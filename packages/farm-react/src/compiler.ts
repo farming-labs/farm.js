@@ -60,6 +60,13 @@ interface ConditionalBlockPlan {
   source: t.Expression;
 }
 
+interface KeyedListPlan {
+  id: number;
+  dependencies: number[];
+  source: t.Expression;
+  syntax: "map" | "list";
+}
+
 interface Candidate {
   name: string;
   path: NodePath<t.FunctionDeclaration | t.FunctionExpression | t.ArrowFunctionExpression>;
@@ -601,11 +608,316 @@ function lowerConditionalBlocks(
   return lowered;
 }
 
+function isMapCall(expression: t.Expression): expression is t.CallExpression {
+  return (
+    t.isCallExpression(expression) &&
+    t.isMemberExpression(expression.callee) &&
+    !expression.callee.computed &&
+    t.isExpression(expression.callee.object) &&
+    t.isIdentifier(expression.callee.property, { name: "map" })
+  );
+}
+
+function returnedExpression(
+  callback: t.ArrowFunctionExpression | t.FunctionExpression,
+): t.Expression | undefined {
+  if (t.isExpression(callback.body)) return callback.body;
+  if (callback.body.body.length !== 1 || !t.isReturnStatement(callback.body.body[0])) {
+    return undefined;
+  }
+  const value = callback.body.body[0].argument;
+  return value && t.isExpression(value) ? value : undefined;
+}
+
+function containsDirectHookCall(
+  callback: t.ArrowFunctionExpression | t.FunctionExpression,
+): boolean {
+  let found = false;
+  traverse(expressionFile(t.cloneNode(callback, true)), {
+    CallExpression(path) {
+      const callee = path.node.callee;
+      const name = t.isIdentifier(callee)
+        ? callee.name
+        : t.isMemberExpression(callee) && !callee.computed && t.isIdentifier(callee.property)
+          ? callee.property.name
+          : "";
+      if (/^use[A-Z0-9]/.test(name)) {
+        found = true;
+        path.stop();
+      }
+    },
+  });
+  return found;
+}
+
+function jsxKeyExpression(element: t.JSXElement): t.Expression | undefined {
+  for (const attribute of element.openingElement.attributes) {
+    if (!t.isJSXAttribute(attribute) || !t.isJSXIdentifier(attribute.name, { name: "key" })) {
+      continue;
+    }
+    if (t.isStringLiteral(attribute.value)) return t.stringLiteral(attribute.value.value);
+    if (
+      t.isJSXExpressionContainer(attribute.value) &&
+      !t.isJSXEmptyExpression(attribute.value.expression)
+    )
+      return attribute.value.expression;
+  }
+  return undefined;
+}
+
+function validateKeyFunction(
+  callback: t.ArrowFunctionExpression | t.FunctionExpression,
+  keyExpression: t.Expression,
+  safeGlobals: ReadonlySet<string>,
+): string | undefined {
+  if (
+    callback.async ||
+    callback.generator ||
+    callback.params.length < 1 ||
+    callback.params.length > 2 ||
+    !t.isIdentifier(callback.params[0]) ||
+    (callback.params[1] !== undefined && !t.isIdentifier(callback.params[1]))
+  ) {
+    return "keyed list callbacks must be synchronous and use item and optional index identifiers";
+  }
+  const item = callback.params[0].name;
+  const index = t.isIdentifier(callback.params[1]) ? callback.params[1].name : undefined;
+  if (index && referencesIdentifier(keyExpression, index)) {
+    return "keyed list keys cannot depend on the array index";
+  }
+  if (!referencesIdentifier(keyExpression, item)) {
+    return "keyed list keys must depend on the mapped item";
+  }
+  const unsupported = validateDerivedExpression(keyExpression, safeGlobals);
+  return unsupported ? `keyed list keys cannot use ${unsupported}` : undefined;
+}
+
+function isPublicListElement(element: t.JSXElement, listNames: ReadonlySet<string>): boolean {
+  const name = element.openingElement.name;
+  return t.isJSXIdentifier(name) && listNames.has(name.name);
+}
+
+function meaningfulJsxChildren(element: t.JSXElement): t.JSXElement["children"] {
+  return element.children.filter((child) => {
+    if (t.isJSXText(child)) return child.value.trim().length > 0;
+    return !(t.isJSXExpressionContainer(child) && t.isJSXEmptyExpression(child.expression));
+  });
+}
+
+function analyzeMapList(
+  expression: t.CallExpression,
+  statesByValue: ReadonlyMap<string, StateBinding>,
+  safeGlobals: ReadonlySet<string>,
+): { dependencies?: number[]; reason?: string } {
+  const callee = expression.callee as t.MemberExpression;
+  const collection = callee.object as t.Expression;
+  const collectionUnsupported = validateDerivedExpression(collection, safeGlobals);
+  if (collectionUnsupported) {
+    return { reason: `keyed list collection cannot use ${collectionUnsupported}` };
+  }
+  if (
+    expression.arguments.length !== 1 ||
+    (!t.isArrowFunctionExpression(expression.arguments[0]) &&
+      !t.isFunctionExpression(expression.arguments[0]))
+  ) {
+    return { reason: "keyed list map must use one inline render callback" };
+  }
+  const callback = expression.arguments[0];
+  if (containsDirectHookCall(callback)) {
+    return { reason: "Hooks cannot be called directly inside a keyed list callback" };
+  }
+  const row = returnedExpression(callback);
+  if (!row || !t.isJSXElement(row)) {
+    return { reason: "keyed list map callbacks must return one React element" };
+  }
+  const key = jsxKeyExpression(row);
+  if (!key) return { reason: "automatically compiled lists require an explicit item key" };
+  const keyReason = validateKeyFunction(callback, key, safeGlobals);
+  if (keyReason) return { reason: keyReason };
+  return { dependencies: collectStateDependencies(expression, statesByValue) };
+}
+
+function listAttributeExpression(element: t.JSXElement, name: string): t.Expression | undefined {
+  for (const attribute of element.openingElement.attributes) {
+    if (
+      t.isJSXAttribute(attribute) &&
+      t.isJSXIdentifier(attribute.name, { name }) &&
+      t.isJSXExpressionContainer(attribute.value) &&
+      !t.isJSXEmptyExpression(attribute.value.expression)
+    ) {
+      return attribute.value.expression;
+    }
+  }
+  return undefined;
+}
+
+function analyzePublicList(
+  element: t.JSXElement,
+  statesByValue: ReadonlyMap<string, StateBinding>,
+  safeGlobals: ReadonlySet<string>,
+): { dependencies?: number[]; reason?: string } {
+  if (element.openingElement.attributes.some((attribute) => t.isJSXSpreadAttribute(attribute))) {
+    return { reason: "compiled List boundaries do not support JSX attribute spreads" };
+  }
+  const each = listAttributeExpression(element, "each");
+  const by = listAttributeExpression(element, "by");
+  if (!each || !by) return { reason: "List requires explicit each and by properties" };
+  const collectionUnsupported = validateDerivedExpression(each, safeGlobals);
+  if (collectionUnsupported) {
+    return { reason: `List each cannot use ${collectionUnsupported}` };
+  }
+  if (!t.isArrowFunctionExpression(by) && !t.isFunctionExpression(by)) {
+    return { reason: "compiled List by must use an inline key function" };
+  }
+  const key = returnedExpression(by);
+  if (!key) return { reason: "compiled List by must return one key expression" };
+  const keyReason = validateKeyFunction(by, key, safeGlobals);
+  if (keyReason) return { reason: keyReason };
+
+  const children = meaningfulJsxChildren(element);
+  if (
+    children.length !== 1 ||
+    !t.isJSXExpressionContainer(children[0]) ||
+    t.isJSXEmptyExpression(children[0].expression) ||
+    (!t.isArrowFunctionExpression(children[0].expression) &&
+      !t.isFunctionExpression(children[0].expression))
+  ) {
+    return { reason: "compiled List children must use one inline render function" };
+  }
+  const render = children[0].expression;
+  if (!returnedExpression(render)) {
+    return { reason: "compiled List children must return one React element" };
+  }
+  if (containsDirectHookCall(render)) {
+    return { reason: "Hooks cannot be called directly inside List children" };
+  }
+  return { dependencies: collectStateDependencies(element, statesByValue) };
+}
+
+function analyzeKeyedLists(
+  root: t.JSXElement,
+  statesByValue: ReadonlyMap<string, StateBinding>,
+  safeGlobals: ReadonlySet<string>,
+  listNames: ReadonlySet<string>,
+  startingId: number,
+): { lists?: KeyedListPlan[]; reason?: string } {
+  const lists: KeyedListPlan[] = [];
+
+  const visit = (element: t.JSXElement): string | undefined => {
+    const meaningful = meaningfulJsxChildren(element);
+    for (const child of element.children) {
+      if (t.isJSXElement(child) && isPublicListElement(child, listNames)) {
+        if (meaningful.length !== 1) {
+          return "a compiled keyed list must be the only child of its host container";
+        }
+        const result = analyzePublicList(child, statesByValue, safeGlobals);
+        if (result.reason) return result.reason;
+        lists.push({
+          id: startingId + lists.length,
+          dependencies: result.dependencies || [],
+          source: child,
+          syntax: "list",
+        });
+        continue;
+      }
+      if (t.isJSXElement(child)) {
+        const reason = visit(child);
+        if (reason) return reason;
+        continue;
+      }
+      if (
+        !t.isJSXExpressionContainer(child) ||
+        t.isJSXEmptyExpression(child.expression) ||
+        !isMapCall(child.expression)
+      ) {
+        continue;
+      }
+      if (meaningful.length !== 1) {
+        return "a compiled keyed list must be the only child of its host container";
+      }
+      const result = analyzeMapList(child.expression, statesByValue, safeGlobals);
+      if (result.reason) return result.reason;
+      lists.push({
+        id: startingId + lists.length,
+        dependencies: result.dependencies || [],
+        source: child.expression,
+        syntax: "map",
+      });
+    }
+    return undefined;
+  };
+
+  const reason = visit(root);
+  return reason ? { reason } : { lists };
+}
+
+function keyedListBoundary(
+  blockRuntime: t.Identifier,
+  plan: KeyedListPlan,
+  source: t.Expression,
+): t.JSXElement {
+  const name = t.jsxMemberExpression(
+    t.jsxIdentifier(blockRuntime.name),
+    t.jsxIdentifier("KeyedList"),
+  );
+  return t.jsxElement(
+    t.jsxOpeningElement(
+      name,
+      [
+        t.jsxAttribute(t.jsxIdentifier("id"), t.jsxExpressionContainer(t.numericLiteral(plan.id))),
+        t.jsxAttribute(
+          t.jsxIdentifier("render"),
+          t.jsxExpressionContainer(t.arrowFunctionExpression([], cloneExpression(source))),
+        ),
+      ],
+      true,
+    ),
+    null,
+    [],
+    true,
+  );
+}
+
+function lowerKeyedLists(
+  root: t.JSXElement,
+  plans: readonly KeyedListPlan[],
+  blockRuntime: t.Identifier,
+  listNames: ReadonlySet<string>,
+): t.JSXElement {
+  const lowered = t.cloneNode(root, true);
+  let cursor = 0;
+  const visit = (element: t.JSXElement): void => {
+    element.children = element.children.map((child) => {
+      if (t.isJSXElement(child) && isPublicListElement(child, listNames)) {
+        const plan = plans[cursor++];
+        return keyedListBoundary(blockRuntime, plan, child);
+      }
+      if (t.isJSXElement(child)) {
+        visit(child);
+        return child;
+      }
+      if (
+        t.isJSXExpressionContainer(child) &&
+        !t.isJSXEmptyExpression(child.expression) &&
+        isMapCall(child.expression)
+      ) {
+        const plan = plans[cursor++];
+        return keyedListBoundary(blockRuntime, plan, child.expression);
+      }
+      return child;
+    });
+  };
+  visit(lowered);
+  return lowered;
+}
+
 function analyzeHostTree(
   root: t.JSXElement,
   statesByValue: ReadonlyMap<string, StateBinding>,
   safeGlobals: ReadonlySet<string>,
   conditionalExpressions: ReadonlySet<t.Expression>,
+  keyedExpressions: ReadonlySet<t.Expression>,
+  keyedElements: ReadonlySet<t.JSXElement>,
 ): { bindings?: PendingBinding[]; reason?: string } {
   const bindings: PendingBinding[] = [];
 
@@ -685,8 +997,8 @@ function analyzeHostTree(
       });
     }
 
-    const nestedElements = element.children.filter((child): child is t.JSXElement =>
-      t.isJSXElement(child),
+    const nestedElements = element.children.filter(
+      (child): child is t.JSXElement => t.isJSXElement(child) && !keyedElements.has(child),
     );
     const expressionChildren = element.children.filter((child): child is t.JSXExpressionContainer =>
       t.isJSXExpressionContainer(child),
@@ -694,16 +1006,23 @@ function analyzeHostTree(
     for (const child of expressionChildren) {
       if (t.isJSXEmptyExpression(child.expression)) continue;
       if (conditionalExpressions.has(child.expression)) continue;
+      if (keyedExpressions.has(child.expression)) continue;
       if (!isTextExpression(child.expression, statesByValue, safeGlobals)) {
         return "dynamic child structures require React reconciliation";
       }
     }
 
-    const hasConditionalBlocks = expressionChildren.some(
-      (child) =>
-        !t.isJSXEmptyExpression(child.expression) && conditionalExpressions.has(child.expression),
+    const hasKeyedElement = element.children.some(
+      (child) => t.isJSXElement(child) && keyedElements.has(child),
     );
-    if (nestedElements.length === 0 && !hasConditionalBlocks) {
+    const hasDynamicBlocks =
+      hasKeyedElement ||
+      expressionChildren.some(
+        (child) =>
+          !t.isJSXEmptyExpression(child.expression) &&
+          (conditionalExpressions.has(child.expression) || keyedExpressions.has(child.expression)),
+      );
+    if (nestedElements.length === 0 && !hasDynamicBlocks) {
       const dependencies = new Set<number>();
       const parts: t.Expression[] = [];
       for (const child of element.children) {
@@ -730,6 +1049,7 @@ function analyzeHostTree(
         if (
           !t.isJSXEmptyExpression(child.expression) &&
           !conditionalExpressions.has(child.expression) &&
+          !keyedExpressions.has(child.expression) &&
           collectStateDependencies(child.expression, statesByValue).length > 0
         ) {
           return "mixed element and stateful text children are not supported yet";
@@ -737,7 +1057,7 @@ function analyzeHostTree(
       }
       let elementIndex = 0;
       for (const child of element.children) {
-        if (!t.isJSXElement(child)) continue;
+        if (!t.isJSXElement(child) || keyedElements.has(child)) continue;
         const reason = visit(child, [...path, elementIndex]);
         if (reason) return reason;
         elementIndex += 1;
@@ -883,6 +1203,7 @@ function compileCandidate(
   createComponentIdentifier: t.Identifier,
   useStateNames: ReadonlySet<string>,
   reactNames: ReadonlySet<string>,
+  listNames: ReadonlySet<string>,
   moduleId: string,
 ): string | undefined {
   const { path, name, statementPath } = candidate;
@@ -1019,12 +1340,29 @@ function compileCandidate(
   const conditionalAnalysis = analyzeConditionalBlocks(expandedRoot, statesByValue, safeGlobals);
   if (conditionalAnalysis.reason) return conditionalAnalysis.reason;
   const conditionalBlocks = conditionalAnalysis.blocks || [];
+  const keyedAnalysis = analyzeKeyedLists(
+    expandedRoot,
+    statesByValue,
+    safeGlobals,
+    listNames,
+    conditionalBlocks.length,
+  );
+  if (keyedAnalysis.reason) return keyedAnalysis.reason;
+  const keyedLists = keyedAnalysis.lists || [];
   const conditionalExpressions = new Set(conditionalBlocks.map((block) => block.source));
+  const keyedExpressions = new Set(
+    keyedLists.filter((list) => list.syntax === "map").map((list) => list.source),
+  );
+  const keyedElements = new Set(
+    keyedLists.filter((list) => list.syntax === "list").map((list) => list.source as t.JSXElement),
+  );
   const analysis = analyzeHostTree(
     expandedRoot,
     statesByValue,
     safeGlobals,
     conditionalExpressions,
+    keyedExpressions,
+    keyedElements,
   );
   if (analysis.reason) return analysis.reason;
 
@@ -1032,7 +1370,8 @@ function compileCandidate(
   const blockParameter = path.scope.generateUidIdentifier("farmBlocks");
   const definitionIdentifier = path.scope.generateUidIdentifier(`${name}Compiled`);
   const propsParameter = propsPlan.definitionParameter;
-  const rootWithBlocks = lowerConditionalBlocks(expandedRoot, conditionalBlocks, blockParameter);
+  const rootWithLists = lowerKeyedLists(expandedRoot, keyedLists, blockParameter, listNames);
+  const rootWithBlocks = lowerConditionalBlocks(rootWithLists, conditionalBlocks, blockParameter);
   const rewrittenRoot = rewriteStateAccess(
     rootWithBlocks,
     stateParameter,
@@ -1093,6 +1432,11 @@ function compileCandidate(
               kind: "block" as const,
               id: block.id,
               dependencies: block.dependencies,
+            })),
+            ...keyedLists.map((list) => ({
+              kind: "block" as const,
+              id: list.id,
+              dependencies: list.dependencies,
             })),
           ].map((binding) =>
             bindingObject(binding, propsParameter, stateParameter, statesByValue, statesBySetter),
@@ -1175,8 +1519,21 @@ export async function compileReactModule(
         const moduleDirectives = new Set(directiveValues(programPath.node));
         const useStateNames = new Set<string>();
         const reactNames = new Set<string>();
+        const listNames = new Set<string>();
         for (const statement of programPath.node.body) {
-          if (!t.isImportDeclaration(statement) || statement.source.value !== "react") continue;
+          if (!t.isImportDeclaration(statement)) continue;
+          if (statement.source.value === "@farm.js/react/list") {
+            for (const specifier of statement.specifiers) {
+              if (
+                t.isImportSpecifier(specifier) &&
+                t.isIdentifier(specifier.imported, { name: "List" })
+              ) {
+                listNames.add(specifier.local.name);
+              }
+            }
+            continue;
+          }
+          if (statement.source.value !== "react") continue;
           for (const specifier of statement.specifiers) {
             if (t.isImportDefaultSpecifier(specifier) || t.isImportNamespaceSpecifier(specifier)) {
               reactNames.add(specifier.local.name);
@@ -1208,6 +1565,7 @@ export async function compileReactModule(
             createComponentIdentifier,
             useStateNames,
             reactNames,
+            listNames,
             id,
           );
           if (reason) {

@@ -6,6 +6,7 @@ export default defineConfig({
     server: "src/server.ts",
     client: "src/client.ts",
     "compiler-runtime": "src/compiler-runtime.tsx",
+    list: "src/list.tsx",
     vite: "src/vite.ts",
   },
   format: ["cjs", "esm"],

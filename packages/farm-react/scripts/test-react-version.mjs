@@ -40,6 +40,7 @@ const testSource = String.raw`
   const { createRoot, hydrateRoot } = await import("react-dom/client");
   const { renderToString } = await import("react-dom/server");
   const { createCompiledComponent } = await import("@farm.js/react/compiler-runtime");
+  const { List } = await import("@farm.js/react/list");
 
   const Counter = createCompiledComponent({
     displayName: "CompatibilityCounter",
@@ -235,6 +236,72 @@ const testSource = String.raw`
   assert.equal(conditionalContainer.querySelector("output").textContent, "1");
   assert.equal(conditionalExecutions, initialConditionalExecutions);
   flushSync(() => conditionalRoot.unmount());
+
+  const explicitListContainer = document.createElement("div");
+  document.body.append(explicitListContainer);
+  const explicitListRoot = createRoot(explicitListContainer);
+  flushSync(() =>
+    explicitListRoot.render(
+      React.createElement(
+        "ul",
+        null,
+        React.createElement(List, {
+          each: [{ id: "a", label: "Alpha" }],
+          by: (item) => item.id,
+          children: (item) => React.createElement("li", null, item.label),
+        }),
+      ),
+    ),
+  );
+  assert.equal(explicitListContainer.textContent, "Alpha");
+  flushSync(() => explicitListRoot.unmount());
+
+  let keyedExecutions = 0;
+  const KeyedBlocks = createCompiledComponent({
+    displayName: "CompatibilityKeyedBlocks",
+    initialize: () => [[{ id: "a", label: "Alpha" }, { id: "b", label: "Beta" }]],
+    render(_props, state, blocks) {
+      keyedExecutions += 1;
+      return React.createElement(
+        "section",
+        null,
+        React.createElement(
+          "button",
+          { onClick: () => state[0].set((value) => [...value].reverse()) },
+          "Reverse",
+        ),
+        React.createElement(
+          "ul",
+          null,
+          React.createElement(blocks.KeyedList, {
+            id: 0,
+            render: () =>
+              state[0].get().map((item) =>
+                React.createElement("li", { key: item.id, "data-key": item.id }, item.label),
+              ),
+          }),
+        ),
+      );
+    },
+    bindings: [{ kind: "block", id: 0, dependencies: [0] }],
+  });
+  const keyedContainer = document.createElement("div");
+  document.body.append(keyedContainer);
+  const keyedRoot = createRoot(keyedContainer);
+  flushSync(() => keyedRoot.render(React.createElement(KeyedBlocks)));
+  const initialKeyedExecutions = keyedExecutions;
+  const originalAlpha = keyedContainer.querySelector("[data-key='a']");
+  keyedContainer.querySelector("button").click();
+  await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync(() => {});
+  assert.deepEqual(
+    [...keyedContainer.querySelectorAll("li")].map((row) => row.getAttribute("data-key")),
+    ["b", "a"],
+  );
+  assert.equal(keyedContainer.querySelector("[data-key='a']"), originalAlpha);
+  assert.equal(keyedExecutions, initialKeyedExecutions);
+  flushSync(() => keyedRoot.unmount());
 
   const hydrationContainer = document.createElement("div");
   hydrationContainer.innerHTML = renderToString(React.createElement(Counter));

@@ -374,6 +374,10 @@ h1 span {
   border-top: 1px solid #33332f;
 }
 
+.edge-grid--single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .edge-card {
   min-width: 0;
   padding: clamp(1.25rem, 3vw, 2rem);
@@ -643,6 +647,20 @@ h1 span {
     0.66rem "Geist Mono Variable",
     ui-monospace,
     monospace;
+}
+
+.keyed-row-stage {
+  display: flex;
+  min-height: 2.8rem;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 0 0 0.8rem;
+}
+
+.keyed-row-stage button {
+  color: #c8c8c1;
+  font-family: "Geist Mono Variable", ui-monospace, monospace;
 }
 
 .hook-warning {

@@ -42,6 +42,11 @@
       "import": "./dist/compiler-runtime.mjs",
       "require": "./dist/compiler-runtime.cjs"
     },
+    "./list": {
+      "types": "./dist/list.d.ts",
+      "import": "./dist/list.mjs",
+      "require": "./dist/list.cjs"
+    },
     "./vite": {
       "types": "./dist/vite.d.ts",
       "import": "./dist/vite.mjs",

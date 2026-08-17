@@ -54,8 +54,14 @@ export interface CompilerConditionalBlockProps {
   render(): React.ReactNode;
 }
 
+export interface CompilerKeyedListBlockProps {
+  id: number;
+  render(): React.ReactNode;
+}
+
 export interface CompilerBlockRuntime {
   Conditional: React.ComponentType<CompilerConditionalBlockProps>;
+  KeyedList: React.ComponentType<CompilerKeyedListBlockProps>;
 }
 
 export type CompilerBinding<Props> =
@@ -363,6 +369,44 @@ function createConditionalBlockComponent(
   return FarmConditionalBlock;
 }
 
+function createKeyedListBlockComponent(
+  owner: Pick<ConditionalBlockOwner, "subscribe">,
+): React.ComponentType<CompilerKeyedListBlockProps> {
+  class FarmKeyedListBlock extends React.Component<CompilerKeyedListBlockProps> {
+    static displayName = "FarmCompiledKeyedListBlock";
+
+    private unsubscribe: (() => void) | undefined;
+
+    private refresh = (afterCommit?: () => void) => {
+      this.forceUpdate(afterCommit);
+    };
+
+    private subscribe(): void {
+      this.unsubscribe = owner.subscribe(this.props.id, this.refresh);
+    }
+
+    componentDidMount(): void {
+      this.subscribe();
+    }
+
+    componentDidUpdate(previous: CompilerKeyedListBlockProps): void {
+      if (previous.id === this.props.id) return;
+      this.unsubscribe?.();
+      this.subscribe();
+    }
+
+    componentWillUnmount(): void {
+      this.unsubscribe?.();
+    }
+
+    render(): React.ReactNode {
+      return this.props.render();
+    }
+  }
+
+  return FarmKeyedListBlock;
+}
+
 /**
  * Runtime target emitted by the AOT transform.
  *
@@ -425,6 +469,9 @@ export function createCompiledComponent<Props>(
       this.blockRuntime = {
         Conditional: createConditionalBlockComponent({
           setRoot: (id, root) => this.setBlockRoot(id, root),
+          subscribe: (id, refresh) => this.subscribeToBlock(id, refresh),
+        }),
+        KeyedList: createKeyedListBlockComponent({
           subscribe: (id, refresh) => this.subscribeToBlock(id, refresh),
         }),
       };

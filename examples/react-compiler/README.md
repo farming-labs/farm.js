@@ -4,8 +4,8 @@ This production-browser experiment answers two questions:
 
 1. Why build this compiler? Eligible local `useState` updates can patch precomputed DOM targets
    without rerunning the component body or asking React to reconcile the same static tree again.
-2. Where must it stop? Eligible host-only conditionals use a small React-owned block boundary.
-   Keyed lists, effects, refs, custom components, and other unproven structures stay on React.
+2. Where must it stop? Eligible host-only conditionals and keyed lists use small React-owned
+   boundaries. Effects, refs, unsupported list shapes, and other unproven structures stay on React.
 
 The default `compiler: true` configuration automatically considers components. No annotation is
 needed. A component can explicitly opt out with `"use no compiler"`.
@@ -28,16 +28,17 @@ assertions, checks for console/runtime errors and horizontal overflow, saves scr
 
 ## Expected report
 
-| Experiment                 | Compiled result                                         | Base React / fallback result                   | What it proves                                                         |
-| -------------------------- | ------------------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------- |
-| Two direct updates         | state `2`, update executions `0`                        | state `2`, update executions `2`               | Eligible updates skip post-mount component executions.                 |
-| Batched functional updates | count `2`, snapshot `0`, update executions `0`          | count `2`, snapshot `0`, update executions `1` | The compiler preserves queued updater and event snapshot behavior.     |
-| Two state cells            | text/class/data/input all update, update executions `0` | —                                              | AOT dependency lists update only bindings affected by each state cell. |
-| Calculated style bindings  | value `6`, progress `50%`, update executions `0`        | —                                              | Safe calls and individual CSS properties use prepared dependencies.    |
-| Controlled form bindings  | textarea/select/checkbox update, executions `0`         | —                                              | Form properties and textarea selection stay coherent.                  |
-| Logical conditional block | branch mounts, updates, and unmounts; executions `0`     | —                                              | Only the isolated React block refreshes.                                |
-| Ternary conditional block | `strong` and `span` replace each other; executions `0`   | —                                              | React preserves branch and event semantics without the outer rerender. |
-| Keyed list                 | intentionally not compiled                              | 3 correct keyed rows, update executions `2`    | Dynamic child structure safely falls back to React reconciliation.     |
+| Experiment                  | Compiled result                                         | Base React / fallback result                   | What it proves                                                         |
+| --------------------------- | ------------------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------- |
+| Two direct updates          | state `2`, update executions `0`                        | state `2`, update executions `2`               | Eligible updates skip post-mount component executions.                 |
+| Batched functional updates  | count `2`, snapshot `0`, update executions `0`          | count `2`, snapshot `0`, update executions `1` | The compiler preserves queued updater and event snapshot behavior.     |
+| Two state cells             | text/class/data/input all update, update executions `0` | —                                              | AOT dependency lists update only bindings affected by each state cell. |
+| Automatic keyed map         | insert and reverse rows, update executions `0`          | —                                              | A direct item-keyed map gets its own React refresh boundary.           |
+| Explicit `List`             | stateful rows reorder, update executions `0`            | —                                              | React preserves custom-row state by key inside the isolated boundary.  |
+| Calculated style bindings   | value `6`, progress `50%`, update executions `0`        | —                                              | Safe calls and individual CSS properties use prepared dependencies.    |
+| Controlled form bindings   | textarea/select/checkbox update, executions `0`         | —                                              | Form properties and textarea selection stay coherent.                  |
+| Logical conditional block  | branch mounts, updates, and unmounts; executions `0`    | —                                              | Only the isolated React block refreshes.                               |
+| Ternary conditional block  | `strong` and `span` replace each other; executions `0`  | —                                              | React preserves branch and event semantics without the outer rerender. |
 
 The package runtime test also measures one equivalent update under a React `Profiler`:
 
@@ -52,13 +53,33 @@ speed depends on event work, DOM work, layout, paint, application shape, and dev
 
 ## Keys and Hooks boundary
 
-`items.map(item => <Row key={item} />)` changes tree structure, so the current compiler leaves it to
-React. Keys tell React which row identity survived an insert, delete, or move; they do not make
-reconciliation unnecessary.
+For a direct `items.map(item => <Row key={item.id} />)`, the compiler can isolate the list update
+from the outer component. Keys tell React which row identity survived an insert, delete, or move;
+they do not make reconciliation unnecessary. React still compares the rows and owns their DOM,
+events, lifecycle, and state.
 
-Calling a Hook directly inside `items.map(...)` is invalid React because the number or order of Hook
-calls can change. Put the Hook inside a separate `Row` component and key that component. The compiler
-has a regression test confirming that the invalid inline shape is rejected rather than transformed.
+The explicit equivalent separates collection, key, and rendering:
+
+```tsx
+import { List } from "@farm.js/react/list";
+
+<div>
+  <List each={items} by={(item) => item.id}>
+    {(item) => <Row item={item} />}
+  </List>
+</div>;
+```
+
+`List` is useful for custom stateful rows and still works as ordinary React when the compiler is
+off. Automatic maps and optimized `List` boundaries currently need to be the only meaningful child
+of their host container. Index keys, missing keys, chained maps, and mixed sibling structures fall
+back to the complete React component. Farm does not perform compiler-owned LIS moves in this stage;
+React remains the sole owner of row reconciliation.
+
+Calling a Hook directly inside `items.map(...)` or a `List` render callback is invalid React because
+the number or order of Hook calls can change. Put the Hook inside a separate `Row` component and key
+that component. The compiler has a regression test confirming that the invalid inline shape is
+rejected rather than transformed.
 
 ## Conditional block boundary
 
@@ -101,9 +122,9 @@ Repeated reference run on Apple M1, Chromium 145:
 | Production page chunk (gzip) |         3,953 B |     5,221 B |                  **+1,268 B** |
 
 The timing result is intentionally narrow. It does not include browser layout/paint, network work,
-effects, child component updates, or dynamic/keyed structure. Those either add costs outside the
-measured update path or currently fall back to React. Run the command on target devices before using
-the reference number for a product decision.
+effects, child component updates, or keyed-list reconciliation. Those add costs outside the
+measured update path. Unsupported dynamic structures still fall back to React. Run the command on
+target devices before using the reference number for a product decision.
 
 The environment flag controls the two production builds; omission defaults to enabled:
 
