@@ -12,7 +12,7 @@ export function searchParamsToObject(
 
   searchParams.forEach((value, key) => {
     const existing = output[key];
-    if (existing) {
+    if (existing !== undefined) {
       if (Array.isArray(existing)) {
         existing.push(value);
       } else {

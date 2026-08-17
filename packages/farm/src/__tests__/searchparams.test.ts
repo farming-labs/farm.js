@@ -177,10 +177,10 @@ describe("searchParamsToObject", () => {
     );
   });
 
-  it("mirrors the dev renderer's handling of empty first values", () => {
-    // The dev helper checks truthiness, so an empty-string first value is
-    // replaced instead of collected. Production must agree with dev.
-    expect(searchParamsToObject(new URLSearchParams("?tab=&tab=x"))).toEqual({ tab: "x" });
+  it("preserves empty values when a parameter is repeated", () => {
+    expect(searchParamsToObject(new URLSearchParams("?tab=&tab=x&tab="))).toEqual({
+      tab: ["", "x", ""],
+    });
     expect(searchParamsToObject(new URLSearchParams(""))).toEqual({});
   });
 });
@@ -211,9 +211,7 @@ describe("SearchParams in the production runtime", () => {
     );
     expect(source).not.toContain("Object.fromEntries(url.searchParams)");
     expect(source).not.toContain("Object.fromEntries(targetUrl.searchParams)");
-    expect(source).not.toContain(
-      "Object.fromEntries(new URLSearchParams(window.location.search))",
-    );
+    expect(source).not.toContain("Object.fromEntries(new URLSearchParams(window.location.search))");
     expect(readSource("client", "production-runtime.ts")).toContain(
       'export { searchParamsToObject } from "../search-params";',
     );
@@ -230,5 +228,21 @@ describe("SearchParams in the production runtime", () => {
     const source = readSource("server", "renderer.ts");
 
     expect(source).toContain('import { searchParamsToObject } from "../search-params";');
+  });
+
+  it("shares the helper with secondary production, dev navigation, and test runtimes", () => {
+    const nitroSource = readSource("nitro", "index.ts");
+    const viteSource = readSource("vite.ts");
+    const testingSource = readSource("testing.ts");
+
+    expect(nitroSource).toContain(
+      "import { searchParamsToObject } from '@farm.js/core/internal/production-runtime';",
+    );
+    expect(nitroSource).toContain(
+      "const searchParamsObject = searchParamsToObject(url.searchParams);",
+    );
+    expect(viteSource).toContain("const searchParams = searchParamsToObject(url.searchParams);");
+    expect(viteSource).toContain("return searchParamsToObject(url.searchParams);");
+    expect(testingSource).toContain("const search = searchParamsToObject(url.searchParams);");
   });
 });

@@ -261,6 +261,7 @@ import type { H3Event } from 'h3';
 import { farmRegistry } from '../farm-registry';
 import React from 'react';
 import { renderToString } from 'react-dom/server';
+import { searchParamsToObject } from '@farm.js/core/internal/production-runtime';
 
 export default defineEventHandler(async (event: H3Event) => {
   try {
@@ -376,19 +377,7 @@ export default defineEventHandler(async (event: H3Event) => {
       }
       
       // Get search params
-      const searchParamsObject: Record<string, string | string[] | undefined> = {};
-      url.searchParams.forEach((value, key) => {
-        const existing = searchParamsObject[key];
-        if (existing) {
-          if (Array.isArray(existing)) {
-            existing.push(value);
-          } else {
-            searchParamsObject[key] = [existing, value];
-          }
-        } else {
-          searchParamsObject[key] = value;
-        }
-      });
+      const searchParamsObject = searchParamsToObject(url.searchParams);
       
       // Load route module - in production, use bundled SSR output
       // Get bundled path from registry or construct it

@@ -18,6 +18,7 @@ import {
 } from "./router";
 import { runWithServerActionRequest } from "./server-action-security";
 import type { ServerFn } from "./server-fn";
+import { searchParamsToObject } from "./search-params";
 import type { FarmContextFactory, MiddlewareProps, PluginContextProps, RouteModule } from "./types";
 
 export type FarmTestQuery = URLSearchParams | Record<string, FarmRouterQueryValue>;
@@ -198,7 +199,7 @@ export function createFarmTestHarness<TContext = unknown>(
       });
       const url = new URL(routeRequest.url);
       const params = resolvePageParams(route.path, url.pathname, routeOptions.params);
-      const search = readSearchParams(url.searchParams);
+      const search = searchParamsToObject(url.searchParams);
       const routeContext = Object.prototype.hasOwnProperty.call(routeOptions, "context")
         ? routeOptions.context
         : await resolveFarmRouteContext(
@@ -435,14 +436,6 @@ function resolvePageParams(
       Array.isArray(value) ? value.map(String).join("/") : String(value),
     ]),
   );
-}
-
-function readSearchParams(searchParams: URLSearchParams): Record<string, string> {
-  const search: Record<string, string> = {};
-  searchParams.forEach((value, key) => {
-    search[key] = value;
-  });
-  return search;
 }
 
 function readCanonicalPath(props: Record<string, unknown>): string | undefined {
