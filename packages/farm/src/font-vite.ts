@@ -946,14 +946,18 @@ function renderFontDefinitionCss(
 }
 
 function resourceUrl(resource: FontResource, production: boolean, basePath: string): string {
+  // Production font URLs are root-relative: emitted assets land in the client
+  // output, which the server publishes at "/" regardless of basePath — the
+  // same convention as the hashed client JS/CSS hrefs. Only the dev server
+  // mounts under basePath (the Vite base), so only dev URLs carry the prefix.
   if (resource.publicPath) {
-    return production ? joinBasePath(basePath, resource.publicPath) : resource.publicPath;
+    return resource.publicPath;
   }
   if (!resource.bytes) return resource.publicUrl;
   if (!production) {
     return joinBasePath(basePath, `/@farm/font/${resource.hash}${resource.extension}`);
   }
-  return joinBasePath(basePath, `/${resource.outputFileName}`);
+  return `/${resource.outputFileName}`;
 }
 
 async function fetchRemoteFont(url: URL, integrity?: string): Promise<Buffer> {
