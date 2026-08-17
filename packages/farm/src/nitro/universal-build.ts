@@ -2040,7 +2040,7 @@ document.addEventListener("click", function(e) {
 ${cssImport}
 ${layoutImports}
 ${rendererClientImports}
-import { createClientPluginManager, installChunkErrorRecovery, scheduleFarmIslandHydration } from "@farm.js/core/internal/client-runtime";
+import { createClientPluginManager, installChunkErrorRecovery, scheduleFarmIslandHydration, searchParamsToObject } from "@farm.js/core/internal/client-runtime";
 import { matchFarmRoute } from "@farm.js/core/router";
 ${clientPluginEntry.imports}
 ${i18nClientRuntime}
@@ -2392,7 +2392,7 @@ async function hydrate() {
         ) {
           return;
         }
-        const searchParams = Object.fromEntries(new URLSearchParams(window.location.search));
+        const searchParams = searchParamsToObject(new URLSearchParams(window.location.search));
         const wrappedElement = await createMatchedHydrationElement(
           matched,
           pathname,
@@ -2602,7 +2602,7 @@ ${generateUniversalRouterStateProperties()}
         // when their initial document hydration strategy is deferred.
         const Component = await loadRouteComponent(matched.route);
         const params = matched.params;
-        const searchParams = Object.fromEntries(url.searchParams);
+        const searchParams = searchParamsToObject(url.searchParams);
         const props = { params: params, searchParams: Promise.resolve(searchParams) };
         let pageElement = React.createElement(Component, props);
         if (hasHydratableLayout(pathname)) {
@@ -2735,7 +2735,7 @@ ${generateUniversalRouterStateProperties()}
     // If React already owns the shared layout, update that root. React keeps
     // matching layout component instances and their state mounted.
     if (matched && hydrateLayouts && reactRoot && reactRootContainer === currentRoot) {
-      const searchParams = Object.fromEntries(targetUrl.searchParams);
+      const searchParams = searchParamsToObject(targetUrl.searchParams);
       const wrappedElement = await createMatchedHydrationElement(
         matched,
         newPathname,
@@ -2762,7 +2762,7 @@ ${generateUniversalRouterStateProperties()}
 
     // Check if the new HTML contains an interactive route boundary.
     if (matched) {
-      const searchParams = Object.fromEntries(targetUrl.searchParams);
+      const searchParams = searchParamsToObject(targetUrl.searchParams);
       const pageContainer =
         hydrateLayouts ? currentRoot : document.getElementById("__farm_page__") || currentRoot;
       const wrappedElement = await createMatchedHydrationElement(
@@ -3603,6 +3603,7 @@ function generateVirtualEntryCode(
   resolveDefaultErrorStatus,
   resolveFarmInstrumentationRuntime,
   runWithFarmRequestSpan,
+  searchParamsToObject,
   stripFarmLocaleFromPathname,
   withFarmRouteContext,
 } from "@farm.js/core/internal/production-runtime";`;
@@ -4684,7 +4685,7 @@ async function handleMetadataImageRequest(request, routePathname) {
       throw new Error("Metadata image module does not export a default component or handler");
     }
 
-    const searchParams = Object.fromEntries(url.searchParams.entries());
+    const searchParams = searchParamsToObject(url.searchParams);
     const props = {
       params: match.params,
       searchParams: Promise.resolve(searchParams),
@@ -5668,7 +5669,7 @@ async function handleFarmRequestInContext(
       
       if (PageComponent) {
         // Parse search params - make it a resolved Promise for async components
-        const searchParamsObj = Object.fromEntries(url.searchParams.entries());
+        const searchParamsObj = searchParamsToObject(url.searchParams);
         
         // Render the page component
         const routeContext = hasConfiguredRouteContext
@@ -6237,7 +6238,7 @@ async function handleFarmRequestInContext(
       const errorBoundaryMatch = getMatchingErrorBoundary(routePathname);
       if (errorBoundaryMatch?.route.module?.default) {
         try {
-          const searchParamsObj = Object.fromEntries(url.searchParams.entries());
+          const searchParamsObj = searchParamsToObject(url.searchParams);
           const ErrorComponent = errorBoundaryMatch.route.module.default;
           let errorElement = React.createElement(ErrorComponent, {
             error,

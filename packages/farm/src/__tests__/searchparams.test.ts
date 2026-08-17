@@ -1,4 +1,8 @@
+import fs from "fs";
+import path from "path";
 import { describe, it, expect } from "vitest";
+
+import { searchParamsToObject } from "../search-params";
 
 describe("SearchParams Parsing", () => {
   it("should parse single query parameter", () => {
@@ -154,5 +158,91 @@ describe("SearchParams in PageProps", () => {
     const tab = search.tab;
 
     expect(tab).toBeUndefined();
+  });
+});
+
+describe("searchParamsToObject", () => {
+  it("keeps single-value parameters as strings", () => {
+    expect(searchParamsToObject(new URLSearchParams("?tab=profile&sort=desc"))).toEqual({
+      tab: "profile",
+      sort: "desc",
+    });
+  });
+
+  it("collects repeated parameters into arrays", () => {
+    expect(searchParamsToObject(new URLSearchParams("?tag=react&tag=typescript&tag=vite"))).toEqual(
+      {
+        tag: ["react", "typescript", "vite"],
+      },
+    );
+  });
+
+  it("preserves empty values when a parameter is repeated", () => {
+    expect(searchParamsToObject(new URLSearchParams("?tab=&tab=x&tab="))).toEqual({
+      tab: ["", "x", ""],
+    });
+    expect(searchParamsToObject(new URLSearchParams(""))).toEqual({});
+  });
+});
+
+describe("SearchParams in the production runtime", () => {
+  const readSource = (...segments: string[]) =>
+    fs.readFileSync(path.join(process.cwd(), "src", ...segments), "utf-8");
+
+  it("builds generated SSR page props with array-aware search params", () => {
+    const source = readSource("nitro", "universal-build.ts");
+
+    expect(source).toContain("  searchParamsToObject,");
+    expect(source).toContain("const searchParamsObj = searchParamsToObject(url.searchParams);");
+    expect(source).not.toContain("Object.fromEntries(url.searchParams.entries())");
+    expect(readSource("nitro", "production-runtime.ts")).toContain(
+      'export { searchParamsToObject } from "../search-params";',
+    );
+  });
+
+  it("hydrates and client-navigates with array-aware search params", () => {
+    const source = readSource("nitro", "universal-build.ts");
+
+    expect(source).toContain(
+      'import { createClientPluginManager, installChunkErrorRecovery, scheduleFarmIslandHydration, searchParamsToObject } from "@farm.js/core/internal/client-runtime";',
+    );
+    expect(source).toContain(
+      "const searchParams = searchParamsToObject(new URLSearchParams(window.location.search));",
+    );
+    expect(source).not.toContain("Object.fromEntries(url.searchParams)");
+    expect(source).not.toContain("Object.fromEntries(targetUrl.searchParams)");
+    expect(source).not.toContain("Object.fromEntries(new URLSearchParams(window.location.search))");
+    expect(readSource("client", "production-runtime.ts")).toContain(
+      'export { searchParamsToObject } from "../search-params";',
+    );
+  });
+
+  it("returns array-aware search params from the SPA page-data endpoint", () => {
+    const source = readSource("nitro", "server-entry.ts");
+
+    expect(source).toContain("const searchParams = searchParamsToObject(targetUrl.searchParams);");
+    expect(source).not.toContain("const searchParams: Record<string, string> = {};");
+  });
+
+  it("shares the dev renderer's helper", () => {
+    const source = readSource("server", "renderer.ts");
+
+    expect(source).toContain('import { searchParamsToObject } from "../search-params";');
+  });
+
+  it("shares the helper with secondary production, dev navigation, and test runtimes", () => {
+    const nitroSource = readSource("nitro", "index.ts");
+    const viteSource = readSource("vite.ts");
+    const testingSource = readSource("testing.ts");
+
+    expect(nitroSource).toContain(
+      "import { searchParamsToObject } from '@farm.js/core/internal/production-runtime';",
+    );
+    expect(nitroSource).toContain(
+      "const searchParamsObject = searchParamsToObject(url.searchParams);",
+    );
+    expect(viteSource).toContain("const searchParams = searchParamsToObject(url.searchParams);");
+    expect(viteSource).toContain("return searchParamsToObject(url.searchParams);");
+    expect(testingSource).toContain("const search = searchParamsToObject(url.searchParams);");
   });
 });

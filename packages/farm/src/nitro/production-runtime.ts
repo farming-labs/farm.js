@@ -53,6 +53,7 @@ export {
   manageFarmLinkHeaderPreloads,
   reportFarmPreloadWarnings,
 } from "../preload";
+export { searchParamsToObject } from "../search-params";
 
 export function appendFarmLinkHeader(headers: Headers, value: string): void {
   const current = headers.get("Link");

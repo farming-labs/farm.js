@@ -74,6 +74,7 @@ import {
 } from "./server-http";
 import { createCliColors } from "./cli-colors";
 import { createFarmThemeCssPlugin } from "./theme/vite";
+import { searchParamsToObject } from "./search-params";
 import { emitFarmEvent, runWithFarmRequestSpan } from "./observability";
 import {
   isReactRenderer,
@@ -1881,10 +1882,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
 
                 // Build search params
                 const targetUrl = new URL(targetPath, "http://localhost");
-                const searchParams: Record<string, string> = {};
-                targetUrl.searchParams.forEach((value, key) => {
-                  searchParams[key] = value;
-                });
+                const searchParams = searchParamsToObject(targetUrl.searchParams);
                 const routeContext = await resolveFarmRouteContext(farmApp.getConfig(), {
                   request,
                   params,
@@ -3325,7 +3323,7 @@ async function hydrateFarmDocsAdapterRuntime() {
 ${rendererClientImports}
 import { installChunkErrorRecovery, SPARouter } from '@farm.js/core/client'
 import { createClientPluginManager } from '@farm.js/core/plugin/client'
-import { scheduleFarmIslandHydration } from '@farm.js/core/internal/client-runtime'
+import { scheduleFarmIslandHydration, searchParamsToObject } from '@farm.js/core/internal/client-runtime'
 import { reviveDeferredData } from '@farm.js/core/deferred'
 import {
   createFarmDeploymentMismatchError,
@@ -3522,10 +3520,7 @@ class LegacyManifestSPARouter {
       const { route, params } = match;
 
       // Parse search params
-      const searchParams = {};
-      url.searchParams.forEach((value, key) => {
-        searchParams[key] = value;
-      });
+      const searchParams = searchParamsToObject(url.searchParams);
 
       // Build page data from manifest (no server request!)
       const pageData = {
@@ -3642,10 +3637,7 @@ class LegacyManifestSPARouter {
 
       const { route, params } = match;
       const url = new URL(window.location.href);
-      const searchParams = {};
-      url.searchParams.forEach((value, key) => {
-        searchParams[key] = value;
-      });
+      const searchParams = searchParamsToObject(url.searchParams);
 
       const pageData = {
         route: route,
@@ -3980,12 +3972,8 @@ function wrapWithLoadedLayouts(element, loadedLayouts, params) {
 }
 
 function getCurrentSearchParams() {
-  const searchParams = {};
   const url = new URL(window.location.href);
-  url.searchParams.forEach((value, key) => {
-    searchParams[key] = value;
-  });
-  return searchParams;
+  return searchParamsToObject(url.searchParams);
 }
 
 function parseClientRouteSchema(schema, value, label) {
