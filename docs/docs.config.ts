@@ -325,6 +325,7 @@ const sidebar = [
     children: [
       { label: "Testing", slug: "testing", icon: "terminal" },
       { label: "CLI", slug: "cli", icon: "terminal" },
+      { label: "Telemetry", slug: "telemetry", icon: "activity" },
       { label: "Examples", slug: "examples", icon: "box" },
       { label: "Reference", slug: "reference", icon: "book" },
     ],
