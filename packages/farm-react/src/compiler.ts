@@ -21,9 +21,21 @@ interface StateBinding {
   initialValue?: t.Expression;
 }
 
-interface DerivedBinding {
+interface HandlerBinding {
+  name: string;
+  value: t.ArrowFunctionExpression | t.FunctionExpression;
+}
+
+interface LocalBinding {
+  kind: "derived" | "handler";
   name: string;
   value: t.Expression;
+}
+
+interface PropsPlan {
+  definitionParameter: t.Identifier;
+  wrapperProps?: t.Expression;
+  destructuredNames: ReadonlySet<string>;
 }
 
 interface PendingBinding {
@@ -126,6 +138,59 @@ function rewriteDerivedAccess<T extends t.Expression>(
     },
   });
   return (file.program.body[0] as t.ExpressionStatement).expression as T;
+}
+
+function rewriteDestructuredPropAccess<T extends t.Expression>(
+  expression: T,
+  names: ReadonlySet<string>,
+  propsParameter: t.Identifier,
+): T {
+  if (names.size === 0) return cloneExpression(expression);
+  const file = expressionFile(cloneExpression(expression));
+  traverse(file, {
+    ReferencedIdentifier(path) {
+      if (!names.has(path.node.name) || path.scope.hasBinding(path.node.name)) return;
+      path.replaceWith(
+        t.memberExpression(t.cloneNode(propsParameter), t.identifier(path.node.name)),
+      );
+      path.skip();
+    },
+  });
+  return (file.program.body[0] as t.ExpressionStatement).expression as T;
+}
+
+function rewriteHandlerAccess(
+  root: t.JSXElement,
+  handlersByName: ReadonlyMap<string, HandlerBinding>,
+): { root?: t.JSXElement; reason?: string } {
+  if (handlersByName.size === 0) return { root: t.cloneNode(root, true) };
+  const file = expressionFile(t.cloneNode(root, true));
+  let reason: string | undefined;
+  traverse(file, {
+    ReferencedIdentifier(path) {
+      if (reason || path.scope.hasBinding(path.node.name)) return;
+      const handler = handlersByName.get(path.node.name);
+      if (!handler) return;
+      const container = path.parentPath;
+      const attribute = container.parentPath;
+      const eventName = attribute?.isJSXAttribute() && jsxAttributeName(attribute.node);
+      if (
+        !container.isJSXExpressionContainer() ||
+        container.node.expression !== path.node ||
+        !eventName ||
+        !/^on[A-Z]/.test(eventName)
+      ) {
+        reason = `event handler ${handler.name} must be passed directly to a JSX event`;
+        path.stop();
+        return;
+      }
+      path.replaceWith(t.cloneNode(handler.value, true));
+      path.skip();
+    },
+  });
+  return reason
+    ? { reason }
+    : { root: (file.program.body[0] as t.ExpressionStatement).expression as t.JSXElement };
 }
 
 function validateDerivedExpression(expression: t.Expression): string | undefined {
@@ -400,18 +465,65 @@ function lazyInitialValue(expression?: t.Expression): t.Expression {
   );
 }
 
-function clonePropsParameter(
+function analyzePropsParameter(
   path: NodePath<t.FunctionDeclaration | t.FunctionExpression | t.ArrowFunctionExpression>,
-): t.Identifier {
+): PropsPlan | string {
   const parameter = path.node.params[0];
-  return parameter && t.isIdentifier(parameter)
-    ? (t.cloneNode(parameter, true) as t.Identifier)
-    : t.identifier("_props");
+  if (!parameter) {
+    return {
+      definitionParameter: path.scope.generateUidIdentifier("props"),
+      destructuredNames: new Set(),
+    };
+  }
+  if (t.isIdentifier(parameter)) {
+    return {
+      definitionParameter: t.cloneNode(parameter, true) as t.Identifier,
+      wrapperProps: t.cloneNode(parameter, true) as t.Identifier,
+      destructuredNames: new Set(),
+    };
+  }
+  if (!t.isObjectPattern(parameter)) {
+    return "components must use zero parameters, one props identifier, or flat object props destructuring";
+  }
+
+  const localNames = new Set<string>();
+  for (const property of parameter.properties) {
+    if (t.isRestElement(property)) {
+      return "rest properties in component props destructuring are not supported yet";
+    }
+    if (property.computed) {
+      return "computed component props destructuring is not supported yet";
+    }
+    let local: t.Identifier | undefined;
+    if (t.isIdentifier(property.value)) {
+      local = property.value;
+    } else if (t.isAssignmentPattern(property.value) && t.isIdentifier(property.value.left)) {
+      local = property.value.left;
+    }
+    if (!local) {
+      return "nested component props destructuring is not supported yet";
+    }
+    if (localNames.has(local.name)) {
+      return "component props destructuring local names must be unique";
+    }
+    localNames.add(local.name);
+  }
+
+  const definitionParameter = path.scope.generateUidIdentifier("props");
+  return {
+    definitionParameter,
+    wrapperProps: t.objectExpression(
+      [...localNames].map((name) =>
+        t.objectProperty(t.identifier(name), t.identifier(name), false, true),
+      ),
+    ),
+    destructuredNames: localNames,
+  };
 }
 
 function bindingObject(
   binding: PendingBinding,
-  componentPath: Candidate["path"],
+  propsParameter: t.Identifier,
   stateParameter: t.Identifier,
   statesByValue: ReadonlyMap<string, StateBinding>,
   statesBySetter: ReadonlyMap<string, StateBinding>,
@@ -433,7 +545,7 @@ function bindingObject(
     t.objectProperty(
       t.identifier("read"),
       t.arrowFunctionExpression(
-        [clonePropsParameter(componentPath), t.cloneNode(stateParameter)],
+        [t.cloneNode(propsParameter), t.cloneNode(stateParameter)],
         rewriteStateAccess(binding.value, stateParameter, statesByValue, statesBySetter),
       ),
     ),
@@ -441,7 +553,7 @@ function bindingObject(
   return t.objectExpression(properties);
 }
 
-function wrapperElement(definitionIdentifier: t.Identifier, props?: t.Identifier): t.JSXElement {
+function wrapperElement(definitionIdentifier: t.Identifier, props?: t.Expression): t.JSXElement {
   const name = t.jsxIdentifier(definitionIdentifier.name);
   const attributes = props ? [t.jsxSpreadAttribute(t.cloneNode(props))] : [];
   return t.jsxElement(t.jsxOpeningElement(name, attributes, true), null, [], true);
@@ -458,16 +570,13 @@ function compileCandidate(
   if (path.node.async || path.node.generator)
     return "async and generator components are not supported";
   if (path.node.typeParameters) return "generic components are not supported yet";
-  if (
-    path.node.params.length > 1 ||
-    (path.node.params[0] && !t.isIdentifier(path.node.params[0]))
-  ) {
-    return "components must use zero parameters or one props identifier";
-  }
+  if (path.node.params.length > 1) return "components must use at most one props parameter";
+  const propsPlan = analyzePropsParameter(path);
+  if (typeof propsPlan === "string") return propsPlan;
   if (!t.isBlockStatement(path.node.body)) return "components must use a block body";
 
   const states: StateBinding[] = [];
-  const derived: DerivedBinding[] = [];
+  const locals: LocalBinding[] = [];
   let returned: t.ReturnStatement | undefined;
   for (const statement of path.node.body.body) {
     if (t.isReturnStatement(statement)) {
@@ -480,7 +589,7 @@ function compileCandidate(
       statement.kind !== "const" ||
       statement.declarations.length !== 1
     ) {
-      return "only top-level useState declarations, pure derived const values, and one return are supported by the current compiler";
+      return "only top-level useState declarations, pure derived const values, named synchronous handlers, and one return are supported by the current compiler";
     }
     const declaration = statement.declarations[0];
     if (t.isArrayPattern(declaration.id)) {
@@ -494,8 +603,8 @@ function compileCandidate(
       ) {
         return "only const [value, setValue] = useState(initial) state declarations are supported";
       }
-      if (derived.length > 0) {
-        return "useState declarations must appear before derived local values";
+      if (locals.length > 0) {
+        return "useState declarations must appear before derived local values and event handlers";
       }
       states.push({
         valueName: declaration.id.elements[0].name,
@@ -506,9 +615,16 @@ function compileCandidate(
       continue;
     }
     if (!t.isIdentifier(declaration.id) || !t.isExpression(declaration.init)) {
-      return "derived const values must use one identifier and one expression";
+      return "derived const values and event handlers must use one identifier and one expression";
     }
-    derived.push({ name: declaration.id.name, value: declaration.init });
+    if (t.isArrowFunctionExpression(declaration.init) || t.isFunctionExpression(declaration.init)) {
+      if (declaration.init.async || declaration.init.generator) {
+        return `event handler ${declaration.id.name} must be synchronous`;
+      }
+      locals.push({ kind: "handler", name: declaration.id.name, value: declaration.init });
+    } else {
+      locals.push({ kind: "derived", name: declaration.id.name, value: declaration.init });
+    }
   }
 
   if (states.length === 0) return "no local useState binding was found";
@@ -518,13 +634,13 @@ function compileCandidate(
 
   const statesByValue = new Map(states.map((state) => [state.valueName, state]));
   const statesBySetter = new Map(states.map((state) => [state.setterName, state]));
-  const derivedNames = new Set(derived.map((binding) => binding.name));
-  if (derivedNames.size !== derived.length) return "derived local names must be unique";
+  const localNames = new Set(locals.map((binding) => binding.name));
+  if (localNames.size !== locals.length) return "local binding names must be unique";
   for (const state of states) {
     if (
       state.initialValue &&
       (collectStateDependencies(state.initialValue, statesByValue).length > 0 ||
-        collectReferencedLocals(state.initialValue, derivedNames).length > 0 ||
+        collectReferencedLocals(state.initialValue, localNames).length > 0 ||
         [...statesBySetter].some(([setterName]) =>
           referencesIdentifier(state.initialValue!, setterName),
         ))
@@ -533,21 +649,37 @@ function compileCandidate(
     }
   }
   const derivedByName = new Map<string, t.Expression>();
-  for (const binding of derived) {
-    const forwardReferences = collectReferencedLocals(binding.value, derivedNames).filter(
+  const handlersByName = new Map<string, HandlerBinding>();
+  for (const binding of locals) {
+    const forwardReferences = collectReferencedLocals(binding.value, localNames).filter(
       (reference) => !derivedByName.has(reference),
     );
     if (forwardReferences.length > 0) {
-      return `derived local ${binding.name} can only reference earlier derived local values`;
+      return `${binding.kind === "handler" ? "event handler" : "derived local"} ${binding.name} can only reference earlier derived local values`;
     }
     const expanded = rewriteDerivedAccess(binding.value, derivedByName);
+    if (binding.kind === "handler") {
+      handlersByName.set(binding.name, {
+        name: binding.name,
+        value: expanded as t.ArrowFunctionExpression | t.FunctionExpression,
+      });
+      continue;
+    }
     const unsupported = validateDerivedExpression(expanded);
     if (unsupported) {
       return `derived local ${binding.name} cannot use ${unsupported}`;
     }
     derivedByName.set(binding.name, expanded);
   }
-  const expandedRoot = rewriteDerivedAccess(returned.argument, derivedByName) as t.JSXElement;
+  const rootWithDerived = rewriteDerivedAccess(returned.argument, derivedByName) as t.JSXElement;
+  const handlerRewrite = rewriteHandlerAccess(rootWithDerived, handlersByName);
+  if (handlerRewrite.reason) return handlerRewrite.reason;
+  if (!handlerRewrite.root) return "event handlers could not be prepared safely";
+  const expandedRoot = rewriteDestructuredPropAccess(
+    handlerRewrite.root,
+    propsPlan.destructuredNames,
+    propsPlan.definitionParameter,
+  );
   const setterReason = validateSetterUsage(expandedRoot, statesBySetter);
   if (setterReason) return setterReason;
   const analysis = analyzeHostTree(expandedRoot, statesByValue);
@@ -555,7 +687,7 @@ function compileCandidate(
 
   const stateParameter = path.scope.generateUidIdentifier("farmState");
   const definitionIdentifier = path.scope.generateUidIdentifier(`${name}Compiled`);
-  const propsParameter = clonePropsParameter(path);
+  const propsParameter = propsPlan.definitionParameter;
   const rewrittenRoot = rewriteStateAccess(
     expandedRoot,
     stateParameter,
@@ -585,7 +717,19 @@ function compileCandidate(
         t.identifier("initialize"),
         t.arrowFunctionExpression(
           [t.cloneNode(propsParameter)],
-          t.arrayExpression(states.map((state) => lazyInitialValue(state.initialValue))),
+          t.arrayExpression(
+            states.map((state) =>
+              lazyInitialValue(
+                state.initialValue
+                  ? rewriteDestructuredPropAccess(
+                      state.initialValue,
+                      propsPlan.destructuredNames,
+                      propsParameter,
+                    )
+                  : undefined,
+              ),
+            ),
+          ),
         ),
       ),
       t.objectProperty(
@@ -599,24 +743,18 @@ function compileCandidate(
         t.identifier("bindings"),
         t.arrayExpression(
           (analysis.bindings || []).map((binding) =>
-            bindingObject(binding, path, stateParameter, statesByValue, statesBySetter),
+            bindingObject(binding, propsParameter, stateParameter, statesByValue, statesBySetter),
           ),
         ),
       ),
     ]),
   ]);
 
-  const originalProps = path.node.params[0];
   path
     .get("body")
     .replaceWith(
       t.blockStatement([
-        t.returnStatement(
-          wrapperElement(
-            definitionIdentifier,
-            originalProps && t.isIdentifier(originalProps) ? originalProps : undefined,
-          ),
-        ),
+        t.returnStatement(wrapperElement(definitionIdentifier, propsPlan.wrapperProps)),
       ]),
     );
   statementPath.insertAfter(

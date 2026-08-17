@@ -1,5 +1,6 @@
 import { CompilerComparison } from "../components/compiler-comparison";
 import { CompilerEdgeLab } from "../components/compiler-edge-lab";
+import { CommonSyntaxExperiment } from "../components/common-syntax-experiment";
 import { HeavyInteractionBenchmark } from "../components/heavy-interaction-benchmark";
 
 export default function HomePage() {
@@ -57,6 +58,8 @@ export default function HomePage() {
       </section>
 
       <CompilerEdgeLab />
+
+      <CommonSyntaxExperiment />
 
       <HeavyInteractionBenchmark />
 

@@ -84,6 +84,83 @@ describe("React AOT compiler", () => {
     });
   });
 
+  it("compiles destructured props and named synchronous event handlers", async () => {
+    const result = await compileReactModule(
+      `
+        import { useState } from "react";
+        interface CounterProps {
+          initial?: number;
+          label: string;
+          onCommit(value: number): void;
+        }
+        export function CommonCounter({
+          initial = 1,
+          label: title,
+          onCommit,
+        }: CounterProps) {
+          const [count, setCount] = useState(initial);
+          const [active, setActive] = useState(false);
+          const doubled = count * 2;
+          const increment = () => {
+            onCommit(doubled);
+            setCount((value) => value + 1);
+            setActive(!active);
+          };
+          return (
+            <button
+              className={active ? "active" : "idle"}
+              data-count={doubled}
+              onClick={increment}
+            >{title}: {doubled}</button>
+          );
+        }
+      `,
+      "/app/CommonCounter.tsx",
+      infer,
+    );
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.compiled).toEqual(["CommonCounter"]);
+    expect(result.code).toContain("initial = 1");
+    expect(result.code).toContain("label: title");
+    expect(result.code).not.toContain("const increment");
+    expect(result.code).toMatch(/props\.initial/);
+    expect(result.code).toMatch(/props\.title/);
+    expect(result.code).toMatch(/props\.onCommit/);
+    expect(result.code).toMatch(/farmState\[0\]\.set/);
+    expect(result.code).toMatch(/farmState\[1\]\.set/);
+    await expect(
+      transformWithEsbuild(result.code, "/app/CommonCounter.tsx", {
+        loader: "tsx",
+        jsx: "automatic",
+      }),
+    ).resolves.toMatchObject({
+      code: expect.stringContaining("createCompiledComponent"),
+    });
+  });
+
+  it("compiles a named function expression used directly as an event", async () => {
+    const result = await compileReactModule(
+      `
+        import { useState } from "react";
+        export const Toggle = ({ initial: start = false }) => {
+          const [active, setActive] = useState(start);
+          const toggle = function toggle() {
+            setActive((value) => !value);
+          };
+          return <button aria-pressed={active} onClick={toggle}>{active ? "on" : "off"}</button>;
+        };
+      `,
+      "/app/Toggle.tsx",
+      infer,
+    );
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.compiled).toEqual(["Toggle"]);
+    expect(result.code).not.toContain("const toggle");
+    expect(result.code).toMatch(/props\.start/);
+  });
+
   it("only compiles selected components in annotation mode", async () => {
     const result = await compileReactModule(
       `
