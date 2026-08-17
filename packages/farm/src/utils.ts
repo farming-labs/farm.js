@@ -10,6 +10,9 @@ export function parseRoutePath(filePath: string): ParsedRoute {
   const fileType = getRouteType(fileName);
 
   for (const part of pathParts) {
+    // Route groups like `(marketing)` organize files without adding URL
+    // segments. Mirrors isRouteGroup in router.ts for programmatic routes.
+    if (part.startsWith("(") && part.endsWith(")")) continue;
     if (part.startsWith("[") && part.endsWith("]")) {
       let segment = part.slice(1, -1);
       const isDynamic = true;
