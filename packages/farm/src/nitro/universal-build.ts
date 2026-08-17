@@ -123,6 +123,12 @@ type UniversalMetadataImageRoute = {
   };
   data?: string;
 };
+type UniversalApplicationMetadataRoute = {
+  pattern: string;
+  kind: "sitemap" | "robots" | "manifest";
+  outputName: "sitemap.xml" | "robots.txt" | "manifest.webmanifest";
+  modulePath: string;
+};
 type UniversalMiddlewareRoute = {
   path: string;
   filePath: string;
@@ -2992,6 +2998,16 @@ async function buildSSRInMemory(
     });
   }
 
+  const applicationMetadataRoutes: UniversalApplicationMetadataRoute[] = Array.from(
+    routeManager.getMetadataRoutes().values(),
+    (entry) => ({
+      pattern: entry.pattern,
+      kind: entry.kind,
+      outputName: entry.outputName,
+      modulePath: entry.modulePath,
+    }),
+  );
+
   // Generate API route manifest
   const apiRoutes: Array<{
     path: string;
@@ -3059,7 +3075,7 @@ async function buildSSRInMemory(
   });
 
   logger.info(
-    `📋 Found ${pageRoutes.length} page routes, ${layoutRoutes.length} layouts, ${apiRoutes.length} API routes, and ${middlewareRoutes.length} middleware files`,
+    `📋 Found ${pageRoutes.length} page routes, ${layoutRoutes.length} layouts, ${apiRoutes.length} API routes, ${applicationMetadataRoutes.length} metadata routes, and ${middlewareRoutes.length} middleware files`,
   );
 
   const configuredIntegrationValues = Object.values(config.integrations || {});
@@ -3104,6 +3120,7 @@ async function buildSSRInMemory(
     routeSlots,
     errorRoutes,
     metadataImageRoutes,
+    applicationMetadataRoutes,
     middlewareRoutes,
     redirectRoutes,
     configuredRewrites,
@@ -3335,6 +3352,7 @@ function generateVirtualEntryCode(
   routeSlots: UniversalRouteSlot[],
   errorRoutes: UniversalBoundaryRoute[],
   metadataImageRoutes: UniversalMetadataImageRoute[],
+  applicationMetadataRoutes: UniversalApplicationMetadataRoute[],
   middlewareRoutes: UniversalMiddlewareRoute[],
   redirectRoutes: ProgrammaticRedirectRoute[],
   configuredRewriteRoutes: RewriteConfig[],
@@ -3507,6 +3525,20 @@ function generateVirtualEntryCode(
     metadataImageRegistrations.push(`  ${JSON.stringify(image)}`);
   });
 
+  const applicationMetadataImports: string[] = [];
+  const applicationMetadataRegistrations: string[] = [];
+  applicationMetadataRoutes.forEach((metadata, index) => {
+    const varName = `applicationMetadataRoute${index}`;
+    applicationMetadataImports.push(`import * as ${varName} from "${metadata.modulePath}";`);
+    applicationMetadataRegistrations.push(`
+  {
+    pattern: ${JSON.stringify(metadata.pattern)},
+    kind: ${JSON.stringify(metadata.kind)},
+    outputName: ${JSON.stringify(metadata.outputName)},
+    module: ${varName},
+  }`);
+  });
+
   // Generate imports for all app middleware files
   const middlewareImports: string[] = [];
   const middlewareRegistrations: string[] = [];
@@ -3543,6 +3575,7 @@ function generateVirtualEntryCode(
   createDefaultErrorMarkup,
   createFarmInstrumentationLifecycle,
   createFarmCacheKey,
+  createFarmMetadataRouteResponse,
   createFarmThemeDocumentParts,
   createFarmLocaleCookie,
   createFarmProductionLifecycle,
@@ -3756,6 +3789,7 @@ ${layoutImports.join("\n")}
 ${routeSlotImports.join("\n")}
 ${errorImports.join("\n")}
 ${metadataImageImports.join("\n")}
+${applicationMetadataImports.join("\n")}
 ${middlewareImports.join("\n")}
 ${notFoundImport}
 ${apiRouteHelpersImport}
@@ -4003,6 +4037,10 @@ const errorRoutes = [${errorRegistrations.join(",")}
 
 // Metadata image routes bundled at build time
 const metadataImageRoutes = [${metadataImageRegistrations.join(",")}
+];
+
+// sitemap.ts, robots.ts, and manifest.ts routes bundled at build time
+const applicationMetadataRoutes = [${applicationMetadataRegistrations.join(",")}
 ];
 
 // Redirect routes bundled at build time
@@ -4657,6 +4695,79 @@ async function handleMetadataImageRequest(request, routePathname) {
   }
 }
 
+function matchApplicationMetadataRouteRequest(pathname) {
+  const normalizedPath = normalizeRuntimePath(pathname);
+  for (const metadata of applicationMetadataRoutes) {
+    const suffix = "/" + metadata.outputName;
+    if (normalizedPath !== suffix && !normalizedPath.endsWith(suffix)) continue;
+    const routePath = normalizedPath.slice(0, -suffix.length) || "/";
+    const params = matchRuntimePathPattern(metadata.pattern, routePath);
+    if (params !== null) return { metadata, params, routePath };
+  }
+  return null;
+}
+
+function getMatchingApplicationMetadataRoute(pathname, kind) {
+  const normalizedPath = normalizeRuntimePath(pathname);
+  const pathSegments = splitRuntimePath(normalizedPath);
+  let bestMatch = null;
+
+  for (const metadata of applicationMetadataRoutes) {
+    if (metadata.kind !== kind) continue;
+    const patternDepth = splitRuntimePath(metadata.pattern).length;
+    if (patternDepth > pathSegments.length) continue;
+    const routePath = patternDepth === 0
+      ? "/"
+      : "/" + pathSegments.slice(0, patternDepth).join("/");
+    const params = matchRuntimePathPattern(metadata.pattern, routePath);
+    if (params === null) continue;
+    if (!bestMatch || patternDepth > bestMatch.depth) {
+      bestMatch = { metadata, params, routePath, depth: patternDepth };
+    }
+  }
+
+  return bestMatch;
+}
+
+function createApplicationMetadataHref(match, locale) {
+  const basePath = match.routePath === "/" ? "" : match.routePath;
+  const href = basePath + "/" + match.metadata.outputName;
+  return locale ? localizeFarmHref(href, locale, farmI18nConfig) : href;
+}
+
+async function handleApplicationMetadataRouteRequest(request, routePathname) {
+  const url = new URL(request.url);
+  const match = matchApplicationMetadataRouteRequest(routePathname || url.pathname);
+  if (!match) return null;
+
+  const method = request.method.toUpperCase();
+  if (method !== "GET" && method !== "HEAD") {
+    return new Response(null, { status: 405, headers: { Allow: "GET, HEAD" } });
+  }
+
+  try {
+    const routeModule = match.metadata.module;
+    if (routeModule?.default === undefined) {
+      throw new Error("Metadata route module does not export a default value or handler");
+    }
+    const value = typeof routeModule.default === "function"
+      ? await routeModule.default({
+          request,
+          params: match.params,
+          searchParams: url.searchParams,
+          path: match.routePath,
+        })
+      : routeModule.default;
+    return createFarmMetadataRouteResponse(match.metadata.kind, value, routeModule, { method });
+  } catch (error) {
+    console.error("Metadata route render failed:", error);
+    return new Response("Internal Server Error", {
+      status: 500,
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
+    });
+  }
+}
+
 function encodeRuntimePathSegment(value) {
   return encodeURIComponent(String(value)).replace(
     /[!'()*]/g,
@@ -4887,7 +4998,11 @@ function hasLocalRequestRoute(request, routePathname) {
   if (matchLocalAPIRequest(request) || matchLocalIntegrationRequest(request)) {
     return true;
   }
-  if (matchPageRoute(routePathname) || matchMetadataImageRequest(routePathname)) {
+  if (
+    matchPageRoute(routePathname) ||
+    matchMetadataImageRequest(routePathname) ||
+    matchApplicationMetadataRouteRequest(routePathname)
+  ) {
     return true;
   }
   if (${imageRuntime === "none" ? "false" : `pathname === ${JSON.stringify(config.images.path)}`}) {
@@ -4961,6 +5076,18 @@ function getFarmPluginRequestOptions(request) {
         ...route,
         pattern: metadataImageMatch.image.pattern,
         params: metadataImageMatch.params,
+      },
+    };
+  }
+
+  const applicationMetadataMatch = matchApplicationMetadataRouteRequest(routePathname);
+  if (applicationMetadataMatch) {
+    return {
+      kind: "asset",
+      route: {
+        ...route,
+        pattern: applicationMetadataMatch.metadata.pattern,
+        params: applicationMetadataMatch.params,
       },
     };
   }
@@ -5419,6 +5546,20 @@ async function handleFarmRequestInContext(
       : ""
   }
 
+  ${
+    applicationMetadataRoutes.length > 0
+      ? `
+  const applicationMetadataResponse = await handleApplicationMetadataRouteRequest(
+    request.clone(),
+    routePathname
+  );
+  if (applicationMetadataResponse) {
+    return applyProductionMiddlewareHeaders(applicationMetadataResponse, middlewareHeaders);
+  }
+  `
+      : ""
+  }
+
   // Preserve the explicit JSON 404 for /api/* misses.
   if (pathname.startsWith("/api/")) {
     if (farmDocsAPIHandler) {
@@ -5794,6 +5935,16 @@ async function handleFarmRequestInContext(
             mergedMetadata,
             await route.module.generateMetadata(pageProps),
           );
+        }
+
+        if (!mergedMetadata.manifest) {
+          const manifestMatch = getMatchingApplicationMetadataRoute(routePathname, "manifest");
+          if (manifestMatch) {
+            mergedMetadata.manifest = createApplicationMetadataHref(
+              manifestMatch,
+              farmLocaleResolution?.locale,
+            );
+          }
         }
 
         for (const kind of ["opengraph", "twitter"]) {

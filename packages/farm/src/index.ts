@@ -62,6 +62,7 @@ export * from "./middleware";
 export * from "./router";
 export * from "./route-rules";
 export * from "./route-runtime";
+export type { MetadataRoute, MetadataRouteContext } from "./metadata-route";
 export {
   createLayoutModuleFromProgrammaticLayout,
   createRoute,

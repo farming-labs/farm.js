@@ -21,6 +21,8 @@ const dashboardLayoutModulePath = "/test/src/app/dashboard/layout.tsx";
 const loadingModulePath = "/test/src/app/dashboard/loading.tsx";
 const errorModulePath = "/test/src/app/dashboard/error.tsx";
 const ogImageModulePath = "/test/src/app/dashboard/opengraph-image.tsx";
+const sitemapModulePath = "/test/src/app/dashboard/sitemap.ts";
+const manifestModulePath = "/test/src/app/dashboard/manifest.ts";
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
@@ -200,6 +202,66 @@ describe("file route loading.tsx and error.tsx", () => {
     expect(response.headers.get("content-type")).toBe("image/svg+xml");
     expect(response.body).toContain("<svg");
     expect(response.body).toContain("OG /dashboard");
+  });
+
+  it("serves sitemap.ts with params, search params, and cache headers", async () => {
+    const response = createMockResponse();
+    const renderer = createRenderer(
+      {
+        [sitemapModulePath]: {
+          revalidate: 120,
+          default({ path: routePath, searchParams }: any) {
+            return [
+              {
+                url: `https://farm.test${routePath}?locale=${searchParams.get("locale")}`,
+                changeFrequency: "daily",
+              },
+            ];
+          },
+        },
+      },
+      {
+        applicationMetadata: {
+          kind: "sitemap",
+          modulePath: sitemapModulePath,
+          outputName: "sitemap.xml",
+        },
+      },
+    );
+
+    await renderer.renderPage(createMockRequest("/dashboard/sitemap.xml?locale=am"), response);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/xml; charset=utf-8");
+    expect(response.headers.get("cache-control")).toBe(
+      "public, s-maxage=120, stale-while-revalidate=300",
+    );
+    expect(response.body).toContain("<loc>https://farm.test/dashboard?locale=am</loc>");
+  });
+
+  it("automatically links the nearest manifest.ts from rendered pages", async () => {
+    const response = createMockResponse();
+    const renderer = createRenderer(
+      {
+        [routeModulePath]: {
+          default: () => React.createElement("main", null, "Dashboard ready"),
+        },
+        [manifestModulePath]: {
+          default: { name: "Farm dashboard", start_url: "/dashboard" },
+        },
+      },
+      {
+        applicationMetadata: {
+          kind: "manifest",
+          modulePath: manifestModulePath,
+          outputName: "manifest.webmanifest",
+        },
+      },
+    );
+
+    await renderer.renderPage(createMockRequest("/dashboard"), response);
+
+    expect(response.body).toContain('<link rel="manifest" href="/dashboard/manifest.webmanifest">');
   });
 
   it("renders and serves a fingerprinted static metadata image", async () => {
@@ -492,6 +554,11 @@ function createRenderer(
   options: {
     opengraphImage?: boolean;
     staticImage?: { modulePath: string; staticInfo: any };
+    applicationMetadata?: {
+      kind: "sitemap" | "robots" | "manifest";
+      modulePath: string;
+      outputName: "sitemap.xml" | "robots.txt" | "manifest.webmanifest";
+    };
     clientMetadata?: {
       isClientComponent: boolean;
       shouldHydrate: boolean;
@@ -523,7 +590,39 @@ function createRenderer(
       ],
     },
   };
+  const applicationMetadataEntry = options.applicationMetadata
+    ? {
+        pattern: "/dashboard",
+        modulePath: options.applicationMetadata.modulePath,
+        kind: options.applicationMetadata.kind,
+        fileName: options.applicationMetadata.kind,
+        outputName: options.applicationMetadata.outputName,
+        route: {
+          segments: [
+            {
+              segment: "dashboard",
+              isDynamic: false,
+              isCatchAll: false,
+              isOptional: false,
+            },
+          ],
+        },
+      }
+    : null;
   const routeManager = {
+    matchMetadataRoute(pathname: string) {
+      if (
+        !applicationMetadataEntry ||
+        pathname !== `/dashboard/${applicationMetadataEntry.outputName}`
+      ) {
+        return null;
+      }
+      return {
+        metadata: applicationMetadataEntry,
+        params: {},
+        routePath: "/dashboard",
+      };
+    },
     matchMetadataImage(pathname: string) {
       if (!options.opengraphImage || pathname !== "/dashboard/opengraph-image") {
         return null;
@@ -576,6 +675,17 @@ function createRenderer(
         image: metadataImageEntry,
         params: {},
       };
+    },
+    getMatchingMetadataRoute(_pathname: string, kind: string) {
+      if (!applicationMetadataEntry || applicationMetadataEntry.kind !== kind) return null;
+      return {
+        metadata: applicationMetadataEntry,
+        params: {},
+        routePath: "/dashboard",
+      };
+    },
+    resolveMetadataRoutePath() {
+      return applicationMetadataEntry ? `/dashboard/${applicationMetadataEntry.outputName}` : "";
     },
     resolveMetadataImagePath() {
       return options.staticImage

@@ -472,6 +472,60 @@ describe("RouteManager", () => {
       );
     });
   });
+
+  describe("application metadata routes", () => {
+    it("discovers sitemap, robots, and manifest conventions in route segments", async () => {
+      const { globFiles } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) return ["page.tsx", "shops/[shop]/page.tsx"];
+        if (pattern.includes("sitemap")) {
+          return ["sitemap.ts", "robots.js", "manifest.ts", "shops/[shop]/sitemap.ts"];
+        }
+        return [];
+      });
+
+      await routeManager.discoverRoutes();
+
+      expect(routeManager.getMetadataRoutes().size).toBe(4);
+      expect(routeManager.matchMetadataRoute("/sitemap.xml")).toMatchObject({
+        metadata: { kind: "sitemap", pattern: "/" },
+        params: {},
+        routePath: "/",
+      });
+      expect(routeManager.matchMetadataRoute("/robots.txt")?.metadata.kind).toBe("robots");
+      expect(routeManager.matchMetadataRoute("/manifest.webmanifest")?.metadata.kind).toBe(
+        "manifest",
+      );
+
+      const shopSitemap = routeManager.matchMetadataRoute("/shops/acme/sitemap.xml");
+      expect(shopSitemap).toMatchObject({
+        metadata: { kind: "sitemap", pattern: "/shops/[shop]" },
+        params: { shop: "acme" },
+        routePath: "/shops/acme",
+      });
+      expect(
+        routeManager.resolveMetadataRoutePath(shopSitemap!.metadata, shopSitemap!.params),
+      ).toBe("/shops/acme/sitemap.xml");
+
+      const manifest = routeManager.getMatchingMetadataRoute("/shops/acme/products", "manifest");
+      expect(manifest?.metadata.pattern).toBe("/");
+      expect(routeManager.resolveMetadataRoutePath(manifest!.metadata, manifest!.params)).toBe(
+        "/manifest.webmanifest",
+      );
+    });
+
+    it("rejects duplicate metadata implementations in one route segment", async () => {
+      const { globFiles } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("sitemap")) return ["docs/sitemap.ts", "docs/sitemap.js"];
+        return [];
+      });
+
+      await expect(routeManager.discoverRoutes()).rejects.toThrow(
+        'Duplicate sitemap route "/docs"',
+      );
+    });
+  });
 });
 
 describe("static rendering suggestions with i18n", () => {

@@ -42,6 +42,24 @@ describe("production middleware runtime", () => {
       const config = await resolveConfig({ ...userConfig, root }, "production");
       await build(config, { root, preset: "vercel" });
 
+      const routeRuntimeManifest = JSON.parse(
+        await fs.readFile(path.join(root, ".farm", "route-runtime-manifest.json"), "utf8"),
+      );
+      expect(routeRuntimeManifest.routes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: "metadata",
+            pattern: "/sitemap.xml",
+            source: "src/app/sitemap.ts",
+          }),
+          expect.objectContaining({
+            kind: "metadata",
+            pattern: "/users/[id]/sitemap.xml",
+            source: "src/app/users/[id]/sitemap.ts",
+          }),
+        ]),
+      );
+
       const vercelOutputConfig = JSON.parse(
         await fs.readFile(path.join(root, ".vercel", "output", "config.json"), "utf8"),
       );
@@ -125,6 +143,7 @@ describe("production middleware runtime", () => {
         "production middleware: dashboard / settings / dashboard-file / /dashboard/settings",
       );
       expect(html).toContain("server context: dashboard-user / /dashboard/settings");
+      expect(html).toContain('<link rel="manifest" href="/manifest.webmanifest">');
       expect(html).not.toContain("never-serialize-this-session-secret");
       const hydrationProps = readInlineFarmProps(html);
       expect(hydrationProps).toMatchObject({
@@ -203,6 +222,59 @@ describe("production middleware runtime", () => {
       expect(optimizedImageResponse.headers.get("content-type")).toBe("image/webp");
       expect(optimizedImageResponse.headers.get("vary")).toBe("Accept");
       expect((await optimizedImageResponse.arrayBuffer()).byteLength).toBeGreaterThan(0);
+
+      const sitemapResponse = await serverModule.default.fetch(
+        new Request("https://example.test/sitemap.xml?campaign=spring%26summer"),
+      );
+      expect(sitemapResponse.status).toBe(200);
+      expect(sitemapResponse.headers.get("content-type")).toBe("application/xml; charset=utf-8");
+      expect(sitemapResponse.headers.get("cache-control")).toBe(
+        "public, s-maxage=600, stale-while-revalidate=300",
+      );
+      const sitemapXml = await sitemapResponse.text();
+      expect(sitemapXml).toContain("<loc>https://example.test/?campaign=spring&amp;summer</loc>");
+      expect(sitemapXml).toContain("<lastmod>2026-08-16T12:00:00.000Z</lastmod>");
+
+      const userSitemapResponse = await serverModule.default.fetch(
+        new Request("https://example.test/users/42/sitemap.xml"),
+      );
+      expect(userSitemapResponse.status).toBe(200);
+      const userSitemapXml = await userSitemapResponse.text();
+      expect(userSitemapXml).toContain("<loc>https://example.test/users/42/profile</loc>");
+      expect(userSitemapXml).toContain("<priority>0.42</priority>");
+
+      const robotsResponse = await serverModule.default.fetch(
+        new Request("https://example.test/robots.txt"),
+      );
+      expect(robotsResponse.status).toBe(200);
+      expect(robotsResponse.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+      await expect(robotsResponse.text()).resolves.toContain(
+        "Sitemap: https://example.test/sitemap.xml",
+      );
+
+      const manifestResponse = await serverModule.default.fetch(
+        new Request("https://example.test/manifest.webmanifest"),
+      );
+      expect(manifestResponse.status).toBe(200);
+      expect(manifestResponse.headers.get("content-type")).toBe(
+        "application/manifest+json; charset=utf-8",
+      );
+      await expect(manifestResponse.json()).resolves.toMatchObject({
+        name: "Farm production fixture",
+        display: "standalone",
+      });
+
+      const manifestHeadResponse = await serverModule.default.fetch(
+        new Request("https://example.test/manifest.webmanifest", { method: "HEAD" }),
+      );
+      expect(manifestHeadResponse.status).toBe(200);
+      expect(await manifestHeadResponse.text()).toBe("");
+
+      const metadataPostResponse = await serverModule.default.fetch(
+        new Request("https://example.test/robots.txt", { method: "POST" }),
+      );
+      expect(metadataPostResponse.status).toBe(405);
+      expect(metadataPostResponse.headers.get("allow")).toBe("GET, HEAD");
 
       (globalThis as any).__farmMiddlewareEvents = [];
       const configResponse = await serverModule.default.fetch(

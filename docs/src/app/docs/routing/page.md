@@ -751,6 +751,92 @@ export const metadata: Metadata = {
 
 Root layout metadata applies the favicon to every route. Nested layouts and pages can override individual icon entries through their own metadata. Do not render a `<link rel="icon">` element from the layout component; declaring `metadata.icons` lets Farm place the tags in the document head in both development and production.
 
+### Application metadata routes
+
+Use server-only metadata files when crawlers or browsers need an application-level document rather than an HTML `<meta>` tag. Farm discovers three conventions in `src/app` and route segments:
+
+| File          | Public route            | Default return type      |
+| ------------- | ----------------------- | ------------------------ |
+| `sitemap.ts`  | `/sitemap.xml`          | `MetadataRoute.Sitemap`  |
+| `robots.ts`   | `/robots.txt`           | `MetadataRoute.Robots`   |
+| `manifest.ts` | `/manifest.webmanifest` | `MetadataRoute.Manifest` |
+
+The default export can be a literal value or a sync or async function. Functions receive the matched `params`, the current `Request`, its `URLSearchParams`, and the concrete route-segment `path`.
+
+**src/app/sitemap.ts**
+
+```ts
+import type { MetadataRoute } from "@farm.js/core";
+
+export const revalidate = 3600;
+
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+  const products = await listProducts();
+
+  return [
+    {
+      url: "https://acme.test",
+      lastModified: new Date(),
+      changeFrequency: "daily",
+      priority: 1,
+    },
+    ...products.map((product) => ({
+      url: `https://acme.test/products/${product.id}`,
+      lastModified: product.updatedAt,
+      priority: 0.8,
+    })),
+  ];
+}
+```
+
+Farm escapes XML values and supports language alternates through `alternates.languages`.
+
+**src/app/robots.ts**
+
+```ts
+import type { MetadataRoute } from "@farm.js/core";
+
+export default function robots(): MetadataRoute.Robots {
+  return {
+    rules: {
+      userAgent: "*",
+      allow: "/",
+      disallow: ["/admin/", "/preview/"],
+    },
+    sitemap: "https://acme.test/sitemap.xml",
+    host: "https://acme.test",
+  };
+}
+```
+
+**src/app/manifest.ts**
+
+```ts
+import type { MetadataRoute } from "@farm.js/core";
+
+export default function manifest(): MetadataRoute.Manifest {
+  return {
+    name: "Acme Store",
+    short_name: "Acme",
+    description: "The Acme product catalog",
+    start_url: "/",
+    display: "standalone",
+    background_color: "#ffffff",
+    theme_color: "#16a34a",
+    icons: [
+      { src: "/icon-192.png", sizes: "192x192", type: "image/png" },
+      { src: "/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+  };
+}
+```
+
+Farm automatically adds the nearest discovered manifest to rendered page heads unless `metadata.manifest` already supplies an explicit URL. A nested file keeps its route prefix: `src/app/docs/sitemap.ts` is served at `/docs/sitemap.xml`, and a file under `[tenant]` receives the concrete tenant param.
+
+Generated metadata routes accept `GET` and `HEAD` and return `405` for other methods. They revalidate by default. Export `revalidate = 300` for shared CDN caching or `revalidate = false` only for permanently immutable output. A returned `Response` is an escape hatch for custom XML, headers, or status codes.
+
+`feed.ts` is not reserved yet because feeds need an explicit RSS, Atom, or JSON Feed contract. Use an API or programmatic route for feeds until that format is defined.
+
 ### Static metadata images
 
 Place `opengraph-image.png` next to a page or layout segment for a zero-code, route-local social image. Farm supports `.png`, `.jpg`, `.jpeg`, `.gif`, and `.webp` files.

@@ -52,6 +52,7 @@ import { localizeFarmHref, localizeFarmPathname } from "../i18n/routing";
 import { sendWebResponse } from "./response";
 import { renderFarmFontDevHead } from "../font-vite";
 import { createFarmMetadataImageResponse } from "../metadata-image";
+import { createFarmMetadataRouteResponse } from "../metadata-route";
 import { DEFAULT_NOT_FOUND_STYLES } from "../components/not-found-styles";
 import {
   createDefaultErrorMarkup,
@@ -916,6 +917,13 @@ export class ServerRenderer {
       emitFarmEvent({ type: "render.start", route: pathname, pathname });
       searchParamsObject = searchParamsToObject(url.searchParams);
 
+      const metadataRouteMatch = this.routeManager.matchMetadataRoute(pathname);
+      if (metadataRouteMatch) {
+        await this.renderMetadataRoute(req, res, metadataRouteMatch);
+        completeRender(res.statusCode || 200, pathname);
+        return;
+      }
+
       const metadataImageMatch = this.routeManager.matchMetadataImage(pathname);
       if (metadataImageMatch) {
         await this.renderMetadataImage(req, res, {
@@ -1573,6 +1581,23 @@ export class ServerRenderer {
       );
     }
 
+    if (!metadata.manifest) {
+      const manifestMatch = this.routeManager.getMatchingMetadataRoute(
+        options.pathname,
+        "manifest",
+      );
+      if (manifestMatch) {
+        const rawHref = this.routeManager.resolveMetadataRoutePath(
+          manifestMatch.metadata,
+          manifestMatch.params,
+        );
+        const snapshot = getFarmI18nClientSnapshot();
+        metadata.manifest = snapshot
+          ? localizeFarmHref(rawHref, snapshot.locale, snapshot)
+          : rawHref;
+      }
+    }
+
     for (const kind of ["opengraph", "twitter"] as const) {
       const reference = await this.resolveMetadataImageReference(kind, options.pathname);
       if (reference) {
@@ -1626,6 +1651,54 @@ export class ServerRenderer {
     }
 
     return reference;
+  }
+
+  private async renderMetadataRoute(
+    req: FarmRequest,
+    res: FarmResponse,
+    match: NonNullable<ReturnType<RouteManager["matchMetadataRoute"]>>,
+  ): Promise<void> {
+    const method = (req.method || "GET").toUpperCase();
+    if (method !== "GET" && method !== "HEAD") {
+      res.statusCode = 405;
+      res.setHeader("Allow", "GET, HEAD");
+      res.end();
+      return;
+    }
+
+    try {
+      const routeModule = await this.routeManager.loadRouteModule(match.metadata.modulePath);
+      if (routeModule.default === undefined) {
+        throw new Error(
+          `Metadata route module ${match.metadata.modulePath} does not export a default value or handler`,
+        );
+      }
+
+      const request = createWebRequestFromFarmRequest(req);
+      const url = new URL(request.url);
+      const value =
+        typeof routeModule.default === "function"
+          ? await (routeModule.default as any)({
+              request,
+              params: match.params,
+              searchParams: url.searchParams,
+              path: match.routePath,
+            })
+          : routeModule.default;
+      const response = createFarmMetadataRouteResponse(match.metadata.kind, value, routeModule, {
+        method,
+      });
+      await sendWebResponse(res as any, response);
+    } catch (error) {
+      logger.error(`Metadata route render failed for ${match.metadata.modulePath}: ${error}`);
+      await sendWebResponse(
+        res as any,
+        new Response("Internal Server Error", {
+          status: 500,
+          headers: { "Content-Type": "text/plain; charset=utf-8" },
+        }),
+      );
+    }
   }
 
   private async renderMetadataImage(

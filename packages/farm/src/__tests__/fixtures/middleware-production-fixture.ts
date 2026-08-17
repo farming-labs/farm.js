@@ -92,6 +92,51 @@ export default {
   );
   await fs.writeFile(path.join(root, "src", "app", "globals.css"), "");
   await fs.writeFile(
+    path.join(root, "src", "app", "sitemap.ts"),
+    `
+export const revalidate = 600;
+
+export default function sitemap({ searchParams }: any) {
+  const campaign = searchParams.get("campaign") || "organic";
+  return [
+    {
+      url: "https://example.test/?campaign=" + campaign,
+      lastModified: new Date("2026-08-16T12:00:00.000Z"),
+      changeFrequency: "daily",
+      priority: 1,
+    },
+  ];
+}
+`.trim(),
+  );
+  await fs.writeFile(
+    path.join(root, "src", "app", "robots.ts"),
+    `
+export default {
+  rules: {
+    userAgent: "*",
+    allow: "/",
+    disallow: "/private/",
+  },
+  sitemap: "https://example.test/sitemap.xml",
+};
+`.trim(),
+  );
+  await fs.writeFile(
+    path.join(root, "src", "app", "manifest.ts"),
+    `
+export default function manifest() {
+  return {
+    name: "Farm production fixture",
+    short_name: "Farm",
+    start_url: "/",
+    display: "standalone",
+    theme_color: "#16a34a",
+  };
+}
+`.trim(),
+  );
+  await fs.writeFile(
     path.join(root, "src", "app", "rewrite-target", "page.tsx"),
     `
 import React from "react";
@@ -386,6 +431,14 @@ export default function UserImage({ params }: { params: { id: string } }) {
     },
     \`User \${params.id}\`,
   );
+}
+`.trim(),
+  );
+  await fs.writeFile(
+    path.join(root, "src", "app", "users", "[id]", "sitemap.ts"),
+    `
+export default function userSitemap({ params, path }: any) {
+  return [{ url: "https://example.test" + path + "/profile", priority: Number(params.id) / 100 }];
 }
 `.trim(),
   );
