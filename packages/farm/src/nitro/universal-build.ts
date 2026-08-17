@@ -4361,7 +4361,9 @@ function createFarmErrorDocument(html, title) {
   }
   fullHtml = fullHtml
     .replace(/<head([^>]*)>/i, '<head$1>\\n  <link rel="stylesheet" href="/__farm_client_css_href__">')
-    .replace(/<\\/head>/i, renderFarmRendererHydrationScript() + '\\n</head>')
+    // Function replacements: dynamic markup may contain $-sequences ($&, $', $$)
+    // that a string replacement would expand, corrupting the document.
+    .replace(/<\\/head>/i, function() { return renderFarmRendererHydrationScript() + '\\n</head>'; })
     .replace(/<head([^>]*)>([\\s\\S]*?)<\\/head>/i, function(match, attrs, headContent) {
       return headContent.includes("<title")
         ? match
@@ -4369,8 +4371,10 @@ function createFarmErrorDocument(html, title) {
     })
     .replace(
       /<\\/body>/i,
-      '  ' + renderFarmClientBootstrapScript() + '\\n' +
-        '  <script type="module" src="/__farm_client_js_src__"></script>\\n</body>',
+      function() {
+        return '  ' + renderFarmClientBootstrapScript() + '\\n' +
+          '  <script type="module" src="/__farm_client_js_src__"></script>\\n</body>';
+      },
     );
   return fullHtml.trim().startsWith("<!DOCTYPE")
     ? fullHtml
@@ -4410,7 +4414,10 @@ function applyFarmI18nDocument(html, requestPath, snapshot) {
   const runtimeMarkup =
     renderFarmI18nAlternateLinks(requestPath, snapshot) +
     '<script>window.__FARM_I18N__ = ' + serializeFarmInlineValue(snapshot) + ';</script>';
-  nextHtml = nextHtml.replace(/<head([^>]*)>/i, '<head$1>' + runtimeMarkup);
+  nextHtml = nextHtml.replace(/<head([^>]*)>/i, function(_match, attributes) {
+    // Function replacement: runtimeMarkup may contain $-sequences ($&, $', $$).
+    return '<head' + attributes + '>' + runtimeMarkup;
+  });
   return nextHtml;
 }
 
@@ -5199,7 +5206,8 @@ ${
   );
   let html = source.replace(
     bodyMatch[0],
-    "<body" + bodyMatch[1] + ">" + rootMarkup + "</body>",
+    // Function replacement: rendered markup may contain $-sequences ($&, $', $$).
+    function() { return "<body" + bodyMatch[1] + ">" + rootMarkup + "</body>"; },
   );
   if (!html.includes('href="/__farm_client_css_href__"')) {
     const clientStylesheet = '  <link rel="stylesheet" href="/__farm_client_css_href__">\\n';
@@ -5210,7 +5218,7 @@ ${
         : html.replace(/<[/]head>/i, clientStylesheet + "</head>");
   }
   if (!html.includes('id="__farm_route_slots_data__"')) {
-    html = html.replace(/<[/]body>/i, renderFarmClientBootstrapScript() + "\\n</body>");
+    html = html.replace(/<[/]body>/i, function() { return renderFarmClientBootstrapScript() + "\\n</body>"; });
   }
   if (!html.includes('src="/__farm_client_js_src__"')) {
     html = html.replace(
@@ -5219,7 +5227,7 @@ ${
     );
   }
   if (!html.includes('window._$HY')) {
-    html = html.replace(/<[/]head>/i, renderFarmRendererHydrationScript() + "\\n</head>");
+    html = html.replace(/<[/]head>/i, function() { return renderFarmRendererHydrationScript() + "\\n</head>"; });
   }
   const headers = new Headers(response.headers);
   headers.delete("content-length");
@@ -6067,7 +6075,7 @@ async function handleFarmRequestInContext(
           fullHtml = html
             // Inject CSS link after opening head tag or first meta tag
             .replace(/<head([^>]*)>/i, '<head$1>\\n  <link rel="stylesheet" href="/__farm_client_css_href__">')
-            .replace(/<\\/head>/i, renderFarmRendererHydrationScript() + '\\n</head>')
+            .replace(/<\\/head>/i, () => renderFarmRendererHydrationScript() + '\\n</head>')
             // Inject title if not present and we have one
             .replace(/<head([^>]*)>([\\s\\S]*?)<\\/head>/i, (match, attrs, headContent) => {
               let nextHeadContent = headContent;
@@ -6079,10 +6087,13 @@ async function handleFarmRequestInContext(
                 ? match
                 : "<head" + attrs + ">" + nextHeadContent + "\\n</head>";
             })
-            // Inject client script before closing body tag
+            // Inject client script before closing body tag. Function replacement:
+            // serialized page props may contain $-sequences ($&, $', $$) that a
+            // string replacement would expand into surrounding document markup,
+            // corrupting the inline bootstrap script.
             .replace(
               /<\\/body>/i,
-              '  ' + renderFarmClientBootstrapScript(
+              () => '  ' + renderFarmClientBootstrapScript(
                 pageProps.__farmCanonicalPath,
                 routeSlotPayload,
                 clientPageProps
@@ -6373,10 +6384,10 @@ async function handleFarmRequestInContext(
     if (hasFullDocument) {
       fullHtml = html
         .replace(/<head([^>]*)>/i, '<head$1>\\n  <link rel="stylesheet" href="/__farm_client_css_href__">')
-        .replace(/<\\/head>/i, renderFarmRendererHydrationScript() + '\\n</head>')
+        .replace(/<\\/head>/i, () => renderFarmRendererHydrationScript() + '\\n</head>')
         .replace(
           /<\\/body>/i,
-          '  ' + renderFarmClientBootstrapScript() + '\\n' +
+          () => '  ' + renderFarmClientBootstrapScript() + '\\n' +
             '  <script type="module" src="/__farm_client_js_src__"></script>\\n</body>',
         );
       if (!fullHtml.trim().startsWith('<!DOCTYPE')) {
