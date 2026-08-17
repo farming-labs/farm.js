@@ -162,7 +162,10 @@ function routeSpecificity(entry: RouteEntry): number {
   return entry.route.segments.reduce((score, segment) => {
     if (!segment.isDynamic) return score + 100;
     if (!segment.isCatchAll) return score + 50;
-    return score + (segment.isOptional ? 5 : 10);
+    // An optional catch-all also matches its parent path (the empty case), so
+    // it must rank just below a page defined at that exact path: -2 nets out
+    // this segment's share of the length seed and one point more.
+    return score + (segment.isOptional ? -2 : 10);
   }, entry.route.segments.length);
 }
 
