@@ -4127,6 +4127,11 @@ async function renderFarmElement(ReactDOMServer, element) {
   if (typeof ReactDOMServer.renderToReadableStream === "function") {
     const stream = await ReactDOMServer.renderToReadableStream(element, {
       onError(error) {
+        // redirect()/notFound() are control flow, not render failures: the
+        // request handler maps them to a response, so skip the error log and
+        // keep them out of streamErrors, where a buffered deferred render
+        // would rethrow them after the shell already succeeded.
+        if (isFarmRedirectError(error) || isFarmNotFoundError(error)) return;
         streamErrors.push(error);
         console.error("[Farm SSR stream]", error);
       },
@@ -4271,6 +4276,8 @@ async function renderFarmElement(ReactDOMServer, element) {
       },
       onShellError: fail,
       onError(error) {
+        // Same control-flow guard as the readable-stream path above.
+        if (isFarmRedirectError(error) || isFarmNotFoundError(error)) return;
         streamErrors.push(error);
         console.error("[Farm SSR stream]", error);
       },
