@@ -3,12 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  isFarmNotFoundError,
-  isFarmRedirectError,
-  notFound,
-  redirect,
-} from "../navigation-errors";
+import { isFarmNotFoundError, isFarmRedirectError, notFound, redirect } from "../navigation-errors";
 
 type RenderedElement = {
   html?: string;
@@ -103,31 +98,25 @@ describe("generated production stream renderer control-flow errors", () => {
     vi.restoreAllMocks();
   });
 
-  it("does not log or buffer redirect() on the readable-stream path", async () => {
+  it("preserves but does not log redirect() on the readable-stream path", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     const { renderFarmElement } = instantiateStreamRenderer();
+    const redirectError = captureThrown(() => redirect("/login"));
 
-    const rendered = await renderFarmElement(
-      readableStreamServer(captureThrown(() => redirect("/login"))),
-      null,
+    await expect(renderFarmElement(readableStreamServer(redirectError), null)).rejects.toBe(
+      redirectError,
     );
-
-    expect(rendered.html).toBe("<div>shell</div><!--deferred-->");
-    expect(rendered.streamErrors).toHaveLength(0);
     expect(consoleError).not.toHaveBeenCalled();
   });
 
-  it("does not log or buffer notFound() on the readable-stream path", async () => {
+  it("preserves but does not log notFound() on the readable-stream path", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     const { renderFarmElement } = instantiateStreamRenderer();
+    const notFoundError = captureThrown(() => notFound());
 
-    const rendered = await renderFarmElement(
-      readableStreamServer(captureThrown(() => notFound())),
-      null,
+    await expect(renderFarmElement(readableStreamServer(notFoundError), null)).rejects.toBe(
+      notFoundError,
     );
-
-    expect(rendered.html).toBe("<div>shell</div><!--deferred-->");
-    expect(rendered.streamErrors).toHaveLength(0);
     expect(consoleError).not.toHaveBeenCalled();
   });
 
@@ -135,37 +124,31 @@ describe("generated production stream renderer control-flow errors", () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     const { renderFarmElement } = instantiateStreamRenderer();
 
-    await expect(
-      renderFarmElement(readableStreamServer(new Error("boom")), null),
-    ).rejects.toThrow("boom");
+    await expect(renderFarmElement(readableStreamServer(new Error("boom")), null)).rejects.toThrow(
+      "boom",
+    );
     expect(consoleError).toHaveBeenCalledWith("[Farm SSR stream]", expect.any(Error));
   });
 
-  it("does not log or buffer redirect() on the pipeable-stream path", async () => {
+  it("preserves but does not log redirect() on the pipeable-stream path", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     const { renderFarmElement } = instantiateStreamRenderer();
+    const redirectError = captureThrown(() => redirect("/login"));
 
-    const rendered = await renderFarmElement(
-      pipeableStreamServer(captureThrown(() => redirect("/login"))),
-      null,
+    await expect(renderFarmElement(pipeableStreamServer(redirectError), null)).rejects.toBe(
+      redirectError,
     );
-
-    expect(rendered.html).toBe("<div>shell</div><!--resolved-->");
-    expect(rendered.streamErrors).toHaveLength(0);
     expect(consoleError).not.toHaveBeenCalled();
   });
 
-  it("does not log or buffer notFound() on the pipeable-stream path", async () => {
+  it("preserves but does not log notFound() on the pipeable-stream path", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     const { renderFarmElement } = instantiateStreamRenderer();
+    const notFoundError = captureThrown(() => notFound());
 
-    const rendered = await renderFarmElement(
-      pipeableStreamServer(captureThrown(() => notFound())),
-      null,
+    await expect(renderFarmElement(pipeableStreamServer(notFoundError), null)).rejects.toBe(
+      notFoundError,
     );
-
-    expect(rendered.html).toBe("<div>shell</div><!--resolved-->");
-    expect(rendered.streamErrors).toHaveLength(0);
     expect(consoleError).not.toHaveBeenCalled();
   });
 
@@ -173,9 +156,9 @@ describe("generated production stream renderer control-flow errors", () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     const { renderFarmElement } = instantiateStreamRenderer();
 
-    await expect(
-      renderFarmElement(pipeableStreamServer(new Error("boom")), null),
-    ).rejects.toThrow("boom");
+    await expect(renderFarmElement(pipeableStreamServer(new Error("boom")), null)).rejects.toThrow(
+      "boom",
+    );
     expect(consoleError).toHaveBeenCalledWith("[Farm SSR stream]", expect.any(Error));
   });
 });
