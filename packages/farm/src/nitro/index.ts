@@ -478,7 +478,7 @@ export default defineEventHandler(async (event: H3Event) => {
       // Create page element
       const PageComponent = routeModule.default;
       let pageElement;
-      if (PageComponent.constructor.name === "AsyncFunction" || PageComponent.toString().includes("async")) {
+      if (typeof PageComponent === "function" && PageComponent.constructor.name === "AsyncFunction") {
         pageElement = await PageComponent(pageProps);
       } else {
         pageElement = React.createElement(PageComponent, pageProps);

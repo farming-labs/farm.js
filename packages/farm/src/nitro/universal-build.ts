@@ -5833,22 +5833,18 @@ async function handleFarmRequestInContext(
             // First, render the page content
             let pageElement;
 
-            // Check if the component is async
-            if (PageComponent.constructor.name === "AsyncFunction" || PageComponent.toString().includes("async")) {
-              // For async components, execute to get the element
-              try {
-                const result = await PageComponent(pageProps);
-                if (React.isValidElement(result)) {
-                  pageElement = result;
-                } else {
-                  pageElement = React.createElement("div", null, String(result));
-                }
-              } catch (asyncError) {
-                if (isFarmRedirectError(asyncError) || isFarmNotFoundError(asyncError)) {
-                  throw asyncError;
-                }
-                // If async rendering fails, try sync rendering as fallback
-                pageElement = React.createElement(PageComponent, pageProps);
+            // Only genuinely async components are executed directly; source
+            // sniffing is unsound because any sync component whose source
+            // contains "async" (e.g. an async event handler) would be called
+            // outside React, breaking hooks and re-running side effects.
+            // Errors, including redirect/notFound controls, propagate to the
+            // outer request handler exactly like sync render errors.
+            if (typeof PageComponent === "function" && PageComponent.constructor.name === "AsyncFunction") {
+              const result = await PageComponent(pageProps);
+              if (React.isValidElement(result)) {
+                pageElement = result;
+              } else {
+                pageElement = React.createElement("div", null, String(result));
               }
             } else {
               // Sync component - create element directly
