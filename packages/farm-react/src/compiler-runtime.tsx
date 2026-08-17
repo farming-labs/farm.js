@@ -43,10 +43,26 @@ export interface CompilerStyleBinding<Props> {
   read(props: Props, state: readonly CompilerCell[]): unknown;
 }
 
+export interface CompilerConditionalBlockBinding {
+  kind: "block";
+  id: number;
+  dependencies: readonly number[];
+}
+
+export interface CompilerConditionalBlockProps {
+  id: number;
+  render(): React.ReactNode;
+}
+
+export interface CompilerBlockRuntime {
+  Conditional: React.ComponentType<CompilerConditionalBlockProps>;
+}
+
 export type CompilerBinding<Props> =
   | CompilerTextBinding<Props>
   | CompilerAttributeBinding<Props>
-  | CompilerStyleBinding<Props>;
+  | CompilerStyleBinding<Props>
+  | CompilerConditionalBlockBinding;
 
 export interface CompiledComponentDefinition<Props> {
   displayName: string;
@@ -55,7 +71,11 @@ export interface CompiledComponentDefinition<Props> {
   /** Changes when the compiler-owned state layout is no longer refresh-compatible. */
   stateSignature?: string;
   initialize(props: Props): readonly unknown[];
-  render(props: Props, state: readonly CompilerCell[]): React.ReactElement;
+  render(
+    props: Props,
+    state: readonly CompilerCell[],
+    blocks: CompilerBlockRuntime,
+  ): React.ReactElement;
   bindings: readonly CompilerBinding<Props>[];
 }
 
@@ -89,10 +109,15 @@ function renderTextValue(value: unknown): string {
   return String(value);
 }
 
-function findBindingTarget(root: Element, path: readonly number[]): Element | null {
+function findBindingTarget(
+  root: Element,
+  path: readonly number[],
+  blockRoots: ReadonlySet<Element>,
+): Element | null {
   let current: Element | null = root;
   for (const index of path) {
-    current = current?.children.item(index) || null;
+    if (!current) return null;
+    current = [...current.children].filter((child) => !blockRoots.has(child))[index] || null;
   }
   return current;
 }
@@ -266,6 +291,78 @@ function updateAttribute(element: Element, name: string, value: unknown): void {
   }
 }
 
+interface ConditionalBlockOwner {
+  setRoot(id: number, root: Element | null): void;
+  subscribe(id: number, refresh: (afterCommit?: () => void) => void): () => void;
+}
+
+function createConditionalBlockComponent(
+  owner: ConditionalBlockOwner,
+): React.ComponentType<CompilerConditionalBlockProps> {
+  class FarmConditionalBlock extends React.Component<CompilerConditionalBlockProps> {
+    static displayName = "FarmCompiledConditionalBlock";
+
+    private unsubscribe: (() => void) | undefined;
+
+    private captureRoot = (root: Element | null) => {
+      owner.setRoot(this.props.id, root);
+    };
+
+    private refresh = (afterCommit?: () => void) => {
+      this.forceUpdate(afterCommit);
+    };
+
+    private subscribe(): void {
+      this.unsubscribe = owner.subscribe(this.props.id, this.refresh);
+    }
+
+    componentDidMount(): void {
+      this.subscribe();
+    }
+
+    componentDidUpdate(previous: CompilerConditionalBlockProps): void {
+      if (previous.id === this.props.id) return;
+      this.unsubscribe?.();
+      owner.setRoot(previous.id, null);
+      this.subscribe();
+    }
+
+    componentWillUnmount(): void {
+      this.unsubscribe?.();
+      owner.setRoot(this.props.id, null);
+    }
+
+    render(): React.ReactNode {
+      const node = this.props.render();
+      if (!React.isValidElement(node)) {
+        if (
+          node === null ||
+          node === undefined ||
+          typeof node === "boolean" ||
+          typeof node === "string" ||
+          typeof node === "number" ||
+          typeof node === "bigint"
+        ) {
+          return node;
+        }
+        throw new TypeError(
+          `Compiled conditional block ${this.props.id} must return one host element or an empty value.`,
+        );
+      }
+      if (typeof node.type !== "string") {
+        throw new TypeError(
+          `Compiled conditional block ${this.props.id} must return one host element.`,
+        );
+      }
+      return React.cloneElement(node, {
+        ref: this.captureRoot,
+      } as React.Attributes);
+    }
+  }
+
+  return FarmConditionalBlock;
+}
+
 /**
  * Runtime target emitted by the AOT transform.
  *
@@ -299,6 +396,10 @@ export function createCompiledComponent<Props>(
     private inputSelection: InputSelectionSnapshot | null = null;
     private readonly dirtyState = new Set<number>();
     private readonly cells: RuntimeCell[];
+    private readonly blockRefreshListeners = new Map<number, (afterCommit?: () => void) => void>();
+    private readonly blockRoots = new Map<number, Element>();
+    private readonly blockRootElements = new Set<Element>();
+    private readonly blockRuntime: CompilerBlockRuntime;
 
     constructor(props: Props) {
       super(props);
@@ -321,6 +422,12 @@ export function createCompiledComponent<Props>(
           },
         };
       });
+      this.blockRuntime = {
+        Conditional: createConditionalBlockComponent({
+          setRoot: (id, root) => this.setBlockRoot(id, root),
+          subscribe: (id, refresh) => this.subscribeToBlock(id, refresh),
+        }),
+      };
     }
 
     private captureRoot = (root: Element | null) => {
@@ -360,6 +467,26 @@ export function createCompiledComponent<Props>(
       snapshot.element.setSelectionRange(snapshot.start, snapshot.end, snapshot.direction);
     }
 
+    private setBlockRoot(id: number, root: Element | null): void {
+      const previous = this.blockRoots.get(id);
+      if (previous) this.blockRootElements.delete(previous);
+      if (root) {
+        this.blockRoots.set(id, root);
+        this.blockRootElements.add(root);
+      } else {
+        this.blockRoots.delete(id);
+      }
+    }
+
+    private subscribeToBlock(id: number, refresh: (afterCommit?: () => void) => void): () => void {
+      this.blockRefreshListeners.set(id, refresh);
+      return () => {
+        if (this.blockRefreshListeners.get(id) === refresh) {
+          this.blockRefreshListeners.delete(id);
+        }
+      };
+    }
+
     private scheduleBindingFlush(index: number): void {
       this.dirtyState.add(index);
       this.captureInputSelection();
@@ -377,12 +504,21 @@ export function createCompiledComponent<Props>(
         this.dirtyState.clear();
         if (dirty.size === 0) return;
         try {
+          let blockRefreshScheduled = false;
           for (const binding of definitionReference.current.bindings) {
             if (binding.dependencies.some((dependency) => dirty.has(dependency))) {
-              this.applyBinding(binding);
+              if (binding.kind === "block") {
+                const refresh = this.blockRefreshListeners.get(binding.id);
+                if (refresh) {
+                  blockRefreshScheduled = true;
+                  refresh(() => this.restoreInputSelection(inputSelection));
+                }
+              } else {
+                this.applyBinding(binding);
+              }
             }
           }
-          this.restoreInputSelection(inputSelection);
+          if (!blockRefreshScheduled) this.restoreInputSelection(inputSelection);
         } catch (error) {
           this.bindingError = error;
           this.hasBindingError = true;
@@ -392,8 +528,8 @@ export function createCompiledComponent<Props>(
     }
 
     private applyBinding(binding: CompilerBinding<Props>): void {
-      if (!this.root) return;
-      const target = findBindingTarget(this.root, binding.path);
+      if (!this.root || binding.kind === "block") return;
+      const target = findBindingTarget(this.root, binding.path, this.blockRootElements);
       if (!target) return;
       const value = binding.read(this.props, this.cells);
       if (binding.kind === "text") {
@@ -414,7 +550,9 @@ export function createCompiledComponent<Props>(
       // React has reconciled a parent-driven prop update. Reapply compiled
       // bindings from the current cells so React and the imperative state stay
       // coherent even when both change in the same turn.
-      for (const binding of definitionReference.current.bindings) this.applyBinding(binding);
+      for (const binding of definitionReference.current.bindings) {
+        if (binding.kind !== "block") this.applyBinding(binding);
+      }
     }
 
     componentWillUnmount(): void {
@@ -422,13 +560,16 @@ export function createCompiledComponent<Props>(
       this.root = null;
       this.dirtyState.clear();
       this.inputSelection = null;
+      this.blockRefreshListeners.clear();
+      this.blockRoots.clear();
+      this.blockRootElements.clear();
       refreshListeners.delete(this.refreshDefinition);
     }
 
     render(): React.ReactNode {
       if (this.hasBindingError) throw this.bindingError;
       const currentDefinition = definitionReference.current;
-      const element = currentDefinition.render(this.props, this.cells);
+      const element = currentDefinition.render(this.props, this.cells, this.blockRuntime);
       if (!React.isValidElement(element) || typeof element.type !== "string") {
         throw new TypeError(
           `Compiled component ${currentDefinition.displayName} must return one host element.`,

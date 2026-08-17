@@ -1,6 +1,7 @@
 import { CompilerComparison } from "../components/compiler-comparison";
 import { CompilerEdgeLab } from "../components/compiler-edge-lab";
 import { CommonSyntaxExperiment } from "../components/common-syntax-experiment";
+import { ConditionalBlockExperiment } from "../components/conditional-block-experiment";
 import { HeavyInteractionBenchmark } from "../components/heavy-interaction-benchmark";
 import { StaticBindingExperiment } from "../components/static-binding-experiment";
 
@@ -63,6 +64,8 @@ export default function HomePage() {
       <CommonSyntaxExperiment />
 
       <StaticBindingExperiment />
+
+      <ConditionalBlockExperiment />
 
       <HeavyInteractionBenchmark />
 

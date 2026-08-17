@@ -4,8 +4,8 @@ This production-browser experiment answers two questions:
 
 1. Why build this compiler? Eligible local `useState` updates can patch precomputed DOM targets
    without rerunning the component body or asking React to reconcile the same static tree again.
-2. Where must it stop? Keyed lists, effects, refs, custom components, and other dynamic structures
-   stay on React whenever the compiler cannot prove that a direct binding preserves behavior.
+2. Where must it stop? Eligible host-only conditionals use a small React-owned block boundary.
+   Keyed lists, effects, refs, custom components, and other unproven structures stay on React.
 
 The default `compiler: true` configuration automatically considers components. No annotation is
 needed. A component can explicitly opt out with `"use no compiler"`.
@@ -22,8 +22,9 @@ pnpm --filter farm-react-compiler-example experiment
 
 The Playwright install is needed once per machine (or whenever its browser cache is cleared).
 
-The command creates a production build, starts it on a local port, runs Chromium assertions, checks
-for console/runtime errors, saves `/tmp/farm-react-aot-edge-lab.png`, and prints a JSON report.
+The command creates a production build, starts it on a local port, runs desktop and mobile Chromium
+assertions, checks for console/runtime errors and horizontal overflow, saves screenshots under
+`/tmp/farm-react-aot-edge-lab*`, and prints a JSON report.
 
 ## Expected report
 
@@ -34,6 +35,8 @@ for console/runtime errors, saves `/tmp/farm-react-aot-edge-lab.png`, and prints
 | Two state cells            | text/class/data/input all update, update executions `0` | —                                              | AOT dependency lists update only bindings affected by each state cell. |
 | Calculated style bindings  | value `6`, progress `50%`, update executions `0`        | —                                              | Safe calls and individual CSS properties use prepared dependencies.    |
 | Controlled form bindings  | textarea/select/checkbox update, executions `0`         | —                                              | Form properties and textarea selection stay coherent.                  |
+| Logical conditional block | branch mounts, updates, and unmounts; executions `0`     | —                                              | Only the isolated React block refreshes.                                |
+| Ternary conditional block | `strong` and `span` replace each other; executions `0`   | —                                              | React preserves branch and event semantics without the outer rerender. |
 | Keyed list                 | intentionally not compiled                              | 3 correct keyed rows, update executions `2`    | Dynamic child structure safely falls back to React reconciliation.     |
 
 The package runtime test also measures one equivalent update under a React `Profiler`:
@@ -56,6 +59,17 @@ reconciliation unnecessary.
 Calling a Hook directly inside `items.map(...)` is invalid React because the number or order of Hook
 calls can change. Put the Hook inside a separate `Row` component and key that component. The compiler
 has a regression test confirming that the invalid inline shape is rejected rather than transformed.
+
+## Conditional block boundary
+
+The `07A` and `07B` cards exercise `condition && <host />` and
+`condition ? <host /> : <host />` in the production browser build. The compiler records each
+condition's state dependencies and lowers the child to a private React boundary. A matching state
+update refreshes that boundary while the user component's execution counter stays unchanged.
+
+This does not pre-mount both branches or bypass React's event system. React still creates, replaces,
+and removes the selected host branch. Custom components, hooks, fragments, nested conditionals,
+lists, refs, spreads, and dangerous HTML inside a branch intentionally fall back.
 
 ## Heavy compiler-on/off benchmark
 

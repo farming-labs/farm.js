@@ -573,6 +573,57 @@ h1 span {
   white-space: nowrap;
 }
 
+.conditional-stage {
+  display: grid;
+  min-height: 5.5rem;
+  margin-top: 1.7rem;
+  place-items: center;
+  border: 1px solid #33332f;
+  background:
+    linear-gradient(135deg, rgb(184 255 91 / 0.035), transparent 55%),
+    #0d0d0c;
+}
+
+.conditional-stage:empty::before {
+  color: #5f5f59;
+  content: "BLOCK NOT MOUNTED";
+  font:
+    0.6rem "Geist Mono Variable",
+    ui-monospace,
+    monospace;
+  letter-spacing: 0.07em;
+}
+
+.conditional-branch {
+  margin: 0;
+  color: #d8ff9f;
+  font:
+    0.74rem "Geist Mono Variable",
+    ui-monospace,
+    monospace;
+  letter-spacing: 0.035em;
+}
+
+.conditional-branch::before {
+  display: inline-block;
+  width: 0.42rem;
+  height: 0.42rem;
+  margin-right: 0.6rem;
+  border-radius: 50%;
+  background: #b8ff5b;
+  box-shadow: 0 0 0 0.3rem rgb(184 255 91 / 0.09);
+  content: "";
+}
+
+.conditional-branch--paused {
+  color: #999992;
+}
+
+.conditional-branch--paused::before {
+  background: #696963;
+  box-shadow: none;
+}
+
 .edge-card ul {
   display: flex;
   min-height: 2.8rem;

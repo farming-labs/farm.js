@@ -10,6 +10,7 @@ const serverEntry = path.resolve(".farm/.output/server/index.mjs");
 const compilerReportPath = path.resolve(".farm/react-compiler.json");
 const screenshotPath =
   process.env.FARM_EXPERIMENT_SCREENSHOT || "/tmp/farm-react-aot-edge-lab.png";
+const mobileScreenshotPath = screenshotPath.replace(/(\.[^.]+)?$/, "-mobile$1");
 
 await access(serverEntry);
 const compilerReport = JSON.parse(await readFile(compilerReportPath, "utf8"));
@@ -24,6 +25,8 @@ for (const component of [
   "ControlledSyntax",
   "CalculatedBindingPanel",
   "FormBindingPanel",
+  "LogicalBlockPanel",
+  "TernaryBlockPanel",
 ]) {
   assert.ok(compiledComponents.has(component), `${component} was not compiled`);
 }
@@ -301,6 +304,73 @@ try {
   const formFinalExecutions = await readNumber(page, `${form} [data-metric="executions"]`);
   assert.equal(formFinalExecutions - formInitialExecutions, 0);
 
+  const logical = '[data-experiment="conditional-logical"]';
+  const logicalInitialExecutions = await readNumber(
+    page,
+    `${logical} [data-metric="executions"]`,
+  );
+  await assertText(page, `${logical} [data-metric="mounted"]`, "no");
+  assert.equal(
+    await page.locator(`${logical} [data-branch="loading"]`).count(),
+    0,
+  );
+  await page.locator(`${logical} [data-action="toggle-logical"]`).click();
+  await assertText(page, `${logical} [data-metric="mounted"]`, "yes");
+  await assertText(
+    page,
+    `${logical} [data-branch="loading"]`,
+    "Loading branch · update 0",
+  );
+  await page.locator(`${logical} [data-action="increment-logical"]`).click();
+  await assertText(page, `${logical} [data-metric="updates"]`, "1");
+  await assertText(
+    page,
+    `${logical} [data-branch="loading"]`,
+    "Loading branch · update 1",
+  );
+  await page.locator(`${logical} [data-action="toggle-logical"]`).click();
+  await assertText(page, `${logical} [data-metric="mounted"]`, "no");
+  assert.equal(
+    await page.locator(`${logical} [data-branch="loading"]`).count(),
+    0,
+  );
+  const logicalFinalExecutions = await readNumber(
+    page,
+    `${logical} [data-metric="executions"]`,
+  );
+  assert.equal(logicalFinalExecutions - logicalInitialExecutions, 0);
+
+  const ternary = '[data-experiment="conditional-ternary"]';
+  const ternaryInitialExecutions = await readNumber(
+    page,
+    `${ternary} [data-metric="executions"]`,
+  );
+  await assertText(page, `${ternary} [data-metric="branch"]`, "on");
+  await assertText(page, `${ternary} [data-branch="enabled"]`, "Enabled");
+  assert.equal(
+    await page
+      .locator(`${ternary} [data-branch="enabled"]`)
+      .evaluate((node) => node.tagName),
+    "STRONG",
+  );
+  await page.locator(`${ternary} [data-action="toggle-ternary"]`).click();
+  await assertText(page, `${ternary} [data-metric="branch"]`, "off");
+  await assertText(page, `${ternary} [data-branch="disabled"]`, "Disabled");
+  assert.equal(
+    await page
+      .locator(`${ternary} [data-branch="disabled"]`)
+      .evaluate((node) => node.tagName),
+    "SPAN",
+  );
+  await page.locator(`${ternary} [data-action="toggle-ternary"]`).click();
+  await assertText(page, `${ternary} [data-metric="branch"]`, "on");
+  await assertText(page, `${ternary} [data-branch="enabled"]`, "Enabled");
+  const ternaryFinalExecutions = await readNumber(
+    page,
+    `${ternary} [data-metric="executions"]`,
+  );
+  assert.equal(ternaryFinalExecutions - ternaryInitialExecutions, 0);
+
   const keyed = '[data-experiment="keyed-fallback"]';
   const keyedInitialExecutions = await readNumber(
     page,
@@ -321,6 +391,32 @@ try {
   ]);
 
   await page.screenshot({ path: screenshotPath, fullPage: true });
+
+  const mobilePage = await browser.newPage({
+    viewport: { width: 390, height: 844 },
+  });
+  mobilePage.on("console", (message) => {
+    if (message.type() === "error") browserErrors.push(`[mobile] ${message.text()}`);
+  });
+  mobilePage.on("pageerror", (error) =>
+    browserErrors.push(`[mobile] ${error.message}`),
+  );
+  await mobilePage.goto(origin, { waitUntil: "networkidle" });
+  assert.equal(
+    await mobilePage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    true,
+    "the experiment page overflowed the mobile viewport",
+  );
+  await mobilePage
+    .locator('[data-experiment="conditional-logical"] [data-action="toggle-logical"]')
+    .click();
+  await assertText(
+    mobilePage,
+    '[data-experiment="conditional-logical"] [data-branch="loading"]',
+    "Loading branch · update 0",
+  );
+  await mobilePage.screenshot({ path: mobileScreenshotPath, fullPage: true });
+  await mobilePage.close();
   assert.deepEqual(browserErrors, []);
 
   console.log(
@@ -328,7 +424,10 @@ try {
       {
         result: "PASS",
         productionUrl: origin,
-        screenshot: screenshotPath,
+        screenshots: {
+          desktop: screenshotPath,
+          mobile: mobileScreenshotPath,
+        },
         compilerReport: path.relative(process.cwd(), compilerReportPath),
         compilerSummary: compilerReport.summary,
         experiments: {
@@ -385,6 +484,15 @@ try {
             enabled: false,
             selectionPreserved: true,
             updateExecutions: formFinalExecutions - formInitialExecutions,
+          },
+          conditionalLogicalBlock: {
+            mounted: false,
+            branchValue: 1,
+            updateExecutions: logicalFinalExecutions - logicalInitialExecutions,
+          },
+          conditionalTernaryBlock: {
+            branch: "enabled",
+            updateExecutions: ternaryFinalExecutions - ternaryInitialExecutions,
           },
           keyedFallback: {
             items: 3,

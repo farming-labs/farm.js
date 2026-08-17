@@ -204,7 +204,7 @@ describe("React AOT compiler", () => {
     expect(result.compiled).toEqual(["Counter"]);
   });
 
-  it("falls back to React for dynamic child structure", async () => {
+  it("compiles a host-only conditional child block", async () => {
     const result = await compileReactModule(
       `
         import { useState } from "react";
@@ -217,8 +217,18 @@ describe("React AOT compiler", () => {
       infer,
     );
 
-    expect(result.compiled).toEqual([]);
-    expect(result.diagnostics[0]?.reason).toMatch(/dynamic child structures/i);
-    expect(result.code).not.toContain("compiler-runtime");
+    expect(result.diagnostics).toEqual([]);
+    expect(result.compiled).toEqual(["MaybeDetails"]);
+    expect(result.code).toContain("farmBlocks.Conditional");
+    expect(result.code).toContain('kind: "block"');
+    expect(result.code).toContain("dependencies: [0]");
+    await expect(
+      transformWithEsbuild(result.code, "/app/MaybeDetails.tsx", {
+        loader: "tsx",
+        jsx: "automatic",
+      }),
+    ).resolves.toMatchObject({
+      code: expect.stringContaining("farmBlocks.Conditional"),
+    });
   });
 });
