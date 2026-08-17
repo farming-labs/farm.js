@@ -38,6 +38,7 @@ import {
   type MetadataImageKind,
 } from "../metadata";
 import { resolveFarmRouteContext, withFarmRouteContext } from "../route-context";
+import { searchParamsToObject } from "../search-params";
 import { prepareDeferredData, snapshotDeferredData, type DeferredRecord } from "../deferred";
 import { createFarmDeploymentCookie, FARM_DEPLOYMENT_ID_HEADER } from "../deployment";
 import type { StaticMetadataImageInfo } from "../static-metadata-image";
@@ -220,27 +221,6 @@ function createPPRRefreshScript(): string {
 
 function createPreHydrationClickQueueScript(): string {
   return `<script>(function(){if(window.__FARM_PREHYDRATION_CLICK_QUEUE__)return;var queue=[];window.__FARM_PREHYDRATION_CLICK_QUEUE__=queue;window.__FARM_HYDRATED__=false;document.documentElement.dataset.farmHydrated="false";function isModified(event){return !!(event.metaKey||event.altKey||event.ctrlKey||event.shiftKey)}function closestQueuedTarget(target){while(target&&target!==document.documentElement){if(target.matches&&target.matches('button,[role="button"],input[type="button"],input[type="submit"],input[type="reset"]'))return target;target=target.parentElement}return null}document.addEventListener("click",function(event){if(window.__FARM_HYDRATED__)return;if(event.defaultPrevented||event.button!==0||isModified(event))return;var target=closestQueuedTarget(event.target);if(!target||target.closest&&target.closest("a[href]")||target.closest&&target.closest('[data-farm-island-hydrated="true"]'))return;if(queue.some(function(item){return item.target===target}))return;queue.push({target:target,createdAt:Date.now()});document.dispatchEvent(new CustomEvent("farm:island-interaction",{detail:{target:target}}));event.preventDefault();event.stopImmediatePropagation()},true);})();</script>`;
-}
-
-function searchParamsToObject(
-  searchParams: URLSearchParams,
-): Record<string, string | string[] | undefined> {
-  const output: Record<string, string | string[] | undefined> = {};
-
-  searchParams.forEach((value, key) => {
-    const existing = output[key];
-    if (existing) {
-      if (Array.isArray(existing)) {
-        existing.push(value);
-      } else {
-        output[key] = [existing, value];
-      }
-    } else {
-      output[key] = value;
-    }
-  });
-
-  return output;
 }
 
 function createDocumentFooter(options: {

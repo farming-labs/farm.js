@@ -11,6 +11,7 @@ import type { ServerRenderer } from "../server/renderer";
 import { setEnv } from "../env";
 import { withFarmRouteContext } from "../route-context";
 import { createDeferredDataResponse } from "../deferred";
+import { searchParamsToObject } from "../search-params";
 import {
   createFarmDeploymentMismatchResponse,
   getFarmDeploymentMismatch,
@@ -214,11 +215,8 @@ async function defaultHandler({
         mergedMetadata = { ...mergedMetadata, ...routeModule.metadata };
       }
 
-      // Build search params
-      const searchParams: Record<string, string> = {};
-      targetUrl.searchParams.forEach((value, key) => {
-        searchParams[key] = value;
-      });
+      // Build search params (repeated keys collect into arrays, matching dev)
+      const searchParams = searchParamsToObject(targetUrl.searchParams);
       const routeContext = sr
         ? await sr.resolveRouteContext({
             request,
