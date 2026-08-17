@@ -446,7 +446,7 @@ export default async function TelemetryPage({ searchParams }: TelemetryPageProps
                 Farm.js telemetry
               </h1>
               <p className="mt-3 max-w-2xl text-sm leading-6 text-white/50">
-                Coarse, opt-in CLI and project-creation signals. No paths, repositories, source,
+                Coarse, anonymous CLI and project-creation signals. No paths, repositories, source,
                 credentials, user identities, IP addresses, or user-agent strings are stored.
               </p>
             </div>

@@ -61,6 +61,11 @@ interface FarmTelemetryConfig {
   anonymousId?: string;
 }
 
+interface FarmTelemetryConfigState {
+  config: FarmTelemetryConfig;
+  stored: boolean;
+}
+
 interface FarmTelemetryEventBase {
   schemaVersion: typeof TELEMETRY_SCHEMA_VERSION;
   eventId: string;
@@ -124,7 +129,7 @@ type FarmTelemetryEventInput<T = FarmTelemetryEvent> = T extends FarmTelemetryEv
 function defaultConfig(): FarmTelemetryConfig {
   return {
     version: TELEMETRY_SCHEMA_VERSION,
-    enabled: false,
+    enabled: true,
     noticeShown: false,
   };
 }
@@ -149,20 +154,25 @@ export function getFarmTelemetryConfigFile(): string {
   return path.join(configDirectory(), "telemetry.json");
 }
 
-async function readConfig(): Promise<FarmTelemetryConfig> {
+async function readConfig(): Promise<FarmTelemetryConfigState> {
   try {
     const parsed = JSON.parse(
       await readFile(getFarmTelemetryConfigFile(), "utf8"),
     ) as Partial<FarmTelemetryConfig>;
-    if (parsed.version !== TELEMETRY_SCHEMA_VERSION) return defaultConfig();
+    if (parsed.version !== TELEMETRY_SCHEMA_VERSION) {
+      return { config: defaultConfig(), stored: false };
+    }
     return {
-      version: TELEMETRY_SCHEMA_VERSION,
-      enabled: parsed.enabled === true,
-      noticeShown: parsed.noticeShown === true,
-      anonymousId: isUuid(parsed.anonymousId) ? parsed.anonymousId : undefined,
+      config: {
+        version: TELEMETRY_SCHEMA_VERSION,
+        enabled: parsed.enabled === true,
+        noticeShown: parsed.noticeShown === true,
+        anonymousId: isUuid(parsed.anonymousId) ? parsed.anonymousId : undefined,
+      },
+      stored: true,
     };
   } catch {
-    return defaultConfig();
+    return { config: defaultConfig(), stored: false };
   }
 }
 
@@ -244,15 +254,11 @@ async function resolveState(): Promise<{
   source: FarmTelemetryStatus["source"];
   reason?: string;
 }> {
-  const config = await readConfig();
+  const { config, stored } = await readConfig();
   const environment = environmentDecision();
   const enabled = environment.enabled ?? config.enabled;
   const source =
-    environment.enabled !== undefined
-      ? "environment"
-      : config.enabled
-        ? "configuration"
-        : "default";
+    environment.enabled !== undefined ? "environment" : stored ? "configuration" : "default";
 
   if (!enabled) return { config, enabled, active: false, source, reason: environment.reason };
   if (environment.enabled === true) return { config, enabled, active: true, source };
@@ -288,7 +294,7 @@ export async function getFarmTelemetryStatus(): Promise<FarmTelemetryStatus> {
 }
 
 export async function setFarmTelemetryEnabled(enabled: boolean): Promise<FarmTelemetryStatus> {
-  const current = await readConfig();
+  const { config: current } = await readConfig();
   await writeConfig({
     version: TELEMETRY_SCHEMA_VERSION,
     enabled,
@@ -301,10 +307,10 @@ export async function setFarmTelemetryEnabled(enabled: boolean): Promise<FarmTel
 export async function showFarmTelemetryNotice(): Promise<void> {
   if (!isInteractive() || isContinuousIntegration() || process.env.NODE_ENV === "test") return;
   if (environmentDecision().enabled !== undefined) return;
-  const config = await readConfig();
+  const { config } = await readConfig();
   if (config.noticeShown) return;
   process.stderr.write(
-    `Farm.js anonymous telemetry is off during beta. Run "farm telemetry enable" to opt in.\nLearn more: ${TELEMETRY_NOTICE_URL}\n`,
+    `Farm.js collects anonymous CLI telemetry by default. Run "farm telemetry disable" to opt out.\nLearn more: ${TELEMETRY_NOTICE_URL}\n`,
   );
   await writeConfig({ ...config, noticeShown: true });
 }

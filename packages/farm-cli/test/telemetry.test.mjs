@@ -42,11 +42,13 @@ async function withTelemetryEnvironment(run) {
   }
 }
 
-test("telemetry is opt-in and does not create an identity by default", async () => {
+test("telemetry is enabled without creating an identity by default", async () => {
   await withTelemetryEnvironment(async () => {
     const status = await getFarmTelemetryStatus();
-    assert.equal(status.enabled, false);
+    assert.equal(status.enabled, true);
     assert.equal(status.active, false);
+    assert.equal(status.source, "default");
+    assert.match(status.reason, /non-interactive/);
     assert.equal(status.anonymousId, undefined);
   });
 });
@@ -61,6 +63,9 @@ test("enable persists an anonymous ID and disable removes it", async () => {
     const disabledConfig = JSON.parse(await readFile(getFarmTelemetryConfigFile(), "utf8"));
     assert.equal(disabledConfig.enabled, false);
     assert.equal(disabledConfig.anonymousId, undefined);
+    const disabledStatus = await getFarmTelemetryStatus();
+    assert.equal(disabledStatus.enabled, false);
+    assert.equal(disabledStatus.source, "configuration");
 
     await setFarmTelemetryEnabled(true);
     const secondConfig = JSON.parse(await readFile(getFarmTelemetryConfigFile(), "utf8"));
