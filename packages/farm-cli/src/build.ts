@@ -12,6 +12,8 @@ export { withProductionNodeEnv };
 export interface BuildFarmOptions {
   root?: string;
   preset?: string;
+  /** Deployment platform the build serves. Wins over the preset-derived target. */
+  target?: string;
 }
 
 /**
@@ -46,9 +48,12 @@ export async function buildFarm(options: BuildFarmOptions = {}) {
 
       const config = await resolveConfig(userConfig, mode);
 
-      // Override preset if provided via CLI
-      if (options.preset) {
-        const deploy = resolveDeployConfig(userConfig, { preset: options.preset as any });
+      // Override preset/target if provided via CLI
+      if (options.preset || options.target) {
+        const deploy = resolveDeployConfig(userConfig, {
+          preset: options.preset as any,
+          target: options.target,
+        });
         config.preset = deploy.preset;
         config.deploy = deploy;
       }
