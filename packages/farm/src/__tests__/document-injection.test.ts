@@ -13,15 +13,11 @@ const universalBuildSource = fs.readFileSync(
 // extracted from the source and un-escaped (\\ -> \, \` -> `, \$ -> $) before
 // being executed the way the emitted bundle runs it.
 function extractEmittedFullDocumentInjection(): string {
-  const start = universalBuildSource.indexOf(
-    "fullHtml = html\n            // Inject CSS link",
-  );
+  const start = universalBuildSource.indexOf("fullHtml = html\n            // Inject CSS link");
   const end = universalBuildSource.indexOf("// Add DOCTYPE if not present", start);
   expect(start).toBeGreaterThan(-1);
   expect(end).toBeGreaterThan(start);
-  const emitted = universalBuildSource
-    .slice(start, end)
-    .replace(/\\([\\`$])/g, "$1");
+  const emitted = universalBuildSource.slice(start, end).replace(/\\([\\`$])/g, "$1");
   return emitted.slice(0, emitted.lastIndexOf(";") + 1);
 }
 
@@ -54,9 +50,7 @@ describe("generated full-document injection", () => {
       "clientPageProps",
       "renderFarmClientBootstrapScript",
       "renderFarmRendererHydrationScript",
-      "let fullHtml;\n" +
-        extractEmittedFullDocumentInjection() +
-        "\nreturn fullHtml;",
+      "let fullHtml;\n" + extractEmittedFullDocumentInjection() + "\nreturn fullHtml;",
     );
 
     const clientPageProps = { note: "totals: $$ then $& then $' then $`" };
@@ -83,12 +77,13 @@ describe("generated full-document injection", () => {
     // so every dynamically built replacement must go through a function.
     const stringReplacementWithDynamicMarkup =
       /\.replace\(\s*\/[^\n]*\/i,\s*(?:'[^']*'\s*\+\s*)?(?:renderFarmClientBootstrapScript|renderFarmRendererHydrationScript)\(/g;
-    expect(
-      universalBuildSource.match(stringReplacementWithDynamicMarkup),
-    ).toBeNull();
+    expect(universalBuildSource.match(stringReplacementWithDynamicMarkup)).toBeNull();
     expect(universalBuildSource).not.toContain("'<head$1>' + runtimeMarkup");
     expect(universalBuildSource).not.toContain(
       `"<body" + bodyMatch[1] + ">" + rootMarkup + "</body>",`,
+    );
+    expect(universalBuildSource).toContain(
+      `() => '<html lang="en"' + farmThemeDocument.attributes + '>'`,
     );
   });
 });

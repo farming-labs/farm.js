@@ -6033,7 +6033,7 @@ async function handleFarmRequestInContext(
             '</body>\\n</html>';
           const themedStreamPrefix = streamPrefix.replace(
             '<html lang="en">',
-            '<html lang="en"' + farmThemeDocument.attributes + '>'
+            () => '<html lang="en"' + farmThemeDocument.attributes + '>'
           );
           const streamedDocument = createFarmDocumentStream(
             renderedPage.stream,
