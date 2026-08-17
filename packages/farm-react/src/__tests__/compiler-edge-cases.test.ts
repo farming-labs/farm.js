@@ -184,6 +184,105 @@ describe("React AOT compiler safety boundaries", () => {
     expect(result.diagnostics[0]?.reason).toMatch(reason);
   });
 
+  it.each([
+    {
+      name: "nested props",
+      parameter: "{ user: { name } }",
+      reason: /nested component props destructuring/i,
+    },
+    {
+      name: "rest props",
+      parameter: "{ initial, ...rest }",
+      reason: /rest properties in component props destructuring/i,
+    },
+    {
+      name: "computed props",
+      parameter: '{ ["initial"]: initial }',
+      reason: /computed component props destructuring/i,
+    },
+    {
+      name: "a defaulted props object",
+      parameter: "{ initial } = { initial: 0 }",
+      reason: /zero parameters, one props identifier, or flat object props destructuring/i,
+    },
+  ])("falls back for $name", async ({ parameter, reason }) => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function PropsBoundary(${parameter}) {
+        const [count, setCount] = useState(initial ?? 0);
+        return <button onClick={() => setCount(count + 1)}>{count}</button>;
+      }
+    `);
+
+    expect(result.compiled).toEqual([]);
+    expect(result.diagnostics[0]?.reason).toMatch(reason);
+    expect(result.code).not.toContain("compiler-runtime");
+  });
+
+  it.each([
+    {
+      name: "an async handler",
+      declaration: "const increment = async () => setCount(count + 1);",
+      event: "increment",
+      reason: /event handler increment must be synchronous/i,
+    },
+    {
+      name: "a generator handler",
+      declaration: "const increment = function* () { setCount(count + 1); };",
+      event: "increment",
+      reason: /event handler increment must be synchronous/i,
+    },
+    {
+      name: "an indirectly invoked handler",
+      declaration: "const increment = () => setCount(count + 1);",
+      event: "() => increment()",
+      reason: /must be passed directly to a JSX event/i,
+    },
+    {
+      name: "a handler exposed as a child",
+      declaration: "const increment = () => setCount(count + 1);",
+      event: "increment",
+      child: "{increment}",
+      reason: /must be passed directly to a JSX event/i,
+    },
+    {
+      name: "a handler that reads a later derived value",
+      declaration: "const increment = () => setCount(next); const next = count + 1;",
+      event: "increment",
+      reason: /event handler increment can only reference earlier derived local values/i,
+    },
+  ])("falls back for $name", async ({ declaration, event, child = "{count}", reason }) => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function HandlerBoundary() {
+        const [count, setCount] = useState(0);
+        ${declaration}
+        return <button onClick={${event}}>${child}</button>;
+      }
+    `);
+
+    expect(result.compiled).toEqual([]);
+    expect(result.diagnostics[0]?.reason).toMatch(reason);
+    expect(result.code).not.toContain("compiler-runtime");
+  });
+
+  it("preserves handler parameter shadowing while rewriting destructured props", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Shadowed({ value: label }) {
+        const [value, setValue] = useState(0);
+        const update = (label) => setValue(label.currentTarget.value.length);
+        return <input aria-label={label} value={value} onInput={update} />;
+      }
+    `);
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.compiled).toEqual(["Shadowed"]);
+    expect(result.code).toMatch(/props\.label/);
+    expect(result.code).toContain("label.currentTarget.value.length");
+    expect(result.code).not.toMatch(/props\.label\.currentTarget/);
+  });
+
   it("falls back for hooks placed inside keyed list iteration", async () => {
     const result = await compile(`
       import { useState } from "react";

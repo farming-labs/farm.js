@@ -16,6 +16,12 @@ const compilerReport = JSON.parse(await readFile(compilerReportPath, "utf8"));
 
 assert.equal(compilerReport.version, 1);
 assert.ok(compilerReport.summary.compiled >= 1);
+const compiledComponents = new Set(
+  compilerReport.modules.flatMap((module) => module.compiled),
+);
+for (const component of ["CommonSyntaxCounter", "ControlledSyntax"]) {
+  assert.ok(compiledComponents.has(component), `${component} was not compiled`);
+}
 
 let serverOutput = "";
 const server = spawn(process.execPath, [serverEntry], {
@@ -149,6 +155,86 @@ try {
       .evaluate((element) => element.classList.contains("edge-card--active")),
   );
 
+  const common = '[data-experiment="common-syntax"]';
+  const commonInitialExecutions = await readNumber(
+    page,
+    `${common} [data-metric="executions"]`,
+  );
+  await assertText(page, `${common} h3`, "Alpha counter");
+  await assertText(page, `${common} [data-metric="count"]`, "2");
+  await assertText(page, `${common} [data-metric="doubled"]`, "4");
+  await assertText(page, '[data-metric="parent-commit"]', "Last parent commit: -1");
+
+  await page.locator(`${common} [data-action="commit"]`).click();
+  await assertText(page, `${common} h3`, "Beta counter");
+  await assertText(page, `${common} [data-metric="count"]`, "3");
+  await assertText(page, `${common} [data-metric="doubled"]`, "6");
+  await assertText(page, '[data-metric="parent-commit"]', "Last parent commit: 4");
+  assert.equal(await page.locator(common).getAttribute("data-count"), "3");
+  assert.equal(await page.locator(common).getAttribute("data-status"), "active");
+  assert.equal(
+    await page.locator(`${common} [data-action="commit"]`).getAttribute("aria-pressed"),
+    "true",
+  );
+
+  await page.locator(`${common} [data-action="commit"]`).click();
+  await assertText(page, `${common} h3`, "Alpha counter");
+  await assertText(page, `${common} [data-metric="count"]`, "4");
+  await assertText(page, `${common} [data-metric="doubled"]`, "8");
+  await assertText(page, '[data-metric="parent-commit"]', "Last parent commit: 6");
+  const commonFinalExecutions = await readNumber(
+    page,
+    `${common} [data-metric="executions"]`,
+  );
+  assert.equal(commonFinalExecutions - commonInitialExecutions, 2);
+
+  const controlled = '[data-experiment="controlled-syntax"]';
+  const controlledInput = page.locator(`${controlled} [data-input="controlled"]`);
+  const controlledInitialExecutions = await readNumber(
+    page,
+    `${controlled} [data-metric="executions"]`,
+  );
+  await assertText(page, `${controlled} label`, "Display name");
+  await assertText(page, `${controlled} [data-metric="value"]`, "empty");
+  await controlledInput.fill("abcd");
+  await assertText(page, `${controlled} [data-metric="value"]`, "abcd");
+  await assertText(page, `${controlled} [data-metric="length"]`, "4");
+
+  await controlledInput.evaluate((input) => {
+    input.focus();
+    input.setSelectionRange(2, 2);
+  });
+  await page.keyboard.insertText("X");
+  await assertText(page, `${controlled} [data-metric="value"]`, "abXcd");
+  assert.deepEqual(
+    await controlledInput.evaluate((input) => [input.selectionStart, input.selectionEnd]),
+    [3, 3],
+  );
+
+  await controlledInput.evaluate((input) => {
+    input.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    input.value = "日本";
+    input.dispatchEvent(
+      new InputEvent("input", {
+        bubbles: true,
+        composed: true,
+        data: "日本",
+        inputType: "insertCompositionText",
+        isComposing: true,
+      }),
+    );
+    input.dispatchEvent(
+      new CompositionEvent("compositionend", { bubbles: true, data: "日本" }),
+    );
+  });
+  await assertText(page, `${controlled} [data-metric="value"]`, "日本");
+  await assertText(page, `${controlled} [data-metric="length"]`, "2");
+  const controlledFinalExecutions = await readNumber(
+    page,
+    `${controlled} [data-metric="executions"]`,
+  );
+  assert.equal(controlledFinalExecutions - controlledInitialExecutions, 0);
+
   const keyed = '[data-experiment="keyed-fallback"]';
   const keyedInitialExecutions = await readNumber(
     page,
@@ -205,6 +291,21 @@ try {
             input: "value-1",
             updateExecutions:
               multipleFinalExecutions - multipleInitialExecutions,
+          },
+          commonSyntax: {
+            count: 4,
+            doubled: 8,
+            parentCommit: 6,
+            propDrivenExecutions:
+              commonFinalExecutions - commonInitialExecutions,
+          },
+          controlledInput: {
+            value: "日本",
+            length: 2,
+            updateExecutions:
+              controlledFinalExecutions - controlledInitialExecutions,
+            selectionPreserved: true,
+            compositionObserved: true,
           },
           keyedFallback: {
             items: 3,

@@ -11,6 +11,13 @@ interface RuntimeCell extends CompilerCell {
   flush(): boolean;
 }
 
+interface InputSelectionSnapshot {
+  element: HTMLInputElement;
+  start: number;
+  end: number;
+  direction: "forward" | "backward" | "none";
+}
+
 export interface CompilerTextBinding<Props> {
   kind: "text";
   path: readonly number[];
@@ -82,7 +89,8 @@ function updateAttribute(element: Element, name: string, value: unknown): void {
   const stringifiesBoolean = attributeName.startsWith("data-") || attributeName.startsWith("aria-");
 
   if (name === "value" && element instanceof HTMLInputElement) {
-    element.value = value === null || value === undefined ? "" : String(value);
+    const nextValue = value === null || value === undefined ? "" : String(value);
+    if (element.value !== nextValue) element.value = nextValue;
     return;
   }
 
@@ -140,6 +148,7 @@ export function createCompiledComponent<Props>(
     private flushQueued = false;
     private bindingError: unknown;
     private hasBindingError = false;
+    private inputSelection: InputSelectionSnapshot | null = null;
     private readonly dirtyState = new Set<number>();
     private readonly cells: RuntimeCell[];
 
@@ -174,12 +183,44 @@ export function createCompiledComponent<Props>(
       if (this.mounted) this.forceUpdate();
     };
 
+    private captureInputSelection(): void {
+      const active = this.root?.ownerDocument.activeElement;
+      if (
+        !(active instanceof HTMLInputElement) ||
+        !this.root?.contains(active) ||
+        active.selectionStart === null ||
+        active.selectionEnd === null
+      ) {
+        return;
+      }
+      this.inputSelection = {
+        element: active,
+        start: active.selectionStart,
+        end: active.selectionEnd,
+        direction: active.selectionDirection || "none",
+      };
+    }
+
+    private restoreInputSelection(snapshot: InputSelectionSnapshot | null): void {
+      if (
+        !snapshot ||
+        !snapshot.element.isConnected ||
+        snapshot.element.ownerDocument.activeElement !== snapshot.element
+      ) {
+        return;
+      }
+      snapshot.element.setSelectionRange(snapshot.start, snapshot.end, snapshot.direction);
+    }
+
     private scheduleBindingFlush(index: number): void {
       this.dirtyState.add(index);
+      this.captureInputSelection();
       if (!this.mounted || this.flushQueued) return;
       this.flushQueued = true;
       queueMicrotask(() => {
         this.flushQueued = false;
+        const inputSelection = this.inputSelection;
+        this.inputSelection = null;
         if (!this.mounted) return;
         const dirty = new Set<number>();
         for (const index of this.dirtyState) {
@@ -193,6 +234,7 @@ export function createCompiledComponent<Props>(
               this.applyBinding(binding);
             }
           }
+          this.restoreInputSelection(inputSelection);
         } catch (error) {
           this.bindingError = error;
           this.hasBindingError = true;
@@ -229,6 +271,7 @@ export function createCompiledComponent<Props>(
       this.mounted = false;
       this.root = null;
       this.dirtyState.clear();
+      this.inputSelection = null;
       refreshListeners.delete(this.refreshDefinition);
     }
 

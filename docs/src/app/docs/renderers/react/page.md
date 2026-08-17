@@ -326,14 +326,15 @@ satisfy all of these rules:
 | Area                | Current supported shape                                                                                                                             |
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Component discovery | A top-level, capitalized function declaration, function expression, or arrow component in application `.tsx` or `.jsx`.                             |
-| Function shape      | Synchronous, non-generator, non-generic block body with zero parameters or one identifier such as `props`.                                          |
-| Body                | Top-level `useState` declarations, optional compiler-safe derived `const` values in source order, then one unconditional JSX return.                |
+| Function shape      | Synchronous, non-generator, non-generic block body with zero parameters, one props identifier, or flat object props destructuring.                  |
+| Props               | Flat object destructuring supports shorthand names, aliases, and defaults. Nested, computed, and rest patterns fall back.                           |
+| Body                | Top-level `useState` declarations, optional compiler-safe derived values and synchronous named handlers, then one unconditional JSX return.         |
 | State               | `const [value, setValue] = useState(initial)`, including lazy initializers, multiple cells, and queued functional updates.                          |
 | Root                | Exactly one lowercase host JSX element such as `button`, `section`, `input`, or `div`.                                                              |
 | Tree                | A static tree containing host elements only. Nested host elements are supported when their placement cannot change.                                 |
 | Text bindings       | State-driven text in a leaf host element.                                                                                                           |
 | Attribute bindings  | State-driven basic attributes and properties, including `className`, `htmlFor`, `data-*`, `aria-*`, `value`, `checked`, `selected`, and `disabled`. |
-| Events              | React-owned JSX event handlers. A compiled state setter must be called from a JSX event handler.                                                    |
+| Events              | React-owned inline handlers or synchronous `const` handlers passed directly to an event, such as `onClick={increment}`.                             |
 
 This component is eligible:
 
@@ -342,23 +343,24 @@ This component is eligible:
 
 import { useState } from "react";
 
-export function StatusButton(props: { initial: number }) {
-  const [count, setCount] = useState(props.initial);
+interface StatusButtonProps {
+  initial?: number;
+  label: string;
+}
+
+export function StatusButton({ initial = 0, label: title }: StatusButtonProps) {
+  const [count, setCount] = useState(initial);
   const [active, setActive] = useState(false);
   const statusClass = active ? "active" : "idle";
-  const label = `Count: ${count}`;
+  const visibleLabel = `${title}: ${count}`;
+  const update = () => {
+    setCount((value) => value + 1);
+    setActive((value) => !value);
+  };
 
   return (
-    <button
-      aria-pressed={active}
-      className={statusClass}
-      data-count={count}
-      onClick={() => {
-        setCount((value) => value + 1);
-        setActive((value) => !value);
-      }}
-    >
-      {label}
+    <button aria-pressed={active} className={statusClass} data-count={count} onClick={update}>
+      {visibleLabel}
     </button>
   );
 }
@@ -373,6 +375,13 @@ conditionals, templates, and earlier derived values. State declarations must com
 assignments, object or array literals, functions, JSX, constructors, and other expressions whose
 evaluation or identity cannot be preserved safely still fall back to React.
 
+For destructured props, the original component wrapper still performs JavaScript destructuring on
+every parent render. Defaults therefore apply only to `undefined`, aliases keep their normal local
+names, and the resolved values are passed to the compiled definition. A named handler is expanded
+at build time only when it is synchronous and passed directly to a JSX event. Its state reads and
+setters then use the same compiler cells as an equivalent inline handler. Indirect calls such as
+`onClick={() => increment()}` stay on React until the compiler can prove their closure semantics.
+
 ### What falls back to React
 
 | Unsupported shape                                                      | Why React keeps ownership                                                           |
@@ -386,7 +395,9 @@ evaluation or identity cannot be preserved safely still fall back to React.
 | JSX attribute spreads or namespaced attributes                         | The compiler cannot currently enumerate a stable binding contract.                  |
 | Multiple/conditional returns or impure/control-flow statements         | The compiler only lowers a single, statically analyzable render path.               |
 | Derived calls, assignments, identity-bearing values, functions, or JSX | Their evaluation timing, side effects, or identity cannot yet be preserved safely.  |
-| Destructured props, async/generator, or generic components             | These function shapes are outside the current lowering.                             |
+| Nested, computed, or rest props destructuring                          | These patterns need additional parameter-shape and identity analysis.               |
+| Async/generator handlers or indirect named-handler calls               | Their scheduling and closure semantics are outside the current lowering.            |
+| Async/generator or generic components                                  | These function shapes are outside the current lowering.                             |
 | Setters called outside JSX event handlers                              | The compiler only controls and batches event-driven local updates.                  |
 
 Keys do not make list reconciliation unnecessary. A key tells React which child identity survives

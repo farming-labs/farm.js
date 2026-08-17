@@ -54,8 +54,10 @@ The directive is configurable and only has meaning in annotation mode.
 The current compiler handles components that it can prove have:
 
 - one host-element root and a static host-element tree;
+- an identifier props parameter or flat object destructuring with aliases and defaults;
 - top-level `useState` declarations;
 - optional compiler-safe derived `const` values declared after state and in source order;
+- optional synchronous `const` event handlers passed directly to JSX events;
 - state-driven text and basic attribute/property bindings;
 - React-managed event handlers; and
 - no refs, effects, custom child components, keyed lists, or conditional child structure.
@@ -86,5 +88,6 @@ second component render and commit, while the compiled component remains at one 
 commit and updates its two bindings directly. This is a deterministic structural performance
 assertion; it is not presented as a cross-machine timing benchmark.
 
-Keyed list lowering, structural conditionals, effects, and more advanced hook support intentionally
-stay on React in this release.
+Nested, computed, and rest props patterns; indirect or async handlers; keyed list lowering;
+structural conditionals; effects; and more advanced hook support intentionally stay on React in
+this release.

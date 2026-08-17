@@ -317,6 +317,20 @@ describe("compiled React runtime hardening", () => {
     expect(input.getAttribute("data-composing")).toBe("true");
 
     await act(async () => {
+      input.focus();
+      input.value = "faXrm";
+      input.setSelectionRange(3, 3);
+      input.dispatchEvent(new InputEvent("input", { bubbles: true, data: "X" }));
+      // Model React's controlled-input restoration before the compiler's
+      // queued binding flush. The runtime must restore the event-time caret.
+      input.value = "";
+      await flushCompilerUpdates();
+    });
+    expect(input.value).toBe("faXrm");
+    expect(input.selectionStart).toBe(3);
+    expect(input.selectionEnd).toBe(3);
+
+    await act(async () => {
       input.dispatchEvent(new Event("compositionend", { bubbles: true }));
       await flushCompilerUpdates();
     });
