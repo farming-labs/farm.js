@@ -161,6 +161,81 @@ const testSource = String.raw`
   assert.equal(staticContainer.querySelector('input[type="checkbox"]').checked, false);
   flushSync(() => staticRoot.unmount());
 
+  let conditionalExecutions = 0;
+  const ConditionalBlocks = createCompiledComponent({
+    displayName: "CompatibilityConditionalBlocks",
+    initialize: () => [false, 0],
+    render(_props, state, blocks) {
+      conditionalExecutions += 1;
+      return React.createElement(
+        "section",
+        null,
+        React.createElement(
+          "button",
+          { onClick: () => state[0].set((value) => !value) },
+          "Toggle branch",
+        ),
+        React.createElement(blocks.Conditional, {
+          id: 0,
+          render: () =>
+            state[0].get()
+              ? React.createElement(
+                  "strong",
+                  { "data-branch": "enabled" },
+                  "Enabled ",
+                  state[1].get(),
+                )
+              : React.createElement(
+                  "span",
+                  { "data-branch": "disabled" },
+                  "Disabled ",
+                  state[1].get(),
+                ),
+        }),
+        React.createElement("output", null, state[1].get()),
+        React.createElement(
+          "button",
+          { onClick: () => state[1].set((value) => Number(value) + 1) },
+          "Increment",
+        ),
+      );
+    },
+    bindings: [
+      { kind: "block", id: 0, dependencies: [0, 1] },
+      {
+        kind: "text",
+        path: [1],
+        dependencies: [1],
+        read: (_props, state) => state[1].get(),
+      },
+    ],
+  });
+
+  const conditionalContainer = document.createElement("div");
+  document.body.append(conditionalContainer);
+  const conditionalRoot = createRoot(conditionalContainer);
+  flushSync(() => conditionalRoot.render(React.createElement(ConditionalBlocks)));
+  const initialConditionalExecutions = conditionalExecutions;
+  conditionalContainer.querySelectorAll("button")[0].click();
+  await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync(() => {});
+  assert.equal(
+    conditionalContainer.querySelector("[data-branch='enabled']").textContent,
+    "Enabled 0",
+  );
+  conditionalContainer.querySelectorAll("button")[1].click();
+  await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync(() => {});
+  assert.equal(
+    conditionalContainer.querySelector("[data-branch='enabled']").textContent,
+    "Enabled 1",
+  );
+  assert.equal(conditionalContainer.querySelector("output").textContent, "1");
+  assert.equal(conditionalExecutions, initialConditionalExecutions);
+  flushSync(() => conditionalRoot.unmount());
+
   const hydrationContainer = document.createElement("div");
   hydrationContainer.innerHTML = renderToString(React.createElement(Counter));
   document.body.append(hydrationContainer);

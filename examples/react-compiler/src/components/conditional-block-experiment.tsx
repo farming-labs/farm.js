@@ -1,0 +1,125 @@
+"use client";
+
+import { useState } from "react";
+
+let logicalBlockExecutions = 0;
+let ternaryBlockExecutions = 0;
+
+export function LogicalBlockPanel() {
+  const [loading, setLoading] = useState(false);
+  const [updates, setUpdates] = useState(0);
+
+  return (
+    <article className="edge-card" data-experiment="conditional-logical">
+      <header>
+        <span className="experiment-number">07A</span>
+        <div>
+          <h3>Mount or remove one block</h3>
+          <p>The build isolates an eligible logical branch at one known location.</p>
+        </div>
+      </header>
+      <div className="conditional-stage" aria-live="polite">
+        {loading && (
+          <p className="conditional-branch" data-branch="loading">
+            Loading branch · update {updates}
+          </p>
+        )}
+      </div>
+      <dl className="compact-metrics">
+        <div>
+          <dt>Mounted</dt>
+          <dd data-metric="mounted">{loading ? "yes" : "no"}</dd>
+        </div>
+        <div>
+          <dt>Branch value</dt>
+          <dd data-metric="updates">{updates}</dd>
+        </div>
+        <div>
+          <dt>Executions</dt>
+          <dd data-metric="executions">
+            {typeof window === "undefined" ? 1 : ++logicalBlockExecutions}
+          </dd>
+        </div>
+      </dl>
+      <div className="button-row">
+        <button data-action="toggle-logical" type="button" onClick={() => setLoading(!loading)}>
+          {loading ? "Remove branch" : "Mount branch"}
+        </button>
+        <button
+          data-action="increment-logical"
+          type="button"
+          onClick={() => setUpdates((value) => value + 1)}
+        >
+          Update branch value
+        </button>
+      </div>
+    </article>
+  );
+}
+
+export function TernaryBlockPanel() {
+  const [enabled, setEnabled] = useState(true);
+
+  return (
+    <article className="edge-card" data-experiment="conditional-ternary">
+      <header>
+        <span className="experiment-number">07B</span>
+        <div>
+          <h3>Replace one branch</h3>
+          <p>React swaps the prepared host branch without rerunning this component body.</p>
+        </div>
+      </header>
+      <div className="conditional-stage" aria-live="polite">
+        {enabled ? (
+          <strong className="conditional-branch" data-branch="enabled">
+            Enabled
+          </strong>
+        ) : (
+          <span className="conditional-branch conditional-branch--paused" data-branch="disabled">
+            Disabled
+          </span>
+        )}
+      </div>
+      <dl className="compact-metrics">
+        <div>
+          <dt>Branch</dt>
+          <dd data-metric="branch">{enabled ? "on" : "off"}</dd>
+        </div>
+        <div>
+          <dt>Owner</dt>
+          <dd>React</dd>
+        </div>
+        <div>
+          <dt>Executions</dt>
+          <dd data-metric="executions">
+            {typeof window === "undefined" ? 1 : ++ternaryBlockExecutions}
+          </dd>
+        </div>
+      </dl>
+      <button data-action="toggle-ternary" type="button" onClick={() => setEnabled(!enabled)}>
+        Replace branch
+      </button>
+    </article>
+  );
+}
+
+export function ConditionalBlockExperiment() {
+  "use no compiler";
+
+  return (
+    <section className="edge-lab" aria-labelledby="conditional-blocks-title">
+      <div className="section-heading">
+        <span>CONDITIONAL BLOCKS / PRODUCTION PROOF</span>
+        <h2 id="conditional-blocks-title">Change the branch, not the whole component.</h2>
+        <p>
+          Logical and ternary host branches get a small React-owned boundary. A local condition
+          refreshes that boundary while the surrounding compiled component stays still.
+        </p>
+      </div>
+      <div className="edge-grid edge-grid--paired">
+        <LogicalBlockPanel />
+        <TernaryBlockPanel />
+      </div>
+    </section>
+  );
+}

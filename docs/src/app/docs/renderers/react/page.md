@@ -331,10 +331,11 @@ satisfy all of these rules:
 | Body                | Top-level `useState` declarations, optional compiler-safe derived values and synchronous named handlers, then one unconditional JSX return. |
 | State               | `const [value, setValue] = useState(initial)`, including lazy initializers, multiple cells, and queued functional updates.                  |
 | Root                | Exactly one lowercase host JSX element such as `button`, `section`, `input`, or `div`.                                                      |
-| Tree                | A static tree containing host elements only. Nested host elements are supported when their placement cannot change.                         |
+| Tree                | A statically known host tree. Eligible logical and ternary blocks may change one compiler-isolated child location.                          |
 | Text bindings       | State-driven text in a leaf host element.                                                                                                   |
 | Attribute bindings  | Basic attributes, controlled form properties, and individual properties in one inline `style` object.                                       |
 | Events              | Inline handlers and synchronous `const` or function-declaration handlers, used directly or called inside an inline JSX handler.             |
+| Conditional blocks  | `condition && <host />` or `condition ? <host /> : <host />`; `null` and `false` are supported empty ternary branches.                      |
 
 This component is eligible:
 
@@ -398,12 +399,61 @@ state-dependent camelCase property or CSS custom property, so changing `opacity`
 an unrelated `width`. Style spreads, methods, computed names, and conditional whole objects remain
 on React because their final property set or precedence can change.
 
+### Conditional DOM blocks
+
+The compiler can isolate two common child structures when their position is known at build time:
+
+```tsx
+export function StatusPanel() {
+  const [loading, setLoading] = useState(false);
+  const [enabled, setEnabled] = useState(true);
+
+  return (
+    <section>
+      <button onClick={() => setLoading(!loading)}>Toggle loading</button>
+      {loading && <p>Loading…</p>}
+
+      <button onClick={() => setEnabled(!enabled)}>Toggle status</button>
+      {enabled ? <strong>Enabled</strong> : <span>Disabled</span>}
+    </section>
+  );
+}
+```
+
+At build time, Farm records the state cells used by each condition and replaces that child
+expression with a small internal block boundary. When one of those cells changes, the outer user
+component does not execute again. Only the matching boundary asks React to mount, replace, remove,
+or update its selected host branch. Other compiler bindings continue to patch their prepared DOM
+targets directly.
+
+This is intentionally block-local React reconciliation, not manual DOM insertion. Keeping React at
+the boundary preserves delegated events, host property behavior, unmounting, error boundaries,
+Strict Mode, SSR, and hydration. The inactive branch is described by generated code but is not
+pre-mounted or cached in the DOM.
+
+The initial safety limits are:
+
+- Every non-empty branch has exactly one lowercase host root such as `p`, `strong`, `span`, or
+  `div`.
+- Descendants keep a static host-only tree. Stateful text, attributes, inline style properties, and
+  event handlers inside that tree are allowed and update when the block refreshes.
+- A ternary may use `null` or `false` for an empty branch.
+- The conditional must be a JSX child at one statically known location, and its test must use the
+  same deterministic expression subset as other compiler bindings.
+- Custom components, hooks, fragments, nested conditional blocks, lists, refs,
+  `dangerouslySetInnerHTML`, and attribute spreads inside a branch fall back to the original React
+  component.
+
+The optimization boundary matters: the surrounding compiled component and its unrelated siblings
+do not rerender, but React still renders and commits the small conditional boundary. A branch with
+substantial work therefore still pays for that branch work.
+
 ### What falls back to React
 
 | Unsupported shape                                                      | Why React keeps ownership                                                           |
 | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
 | Keyed lists, `.map()`, element arrays, or helper-rendered children     | Inserts, removals, moves, and identity changes require reconciliation.              |
-| Conditional JSX children or fragments                                  | The prepared DOM path can change when structure appears or disappears.              |
+| Fragments or unsupported/nested conditional JSX                        | Their structure is outside the current single-location host-block contract.         |
 | Custom child components                                                | A child component has its own props, hooks, lifecycle, and reconciliation boundary. |
 | Effects or hooks other than the supported `useState` shape             | Their lifecycle and ordering must remain under React's hook dispatcher.             |
 | `ref` or `dangerouslySetInnerHTML`                                     | They directly participate in DOM ownership.                                         |
@@ -462,6 +512,7 @@ follows:
 | JSX event registration and dispatch            | Comparing flushed values with `Object.is`                       |
 | Parent-driven prop updates                     | Selecting bindings whose state dependencies changed             |
 | Unsupported trees, hooks, refs, and lifecycles | Patching precomputed text/attribute targets after local updates |
+| Host creation/removal inside an eligible block | Refreshing only the matching internal conditional boundary      |
 | Unmounting and the surrounding component tree  | Reapplying bindings after a parent-driven React update          |
 
 Queued functional setters preserve the event's state snapshot. Two calls such as
