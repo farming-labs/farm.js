@@ -158,7 +158,11 @@ async function resolveFarmDeployContext(options: DeployFarmOptions) {
   // steps would otherwise resolve different directories.
   const configuredPreset = userConfig?.deploy?.preset || userConfig?.preset;
   const configuredPresetTarget = getDeployTargetForPreset(configuredPreset);
-  const presetMatchesPlatform = Boolean(configuredPreset) && configuredPresetTarget === platform;
+  const configuredTarget = normalizeDeployTarget(userConfig?.deploy?.target);
+  const presetMatchesPlatform =
+    Boolean(configuredPreset) &&
+    (configuredPresetTarget === platform ||
+      (!configuredPresetTarget && configuredTarget === platform));
   if (cliTarget && configuredPreset && !presetMatchesPlatform) {
     logger.warn(
       `Configured preset "${configuredPreset}" targets ${configuredPresetTarget || "an unknown platform"}; using the "${getPresetForDeployTarget(platform)}" preset because --${cliTarget} was passed.`,

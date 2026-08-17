@@ -230,3 +230,24 @@ test("keeps a configured preset that already builds for the flagged platform", a
     if (root) await rm(root, { recursive: true, force: true });
   }
 });
+
+test("keeps a custom preset when its configured target matches the flag", async () => {
+  let root;
+
+  try {
+    root = await mkdtemp(path.join(tmpdir(), "farm-cli-deploy-custom-preset-"));
+    await writeFile(
+      path.join(root, "farm.config.mjs"),
+      "export default { deploy: { target: 'vercel', preset: 'custom-vercel' } };\n",
+    );
+
+    const plan = await createFarmDeployPlan({ root, vercel: true });
+
+    assert.equal(plan.target, "vercel");
+    assert.equal(plan.preset, "custom-vercel");
+    assert.equal(plan.outputDir, path.join(root, ".vercel", "output"));
+    assert.equal(plan.build.command, "farm build --preset custom-vercel");
+  } finally {
+    if (root) await rm(root, { recursive: true, force: true });
+  }
+});
