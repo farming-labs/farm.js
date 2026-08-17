@@ -264,9 +264,59 @@ console.log(demo, farmFontPreloadHeader);`,
         .map((output) => String(output.source))
         .join("\n");
 
-      expect(css).toContain('url("/docs/fonts/public.woff2")');
-      expect(entry?.code).toContain("%3C%2Fdocs%2Ffonts%2Fpublic.woff2%3E");
+      expect(css).toContain('url("/fonts/public.woff2")');
+      expect(css).not.toContain("/docs/fonts/");
+      expect(entry?.code).toContain("%3C%2Ffonts%2Fpublic.woff2%3E");
       expect(assets.some((output) => output.fileName.startsWith("assets/fonts/"))).toBe(false);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("mints root-relative production font URLs when basePath is set", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-font-base-path-"));
+    try {
+      await fs.writeFile(path.join(root, "demo.woff2"), Buffer.from("base-path-font"));
+      await fs.writeFile(
+        path.join(root, "entry.ts"),
+        `import { localFont } from "@farm.js/core/font";
+import { farmFontPreloadHeader } from "virtual:farm-font-runtime";
+export const demo = localFont({ src: "./demo.woff2", family: "Base Path Demo" });
+console.log(demo, farmFontPreloadHeader);`,
+      );
+
+      const result = await build({
+        root,
+        configFile: false,
+        logLevel: "silent",
+        plugins: [fontRuntimeStub(), farmPlugin({ root, basePath: "/docs" })],
+        build: {
+          write: false,
+          assetsInlineLimit: 0,
+          rollupOptions: {
+            input: path.join(root, "entry.ts"),
+            output: { entryFileNames: "entry.js" },
+          },
+        },
+      });
+      if (Array.isArray(result)) throw new Error("Expected one Vite build output");
+      const entry = result.output.find(
+        (output): output is Rollup.OutputChunk => output.type === "chunk" && output.isEntry,
+      );
+      const css = result.output
+        .filter((output): output is Rollup.OutputAsset => output.type === "asset")
+        .filter((output) => output.fileName.endsWith(".css"))
+        .map((output) => String(output.source))
+        .join("\n");
+
+      // The hashed asset is emitted at assets/fonts/... in the client output,
+      // which production serves at the root — the CSS src, runtime preload
+      // metadata, and encoded Link header must not carry basePath.
+      expect(css).toMatch(/url\("\/assets\/fonts\/demo-h[a-f0-9]{12}\.woff2"\)/);
+      expect(css).not.toContain("/docs/assets/fonts/");
+      expect(entry?.code).toMatch(/preloads:\s*\[\{\s*href:\s*["']\/assets\/fonts\/demo-/);
+      expect(entry?.code).toContain("%3C%2Fassets%2Ffonts%2Fdemo-");
+      expect(entry?.code).not.toContain("%2Fdocs%2Fassets");
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
