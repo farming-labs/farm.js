@@ -128,6 +128,70 @@ describe("RouteManager", () => {
       );
       expect(routeManager.matchRoute("/contact").route?.pattern).toBe("/[slug]");
     });
+
+    it("prefers an exact page over an optional catch-all matching its empty case", async () => {
+      const { globFiles } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) {
+          return [
+            "page.tsx",
+            "[[...slug]]/page.tsx",
+            "shop/page.tsx",
+            "shop/[id]/page.tsx",
+            "shop/[[...filters]]/page.tsx",
+          ];
+        }
+        return [];
+      });
+      await routeManager.discoverRoutes();
+
+      expect(routeManager.matchRoute("/").route?.pattern).toBe("/");
+      expect(routeManager.matchRoute("/shop").route?.pattern).toBe("/shop");
+      expect(routeManager.matchRoute("/shop").params).toEqual({});
+      expect(routeManager.matchRoute("/shop/42").route?.pattern).toBe("/shop/[id]");
+      expect(routeManager.matchRoute("/shop/sale/red")).toMatchObject({
+        route: { pattern: "/shop/[[...filters]]" },
+        params: { filters: "sale/red" },
+      });
+      expect(routeManager.matchRoute("/blog/a/b")).toMatchObject({
+        route: { pattern: "/[[...slug]]" },
+        params: { slug: "blog/a/b" },
+      });
+    });
+
+    it("prefers an exact dynamic parent over its optional catch-all's empty case", async () => {
+      const { globFiles } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) {
+          return ["[category]/page.tsx", "[category]/[[...rest]]/page.tsx"];
+        }
+        return [];
+      });
+      await routeManager.discoverRoutes();
+
+      expect(routeManager.matchRoute("/shoes")).toMatchObject({
+        route: { pattern: "/[category]" },
+        params: { category: "shoes" },
+      });
+      expect(routeManager.matchRoute("/shoes/red")).toMatchObject({
+        route: { pattern: "/[category]/[[...rest]]" },
+        params: { category: "shoes", rest: "red" },
+      });
+    });
+
+    it("ranks required catch-alls above optional catch-alls", async () => {
+      const { globFiles } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) {
+          return ["blog/[...slug]/page.tsx", "blog/[[...archive]]/page.tsx"];
+        }
+        return [];
+      });
+      await routeManager.discoverRoutes();
+
+      expect(routeManager.matchRoute("/blog/2024/01").route?.pattern).toBe("/blog/[...slug]");
+      expect(routeManager.matchRoute("/blog").route?.pattern).toBe("/blog/[[...archive]]");
+    });
   });
 
   describe("discoverRoutes", () => {

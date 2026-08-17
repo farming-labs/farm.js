@@ -4932,7 +4932,8 @@ function matchesRoutePrefix(pathname, pattern) {
 function routeSlotSpecificity(slot) {
   return slot.pattern.split("/").reduce(function(score, segment) {
     if (!segment) return score;
-    if (segment.startsWith("[[...")) return score + 1;
+    // Optional catch-alls rank below their parent path (mirrors routeSpecificity).
+    if (segment.startsWith("[[...")) return score - 1;
     if (segment.startsWith("[...")) return score + 2;
     if (segment.startsWith("[")) return score + 3;
     return score + 10;
