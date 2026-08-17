@@ -11,6 +11,11 @@ import type {
 } from "../types";
 import type { MatchedRouteSlot, RouteManager } from "../routing/route-manager";
 import { logger, toRootRelativeUrlPath } from "../utils";
+import {
+  composeFarmFullDocument,
+  extractFarmFullDocument,
+  opensFarmFullDocument,
+} from "./full-document";
 import { getClientModuleMetadata } from "../utils/client-component";
 import { Writable } from "stream";
 import {
@@ -135,6 +140,26 @@ function warnSuppressedAsyncHydrationOnce(modulePath: string): void {
       `server-rendered and its client imports are not interactive. Move the ` +
       `interactive UI into a "use client" child rendered by a synchronous page, ` +
       `or enable experimental server components support.`,
+  );
+}
+
+// Routes whose layout was observed to render a full `<html>` document. The
+// streaming path can't rewrite a document after its shell is flushed, so once a
+// route is seen to be full-document it is served through the buffered path
+// (which composes the document correctly) on every subsequent request.
+const fullDocumentRoutes = new Set<string>();
+
+let warnedFullDocumentLayout = false;
+
+function warnFarmFullDocumentLayout(): void {
+  if (warnedFullDocumentLayout) return;
+  warnedFullDocumentLayout = true;
+  logger.warn(
+    `A root layout returned a full <html> document. Farm.js owns the document ` +
+      `shell, so a layout should return a fragment (its children) — like the docs ` +
+      `example — and let the framework provide <html>/<head>/<body>. The document ` +
+      `has been composed into the response, but returning a fragment avoids the ` +
+      `ambiguity and keeps dev and production identical.`,
   );
 }
 
@@ -1982,10 +2007,38 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
         this.config.basePath,
         getFarmTheme(),
       );
-      const html = `<!DOCTYPE html>
+
+      // A layout that returns its own full `<html>` document is composed as the
+      // document (Farm assets merged in) rather than nested inside the shell,
+      // matching the production build and avoiding invalid nested documents.
+      const fullDocument = extractFarmFullDocument(content);
+      let html: string;
+      if (fullDocument) {
+        warnFarmFullDocumentLayout();
+        html = composeFarmFullDocument(fullDocument, {
+          htmlAttributes: `${i18nSnapshot ? ` dir="${i18nSnapshot.direction}"` : ""}${themeDocument.attributes}`,
+          headAssets: [
+            themeDocument.head,
+            `<meta name="farm-deployment-id" content="${escapeHtmlAttribute(deploymentId)}">`,
+            metaTags,
+            alternateTags,
+            renderFarmFontDevHead(this.config.root || process.cwd()),
+            `<link rel="stylesheet" href="/src/app/globals.css">`,
+            `<script type="module" src="/@vite/client"></script>`,
+            rendererHydrationScript,
+            bootstrapScript,
+          ]
+            .filter(Boolean)
+            .join("\n  "),
+          bodyFooter: [deferredScript, `<script type="module" src="/@farm/client.js"></script>`]
+            .filter(Boolean)
+            .join("\n  "),
+        });
+      } else {
+        html = `<!DOCTYPE html>
 <html lang="${escapeHtmlAttribute(i18nSnapshot?.locale || "en")}"${
-        i18nSnapshot ? ` dir="${i18nSnapshot.direction}"` : ""
-      }${themeDocument.attributes}>
+          i18nSnapshot ? ` dir="${i18nSnapshot.direction}"` : ""
+        }${themeDocument.attributes}>
 <head>
   ${themeDocument.head}
   <meta charset="utf-8">
@@ -2005,6 +2058,7 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
   <script type="module" src="/@farm/client.js"></script>
 </body>
 </html>`;
+      }
 
       emitFarmEvent({
         type: "render.stream.shellReady",
@@ -2042,7 +2096,12 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
     } = {},
   ): Promise<void> {
     const renderToPipeableStream = this.rendererRuntime.renderToPipeableStream;
-    if (!renderToPipeableStream) {
+    const fullDocumentRouteKey =
+      options.observabilityRoute || (req as any).__FARM_ROUTE__ || req.url || "/";
+    // A full-document layout can't be composed once the stream's shell is
+    // flushed, so a route previously seen to render one is served through the
+    // buffered path, which produces a valid single document.
+    if (!renderToPipeableStream || fullDocumentRoutes.has(fullDocumentRouteKey)) {
       return this.renderBufferedSSR(element, req, res, clearMiddlewareData, options);
     }
 
@@ -2225,6 +2284,7 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
           staticShellParts?.push(shell);
 
           let firstChunk = true;
+          let checkedFullDocument = false;
           const writableStream = new Writable({
             write(chunk, encoding, callback) {
               if (firstChunk && process.env.FARM_VERBOSE) {
@@ -2232,6 +2292,16 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
                 firstChunk = false;
               }
               const chunkText = Buffer.isBuffer(chunk) ? chunk.toString() : String(chunk);
+              // The shell was already flushed, so this response still nests the
+              // document; record the route so later requests take the buffered
+              // path (which composes it correctly) and warn the developer once.
+              if (!checkedFullDocument) {
+                checkedFullDocument = true;
+                if (opensFarmFullDocument(chunkText)) {
+                  fullDocumentRoutes.add(fullDocumentRouteKey);
+                  warnFarmFullDocumentLayout();
+                }
+              }
               htmlParts.push(chunkText);
 
               if (staticShellParts && !staticShellClosed) {
@@ -2480,6 +2550,31 @@ ${i18nSnapshot ? `window.__FARM_I18N__ = ${serializeInlineValue(i18nSnapshot)};`
       getFarmTheme(),
     );
     const rendererHydrationScript = this.rendererRuntime.generateHydrationScript?.() || "";
+
+    // A layout that returns its own full `<html>` document must not be nested
+    // inside this shell (that yields invalid nested `<html>`/`<head>`/`<body>`).
+    // Compose Farm's managed assets into the layout's document instead, matching
+    // the production build's `hasFullDocument` path.
+    const fullDocument = extractFarmFullDocument(content);
+    if (fullDocument) {
+      warnFarmFullDocumentLayout();
+      return composeFarmFullDocument(fullDocument, {
+        htmlAttributes: `${i18nSnapshot ? ` dir="${i18nSnapshot.direction}"` : ""}${themeDocument.attributes}`,
+        headAssets: [
+          themeDocument.head,
+          `<meta name="farm-deployment-id" content="${escapeHtmlAttribute(this.getDeploymentId())}">`,
+          alternateLinks,
+          fontHead,
+          `<link rel="stylesheet" href="/src/app/globals.css" />`,
+          `<script type="module" src="/@vite/client"></script>`,
+          rendererHydrationScript,
+          integrationManifestScript,
+        ]
+          .filter(Boolean)
+          .join("\n  "),
+        bodyFooter: clientScript.trim(),
+      });
+    }
 
     return `<!DOCTYPE html>
 <html lang="${escapeHtmlAttribute(i18nSnapshot?.locale || "en")}"${
