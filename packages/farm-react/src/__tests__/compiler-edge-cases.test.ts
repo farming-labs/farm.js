@@ -148,7 +148,7 @@ describe("React AOT compiler safety boundaries", () => {
     {
       name: "an impure derived call",
       body: `
-        const label = String(count);
+        const label = formatCount(count);
         return <button onClick={() => setCount(count + 1)}>{label}</button>;
       `,
       reason: /derived local label cannot use function calls/i,
@@ -233,12 +233,6 @@ describe("React AOT compiler safety boundaries", () => {
       reason: /event handler increment must be synchronous/i,
     },
     {
-      name: "an indirectly invoked handler",
-      declaration: "const increment = () => setCount(count + 1);",
-      event: "() => increment()",
-      reason: /must be passed directly to a JSX event/i,
-    },
-    {
       name: "a handler exposed as a child",
       declaration: "const increment = () => setCount(count + 1);",
       event: "increment",
@@ -305,15 +299,15 @@ describe("React AOT compiler safety boundaries", () => {
 
   it.each([
     {
-      name: "stateful style",
+      name: "a stateful style spread",
       source: `
         import { useState } from "react";
-        export function Styled() {
+        export function Styled(props) {
           const [wide, setWide] = useState(false);
-          return <div style={{ width: wide ? 100 : 50 }} onClick={() => setWide(!wide)}>Box</div>;
+          return <div style={{ ...props.style, width: wide ? 100 : 50 }} onClick={() => setWide(!wide)}>Box</div>;
         }
       `,
-      reason: /stateful style/i,
+      reason: /stateful style bindings do not support spreads/i,
     },
     {
       name: "ref ownership",

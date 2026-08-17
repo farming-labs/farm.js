@@ -26,8 +26,11 @@ const testSource = String.raw`
   globalThis.Element = dom.window.Element;
   globalThis.HTMLElement = dom.window.HTMLElement;
   globalThis.HTMLInputElement = dom.window.HTMLInputElement;
+  globalThis.HTMLTextAreaElement = dom.window.HTMLTextAreaElement;
+  globalThis.HTMLSelectElement = dom.window.HTMLSelectElement;
   globalThis.HTMLOptionElement = dom.window.HTMLOptionElement;
   globalThis.HTMLButtonElement = dom.window.HTMLButtonElement;
+  globalThis.SVGElement = dom.window.SVGElement;
   globalThis.Node = dom.window.Node;
   globalThis.Event = dom.window.Event;
   globalThis.MouseEvent = dom.window.MouseEvent;
@@ -68,6 +71,95 @@ const testSource = String.raw`
   await Promise.resolve();
   assert.equal(container.textContent, "Count: 1");
   flushSync(() => root.unmount());
+
+  const StaticBindings = createCompiledComponent({
+    displayName: "CompatibilityStaticBindings",
+    initialize: () => [8, "draft", "safe", true],
+    render(_props, state) {
+      return React.createElement(
+        "div",
+        null,
+        React.createElement(
+          "button",
+          {
+            onClick: () => {
+              state[0].set(24);
+              state[1].set("compiled");
+              state[2].set("fast");
+              state[3].set(false);
+            },
+          },
+          "Update bindings",
+        ),
+        React.createElement("div", { "data-bar": true, style: { width: 8 } }),
+        React.createElement("textarea", {
+          "aria-label": "Note",
+          onChange: () => {},
+          value: state[1].get(),
+        }),
+        React.createElement(
+          "select",
+          { "aria-label": "Mode", onChange: () => {}, value: state[2].get() },
+          React.createElement("option", { value: "safe" }, "Safe"),
+          React.createElement("option", { value: "fast" }, "Fast"),
+        ),
+        React.createElement("input", {
+          "aria-label": "Enabled",
+          checked: state[3].get(),
+          readOnly: true,
+          type: "checkbox",
+        }),
+      );
+    },
+    bindings: [
+      {
+        kind: "style",
+        path: [1],
+        dependencies: [0],
+        name: "width",
+        read: (_props, state) => state[0].get(),
+      },
+      {
+        kind: "attribute",
+        path: [2],
+        dependencies: [1],
+        name: "value",
+        read: (_props, state) => state[1].get(),
+      },
+      {
+        kind: "attribute",
+        path: [3],
+        dependencies: [2],
+        name: "value",
+        read: (_props, state) => state[2].get(),
+      },
+      {
+        kind: "attribute",
+        path: [4],
+        dependencies: [3],
+        name: "checked",
+        read: (_props, state) => state[3].get(),
+      },
+    ],
+  });
+
+  const staticContainer = document.createElement("div");
+  document.body.append(staticContainer);
+  const staticRoot = createRoot(staticContainer);
+  flushSync(() => staticRoot.render(React.createElement(StaticBindings)));
+  const textarea = staticContainer.querySelector("textarea");
+  textarea.focus();
+  textarea.setSelectionRange(1, 3);
+  staticContainer.querySelector("button").click();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(staticContainer.querySelector("[data-bar]").style.width, "24px");
+  assert.equal(textarea.value, "compiled");
+  assert.equal(textarea.selectionStart, 1);
+  assert.equal(textarea.selectionEnd, 3);
+  assert.equal(staticContainer.querySelector("select").value, "fast");
+  assert.equal(staticContainer.querySelector('input[type="checkbox"]').checked, false);
+  flushSync(() => staticRoot.unmount());
 
   const hydrationContainer = document.createElement("div");
   hydrationContainer.innerHTML = renderToString(React.createElement(Counter));

@@ -323,18 +323,18 @@ policy.
 The current compiler deliberately supports a smaller subset than general React. A component must
 satisfy all of these rules:
 
-| Area                | Current supported shape                                                                                                                             |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Component discovery | A top-level, capitalized function declaration, function expression, or arrow component in application `.tsx` or `.jsx`.                             |
-| Function shape      | Synchronous, non-generator, non-generic block body with zero parameters, one props identifier, or flat object props destructuring.                  |
-| Props               | Flat object destructuring supports shorthand names, aliases, and defaults. Nested, computed, and rest patterns fall back.                           |
-| Body                | Top-level `useState` declarations, optional compiler-safe derived values and synchronous named handlers, then one unconditional JSX return.         |
-| State               | `const [value, setValue] = useState(initial)`, including lazy initializers, multiple cells, and queued functional updates.                          |
-| Root                | Exactly one lowercase host JSX element such as `button`, `section`, `input`, or `div`.                                                              |
-| Tree                | A static tree containing host elements only. Nested host elements are supported when their placement cannot change.                                 |
-| Text bindings       | State-driven text in a leaf host element.                                                                                                           |
-| Attribute bindings  | State-driven basic attributes and properties, including `className`, `htmlFor`, `data-*`, `aria-*`, `value`, `checked`, `selected`, and `disabled`. |
-| Events              | React-owned inline handlers or synchronous `const` handlers passed directly to an event, such as `onClick={increment}`.                             |
+| Area                | Current supported shape                                                                                                                     |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Component discovery | A top-level, capitalized function declaration, function expression, or arrow component in application `.tsx` or `.jsx`.                     |
+| Function shape      | Synchronous, non-generator, non-generic block body with zero parameters, one props identifier, or flat object props destructuring.          |
+| Props               | Flat object destructuring supports shorthand names, aliases, and defaults. Nested, computed, and rest patterns fall back.                   |
+| Body                | Top-level `useState` declarations, optional compiler-safe derived values and synchronous named handlers, then one unconditional JSX return. |
+| State               | `const [value, setValue] = useState(initial)`, including lazy initializers, multiple cells, and queued functional updates.                  |
+| Root                | Exactly one lowercase host JSX element such as `button`, `section`, `input`, or `div`.                                                      |
+| Tree                | A static tree containing host elements only. Nested host elements are supported when their placement cannot change.                         |
+| Text bindings       | State-driven text in a leaf host element.                                                                                                   |
+| Attribute bindings  | Basic attributes, controlled form properties, and individual properties in one inline `style` object.                                       |
+| Events              | Inline handlers and synchronous `const` or function-declaration handlers, used directly or called inside an inline JSX handler.             |
 
 This component is eligible:
 
@@ -351,15 +351,23 @@ interface StatusButtonProps {
 export function StatusButton({ initial = 0, label: title }: StatusButtonProps) {
   const [count, setCount] = useState(initial);
   const [active, setActive] = useState(false);
+  const visibleCount = Math.max(0, count);
   const statusClass = active ? "active" : "idle";
-  const visibleLabel = `${title}: ${count}`;
-  const update = () => {
+  const visibleLabel = `${title}: ${String(visibleCount)}`;
+
+  function update() {
     setCount((value) => value + 1);
     setActive((value) => !value);
-  };
+  }
 
   return (
-    <button aria-pressed={active} className={statusClass} data-count={count} onClick={update}>
+    <button
+      aria-pressed={active}
+      className={statusClass}
+      data-count={visibleCount}
+      onClick={() => update()}
+      style={{ opacity: active ? 1 : 0.6 }}
+    >
       {visibleLabel}
     </button>
   );
@@ -370,17 +378,25 @@ The compiler records separate dependencies for `count` and `active`. Changing `c
 reevaluate bindings that depend only on `active`, and vice versa.
 
 Derived values are expanded into the generated bindings, so they do not create a runtime scope or
-force a component rerender. They may use literals, props, state, operators, member access,
-conditionals, templates, and earlier derived values. State declarations must come first. Calls,
-assignments, object or array literals, functions, JSX, constructors, and other expressions whose
-evaluation or identity cannot be preserved safely still fall back to React.
+force a component rerender. They may use literals, props, state, operators, optional/member access,
+conditionals, templates, earlier derived values, and a small call whitelist. The whitelist contains
+`Boolean`, `Number`, `String`, and `Math.abs`, `ceil`, `floor`, `max`, `min`, `round`, `sign`, and
+`trunc`. A name is not treated as built-in when the component shadows it. Application helpers,
+prototype methods, `Math.random`, optional calls, assignments, identity-bearing object or array
+literals, functions, JSX, constructors, and other unproven expressions still fall back to React.
 
 For destructured props, the original component wrapper still performs JavaScript destructuring on
 every parent render. Defaults therefore apply only to `undefined`, aliases keep their normal local
-names, and the resolved values are passed to the compiled definition. A named handler is expanded
-at build time only when it is synchronous and passed directly to a JSX event. Its state reads and
-setters then use the same compiler cells as an equivalent inline handler. Indirect calls such as
-`onClick={() => increment()}` stay on React until the compiler can prove their closure semantics.
+names, and the resolved values are passed to the compiled definition. A named handler can be a
+synchronous `const` function or function declaration. It is expanded when passed directly to a JSX
+event or called from that event's inline function, including arguments such as
+`onClick={() => select(productId)}`. Calling it while producing the event prop, exposing it as a
+child, using it outside an event, or making it async/generic still falls back to React.
+
+Stateful styles use one inline object literal. The compiler creates a separate binding for each
+state-dependent camelCase property or CSS custom property, so changing `opacity` does not rewrite
+an unrelated `width`. Style spreads, methods, computed names, and conditional whole objects remain
+on React because their final property set or precedence can change.
 
 ### What falls back to React
 
@@ -391,12 +407,13 @@ setters then use the same compiler cells as an equivalent inline handler. Indire
 | Custom child components                                                | A child component has its own props, hooks, lifecycle, and reconciliation boundary. |
 | Effects or hooks other than the supported `useState` shape             | Their lifecycle and ordering must remain under React's hook dispatcher.             |
 | `ref` or `dangerouslySetInnerHTML`                                     | They directly participate in DOM ownership.                                         |
-| Stateful `style`, `children`, or `key` bindings                        | These need specialized property, structure, or identity semantics.                  |
+| Stateful `children` or `key` bindings                                  | These need structure or identity semantics.                                         |
+| Conditional style objects, style spreads, methods, or computed names   | The final property set or precedence cannot be prepared statically.                 |
 | JSX attribute spreads or namespaced attributes                         | The compiler cannot currently enumerate a stable binding contract.                  |
 | Multiple/conditional returns or impure/control-flow statements         | The compiler only lowers a single, statically analyzable render path.               |
 | Derived calls, assignments, identity-bearing values, functions, or JSX | Their evaluation timing, side effects, or identity cannot yet be preserved safely.  |
 | Nested, computed, or rest props destructuring                          | These patterns need additional parameter-shape and identity analysis.               |
-| Async/generator handlers or indirect named-handler calls               | Their scheduling and closure semantics are outside the current lowering.            |
+| Async/generator/generic handlers or named handlers outside JSX events  | Their scheduling, identity, or closure semantics are outside the current lowering.  |
 | Async/generator or generic components                                  | These function shapes are outside the current lowering.                             |
 | Setters called outside JSX event handlers                              | The compiler only controls and batches event-driven local updates.                  |
 
@@ -455,9 +472,17 @@ previous value, no binding is patched.
 Attribute updates preserve important DOM behavior:
 
 - `className` and `htmlFor` map to `class` and `for`;
-- input `value` and `checked`, option `selected`, and element `disabled` use DOM properties;
+- input and textarea `value`, select values, input `checked`, option `selected`, and element
+  `disabled` use DOM properties;
+- controlled single and multiple selects update their selected options;
+- style bindings patch one property, add `px` where React expects it, preserve unitless numbers and
+  CSS custom properties, and clear nullish values;
 - `data-*` and `aria-*` booleans are stringified; and
 - nullish values and ordinary false boolean attributes are removed.
+
+Focused input and textarea updates capture and restore the current selection around the compiler
+microtask. Composition events remain React-owned, so IME input keeps its normal event ordering while
+the resulting value, selection, and dependent bindings are patched together.
 
 The server output is ordinary React HTML and contains no compiler marker. React hydrates that
 markup normally; direct binding updates begin after the component mounts.
@@ -491,6 +516,8 @@ The package and example test suites verify more than generated code:
 - server-rendered markup hydrates and remains interactive;
 - lazy initialization, event snapshots, and batched functional setters are preserved;
 - multiple state cells update only their dependent bindings;
+- whitelisted calculations, per-property styles, handler wrappers, textarea/select/checkbox
+  properties, and multiple-select values update without rerunning the component;
 - Strict Mode mounting, queued-unmount cleanup, bubbled events, controlled input selection, and
   composition events preserve their React behavior;
 - simultaneous parent-prop and compiled-local updates remain coherent;
@@ -524,8 +551,9 @@ property.
    remain eligible.
 
 The [`examples/react-compiler`](https://github.com/farming-labs/farm.js/tree/main/examples/react-compiler)
-app contains the advanced batching, multiple-binding, keyed-fallback, compiler-on/off, and heavy
-interaction experiments. The standalone starter intentionally keeps the first experience focused.
+app contains batching, multiple-binding, common-syntax, calculated-style, controlled-form,
+keyed-fallback, compiler-on/off, and heavy-interaction experiments. The standalone starter
+intentionally keeps the first experience focused.
 
 ## React-specific FARMJS APIs
 

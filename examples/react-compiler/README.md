@@ -32,6 +32,8 @@ for console/runtime errors, saves `/tmp/farm-react-aot-edge-lab.png`, and prints
 | Two direct updates         | state `2`, update executions `0`                        | state `2`, update executions `2`               | Eligible updates skip post-mount component executions.                 |
 | Batched functional updates | count `2`, snapshot `0`, update executions `0`          | count `2`, snapshot `0`, update executions `1` | The compiler preserves queued updater and event snapshot behavior.     |
 | Two state cells            | text/class/data/input all update, update executions `0` | —                                              | AOT dependency lists update only bindings affected by each state cell. |
+| Calculated style bindings  | value `6`, progress `50%`, update executions `0`        | —                                              | Safe calls and individual CSS properties use prepared dependencies.    |
+| Controlled form bindings  | textarea/select/checkbox update, executions `0`         | —                                              | Form properties and textarea selection stay coherent.                  |
 | Keyed list                 | intentionally not compiled                              | 3 correct keyed rows, update executions `2`    | Dynamic child structure safely falls back to React reconciliation.     |
 
 The package runtime test also measures one equivalent update under a React `Profiler`:
