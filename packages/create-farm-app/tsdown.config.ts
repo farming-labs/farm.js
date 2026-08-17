@@ -19,6 +19,7 @@ export default defineConfig({
       packageDirectory,
       "../farm-cli/src/add-integration.ts",
     ),
+    "@farm.js/cli/telemetry": path.resolve(packageDirectory, "../farm-cli/src/telemetry.ts"),
   },
   noExternal: [/^@farm\.js\/cli(?:\/.*)?$/],
   splitting: false,

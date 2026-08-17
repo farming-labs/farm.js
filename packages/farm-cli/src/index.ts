@@ -102,3 +102,20 @@ export {
   type FarmUpgradePlan,
   type FarmUpgradeResult,
 } from "./upgrade";
+export {
+  getFarmTelemetryConfigFile,
+  getFarmTelemetryStatus,
+  resolveFarmTelemetryCommand,
+  setFarmTelemetryEnabled,
+  showFarmTelemetryNotice,
+  trackFarmCommand,
+  trackFarmProjectCreated,
+  type FarmCommandTelemetryInput,
+  type FarmProjectCreatedTelemetryInput,
+  type FarmTelemetryCommand,
+  type FarmTelemetryDeployTarget,
+  type FarmTelemetryPackageManager,
+  type FarmTelemetryRenderer,
+  type FarmTelemetryStatus,
+  type FarmTelemetryTemplate,
+} from "./telemetry";

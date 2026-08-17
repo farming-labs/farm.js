@@ -7,6 +7,7 @@ import {
   type AddFarmIntegrationResult,
   type FarmIntegrationProvider,
 } from "@farm.js/cli/add-integration";
+import { showFarmTelemetryNotice, trackFarmProjectCreated } from "@farm.js/cli/telemetry";
 import { logger, showBanner } from "./utils";
 
 interface CreateAppOptions {
@@ -15,6 +16,7 @@ interface CreateAppOptions {
   typescript?: boolean;
   skipInstall?: boolean;
   listTemplates?: boolean;
+  telemetryPackageVersion?: string;
 }
 
 interface TemplateDetails {
@@ -203,6 +205,7 @@ export interface PackageManager {
 
 export async function createApp(projectName?: string, options: CreateAppOptions = {}) {
   showBanner();
+  await showFarmTelemetryNotice();
 
   const templates = await getAvailableTemplates();
   if (templates.length === 0) {
@@ -415,6 +418,15 @@ export async function createApp(projectName?: string, options: CreateAppOptions 
       logger.info(note);
     }
   }
+
+  await trackFarmProjectCreated({
+    packageVersion: options.telemetryPackageVersion ?? "unknown",
+    template,
+    renderer,
+    packageManager: packageManager.name,
+    typescript: useTypeScript,
+    installedDependencies: !options.skipInstall,
+  });
 }
 
 async function copyTemplate(

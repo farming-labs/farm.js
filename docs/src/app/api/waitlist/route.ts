@@ -1,38 +1,6 @@
 import { createEndpoint } from "@farm.js/core/api";
-import type { PrismaClient as PrismaClientType } from "@prisma/client";
 import { z } from "zod";
-
-const globalForPrisma = globalThis as unknown as {
-  prisma?: PrismaClientType;
-};
-
-type PrismaClientConstructor = new (options?: {
-  log?: Array<"query" | "info" | "warn" | "error">;
-}) => PrismaClientType;
-
-type PrismaModule = {
-  PrismaClient: PrismaClientConstructor;
-};
-
-const importRuntimeModule = new Function("specifier", "return import(specifier)") as (
-  specifier: string,
-) => Promise<PrismaModule>;
-
-async function getPrisma() {
-  if (!process.env.DATABASE_URL) {
-    throw new Error("DATABASE_URL is not configured");
-  }
-
-  if (!globalForPrisma.prisma) {
-    const { PrismaClient } = await importRuntimeModule("@prisma/client");
-
-    globalForPrisma.prisma = new PrismaClient({
-      log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
-    });
-  }
-
-  return globalForPrisma.prisma;
-}
+import { getPrisma } from "../../../lib/prisma";
 
 const waitlistSchema = z.object({
   email: z.string().trim().email().max(200),

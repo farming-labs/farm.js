@@ -19,7 +19,7 @@ program
   .option("--skip-install", "Skip installing dependencies")
   .action(async (projectName, options) => {
     try {
-      await createApp(projectName, options);
+      await createApp(projectName, { ...options, telemetryPackageVersion: version });
     } catch (error) {
       console.error("Failed to create app:", error);
       process.exit(1);

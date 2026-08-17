@@ -35,6 +35,44 @@ function collectOption(value, previous) {
   return [...(previous || []), value];
 }
 
+function telemetryCommandPath(command) {
+  const segments = [];
+  let current = command;
+  while (current && current !== program) {
+    segments.unshift(current.name());
+    current = current.parent;
+  }
+  return segments.join(":");
+}
+
+function telemetryDeployTarget(commandPath, options) {
+  if (commandPath !== "deploy") return undefined;
+  if (options.vercel) return "vercel";
+  if (options.cloudflare) return "cloudflare";
+  if (options.netlify) return "netlify";
+  if (options.custom) return "custom";
+  return undefined;
+}
+
+program.hook("preAction", async (_command, actionCommand) => {
+  const commandPath = telemetryCommandPath(actionCommand);
+  if (commandPath.startsWith("telemetry")) return;
+  const {
+    resolveFarmTelemetryCommand,
+    showFarmTelemetryNotice,
+    trackFarmCommand,
+  } = require("../dist/telemetry.js");
+  await showFarmTelemetryNotice();
+  const command = resolveFarmTelemetryCommand(commandPath);
+  if (!command) return;
+  const options = actionCommand.opts();
+  await trackFarmCommand({
+    command,
+    packageVersion: version,
+    deployTarget: telemetryDeployTarget(commandPath, options),
+  });
+});
+
 program
   .command("dev")
   .description("Start development server")
@@ -480,4 +518,49 @@ program
     }
   });
 
-program.parse();
+const telemetryCommand = program
+  .command("telemetry")
+  .description("Control anonymous Farm.js product telemetry");
+
+telemetryCommand
+  .command("status")
+  .description("Show the current telemetry setting")
+  .action(async () => {
+    const { getFarmTelemetryStatus } = require("../dist/telemetry.js");
+    const status = await getFarmTelemetryStatus();
+    console.log(`Anonymous telemetry: ${status.enabled ? "enabled" : "disabled"}`);
+    console.log(`Active for this command: ${status.active ? "yes" : "no"}`);
+    console.log(`Setting source: ${status.source}`);
+    if (status.reason) console.log(`Reason: ${status.reason}`);
+    console.log(`Local anonymous ID: ${status.anonymousId ? "created" : "not created"}`);
+    console.log(`Configuration: ${status.configFile}`);
+    console.log("Privacy details: https://farmjs.dev/docs/telemetry");
+  });
+
+telemetryCommand
+  .command("enable")
+  .description("Opt in to anonymous Farm.js product telemetry")
+  .action(async () => {
+    const { setFarmTelemetryEnabled } = require("../dist/telemetry.js");
+    const status = await setFarmTelemetryEnabled(true);
+    console.log("Anonymous Farm.js telemetry is enabled.");
+    if (!status.active && status.reason)
+      console.log(`It is inactive here because ${status.reason}.`);
+  });
+
+telemetryCommand
+  .command("disable")
+  .description("Opt out and delete the local anonymous installation ID")
+  .action(async () => {
+    const { setFarmTelemetryEnabled } = require("../dist/telemetry.js");
+    const status = await setFarmTelemetryEnabled(false);
+    console.log("Anonymous Farm.js telemetry is disabled and its local ID was deleted.");
+    if (status.enabled) {
+      console.log("An environment variable currently overrides the saved setting.");
+    }
+  });
+
+program.parseAsync().catch((error) => {
+  console.error("Farm CLI failed:", error);
+  process.exitCode = 1;
+});
