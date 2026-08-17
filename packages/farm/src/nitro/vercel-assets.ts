@@ -13,15 +13,17 @@ export interface FarmVercelImmutableAssetRoute {
  * excluded because they can change between deployments. The fingerprinted
  * client entry lives at the public root — its relative chunk imports pin it
  * there — so root-level farm-client-h files qualify alongside assets/chunks.
+ *
+ * Hashed client assets are emitted and served at the root even when a
+ * basePath is configured — the client build sets no Vite `base` and Nitro
+ * mounts the client output at "/" — so the route matches root paths
+ * unconditionally.
  */
-export function createFarmVercelImmutableAssetRoute(basePath = "/"): FarmVercelImmutableAssetRoute {
-  const normalizedBasePath = normalizeBasePath(basePath);
-  const escapedBasePath = escapeRegex(normalizedBasePath);
-  const prefix = escapedBasePath ? `/${escapedBasePath}` : "";
+export function createFarmVercelImmutableAssetRoute(): FarmVercelImmutableAssetRoute {
   const fingerprint = "-h(?:[a-fA-F0-9]{8}|[a-fA-F0-9]{12}|[a-fA-F0-9]{16})";
 
   return {
-    src: `^${prefix}/(?:(?:assets|chunks)/(?:.+/)*[^/]+|farm-client)${fingerprint}\\.(?!(?:[hH][tT][mM][lL]?)$)[^/]+$`,
+    src: `^/(?:(?:assets|chunks)/(?:.+/)*[^/]+|farm-client)${fingerprint}\\.(?!(?:[hH][tT][mM][lL]?)$)[^/]+$`,
     headers: {
       "Cache-Control": FARM_IMMUTABLE_ASSET_CACHE_CONTROL,
     },
@@ -30,14 +32,6 @@ export function createFarmVercelImmutableAssetRoute(basePath = "/"): FarmVercelI
   };
 }
 
-export function isFarmVercelImmutableAssetPath(pathname: string, basePath = "/"): boolean {
-  return new RegExp(createFarmVercelImmutableAssetRoute(basePath).src).test(pathname);
-}
-
-function normalizeBasePath(basePath: string): string {
-  return basePath.trim().replace(/^\/+|\/+$/g, "");
-}
-
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+export function isFarmVercelImmutableAssetPath(pathname: string): boolean {
+  return new RegExp(createFarmVercelImmutableAssetRoute().src).test(pathname);
 }

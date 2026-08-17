@@ -63,9 +63,7 @@ describe("production middleware runtime", () => {
       const vercelOutputConfig = JSON.parse(
         await fs.readFile(path.join(root, ".vercel", "output", "config.json"), "utf8"),
       );
-      expect(vercelOutputConfig.routes[0]).toEqual(
-        createFarmVercelImmutableAssetRoute(config.basePath),
-      );
+      expect(vercelOutputConfig.routes[0]).toEqual(createFarmVercelImmutableAssetRoute());
       expect(vercelOutputConfig.routes[1]).toEqual({ handle: "filesystem" });
 
       const staticAssetsDir = path.join(root, ".vercel", "output", "static", "assets");

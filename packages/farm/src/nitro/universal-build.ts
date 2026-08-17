@@ -7499,7 +7499,9 @@ async function postProcessVercelOutput(
   vercelConfig.routes = [
     // Apply the header before the filesystem handler. `continue` lets Vercel
     // serve the matching file while preserving the immutable cache policy.
-    createFarmVercelImmutableAssetRoute(config.basePath),
+    // Hashed client assets ship at the root regardless of basePath, so the
+    // route is deliberately not basePath-scoped.
+    createFarmVercelImmutableAssetRoute(),
     // Serve static files first
     {
       handle: "filesystem",
