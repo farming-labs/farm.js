@@ -19,7 +19,12 @@ assert.ok(compilerReport.summary.compiled >= 1);
 const compiledComponents = new Set(
   compilerReport.modules.flatMap((module) => module.compiled),
 );
-for (const component of ["CommonSyntaxCounter", "ControlledSyntax"]) {
+for (const component of [
+  "CommonSyntaxCounter",
+  "ControlledSyntax",
+  "CalculatedBindingPanel",
+  "FormBindingPanel",
+]) {
   assert.ok(compiledComponents.has(component), `${component} was not compiled`);
 }
 
@@ -235,6 +240,67 @@ try {
   );
   assert.equal(controlledFinalExecutions - controlledInitialExecutions, 0);
 
+  const calculated = '[data-experiment="calculated-bindings"]';
+  const calculatedInitialExecutions = await readNumber(
+    page,
+    `${calculated} [data-metric="executions"]`,
+  );
+  await assertText(page, `${calculated} [data-metric="value"]`, "2");
+  await assertText(page, `${calculated} [data-metric="percent"]`, "17%");
+  assert.equal(await page.locator(calculated).getAttribute("data-percent"), "17");
+  assert.equal(await page.locator(calculated).evaluate((element) => element.style.opacity), "1");
+  assert.equal(
+    await page.locator(`${calculated} .binding-meter__fill`).evaluate((element) => element.style.width),
+    "17%",
+  );
+
+  await page.locator(`${calculated} [data-action="advance"]`).click();
+  await assertText(page, `${calculated} [data-metric="value"]`, "4");
+  await assertText(page, `${calculated} [data-metric="percent"]`, "33%");
+  assert.equal(await page.locator(calculated).evaluate((element) => element.style.opacity), "0.58");
+  assert.equal(
+    await page.locator(`${calculated} .binding-meter__fill`).evaluate((element) => element.style.width),
+    "33%",
+  );
+
+  await page.locator(`${calculated} [data-action="advance"]`).click();
+  await assertText(page, `${calculated} [data-metric="value"]`, "6");
+  await assertText(page, `${calculated} [data-metric="percent"]`, "50%");
+  assert.equal(await page.locator(calculated).evaluate((element) => element.style.opacity), "1");
+  const calculatedFinalExecutions = await readNumber(
+    page,
+    `${calculated} [data-metric="executions"]`,
+  );
+  assert.equal(calculatedFinalExecutions - calculatedInitialExecutions, 0);
+
+  const form = '[data-experiment="form-bindings"]';
+  const formInitialExecutions = await readNumber(page, `${form} [data-metric="executions"]`);
+  const note = page.locator(`${form} [data-input="note"]`);
+  await assertText(page, `${form} [data-metric="length"]`, "4");
+  await assertText(page, `${form} [data-metric="mode"]`, "balanced");
+  await assertText(page, `${form} [data-metric="summary"]`, "Farm / on");
+
+  await note.fill("Compiler");
+  await note.evaluate((element) => {
+    element.focus();
+    element.setSelectionRange(3, 3);
+  });
+  await page.keyboard.insertText("X");
+  await assertText(page, `${form} [data-metric="length"]`, "9");
+  assert.equal(await note.inputValue(), "ComXpiler");
+  assert.deepEqual(await note.evaluate((element) => [element.selectionStart, element.selectionEnd]), [
+    4,
+    4,
+  ]);
+
+  await page.locator(`${form} [data-input="mode"]`).selectOption("fast");
+  await page.locator(`${form} input[type="checkbox"]`).uncheck();
+  await assertText(page, `${form} [data-metric="mode"]`, "fast");
+  await assertText(page, `${form} [data-metric="summary"]`, "ComXpiler / off");
+  assert.equal(await page.locator(form).getAttribute("data-enabled"), "false");
+  const formFinalExecutions = await readNumber(page, `${form} [data-metric="executions"]`);
+  assert.equal(formFinalExecutions - formInitialExecutions, 0);
+
   const keyed = '[data-experiment="keyed-fallback"]';
   const keyedInitialExecutions = await readNumber(
     page,
@@ -306,6 +372,19 @@ try {
               controlledFinalExecutions - controlledInitialExecutions,
             selectionPreserved: true,
             compositionObserved: true,
+          },
+          calculatedBindings: {
+            value: 6,
+            percent: 50,
+            updateExecutions:
+              calculatedFinalExecutions - calculatedInitialExecutions,
+          },
+          formBindings: {
+            note: "ComXpiler",
+            mode: "fast",
+            enabled: false,
+            selectionPreserved: true,
+            updateExecutions: formFinalExecutions - formInitialExecutions,
           },
           keyedFallback: {
             items: 3,

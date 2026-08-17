@@ -11,8 +11,10 @@ interface RuntimeCell extends CompilerCell {
   flush(): boolean;
 }
 
+type SelectableTextControl = HTMLInputElement | HTMLTextAreaElement;
+
 interface InputSelectionSnapshot {
-  element: HTMLInputElement;
+  element: SelectableTextControl;
   start: number;
   end: number;
   direction: "forward" | "backward" | "none";
@@ -33,7 +35,18 @@ export interface CompilerAttributeBinding<Props> {
   read(props: Props, state: readonly CompilerCell[]): unknown;
 }
 
-export type CompilerBinding<Props> = CompilerTextBinding<Props> | CompilerAttributeBinding<Props>;
+export interface CompilerStyleBinding<Props> {
+  kind: "style";
+  path: readonly number[];
+  dependencies: readonly number[];
+  name: string;
+  read(props: Props, state: readonly CompilerCell[]): unknown;
+}
+
+export type CompilerBinding<Props> =
+  | CompilerTextBinding<Props>
+  | CompilerAttributeBinding<Props>
+  | CompilerStyleBinding<Props>;
 
 export interface CompiledComponentDefinition<Props> {
   displayName: string;
@@ -84,22 +97,157 @@ function findBindingTarget(root: Element, path: readonly number[]): Element | nu
   return current;
 }
 
+const UNITLESS_STYLE_PROPERTIES = new Set([
+  "animationIterationCount",
+  "aspectRatio",
+  "borderImageOutset",
+  "borderImageSlice",
+  "borderImageWidth",
+  "boxFlex",
+  "boxFlexGroup",
+  "boxOrdinalGroup",
+  "columnCount",
+  "columns",
+  "flex",
+  "flexGrow",
+  "flexNegative",
+  "flexOrder",
+  "flexPositive",
+  "flexShrink",
+  "fontWeight",
+  "gridArea",
+  "gridColumn",
+  "gridColumnEnd",
+  "gridColumnSpan",
+  "gridColumnStart",
+  "gridRow",
+  "gridRowEnd",
+  "gridRowSpan",
+  "gridRowStart",
+  "lineClamp",
+  "lineHeight",
+  "opacity",
+  "order",
+  "orphans",
+  "scale",
+  "tabSize",
+  "widows",
+  "zIndex",
+  "zoom",
+  "fillOpacity",
+  "floodOpacity",
+  "stopOpacity",
+  "strokeDasharray",
+  "strokeDashoffset",
+  "strokeMiterlimit",
+  "strokeOpacity",
+  "strokeWidth",
+]);
+
+function unprefixedStyleName(name: string): string {
+  const unprefixed = name.replace(/^(?:Webkit|Moz|ms|O)(?=[A-Z])/, "");
+  return unprefixed ? unprefixed[0].toLowerCase() + unprefixed.slice(1) : name;
+}
+
+function isHtmlOrSvgElement(element: Element): element is HTMLElement | SVGElement {
+  const view = element.ownerDocument.defaultView;
+  return Boolean(
+    view && (element instanceof view.HTMLElement || element instanceof view.SVGElement),
+  );
+}
+
+function isInputElement(element: Element): element is HTMLInputElement {
+  const view = element.ownerDocument.defaultView;
+  return Boolean(view && element instanceof view.HTMLInputElement);
+}
+
+function isTextAreaElement(element: Element): element is HTMLTextAreaElement {
+  const view = element.ownerDocument.defaultView;
+  return Boolean(view && element instanceof view.HTMLTextAreaElement);
+}
+
+function isSelectElement(element: Element): element is HTMLSelectElement {
+  const view = element.ownerDocument.defaultView;
+  return Boolean(view && element instanceof view.HTMLSelectElement);
+}
+
+function isOptionElement(element: Element): element is HTMLOptionElement {
+  const view = element.ownerDocument.defaultView;
+  return Boolean(view && element instanceof view.HTMLOptionElement);
+}
+
+function isSelectableTextControl(
+  element: Element | null | undefined,
+): element is SelectableTextControl {
+  return Boolean(element && (isInputElement(element) || isTextAreaElement(element)));
+}
+
+function updateStyle(element: Element, name: string, value: unknown): void {
+  if (!isHtmlOrSvgElement(element)) return;
+  const customProperty = name.startsWith("--");
+  let nextValue = "";
+  if (value !== null && value !== undefined && typeof value !== "boolean" && value !== "") {
+    nextValue =
+      typeof value === "number" &&
+      value !== 0 &&
+      !customProperty &&
+      !UNITLESS_STYLE_PROPERTIES.has(unprefixedStyleName(name))
+        ? `${value}px`
+        : String(value).trim();
+  }
+
+  if (customProperty || name.includes("-")) {
+    element.style.setProperty(name, nextValue);
+  } else {
+    (element.style as unknown as Record<string, string>)[name] = nextValue;
+  }
+}
+
+function updateSelectValue(element: HTMLSelectElement, value: unknown): void {
+  const options = [...element.options];
+  if (element.multiple) {
+    const selected = new Set(
+      (Array.isArray(value) ? value : value === null || value === undefined ? [] : [value]).map(
+        String,
+      ),
+    );
+    for (const option of options) option.selected = selected.has(option.value);
+    return;
+  }
+
+  const selectedValue = value === null || value === undefined ? "" : String(value);
+  let fallback: HTMLOptionElement | undefined;
+  for (const option of options) {
+    if (!option.disabled && !fallback) fallback = option;
+    if (option.value === selectedValue) {
+      option.selected = true;
+      return;
+    }
+  }
+  if (fallback) fallback.selected = true;
+}
+
 function updateAttribute(element: Element, name: string, value: unknown): void {
   const attributeName = name === "className" ? "class" : name === "htmlFor" ? "for" : name;
   const stringifiesBoolean = attributeName.startsWith("data-") || attributeName.startsWith("aria-");
 
-  if (name === "value" && element instanceof HTMLInputElement) {
+  if (name === "value" && (isInputElement(element) || isTextAreaElement(element))) {
     const nextValue = value === null || value === undefined ? "" : String(value);
     if (element.value !== nextValue) element.value = nextValue;
     return;
   }
 
-  if (name === "checked" && element instanceof HTMLInputElement) {
+  if (name === "value" && isSelectElement(element)) {
+    updateSelectValue(element, value);
+    return;
+  }
+
+  if (name === "checked" && isInputElement(element)) {
     element.checked = Boolean(value);
     return;
   }
 
-  if (name === "selected" && element instanceof HTMLOptionElement) {
+  if (name === "selected" && isOptionElement(element)) {
     element.selected = Boolean(value);
     return;
   }
@@ -186,7 +334,7 @@ export function createCompiledComponent<Props>(
     private captureInputSelection(): void {
       const active = this.root?.ownerDocument.activeElement;
       if (
-        !(active instanceof HTMLInputElement) ||
+        !isSelectableTextControl(active) ||
         !this.root?.contains(active) ||
         active.selectionStart === null ||
         active.selectionEnd === null
@@ -250,6 +398,8 @@ export function createCompiledComponent<Props>(
       const value = binding.read(this.props, this.cells);
       if (binding.kind === "text") {
         target.textContent = renderTextValue(value);
+      } else if (binding.kind === "style") {
+        updateStyle(target, binding.name, value);
       } else {
         updateAttribute(target, binding.name, value);
       }

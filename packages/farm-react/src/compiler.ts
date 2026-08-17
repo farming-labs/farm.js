@@ -39,7 +39,7 @@ interface PropsPlan {
 }
 
 interface PendingBinding {
-  kind: "text" | "attribute";
+  kind: "text" | "attribute" | "style";
   path: number[];
   dependencies: number[];
   name?: string;
@@ -51,6 +51,9 @@ interface Candidate {
   path: NodePath<t.FunctionDeclaration | t.FunctionExpression | t.ArrowFunctionExpression>;
   statementPath: NodePath;
 }
+
+const SAFE_GLOBAL_CALLS = new Set(["Boolean", "Number", "String"]);
+const SAFE_MATH_CALLS = new Set(["abs", "ceil", "floor", "max", "min", "round", "sign", "trunc"]);
 
 function isComponentName(name: string): boolean {
   return /^[A-Z]/.test(name);
@@ -175,12 +178,29 @@ function rewriteHandlerAccess(
       const attribute = container.parentPath;
       const eventName = attribute?.isJSXAttribute() && jsxAttributeName(attribute.node);
       if (
-        !container.isJSXExpressionContainer() ||
-        container.node.expression !== path.node ||
-        !eventName ||
-        !/^on[A-Z]/.test(eventName)
+        container.isJSXExpressionContainer() &&
+        container.node.expression === path.node &&
+        eventName &&
+        /^on[A-Z]/.test(eventName)
       ) {
-        reason = `event handler ${handler.name} must be passed directly to a JSX event`;
+        path.replaceWith(t.cloneNode(handler.value, true));
+        path.skip();
+        return;
+      }
+
+      const call =
+        container.isCallExpression() && container.node.callee === path.node ? container : null;
+      const event = call && findContainingEvent(call);
+      const eventExpression =
+        event?.node.value &&
+        t.isJSXExpressionContainer(event.node.value) &&
+        event.node.value.expression;
+      const isInsideInlineHandler =
+        eventExpression &&
+        (t.isArrowFunctionExpression(eventExpression) || t.isFunctionExpression(eventExpression)) &&
+        Boolean(call?.findParent((parent) => parent.node === eventExpression));
+      if (!call || !event || !isInsideInlineHandler) {
+        reason = `event handler ${handler.name} must be passed directly to a JSX event or called inside its inline handler`;
         path.stop();
         return;
       }
@@ -193,7 +213,27 @@ function rewriteHandlerAccess(
     : { root: (file.program.body[0] as t.ExpressionStatement).expression as t.JSXElement };
 }
 
-function validateDerivedExpression(expression: t.Expression): string | undefined {
+function isSafeCompilerCall(
+  expression: t.CallExpression,
+  safeGlobals: ReadonlySet<string>,
+): boolean {
+  if (t.isIdentifier(expression.callee)) {
+    return safeGlobals.has(expression.callee.name) && SAFE_GLOBAL_CALLS.has(expression.callee.name);
+  }
+  return (
+    t.isMemberExpression(expression.callee) &&
+    !expression.callee.computed &&
+    t.isIdentifier(expression.callee.object, { name: "Math" }) &&
+    safeGlobals.has("Math") &&
+    t.isIdentifier(expression.callee.property) &&
+    SAFE_MATH_CALLS.has(expression.callee.property.name)
+  );
+}
+
+function validateDerivedExpression(
+  expression: t.Expression,
+  safeGlobals: ReadonlySet<string>,
+): string | undefined {
   let unsupported: string | undefined;
   const reject = (reason: string, path: NodePath) => {
     unsupported = reason;
@@ -204,7 +244,9 @@ function validateDerivedExpression(expression: t.Expression): string | undefined
     ArrayExpression: (path) => reject("array literals", path),
     AssignmentExpression: (path) => reject("assignments", path),
     AwaitExpression: (path) => reject("await expressions", path),
-    CallExpression: (path) => reject("function calls", path),
+    CallExpression(path) {
+      if (!isSafeCompilerCall(path.node, safeGlobals)) reject("function calls", path);
+    },
     ClassExpression: (path) => reject("class expressions", path),
     Function: (path) => reject("function expressions", path),
     JSXElement: (path) => reject("JSX", path),
@@ -304,12 +346,22 @@ function cleanJsxText(value: string): string {
   return result;
 }
 
-function isTextExpression(expression: t.Expression): boolean {
+function isTextExpression(
+  expression: t.Expression,
+  statesByValue: ReadonlyMap<string, StateBinding>,
+  safeGlobals: ReadonlySet<string>,
+): boolean {
+  if (collectStateDependencies(expression, statesByValue).length > 0) {
+    return validateDerivedExpression(expression, safeGlobals) === undefined;
+  }
+
   let supported = true;
   traverse(expressionFile(cloneExpression(expression)), {
     CallExpression(path) {
-      supported = false;
-      path.stop();
+      if (!isSafeCompilerCall(path.node, safeGlobals)) {
+        supported = false;
+        path.stop();
+      }
     },
     OptionalCallExpression(path) {
       supported = false;
@@ -342,8 +394,43 @@ function jsxAttributeName(attribute: t.JSXAttribute): string | undefined {
 function analyzeHostTree(
   root: t.JSXElement,
   statesByValue: ReadonlyMap<string, StateBinding>,
+  safeGlobals: ReadonlySet<string>,
 ): { bindings?: PendingBinding[]; reason?: string } {
   const bindings: PendingBinding[] = [];
+
+  const analyzeStyle = (expression: t.Expression, path: number[]): string | undefined => {
+    if (!t.isObjectExpression(expression)) {
+      return "stateful style bindings must use one inline object literal";
+    }
+    for (const property of expression.properties) {
+      if (!t.isObjectProperty(property) || property.computed) {
+        return "stateful style bindings do not support spreads, methods, or computed properties";
+      }
+      const name = t.isIdentifier(property.key)
+        ? property.key.name
+        : t.isStringLiteral(property.key)
+          ? property.key.value
+          : undefined;
+      if (!name || (name.includes("-") && !name.startsWith("--"))) {
+        return "stateful style property names must use camelCase or a CSS custom property";
+      }
+      if (!t.isExpression(property.value)) {
+        return `stateful style property ${name} must use an expression value`;
+      }
+      const dependencies = collectStateDependencies(property.value, statesByValue);
+      if (dependencies.length === 0) continue;
+      const unsupported = validateDerivedExpression(property.value, safeGlobals);
+      if (unsupported) return `stateful style property ${name} cannot use ${unsupported}`;
+      bindings.push({
+        kind: "style",
+        path: [...path],
+        dependencies,
+        name,
+        value: cloneExpression(property.value),
+      });
+    }
+    return undefined;
+  };
 
   const visit = (element: t.JSXElement, path: number[]): string | undefined => {
     const tag = element.openingElement.name;
@@ -368,9 +455,16 @@ function analyzeHostTree(
       const expression = attribute.value.expression;
       const dependencies = collectStateDependencies(expression, statesByValue);
       if (dependencies.length === 0 || /^on[A-Z]/.test(name)) continue;
-      if (name === "style" || name === "children" || name === "key") {
+      if (name === "style") {
+        const reason = analyzeStyle(expression, path);
+        if (reason) return reason;
+        continue;
+      }
+      if (name === "children" || name === "key") {
         return `stateful ${name} bindings are not supported yet`;
       }
+      const unsupported = validateDerivedExpression(expression, safeGlobals);
+      if (unsupported) return `stateful ${name} binding cannot use ${unsupported}`;
       bindings.push({
         kind: "attribute",
         path: [...path],
@@ -388,7 +482,7 @@ function analyzeHostTree(
     );
     for (const child of expressionChildren) {
       if (t.isJSXEmptyExpression(child.expression)) continue;
-      if (!isTextExpression(child.expression)) {
+      if (!isTextExpression(child.expression, statesByValue, safeGlobals)) {
         return "dynamic child structures require React reconciliation";
       }
     }
@@ -574,6 +668,9 @@ function compileCandidate(
   const propsPlan = analyzePropsParameter(path);
   if (typeof propsPlan === "string") return propsPlan;
   if (!t.isBlockStatement(path.node.body)) return "components must use a block body";
+  const safeGlobals = new Set(
+    [...SAFE_GLOBAL_CALLS, "Math"].filter((name) => !path.scope.getBinding(name)),
+  );
 
   const states: StateBinding[] = [];
   const locals: LocalBinding[] = [];
@@ -582,6 +679,18 @@ function compileCandidate(
     if (t.isReturnStatement(statement)) {
       if (returned) return "components must have one unconditional return";
       returned = statement;
+      continue;
+    }
+    if (t.isFunctionDeclaration(statement)) {
+      if (!statement.id) return "named event handler declarations must have a name";
+      if (statement.async || statement.generator || statement.typeParameters) {
+        return `event handler ${statement.id.name} must be synchronous and non-generic`;
+      }
+      locals.push({
+        kind: "handler",
+        name: statement.id.name,
+        value: t.toExpression(t.cloneNode(statement, true)) as t.FunctionExpression,
+      });
       continue;
     }
     if (
@@ -665,7 +774,7 @@ function compileCandidate(
       });
       continue;
     }
-    const unsupported = validateDerivedExpression(expanded);
+    const unsupported = validateDerivedExpression(expanded, safeGlobals);
     if (unsupported) {
       return `derived local ${binding.name} cannot use ${unsupported}`;
     }
@@ -682,7 +791,7 @@ function compileCandidate(
   );
   const setterReason = validateSetterUsage(expandedRoot, statesBySetter);
   if (setterReason) return setterReason;
-  const analysis = analyzeHostTree(expandedRoot, statesByValue);
+  const analysis = analyzeHostTree(expandedRoot, statesByValue, safeGlobals);
   if (analysis.reason) return analysis.reason;
 
   const stateParameter = path.scope.generateUidIdentifier("farmState");
