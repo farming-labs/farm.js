@@ -27,6 +27,9 @@ for (const component of [
   "FormBindingPanel",
   "LogicalBlockPanel",
   "TernaryBlockPanel",
+  "AutomaticKeyedListExperiment",
+  "ExplicitKeyedListExperiment",
+  "StatefulListRow",
 ]) {
   assert.ok(compiledComponents.has(component), `${component} was not compiled`);
 }
@@ -371,24 +374,46 @@ try {
   );
   assert.equal(ternaryFinalExecutions - ternaryInitialExecutions, 0);
 
-  const keyed = '[data-experiment="keyed-fallback"]';
-  const keyedInitialExecutions = await readNumber(
+  const automaticList = '[data-experiment="keyed-automatic"]';
+  const automaticListInitialExecutions = await readNumber(
     page,
-    `${keyed} [data-metric="executions"]`,
+    `${automaticList} [data-metric="executions"]`,
   );
-  await page.locator(`${keyed} [data-action="add-item"]`).click();
-  await page.locator(`${keyed} [data-action="add-item"]`).click();
-  await assertText(page, `${keyed} [data-metric="items"]`, "3");
-  const keyedFinalExecutions = await readNumber(
+  await page.locator(`${automaticList} [data-action="add-item"]`).click();
+  await page.locator(`${automaticList} [data-action="add-item"]`).click();
+  await assertText(page, `${automaticList} [data-metric="items"]`, "4");
+  await page.locator(`${automaticList} [data-action="reverse-items"]`).click();
+  await assertText(page, `${automaticList} [data-metric="first"]`, "Item 4");
+  const automaticListFinalExecutions = await readNumber(
     page,
-    `${keyed} [data-metric="executions"]`,
+    `${automaticList} [data-metric="executions"]`,
   );
-  assert.equal(keyedFinalExecutions - keyedInitialExecutions, 2);
-  assert.deepEqual(await page.locator(`${keyed} li`).allTextContents(), [
-    "item-1",
-    "item-2",
-    "item-3",
+  assert.equal(automaticListFinalExecutions - automaticListInitialExecutions, 0);
+  assert.deepEqual(await page.locator(`${automaticList} li`).allTextContents(), [
+    "Item 4",
+    "Item 3",
+    "Beta",
+    "Alpha",
   ]);
+
+  const explicitList = '[data-experiment="keyed-explicit"]';
+  const explicitListInitialExecutions = await readNumber(
+    page,
+    `${explicitList} [data-metric="executions"]`,
+  );
+  await page.locator(`${explicitList} [data-row="a"]`).click();
+  await assertText(page, `${explicitList} [data-row="a"]`, "Alpha · 1");
+  await page.locator(`${explicitList} [data-action="reverse-items"]`).click();
+  await assertText(page, `${explicitList} [data-metric="first"]`, "Beta");
+  assert.deepEqual(
+    await page.locator(`${explicitList} [data-row]`).allTextContents(),
+    ["Beta · 0", "Alpha · 1"],
+  );
+  const explicitListFinalExecutions = await readNumber(
+    page,
+    `${explicitList} [data-metric="executions"]`,
+  );
+  assert.equal(explicitListFinalExecutions - explicitListInitialExecutions, 0);
 
   await page.screenshot({ path: screenshotPath, fullPage: true });
 
@@ -494,9 +519,18 @@ try {
             branch: "enabled",
             updateExecutions: ternaryFinalExecutions - ternaryInitialExecutions,
           },
-          keyedFallback: {
-            items: 3,
-            updateExecutions: keyedFinalExecutions - keyedInitialExecutions,
+          automaticKeyedList: {
+            items: 4,
+            first: "Item 4",
+            updateExecutions:
+              automaticListFinalExecutions - automaticListInitialExecutions,
+            owner: "React boundary",
+          },
+          explicitKeyedList: {
+            order: ["Beta", "Alpha"],
+            alphaState: 1,
+            updateExecutions:
+              explicitListFinalExecutions - explicitListInitialExecutions,
             owner: "React",
           },
         },

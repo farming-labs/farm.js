@@ -331,11 +331,12 @@ satisfy all of these rules:
 | Body                | Top-level `useState` declarations, optional compiler-safe derived values and synchronous named handlers, then one unconditional JSX return. |
 | State               | `const [value, setValue] = useState(initial)`, including lazy initializers, multiple cells, and queued functional updates.                  |
 | Root                | Exactly one lowercase host JSX element such as `button`, `section`, `input`, or `div`.                                                      |
-| Tree                | A statically known host tree. Eligible logical and ternary blocks may change one compiler-isolated child location.                          |
+| Tree                | A statically known host tree. Eligible conditional and keyed-list boundaries may change one compiler-isolated child location.               |
 | Text bindings       | State-driven text in a leaf host element.                                                                                                   |
 | Attribute bindings  | Basic attributes, controlled form properties, and individual properties in one inline `style` object.                                       |
 | Events              | Inline handlers and synchronous `const` or function-declaration handlers, used directly or called inside an inline JSX handler.             |
 | Conditional blocks  | `condition && <host />` or `condition ? <host /> : <host />`; `null` and `false` are supported empty ternary branches.                      |
+| Keyed lists         | A direct keyed `items.map(...)`, or an explicit imported `List`, when it is the only meaningful child of its host container.                |
 
 This component is eligible:
 
@@ -448,29 +449,105 @@ The optimization boundary matters: the surrounding compiled component and its un
 do not rerender, but React still renders and commits the small conditional boundary. A branch with
 substantial work therefore still pays for that branch work.
 
+### Keyed list boundaries
+
+The compiler automatically recognizes a direct keyed map in a safe, statically known container:
+
+```tsx
+export function Inventory() {
+  const [items, setItems] = useState(initialItems);
+
+  return (
+    <ul>
+      {items.map((item) => (
+        <li key={item.id}>{item.label}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+Farm records the list's state dependencies and replaces the map location with a small internal
+React boundary. Updating `items` refreshes that boundary without executing `Inventory` again.
+React still receives the keyed elements and performs the insert, removal, move, render, lifecycle,
+and commit work inside the list. The optimization isolates that work; it does not remove it.
+
+Use the public `List` component when the key should be separate from the row renderer, or when rows
+are custom components:
+
+```tsx
+import { List } from "@farm.js/react/list";
+
+export function Inventory() {
+  const [items, setItems] = useState(initialItems);
+
+  return (
+    <div className="inventory">
+      <List each={items} by={(item) => item.id}>
+        {(item) => <InventoryRow item={item} />}
+      </List>
+    </div>
+  );
+}
+
+function InventoryRow({ item }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <button onClick={() => setExpanded((value) => !value)}>
+      {item.label}: {expanded ? "open" : "closed"}
+    </button>
+  );
+}
+```
+
+`List` is an ordinary React component, not compiler-only syntax. It accepts an `Iterable`, `null`,
+or `undefined`; calls `by(item, index)` to create each React key; and requires its child function to
+return one React element. It therefore renders correctly when the experimental compiler is off or
+when this particular use cannot be optimized. Hooks belong inside a row component such as
+`InventoryRow`, never directly inside the `List` child function or a `.map()` callback.
+
+The first automatic contract is deliberately narrow:
+
+- The map must be a direct `collection.map(...)` with one synchronous inline callback returning one
+  React element and an explicit item-derived `key`.
+- An array-index key is rejected for compiler isolation because it does not preserve item identity
+  across insertion, removal, or reordering.
+- The optimized `List` shape uses inline `by` and child functions, a compiler-safe `each`
+  expression, and an item-derived key.
+- The map or `List` must be the only meaningful child of its host container. This keeps all
+  compiler-prepared DOM paths outside the boundary stable.
+- Chained expressions such as `items.filter(...).map(...)`, mixed static siblings, spread children,
+  hooks in the callback, and other unproven shapes fall back to normal React.
+
+Stable keys must be unique among siblings and come from the item's identity, such as a database ID.
+Farm does not implement an LIS move algorithm in this release. A compiler-owned LIS can only be
+safe after the compiler owns an entire host-only list island; this boundary intentionally keeps
+React as the sole DOM and Fiber owner.
+
 ### What falls back to React
 
-| Unsupported shape                                                      | Why React keeps ownership                                                           |
-| ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| Keyed lists, `.map()`, element arrays, or helper-rendered children     | Inserts, removals, moves, and identity changes require reconciliation.              |
-| Fragments or unsupported/nested conditional JSX                        | Their structure is outside the current single-location host-block contract.         |
-| Custom child components                                                | A child component has its own props, hooks, lifecycle, and reconciliation boundary. |
-| Effects or hooks other than the supported `useState` shape             | Their lifecycle and ordering must remain under React's hook dispatcher.             |
-| `ref` or `dangerouslySetInnerHTML`                                     | They directly participate in DOM ownership.                                         |
-| Stateful `children` or `key` bindings                                  | These need structure or identity semantics.                                         |
-| Conditional style objects, style spreads, methods, or computed names   | The final property set or precedence cannot be prepared statically.                 |
-| JSX attribute spreads or namespaced attributes                         | The compiler cannot currently enumerate a stable binding contract.                  |
-| Multiple/conditional returns or impure/control-flow statements         | The compiler only lowers a single, statically analyzable render path.               |
-| Derived calls, assignments, identity-bearing values, functions, or JSX | Their evaluation timing, side effects, or identity cannot yet be preserved safely.  |
-| Nested, computed, or rest props destructuring                          | These patterns need additional parameter-shape and identity analysis.               |
-| Async/generator/generic handlers or named handlers outside JSX events  | Their scheduling, identity, or closure semantics are outside the current lowering.  |
-| Async/generator or generic components                                  | These function shapes are outside the current lowering.                             |
-| Setters called outside JSX event handlers                              | The compiler only controls and batches event-driven local updates.                  |
+| Unsupported shape                                                        | Why React keeps ownership                                                           |
+| ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| Unkeyed/index-keyed/chained maps, mixed list siblings, or element arrays | Their structure or item identity is outside the isolated keyed-boundary contract.   |
+| Fragments or unsupported/nested conditional JSX                          | Their structure is outside the current single-location host-block contract.         |
+| Custom child components outside an eligible keyed-list boundary          | A child component has its own props, hooks, lifecycle, and reconciliation boundary. |
+| Effects or hooks other than the supported `useState` shape               | Their lifecycle and ordering must remain under React's hook dispatcher.             |
+| `ref` or `dangerouslySetInnerHTML`                                       | They directly participate in DOM ownership.                                         |
+| Stateful `children` or `key` bindings outside an eligible boundary       | These need structure or identity semantics.                                         |
+| Conditional style objects, style spreads, methods, or computed names     | The final property set or precedence cannot be prepared statically.                 |
+| JSX attribute spreads or namespaced attributes                           | The compiler cannot currently enumerate a stable binding contract.                  |
+| Multiple/conditional returns or impure/control-flow statements           | The compiler only lowers a single, statically analyzable render path.               |
+| Derived calls, assignments, identity-bearing values, functions, or JSX   | Their evaluation timing, side effects, or identity cannot yet be preserved safely.  |
+| Nested, computed, or rest props destructuring                            | These patterns need additional parameter-shape and identity analysis.               |
+| Async/generator/generic handlers or named handlers outside JSX events    | Their scheduling, identity, or closure semantics are outside the current lowering.  |
+| Async/generator or generic components                                    | These function shapes are outside the current lowering.                             |
+| Setters called outside JSX event handlers                                | The compiler only controls and batches event-driven local updates.                  |
 
 Keys do not make list reconciliation unnecessary. A key tells React which child identity survives
-an insert, removal, or move; React still needs to compare the dynamic children. Calling a Hook
-directly inside a list iteration is also invalid React because the number or order of calls can
-change. Put the Hook inside a keyed child component and leave that structure on React.
+an insert, removal, or move; React still compares the dynamic children. The compiler uses that
+identity to decide when a list can have its own refresh boundary, then hands the keyed elements to
+React. Calling a Hook directly inside a list iteration is invalid React because the number or order
+of calls can change. Put the Hook inside a keyed child component instead.
 
 ### Build-time transformation
 
@@ -513,6 +590,7 @@ follows:
 | Parent-driven prop updates                     | Selecting bindings whose state dependencies changed             |
 | Unsupported trees, hooks, refs, and lifecycles | Patching precomputed text/attribute targets after local updates |
 | Host creation/removal inside an eligible block | Refreshing only the matching internal conditional boundary      |
+| Keyed row identity, reconciliation, and DOM    | Refreshing only the matching internal keyed-list boundary       |
 | Unmounting and the surrounding component tree  | Reapplying bindings after a parent-driven React update          |
 
 Queued functional setters preserve the event's state snapshot. Two calls such as
@@ -550,9 +628,11 @@ normal recovery path.
 ### Safety reasoning
 
 The compiler uses fallback as a semantic boundary, not as an error-recovery trick. A precomputed
-path is only correct while the host tree has the same shape. Dynamic children, custom components,
-refs, and effects can change ownership or lifecycle in ways the current compiler does not yet
-model. Letting React handle them is the optimization's correctness mechanism.
+path is only correct while the host tree has the same shape. Conditional and keyed-list boundaries
+isolate the dynamic location and give its structure back to React. Other dynamic children, custom
+components outside those boundaries, refs, and effects can change ownership or lifecycle in ways
+the current compiler does not yet model. Letting React handle them is the optimization's
+correctness mechanism.
 
 Parent-driven prop updates also remain React updates. After React reconciles the new props, the
 runtime reapplies compiler-owned bindings from the current local cells so prop changes and local
@@ -576,9 +656,14 @@ The package and example test suites verify more than generated code:
 - hydration mismatches follow React's recoverable-error path and remain interactive;
 - object, array, and nullish state transitions match normal React across 3,000 deterministic
   randomized updates;
+- automatic keyed maps and explicit `List` boundaries preserve keyed DOM nodes and stateful row
+  identity across inserts, removals, updates, and reorders without rerunning the outer component;
+- 1,000 deterministic randomized list operations produce the same ordered output as normal React;
+- the public `List` renders iterable and nullish collections correctly with the compiler off;
 - the packaged runtime is exercised separately with React 18.3 and React 19;
 - boolean `data-*` and `aria-*` attributes keep React-compatible string values; and
-- keyed lists, effects, refs, and custom child components remain on React without corrupting output.
+- unsupported list shapes, effects, refs, and custom child components outside a keyed boundary
+  remain on React without corrupting output.
 
 The heavy example uses a fixed 768-host-node tree with three state cells and sparse bindings. Its
 compiler-off → compiler-on crossover run measures a deliberately favorable supported workload. The
@@ -603,7 +688,7 @@ property.
 
 The [`examples/react-compiler`](https://github.com/farming-labs/farm.js/tree/main/examples/react-compiler)
 app contains batching, multiple-binding, common-syntax, calculated-style, controlled-form,
-keyed-fallback, compiler-on/off, and heavy-interaction experiments. The standalone starter
+automatic and explicit keyed-list, compiler-on/off, and heavy-interaction experiments. The standalone starter
 intentionally keeps the first experience focused.
 
 ## React-specific FARMJS APIs

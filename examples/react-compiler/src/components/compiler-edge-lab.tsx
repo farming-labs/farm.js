@@ -1,11 +1,13 @@
 "use client";
 
+import { List } from "@farm.js/react/list";
 import { useState } from "react";
 
 let compiledBatchExecutions = 0;
 let reactBatchExecutions = 0;
 let multipleBindingExecutions = 0;
-let keyedListExecutions = 0;
+let automaticListExecutions = 0;
+let explicitListExecutions = 0;
 
 export function CompiledBatchExperiment() {
   const [count, setCount] = useState(0);
@@ -154,19 +156,24 @@ export function MultipleBindingExperiment() {
   );
 }
 
-export function KeyedListFallbackExperiment() {
-  const [items, setItems] = useState(["item-1"]);
+interface ListItem {
+  id: string;
+  label: string;
+}
+
+export function AutomaticKeyedListExperiment() {
+  const [items, setItems] = useState<ListItem[]>([
+    { id: "a", label: "Alpha" },
+    { id: "b", label: "Beta" },
+  ]);
 
   return (
-    <article
-      className="edge-card edge-card--fallback"
-      data-experiment="keyed-fallback"
-    >
+    <article className="edge-card" data-experiment="keyed-automatic">
       <header>
-        <span className="experiment-number">04</span>
+        <span className="experiment-number">04A</span>
         <div>
-          <h3>Keyed list fallback</h3>
-          <p>Dynamic structure stays under React reconciliation.</p>
+          <h3>Automatic keyed boundary</h3>
+          <p>The build recognizes a direct keyed map and isolates the list.</p>
         </div>
       </header>
       <dl className="compact-metrics" aria-live="polite">
@@ -175,25 +182,99 @@ export function KeyedListFallbackExperiment() {
           <dd data-metric="items">{items.length}</dd>
         </div>
         <div>
+          <dt>First row</dt>
+          <dd data-metric="first">{items[0]?.label}</dd>
+        </div>
+        <div>
           <dt>Executions</dt>
           <dd data-metric="executions">
-            {typeof window === "undefined" ? 1 : ++keyedListExecutions}
+            {typeof window === "undefined" ? 1 : ++automaticListExecutions}
           </dd>
         </div>
       </dl>
       <ul data-list="keyed">
         {items.map((item) => (
-          <li key={item}>{item}</li>
+          <li data-key={item.id} key={item.id}>
+            {item.label}
+          </li>
         ))}
       </ul>
+      <div className="button-row">
+        <button
+          type="button"
+          data-action="add-item"
+          onClick={() =>
+            setItems((value) => [
+              ...value,
+              { id: `item-${value.length + 1}`, label: `Item ${value.length + 1}` },
+            ])
+          }
+        >
+          Add item
+        </button>
+        <button
+          type="button"
+          data-action="reverse-items"
+          onClick={() => setItems((value) => [...value].reverse())}
+        >
+          Reverse rows
+        </button>
+      </div>
+    </article>
+  );
+}
+
+function StatefulListRow({ item }: { item: ListItem }) {
+  const [clicks, setClicks] = useState(0);
+  return (
+    <button data-row={item.id} type="button" onClick={() => setClicks((value) => value + 1)}>
+      {item.label} · {clicks}
+    </button>
+  );
+}
+
+export function ExplicitKeyedListExperiment() {
+  const [items, setItems] = useState<ListItem[]>([
+    { id: "a", label: "Alpha" },
+    { id: "b", label: "Beta" },
+  ]);
+
+  return (
+    <article className="edge-card" data-experiment="keyed-explicit">
+      <header>
+        <span className="experiment-number">04B</span>
+        <div>
+          <h3>Explicit List boundary</h3>
+          <p>A key selector supports custom rows while React preserves their state.</p>
+        </div>
+      </header>
+      <dl className="compact-metrics" aria-live="polite">
+        <div>
+          <dt>Items</dt>
+          <dd data-metric="items">{items.length}</dd>
+        </div>
+        <div>
+          <dt>First row</dt>
+          <dd data-metric="first">{items[0]?.label}</dd>
+        </div>
+        <div>
+          <dt>Executions</dt>
+          <dd data-metric="executions">
+            {typeof window === "undefined" ? 1 : ++explicitListExecutions}
+          </dd>
+        </div>
+      </dl>
+      <div className="keyed-row-stage" data-list="explicit">
+        <List each={items} by={(item) => item.id}>
+          {(item) => <StatefulListRow item={item} />}
+        </List>
+      </div>
       <button
+        data-action="reverse-items"
         type="button"
-        data-action="add-item"
-        onClick={() =>
-          setItems((value) => [...value, `item-${value.length + 1}`])
-        }
+        onClick={() => setItems((value) => [...value].reverse())}
       >
-        Add keyed item
+        Reverse stateful rows
       </button>
     </article>
   );
@@ -215,18 +296,20 @@ export function CompilerEdgeLab() {
         <CompiledBatchExperiment />
         <ReactBatchExperiment />
       </div>
-      <div className="edge-grid">
+      <div className="edge-grid edge-grid--single">
         <MultipleBindingExperiment />
-        <KeyedListFallbackExperiment />
+      </div>
+      <div className="edge-grid">
+        <AutomaticKeyedListExperiment />
+        <ExplicitKeyedListExperiment />
       </div>
 
       <aside className="hook-warning">
         <span>HOOKS + KEYS</span>
         <p>
           Never call a Hook directly inside <code>items.map(...)</code>. Put the
-          Hook in a separate keyed row component. This compiler rejects the
-          inline pattern; the current compiler leaves the keyed list itself to
-          React.
+          Hook in a separate keyed row component. Automatic maps and the explicit
+          <code>List</code> boundary keep row identity and lifecycle under React.
         </p>
       </aside>
     </section>

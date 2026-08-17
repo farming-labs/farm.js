@@ -62,14 +62,50 @@ The current compiler handles components that it can prove have:
 - state-driven text, attributes, per-property inline styles, and controlled form properties;
 - host-only `condition && <element>` and `condition ? <element> : <element>` child blocks at
   statically known locations;
+- direct item-keyed `collection.map(...)` children and explicit `List` boundaries at statically
+  known container locations;
 - React-managed event handlers; and
-- no refs, effects, custom child components, or keyed lists.
+- no refs, effects, or unsupported dynamic child structures.
 
 The generated component preserves React ownership of placement, props, events, SSR, and hydration.
 Local state cells batch updates into a microtask and patch only compiler-known DOM paths. For an
 eligible conditional, the runtime refreshes one small internal React boundary instead of executing
 the user component again. React mounts, replaces, or removes the selected branch, so events,
 unmounting, SSR, hydration, and error boundaries keep React semantics.
+
+For a common keyed map, no new API is required:
+
+```tsx
+<ul>
+  {items.map((item) => (
+    <li key={item.id}>{item.label}</li>
+  ))}
+</ul>
+```
+
+The compiler can isolate this direct map when it is the container's only meaningful child, the key
+comes from the item rather than the array index, and the callback is otherwise safe. A list update
+then refreshes only an internal React boundary instead of executing the outer user component.
+React still reconciles the keyed rows and owns their DOM, events, lifecycle, and state.
+
+For custom rows or an explicit key selector, use the public component:
+
+```tsx
+import { List } from "@farm.js/react/list";
+
+<div>
+  <List each={items} by={(item) => item.id}>
+    {(item) => <StatefulRow item={item} />}
+  </List>
+</div>;
+```
+
+`List` also works with the compiler disabled. `each` accepts an iterable, `null`, or `undefined`;
+`by` supplies the React key; and the child function returns one React element. Put Hooks inside the
+row component, not directly inside the iteration callback. With the compiler enabled, the
+optimized explicit shape requires inline `by` and child functions, a safe `each` expression, an
+item-derived key, and no meaningful siblings in the same host container. Other shapes keep normal
+React behavior.
 
 Conditional blocks deliberately start with a narrow contract. Each non-empty branch must have one
 lowercase host root and a static host-only subtree. An empty ternary branch may be `null` or `false`.
@@ -100,5 +136,7 @@ commit and updates its two bindings directly. This is a deterministic structural
 assertion; it is not presented as a cross-machine timing benchmark.
 
 Application and prototype calls, dynamic style objects, handlers outside JSX events, nested,
-computed, and rest props patterns, async handlers, keyed list lowering, unsupported conditional
-shapes, effects, and more advanced hook support intentionally stay on React in this release.
+computed, and rest props patterns, async handlers, unkeyed or index-keyed lists, chained maps,
+mixed list siblings, unsupported conditional shapes, effects, and more advanced hook support
+intentionally stay on React in this release. Farm does not perform compiler-owned LIS row moves;
+eligible keyed boundaries deliberately keep reconciliation under React.

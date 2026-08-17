@@ -80,11 +80,11 @@ describe("React renderer Vite integration", () => {
     expect(report.summary).toEqual({
       modules: 1,
       componentsConsidered: 2,
-      compiled: 1,
-      fallback: 1,
+      compiled: 2,
+      fallback: 0,
     });
-    expect(report.modules[0].compiled).toEqual(["Counter"]);
-    expect(report.modules[0].fallbacks[0].component).toBe("List");
+    expect(report.modules[0].compiled).toEqual(["Counter", "List"]);
+    expect(report.modules[0].fallbacks).toEqual([]);
 
     await writeFile(
       entry,

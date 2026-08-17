@@ -36,7 +36,7 @@ describe("React AOT compiler safety boundaries", () => {
     expect(result.code).toContain("dependencies: [1]");
   });
 
-  it("falls back for an inline keyed list instead of stringifying React elements", async () => {
+  it("isolates an inline keyed list instead of stringifying React elements", async () => {
     const result = await compile(`
       import { useState } from "react";
       export function KeyedList() {
@@ -50,12 +50,13 @@ describe("React AOT compiler safety boundaries", () => {
       }
     `);
 
-    expect(result.compiled).toEqual([]);
-    expect(result.diagnostics[0]?.reason).toMatch(/dynamic child structures/i);
-    expect(result.code).not.toContain("compiler-runtime");
+    expect(result.compiled).toEqual(["KeyedList"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.code).toContain("farmBlocks.KeyedList");
+    expect(result.code).toContain("compiler-runtime");
   });
 
-  it("keeps a keyed parent on React while compiling its stable row component", async () => {
+  it("isolates a keyed parent while compiling its stable row component", async () => {
     const result = await compile(`
       import { useState } from "react";
       export function List(props) {
@@ -68,13 +69,8 @@ describe("React AOT compiler safety boundaries", () => {
       }
     `);
 
-    expect(result.compiled).toEqual(["Row"]);
-    expect(result.diagnostics).toEqual([
-      expect.objectContaining({
-        component: "List",
-        reason: expect.stringMatching(/dynamic child structures/i),
-      }),
-    ]);
+    expect(result.compiled).toEqual(["List", "Row"]);
+    expect(result.diagnostics).toEqual([]);
     expect(result.code).toContain("createCompiledComponent");
   });
 
@@ -294,7 +290,7 @@ describe("React AOT compiler safety boundaries", () => {
     `);
 
     expect(result.compiled).toEqual([]);
-    expect(result.diagnostics[0]?.reason).toMatch(/dynamic child structures/i);
+    expect(result.diagnostics[0]?.reason).toMatch(/Hooks cannot be called directly/i);
   });
 
   it.each([
