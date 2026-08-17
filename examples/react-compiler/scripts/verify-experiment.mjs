@@ -30,6 +30,7 @@ for (const component of [
   "AutomaticKeyedListExperiment",
   "ExplicitKeyedListExperiment",
   "StatefulListRow",
+  "ComponentIslandExperiment",
 ]) {
   assert.ok(compiledComponents.has(component), `${component} was not compiled`);
 }
@@ -415,6 +416,44 @@ try {
   );
   assert.equal(explicitListFinalExecutions - explicitListInitialExecutions, 0);
 
+  const componentIslands = '[data-benchmark="component-islands"]';
+  const islandOwnerInitialExecutions = await readNumber(
+    page,
+    `${componentIslands} [data-metric="island-owner-executions"]`,
+  );
+  const staticTreeInitialExecutions = Number(
+    await page.locator(`${componentIslands} [data-static-executions]`).getAttribute(
+      "data-static-executions",
+    ),
+  );
+  await page.locator(`${componentIslands} [data-action="island-pin"]`).click();
+  await assertText(
+    page,
+    `${componentIslands} [data-action="island-pin"]`,
+    "Pinned",
+  );
+  for (let update = 0; update < 3; update += 1) {
+    await page.locator(`${componentIslands} [data-action="island-update"]`).click();
+  }
+  await assertText(page, `${componentIslands} [data-metric="island-tick"]`, "3");
+  await assertText(page, `${componentIslands} [data-island-tick]`, "3");
+  await assertText(
+    page,
+    `${componentIslands} [data-action="island-pin"]`,
+    "Pinned",
+  );
+  const islandOwnerFinalExecutions = await readNumber(
+    page,
+    `${componentIslands} [data-metric="island-owner-executions"]`,
+  );
+  const staticTreeFinalExecutions = Number(
+    await page.locator(`${componentIslands} [data-static-executions]`).getAttribute(
+      "data-static-executions",
+    ),
+  );
+  assert.equal(islandOwnerFinalExecutions - islandOwnerInitialExecutions, 0);
+  assert.equal(staticTreeFinalExecutions - staticTreeInitialExecutions, 0);
+
   await page.screenshot({ path: screenshotPath, fullPage: true });
 
   const mobilePage = await browser.newPage({
@@ -532,6 +571,14 @@ try {
             updateExecutions:
               explicitListFinalExecutions - explicitListInitialExecutions,
             owner: "React",
+          },
+          componentIsland: {
+            state: 3,
+            childStatePreserved: true,
+            ownerUpdateExecutions:
+              islandOwnerFinalExecutions - islandOwnerInitialExecutions,
+            staticSiblingUpdateExecutions:
+              staticTreeFinalExecutions - staticTreeInitialExecutions,
           },
         },
       },

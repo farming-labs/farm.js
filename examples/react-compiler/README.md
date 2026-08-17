@@ -94,9 +94,13 @@ lists, refs, spreads, and dangerous HTML inside a branch intentionally fall back
 
 ## Heavy compiler-on/off benchmark
 
-The page also contains `HeavyInteractionBenchmark`: one component with 768 static host nodes, three
-local state cells, and a small number of dynamic text/attribute targets. It represents a workload
-the current compiler is designed to optimize—a large stable tree with sparse local updates.
+The page contains two measured workloads:
+
+- `HeavyInteractionBenchmark` has one component with 768 static host nodes, three local state
+  cells, and a small number of dynamic text/attribute targets.
+- `ComponentIslandExperiment` has one state-dependent React child beside a React-owned component
+  that produces 768 static host nodes. The child keeps local Hook state while the compiler skips
+  the outer owner and unchanged static sibling.
 
 Run the full crossover benchmark:
 
@@ -112,19 +116,32 @@ sample measures browser button dispatch through the observed DOM mutation. It al
 state, browser errors, component executions, the number of rendered workload nodes, and whether the
 production bundle actually contains the compiled component marker.
 
+The component-island sample waits for the dependent React child to commit, so its latency includes
+that child render. It does not stop at the earlier direct owner binding.
+
 Repeated reference run on Apple M1, Chromium 145:
 
 | Metric                       |    Compiler off | Compiler on |                        Change |
 | ---------------------------- | --------------: | ----------: | ----------------------------: |
-| Median update latency        |        0.170 ms |    0.020 ms | **88.2% lower / 8.5× faster** |
-| p95 update latency           |        0.215 ms |    0.030 ms |               **86.0% lower** |
+| Median update latency        |        0.175 ms |    0.015 ms | **91.4% lower / 11.7× faster** |
+| p95 update latency           |        0.210 ms |    0.030 ms |                **85.7% lower** |
 | Component executions added   | 2,430 per trial |           0 |  All update rerenders removed |
-| Production page chunk (gzip) |         3,953 B |     5,221 B |                  **+1,268 B** |
+| Production page chunk (gzip) |         6,948 B |    10,792 B |                  **+3,844 B** |
+
+Component-island reference run from the same crossover method:
+
+| Metric                              | Compiler off | Compiler on |                         Change |
+| ----------------------------------- | -----------: | ----------: | -----------------------------: |
+| Median child-commit latency         |     0.165 ms |    0.025 ms | **84.8% lower / 6.6× faster**  |
+| p95 child-commit latency            |     0.180 ms |    0.110 ms |                **38.9% lower** |
+| Owner executions added per trial    |        2,430 |           0 |       Owner rerenders removed |
+| Static sibling executions per trial |        2,430 |           0 | Static rerenders removed      |
 
 The timing result is intentionally narrow. It does not include browser layout/paint, network work,
-effects, child component updates, or keyed-list reconciliation. Those add costs outside the
-measured update path. Unsupported dynamic structures still fall back to React. Run the command on
-target devices before using the reference number for a product decision.
+effects or keyed-list reconciliation. The component-island row does include its dependent child
+update, but not layout, paint, or unrelated application work. Unsupported dynamic structures still
+fall back to React. Run the command on target devices before using the reference number for a
+product decision.
 
 The environment flag controls the two production builds; omission defaults to enabled:
 

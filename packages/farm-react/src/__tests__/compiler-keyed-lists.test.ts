@@ -145,7 +145,7 @@ describe("React AOT keyed list compiler", () => {
     expect(result.diagnostics[0]?.reason).toMatch(/cannot depend on the array index/i);
   });
 
-  it("does not treat a locally named List as the public primitive", async () => {
+  it("treats a locally named List as an ordinary static component island", async () => {
     const result = await compile(`
       import { useState } from "react";
       function List() { return <li>Local</li>; }
@@ -155,10 +155,9 @@ describe("React AOT keyed list compiler", () => {
       }
     `);
 
-    expect(result.compiled).toEqual([]);
-    expect(result.diagnostics.find((entry) => entry.component === "LocalList")?.reason).toMatch(
-      /host elements only/i,
-    );
+    expect(result.compiled).toContain("LocalList");
+    expect(result.code).toContain("<List />");
+    expect(result.code).not.toContain("farmBlocks.KeyedList");
   });
 
   it("assigns unique boundary ids when conditions and lists coexist", async () => {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { readFile, readdir, writeFile } from "node:fs/promises";
+import { readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
@@ -66,11 +66,18 @@ async function inspectBundle(compilerEnabled) {
   const source = sources.join("\n");
   const heavyComponentCompiled =
     /displayName:[`"]HeavyInteractionBenchmark[`"]/.test(source);
+  const componentIslandCompiled =
+    /displayName:[`"]ComponentIslandExperiment[`"]/.test(source);
 
   assert.equal(
     heavyComponentCompiled,
     compilerEnabled,
     `HeavyInteractionBenchmark compiler marker did not match compiler=${compilerEnabled}.`,
+  );
+  assert.equal(
+    componentIslandCompiled,
+    compilerEnabled,
+    `ComponentIslandExperiment compiler marker did not match compiler=${compilerEnabled}.`,
   );
 
   return {
@@ -78,6 +85,7 @@ async function inspectBundle(compilerEnabled) {
     rawBytes: Buffer.byteLength(source),
     gzipBytes: gzipSync(source).byteLength,
     heavyComponentCompiled,
+    componentIslandCompiled,
   };
 }
 
@@ -110,6 +118,7 @@ async function stopServer(server) {
 async function measureTrial(browser, trial, compilerEnabled, port) {
   const mode = compilerEnabled ? "on" : "off";
   process.stdout.write(`[heavy] building compiler ${mode} (${trial})...\n`);
+  await rm(path.resolve(".farm"), { force: true, recursive: true });
   await runCommand("pnpm", ["run", "build"], {
     FARM_REACT_COMPILER: String(compilerEnabled),
   });
@@ -156,85 +165,118 @@ async function measureTrial(browser, trial, compilerEnabled, port) {
       await root.locator(".workload-cell, .workload-cell i").count(),
       768,
     );
+    const islandRoot = page.locator('[data-benchmark="component-islands"]');
+    assert.equal(await islandRoot.locator(".component-island-workload .workload-cell").count(), 192);
+    assert.equal(
+      await islandRoot.locator(
+        ".component-island-workload .workload-cell, .component-island-workload .workload-cell i",
+      ).count(),
+      768,
+    );
 
     const result = await page.evaluate(
       async ({ measuredSamples, updatesPerSample, warmupUpdates }) => {
-        const root = document.querySelector('[data-benchmark="heavy"]');
-        const button = root?.querySelector('[data-action="heavy-update"]');
-        const tick = root?.querySelector('[data-metric="heavy-tick"]');
-        const executions = root?.querySelector(
-          '[data-metric="heavy-executions"]',
-        );
-        if (
-          !(root instanceof HTMLElement) ||
-          !(button instanceof HTMLButtonElement)
-        ) {
-          throw new Error("The heavy benchmark controls did not render.");
-        }
-        if (
-          !(tick instanceof HTMLElement) ||
-          !(executions instanceof HTMLElement)
-        ) {
-          throw new Error("The heavy benchmark metrics did not render.");
-        }
-
-        const updateOnce = () =>
-          new Promise((resolve, reject) => {
-            const expected = Number(tick.textContent) + 1;
-            let timeout;
-            const finish = () => {
-              if (Number(tick.textContent) !== expected) return;
-              observer.disconnect();
-              clearTimeout(timeout);
-              resolve();
-            };
-            const observer = new MutationObserver(finish);
-            observer.observe(tick, {
-              characterData: true,
-              childList: true,
-              subtree: true,
-            });
-            timeout = setTimeout(() => {
-              observer.disconnect();
-              reject(new Error(`Update ${expected} did not reach the DOM.`));
-            }, 2_000);
-            button.click();
-            finish();
-          });
-
-        const initialExecutions = Number(executions.textContent);
-        for (let index = 0; index < warmupUpdates; index += 1)
-          await updateOnce();
-
-        const samples = [];
-        for (let index = 0; index < measuredSamples; index += 1) {
-          const startedAt = performance.now();
-          for (let update = 0; update < updatesPerSample; update += 1) {
-            await updateOnce();
+        const measure = async ({ rootSelector, buttonSelector, tickSelector, executionSelector }) => {
+          const root = document.querySelector(rootSelector);
+          const button = root?.querySelector(buttonSelector);
+          const tick = root?.querySelector(tickSelector);
+          const executions = root?.querySelector(executionSelector);
+          if (
+            !(root instanceof HTMLElement) ||
+            !(button instanceof HTMLButtonElement) ||
+            !(tick instanceof HTMLElement) ||
+            !(executions instanceof HTMLElement)
+          ) {
+            throw new Error(`Benchmark controls did not render for ${rootSelector}.`);
           }
-          samples.push((performance.now() - startedAt) / updatesPerSample);
-        }
 
+          const staticWorkload = root.querySelector("[data-static-executions]");
+          const initialStaticExecutions = Number(
+            staticWorkload?.getAttribute("data-static-executions") || 0,
+          );
+          const updateOnce = () =>
+            new Promise((resolve, reject) => {
+              const expected = Number(tick.textContent) + 1;
+              let timeout;
+              const finish = () => {
+                if (Number(tick.textContent) !== expected) return;
+                observer.disconnect();
+                clearTimeout(timeout);
+                resolve();
+              };
+              const observer = new MutationObserver(finish);
+              observer.observe(tick, {
+                characterData: true,
+                childList: true,
+                subtree: true,
+              });
+              timeout = setTimeout(() => {
+                observer.disconnect();
+                reject(new Error(`Update ${expected} did not reach the DOM.`));
+              }, 2_000);
+              button.click();
+              finish();
+            });
+
+          const initialExecutions = Number(executions.textContent);
+          for (let index = 0; index < warmupUpdates; index += 1) await updateOnce();
+
+          const samples = [];
+          for (let index = 0; index < measuredSamples; index += 1) {
+            const startedAt = performance.now();
+            for (let update = 0; update < updatesPerSample; update += 1) {
+              await updateOnce();
+            }
+            samples.push((performance.now() - startedAt) / updatesPerSample);
+          }
+
+          return {
+            executionsAdded: Number(executions.textContent) - initialExecutions,
+            finalTick: Number(root.getAttribute("data-tick")),
+            samples,
+            staticExecutionsAdded:
+              Number(staticWorkload?.getAttribute("data-static-executions") || 0) -
+              initialStaticExecutions,
+          };
+        };
+
+        const heavy = await measure({
+          rootSelector: '[data-benchmark="heavy"]',
+          buttonSelector: '[data-action="heavy-update"]',
+          tickSelector: '[data-metric="heavy-tick"]',
+          executionSelector: '[data-metric="heavy-executions"]',
+        });
+        const heavyRoot = document.querySelector('[data-benchmark="heavy"]');
+        const islands = await measure({
+          rootSelector: '[data-benchmark="component-islands"]',
+          buttonSelector: '[data-action="island-update"]',
+          tickSelector: "[data-island-tick]",
+          executionSelector: '[data-metric="island-owner-executions"]',
+        });
         return {
-          active: root.getAttribute("data-active"),
-          executionsAdded: Number(executions.textContent) - initialExecutions,
-          finalLevel: Number(root.getAttribute("data-level")),
-          finalTick: Number(root.getAttribute("data-tick")),
-          readout: root
-            .querySelector('[data-metric="heavy-readout"]')
-            ?.textContent?.trim(),
-          samples,
+          heavy: {
+            ...heavy,
+            active: heavyRoot?.getAttribute("data-active"),
+            finalLevel: Number(heavyRoot?.getAttribute("data-level")),
+            readout: heavyRoot
+              ?.querySelector('[data-metric="heavy-readout"]')
+              ?.textContent?.trim(),
+          },
+          islands,
         };
       },
       { measuredSamples, updatesPerSample, warmupUpdates },
     );
 
     const totalUpdates = warmupUpdates + measuredSamples * updatesPerSample;
-    assert.equal(result.finalTick, totalUpdates);
-    assert.equal(result.finalLevel, (totalUpdates * 7) % 100);
-    assert.equal(result.active, String(totalUpdates % 2 === 1));
-    assert.equal(result.readout, `Frame ${totalUpdates}`);
-    assert.equal(result.executionsAdded, compilerEnabled ? 0 : totalUpdates);
+    assert.equal(result.heavy.finalTick, totalUpdates);
+    assert.equal(result.heavy.finalLevel, (totalUpdates * 7) % 100);
+    assert.equal(result.heavy.active, String(totalUpdates % 2 === 1));
+    assert.equal(result.heavy.readout, `Frame ${totalUpdates}`);
+    assert.equal(result.heavy.executionsAdded, compilerEnabled ? 0 : totalUpdates);
+    assert.equal(result.islands.finalTick, totalUpdates);
+    assert.equal(result.islands.executionsAdded, compilerEnabled ? 0 : totalUpdates);
+    assert.equal(result.islands.staticExecutionsAdded, compilerEnabled ? 0 : totalUpdates);
     assert.deepEqual(browserErrors, []);
 
     const screenshot = `/tmp/farm-react-heavy-compiler-${mode}-${trial}.png`;
@@ -245,15 +287,19 @@ async function measureTrial(browser, trial, compilerEnabled, port) {
       trial,
       bundle,
       browserErrors,
-      executionsAdded: result.executionsAdded,
+      executionsAdded: result.heavy.executionsAdded,
+      componentIslandExecutionsAdded: result.islands.executionsAdded,
+      staticComponentExecutionsAdded: result.islands.staticExecutionsAdded,
       finalState: {
-        active: result.active,
-        level: result.finalLevel,
-        tick: result.finalTick,
+        active: result.heavy.active,
+        level: result.heavy.finalLevel,
+        tick: result.heavy.finalTick,
       },
-      samples: result.samples,
+      samples: result.heavy.samples,
+      componentIslandSamples: result.islands.samples,
       screenshot,
-      timing: timingSummary(result.samples),
+      timing: timingSummary(result.heavy.samples),
+      componentIslandTiming: timingSummary(result.islands.samples),
     };
   } finally {
     await context.close();
@@ -290,6 +336,20 @@ const medianReductionPercent =
   100;
 const p95ReductionPercent =
   ((baselineTiming.p95Ms - compiledTiming.p95Ms) / baselineTiming.p95Ms) * 100;
+const baselineComponentIslandTiming = timingSummary(
+  baselines.flatMap((trial) => trial.componentIslandSamples),
+);
+const compiledComponentIslandTiming = timingSummary(compiled.componentIslandSamples);
+const componentIslandSpeedup =
+  baselineComponentIslandTiming.medianMs / compiledComponentIslandTiming.medianMs;
+const componentIslandMedianReductionPercent =
+  ((baselineComponentIslandTiming.medianMs - compiledComponentIslandTiming.medianMs) /
+    baselineComponentIslandTiming.medianMs) *
+  100;
+const componentIslandP95ReductionPercent =
+  ((baselineComponentIslandTiming.p95Ms - compiledComponentIslandTiming.p95Ms) /
+    baselineComponentIslandTiming.p95Ms) *
+  100;
 
 const report = {
   result:
@@ -325,6 +385,25 @@ const report = {
     p95ReductionPercent,
     speedup,
   },
+  componentIslands: {
+    baseline: {
+      executionsAddedPerTrial: baselines.map(
+        (trial) => trial.componentIslandExecutionsAdded,
+      ),
+      staticComponentExecutionsAddedPerTrial: baselines.map(
+        (trial) => trial.staticComponentExecutionsAdded,
+      ),
+      timing: baselineComponentIslandTiming,
+    },
+    compiler: {
+      executionsAdded: compiled.componentIslandExecutionsAdded,
+      staticComponentExecutionsAdded: compiled.staticComponentExecutionsAdded,
+      timing: compiledComponentIslandTiming,
+    },
+    medianReductionPercent: componentIslandMedianReductionPercent,
+    p95ReductionPercent: componentIslandP95ReductionPercent,
+    speedup: componentIslandSpeedup,
+  },
   screenshots: trials.map((trial) => trial.screenshot),
 };
 
@@ -334,4 +413,8 @@ console.log(JSON.stringify({ ...report, reportPath }, null, 2));
 assert(
   compiledTiming.medianMs < baselineTiming.medianMs,
   `Compiler median ${compiledTiming.medianMs.toFixed(3)}ms did not beat baseline ${baselineTiming.medianMs.toFixed(3)}ms.`,
+);
+assert(
+  compiledComponentIslandTiming.medianMs < baselineComponentIslandTiming.medianMs,
+  `Component-island compiler median ${compiledComponentIslandTiming.medianMs.toFixed(3)}ms did not beat baseline ${baselineComponentIslandTiming.medianMs.toFixed(3)}ms.`,
 );

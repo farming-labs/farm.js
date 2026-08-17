@@ -331,12 +331,13 @@ satisfy all of these rules:
 | Body                | Top-level `useState` declarations, optional compiler-safe derived values and synchronous named handlers, then one unconditional JSX return. |
 | State               | `const [value, setValue] = useState(initial)`, including lazy initializers, multiple cells, and queued functional updates.                  |
 | Root                | Exactly one lowercase host JSX element such as `button`, `section`, `input`, or `div`.                                                      |
-| Tree                | A statically known host tree. Eligible conditional and keyed-list boundaries may change one compiler-isolated child location.               |
+| Tree                | A statically known host tree around eligible conditional, keyed-list, and React component-island boundaries.                                |
 | Text bindings       | State-driven text in a leaf host element.                                                                                                   |
 | Attribute bindings  | Basic attributes, controlled form properties, and individual properties in one inline `style` object.                                       |
 | Events              | Inline handlers and synchronous `const` or function-declaration handlers, used directly or called inside an inline JSX handler.             |
 | Conditional blocks  | `condition && <host />` or `condition ? <host /> : <host />`; `null` and `false` are supported empty ternary branches.                      |
 | Keyed lists         | A direct keyed `items.map(...)`, or an explicit imported `List`, when it is the only meaningful child of its host container.                |
+| Component islands   | Stable imported or module-level component identifiers with explicit compiler-safe props and no JSX children, spread, `ref`, or `key`.       |
 
 This component is eligible:
 
@@ -514,8 +515,8 @@ The first automatic contract is deliberately narrow:
   across insertion, removal, or reordering.
 - The optimized `List` shape uses inline `by` and child functions, a compiler-safe `each`
   expression, and an item-derived key.
-- The map or `List` must be the only meaningful child of its host container. This keeps all
-  compiler-prepared DOM paths outside the boundary stable.
+- The map or `List` must be the only meaningful child of its host container. This keeps the first
+  keyed-boundary contract narrow and easy to audit.
 - Chained expressions such as `items.filter(...).map(...)`, mixed static siblings, spread children,
   hooks in the callback, and other unproven shapes fall back to normal React.
 
@@ -524,24 +525,73 @@ Farm does not implement an LIS move algorithm in this release. A compiler-owned 
 safe after the compiler owns an entire host-only list island; this boundary intentionally keeps
 React as the sole DOM and Fiber owner.
 
+### React component islands
+
+Ordinary child components can stay under React while the compiler owns the surrounding update
+graph:
+
+```tsx
+import { Chart } from "./chart";
+import { Header } from "./header";
+
+export function Dashboard() {
+  const [count, setCount] = useState(0);
+
+  return (
+    <main>
+      <Header title="Dashboard" />
+      <button onClick={() => setCount((value) => value + 1)}>Count: {count}</button>
+      <Chart value={count} />
+    </main>
+  );
+}
+```
+
+`Header` has no dependency on `count`, so a compiled local update leaves it mounted without
+rendering it again. `Chart` depends on `count`, so the compiler replaces that location with a small
+internal component boundary and records the exact state dependency. When `count` changes, the
+button binding is patched directly and only the `Chart` boundary asks React to update. The
+`Dashboard` function does not execute again.
+
+This does not compile or inspect `Chart`. React continues to own its render, Hooks, context, local
+state, effects, events, lifecycle, reconciliation, errors, SSR, and hydration. Keeping the same
+component type and boundary position preserves child state across parent-cell updates. Context
+updates still reach consumers inside the island even when the compiled owner is memoized.
+
+The first supported shape is intentionally conservative:
+
+- The component name is one direct imported or module-level identifier such as `Chart`.
+- Props are explicit strings, booleans, or compiler-safe expressions. Inline event handlers may
+  call supported setters.
+- A prop that depends on local compiler state makes the component a subscribed island. A component
+  with no local-state dependency remains an ordinary, unchanged React child.
+- The child may internally return `null`, fragments, multiple elements, or other components.
+- JSX children, spreads, `ref`, `key`, member expressions such as `UI.Chart`, prop-selected dynamic
+  component types, render props, and inline object/array/JSX values fall back to normal React.
+
+Direct DOM bindings now use generated private callback refs instead of depending only on sibling
+indexes. This matters when an earlier React-owned child changes its number of DOM nodes: the
+compiler still holds the exact target element and cannot accidentally patch a different sibling.
+The refs produce no `data-*` marker or other extra server markup.
+
 ### What falls back to React
 
-| Unsupported shape                                                        | Why React keeps ownership                                                           |
-| ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
-| Unkeyed/index-keyed/chained maps, mixed list siblings, or element arrays | Their structure or item identity is outside the isolated keyed-boundary contract.   |
-| Fragments or unsupported/nested conditional JSX                          | Their structure is outside the current single-location host-block contract.         |
-| Custom child components outside an eligible keyed-list boundary          | A child component has its own props, hooks, lifecycle, and reconciliation boundary. |
-| Effects or hooks other than the supported `useState` shape               | Their lifecycle and ordering must remain under React's hook dispatcher.             |
-| `ref` or `dangerouslySetInnerHTML`                                       | They directly participate in DOM ownership.                                         |
-| Stateful `children` or `key` bindings outside an eligible boundary       | These need structure or identity semantics.                                         |
-| Conditional style objects, style spreads, methods, or computed names     | The final property set or precedence cannot be prepared statically.                 |
-| JSX attribute spreads or namespaced attributes                           | The compiler cannot currently enumerate a stable binding contract.                  |
-| Multiple/conditional returns or impure/control-flow statements           | The compiler only lowers a single, statically analyzable render path.               |
-| Derived calls, assignments, identity-bearing values, functions, or JSX   | Their evaluation timing, side effects, or identity cannot yet be preserved safely.  |
-| Nested, computed, or rest props destructuring                            | These patterns need additional parameter-shape and identity analysis.               |
-| Async/generator/generic handlers or named handlers outside JSX events    | Their scheduling, identity, or closure semantics are outside the current lowering.  |
-| Async/generator or generic components                                    | These function shapes are outside the current lowering.                             |
-| Setters called outside JSX event handlers                                | The compiler only controls and batches event-driven local updates.                  |
+| Unsupported shape                                                          | Why React keeps ownership                                                          |
+| -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Unkeyed/index-keyed/chained maps, mixed list siblings, or element arrays   | Their structure or item identity is outside the isolated keyed-boundary contract.  |
+| Fragments or unsupported/nested conditional JSX                            | Their structure is outside the current single-location host-block contract.        |
+| Dynamic/member component types, component spreads, refs, keys, or children | Their identity or ownership is outside the first component-island contract.        |
+| Effects or hooks other than the supported `useState` shape                 | Their lifecycle and ordering must remain under React's hook dispatcher.            |
+| `ref` or `dangerouslySetInnerHTML`                                         | They directly participate in DOM ownership.                                        |
+| Stateful `children` or `key` bindings outside an eligible boundary         | These need structure or identity semantics.                                        |
+| Conditional style objects, style spreads, methods, or computed names       | The final property set or precedence cannot be prepared statically.                |
+| JSX attribute spreads or namespaced attributes                             | The compiler cannot currently enumerate a stable binding contract.                 |
+| Multiple/conditional returns or impure/control-flow statements             | The compiler only lowers a single, statically analyzable render path.              |
+| Derived calls, assignments, identity-bearing values, functions, or JSX     | Their evaluation timing, side effects, or identity cannot yet be preserved safely. |
+| Nested, computed, or rest props destructuring                              | These patterns need additional parameter-shape and identity analysis.              |
+| Async/generator/generic handlers or named handlers outside JSX events      | Their scheduling, identity, or closure semantics are outside the current lowering. |
+| Async/generator or generic components                                      | These function shapes are outside the current lowering.                            |
+| Setters called outside JSX event handlers                                  | The compiler only controls and batches event-driven local updates.                 |
 
 Keys do not make list reconciliation unnecessary. A key tells React which child identity survives
 an insert, removal, or move; React still compares the dynamic children. The compiler uses that
@@ -566,6 +616,7 @@ createCompiledComponent({
     {
       kind: "text",
       path: [],
+      target: 0,
       dependencies: [0],
       read: (_props, state) => ["Count: ", state[0].get()],
     },
@@ -582,16 +633,17 @@ do not receive the runtime import.
 The generated runtime wrapper is still a React component. Its responsibilities are split as
 follows:
 
-| React owns                                     | Compiler runtime owns                                           |
-| ---------------------------------------------- | --------------------------------------------------------------- |
-| Initial element creation and placement         | Local compiler-cell values                                      |
-| SSR markup and hydration                       | Queuing local setter calls into one microtask                   |
-| JSX event registration and dispatch            | Comparing flushed values with `Object.is`                       |
-| Parent-driven prop updates                     | Selecting bindings whose state dependencies changed             |
-| Unsupported trees, hooks, refs, and lifecycles | Patching precomputed text/attribute targets after local updates |
-| Host creation/removal inside an eligible block | Refreshing only the matching internal conditional boundary      |
-| Keyed row identity, reconciliation, and DOM    | Refreshing only the matching internal keyed-list boundary       |
-| Unmounting and the surrounding component tree  | Reapplying bindings after a parent-driven React update          |
+| React owns                                      | Compiler runtime owns                                                |
+| ----------------------------------------------- | -------------------------------------------------------------------- |
+| Initial element creation and placement          | Local compiler-cell values                                           |
+| SSR markup and hydration                        | Queuing local setter calls into one microtask                        |
+| JSX event registration and dispatch             | Comparing flushed values with `Object.is`                            |
+| Parent-driven prop updates                      | Selecting bindings whose state dependencies changed                  |
+| Unsupported trees, hooks, refs, and lifecycles  | Patching stable ref-owned text/attribute targets after local updates |
+| Host creation/removal inside an eligible block  | Refreshing only the matching internal conditional boundary           |
+| Keyed row identity, reconciliation, and DOM     | Refreshing only the matching internal keyed-list boundary            |
+| Component render, Hooks, context, and lifecycle | Refreshing only a dependent React component-island boundary          |
+| Unmounting and the surrounding component tree   | Reapplying bindings after a parent-driven React update               |
 
 Queued functional setters preserve the event's state snapshot. Two calls such as
 `setCount(value => value + 1)` are applied in order during the same microtask flush, while reads
@@ -627,12 +679,11 @@ normal recovery path.
 
 ### Safety reasoning
 
-The compiler uses fallback as a semantic boundary, not as an error-recovery trick. A precomputed
-path is only correct while the host tree has the same shape. Conditional and keyed-list boundaries
-isolate the dynamic location and give its structure back to React. Other dynamic children, custom
-components outside those boundaries, refs, and effects can change ownership or lifecycle in ways
-the current compiler does not yet model. Letting React handle them is the optimization's
-correctness mechanism.
+The compiler uses fallback as a semantic boundary, not as an error-recovery trick. Generated
+callback refs keep direct DOM targets stable even when a React component island returns `null`, a
+fragment, or multiple nodes. Conditional, keyed-list, and component boundaries give dynamic
+structure back to React. Unsupported dynamic component types, refs, effects, and other unproven
+shapes keep the complete component on React; fallback is the optimization's correctness mechanism.
 
 Parent-driven prop updates also remain React updates. After React reconciles the new props, the
 runtime reapplies compiler-owned bindings from the current local cells so prop changes and local
@@ -658,23 +709,32 @@ The package and example test suites verify more than generated code:
   randomized updates;
 - automatic keyed maps and explicit `List` boundaries preserve keyed DOM nodes and stateful row
   identity across inserts, removals, updates, and reorders without rerunning the outer component;
+- component islands update only dependent children, preserve child-local state and context, route
+  failures through React error boundaries, hydrate in Strict Mode, and safely drop queued updates
+  after unmount;
+- stable ref targets remain correct when an earlier island switches among `null`, one node, and a
+  multi-node fragment;
+- 1,000 deterministic object, array, and nullish component-prop transitions match normal React;
 - 1,000 deterministic randomized list operations produce the same ordered output as normal React;
 - the public `List` renders iterable and nullish collections correctly with the compiler off;
 - the packaged runtime is exercised separately with React 18.3 and React 19;
 - boolean `data-*` and `aria-*` attributes keep React-compatible string values; and
-- unsupported list shapes, effects, refs, and custom child components outside a keyed boundary
-  remain on React without corrupting output.
+- unsupported list shapes, effects, refs, and unsupported dynamic component-island shapes remain
+  on React without corrupting output.
 
-The heavy example uses a fixed 768-host-node tree with three state cells and sparse bindings. Its
-compiler-off → compiler-on crossover run measures a deliberately favorable supported workload. The
-reference run reported 88.2% lower median update latency, 86% lower p95 latency, and zero added
-component executions on the compiled path. These numbers describe that warm update path, not page
-load, build time, browser layout/paint, network work, effects, child-component updates, or general
-React performance.
+The heavy example measures both a fixed 768-host-node tree with sparse bindings and a component
+island beside a React-owned 768-node static component. Its compiler-off → compiler-on crossover
+run measures deliberately favorable supported workloads. An Apple M1 and Chromium 145 reference
+run measured the direct-binding median at `0.175 ms` without the compiler and `0.015 ms` with it—
+91.4% lower, or 11.7× faster—with zero added component executions. The component-island result
+separately includes the dependent child React render and verifies that the static sibling and
+compiled owner add zero update executions. Its median child-commit latency fell from `0.165 ms` to
+`0.025 ms`—84.8% lower, or 6.6× faster. These are warm update-path measurements, not page load,
+build, layout, paint, network, or general React performance claims.
 
-Run the benchmark on target devices before using its timing as a product estimate. The structural
-result—no extra component execution or React commit for an eligible local update—is the more stable
-property.
+Run the benchmark on target devices before using its timing as a product estimate. The more stable
+structural result is zero owner and unchanged-sibling executions; direct bindings also avoid a
+React commit, while a dependent component island still performs its required child commit.
 
 ### Recommended rollout
 
@@ -688,8 +748,8 @@ property.
 
 The [`examples/react-compiler`](https://github.com/farming-labs/farm.js/tree/main/examples/react-compiler)
 app contains batching, multiple-binding, common-syntax, calculated-style, controlled-form,
-automatic and explicit keyed-list, compiler-on/off, and heavy-interaction experiments. The standalone starter
-intentionally keeps the first experience focused.
+automatic and explicit keyed-list, component-island, compiler-on/off, and heavy-interaction
+experiments. The standalone starter intentionally keeps the first experience focused.
 
 ## React-specific FARMJS APIs
 

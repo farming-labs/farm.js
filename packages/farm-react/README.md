@@ -53,7 +53,8 @@ The directive is configurable and only has meaning in annotation mode.
 
 The current compiler handles components that it can prove have:
 
-- one host-element root and a statically known host-element tree;
+- one host-element root and a statically known host-element tree around supported React component
+  islands;
 - an identifier props parameter or flat object destructuring with aliases and defaults;
 - top-level `useState` declarations;
 - optional compiler-safe derived `const` values declared after state and in source order;
@@ -64,11 +65,12 @@ The current compiler handles components that it can prove have:
   statically known locations;
 - direct item-keyed `collection.map(...)` children and explicit `List` boundaries at statically
   known container locations;
+- stable module-level child components with compiler-safe props;
 - React-managed event handlers; and
 - no refs, effects, or unsupported dynamic child structures.
 
 The generated component preserves React ownership of placement, props, events, SSR, and hydration.
-Local state cells batch updates into a microtask and patch only compiler-known DOM paths. For an
+Local state cells batch updates into a microtask and patch only compiler-known DOM targets. For an
 eligible conditional, the runtime refreshes one small internal React boundary instead of executing
 the user component again. React mounts, replaces, or removes the selected branch, so events,
 unmounting, SSR, hydration, and error boundaries keep React semantics.
@@ -106,6 +108,24 @@ row component, not directly inside the iteration callback. With the compiler ena
 optimized explicit shape requires inline `by` and child functions, a safe `each` expression, an
 item-derived key, and no meaningful siblings in the same host container. Other shapes keep normal
 React behavior.
+
+A normal child component can become an automatic React-owned island:
+
+```tsx
+<Header title="Dashboard" />
+<Chart value={count} />
+```
+
+If `count` changes, the compiler leaves the outer component and `Header` alone and asks React to
+render only the `Chart` boundary. `Chart` remains ordinary React and may use Hooks, context, local
+state, effects, lifecycle, and error boundaries. The first contract accepts stable imported or
+module-level identifiers with explicit compiler-safe props. Component children, spreads, `ref`,
+`key`, member-expression or prop-selected component types, and identity-bearing inline prop values
+fall back to the complete React component.
+
+Generated callback refs give directly patched host elements stable private target identities. A
+React-owned component may therefore return `null`, a fragment, or multiple host nodes without
+shifting an unrelated compiler binding. These refs do not add attributes to SSR output.
 
 Conditional blocks deliberately start with a narrow contract. Each non-empty branch must have one
 lowercase host root and a static host-only subtree. An empty ternary branch may be `null` or `false`.

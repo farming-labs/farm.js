@@ -41,6 +41,7 @@ interface PropsPlan {
 interface PendingDomBinding {
   kind: "text" | "attribute" | "style";
   path: number[];
+  target?: number;
   dependencies: number[];
   name?: string;
   value: t.Expression;
@@ -67,6 +68,18 @@ interface KeyedListPlan {
   syntax: "map" | "list";
 }
 
+interface ComponentIslandPlan {
+  id: number;
+  dependencies: number[];
+  location: number[];
+}
+
+interface ComponentIslandAnalysis {
+  islands?: ComponentIslandPlan[];
+  components?: Set<t.JSXElement>;
+  reason?: string;
+}
+
 interface Candidate {
   name: string;
   path: NodePath<t.FunctionDeclaration | t.FunctionExpression | t.ArrowFunctionExpression>;
@@ -78,6 +91,11 @@ const SAFE_MATH_CALLS = new Set(["abs", "ceil", "floor", "max", "min", "round", 
 
 function isComponentName(name: string): boolean {
   return /^[A-Z]/.test(name);
+}
+
+function isHostElement(element: t.JSXElement): boolean {
+  const name = element.openingElement.name;
+  return t.isJSXIdentifier(name) && /^[a-z]/.test(name.name);
 }
 
 function directiveValues(node: { directives?: readonly t.Directive[] | null }): string[] {
@@ -174,6 +192,7 @@ function rewriteDestructuredPropAccess<T extends t.Expression>(
   traverse(file, {
     ReferencedIdentifier(path) {
       if (!names.has(path.node.name) || path.scope.hasBinding(path.node.name)) return;
+      if (path.parentPath.isJSXOpeningElement() || path.parentPath.isJSXClosingElement()) return;
       path.replaceWith(
         t.memberExpression(t.cloneNode(propsParameter), t.identifier(path.node.name)),
       );
@@ -911,6 +930,194 @@ function lowerKeyedLists(
   return lowered;
 }
 
+function analyzeComponentIslands(
+  root: t.JSXElement,
+  statesByValue: ReadonlyMap<string, StateBinding>,
+  safeGlobals: ReadonlySet<string>,
+  allowedComponentNames: ReadonlySet<string>,
+  keyedElements: ReadonlySet<t.JSXElement>,
+  startingId: number,
+): ComponentIslandAnalysis {
+  const islands: ComponentIslandPlan[] = [];
+  const components = new Set<t.JSXElement>();
+
+  const visit = (element: t.JSXElement, location: number[]): string | undefined => {
+    for (let childIndex = 0; childIndex < element.children.length; childIndex += 1) {
+      const child = element.children[childIndex];
+      if (!t.isJSXElement(child) || keyedElements.has(child)) continue;
+      if (isHostElement(child)) {
+        const reason = visit(child, [...location, childIndex]);
+        if (reason) return reason;
+        continue;
+      }
+
+      const name = child.openingElement.name;
+      if (!t.isJSXIdentifier(name) || !isComponentName(name.name)) {
+        return "component islands require a direct component identifier";
+      }
+      if (!allowedComponentNames.has(name.name)) {
+        return `component island ${name.name} must reference a stable module-level component`;
+      }
+      if (meaningfulJsxChildren(child).length > 0) {
+        return `component island ${name.name} does not support children yet`;
+      }
+
+      const dependencies = new Set<number>();
+      for (const attribute of child.openingElement.attributes) {
+        if (t.isJSXSpreadAttribute(attribute)) {
+          return `component island ${name.name} does not support JSX attribute spreads`;
+        }
+        const attributeName = jsxAttributeName(attribute);
+        if (!attributeName) {
+          return `component island ${name.name} does not support namespaced JSX attributes`;
+        }
+        if (attributeName === "ref" || attributeName === "key" || attributeName === "children") {
+          return `component island ${name.name} does not support ${attributeName} yet`;
+        }
+        if (
+          !t.isJSXExpressionContainer(attribute.value) ||
+          t.isJSXEmptyExpression(attribute.value.expression)
+        ) {
+          continue;
+        }
+
+        const expression = attribute.value.expression;
+        const isEventFunction =
+          /^on[A-Z]/.test(attributeName) &&
+          (t.isArrowFunctionExpression(expression) || t.isFunctionExpression(expression));
+        if (!isEventFunction) {
+          const unsupported = validateDerivedExpression(expression, safeGlobals);
+          if (unsupported) {
+            return `component island ${name.name} prop ${attributeName} cannot use ${unsupported}`;
+          }
+        }
+        collectStateDependencies(expression, statesByValue).forEach((dependency) =>
+          dependencies.add(dependency),
+        );
+      }
+
+      components.add(child);
+      if (dependencies.size > 0) {
+        islands.push({
+          id: startingId + islands.length,
+          dependencies: [...dependencies].sort((left, right) => left - right),
+          location: [...location, childIndex],
+        });
+      }
+    }
+    return undefined;
+  };
+
+  const reason = visit(root, []);
+  return reason ? { reason } : { islands, components };
+}
+
+function componentIslandBoundary(
+  blockRuntime: t.Identifier,
+  plan: ComponentIslandPlan,
+  source: t.JSXElement,
+): t.JSXElement {
+  const name = t.jsxMemberExpression(
+    t.jsxIdentifier(blockRuntime.name),
+    t.jsxIdentifier("Component"),
+  );
+  return t.jsxElement(
+    t.jsxOpeningElement(
+      name,
+      [
+        t.jsxAttribute(t.jsxIdentifier("id"), t.jsxExpressionContainer(t.numericLiteral(plan.id))),
+        t.jsxAttribute(
+          t.jsxIdentifier("render"),
+          t.jsxExpressionContainer(t.arrowFunctionExpression([], t.cloneNode(source, true))),
+        ),
+      ],
+      true,
+    ),
+    null,
+    [],
+    true,
+  );
+}
+
+function lowerComponentIslands(
+  root: t.JSXElement,
+  plans: readonly ComponentIslandPlan[],
+  blockRuntime: t.Identifier,
+): t.JSXElement {
+  if (plans.length === 0) return t.cloneNode(root, true);
+  const lowered = t.cloneNode(root, true);
+  const plansByLocation = new Map(plans.map((plan) => [plan.location.join("."), plan]));
+
+  const visit = (element: t.JSXElement, location: number[]): void => {
+    element.children = element.children.map((child, childIndex) => {
+      if (!t.isJSXElement(child)) return child;
+      const childLocation = [...location, childIndex];
+      const plan = plansByLocation.get(childLocation.join("."));
+      if (plan) return componentIslandBoundary(blockRuntime, plan, child);
+      if (isHostElement(child)) visit(child, childLocation);
+      return child;
+    });
+  };
+
+  visit(lowered, []);
+  return lowered;
+}
+
+function assignStableBindingTargets(bindings: readonly PendingBinding[]): void {
+  const targetByPath = new Map<string, number>();
+  for (const binding of bindings) {
+    if (binding.kind === "block") continue;
+    const key = binding.path.join(".");
+    let target = targetByPath.get(key);
+    if (target === undefined) {
+      target = targetByPath.size;
+      targetByPath.set(key, target);
+    }
+    binding.target = target;
+  }
+}
+
+function lowerStableBindingTargets(
+  root: t.JSXElement,
+  bindings: readonly PendingBinding[],
+  blockRuntime: t.Identifier,
+): t.JSXElement {
+  const lowered = t.cloneNode(root, true);
+  const targetByPath = new Map<string, number>();
+  for (const binding of bindings) {
+    if (binding.kind !== "block" && binding.target !== undefined) {
+      targetByPath.set(binding.path.join("."), binding.target);
+    }
+  }
+
+  const visit = (element: t.JSXElement, path: number[]): void => {
+    const target = targetByPath.get(path.join("."));
+    if (target !== undefined && path.length > 0) {
+      element.openingElement.attributes.push(
+        t.jsxAttribute(
+          t.jsxIdentifier("ref"),
+          t.jsxExpressionContainer(
+            t.callExpression(
+              t.memberExpression(t.cloneNode(blockRuntime), t.identifier("target")),
+              [t.numericLiteral(target)],
+            ),
+          ),
+        ),
+      );
+    }
+
+    let elementIndex = 0;
+    for (const child of element.children) {
+      if (!t.isJSXElement(child) || !isHostElement(child)) continue;
+      visit(child, [...path, elementIndex]);
+      elementIndex += 1;
+    }
+  };
+
+  visit(lowered, []);
+  return lowered;
+}
+
 function analyzeHostTree(
   root: t.JSXElement,
   statesByValue: ReadonlyMap<string, StateBinding>,
@@ -918,6 +1125,7 @@ function analyzeHostTree(
   conditionalExpressions: ReadonlySet<t.Expression>,
   keyedExpressions: ReadonlySet<t.Expression>,
   keyedElements: ReadonlySet<t.JSXElement>,
+  componentElements: ReadonlySet<t.JSXElement>,
 ): { bindings?: PendingBinding[]; reason?: string } {
   const bindings: PendingBinding[] = [];
 
@@ -998,7 +1206,8 @@ function analyzeHostTree(
     }
 
     const nestedElements = element.children.filter(
-      (child): child is t.JSXElement => t.isJSXElement(child) && !keyedElements.has(child),
+      (child): child is t.JSXElement =>
+        t.isJSXElement(child) && isHostElement(child) && !keyedElements.has(child),
     );
     const expressionChildren = element.children.filter((child): child is t.JSXExpressionContainer =>
       t.isJSXExpressionContainer(child),
@@ -1015,8 +1224,12 @@ function analyzeHostTree(
     const hasKeyedElement = element.children.some(
       (child) => t.isJSXElement(child) && keyedElements.has(child),
     );
+    const hasComponentElement = element.children.some(
+      (child) => t.isJSXElement(child) && componentElements.has(child),
+    );
     const hasDynamicBlocks =
       hasKeyedElement ||
+      hasComponentElement ||
       expressionChildren.some(
         (child) =>
           !t.isJSXEmptyExpression(child.expression) &&
@@ -1057,7 +1270,7 @@ function analyzeHostTree(
       }
       let elementIndex = 0;
       for (const child of element.children) {
-        if (!t.isJSXElement(child) || keyedElements.has(child)) continue;
+        if (!t.isJSXElement(child) || !isHostElement(child) || keyedElements.has(child)) continue;
         const reason = visit(child, [...path, elementIndex]);
         if (reason) return reason;
         elementIndex += 1;
@@ -1178,6 +1391,13 @@ function bindingObject(
       t.arrayExpression(binding.path.map((part) => t.numericLiteral(part))),
     ),
   );
+  if (binding.target !== undefined) {
+    properties.splice(
+      2,
+      0,
+      t.objectProperty(t.identifier("target"), t.numericLiteral(binding.target)),
+    );
+  }
   if (binding.name)
     properties.push(t.objectProperty(t.identifier("name"), t.stringLiteral(binding.name)));
   properties.push(
@@ -1356,6 +1576,38 @@ function compileCandidate(
   const keyedElements = new Set(
     keyedLists.filter((list) => list.syntax === "list").map((list) => list.source as t.JSXElement),
   );
+  const referencedComponentNames = new Set<string>();
+  traverse(expressionFile(t.cloneNode(expandedRoot, true)), {
+    JSXOpeningElement(componentPath) {
+      const componentName = componentPath.node.name;
+      if (t.isJSXIdentifier(componentName) && isComponentName(componentName.name)) {
+        referencedComponentNames.add(componentName.name);
+      }
+    },
+  });
+  const allowedComponentNames = new Set(
+    [...referencedComponentNames].filter((componentName) => {
+      if (listNames.has(componentName)) return false;
+      const binding = path.scope.getBinding(componentName);
+      return Boolean(
+        binding?.constant &&
+        binding.scope.path.isProgram() &&
+        binding.kind !== "let" &&
+        binding.kind !== "var",
+      );
+    }),
+  );
+  const componentAnalysis = analyzeComponentIslands(
+    expandedRoot,
+    statesByValue,
+    safeGlobals,
+    allowedComponentNames,
+    keyedElements,
+    conditionalBlocks.length + keyedLists.length,
+  );
+  if (componentAnalysis.reason) return componentAnalysis.reason;
+  const componentIslands = componentAnalysis.islands || [];
+  const componentElements = componentAnalysis.components || new Set<t.JSXElement>();
   const analysis = analyzeHostTree(
     expandedRoot,
     statesByValue,
@@ -1363,14 +1615,22 @@ function compileCandidate(
     conditionalExpressions,
     keyedExpressions,
     keyedElements,
+    componentElements,
   );
   if (analysis.reason) return analysis.reason;
+  assignStableBindingTargets(analysis.bindings || []);
 
   const stateParameter = path.scope.generateUidIdentifier("farmState");
   const blockParameter = path.scope.generateUidIdentifier("farmBlocks");
   const definitionIdentifier = path.scope.generateUidIdentifier(`${name}Compiled`);
   const propsParameter = propsPlan.definitionParameter;
-  const rootWithLists = lowerKeyedLists(expandedRoot, keyedLists, blockParameter, listNames);
+  const rootWithTargets = lowerStableBindingTargets(
+    expandedRoot,
+    analysis.bindings || [],
+    blockParameter,
+  );
+  const rootWithIslands = lowerComponentIslands(rootWithTargets, componentIslands, blockParameter);
+  const rootWithLists = lowerKeyedLists(rootWithIslands, keyedLists, blockParameter, listNames);
   const rootWithBlocks = lowerConditionalBlocks(rootWithLists, conditionalBlocks, blockParameter);
   const rewrittenRoot = rewriteStateAccess(
     rootWithBlocks,
@@ -1437,6 +1697,11 @@ function compileCandidate(
               kind: "block" as const,
               id: list.id,
               dependencies: list.dependencies,
+            })),
+            ...componentIslands.map((island) => ({
+              kind: "block" as const,
+              id: island.id,
+              dependencies: island.dependencies,
             })),
           ].map((binding) =>
             bindingObject(binding, propsParameter, stateParameter, statesByValue, statesBySetter),

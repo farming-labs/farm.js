@@ -317,18 +317,6 @@ describe("React AOT compiler safety boundaries", () => {
       reason: /ref requires React ownership/i,
     },
     {
-      name: "custom child component",
-      source: `
-        import { useState } from "react";
-        import { Label } from "./label";
-        export function Parent() {
-          const [count, setCount] = useState(0);
-          return <div onClick={() => setCount(count + 1)}><Label value={count} /></div>;
-        }
-      `,
-      reason: /host elements only/i,
-    },
-    {
       name: "effect lifecycle",
       source: `
         import { useEffect, useState } from "react";

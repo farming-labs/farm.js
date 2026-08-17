@@ -303,6 +303,70 @@ const testSource = String.raw`
   assert.equal(keyedExecutions, initialKeyedExecutions);
   flushSync(() => keyedRoot.unmount());
 
+  let islandExecutions = 0;
+  let islandChildExecutions = 0;
+  function IslandChild({ value }) {
+    islandChildExecutions += 1;
+    const [selected, setSelected] = React.useState(false);
+    return React.createElement(
+      "button",
+      { "data-island": true, onClick: () => setSelected((current) => !current) },
+      value,
+      ":",
+      selected ? "selected" : "idle",
+    );
+  }
+  const ComponentIslands = createCompiledComponent({
+    displayName: "CompatibilityComponentIslands",
+    initialize: () => [0],
+    render(_props, state, blocks) {
+      islandExecutions += 1;
+      return React.createElement(
+        "section",
+        null,
+        React.createElement(
+          "button",
+          { "data-update": true, onClick: () => state[0].set((value) => Number(value) + 1) },
+          "Update",
+        ),
+        React.createElement(
+          "output",
+          { ref: blocks.target(0) },
+          Number(state[0].get()),
+        ),
+        React.createElement(blocks.Component, {
+          id: 0,
+          render: () => React.createElement(IslandChild, { value: Number(state[0].get()) }),
+        }),
+      );
+    },
+    bindings: [
+      {
+        kind: "text",
+        path: [1],
+        target: 0,
+        dependencies: [0],
+        read: (_props, state) => state[0].get(),
+      },
+      { kind: "block", id: 0, dependencies: [0] },
+    ],
+  });
+  const islandContainer = document.createElement("div");
+  document.body.append(islandContainer);
+  const islandRoot = createRoot(islandContainer);
+  flushSync(() => islandRoot.render(React.createElement(ComponentIslands)));
+  islandContainer.querySelector("[data-island]").click();
+  flushSync(() => {});
+  islandContainer.querySelector("[data-update]").click();
+  await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync(() => {});
+  assert.equal(islandContainer.querySelector("output").textContent, "1");
+  assert.equal(islandContainer.querySelector("[data-island]").textContent, "1:selected");
+  assert.equal(islandExecutions, 1);
+  assert.equal(islandChildExecutions, 3);
+  flushSync(() => islandRoot.unmount());
+
   const hydrationContainer = document.createElement("div");
   hydrationContainer.innerHTML = renderToString(React.createElement(Counter));
   document.body.append(hydrationContainer);
