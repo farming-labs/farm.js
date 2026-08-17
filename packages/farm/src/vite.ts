@@ -546,6 +546,9 @@ export function farmPlugin(
       const layerAliases = getFarmLayerAliases(options.layers);
       const layerRoots = (options.layers ?? []).map((layer) => layer.root);
       return {
+        // Honor Farm's publicDir so the dev server serves the same static
+        // directory the production client build emits.
+        ...(options.publicDir ? { publicDir: options.publicDir } : {}),
         define: getEnvDefines(options, configEnv),
         resolve: {
           alias: layerAliases,

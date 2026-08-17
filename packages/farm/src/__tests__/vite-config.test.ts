@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import path from "node:path";
 import { FARM_CLIENT_OPTIMIZE_DEPS_INCLUDE } from "../server/vite-config";
-import { defineConfig } from "../vite";
+import { defineConfig, farmPlugin } from "../vite";
 
 describe("Farm Vite dependency optimization", () => {
   it("pre-bundles framework and route UI entries with React", async () => {
@@ -25,5 +25,27 @@ describe("Farm Vite dependency optimization", () => {
     expect(config.resolve?.alias).toMatchObject({
       "@": path.resolve(process.cwd(), "web"),
     });
+  });
+});
+
+describe("Farm Vite publicDir", () => {
+  it("passes the configured publicDir to Vite through the plugin config hook", () => {
+    const plugin = farmPlugin({ publicDir: "static" });
+
+    const config = (plugin.config as any)?.(
+      {},
+      { command: "serve", mode: "development", isSsrBuild: false },
+    );
+    expect(config.publicDir).toBe("static");
+  });
+
+  it("leaves Vite's default publicDir untouched when none is configured", () => {
+    const plugin = farmPlugin({});
+
+    const config = (plugin.config as any)?.(
+      {},
+      { command: "serve", mode: "development", isSsrBuild: false },
+    );
+    expect("publicDir" in config).toBe(false);
   });
 });

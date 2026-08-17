@@ -1238,6 +1238,9 @@ async function buildClient(
   try {
     await viteBuild({
       root,
+      // Vite otherwise falls back to <root>/public, silently dropping every
+      // asset in a custom config.publicDir from the production client output.
+      publicDir: config.publicDir,
       esbuild: {
         jsxDev: false,
       },
