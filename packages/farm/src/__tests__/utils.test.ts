@@ -70,6 +70,24 @@ describe("parseRoutePath", () => {
     const result = parseRoutePath("about/layout.tsx");
     expect(result.type).toBe("layout");
   });
+
+  it("should strip route group segments from the URL", () => {
+    expect(parseRoutePath("(marketing)/page.tsx").segments).toEqual([]);
+    expect(parseRoutePath("(marketing)/pricing/page.tsx").segments).toEqual([
+      { segment: "pricing", isDynamic: false, isOptional: false, isCatchAll: false },
+    ]);
+    expect(parseRoutePath("(shop)/products/[id]/page.tsx").segments).toEqual([
+      { segment: "products", isDynamic: false, isOptional: false, isCatchAll: false },
+      { segment: "id", isDynamic: true, isOptional: false, isCatchAll: false },
+    ]);
+  });
+
+  it("should keep interception marker segments intact", () => {
+    expect(parseRoutePath("feed/(.)photo/page.tsx").segments).toEqual([
+      { segment: "feed", isDynamic: false, isOptional: false, isCatchAll: false },
+      { segment: "(.)photo", isDynamic: false, isOptional: false, isCatchAll: false },
+    ]);
+  });
 });
 
 describe("matchRoute", () => {

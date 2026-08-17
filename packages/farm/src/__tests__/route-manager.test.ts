@@ -272,6 +272,57 @@ describe("RouteManager", () => {
     });
   });
 
+  describe("route groups", () => {
+    it("registers grouped pages at their group-free URLs", async () => {
+      const { globFiles } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) {
+          return [
+            "(marketing)/page.tsx",
+            "(marketing)/pricing/page.tsx",
+            "(app)/dashboard/page.tsx",
+          ];
+        }
+        if (pattern.includes("layout")) {
+          return ["layout.tsx", "(app)/dashboard/layout.tsx"];
+        }
+        if (pattern.includes("loading")) {
+          return ["(marketing)/pricing/loading.tsx"];
+        }
+        return [];
+      });
+
+      await routeManager.discoverRoutes();
+
+      expect(new Set(routeManager.getRoutes().keys())).toEqual(
+        new Set(["/", "/pricing", "/dashboard"]),
+      );
+      expect(routeManager.matchRoute("/").route?.modulePath).toBe(
+        "/test/src/app/(marketing)/page.tsx",
+      );
+      expect(routeManager.matchRoute("/pricing").route?.pattern).toBe("/pricing");
+      expect(routeManager.matchRoute("/dashboard").route?.pattern).toBe("/dashboard");
+
+      const dashboard = routeManager.matchRoute("/dashboard");
+      expect(dashboard.layouts.map((layout) => layout.pattern)).toEqual(["/", "/dashboard"]);
+      expect(routeManager.getMatchingLoading("/pricing")?.route.filePath).toBe(
+        "(marketing)/pricing/loading.tsx",
+      );
+    });
+
+    it("rejects pages from different groups that collapse to one URL", async () => {
+      const { globFiles } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) {
+          return ["(a)/x/page.tsx", "(b)/x/page.tsx"];
+        }
+        return [];
+      });
+
+      await expect(routeManager.discoverRoutes()).rejects.toThrow('Duplicate page route "/x"');
+    });
+  });
+
   describe("named route slots", () => {
     beforeEach(async () => {
       const { globFiles } = await import("../utils");

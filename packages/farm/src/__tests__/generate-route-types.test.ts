@@ -128,6 +128,29 @@ describe("generateRouteTypes", () => {
     expect(content).not.toContain("(.)photo");
   });
 
+  it("types grouped routes at their group-free URLs", async () => {
+    const marketingDir = path.join(tmpDir, "src", "app", "(marketing)", "pricing");
+    const appGroupDir = path.join(tmpDir, "src", "app", "(app)", "dashboard");
+    await fs.promises.mkdir(marketingDir, { recursive: true });
+    await fs.promises.mkdir(appGroupDir, { recursive: true });
+    await fs.promises.writeFile(
+      path.join(marketingDir, "page.tsx"),
+      "export default function Pricing() { return null; }",
+    );
+    await fs.promises.writeFile(
+      path.join(appGroupDir, "page.tsx"),
+      "export default function Dashboard() { return null; }",
+    );
+
+    const outPath = await generateRouteTypes({ root: tmpDir, srcDir: "src" });
+    const content = fs.readFileSync(outPath, "utf8");
+
+    expect(readTypeAlias(content, "RoutePath")).toContain('"/pricing"');
+    expect(readTypeAlias(content, "RoutePath")).toContain('"/dashboard"');
+    expect(content).not.toContain("(marketing)");
+    expect(content).not.toContain("(app)");
+  });
+
   it("when suppressLintOnLink is true, disables Link linting but keeps route module props typed", async () => {
     const outPath = await generateRouteTypes({
       root: tmpDir,
