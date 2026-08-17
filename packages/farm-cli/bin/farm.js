@@ -539,7 +539,7 @@ telemetryCommand
 
 telemetryCommand
   .command("enable")
-  .description("Opt in to anonymous Farm.js product telemetry")
+  .description("Enable anonymous Farm.js product telemetry")
   .action(async () => {
     const { setFarmTelemetryEnabled } = require("../dist/telemetry.js");
     const status = await setFarmTelemetryEnabled(true);

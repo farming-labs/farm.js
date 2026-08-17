@@ -53,11 +53,11 @@ React is the default renderer. `--renderer preact`, `--renderer solid`, `--rende
 | farm cron run dailyCleanup       | Invoke one cron route on a running app.                              |
 | farm dev --cron                  | Start the dev server with the opt-in in-memory cron scheduler.       |
 | farm telemetry status            | Show the anonymous product-telemetry preference.                     |
-| farm telemetry enable            | Opt in to anonymous Farm.js product telemetry.                       |
+| farm telemetry enable            | Enable anonymous Farm.js product telemetry.                          |
 | farm telemetry disable           | Opt out and delete the local anonymous installation ID.              |
 
 See [Anonymous telemetry](/docs/telemetry) for the exact event fields, environment overrides, and
-privacy guarantees. Telemetry is off by default during the beta.
+privacy guarantees. Telemetry is enabled by default for interactive local commands.
 
 ## Upgrade Farm packages
 

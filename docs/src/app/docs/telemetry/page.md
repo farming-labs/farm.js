@@ -1,20 +1,20 @@
 ---
 title: "Anonymous telemetry"
-description: "Understand and control Farm.js opt-in product telemetry."
+description: "Understand and control Farm.js anonymous product telemetry."
 section: "Reference"
 ---
 
 # Anonymous telemetry
 
 Farm.js includes optional anonymous product telemetry in `@farm.js/cli` and
-`@farm.js/create-app`. During the beta, telemetry is **off by default**. It helps the
+`@farm.js/create-app`. Telemetry is **enabled by default** for interactive local commands. It helps the
 maintainers understand which coarse framework paths are useful and where compatibility work should
 be focused.
 
 This is separate from [application observability](/docs/observability). OpenTelemetry describes what
 your application does and is configured by the application owner. Farm.js product telemetry only
 describes use of Farm's own CLI and starter generator, and is sent to Farm's infrastructure after
-you opt in.
+the CLI displays its one-time notice unless you opt out.
 
 ## Control telemetry
 
@@ -24,9 +24,10 @@ farm telemetry enable
 farm telemetry disable
 ```
 
-`farm telemetry enable` creates a random anonymous installation ID in the operating system's local
-configuration directory. `farm telemetry disable` opts out and deletes that ID. Enabling telemetry
-again creates a different ID.
+The first eligible event creates a random anonymous installation ID in the operating system's local
+configuration directory. `farm telemetry disable` opts out and deletes that ID. Running
+`farm telemetry enable` later creates a different ID. Saved opt-out preferences remain respected
+across upgrades.
 
 Environment variables can provide an explicit per-process or organization-wide policy:
 
