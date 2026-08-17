@@ -170,3 +170,84 @@ test("binds an untrusted Netlify site value to the intended option", async () =>
     if (root) await rm(root, { recursive: true, force: true });
   }
 });
+
+test("a target flag overrides a configured preset for another platform", async () => {
+  let root;
+
+  try {
+    root = await mkdtemp(path.join(tmpdir(), "farm-cli-deploy-cross-preset-"));
+    await writeFile(
+      path.join(root, "farm.config.mjs"),
+      "export default { deploy: { target: 'cloudflare', preset: 'cloudflare-module' } };\n",
+    );
+
+    const plan = await createFarmDeployPlan({ root, vercel: true });
+
+    assert.equal(plan.target, "vercel");
+    assert.equal(plan.preset, "vercel");
+    assert.equal(plan.outputDir, path.join(root, ".vercel", "output"));
+    assert.equal(plan.build.command, "farm build --preset vercel");
+  } finally {
+    if (root) await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a target flag overrides a mismatched top-level preset", async () => {
+  let root;
+
+  try {
+    root = await mkdtemp(path.join(tmpdir(), "farm-cli-deploy-top-preset-"));
+    await writeFile(path.join(root, "farm.config.mjs"), "export default { preset: 'vercel' };\n");
+
+    const plan = await createFarmDeployPlan({ root, cloudflare: true });
+
+    assert.equal(plan.target, "cloudflare");
+    assert.equal(plan.preset, "cloudflare-pages");
+    assert.equal(plan.outputDir, path.join(root, ".farm", ".output"));
+    assert.equal(plan.build.command, "farm build --preset cloudflare-pages");
+  } finally {
+    if (root) await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("keeps a configured preset that already builds for the flagged platform", async () => {
+  let root;
+
+  try {
+    root = await mkdtemp(path.join(tmpdir(), "farm-cli-deploy-edge-preset-"));
+    await writeFile(
+      path.join(root, "farm.config.mjs"),
+      "export default { deploy: { preset: 'vercel-edge' } };\n",
+    );
+
+    const plan = await createFarmDeployPlan({ root, vercel: true });
+
+    assert.equal(plan.target, "vercel");
+    assert.equal(plan.preset, "vercel-edge");
+    assert.equal(plan.runtime, "edge");
+    assert.equal(plan.outputDir, path.join(root, ".vercel", "output"));
+  } finally {
+    if (root) await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("keeps a custom preset when its configured target matches the flag", async () => {
+  let root;
+
+  try {
+    root = await mkdtemp(path.join(tmpdir(), "farm-cli-deploy-custom-preset-"));
+    await writeFile(
+      path.join(root, "farm.config.mjs"),
+      "export default { deploy: { target: 'vercel', preset: 'custom-vercel' } };\n",
+    );
+
+    const plan = await createFarmDeployPlan({ root, vercel: true });
+
+    assert.equal(plan.target, "vercel");
+    assert.equal(plan.preset, "custom-vercel");
+    assert.equal(plan.outputDir, path.join(root, ".vercel", "output"));
+    assert.equal(plan.build.command, "farm build --preset custom-vercel");
+  } finally {
+    if (root) await rm(root, { recursive: true, force: true });
+  }
+});

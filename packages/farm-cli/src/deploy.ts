@@ -2,6 +2,7 @@ import { execFileSync } from "child_process";
 import { existsSync, readFileSync } from "fs";
 import path from "path";
 import {
+  getDeployTargetForPreset,
   getPresetForDeployTarget,
   getFarmPresetRuntime,
   loadConfig,
@@ -86,7 +87,7 @@ export async function deployFarm(options: DeployFarmOptions = {}) {
   }
 
   logger.info(`🚀 Building with ${plan.preset} preset...`);
-  await buildFarm({ root: plan.root, preset: plan.preset });
+  await buildFarm({ root: plan.root, preset: plan.preset, target: plan.target });
 
   if (!existsSync(plan.outputDir)) {
     throw new FarmDeployError(
@@ -151,10 +152,28 @@ async function resolveFarmDeployContext(options: DeployFarmOptions) {
     );
   }
 
+  // A target flag expresses current intent, so a configured preset that
+  // builds for a different platform must not steer this deploy: buildFarm
+  // derives its output directory from the preset, and the build and deploy
+  // steps would otherwise resolve different directories.
+  const configuredPreset = userConfig?.deploy?.preset || userConfig?.preset;
+  const configuredPresetTarget = getDeployTargetForPreset(configuredPreset);
+  const configuredTarget = normalizeDeployTarget(userConfig?.deploy?.target);
+  const presetMatchesPlatform =
+    Boolean(configuredPreset) &&
+    (configuredPresetTarget === platform ||
+      (!configuredPresetTarget && configuredTarget === platform));
+  if (cliTarget && configuredPreset && !presetMatchesPlatform) {
+    logger.warn(
+      `Configured preset "${configuredPreset}" targets ${configuredPresetTarget || "an unknown platform"}; using the "${getPresetForDeployTarget(platform)}" preset because --${cliTarget} was passed.`,
+    );
+  }
   const deployConfig = resolveDeployConfig(userConfig || {}, {
     target: platform,
     preset: cliTarget
-      ? userConfig?.deploy?.preset || userConfig?.preset || getPresetForDeployTarget(platform)
+      ? presetMatchesPlatform
+        ? configuredPreset
+        : getPresetForDeployTarget(platform)
       : undefined,
   });
   const preset = deployConfig.preset || getPresetForDeployTarget(platform) || "node-server";
