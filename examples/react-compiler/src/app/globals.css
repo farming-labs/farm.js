@@ -760,6 +760,51 @@ h1 span {
   border-block: 1px solid #33332f;
 }
 
+.heavy-metrics--islands {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.component-island-live {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 1rem 0;
+  border: 1px solid #4d6334;
+  padding: 1rem;
+  background: rgb(184 255 91 / 0.045);
+}
+
+.component-island-live > div {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+}
+
+.component-island-live span {
+  color: #8d8d86;
+  font: 0.62rem "Geist Mono Variable", ui-monospace, monospace;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+
+.component-island-live strong {
+  color: #d8ff9f;
+  font-size: 1.5rem;
+}
+
+.component-island-live button {
+  border: 1px solid #484842;
+  padding: 0.65rem 0.8rem;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.component-island-workload {
+  margin-top: 1rem;
+}
+
 .heavy-metrics > div {
   min-width: 0;
   padding: 1.25rem 0;
@@ -1072,6 +1117,11 @@ code {
   }
 
   .heavy-controls {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .component-island-live {
     align-items: stretch;
     flex-direction: column;
   }

@@ -23,6 +23,8 @@ interface InputSelectionSnapshot {
 export interface CompilerTextBinding<Props> {
   kind: "text";
   path: readonly number[];
+  /** Stable ref target emitted by newer compiler versions. */
+  target?: number;
   dependencies: readonly number[];
   read(props: Props, state: readonly CompilerCell[]): unknown;
 }
@@ -30,6 +32,8 @@ export interface CompilerTextBinding<Props> {
 export interface CompilerAttributeBinding<Props> {
   kind: "attribute";
   path: readonly number[];
+  /** Stable ref target emitted by newer compiler versions. */
+  target?: number;
   dependencies: readonly number[];
   name: string;
   read(props: Props, state: readonly CompilerCell[]): unknown;
@@ -38,6 +42,8 @@ export interface CompilerAttributeBinding<Props> {
 export interface CompilerStyleBinding<Props> {
   kind: "style";
   path: readonly number[];
+  /** Stable ref target emitted by newer compiler versions. */
+  target?: number;
   dependencies: readonly number[];
   name: string;
   read(props: Props, state: readonly CompilerCell[]): unknown;
@@ -59,9 +65,16 @@ export interface CompilerKeyedListBlockProps {
   render(): React.ReactNode;
 }
 
+export interface CompilerComponentBlockProps {
+  id: number;
+  render(): React.ReactNode;
+}
+
 export interface CompilerBlockRuntime {
   Conditional: React.ComponentType<CompilerConditionalBlockProps>;
   KeyedList: React.ComponentType<CompilerKeyedListBlockProps>;
+  Component: React.ComponentType<CompilerComponentBlockProps>;
+  target(id: number): React.RefCallback<Element>;
 }
 
 export type CompilerBinding<Props> =
@@ -407,6 +420,44 @@ function createKeyedListBlockComponent(
   return FarmKeyedListBlock;
 }
 
+function createComponentBlockComponent(
+  owner: Pick<ConditionalBlockOwner, "subscribe">,
+): React.ComponentType<CompilerComponentBlockProps> {
+  class FarmComponentBlock extends React.Component<CompilerComponentBlockProps> {
+    static displayName = "FarmCompiledComponentIsland";
+
+    private unsubscribe: (() => void) | undefined;
+
+    private refresh = (afterCommit?: () => void) => {
+      this.forceUpdate(afterCommit);
+    };
+
+    private subscribe(): void {
+      this.unsubscribe = owner.subscribe(this.props.id, this.refresh);
+    }
+
+    componentDidMount(): void {
+      this.subscribe();
+    }
+
+    componentDidUpdate(previous: CompilerComponentBlockProps): void {
+      if (previous.id === this.props.id) return;
+      this.unsubscribe?.();
+      this.subscribe();
+    }
+
+    componentWillUnmount(): void {
+      this.unsubscribe?.();
+    }
+
+    render(): React.ReactNode {
+      return this.props.render();
+    }
+  }
+
+  return FarmComponentBlock;
+}
+
 /**
  * Runtime target emitted by the AOT transform.
  *
@@ -443,6 +494,8 @@ export function createCompiledComponent<Props>(
     private readonly blockRefreshListeners = new Map<number, (afterCommit?: () => void) => void>();
     private readonly blockRoots = new Map<number, Element>();
     private readonly blockRootElements = new Set<Element>();
+    private readonly bindingTargets = new Map<number, Element>();
+    private readonly bindingTargetRefs = new Map<number, React.RefCallback<Element>>();
     private readonly blockRuntime: CompilerBlockRuntime;
 
     constructor(props: Props) {
@@ -474,6 +527,10 @@ export function createCompiledComponent<Props>(
         KeyedList: createKeyedListBlockComponent({
           subscribe: (id, refresh) => this.subscribeToBlock(id, refresh),
         }),
+        Component: createComponentBlockComponent({
+          subscribe: (id, refresh) => this.subscribeToBlock(id, refresh),
+        }),
+        target: (id) => this.bindingTarget(id),
       };
     }
 
@@ -484,6 +541,20 @@ export function createCompiledComponent<Props>(
     private refreshDefinition = () => {
       if (this.mounted) this.forceUpdate();
     };
+
+    private bindingTarget(id: number): React.RefCallback<Element> {
+      const existing = this.bindingTargetRefs.get(id);
+      if (existing) return existing;
+      const capture: React.RefCallback<Element> = (element) => {
+        if (element) {
+          this.bindingTargets.set(id, element);
+        } else {
+          this.bindingTargets.delete(id);
+        }
+      };
+      this.bindingTargetRefs.set(id, capture);
+      return capture;
+    }
 
     private captureInputSelection(): void {
       const active = this.root?.ownerDocument.activeElement;
@@ -576,7 +647,12 @@ export function createCompiledComponent<Props>(
 
     private applyBinding(binding: CompilerBinding<Props>): void {
       if (!this.root || binding.kind === "block") return;
-      const target = findBindingTarget(this.root, binding.path, this.blockRootElements);
+      const target =
+        binding.target === undefined
+          ? findBindingTarget(this.root, binding.path, this.blockRootElements)
+          : binding.path.length === 0
+            ? this.root
+            : this.bindingTargets.get(binding.target) || null;
       if (!target) return;
       const value = binding.read(this.props, this.cells);
       if (binding.kind === "text") {
@@ -610,6 +686,8 @@ export function createCompiledComponent<Props>(
       this.blockRefreshListeners.clear();
       this.blockRoots.clear();
       this.blockRootElements.clear();
+      this.bindingTargets.clear();
+      this.bindingTargetRefs.clear();
       refreshListeners.delete(this.refreshDefinition);
     }
 
