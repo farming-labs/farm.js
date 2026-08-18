@@ -10,89 +10,48 @@ Integrations are the Farm layer for connecting product services to your app. A p
 
 Farm treats every integration as a small server plugin. That means an integration can participate in framework startup and shutdown, own HTTP routes, and still expose a compact typed API to the rest of the app.
 
-## Register official providers without an adapter import
+## Import the dedicated adapter package
 
-Official providers can be configured directly under `integrations`. When the object key is an
-official provider name, Farm loads its installed adapter automatically. The application can pass a
-provider SDK through `instance` without importing or calling a Farm adapter function.
+New applications should import each Farm adapter from its dedicated package, such as
+`@farm.js/stripe`, `@farm.js/clerk`, or `@farm.js/jobs`. These are the same packages installed by
+`farm add integration` and used by the generated starter files.
 
-```ts
-import { defineConfig } from "@farm.js/core";
-import Stripe from "stripe";
+The older `@farm.js/integrations/*` paths are compatibility re-exports for existing applications.
+They are not a separate ownership model, and new documentation does not use them.
 
-const stripeClient = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  maxNetworkRetries: 2,
-});
+A Farm adapter function such as `stripe(...)` registers routes, typed callers, webhooks, and
+integration lifecycle behavior. It is not the Stripe SDK instance. When the application supplies
+`instance`, the adapter uses that exact object instead of constructing another provider client.
 
-export default defineConfig({
-  integrations: {
-    stripe: {
-      instance: stripeClient,
-      webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
-    },
-  },
-});
-```
-
-The provider package, such as `@farm.js/stripe`, must still be installed because it supplies Farm's
-routes, typed API, webhooks, and lifecycle behavior. It does not need to be imported into application
-code for this configuration style. Farm resolves only configured providers and bundles their
-adapters into production output.
-
-Supported provider names are `stripe`, `polar`, `autumn`, `resend`, `clerk`, `workos`, `auth0`,
-`authjs`, `better-auth`, `supabase`, and `unkey`. The `email` key is an alias for `resend`, and
-`betterAuth` is an alias for `better-auth`.
-
-## Use an application namespace
-
-The object key remains the application namespace. For a custom key such as `billing`, declare the
-official provider explicitly:
-
-```ts
-export default defineConfig({
-  integrations: {
-    billing: {
-      provider: "stripe",
-      instance: stripeClient,
-      webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
-    },
-  },
-});
-```
-
-This registers the caller at `api.billing`. The `provider` field selects the adapter and is not
-forwarded as provider SDK configuration.
-
-## Credentials are supported too
-
-Applications do not have to construct an SDK instance. Pass the same credentials and integration
-options directly, and the official adapter constructs its default client:
+## Register integrations
 
 **farm.config.ts**
 
 ```ts
 import { defineConfig } from "@farm.js/core";
-import { betterAuth } from "better-auth";
+import { stripe } from "@farm.js/stripe";
+import { betterAuth as createBetterAuth } from "better-auth";
+import { betterAuth } from "@farm.js/better-auth";
 
-const auth = betterAuth({
+const auth = createBetterAuth({
   baseURL: process.env.BETTER_AUTH_URL,
   secret: process.env.BETTER_AUTH_SECRET,
 });
 
 export default defineConfig({
   integrations: {
-    billing: {
-      provider: "stripe",
+    billing: stripe({
       secretKey: process.env.STRIPE_SECRET_KEY,
       webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
-    },
-    auth: {
-      provider: "better-auth",
+    }),
+    auth: betterAuth({
       instance: auth,
-    },
+    }),
   },
 });
 ```
+
+The object key is the application namespace. If you register Stripe as `billing`, the typed caller lives at `api.billing`. If you register it as `stripe`, it lives at `api.stripe`.
 
 ## Own the provider instance in application code
 
@@ -111,26 +70,22 @@ export const stripeClient = new Stripe(process.env.STRIPE_SECRET_KEY!, {
 });
 ```
 
-**farm.config.ts**
+**src/lib/integrations.ts**
 
 ```ts
-import { defineConfig } from "@farm.js/core";
-import { stripeClient } from "./src/lib/stripe-client";
+import { stripe } from "@farm.js/stripe";
+import { stripeClient } from "./stripe-client";
 
-export default defineConfig({
-  integrations: {
-    billing: {
-      provider: "stripe",
-      instance: stripeClient,
-      webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
-    },
-  },
+export const billing = stripe({
+  instance: stripeClient,
+  webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
 });
 ```
 
-Keep the provider client in server-only application code and reuse it wherever direct SDK access is
-needed. Farm passes the exact object to the installed adapter. The adapter still owns Farm-specific
-configuration such as webhook routes, product metadata, billing ownership, and typed callers.
+The vendor SDK comes from the vendor package, while the Farm adapter comes from the dedicated Farm
+package. Keep the provider client in server-only application code and reuse it wherever direct SDK
+access is needed. The adapter still owns Farm-specific configuration such as webhook routes,
+product metadata, billing ownership, and typed callers.
 
 For backward compatibility, integrations that previously accepted credentials still do. When both
 are supplied, `instance` wins and credentials remain available only as configuration metadata.
@@ -149,31 +104,6 @@ adapter calls; a vendor breaking those methods can still require an adapter upda
 | Eve and Cloudflare Agents                    | `origin` for an external runtime, or Farm's managed development process. Agent SDKs remain application-owned.                            |
 
 Provider pages show the exact constructor and any integration-owned options that are still required.
-
-## Keep caller types without a runtime adapter import
-
-The declarative config deliberately has no runtime adapter import. When application code needs the
-provider's option validation or generated caller type, use a type-only import, which TypeScript
-erases from JavaScript:
-
-```ts
-import type { StripeIntegration, StripeIntegrationInput } from "@farm.js/stripe";
-
-export const billing = {
-  provider: "stripe",
-  instance: stripeClient,
-  webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
-} satisfies StripeIntegrationInput & { provider: "stripe" };
-
-export type AppIntegrations = {
-  billing: StripeIntegration;
-};
-```
-
-Then pass `AppIntegrations` to `createIntegrations` as shown below. Import and call the dedicated
-adapter factory only when you need its most specific generic inference for customized route paths or
-when you are constructing an integration outside `farm.config`. Existing
-`@farm.js/integrations/*` factory imports remain supported as compatibility re-exports.
 
 ## Create callers
 

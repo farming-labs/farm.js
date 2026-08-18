@@ -61,18 +61,11 @@ then owns the login, signup, callback, logout, profile, and protected-route beha
 ### Provide application-owned middleware
 
 ```ts
-import { defineConfig } from "@farm.js/core";
-
-export default defineConfig({
-  integrations: {
-    auth: {
-      provider: "auth0",
-      instance: {
-        matcher: ["/auth(.*)", "/dashboard(.*)"],
-        middleware(request: Request) {
-          return myAuth0Middleware(request);
-        },
-      },
+auth0({
+  instance: {
+    matcher: ["/auth(.*)", "/dashboard(.*)"],
+    middleware(request) {
+      return myAuth0Middleware(request);
     },
   },
 });
@@ -80,8 +73,7 @@ export default defineConfig({
 
 This advanced path accepts a compatible middleware adapter rather than the Auth0 SDK itself. The
 supplied instance wins and Farm only mounts its middleware; it does not create the built-in login,
-callback, logout, or profile routes. Farm loads `@farm.js/auth0` from `provider`, so this path does
-not import or call `auth0(...)`.
+callback, logout, or profile routes.
 
 ## Environment variables
 

@@ -39,25 +39,20 @@ The example above is the default path. When `instance` is omitted, Farm creates 
 ### Provide an application-owned instance
 
 ```tsx
-import { defineConfig } from "@farm.js/core";
 import { Resend } from "resend";
+import { resend } from "@farm.js/email";
 
 const resendClient = new Resend(process.env.RESEND_API_KEY);
 
-export default defineConfig({
-  integrations: {
-    email: {
-      instance: resendClient,
-      defaults: { from: "hello@example.com" },
-      templates,
-    },
-  },
+export const email = resend({
+  instance: resendClient,
+  defaults: { from: "hello@example.com" },
+  templates,
 });
 ```
 
 The instance wins if an API key is also supplied. Templates, defaults, scheduling, previews,
-routes, and webhooks remain integration options in either mode. The `email` key selects the Resend
-provider alias, so application code does not import or call `resend(...)`.
+routes, and webhooks remain integration options in either mode.
 
 ## Send mail
 

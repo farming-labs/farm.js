@@ -66,31 +66,23 @@ The AuthKit client ID can come from the instance, while the cookie password rema
 Farm owns the sealed session cookie.
 
 When both are present, the supplied instance wins. Integration-owned route, cookie, and protection
-options stay beside `instance` in the declarative integration object.
+options still belong in `workos(...)`.
 
 ```ts
-import { defineConfig } from "@farm.js/core";
 import { WorkOS } from "@workos-inc/node";
+import { workos } from "@farm.js/workos";
 
 const workosClient = new WorkOS({
   apiKey: process.env.WORKOS_API_KEY,
   clientId: process.env.WORKOS_CLIENT_ID,
 });
 
-export default defineConfig({
-  integrations: {
-    auth: {
-      provider: "workos",
-      instance: workosClient,
-      cookiePassword: process.env.WORKOS_COOKIE_PASSWORD,
-      protectedRoutes: ["/dashboard(.*)"],
-    },
-  },
+export const auth = workos({
+  instance: workosClient,
+  cookiePassword: process.env.WORKOS_COOKIE_PASSWORD,
+  protectedRoutes: ["/dashboard(.*)"],
 });
 ```
-
-Farm loads the installed `@farm.js/workos` adapter from `provider`; application code does not import
-or call `workos(...)` for this path.
 
 ## Routes and methods
 

@@ -7,7 +7,7 @@ import type {
 } from "./types";
 import type { DocsConfig } from "@farming-labs/docs";
 import type { FarmDocsResolvedConfig, FarmDocsUserConfig } from "./docs/types";
-import type { FarmIntegrationsUserConfig, ResolvedFarmIntegrationsConfig } from "./integrations";
+import type { FarmIntegrationsUserConfig } from "./integrations";
 import type { FarmMarkdownResolvedConfig, FarmMarkdownUserConfig } from "./markdown";
 import type { FarmObservabilityUserConfig } from "./observability";
 import type { FarmMiddlewareConfig } from "./middleware/types";
@@ -16,7 +16,7 @@ import type { FarmWorkflowsResolvedConfig, FarmWorkflowsUserConfig } from "./wor
 import type { FarmCronResolvedConfig, FarmCronUserConfig } from "./cron";
 import type { FarmEnvConfig, ResolvedFarmEnv } from "./env";
 import type { UserConfig as ViteUserConfig } from "vite";
-import { resolveFarmIntegrations, resolveIntegrationPlugins } from "./integrations";
+import { resolveIntegrationPlugins } from "./integrations";
 import { resolveMarkdownConfig } from "./markdown";
 import { resolveWorkflowsConfig } from "./workflows";
 import { resolveCronConfig } from "./cron";
@@ -377,7 +377,6 @@ export interface ResolvedFarmConfig extends Required<
     | "security"
     | "theme"
     | "renderer"
-    | "integrations"
   >
 > {
   /** @internal Tracks whether `context` came from user/layer config instead of the default noop. */
@@ -405,7 +404,6 @@ export interface ResolvedFarmConfig extends Required<
   security: ResolvedFarmSecurityConfig;
   theme: ResolvedFarmThemeConfig;
   renderer: FarmRenderer;
-  integrations: ResolvedFarmIntegrationsConfig;
   routeRules: FarmRouteRules;
 }
 
@@ -845,12 +843,9 @@ export async function resolveConfig(
     root,
     mode,
   });
-  const integrationInputs = nativeAuthIntegration
+  const integrations = nativeAuthIntegration
     ? { ...userConfig.integrations, auth: nativeAuthIntegration }
     : userConfig.integrations || {};
-  const integrations = await resolveFarmIntegrations(integrationInputs, {
-    resolveFrom: path.join(projectRoot, "package.json"),
-  });
   const generateBuildId = userConfig.generateBuildId || (() => `build-${Date.now()}`);
   const deploymentId = normalizeFarmDeploymentId(
     userConfig.deploymentId ||

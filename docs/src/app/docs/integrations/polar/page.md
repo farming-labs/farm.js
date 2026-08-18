@@ -51,32 +51,26 @@ application still supplies billing ownership, products, meters, routes, and webh
 ### Provide an application-owned instance
 
 ```ts
-import { defineConfig } from "@farm.js/core";
 import { Polar } from "@polar-sh/sdk";
+import { polar } from "@farm.js/polar";
 
 const polarClient = new Polar({
   accessToken: process.env.POLAR_ACCESS_TOKEN!,
   server: "sandbox",
 });
 
-export default defineConfig({
-  integrations: {
-    billing: {
-      provider: "polar",
-      instance: polarClient,
-      server: "sandbox",
-      billing: {
-        resolveOwner: () => null,
-      },
-    },
+export const billing = polar({
+  instance: polarClient,
+  server: "sandbox",
+  billing: {
+    resolveOwner: () => null,
   },
 });
 ```
 
 Farm uses the supplied SDK directly, so the integration does not require `accessToken`. `server`
 still describes the integration environment and defaults from `POLAR_SERVER`. When both an instance
-and token are supplied, the instance wins. Farm loads `@farm.js/polar` from the declared provider;
-application code does not import or call `polar(...)`.
+and token are supplied, the instance wins.
 
 ## Usage
 

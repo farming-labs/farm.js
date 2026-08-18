@@ -44,29 +44,29 @@ A compact map of the main package exports and where to learn more.
 
 ## Integration exports
 
-| Package                                                                       | Exports                                                                                                                                    |
-| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `@farm.js/core`                                                               | `defineIntegration`, `integrationRoute`, `defineIntegrationSchema`, `definePlugin`, `defineConfig`, and declarative provider config types. |
-| `@farm.js/core/theme/client`                                                  | `useTheme`, `getTheme`, `setTheme`, and `toggleTheme` for browser color-mode state.                                                        |
-| `@farm.js/core/theme/server`                                                  | `getTheme` and `getThemeSnapshot` for cookie-backed server rendering.                                                                      |
-| `@farm.js/core/cron`                                                          | `cronRoute`, cron config types, schedule manifests, and deployment adapter helpers.                                                        |
-| `@farm.js/core/workflows`                                                     | Legacy workflow-module APIs kept for compatibility. New schedules should use `cron` config and API routes.                                 |
-| `@farm.js/core/client`                                                        | `useAction`, `createIntegrations`, `createIntegrationClient`, `createIntegrationServerClient`, `endpoint`.                                 |
-| `@farm.js/core/plugin/client`                                                 | `createClientPluginManager` and browser lifecycle types for advanced tooling.                                                              |
-| `@farm.js/core/navigation`                                                    | `redirect`, `permanentRedirect`, `notFound`, `useRouter`, `usePathname`, `useSearchParams`.                                                |
-| `@farm.js/core/font`                                                          | Build-time `localFont` and `remoteFont` loaders with generated CSS, hashed assets, and preload hints.                                      |
-| `@farm.js/core/headers`                                                       | `headers`, `cookies`.                                                                                                                      |
-| `@farm.js/core/router`                                                        | `createFarmRouter`, `matchFarmRoute`, `buildFarmRoutePath`, `isFarmRouteActive`.                                                           |
-| `@farm.js/core/storage`                                                       | `sqliteStorage`, `postgresStorage`, `redisStorage`, `createStorageClient`, `defineStorageClient`.                                          |
-| `@farm.js/cache-redis`                                                        | `redisCache` distributed cache adapter.                                                                                                    |
-| `@farm.js/core/after`                                                         | `after` for short work that starts after the current response finishes.                                                                    |
-| `@farm.js/stripe`, `@farm.js/polar`, `@farm.js/autumn`                        | Billing adapters loaded by declarative `provider` config; factory exports remain available.                                                |
-| `@farm.js/auth0`, `@farm.js/authjs`, `@farm.js/better-auth`, `@farm.js/clerk` | Dedicated auth integration packages.                                                                                                       |
-| `@farm.js/supabase`, `@farm.js/workos`                                        | Dedicated auth integration packages with generated typed callers.                                                                          |
-| `@farm.js/email`                                                              | Resend integration and email template helper.                                                                                              |
-| `@farm.js/jobs`                                                               | Jobs integration, `task`, `defineTasks`, Trigger.dev runtime, Inngest runtime.                                                             |
-| `@farm.js/unkey`                                                              | Unkey API key integration.                                                                                                                 |
-| `@farm.js/integrations/*`                                                     | Compatibility factory re-exports for older imports; declarative config does not import them.                                               |
+| Package                                                                       | Exports                                                                                                    |
+| ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `@farm.js/core`                                                               | `defineIntegration`, `integrationRoute`, `defineIntegrationSchema`, `definePlugin`, `defineConfig`.        |
+| `@farm.js/core/theme/client`                                                  | `useTheme`, `getTheme`, `setTheme`, and `toggleTheme` for browser color-mode state.                        |
+| `@farm.js/core/theme/server`                                                  | `getTheme` and `getThemeSnapshot` for cookie-backed server rendering.                                      |
+| `@farm.js/core/cron`                                                          | `cronRoute`, cron config types, schedule manifests, and deployment adapter helpers.                        |
+| `@farm.js/core/workflows`                                                     | Legacy workflow-module APIs kept for compatibility. New schedules should use `cron` config and API routes. |
+| `@farm.js/core/client`                                                        | `useAction`, `createIntegrations`, `createIntegrationClient`, `createIntegrationServerClient`, `endpoint`. |
+| `@farm.js/core/plugin/client`                                                 | `createClientPluginManager` and browser lifecycle types for advanced tooling.                              |
+| `@farm.js/core/navigation`                                                    | `redirect`, `permanentRedirect`, `notFound`, `useRouter`, `usePathname`, `useSearchParams`.                |
+| `@farm.js/core/font`                                                          | Build-time `localFont` and `remoteFont` loaders with generated CSS, hashed assets, and preload hints.      |
+| `@farm.js/core/headers`                                                       | `headers`, `cookies`.                                                                                      |
+| `@farm.js/core/router`                                                        | `createFarmRouter`, `matchFarmRoute`, `buildFarmRoutePath`, `isFarmRouteActive`.                           |
+| `@farm.js/core/storage`                                                       | `sqliteStorage`, `postgresStorage`, `redisStorage`, `createStorageClient`, `defineStorageClient`.          |
+| `@farm.js/cache-redis`                                                        | `redisCache` distributed cache adapter.                                                                    |
+| `@farm.js/core/after`                                                         | `after` for short work that starts after the current response finishes.                                    |
+| `@farm.js/stripe`, `@farm.js/polar`, `@farm.js/autumn`                        | Dedicated billing integration packages.                                                                    |
+| `@farm.js/auth0`, `@farm.js/authjs`, `@farm.js/better-auth`, `@farm.js/clerk` | Dedicated auth integration packages.                                                                       |
+| `@farm.js/supabase`, `@farm.js/workos`                                        | Dedicated auth integration packages with generated typed callers.                                          |
+| `@farm.js/email`                                                              | Resend integration and email template helper.                                                              |
+| `@farm.js/jobs`                                                               | Jobs integration, `task`, `defineTasks`, Trigger.dev runtime, Inngest runtime.                             |
+| `@farm.js/unkey`                                                              | Unkey API key integration.                                                                                 |
+| `@farm.js/integrations/*`                                                     | Compatibility re-exports for older imports; new code should use the dedicated packages above.              |
 
 ## Mental model
 

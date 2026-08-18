@@ -439,26 +439,21 @@ data?.users[0]?.name;
 const integrationCodeTabs = [
   {
     id: "integrations",
-    label: "farm.config.ts",
+    label: "integrations.ts",
     language: "ts",
-    highlightLines: [1, 8, 13],
-    code: `import { defineConfig } from "@farm.js/core";
-import Stripe from "stripe";
+    highlightLines: [1, 5, 7],
+    code: `import Stripe from "stripe";
+import { stripe } from "@farm.js/stripe";
+import { unkey } from "@farm.js/unkey";
 
 const stripeClient = new Stripe(process.env.STRIPE_SECRET_KEY!);
-export default defineConfig({
-  integrations: {
-    billing: {
-      provider: "stripe",
-      instance: stripeClient,
-    },
-    keys: {
-      provider: "unkey",
-      rootKey: process.env.UNKEY_ROOT_KEY,
-      apiId: process.env.UNKEY_API_ID,
-    },
-  },
-});`,
+export const integrations = {
+    billing: stripe({ instance: stripeClient }),
+    keys: unkey({
+        rootKey: process.env.UNKEY_ROOT_KEY,
+        apiId: process.env.UNKEY_API_ID,
+    }),
+};`,
   },
   {
     id: "apis",

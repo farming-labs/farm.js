@@ -49,24 +49,18 @@ The Farm adapter only requires the `handlers` property, so the normal object ret
 
 ## Register it
 
-**farm.config.ts**
+**src/lib/integrations.ts**
 
 ```ts
-import { defineConfig } from "@farm.js/core";
-import { authInstance } from "./src/lib/auth";
+import { authjs } from "@farm.js/authjs";
+import { authInstance } from "./auth";
 
-export default defineConfig({
-  integrations: {
-    auth: {
-      provider: "authjs",
-      instance: authInstance,
-    },
-  },
-});
+export const appIntegrations = {
+  auth: authjs({
+    instance: authInstance,
+  }),
+} as const;
 ```
-
-Farm loads the installed `@farm.js/authjs` adapter from `provider`; application code does not import
-or call `authjs(...)`.
 
 Farm mounts:
 

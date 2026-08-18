@@ -16,7 +16,7 @@ export default defineConfig({
 
 This is a top-level framework feature, not an `integrations.auth` provider. It supplies a Farm-owned server API and React hook without a provider instance in application config.
 
-The integration path remains fully supported when an application needs provider-specific behavior or wants to own a lower-level auth engine. For example, `integrations.auth: { provider: "better-auth", instance }` lets the application control the complete Better Auth configuration without importing the Farm adapter factory. The two paths are alternatives: configure either top-level `auth` or `integrations.auth`, never both.
+The integration path remains fully supported when an application needs provider-specific behavior or wants to own a lower-level auth engine. For example, `integrations.auth: betterAuth({ instance })` lets the application control the complete Better Auth configuration. The two paths are alternatives: configure either top-level `auth` or `integrations.auth`, never both.
 
 ## Start from the matching starter
 

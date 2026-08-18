@@ -426,9 +426,6 @@ type StripeIntegrationResult<TApi> = Omit<FarmIntegration, "api"> & {
   api: TApi;
 };
 
-/** The default Stripe integration shape used by generated typed callers. */
-export type StripeIntegration = StripeIntegrationResult<StripeDefaultClientAPI>;
-
 type ResolvedStripeProduct = StripeIntegrationProduct & {
   id: string;
   kind: StripeBillingProductKind;
