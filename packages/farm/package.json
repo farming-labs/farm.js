@@ -597,6 +597,7 @@
     "fast-glob": "^3.3.2",
     "h3": "2.0.1-rc.5",
     "image-size": "^2.0.2",
+    "import-meta-resolve": "4.2.0",
     "intl-messageformat": "11.2.12",
     "marked": "^12.0.2",
     "nitro": "3.0.1-alpha.0",

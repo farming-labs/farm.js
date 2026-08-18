@@ -7,12 +7,14 @@ import {
   dispatchIntegrationRequest,
   getFarmIntegrationPluginOwner,
   getFarmIntegrationPluginServerRuntime,
+  getFarmOfficialIntegrationProvider,
   getRegisteredIntegrationRuntime,
   getIntegrationDocumentNavigationMatchers,
   getIntegrationSchemas,
   getRegisteredIntegrationSchemas,
   integrationRoute,
   matchRegisteredIntegrationRoute,
+  resolveFarmIntegrations,
   resolveIntegrationPlugins,
   type FarmIntegrationSchema,
 } from "../integrations";
@@ -64,6 +66,90 @@ function createResponse() {
 }
 
 describe("integrations runtime", () => {
+  it("resolves an official provider from the integration key without an adapter import", async () => {
+    const instance = { name: "application-client" };
+    let receivedInput: Record<string, unknown> | undefined;
+    const loadProvider = vi.fn(async (provider: string) => {
+      return (input: Record<string, unknown>) => {
+        receivedInput = input;
+        return defineIntegration({
+          category: "test",
+          type: provider,
+          instance: input.instance,
+        });
+      };
+    });
+
+    const integrations = await resolveFarmIntegrations(
+      {
+        stripe: {
+          instance,
+          webhookSecret: "whsec_test",
+        },
+      },
+      { loadProvider },
+    );
+
+    expect(loadProvider).toHaveBeenCalledWith("stripe");
+    expect(receivedInput).toEqual({
+      instance,
+      webhookSecret: "whsec_test",
+    });
+    expect(integrations.stripe?.type).toBe("stripe");
+    expect(integrations.stripe?.instance).toBe(instance);
+    expect(getFarmOfficialIntegrationProvider(integrations.stripe!)).toBe("stripe");
+  });
+
+  it("supports a custom integration key with an explicit official provider", async () => {
+    const loadProvider = vi.fn(async (provider: string) => {
+      return (input: Record<string, unknown>) =>
+        defineIntegration({
+          category: "test",
+          type: provider,
+          instance: input.instance,
+        });
+    });
+
+    const integrations = await resolveFarmIntegrations(
+      {
+        billing: {
+          provider: "stripe",
+          instance: { name: "billing-client" },
+        },
+      },
+      { loadProvider },
+    );
+
+    expect(loadProvider).toHaveBeenCalledWith("stripe");
+    expect(integrations.billing?.type).toBe("stripe");
+  });
+
+  it("leaves integrations created by adapter factories unchanged", async () => {
+    const integration = defineIntegration({
+      category: "custom",
+      type: "existing",
+      instance: {},
+    });
+    const loadProvider = vi.fn();
+
+    const integrations = await resolveFarmIntegrations({ existing: integration }, { loadProvider });
+
+    expect(integrations.existing).toBe(integration);
+    expect(loadProvider).not.toHaveBeenCalled();
+  });
+
+  it("requires an explicit provider when a custom key cannot identify the adapter", async () => {
+    await expect(
+      resolveFarmIntegrations({
+        billing: {
+          instance: {},
+        },
+      }),
+    ).rejects.toThrow(
+      'Integration "billing" must be created by a Farm adapter or declare an official provider',
+    );
+  });
+
   it("normalizes legacy slot inputs to category", () => {
     const integration = defineIntegration({
       slot: "auth",

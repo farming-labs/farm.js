@@ -63,23 +63,32 @@ application code. The publishable key is still required for `ClerkProvider`; the
 required by Farm when the backend instance is supplied.
 
 When both an instance and construction credentials are present, the instance wins. Farm-owned
-options such as `protectedRoutes`, `providerProps`, and sign-in URLs still belong in `clerk(...)`.
+options such as `protectedRoutes`, `providerProps`, and sign-in URLs stay beside `instance` in the
+declarative integration object.
 
 ```ts
+import { defineConfig } from "@farm.js/core";
 import { createClerkClient } from "@clerk/backend";
-import { clerk } from "@farm.js/clerk";
 
 const clerkClient = createClerkClient({
   secretKey: process.env.CLERK_SECRET_KEY,
   publishableKey: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
 });
 
-export const auth = clerk({
-  instance: clerkClient,
-  publishableKey: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
-  protectedRoutes: ["/dashboard(.*)"],
+export default defineConfig({
+  integrations: {
+    auth: {
+      provider: "clerk",
+      instance: clerkClient,
+      publishableKey: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
+      protectedRoutes: ["/dashboard(.*)"],
+    },
+  },
 });
 ```
+
+Farm loads the installed `@farm.js/clerk` adapter from `provider`; application code does not import
+or call `clerk(...)` for this path.
 
 ## Create sign-in and sign-up pages
 

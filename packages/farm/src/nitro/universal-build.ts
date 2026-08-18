@@ -62,7 +62,12 @@ import { createFarmVercelImmutableAssetRoute } from "./vercel-assets";
 import { createFarmNodeServerEntry } from "./node-server-entry";
 import { readFarmI18nCatalogs } from "../i18n/catalog";
 import type { FarmI18nCatalogs } from "../i18n/types";
-import { getFarmIntegrationPluginServerRuntime } from "../integrations";
+import {
+  getFarmIntegrationPluginServerRuntime,
+  getFarmOfficialIntegrationProvider,
+  getFarmOfficialIntegrationProviderModule,
+  type FarmOfficialIntegrationProvider,
+} from "../integrations";
 import type { TransformOptions } from "esbuild";
 import { loadFarmProductionVite, type FarmProductionViteRuntime } from "../build/production-vite";
 import { adaptTailwindVitePlugin } from "../build/vite-plugin-compat";
@@ -3682,13 +3687,35 @@ import { fileURLToPath as farmDocsFileURLToPath } from "node:url";`
     (_configFile, index) =>
       `(FarmLayerConfigModule${index}.default || FarmLayerConfigModule${index})`,
   );
+  const officialIntegrationProviders = Array.from(
+    new Set(
+      Object.values(config.integrations)
+        .map((integration) =>
+          integration ? getFarmOfficialIntegrationProvider(integration) : undefined,
+        )
+        .filter((provider): provider is FarmOfficialIntegrationProvider => Boolean(provider)),
+    ),
+  );
+  const officialIntegrationImports = officialIntegrationProviders
+    .map((provider, index) => {
+      const definition = getFarmOfficialIntegrationProviderModule(provider);
+      return `import { ${definition.exportName} as FarmOfficialIntegrationFactory${index} } from ${JSON.stringify(definition.packageName)};`;
+    })
+    .join("\n");
+  const officialIntegrationFactoryEntries = officialIntegrationProviders
+    .map((provider, index) => `${JSON.stringify(provider)}: FarmOfficialIntegrationFactory${index}`)
+    .join(",\n  ");
   const integrationRuntimeExports = Array.from(
     new Set([
       ...(hasServerRuntimeIntegrations
         ? ["dispatchIntegrationRequest", "matchIntegrationRoute"]
         : []),
       ...(hasRuntimeIntegrationConfig
-        ? ["getRegisteredIntegrationAPIManifest", "resolveIntegrationPlugins"]
+        ? [
+            "getRegisteredIntegrationAPIManifest",
+            "resolveFarmIntegrations",
+            "resolveIntegrationPlugins",
+          ]
         : []),
     ]),
   );
@@ -3702,6 +3729,7 @@ import { fileURLToPath as farmDocsFileURLToPath } from "node:url";`
 ${configModulePath ? `import * as FarmUserConfigModule from "${configModulePath}";` : ""}
 ${layerConfigImports}
 ${integrationRuntimeImport}
+${officialIntegrationImports}
 `;
   const imageRuntime = resolveImageRuntime(config, preset);
   const imageRuntimeImport =
@@ -3847,10 +3875,26 @@ const farmUserConfig = ${
 const farmRuntimeConfigs = [${[...layerConfigValues, "farmUserConfig"].join(", ")}].filter(Boolean);
 const farmResolvedRuntimeConfig = Object.assign({}, ...farmRuntimeConfigs);
 const hasConfiguredRouteContext = typeof farmResolvedRuntimeConfig.context === "function";
-const configuredIntegrations = Object.assign(
+const farmOfficialIntegrationFactories = {
+  ${officialIntegrationFactoryEntries}
+};
+const configuredIntegrationInputs = Object.assign(
   {},
   ...farmRuntimeConfigs.map((runtimeConfig) => runtimeConfig.integrations || {}),
 );
+const configuredIntegrations = ${
+    hasRuntimeIntegrationConfig
+      ? `await resolveFarmIntegrations(configuredIntegrationInputs, {
+  loadProvider: async (provider) => {
+    const factory = farmOfficialIntegrationFactories[provider];
+    if (!factory) {
+      throw new Error(\`No bundled integration factory is available for "\${provider}".\`);
+    }
+    return factory;
+  },
+})`
+      : "configuredIntegrationInputs"
+  };
 const serverRuntimeIntegrations = Object.fromEntries(
   Object.entries(configuredIntegrations).filter(([, integration]) =>
     integration && typeof integration === "object" && integration.serverRuntime !== false

@@ -1,6 +1,6 @@
 import Stripe from "stripe";
-import type { FarmIntegrationLogEvent } from "@farm.js/core";
-import { stripe, type StripeWebhookEvent } from "@farm.js/stripe";
+import type { FarmIntegrationLogEvent, FarmIntegrationsUserConfig } from "@farm.js/core";
+import type { StripeIntegration, StripeWebhookEvent } from "@farm.js/stripe";
 import { stripeCatalog } from "./stripe-catalog.ts";
 
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
@@ -31,7 +31,8 @@ const stripeProducts = stripeCatalog.map((product) => {
 });
 
 export const appIntegrations = {
-  billing: stripe({
+  billing: {
+    provider: "stripe",
     products: stripeProducts,
     instance: stripeInstance,
     webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
@@ -41,7 +42,9 @@ export const appIntegrations = {
     async onWebhook(event: StripeWebhookEvent) {
       console.log("[stripe-example:webhook]", event.type, event.id);
     },
-  }),
-} as const;
+  },
+} as const satisfies FarmIntegrationsUserConfig;
 
-export type AppIntegrations = typeof appIntegrations;
+export type AppIntegrations = {
+  billing: StripeIntegration;
+};

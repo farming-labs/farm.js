@@ -72,28 +72,35 @@ Supabase SSR clients contain request cookie handlers, so a single shared client 
 cookie-aware `options`; keep those options when adding custom fetch, headers, or other SDK settings.
 
 ```ts
-import { supabase } from "@farm.js/supabase";
+import { defineConfig } from "@farm.js/core";
+import type { SupabaseIntegrationInstanceContext } from "@farm.js/supabase";
 
-export const auth = supabase({
-  instance: ({ createClient, options }) =>
-    createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_ANON_KEY!, {
-      ...options,
-      global: {
-        ...options.global,
-        headers: {
-          ...options.global?.headers,
-          "x-application-name": "farm-dashboard",
-        },
-      },
-    }),
-  protectedRoutes: ["/dashboard(.*)"],
+export default defineConfig({
+  integrations: {
+    auth: {
+      provider: "supabase",
+      instance: ({ createClient, options }: SupabaseIntegrationInstanceContext) =>
+        createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_ANON_KEY!, {
+          ...options,
+          global: {
+            ...options.global,
+            headers: {
+              ...options.global?.headers,
+              "x-application-name": "farm-dashboard",
+            },
+          },
+        }),
+      protectedRoutes: ["/dashboard(.*)"],
+    },
+  },
 });
 ```
 
 The factory can also use the provided `url` and `anonKey` values when those are configured on the
 integration. The factory wins when supplied, while routes, pages, OAuth providers, and protection
 remain Farm integration options. Do not create the client outside the factory or cache its return
-value.
+value. Farm loads `@farm.js/supabase` from `provider`, so this path does not import or call
+`supabase(...)`.
 
 ## Routes and methods
 

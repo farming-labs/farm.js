@@ -552,23 +552,25 @@ See [Cron](/docs/cron) for route protection, local commands, UTC syntax, deploym
 
 ```ts
 import { defineConfig } from "@farm.js/core";
-import { stripe } from "@farm.js/stripe";
-import { supabase } from "@farm.js/supabase";
 
 export default defineConfig({
   integrations: {
-    billing: stripe({
+    billing: {
+      provider: "stripe",
       secretKey: process.env.STRIPE_SECRET_KEY,
-    }),
-    auth: supabase({
+    },
+    auth: {
+      provider: "supabase",
       url: process.env.SUPABASE_URL,
       anonKey: process.env.SUPABASE_ANON_KEY,
-    }),
+    },
   },
 });
 ```
 
 The keys become typed namespaces. `billing` becomes `api.billing`, and `auth` becomes `api.auth`.
+Farm loads each installed official adapter from `provider`, so config can contain credentials or an
+application-owned `instance` without importing an adapter factory.
 
 ## One-shot migrations
 

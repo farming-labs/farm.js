@@ -49,23 +49,29 @@ where supported.
 ### Provide an application-owned instance
 
 ```ts
+import { defineConfig } from "@farm.js/core";
 import { Autumn } from "autumn-js";
-import { autumn } from "@farm.js/autumn";
 
 const autumnClient = new Autumn({
   secretKey: process.env.AUTUMN_SECRET_KEY,
 });
 
-export const billing = autumn({
-  instance: autumnClient,
-  billing: {
-    resolveOwner: () => null,
+export default defineConfig({
+  integrations: {
+    billing: {
+      provider: "autumn",
+      instance: autumnClient,
+      billing: {
+        resolveOwner: () => null,
+      },
+    },
   },
 });
 ```
 
 The instance wins if a secret key is also supplied. Billing, webhook, route, product, meter, and
-storage settings remain integration options in either mode.
+storage settings remain integration options in either mode. Farm loads the installed Autumn adapter
+from `provider`; application code does not import or call `autumn(...)`.
 
 ## Usage
 

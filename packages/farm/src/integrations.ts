@@ -495,7 +495,46 @@ export interface FarmIntegration<
   plugins?: readonly FarmIntegrationContributedPlugin<NoInfer<TInstance>>[];
 }
 
-export type FarmIntegrationsUserConfig = Record<string, FarmIntegration<any, any, any> | undefined>;
+export const FARM_OFFICIAL_INTEGRATION_PROVIDERS = [
+  "auth0",
+  "authjs",
+  "autumn",
+  "better-auth",
+  "clerk",
+  "polar",
+  "resend",
+  "stripe",
+  "supabase",
+  "unkey",
+  "workos",
+] as const;
+
+export type FarmOfficialIntegrationProvider = (typeof FARM_OFFICIAL_INTEGRATION_PROVIDERS)[number];
+
+/**
+ * Declarative input for an official integration adapter.
+ *
+ * When the integration key is the provider name (for example `stripe`),
+ * `provider` may be omitted. Custom namespaces such as `billing` must name
+ * the provider explicitly.
+ */
+export interface FarmOfficialIntegrationInput {
+  provider?: FarmOfficialIntegrationProvider;
+  instance?: unknown;
+  [option: string]: unknown;
+}
+
+export type FarmIntegrationUserConfigValue =
+  | FarmIntegration<any, any, any>
+  | FarmOfficialIntegrationInput
+  | undefined;
+
+export type FarmIntegrationsUserConfig = Record<string, FarmIntegrationUserConfigValue>;
+
+export type ResolvedFarmIntegrationsConfig = Record<
+  string,
+  FarmIntegration<any, any, any> | undefined
+>;
 
 const FARM_INTEGRATION_PLUGIN_SERVER_RUNTIME = Symbol.for(
   "@farm.js/core/integration-plugin-server-runtime",
@@ -1126,8 +1165,210 @@ export function isFarmIntegration(value: unknown): value is FarmIntegration {
   );
 }
 
-export function resolveIntegrationPlugins(
+type FarmOfficialIntegrationFactory = (
+  input: Record<string, unknown>,
+) => FarmIntegration<any, any, any>;
+
+export interface ResolveFarmIntegrationsOptions {
+  /** File path used as the package-resolution anchor. */
+  resolveFrom?: string;
+  /** @internal Used by framework tests and alternate runtimes. */
+  loadProvider?: (
+    provider: FarmOfficialIntegrationProvider,
+  ) => Promise<FarmOfficialIntegrationFactory>;
+}
+
+const FARM_OFFICIAL_INTEGRATION_PROVIDER_SET = new Set<string>(FARM_OFFICIAL_INTEGRATION_PROVIDERS);
+
+const FARM_OFFICIAL_INTEGRATION_KEY_ALIASES: Readonly<
+  Record<string, FarmOfficialIntegrationProvider>
+> = {
+  betterAuth: "better-auth",
+  email: "resend",
+};
+
+const FARM_OFFICIAL_INTEGRATION_PACKAGES: Readonly<
+  Record<FarmOfficialIntegrationProvider, string>
+> = {
+  auth0: "@farm.js/auth0",
+  authjs: "@farm.js/authjs",
+  autumn: "@farm.js/autumn",
+  "better-auth": "@farm.js/better-auth",
+  clerk: "@farm.js/clerk",
+  polar: "@farm.js/polar",
+  resend: "@farm.js/email",
+  stripe: "@farm.js/stripe",
+  supabase: "@farm.js/supabase",
+  unkey: "@farm.js/unkey",
+  workos: "@farm.js/workos",
+};
+
+const FARM_OFFICIAL_INTEGRATION_EXPORTS: Readonly<Record<FarmOfficialIntegrationProvider, string>> =
+  {
+    auth0: "auth0",
+    authjs: "authjs",
+    autumn: "autumn",
+    "better-auth": "betterAuth",
+    clerk: "clerk",
+    polar: "polar",
+    resend: "resend",
+    stripe: "stripe",
+    supabase: "supabase",
+    unkey: "unkey",
+    workos: "workos",
+  };
+
+const FARM_OFFICIAL_INTEGRATION_PROVIDER = Symbol.for(
+  "@farm.js/core/official-integration-provider",
+);
+
+/** @internal Returns the official provider used to resolve a declarative integration. */
+export function getFarmOfficialIntegrationProvider(
+  integration: FarmIntegration,
+): FarmOfficialIntegrationProvider | undefined {
+  const provider = (integration as FarmIntegration & Record<symbol, unknown>)[
+    FARM_OFFICIAL_INTEGRATION_PROVIDER
+  ];
+  return isFarmOfficialIntegrationProvider(provider) ? provider : undefined;
+}
+
+/** @internal Returns the package and export used by the production bundler. */
+export function getFarmOfficialIntegrationProviderModule(
+  provider: FarmOfficialIntegrationProvider,
+): Readonly<{ packageName: string; exportName: string }> {
+  return {
+    packageName: FARM_OFFICIAL_INTEGRATION_PACKAGES[provider],
+    exportName: FARM_OFFICIAL_INTEGRATION_EXPORTS[provider],
+  };
+}
+
+function isFarmOfficialIntegrationProvider(
+  value: unknown,
+): value is FarmOfficialIntegrationProvider {
+  return typeof value === "string" && FARM_OFFICIAL_INTEGRATION_PROVIDER_SET.has(value);
+}
+
+function inferFarmOfficialIntegrationProvider(
+  key: string,
+  input: FarmOfficialIntegrationInput,
+): FarmOfficialIntegrationProvider {
+  if (input.provider !== undefined) {
+    if (isFarmOfficialIntegrationProvider(input.provider)) {
+      return input.provider;
+    }
+
+    throw new TypeError(
+      `Integration "${key}" uses unsupported provider "${String(input.provider)}". Supported providers: ${FARM_OFFICIAL_INTEGRATION_PROVIDERS.join(", ")}.`,
+    );
+  }
+
+  if (isFarmOfficialIntegrationProvider(key)) {
+    return key;
+  }
+
+  const alias = FARM_OFFICIAL_INTEGRATION_KEY_ALIASES[key];
+  if (alias) {
+    return alias;
+  }
+
+  throw new TypeError(
+    `Integration "${key}" must be created by a Farm adapter or declare an official provider, for example { provider: "stripe", instance }.`,
+  );
+}
+
+async function loadFarmOfficialIntegrationFactory(
+  provider: FarmOfficialIntegrationProvider,
+  resolveFrom?: string,
+): Promise<FarmOfficialIntegrationFactory> {
+  const { packageName, exportName } = getFarmOfficialIntegrationProviderModule(provider);
+  let moduleSpecifier = packageName;
+
+  if (resolveFrom) {
+    const [{ resolve }, { pathToFileURL }] = await Promise.all([
+      import("import-meta-resolve"),
+      import("node:url"),
+    ]);
+    moduleSpecifier = resolve(packageName, pathToFileURL(resolveFrom).href);
+  }
+
+  const moduleExports = (await import(/* @vite-ignore */ moduleSpecifier)) as Record<
+    string,
+    unknown
+  >;
+  const factory = moduleExports[exportName];
+
+  if (typeof factory !== "function") {
+    throw new TypeError(
+      `${packageName} does not export an integration factory named ${exportName}.`,
+    );
+  }
+
+  return factory as FarmOfficialIntegrationFactory;
+}
+
+/**
+ * Resolves declarative official-provider inputs into complete Farm integrations.
+ * Existing integrations returned by adapter factories pass through unchanged.
+ */
+export async function resolveFarmIntegrations(
   integrations: FarmIntegrationsUserConfig | undefined,
+  options: ResolveFarmIntegrationsOptions = {},
+): Promise<ResolvedFarmIntegrationsConfig> {
+  if (!integrations) {
+    return {};
+  }
+
+  const loadProvider =
+    options.loadProvider ||
+    ((provider: FarmOfficialIntegrationProvider) =>
+      loadFarmOfficialIntegrationFactory(provider, options.resolveFrom));
+  const entries = await Promise.all(
+    Object.entries(integrations).map(async ([key, integration]) => {
+      if (integration === undefined || isFarmIntegration(integration)) {
+        return [key, integration] as const;
+      }
+
+      if (!integration || typeof integration !== "object" || Array.isArray(integration)) {
+        throw new TypeError(
+          `Integration "${key}" must be created by a Farm adapter or configured as an object.`,
+        );
+      }
+
+      const input = integration as FarmOfficialIntegrationInput;
+      const provider = inferFarmOfficialIntegrationProvider(key, input);
+      let factory: FarmOfficialIntegrationFactory;
+
+      try {
+        factory = await loadProvider(provider);
+      } catch (error) {
+        const detail = error instanceof Error ? ` ${error.message}` : "";
+        throw new Error(
+          `Could not load integration provider "${provider}" for "${key}". Install ${FARM_OFFICIAL_INTEGRATION_PACKAGES[provider]}.${detail}`,
+        );
+      }
+
+      const { provider: _provider, ...providerInput } = input;
+      const resolved = factory(providerInput);
+      if (!isFarmIntegration(resolved)) {
+        throw new TypeError(
+          `Integration provider "${provider}" did not return a valid Farm integration for "${key}".`,
+        );
+      }
+
+      Object.defineProperty(resolved, FARM_OFFICIAL_INTEGRATION_PROVIDER, {
+        configurable: true,
+        value: provider,
+      });
+
+      return [key, resolved] as const;
+    }),
+  );
+
+  return Object.fromEntries(entries);
+}
+
+export function resolveIntegrationPlugins(
+  integrations: ResolvedFarmIntegrationsConfig | undefined,
 ): FarmPlugin[] {
   if (!integrations) {
     return [];

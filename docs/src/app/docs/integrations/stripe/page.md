@@ -18,54 +18,64 @@ farm add integration stripe --ui
 
 ## Config-first setup
 
-**src/lib/integrations.ts**
+**farm.config.ts**
 
 ```ts
-import { stripe } from "@farm.js/stripe";
+import { defineConfig } from "@farm.js/core";
 
-export const integrations = {
-  billing: stripe({
-    secretKey: process.env.STRIPE_SECRET_KEY,
-    webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
-    products: [
-      {
-        id: "pro",
-        name: "Pro",
-        prices: [{ interval: "month", amount: 2900, currency: "usd" }],
-      },
-    ],
-  }),
-};
+export default defineConfig({
+  integrations: {
+    billing: {
+      provider: "stripe",
+      secretKey: process.env.STRIPE_SECRET_KEY,
+      webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
+      products: [
+        {
+          id: "pro",
+          name: "Pro",
+          prices: [{ interval: "month", amount: 2900, currency: "usd" }],
+        },
+      ],
+    },
+  },
+});
 ```
 
 ## Choose SDK ownership
 
 ### Let Farm construct Stripe
 
-The config-first example is the default path. When `instance` is omitted, Farm creates the Stripe
-SDK from `secretKey`, supplied directly or through `STRIPE_SECRET_KEY`.
+The config-first example is the default path. When `instance` is omitted, Farm loads the installed
+`@farm.js/stripe` adapter and creates the Stripe SDK from `secretKey`, supplied directly or through
+`STRIPE_SECRET_KEY`. Application code does not import the adapter factory.
 
 ### Provide an application-owned instance
 
 ```ts
+import { defineConfig } from "@farm.js/core";
 import Stripe from "stripe";
-import { stripe } from "@farm.js/stripe";
 
 const stripeClient = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   maxNetworkRetries: 2,
 });
 
-export const integrations = {
-  billing: stripe({
-    instance: stripeClient,
-    webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
-  }),
-};
+export default defineConfig({
+  integrations: {
+    billing: {
+      provider: "stripe",
+      instance: stripeClient,
+      webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
+    },
+  },
+});
 ```
 
 Use this path when the application needs to own retries, telemetry, API-version settings, or a
 compatible test adapter. The instance wins if a secret key is also supplied. Webhook, product,
 billing, route, and storage settings remain integration options in either mode.
+
+For typed callers without a runtime adapter import, define the namespace with
+`import type { StripeIntegration } from "@farm.js/stripe"` and pass it to `createIntegrations`.
 
 ## Usage
 

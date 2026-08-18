@@ -65,21 +65,26 @@ config.
 
 ## Register it
 
-**src/lib/integrations.ts**
+**farm.config.ts**
 
 ```ts
-import { betterAuth } from "@farm.js/better-auth";
-import { auth } from "./auth";
+import { defineConfig } from "@farm.js/core";
+import { auth } from "./src/lib/auth";
 
-export const appIntegrations = {
-  auth: betterAuth({
-    instance: auth,
-  }),
-} as const;
+export default defineConfig({
+  integrations: {
+    auth: {
+      provider: "better-auth",
+      instance: auth,
+    },
+  },
+});
 ```
 
-The direct `@farm.js/better-auth` package import is what `farm add integration better-auth` writes.
-The `@farm.js/integrations/better-auth` compatibility export remains supported for existing apps.
+Farm loads the installed `@farm.js/better-auth` adapter from `provider`; application code does not
+import or call the adapter factory. The `@farm.js/better-auth` and
+`@farm.js/integrations/better-auth` factory imports remain supported when an application constructs
+the complete Farm integration object itself.
 
 Farm mounts the instance handler for both methods:
 
@@ -90,16 +95,7 @@ POST /api/auth/[...auth]
 
 There is no app-local `src/app/api/auth/[...auth]/route.ts` file to maintain.
 
-Register `appIntegrations` through `integrations` in `farm.config.ts`. Do not also add the top-level `auth` key:
-
-```ts
-import { defineConfig } from "@farm.js/core";
-import { appIntegrations } from "./src/lib/integrations";
-
-export default defineConfig({
-  integrations: appIntegrations,
-});
-```
+Do not also add the top-level `auth` key when this integration owns authentication.
 
 ## Create the browser client
 
