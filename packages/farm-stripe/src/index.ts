@@ -275,14 +275,17 @@ function resolveOccurredAt(value: unknown): string {
   return date.toISOString();
 }
 
-/**
- * The primary path is passing a real Stripe SDK instance.
- * A custom adapter is still supported for local mocks and tests.
- */
+/** A real Stripe SDK client, or a compatible adapter for local mocks and tests. */
 export type StripeIntegrationInstance = Stripe | StripeIntegrationAdapter;
 
 export interface StripeIntegrationInput {
+  /**
+   * Use an application-owned Stripe SDK client or compatible adapter.
+   * When omitted, `@farm.js/stripe` constructs a Stripe client from `secretKey`
+   * or `STRIPE_SECRET_KEY`.
+   */
   instance?: StripeIntegrationInstance;
+  /** API key used to construct the default Stripe SDK client when `instance` is omitted. */
   secretKey?: string;
   webhooks?: StripeWebhookConfig;
   webhookSecret?: string;

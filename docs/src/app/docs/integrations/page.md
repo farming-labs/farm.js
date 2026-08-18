@@ -23,6 +23,11 @@ A Farm adapter function such as `stripe(...)` registers routes, typed callers, w
 integration lifecycle behavior. It is not the Stripe SDK instance. When the application supplies
 `instance`, the adapter uses that exact object instead of constructing another provider client.
 
+Provider adapters support two first-class ownership modes. Pass credentials when the adapter should
+construct its default SDK client, or pass the vendor SDK object through `instance` when the
+application should own that client. These are alternatives; an application normally registers only
+one Stripe integration for a given billing namespace.
+
 ## Register integrations
 
 **farm.config.ts**
@@ -87,10 +92,11 @@ package. Keep the provider client in server-only application code and reuse it w
 access is needed. The adapter still owns Farm-specific configuration such as webhook routes,
 product metadata, billing ownership, and typed callers.
 
-For backward compatibility, integrations that previously accepted credentials still do. When both
-are supplied, `instance` wins and credentials remain available only as configuration metadata.
-Instance injection owns construction, but the object must still implement the SDK methods the Farm
-adapter calls; a vendor breaking those methods can still require an adapter update.
+Credential-based construction and instance injection are both supported. When `instance` is
+omitted, an adapter such as `@farm.js/stripe` can construct its default SDK client from `secretKey`
+or the matching environment variable. When both are supplied, `instance` wins. The injected object
+must still implement the SDK methods the Farm adapter calls; a vendor breaking those methods can
+still require an adapter update.
 
 | Integration kind                             | Application ownership boundary                                                                                                           |
 | -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |

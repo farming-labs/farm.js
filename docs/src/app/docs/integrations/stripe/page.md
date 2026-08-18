@@ -40,10 +40,11 @@ export const integrations = {
 
 ## Choose SDK ownership
 
-### Let Farm construct Stripe
+### Let `@farm.js/stripe` construct the SDK
 
-The config-first example is the default path. When `instance` is omitted, Farm creates the Stripe
-SDK from `secretKey`, supplied directly or through `STRIPE_SECRET_KEY`.
+The config-first example is the adapter-owned path. When `instance` is omitted, the
+`@farm.js/stripe` adapter creates a real Stripe SDK client from `secretKey`, supplied directly or
+through `STRIPE_SECRET_KEY`.
 
 ### Provide an application-owned instance
 
@@ -66,6 +67,10 @@ export const integrations = {
 Use this path when the application needs to own retries, telemetry, API-version settings, or a
 compatible test adapter. The instance wins if a secret key is also supplied. Webhook, product,
 billing, route, and storage settings remain integration options in either mode.
+
+`stripeClient` above is the vendor's `Stripe` SDK object—not another Farm wrapper. The
+`stripe(...)` call remains responsible for adapting that SDK to Farm routes, callers, webhooks, and
+lifecycle behavior.
 
 ## Usage
 
