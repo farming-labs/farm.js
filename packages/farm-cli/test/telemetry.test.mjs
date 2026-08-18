@@ -13,12 +13,15 @@ import {
 } from "../dist/telemetry.mjs";
 
 const TELEMETRY_ENV_KEYS = [
+  "BUILDKITE",
   "CI",
+  "CIRCLECI",
   "DO_NOT_TRACK",
   "FARM_TELEMETRY",
   "FARM_TELEMETRY_CONFIG_DIR",
   "FARM_TELEMETRY_DISABLED",
   "FARM_TELEMETRY_ENDPOINT",
+  "GITHUB_ACTIONS",
   "NODE_ENV",
 ];
 
@@ -50,6 +53,23 @@ test("telemetry is enabled without creating an identity by default", async () =>
     assert.equal(status.source, "default");
     assert.match(status.reason, /non-interactive/);
     assert.equal(status.anonymousId, undefined);
+  });
+});
+
+test("telemetry remains inactive in recognized CI environments", async () => {
+  await withTelemetryEnvironment(async () => {
+    for (const key of ["CI", "GITHUB_ACTIONS", "BUILDKITE", "CIRCLECI"]) {
+      process.env[key] = "true";
+
+      const status = await getFarmTelemetryStatus();
+      assert.equal(status.enabled, true);
+      assert.equal(status.active, false);
+      assert.equal(status.source, "default");
+      assert.equal(status.reason, "CI environments are skipped");
+      assert.equal(status.anonymousId, undefined);
+
+      delete process.env[key];
+    }
   });
 });
 
