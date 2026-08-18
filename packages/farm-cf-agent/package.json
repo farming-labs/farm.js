@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/cf-agent",
-  "version": "0.1.0-beta.40",
+  "version": "0.1.0-beta.41",
   "description": "First-class Cloudflare Agents integration for Farm.js",
   "keywords": [
     "agents",
