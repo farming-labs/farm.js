@@ -52,7 +52,7 @@ Keep the integration object in a shared server module so `farm.config.ts` and ty
 **src/lib/integrations.ts**
 
 ```ts
-import { supabase } from "@farm.js/integrations/supabase";
+import { supabase } from "@farm.js/supabase";
 
 export const appIntegrations = {
   auth: supabase({

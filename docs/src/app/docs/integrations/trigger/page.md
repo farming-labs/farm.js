@@ -23,7 +23,7 @@ farm add integration jobs-trigger --ui
 **src/lib/integrations.ts**
 
 ```ts
-import { jobs, trigger } from "@farm.js/integrations/jobs";
+import { jobs, trigger } from "@farm.js/jobs";
 import { tasks } from "./jobs";
 
 export const appIntegrations = {
@@ -59,7 +59,7 @@ and execution. There is no in-process Trigger.dev SDK instance to inject into Fa
 **src/lib/jobs.ts**
 
 ```ts
-import { defineTasks, task } from "@farm.js/integrations/jobs";
+import { defineTasks, task } from "@farm.js/jobs";
 
 export const tasks = defineTasks({
   sendWelcomeEmail: task({

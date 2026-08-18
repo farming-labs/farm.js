@@ -52,7 +52,7 @@ The Farm adapter only requires the `handlers` property, so the normal object ret
 **src/lib/integrations.ts**
 
 ```ts
-import { authjs } from "@farm.js/integrations/authjs";
+import { authjs } from "@farm.js/authjs";
 import { authInstance } from "./auth";
 
 export const appIntegrations = {

@@ -21,7 +21,7 @@ farm add integration polar --ui
 **src/lib/integrations.ts**
 
 ```ts
-import { polar } from "@farm.js/integrations/polar";
+import { polar } from "@farm.js/polar";
 
 export const integrations = {
   billing: polar({
@@ -52,7 +52,7 @@ application still supplies billing ownership, products, meters, routes, and webh
 
 ```ts
 import { Polar } from "@polar-sh/sdk";
-import { polar } from "@farm.js/integrations/polar";
+import { polar } from "@farm.js/polar";
 
 const polarClient = new Polar({
   accessToken: process.env.POLAR_ACCESS_TOKEN!,

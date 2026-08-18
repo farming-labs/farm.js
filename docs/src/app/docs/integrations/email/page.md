@@ -13,7 +13,7 @@ Render React Email templates, send with Resend, schedule messages, preview templ
 **src/lib/email.ts**
 
 ```tsx
-import { resend, template } from "@farm.js/integrations/email";
+import { resend, template } from "@farm.js/email";
 
 const templates = {
   welcome: template({
@@ -40,7 +40,7 @@ The example above is the default path. When `instance` is omitted, Farm creates 
 
 ```tsx
 import { Resend } from "resend";
-import { resend } from "@farm.js/integrations/email";
+import { resend } from "@farm.js/email";
 
 const resendClient = new Resend(process.env.RESEND_API_KEY);
 

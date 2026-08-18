@@ -552,8 +552,8 @@ See [Cron](/docs/cron) for route protection, local commands, UTC syntax, deploym
 
 ```ts
 import { defineConfig } from "@farm.js/core";
-import { stripe } from "@farm.js/integrations/stripe";
-import { supabase } from "@farm.js/integrations/supabase";
+import { stripe } from "@farm.js/stripe";
+import { supabase } from "@farm.js/supabase";
 
 export default defineConfig({
   integrations: {

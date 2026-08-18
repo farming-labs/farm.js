@@ -23,7 +23,7 @@ farm add integration clerk --ui
 **src/lib/integrations.ts**
 
 ```ts
-import { clerk } from "@farm.js/integrations/clerk";
+import { clerk } from "@farm.js/clerk";
 
 export const appIntegrations = {
   auth: clerk({
@@ -67,7 +67,7 @@ options such as `protectedRoutes`, `providerProps`, and sign-in URLs still belon
 
 ```ts
 import { createClerkClient } from "@clerk/backend";
-import { clerk } from "@farm.js/integrations/clerk";
+import { clerk } from "@farm.js/clerk";
 
 const clerkClient = createClerkClient({
   secretKey: process.env.CLERK_SECRET_KEY,

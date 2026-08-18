@@ -23,7 +23,7 @@ farm add integration workos --ui
 **src/lib/integrations.ts**
 
 ```ts
-import { workos } from "@farm.js/integrations/workos";
+import { workos } from "@farm.js/workos";
 
 export const appIntegrations = {
   auth: workos({
@@ -70,7 +70,7 @@ options still belong in `workos(...)`.
 
 ```ts
 import { WorkOS } from "@workos-inc/node";
-import { workos } from "@farm.js/integrations/workos";
+import { workos } from "@farm.js/workos";
 
 const workosClient = new WorkOS({
   apiKey: process.env.WORKOS_API_KEY,
