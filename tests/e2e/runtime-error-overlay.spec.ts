@@ -26,9 +26,13 @@ test.describe("Development runtime error overlay", () => {
     await expect(overlay.locator(".farm-default-error__source-line--active")).toContainText(
       "setDisplayName(response.user.profile.formatDisplayName());",
     );
-    await expect(overlay.getByRole("button", { name: "Copy debug report" })).toBeVisible();
+    const copyButton = overlay.getByRole("button", { name: "Copy debug report" });
+    await expect(copyButton).toBeVisible();
+    await expect(copyButton).toHaveCSS("font-family", /Inter|system-ui/);
     const issueLink = overlay.getByRole("link", { name: "Open GitHub issue" });
     await expect(issueLink).toBeVisible();
+    await expect(issueLink).toHaveCSS("font-family", /Inter|system-ui/);
+    await expect(issueLink).toHaveCSS("outline-width", "1px");
     const issueUrl = new URL((await issueLink.getAttribute("href")) || "");
     expect(issueUrl.origin + issueUrl.pathname).toBe(
       "https://github.com/farming-labs/farm.js/issues/new",

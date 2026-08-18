@@ -136,6 +136,11 @@ describe("default error page", () => {
     expect(DEFAULT_ERROR_STYLES).toContain("@media (max-width: 620px)");
     expect(DEFAULT_ERROR_STYLES).toContain("@media (prefers-reduced-motion: reduce)");
     expect(DEFAULT_ERROR_STYLES).toContain("border: 1px solid var(--farm-error-line)");
+    expect(DEFAULT_ERROR_STYLES).toContain("border: 1px solid var(--farm-error-line-strong)");
+    expect(DEFAULT_ERROR_STYLES).toContain("outline: 1px solid var(--farm-error-fg)");
+    expect(DEFAULT_ERROR_STYLES).toContain(
+      'font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;',
+    );
     expect(DEFAULT_ERROR_STYLES).toContain("font-size: clamp(76px, 13vw, 112px)");
   });
 });
