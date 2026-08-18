@@ -3348,6 +3348,31 @@ async function buildSSRInMemory(
  * Generate virtual entry code that bundles all routes
  * This creates managers at runtime from bundled code
  */
+export function generateFarmDocsRuntimeConfigExpression(docs: ResolvedFarmConfig["docs"]): string {
+  if (!docs.enabled) return "null";
+
+  const baseConfig = {
+    ...docs,
+    contentDir: undefined,
+    config: undefined,
+  };
+  const nestedConfig = {
+    ...docs.config,
+    contentDir: undefined,
+  };
+
+  return `farmDocsBundledContentDir
+  ? {
+      ...${JSON.stringify(baseConfig)},
+      contentDir: farmDocsBundledContentDir,
+      config: {
+        ...${JSON.stringify(nestedConfig)},
+        contentDir: farmDocsBundledContentDir,
+      },
+    }
+  : ${JSON.stringify(docs)}`;
+}
+
 function generateVirtualEntryCode(
   apiRoutes: Array<{ path: string; filePath: string; methods: string[] }>,
   pageRoutes: UniversalPageRoute[],
@@ -3385,9 +3410,6 @@ function generateVirtualEntryCode(
   );
   const hasMiddlewareRuntime =
     middlewareRoutes.length > 0 || hasFarmMiddlewareConfig(config.middleware);
-  const farmDocsBaseConfig = config.docs?.enabled
-    ? { ...config.docs, config: undefined }
-    : undefined;
   const farmDocsFontAssets = config.docs?.enabled
     ? toFarmDocsPublicFontAssets(resolveFarmDocsFontAssets(config.root))
     : [];
@@ -3950,20 +3972,7 @@ const farmDocsBundledContentDir = ${
 })()`
       : "null"
   };
-const farmDocsResolvedConfig = ${
-    config.docs?.enabled
-      ? `farmDocsBundledContentDir
-  ? {
-      ...${JSON.stringify(farmDocsBaseConfig)},
-      contentDir: farmDocsBundledContentDir,
-      config: {
-        ...${JSON.stringify(config.docs.config)},
-        contentDir: farmDocsBundledContentDir,
-      },
-    }
-  : ${JSON.stringify(config.docs)}`
-      : "null"
-  };
+const farmDocsResolvedConfig = ${generateFarmDocsRuntimeConfigExpression(config.docs)};
 const farmDocsRuntimeRoot = farmDocsBundledContentDir || ${JSON.stringify(config.root)};
 globalThis.__FARM_DOCS_RUNTIME_CONFIG__ = {
   root: farmDocsRuntimeRoot,

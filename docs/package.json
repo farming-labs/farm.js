@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "pnpm --filter @farm.js/core build && pnpm --filter @farm.js/cli build && pnpm run prisma:generate && farm dev",
-    "build": "pnpm --filter @farm.js/core build:runtime && pnpm --filter @farm.js/cli build && pnpm run prisma:generate && farm build",
+    "build": "pnpm --filter @farm.js/core build:runtime && pnpm --filter @farm.js/cli build && pnpm run prisma:generate && NODE_OPTIONS=--max-old-space-size=6144 farm build",
     "preview": "farm preview",
     "prisma:generate": "DATABASE_URL=${DATABASE_URL:-postgresql://user:password@localhost:5432/farmjs} prisma generate",
     "db:push": "prisma db push"
