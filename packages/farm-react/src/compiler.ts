@@ -50,35 +50,38 @@ interface PendingDomBinding {
 interface PendingConditionalBlockBinding {
   kind: "block";
   id: number;
+  parent?: number;
   dependencies: number[];
 }
 
 type PendingBinding = PendingDomBinding | PendingConditionalBlockBinding;
 
 interface ConditionalBlockPlan {
+  kind: "conditional";
   id: number;
+  parent?: number;
   dependencies: number[];
   source: t.Expression;
 }
 
 interface KeyedListPlan {
+  kind: "keyed-list";
   id: number;
+  parent?: number;
   dependencies: number[];
   source: t.Expression;
   syntax: "map" | "list";
 }
 
 interface ComponentIslandPlan {
+  kind: "component";
   id: number;
+  parent?: number;
   dependencies: number[];
-  location: number[];
+  source: t.JSXElement;
 }
 
-interface ComponentIslandAnalysis {
-  islands?: ComponentIslandPlan[];
-  components?: Set<t.JSXElement>;
-  reason?: string;
-}
+type ComposableBlockPlan = ConditionalBlockPlan | KeyedListPlan | ComponentIslandPlan;
 
 interface Candidate {
   name: string;
@@ -462,171 +465,6 @@ function conditionalBlockShape(expression: t.Expression): ConditionalBlockShape 
   };
 }
 
-function validateConditionalHostTree(
-  root: t.JSXElement,
-  statesByValue: ReadonlyMap<string, StateBinding>,
-  safeGlobals: ReadonlySet<string>,
-): string | undefined {
-  const visit = (element: t.JSXElement): string | undefined => {
-    const tag = element.openingElement.name;
-    if (!t.isJSXIdentifier(tag) || !/^[a-z]/.test(tag.name)) {
-      return "conditional blocks currently support host elements only";
-    }
-
-    for (const attribute of element.openingElement.attributes) {
-      if (t.isJSXSpreadAttribute(attribute)) {
-        return "conditional blocks do not support JSX attribute spreads";
-      }
-      const name = jsxAttributeName(attribute);
-      if (!name) return "conditional blocks do not support namespaced JSX attributes";
-      if (name === "ref" || name === "dangerouslySetInnerHTML") {
-        return `conditional block ${name} requires React ownership`;
-      }
-      if (
-        !t.isJSXExpressionContainer(attribute.value) ||
-        t.isJSXEmptyExpression(attribute.value.expression) ||
-        /^on[A-Z]/.test(name)
-      ) {
-        continue;
-      }
-
-      const expression = attribute.value.expression;
-      if (name === "style") {
-        if (!t.isObjectExpression(expression)) {
-          return "conditional block styles must use one inline object literal";
-        }
-        for (const property of expression.properties) {
-          if (!t.isObjectProperty(property) || property.computed) {
-            return "conditional block styles do not support spreads, methods, or computed properties";
-          }
-          if (!t.isExpression(property.value)) {
-            return "conditional block style properties must use expression values";
-          }
-          const unsupported = validateDerivedExpression(property.value, safeGlobals);
-          if (unsupported) return `conditional block style cannot use ${unsupported}`;
-        }
-        continue;
-      }
-
-      const unsupported = validateDerivedExpression(expression, safeGlobals);
-      if (unsupported) return `conditional block attribute ${name} cannot use ${unsupported}`;
-    }
-
-    for (const child of element.children) {
-      if (t.isJSXElement(child)) {
-        const reason = visit(child);
-        if (reason) return reason;
-        continue;
-      }
-      if (t.isJSXFragment(child)) {
-        return "conditional blocks do not support fragments yet";
-      }
-      if (!t.isJSXExpressionContainer(child) || t.isJSXEmptyExpression(child.expression)) {
-        continue;
-      }
-      if (conditionalBlockShape(child.expression)) {
-        return "nested conditional blocks are not supported yet";
-      }
-      if (!isTextExpression(child.expression, statesByValue, safeGlobals)) {
-        return "conditional block children must keep one static host tree";
-      }
-    }
-    return undefined;
-  };
-
-  return visit(root);
-}
-
-function analyzeConditionalBlocks(
-  root: t.JSXElement,
-  statesByValue: ReadonlyMap<string, StateBinding>,
-  safeGlobals: ReadonlySet<string>,
-): { blocks?: ConditionalBlockPlan[]; reason?: string } {
-  const blocks: ConditionalBlockPlan[] = [];
-
-  const visit = (element: t.JSXElement): string | undefined => {
-    for (const child of element.children) {
-      if (t.isJSXElement(child)) {
-        const reason = visit(child);
-        if (reason) return reason;
-        continue;
-      }
-      if (!t.isJSXExpressionContainer(child) || t.isJSXEmptyExpression(child.expression)) {
-        continue;
-      }
-      const shape = conditionalBlockShape(child.expression);
-      if (!shape) continue;
-      const unsupported = validateDerivedExpression(shape.test, safeGlobals);
-      if (unsupported) return `conditional block test cannot use ${unsupported}`;
-      for (const branch of shape.branches) {
-        const reason = validateConditionalHostTree(branch, statesByValue, safeGlobals);
-        if (reason) return reason;
-      }
-      blocks.push({
-        id: blocks.length,
-        dependencies: collectStateDependencies(child.expression, statesByValue),
-        source: child.expression,
-      });
-    }
-    return undefined;
-  };
-
-  const reason = visit(root);
-  return reason ? { reason } : { blocks };
-}
-
-function lowerConditionalBlocks(
-  root: t.JSXElement,
-  plans: readonly ConditionalBlockPlan[],
-  blockRuntime: t.Identifier,
-): t.JSXElement {
-  const lowered = t.cloneNode(root, true);
-  let cursor = 0;
-  const visit = (element: t.JSXElement): void => {
-    element.children = element.children.map((child) => {
-      if (t.isJSXElement(child)) {
-        visit(child);
-        return child;
-      }
-      if (
-        !t.isJSXExpressionContainer(child) ||
-        t.isJSXEmptyExpression(child.expression) ||
-        !conditionalBlockShape(child.expression)
-      ) {
-        return child;
-      }
-      const plan = plans[cursor++];
-      const name = t.jsxMemberExpression(
-        t.jsxIdentifier(blockRuntime.name),
-        t.jsxIdentifier("Conditional"),
-      );
-      return t.jsxElement(
-        t.jsxOpeningElement(
-          name,
-          [
-            t.jsxAttribute(
-              t.jsxIdentifier("id"),
-              t.jsxExpressionContainer(t.numericLiteral(plan.id)),
-            ),
-            t.jsxAttribute(
-              t.jsxIdentifier("render"),
-              t.jsxExpressionContainer(
-                t.arrowFunctionExpression([], cloneExpression(child.expression)),
-              ),
-            ),
-          ],
-          true,
-        ),
-        null,
-        [],
-        true,
-      );
-    });
-  };
-  visit(lowered);
-  return lowered;
-}
-
 function isMapCall(expression: t.Expression): expression is t.CallExpression {
   return (
     t.isCallExpression(expression) &&
@@ -813,63 +651,6 @@ function analyzePublicList(
   return { dependencies: collectStateDependencies(element, statesByValue) };
 }
 
-function analyzeKeyedLists(
-  root: t.JSXElement,
-  statesByValue: ReadonlyMap<string, StateBinding>,
-  safeGlobals: ReadonlySet<string>,
-  listNames: ReadonlySet<string>,
-  startingId: number,
-): { lists?: KeyedListPlan[]; reason?: string } {
-  const lists: KeyedListPlan[] = [];
-
-  const visit = (element: t.JSXElement): string | undefined => {
-    const meaningful = meaningfulJsxChildren(element);
-    for (const child of element.children) {
-      if (t.isJSXElement(child) && isPublicListElement(child, listNames)) {
-        if (meaningful.length !== 1) {
-          return "a compiled keyed list must be the only child of its host container";
-        }
-        const result = analyzePublicList(child, statesByValue, safeGlobals);
-        if (result.reason) return result.reason;
-        lists.push({
-          id: startingId + lists.length,
-          dependencies: result.dependencies || [],
-          source: child,
-          syntax: "list",
-        });
-        continue;
-      }
-      if (t.isJSXElement(child)) {
-        const reason = visit(child);
-        if (reason) return reason;
-        continue;
-      }
-      if (
-        !t.isJSXExpressionContainer(child) ||
-        t.isJSXEmptyExpression(child.expression) ||
-        !isMapCall(child.expression)
-      ) {
-        continue;
-      }
-      if (meaningful.length !== 1) {
-        return "a compiled keyed list must be the only child of its host container";
-      }
-      const result = analyzeMapList(child.expression, statesByValue, safeGlobals);
-      if (result.reason) return result.reason;
-      lists.push({
-        id: startingId + lists.length,
-        dependencies: result.dependencies || [],
-        source: child.expression,
-        syntax: "map",
-      });
-    }
-    return undefined;
-  };
-
-  const reason = visit(root);
-  return reason ? { reason } : { lists };
-}
-
 function keyedListBoundary(
   blockRuntime: t.Identifier,
   plan: KeyedListPlan,
@@ -897,119 +678,62 @@ function keyedListBoundary(
   );
 }
 
-function lowerKeyedLists(
-  root: t.JSXElement,
-  plans: readonly KeyedListPlan[],
-  blockRuntime: t.Identifier,
-  listNames: ReadonlySet<string>,
-): t.JSXElement {
-  const lowered = t.cloneNode(root, true);
-  let cursor = 0;
-  const visit = (element: t.JSXElement): void => {
-    element.children = element.children.map((child) => {
-      if (t.isJSXElement(child) && isPublicListElement(child, listNames)) {
-        const plan = plans[cursor++];
-        return keyedListBoundary(blockRuntime, plan, child);
-      }
-      if (t.isJSXElement(child)) {
-        visit(child);
-        return child;
-      }
-      if (
-        t.isJSXExpressionContainer(child) &&
-        !t.isJSXEmptyExpression(child.expression) &&
-        isMapCall(child.expression)
-      ) {
-        const plan = plans[cursor++];
-        return keyedListBoundary(blockRuntime, plan, child.expression);
-      }
-      return child;
-    });
-  };
-  visit(lowered);
-  return lowered;
-}
-
-function analyzeComponentIslands(
-  root: t.JSXElement,
+function analyzeComponentIslandElement(
+  element: t.JSXElement,
   statesByValue: ReadonlyMap<string, StateBinding>,
   safeGlobals: ReadonlySet<string>,
   allowedComponentNames: ReadonlySet<string>,
-  keyedElements: ReadonlySet<t.JSXElement>,
-  startingId: number,
-): ComponentIslandAnalysis {
-  const islands: ComponentIslandPlan[] = [];
-  const components = new Set<t.JSXElement>();
+): { dependencies?: number[]; reason?: string } {
+  const name = element.openingElement.name;
+  if (!t.isJSXIdentifier(name) || !isComponentName(name.name)) {
+    return { reason: "component islands require a direct component identifier" };
+  }
+  if (!allowedComponentNames.has(name.name)) {
+    return {
+      reason: `component island ${name.name} must reference a stable module-level component`,
+    };
+  }
+  if (meaningfulJsxChildren(element).length > 0) {
+    return { reason: `component island ${name.name} does not support children yet` };
+  }
 
-  const visit = (element: t.JSXElement, location: number[]): string | undefined => {
-    for (let childIndex = 0; childIndex < element.children.length; childIndex += 1) {
-      const child = element.children[childIndex];
-      if (!t.isJSXElement(child) || keyedElements.has(child)) continue;
-      if (isHostElement(child)) {
-        const reason = visit(child, [...location, childIndex]);
-        if (reason) return reason;
-        continue;
-      }
+  const dependencies = new Set<number>();
+  for (const attribute of element.openingElement.attributes) {
+    if (t.isJSXSpreadAttribute(attribute)) {
+      return { reason: `component island ${name.name} does not support JSX attribute spreads` };
+    }
+    const attributeName = jsxAttributeName(attribute);
+    if (!attributeName) {
+      return { reason: `component island ${name.name} does not support namespaced JSX attributes` };
+    }
+    if (attributeName === "ref" || attributeName === "key" || attributeName === "children") {
+      return { reason: `component island ${name.name} does not support ${attributeName} yet` };
+    }
+    if (
+      !t.isJSXExpressionContainer(attribute.value) ||
+      t.isJSXEmptyExpression(attribute.value.expression)
+    ) {
+      continue;
+    }
 
-      const name = child.openingElement.name;
-      if (!t.isJSXIdentifier(name) || !isComponentName(name.name)) {
-        return "component islands require a direct component identifier";
-      }
-      if (!allowedComponentNames.has(name.name)) {
-        return `component island ${name.name} must reference a stable module-level component`;
-      }
-      if (meaningfulJsxChildren(child).length > 0) {
-        return `component island ${name.name} does not support children yet`;
-      }
-
-      const dependencies = new Set<number>();
-      for (const attribute of child.openingElement.attributes) {
-        if (t.isJSXSpreadAttribute(attribute)) {
-          return `component island ${name.name} does not support JSX attribute spreads`;
-        }
-        const attributeName = jsxAttributeName(attribute);
-        if (!attributeName) {
-          return `component island ${name.name} does not support namespaced JSX attributes`;
-        }
-        if (attributeName === "ref" || attributeName === "key" || attributeName === "children") {
-          return `component island ${name.name} does not support ${attributeName} yet`;
-        }
-        if (
-          !t.isJSXExpressionContainer(attribute.value) ||
-          t.isJSXEmptyExpression(attribute.value.expression)
-        ) {
-          continue;
-        }
-
-        const expression = attribute.value.expression;
-        const isEventFunction =
-          /^on[A-Z]/.test(attributeName) &&
-          (t.isArrowFunctionExpression(expression) || t.isFunctionExpression(expression));
-        if (!isEventFunction) {
-          const unsupported = validateDerivedExpression(expression, safeGlobals);
-          if (unsupported) {
-            return `component island ${name.name} prop ${attributeName} cannot use ${unsupported}`;
-          }
-        }
-        collectStateDependencies(expression, statesByValue).forEach((dependency) =>
-          dependencies.add(dependency),
-        );
-      }
-
-      components.add(child);
-      if (dependencies.size > 0) {
-        islands.push({
-          id: startingId + islands.length,
-          dependencies: [...dependencies].sort((left, right) => left - right),
-          location: [...location, childIndex],
-        });
+    const expression = attribute.value.expression;
+    const isEventFunction =
+      /^on[A-Z]/.test(attributeName) &&
+      (t.isArrowFunctionExpression(expression) || t.isFunctionExpression(expression));
+    if (!isEventFunction) {
+      const unsupported = validateDerivedExpression(expression, safeGlobals);
+      if (unsupported) {
+        return {
+          reason: `component island ${name.name} prop ${attributeName} cannot use ${unsupported}`,
+        };
       }
     }
-    return undefined;
-  };
+    collectStateDependencies(expression, statesByValue).forEach((dependency) =>
+      dependencies.add(dependency),
+    );
+  }
 
-  const reason = visit(root, []);
-  return reason ? { reason } : { islands, components };
+  return { dependencies: [...dependencies].sort((left, right) => left - right) };
 }
 
 function componentIslandBoundary(
@@ -1039,28 +763,322 @@ function componentIslandBoundary(
   );
 }
 
-function lowerComponentIslands(
-  root: t.JSXElement,
-  plans: readonly ComponentIslandPlan[],
-  blockRuntime: t.Identifier,
-): t.JSXElement {
-  if (plans.length === 0) return t.cloneNode(root, true);
-  const lowered = t.cloneNode(root, true);
-  const plansByLocation = new Map(plans.map((plan) => [plan.location.join("."), plan]));
+interface ComposableBlockAnalysis {
+  plans?: ComposableBlockPlan[];
+  componentElements?: Set<t.JSXElement>;
+  conditionalExpressions?: Set<t.Expression>;
+  keyedElements?: Set<t.JSXElement>;
+  keyedExpressions?: Set<t.Expression>;
+  reason?: string;
+}
 
-  const visit = (element: t.JSXElement, location: number[]): void => {
-    element.children = element.children.map((child, childIndex) => {
-      if (!t.isJSXElement(child)) return child;
-      const childLocation = [...location, childIndex];
-      const plan = plansByLocation.get(childLocation.join("."));
-      if (plan) return componentIslandBoundary(blockRuntime, plan, child);
-      if (isHostElement(child)) visit(child, childLocation);
+function analyzeComposableBlocks(
+  root: t.JSXElement,
+  statesByValue: ReadonlyMap<string, StateBinding>,
+  safeGlobals: ReadonlySet<string>,
+  listNames: ReadonlySet<string>,
+  allowedComponentNames: ReadonlySet<string>,
+): ComposableBlockAnalysis {
+  const plans: ComposableBlockPlan[] = [];
+  const componentElements = new Set<t.JSXElement>();
+  const conditionalExpressions = new Set<t.Expression>();
+  const keyedElements = new Set<t.JSXElement>();
+  const keyedExpressions = new Set<t.Expression>();
+  let nextId = 0;
+
+  const mergeDependencies = (target: Set<number>, dependencies: Iterable<number>) => {
+    for (const dependency of dependencies) target.add(dependency);
+  };
+
+  const visitHost = (
+    element: t.JSXElement,
+    parent: number | undefined,
+    insideConditional: boolean,
+  ): { dependencies: Set<number>; reason?: string } => {
+    const dependencies = new Set<number>();
+    if (!isHostElement(element)) {
+      return {
+        dependencies,
+        reason: insideConditional
+          ? "conditional blocks currently support host elements only"
+          : "compiled trees currently support host elements only",
+      };
+    }
+
+    if (insideConditional) {
+      for (const attribute of element.openingElement.attributes) {
+        if (t.isJSXSpreadAttribute(attribute)) {
+          return {
+            dependencies,
+            reason: "conditional blocks do not support JSX attribute spreads",
+          };
+        }
+        const name = jsxAttributeName(attribute);
+        if (!name) {
+          return {
+            dependencies,
+            reason: "conditional blocks do not support namespaced JSX attributes",
+          };
+        }
+        if (name === "ref" || name === "dangerouslySetInnerHTML") {
+          return {
+            dependencies,
+            reason: `conditional block ${name} requires React ownership`,
+          };
+        }
+        if (
+          !t.isJSXExpressionContainer(attribute.value) ||
+          t.isJSXEmptyExpression(attribute.value.expression) ||
+          /^on[A-Z]/.test(name)
+        ) {
+          continue;
+        }
+
+        const expression = attribute.value.expression;
+        if (name === "style") {
+          if (!t.isObjectExpression(expression)) {
+            return {
+              dependencies,
+              reason: "conditional block styles must use one inline object literal",
+            };
+          }
+          for (const property of expression.properties) {
+            if (!t.isObjectProperty(property) || property.computed) {
+              return {
+                dependencies,
+                reason:
+                  "conditional block styles do not support spreads, methods, or computed properties",
+              };
+            }
+            if (!t.isExpression(property.value)) {
+              return {
+                dependencies,
+                reason: "conditional block style properties must use expression values",
+              };
+            }
+            const unsupported = validateDerivedExpression(property.value, safeGlobals);
+            if (unsupported) {
+              return {
+                dependencies,
+                reason: `conditional block style cannot use ${unsupported}`,
+              };
+            }
+            mergeDependencies(
+              dependencies,
+              collectStateDependencies(property.value, statesByValue),
+            );
+          }
+          continue;
+        }
+
+        const unsupported = validateDerivedExpression(expression, safeGlobals);
+        if (unsupported) {
+          return {
+            dependencies,
+            reason: `conditional block attribute ${name} cannot use ${unsupported}`,
+          };
+        }
+        mergeDependencies(dependencies, collectStateDependencies(expression, statesByValue));
+      }
+    }
+
+    for (const child of element.children) {
+      if (t.isJSXFragment(child)) {
+        if (insideConditional) {
+          return {
+            dependencies,
+            reason: "conditional blocks do not support fragments yet",
+          };
+        }
+        continue;
+      }
+
+      if (t.isJSXElement(child)) {
+        if (isHostElement(child)) {
+          const nested = visitHost(child, parent, insideConditional);
+          if (nested.reason) return { dependencies, reason: nested.reason };
+          mergeDependencies(dependencies, nested.dependencies);
+          continue;
+        }
+
+        if (isPublicListElement(child, listNames)) {
+          const result = analyzePublicList(child, statesByValue, safeGlobals);
+          if (result.reason) return { dependencies, reason: result.reason };
+          const plan: KeyedListPlan = {
+            kind: "keyed-list",
+            id: nextId++,
+            parent,
+            dependencies: result.dependencies || [],
+            source: child,
+            syntax: "list",
+          };
+          plans.push(plan);
+          keyedElements.add(child);
+          continue;
+        }
+
+        const result = analyzeComponentIslandElement(
+          child,
+          statesByValue,
+          safeGlobals,
+          allowedComponentNames,
+        );
+        if (result.reason) return { dependencies, reason: result.reason };
+        componentElements.add(child);
+        if ((result.dependencies || []).length > 0) {
+          plans.push({
+            kind: "component",
+            id: nextId++,
+            parent,
+            dependencies: result.dependencies || [],
+            source: child,
+          });
+        }
+        continue;
+      }
+
+      if (!t.isJSXExpressionContainer(child) || t.isJSXEmptyExpression(child.expression)) {
+        continue;
+      }
+
+      const expression = child.expression;
+      const shape = conditionalBlockShape(expression);
+      if (shape) {
+        const unsupported = validateDerivedExpression(shape.test, safeGlobals);
+        if (unsupported) {
+          return {
+            dependencies,
+            reason: `conditional block test cannot use ${unsupported}`,
+          };
+        }
+        const plan: ConditionalBlockPlan = {
+          kind: "conditional",
+          id: nextId++,
+          parent,
+          dependencies: collectStateDependencies(shape.test, statesByValue),
+          source: expression,
+        };
+        plans.push(plan);
+        conditionalExpressions.add(expression);
+        const ownedDependencies = new Set(plan.dependencies);
+        for (const branch of shape.branches) {
+          const nested = visitHost(branch, plan.id, true);
+          if (nested.reason) return { dependencies, reason: nested.reason };
+          mergeDependencies(ownedDependencies, nested.dependencies);
+        }
+        plan.dependencies = [...ownedDependencies].sort((left, right) => left - right);
+        continue;
+      }
+
+      if (isMapCall(expression)) {
+        const result = analyzeMapList(expression, statesByValue, safeGlobals);
+        if (result.reason) return { dependencies, reason: result.reason };
+        plans.push({
+          kind: "keyed-list",
+          id: nextId++,
+          parent,
+          dependencies: result.dependencies || [],
+          source: expression,
+          syntax: "map",
+        });
+        keyedExpressions.add(expression);
+        continue;
+      }
+
+      if (insideConditional) {
+        if (!isTextExpression(expression, statesByValue, safeGlobals)) {
+          return {
+            dependencies,
+            reason: "conditional block children must keep one supported block or static host tree",
+          };
+        }
+        mergeDependencies(dependencies, collectStateDependencies(expression, statesByValue));
+      }
+    }
+
+    return { dependencies };
+  };
+
+  const result = visitHost(root, undefined, false);
+  if (result.reason) return { reason: result.reason };
+  return {
+    plans,
+    componentElements,
+    conditionalExpressions,
+    keyedElements,
+    keyedExpressions,
+  };
+}
+
+function conditionalBlockBoundary(
+  blockRuntime: t.Identifier,
+  plan: ConditionalBlockPlan,
+  source: t.Expression,
+): t.JSXElement {
+  const name = t.jsxMemberExpression(
+    t.jsxIdentifier(blockRuntime.name),
+    t.jsxIdentifier("Conditional"),
+  );
+  return t.jsxElement(
+    t.jsxOpeningElement(
+      name,
+      [
+        t.jsxAttribute(t.jsxIdentifier("id"), t.jsxExpressionContainer(t.numericLiteral(plan.id))),
+        t.jsxAttribute(
+          t.jsxIdentifier("render"),
+          t.jsxExpressionContainer(t.arrowFunctionExpression([], cloneExpression(source))),
+        ),
+      ],
+      true,
+    ),
+    null,
+    [],
+    true,
+  );
+}
+
+function lowerComposableBlocks(
+  root: t.JSXElement,
+  plans: readonly ComposableBlockPlan[],
+  blockRuntime: t.Identifier,
+  listNames: ReadonlySet<string>,
+): t.JSXElement {
+  const planBySource = new Map<t.Node, ComposableBlockPlan>(
+    plans.map((plan) => [plan.source, plan]),
+  );
+
+  const visit = (element: t.JSXElement): void => {
+    element.children = element.children.map((child) => {
+      if (t.isJSXElement(child)) {
+        const plan = planBySource.get(child);
+        if (plan?.kind === "component") {
+          return componentIslandBoundary(blockRuntime, plan, child);
+        }
+        if (plan?.kind === "keyed-list" && isPublicListElement(child, listNames)) {
+          return keyedListBoundary(blockRuntime, plan, child);
+        }
+        if (isHostElement(child)) visit(child);
+        return child;
+      }
+      if (!t.isJSXExpressionContainer(child) || t.isJSXEmptyExpression(child.expression)) {
+        return child;
+      }
+
+      const plan = planBySource.get(child.expression);
+      if (plan?.kind === "conditional") {
+        const shape = conditionalBlockShape(child.expression);
+        for (const branch of shape?.branches || []) visit(branch);
+        return conditionalBlockBoundary(blockRuntime, plan, child.expression);
+      }
+      if (plan?.kind === "keyed-list") {
+        return keyedListBoundary(blockRuntime, plan, child.expression);
+      }
       return child;
     });
   };
 
-  visit(lowered, []);
-  return lowered;
+  visit(root);
+  return root;
 }
 
 function assignStableBindingTargets(bindings: readonly PendingBinding[]): void {
@@ -1082,7 +1100,6 @@ function lowerStableBindingTargets(
   bindings: readonly PendingBinding[],
   blockRuntime: t.Identifier,
 ): t.JSXElement {
-  const lowered = t.cloneNode(root, true);
   const targetByPath = new Map<string, number>();
   for (const binding of bindings) {
     if (binding.kind !== "block" && binding.target !== undefined) {
@@ -1114,8 +1131,8 @@ function lowerStableBindingTargets(
     }
   };
 
-  visit(lowered, []);
-  return lowered;
+  visit(root, []);
+  return root;
 }
 
 function analyzeHostTree(
@@ -1381,6 +1398,9 @@ function bindingObject(
   ];
   if (binding.kind === "block") {
     properties.push(t.objectProperty(t.identifier("id"), t.numericLiteral(binding.id)));
+    if (binding.parent !== undefined) {
+      properties.push(t.objectProperty(t.identifier("parent"), t.numericLiteral(binding.parent)));
+    }
     return t.objectExpression(properties);
   }
   properties.splice(
@@ -1557,25 +1577,6 @@ function compileCandidate(
   );
   const setterReason = validateSetterUsage(expandedRoot, statesBySetter);
   if (setterReason) return setterReason;
-  const conditionalAnalysis = analyzeConditionalBlocks(expandedRoot, statesByValue, safeGlobals);
-  if (conditionalAnalysis.reason) return conditionalAnalysis.reason;
-  const conditionalBlocks = conditionalAnalysis.blocks || [];
-  const keyedAnalysis = analyzeKeyedLists(
-    expandedRoot,
-    statesByValue,
-    safeGlobals,
-    listNames,
-    conditionalBlocks.length,
-  );
-  if (keyedAnalysis.reason) return keyedAnalysis.reason;
-  const keyedLists = keyedAnalysis.lists || [];
-  const conditionalExpressions = new Set(conditionalBlocks.map((block) => block.source));
-  const keyedExpressions = new Set(
-    keyedLists.filter((list) => list.syntax === "map").map((list) => list.source),
-  );
-  const keyedElements = new Set(
-    keyedLists.filter((list) => list.syntax === "list").map((list) => list.source as t.JSXElement),
-  );
   const referencedComponentNames = new Set<string>();
   traverse(expressionFile(t.cloneNode(expandedRoot, true)), {
     JSXOpeningElement(componentPath) {
@@ -1597,25 +1598,23 @@ function compileCandidate(
       );
     }),
   );
-  const componentAnalysis = analyzeComponentIslands(
+  const blockAnalysis = analyzeComposableBlocks(
     expandedRoot,
     statesByValue,
     safeGlobals,
+    listNames,
     allowedComponentNames,
-    keyedElements,
-    conditionalBlocks.length + keyedLists.length,
   );
-  if (componentAnalysis.reason) return componentAnalysis.reason;
-  const componentIslands = componentAnalysis.islands || [];
-  const componentElements = componentAnalysis.components || new Set<t.JSXElement>();
+  if (blockAnalysis.reason) return blockAnalysis.reason;
+  const blockPlans = blockAnalysis.plans || [];
   const analysis = analyzeHostTree(
     expandedRoot,
     statesByValue,
     safeGlobals,
-    conditionalExpressions,
-    keyedExpressions,
-    keyedElements,
-    componentElements,
+    blockAnalysis.conditionalExpressions || new Set<t.Expression>(),
+    blockAnalysis.keyedExpressions || new Set<t.Expression>(),
+    blockAnalysis.keyedElements || new Set<t.JSXElement>(),
+    blockAnalysis.componentElements || new Set<t.JSXElement>(),
   );
   if (analysis.reason) return analysis.reason;
   assignStableBindingTargets(analysis.bindings || []);
@@ -1629,9 +1628,12 @@ function compileCandidate(
     analysis.bindings || [],
     blockParameter,
   );
-  const rootWithIslands = lowerComponentIslands(rootWithTargets, componentIslands, blockParameter);
-  const rootWithLists = lowerKeyedLists(rootWithIslands, keyedLists, blockParameter, listNames);
-  const rootWithBlocks = lowerConditionalBlocks(rootWithLists, conditionalBlocks, blockParameter);
+  const rootWithBlocks = lowerComposableBlocks(
+    rootWithTargets,
+    blockPlans,
+    blockParameter,
+    listNames,
+  );
   const rewrittenRoot = rewriteStateAccess(
     rootWithBlocks,
     stateParameter,
@@ -1688,20 +1690,11 @@ function compileCandidate(
         t.arrayExpression(
           [
             ...(analysis.bindings || []),
-            ...conditionalBlocks.map((block) => ({
+            ...blockPlans.map((block) => ({
               kind: "block" as const,
               id: block.id,
+              parent: block.parent,
               dependencies: block.dependencies,
-            })),
-            ...keyedLists.map((list) => ({
-              kind: "block" as const,
-              id: list.id,
-              dependencies: list.dependencies,
-            })),
-            ...componentIslands.map((island) => ({
-              kind: "block" as const,
-              id: island.id,
-              dependencies: island.dependencies,
             })),
           ].map((binding) =>
             bindingObject(binding, propsParameter, stateParameter, statesByValue, statesBySetter),

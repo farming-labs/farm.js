@@ -107,7 +107,7 @@ describe("React AOT keyed list compiler", () => {
     expect(result.diagnostics[0]?.reason).toMatch(reason);
   });
 
-  it("falls back when the list shares a container with another child", async () => {
+  it("isolates a keyed list alongside static siblings", async () => {
     const result = await compile(`
       import { useState } from "react";
       export function MixedList() {
@@ -121,8 +121,11 @@ describe("React AOT keyed list compiler", () => {
       }
     `);
 
-    expect(result.compiled).toEqual([]);
-    expect(result.diagnostics[0]?.reason).toMatch(/only child of its host container/i);
+    expect(result.compiled).toEqual(["MixedList"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.code).toContain("<li>Static row</li>");
+    expect(result.code).toContain("farmBlocks.KeyedList");
+    expect(result.code).toContain("id={0}");
   });
 
   it("falls back for an index-based explicit List key", async () => {
