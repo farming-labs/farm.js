@@ -13,8 +13,8 @@ body {
   --farm-error-bg: #fafafa;
   --farm-error-fg: #171717;
   --farm-error-muted: #737373;
-  --farm-error-line: rgba(0, 0, 0, 0.16);
-  --farm-error-line-strong: rgba(0, 0, 0, 0.34);
+  --farm-error-line: rgba(0, 0, 0, 0.1);
+  --farm-error-line-strong: rgba(0, 0, 0, 0.22);
   --farm-error-panel: rgba(0, 0, 0, 0.018);
   --farm-error-button-fg: #ffffff;
   --farm-error-source-line: rgba(185, 28, 28, 0.08);
@@ -57,8 +57,8 @@ body {
 @supports (-webkit-text-stroke: 1px currentColor) {
   .farm-default-error__code {
     color: var(--farm-error-bg);
-    -webkit-text-stroke: 2px var(--farm-error-fg);
-    text-shadow: 4px 4px 0 var(--farm-error-fg);
+    -webkit-text-stroke: 1.5px var(--farm-error-fg);
+    text-shadow: 2px 2px 0 var(--farm-error-fg);
   }
 }
 
@@ -129,10 +129,8 @@ body {
 .farm-default-error__label,
 .farm-default-error__value,
 .farm-default-error__details-title,
-.farm-default-error__copy,
 .farm-default-error__source-path,
-.farm-default-error__meta,
-.farm-default-error__action {
+.farm-default-error__meta {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
@@ -184,10 +182,11 @@ body {
   border-radius: 0;
   color: var(--farm-error-fg);
   background: transparent;
-  font-size: 11px;
-  font-weight: 500;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 12px;
+  font-weight: 600;
   line-height: 1;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.01em;
   cursor: pointer;
   transition: border-color 150ms ease-out, background 150ms ease-out;
 }
@@ -224,7 +223,7 @@ body {
   display: grid;
   grid-template-columns: 68px minmax(0, 1fr);
   padding: 0 14px 0 0;
-  border-left: 2px solid transparent;
+  border-left: 1px solid transparent;
 }
 
 .farm-default-error__source-line--active {
@@ -280,20 +279,22 @@ body {
   align-items: center;
   justify-content: center;
   padding: 0 20px;
-  border: 1px solid var(--farm-error-fg);
+  border: 1px solid var(--farm-error-line-strong);
   border-radius: 0;
   color: var(--farm-error-fg);
   background: transparent;
-  font-size: 12px;
-  font-weight: 500;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 13px;
+  font-weight: 600;
   line-height: 1;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.01em;
   text-decoration: none;
   cursor: pointer;
   transition: opacity 150ms ease-out, transform 100ms ease-out;
 }
 
 .farm-default-error__action--primary {
+  border-color: var(--farm-error-fg);
   color: var(--farm-error-button-fg);
   background: var(--farm-error-fg);
 }
@@ -328,8 +329,8 @@ body {
 
 .farm-default-error__copy:focus-visible,
 .farm-default-error__action:focus-visible {
-  outline: 2px solid var(--farm-error-fg);
-  outline-offset: 3px;
+  outline: 1px solid var(--farm-error-fg);
+  outline-offset: 2px;
 }
 
 @media (max-width: 620px) {
@@ -384,8 +385,8 @@ body {
     --farm-error-bg: #0a0a0a;
     --farm-error-fg: #ededed;
     --farm-error-muted: #a1a1a1;
-    --farm-error-line: rgba(255, 255, 255, 0.14);
-    --farm-error-line-strong: rgba(255, 255, 255, 0.3);
+    --farm-error-line: rgba(255, 255, 255, 0.1);
+    --farm-error-line-strong: rgba(255, 255, 255, 0.22);
     --farm-error-panel: rgba(255, 255, 255, 0.018);
     --farm-error-button-fg: #0a0a0a;
     --farm-error-source-line: rgba(248, 113, 113, 0.12);
@@ -400,8 +401,8 @@ body {
   --farm-error-bg: #0a0a0a;
   --farm-error-fg: #ededed;
   --farm-error-muted: #a1a1a1;
-  --farm-error-line: rgba(255, 255, 255, 0.14);
-  --farm-error-line-strong: rgba(255, 255, 255, 0.3);
+  --farm-error-line: rgba(255, 255, 255, 0.1);
+  --farm-error-line-strong: rgba(255, 255, 255, 0.22);
   --farm-error-panel: rgba(255, 255, 255, 0.018);
   --farm-error-button-fg: #0a0a0a;
   --farm-error-source-line: rgba(248, 113, 113, 0.12);
@@ -415,8 +416,8 @@ body {
   --farm-error-bg: #fafafa;
   --farm-error-fg: #171717;
   --farm-error-muted: #737373;
-  --farm-error-line: rgba(0, 0, 0, 0.16);
-  --farm-error-line-strong: rgba(0, 0, 0, 0.34);
+  --farm-error-line: rgba(0, 0, 0, 0.1);
+  --farm-error-line-strong: rgba(0, 0, 0, 0.22);
   --farm-error-panel: rgba(0, 0, 0, 0.018);
   --farm-error-button-fg: #ffffff;
   --farm-error-source-line: rgba(185, 28, 28, 0.08);

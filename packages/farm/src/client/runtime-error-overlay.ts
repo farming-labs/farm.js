@@ -168,6 +168,11 @@ const OVERLAY_STYLES = `
   min-width: 166px;
 }
 
+.farm-runtime-error__action:focus {
+  outline: 1px solid var(--farm-error-fg);
+  outline-offset: 2px;
+}
+
 .farm-runtime-error__viewport .farm-default-error__panel {
   border: 0;
   box-shadow: inset 0 0 0 0.5px var(--farm-error-line-strong);
