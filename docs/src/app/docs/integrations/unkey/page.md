@@ -14,7 +14,7 @@ Create, verify, revoke, update, and delete API keys, plus protect routes with ke
 
 ```ts
 import { defineConfig } from "@farm.js/core";
-import { unkey } from "@farm.js/integrations/unkey";
+import { unkey } from "@farm.js/unkey";
 
 export default defineConfig({
   integrations: {
@@ -40,7 +40,7 @@ Use `instance` when client construction belongs to application code or a shared 
 container. It takes precedence over credentials passed directly to the integration.
 
 ```ts
-import { createUnkeyClient, unkey } from "@farm.js/integrations/unkey";
+import { createUnkeyClient, unkey } from "@farm.js/unkey";
 
 const unkeyClient = createUnkeyClient({
   rootKey: process.env.UNKEY_ROOT_KEY,
@@ -51,6 +51,11 @@ export const keys = unkey({
   instance: unkeyClient,
 });
 ```
+
+`createUnkeyClient` is a convenience constructor, not the integration registration wrapper. The
+`instance` option also accepts any application-owned object that implements the exported
+`UnkeyClient` interface, which makes custom transports and test doubles possible without creating a
+second client.
 
 The previous `client` option remains supported as a deprecated alias, making this change
 backward-compatible. Routes and protection settings still belong in `unkey(...)` in either mode.

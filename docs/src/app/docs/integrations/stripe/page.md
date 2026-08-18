@@ -21,7 +21,7 @@ farm add integration stripe --ui
 **src/lib/integrations.ts**
 
 ```ts
-import { stripe } from "@farm.js/integrations/stripe";
+import { stripe } from "@farm.js/stripe";
 
 export const integrations = {
   billing: stripe({
@@ -49,7 +49,7 @@ SDK from `secretKey`, supplied directly or through `STRIPE_SECRET_KEY`.
 
 ```ts
 import Stripe from "stripe";
-import { stripe } from "@farm.js/integrations/stripe";
+import { stripe } from "@farm.js/stripe";
 
 const stripeClient = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   maxNetworkRetries: 2,

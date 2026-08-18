@@ -15,7 +15,7 @@ It is currently a control-plane adapter. Farm sends work to a task or function t
 **src/lib/jobs.ts**
 
 ```ts
-import { defineTasks, task } from "@farm.js/integrations/jobs";
+import { defineTasks, task } from "@farm.js/jobs";
 
 export const tasks = defineTasks({
   sendWelcomeEmail: task({
@@ -55,7 +55,7 @@ Inngest's `farm` prefix can be changed with `eventNamePrefix`.
 **src/lib/integrations.ts**
 
 ```ts
-import { jobs, trigger } from "@farm.js/integrations/jobs";
+import { jobs, trigger } from "@farm.js/jobs";
 import { tasks } from "./jobs";
 
 export const appIntegrations = {

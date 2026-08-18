@@ -23,7 +23,7 @@ farm add integration jobs-inngest --ui
 **src/lib/integrations.ts**
 
 ```ts
-import { inngest, jobs } from "@farm.js/integrations/jobs";
+import { inngest, jobs } from "@farm.js/jobs";
 import { tasks } from "./jobs";
 
 export const appIntegrations = {
@@ -59,7 +59,7 @@ The runtime is reported as configured only when both event and signing keys are 
 **src/lib/jobs.ts**
 
 ```ts
-import { defineTasks, task } from "@farm.js/integrations/jobs";
+import { defineTasks, task } from "@farm.js/jobs";
 
 export const tasks = defineTasks({
   importCsv: task({

@@ -443,8 +443,8 @@ const integrationCodeTabs = [
     language: "ts",
     highlightLines: [1, 5, 7],
     code: `import Stripe from "stripe";
-import { stripe } from "@farm.js/integrations/stripe";
-import { unkey } from "@farm.js/integrations/unkey";
+import { stripe } from "@farm.js/stripe";
+import { unkey } from "@farm.js/unkey";
 
 const stripeClient = new Stripe(process.env.STRIPE_SECRET_KEY!);
 export const integrations = {

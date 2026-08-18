@@ -23,7 +23,7 @@ farm add integration supabase --ui
 **src/lib/integrations.ts**
 
 ```ts
-import { supabase } from "@farm.js/integrations/supabase";
+import { supabase } from "@farm.js/supabase";
 
 export const appIntegrations = {
   auth: supabase({
@@ -72,7 +72,7 @@ Supabase SSR clients contain request cookie handlers, so a single shared client 
 cookie-aware `options`; keep those options when adding custom fetch, headers, or other SDK settings.
 
 ```ts
-import { supabase } from "@farm.js/integrations/supabase";
+import { supabase } from "@farm.js/supabase";
 
 export const auth = supabase({
   instance: ({ createClient, options }) =>

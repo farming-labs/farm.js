@@ -21,7 +21,7 @@ farm add integration autumn --ui
 **src/lib/integrations.ts**
 
 ```ts
-import { autumn } from "@farm.js/integrations/autumn";
+import { autumn } from "@farm.js/autumn";
 
 export const integrations = {
   billing: autumn({
@@ -50,7 +50,7 @@ where supported.
 
 ```ts
 import { Autumn } from "autumn-js";
-import { autumn } from "@farm.js/integrations/autumn";
+import { autumn } from "@farm.js/autumn";
 
 const autumnClient = new Autumn({
   secretKey: process.env.AUTUMN_SECRET_KEY,

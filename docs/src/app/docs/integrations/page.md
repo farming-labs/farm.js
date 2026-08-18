@@ -10,15 +10,28 @@ Integrations are the Farm layer for connecting product services to your app. A p
 
 Farm treats every integration as a small server plugin. That means an integration can participate in framework startup and shutdown, own HTTP routes, and still expose a compact typed API to the rest of the app.
 
+## Import the dedicated adapter package
+
+New applications should import each Farm adapter from its dedicated package, such as
+`@farm.js/stripe`, `@farm.js/clerk`, or `@farm.js/jobs`. These are the same packages installed by
+`farm add integration` and used by the generated starter files.
+
+The older `@farm.js/integrations/*` paths are compatibility re-exports for existing applications.
+They are not a separate ownership model, and new documentation does not use them.
+
+A Farm adapter function such as `stripe(...)` registers routes, typed callers, webhooks, and
+integration lifecycle behavior. It is not the Stripe SDK instance. When the application supplies
+`instance`, the adapter uses that exact object instead of constructing another provider client.
+
 ## Register integrations
 
 **farm.config.ts**
 
 ```ts
 import { defineConfig } from "@farm.js/core";
-import { stripe } from "@farm.js/integrations/stripe";
+import { stripe } from "@farm.js/stripe";
 import { betterAuth as createBetterAuth } from "better-auth";
-import { betterAuth } from "@farm.js/integrations/better-auth";
+import { betterAuth } from "@farm.js/better-auth";
 
 const auth = createBetterAuth({
   baseURL: process.env.BETTER_AUTH_URL,
@@ -40,20 +53,28 @@ export default defineConfig({
 
 The object key is the application namespace. If you register Stripe as `billing`, the typed caller lives at `api.billing`. If you register it as `stripe`, it lives at `api.stripe`.
 
-## Bring your own provider instance
+## Own the provider instance in application code
 
 When an integration uses an in-process vendor SDK, pass a configured client through `instance`.
 Farm uses that exact object and does not create a second client. This lets the application control
 SDK versions, transports, retries, telemetry, test doubles, and provider-specific options without
 waiting for the Farm adapter to expose every constructor option.
 
+**src/lib/stripe-client.ts**
+
 ```ts
 import Stripe from "stripe";
-import { stripe } from "@farm.js/integrations/stripe";
 
-const stripeClient = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+export const stripeClient = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   maxNetworkRetries: 2,
 });
+```
+
+**src/lib/integrations.ts**
+
+```ts
+import { stripe } from "@farm.js/stripe";
+import { stripeClient } from "./stripe-client";
 
 export const billing = stripe({
   instance: stripeClient,
@@ -61,18 +82,26 @@ export const billing = stripe({
 });
 ```
 
+The vendor SDK comes from the vendor package, while the Farm adapter comes from the dedicated Farm
+package. Keep the provider client in server-only application code and reuse it wherever direct SDK
+access is needed. The adapter still owns Farm-specific configuration such as webhook routes,
+product metadata, billing ownership, and typed callers.
+
 For backward compatibility, integrations that previously accepted credentials still do. When both
 are supplied, `instance` wins and credentials remain available only as configuration metadata.
 Instance injection owns construction, but the object must still implement the SDK methods the Farm
 adapter calls; a vendor breaking those methods can still require an adapter update.
 
-| Integration kind                                                                     | Injection boundary                                                                                                                       |
-| ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| Stripe, Autumn, Polar, Resend, Clerk, WorkOS, Auth0, Auth.js, Better Auth, and Unkey | `instance`: an already configured SDK/client or compatible adapter.                                                                      |
-| Supabase SSR                                                                         | `instance`: a request-scoped factory that receives Farm's cookie-aware client options. Never share one SSR auth client between requests. |
-| AI                                                                                   | `model` plus optional AI SDK function overrides. The model is already the injected provider object.                                      |
-| Trigger.dev and Inngest jobs                                                         | `runtime: trigger(...)` or `runtime: inngest(...)`. Farm talks to the selected external runtime and does not construct its SDK.          |
-| Eve and Cloudflare Agents                                                            | `origin` for an external runtime, or Farm's managed development process. Agent SDKs remain application-owned.                            |
+| Integration kind                             | Application ownership boundary                                                                                                           |
+| -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Stripe, Autumn, Polar, Resend, Clerk, WorkOS | `instance`: a vendor SDK object constructed in application code.                                                                         |
+| Auth.js and Better Auth                      | `instance`: the application-owned auth object. These adapters have no Farm-constructed fallback.                                         |
+| Auth0                                        | `instance`: a compatible application middleware adapter, not the Auth0 SDK. It replaces Farm's built-in route flow.                      |
+| Unkey                                        | `instance`: an application-owned `UnkeyClient`; `createUnkeyClient` is an optional convenience constructor.                              |
+| Supabase SSR                                 | `instance`: a request-scoped factory that receives Farm's cookie-aware client options. Never share one SSR auth client between requests. |
+| AI                                           | `model` plus optional AI SDK function overrides. The model is already the injected provider object.                                      |
+| Trigger.dev and Inngest jobs                 | `runtime: trigger(...)` or `runtime: inngest(...)`. Farm talks to the selected external runtime and does not construct its SDK.          |
+| Eve and Cloudflare Agents                    | `origin` for an external runtime, or Farm's managed development process. Agent SDKs remain application-owned.                            |
 
 Provider pages show the exact constructor and any integration-owned options that are still required.
 
