@@ -335,8 +335,8 @@ satisfy all of these rules:
 | Text bindings       | State-driven text in a leaf host element.                                                                                                   |
 | Attribute bindings  | Basic attributes, controlled form properties, and individual properties in one inline `style` object.                                       |
 | Events              | Inline handlers and synchronous `const` or function-declaration handlers, used directly or called inside an inline JSX handler.             |
-| Conditional blocks  | `condition && <host />` or `condition ? <host /> : <host />`; `null` and `false` are supported empty ternary branches.                      |
-| Keyed lists         | A direct keyed `items.map(...)`, or an explicit imported `List`, when it is the only meaningful child of its host container.                |
+| Conditional blocks  | `condition && <host />` or `condition ? <host /> : <host />`; host branches may contain supported nested blocks.                            |
+| Keyed lists         | A direct keyed `items.map(...)`, or an explicit imported `List`, alongside static siblings or other supported block boundaries.             |
 | Component islands   | Stable imported or module-level component identifiers with explicit compiler-safe props and no JSX children, spread, `ref`, or `key`.       |
 
 This component is eligible:
@@ -437,14 +437,17 @@ The initial safety limits are:
 
 - Every non-empty branch has exactly one lowercase host root such as `p`, `strong`, `span`, or
   `div`.
-- Descendants keep a static host-only tree. Stateful text, attributes, inline style properties, and
-  event handlers inside that tree are allowed and update when the block refreshes.
+- Descendants keep a statically known host tree. Stateful text, attributes, inline style
+  properties, and event handlers inside that tree are allowed and update when the block refreshes.
+- A branch may contain nested host-root conditionals, keyed-list boundaries, and supported
+  component islands. Each nested boundary receives the outer conditional as its runtime parent.
 - A ternary may use `null` or `false` for an empty branch.
 - The conditional must be a JSX child at one statically known location, and its test must use the
   same deterministic expression subset as other compiler bindings.
-- Custom components, hooks, fragments, nested conditional blocks, lists, refs,
-  `dangerouslySetInnerHTML`, and attribute spreads inside a branch fall back to the original React
-  component.
+- A non-empty branch still needs one lowercase host root. A custom component cannot be the branch
+  root, but a supported component island may appear inside that host tree.
+- Hooks directly in branch expressions, fragments, refs, `dangerouslySetInnerHTML`, and attribute
+  spreads fall back to the original React component.
 
 The optimization boundary matters: the surrounding compiled component and its unrelated siblings
 do not rerender, but React still renders and commits the small conditional boundary. A branch with
@@ -515,10 +518,10 @@ The first automatic contract is deliberately narrow:
   across insertion, removal, or reordering.
 - The optimized `List` shape uses inline `by` and child functions, a compiler-safe `each`
   expression, and an item-derived key.
-- The map or `List` must be the only meaningful child of its host container. This keeps the first
-  keyed-boundary contract narrow and easy to audit.
-- Chained expressions such as `items.filter(...).map(...)`, mixed static siblings, spread children,
-  hooks in the callback, and other unproven shapes fall back to normal React.
+- A map or `List` may appear beside static host children, other keyed lists, and eligible
+  conditional boundaries in the same container.
+- Chained expressions such as `items.filter(...).map(...)`, spread children, hooks in the callback,
+  and other unproven shapes fall back to normal React.
 
 Stable keys must be unique among siblings and come from the item's identity, such as a database ID.
 Farm does not implement an LIS move algorithm in this release. A compiler-owned LIS can only be
@@ -574,12 +577,30 @@ indexes. This matters when an earlier React-owned child changes its number of DO
 compiler still holds the exact target element and cannot accidentally patch a different sibling.
 The refs produce no `data-*` marker or other extra server markup.
 
+### Composable block graph
+
+Conditional, keyed-list, and component-island boundaries are analyzed together. The compiler
+assigns every boundary a component-wide ID, so IDs remain unique even when several block types
+share a container or are nested inside one conditional branch. Nested bindings also record the ID
+of their nearest outer conditional.
+
+When one update affects an outer conditional and one or more descendants, the runtime refreshes
+the mounted outer boundary once and suppresses redundant descendant refreshes for that flush.
+React then unmounts or replaces the branch normally. Inner boundaries unsubscribe during that
+unmount, so later updates while the branch is hidden do not target stale components. If the branch
+appears again, each boundary subscribes again and renders from the latest compiler-cell values.
+
+The compiler deliberately does not analyze block-shaped syntax inside a keyed list callback. That
+callback can execute once per row, so a single compile-time block ID would not identify one runtime
+instance. React owns the complete keyed row subtree instead; put Hooks and additional dynamic
+structure inside a keyed row component.
+
 ### What falls back to React
 
 | Unsupported shape                                                          | Why React keeps ownership                                                          |
 | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Unkeyed/index-keyed/chained maps, mixed list siblings, or element arrays   | Their structure or item identity is outside the isolated keyed-boundary contract.  |
-| Fragments or unsupported/nested conditional JSX                            | Their structure is outside the current single-location host-block contract.        |
+| Unkeyed/index-keyed/chained maps or element arrays                         | Their structure or item identity is outside the isolated keyed-boundary contract.  |
+| Fragments or a custom component used as a conditional branch root          | Their structure is outside the current host-root conditional contract.             |
 | Dynamic/member component types, component spreads, refs, keys, or children | Their identity or ownership is outside the first component-island contract.        |
 | Effects or hooks other than the supported `useState` shape                 | Their lifecycle and ordering must remain under React's hook dispatcher.            |
 | `ref` or `dangerouslySetInnerHTML`                                         | They directly participate in DOM ownership.                                        |

@@ -31,6 +31,7 @@ for (const component of [
   "ExplicitKeyedListExperiment",
   "StatefulListRow",
   "ComponentIslandExperiment",
+  "ComposableBlockExperiment",
 ]) {
   assert.ok(compiledComponents.has(component), `${component} was not compiled`);
 }
@@ -454,6 +455,77 @@ try {
   assert.equal(islandOwnerFinalExecutions - islandOwnerInitialExecutions, 0);
   assert.equal(staticTreeFinalExecutions - staticTreeInitialExecutions, 0);
 
+  const composable = '[data-experiment="composable-blocks"]';
+  const composableOwnerInitialExecutions = await readNumber(
+    page,
+    `${composable} [data-metric="composable-owner-executions"]`,
+  );
+  await assertText(page, `${composable} [data-metric="composable-visible"]`, "shown");
+  await assertText(page, `${composable} [data-metric="composable-primary-count"]`, "2");
+  await assertText(page, `${composable} [data-metric="composable-secondary-count"]`, "1");
+  await page.evaluate(() => {
+    window.__farmComposableStatic = document.querySelector("[data-composable-static]");
+    window.__farmComposableAlpha = document.querySelector('[data-composable-primary="a"]');
+  });
+
+  await page.locator(`${composable} [data-action="composable-pin"]`).click();
+  await assertText(page, `${composable} [data-action="composable-pin"]`, "Pinned");
+  await page.locator(`${composable} [data-action="composable-update"]`).click();
+  await assertText(page, `${composable} [data-composable-count]`, "1");
+  await assertText(page, `${composable} [data-metric="composable-secondary-count"]`, "2");
+  assert.deepEqual(
+    await page.locator(`${composable} [data-composable-primary]`).allTextContents(),
+    ["Beta", "Alpha"],
+  );
+  assert.equal(
+    await page.evaluate(
+      () =>
+        window.__farmComposableAlpha ===
+        document.querySelector('[data-composable-primary="a"]'),
+    ),
+    true,
+    "React did not preserve the keyed row DOM node during a reverse",
+  );
+  await assertText(page, `${composable} [data-action="composable-pin"]`, "Pinned");
+
+  await page.locator(`${composable} [data-action="composable-details"]`).click();
+  await assertText(page, `${composable} [data-composable-details]`, "Nested value 1");
+  await assertText(page, `${composable} [data-composable-ready]`, "Nested host block ready");
+
+  await page.locator(`${composable} [data-action="composable-hide-update"]`).click();
+  await assertText(page, `${composable} [data-metric="composable-visible"]`, "hidden");
+  assert.equal(await page.locator(`${composable} [data-composable-outer]`).count(), 0);
+  await page.locator(`${composable} [data-action="composable-hidden-update"]`).click();
+  await assertText(page, `${composable} [data-metric="composable-secondary-count"]`, "4");
+  assert.equal(await page.locator(`${composable} [data-composable-outer]`).count(), 0);
+  assert.equal(
+    await page.evaluate(
+      () =>
+        window.__farmComposableStatic === document.querySelector("[data-composable-static]"),
+    ),
+    true,
+    "an unrelated static sibling was replaced",
+  );
+
+  await page.locator(`${composable} [data-action="composable-show"]`).click();
+  await assertText(page, `${composable} [data-metric="composable-visible"]`, "shown");
+  await assertText(page, `${composable} [data-composable-count]`, "3");
+  await assertText(page, `${composable} [data-composable-details]`, "Nested value 3");
+  await assertText(page, `${composable} [data-action="composable-pin"]`, "Pin child state");
+  assert.deepEqual(
+    await page.locator(`${composable} [data-composable-primary]`).allTextContents(),
+    ["Beta", "Alpha"],
+  );
+  assert.equal(
+    await page.locator(`${composable} [data-composable-secondary]`).count(),
+    4,
+  );
+  const composableOwnerFinalExecutions = await readNumber(
+    page,
+    `${composable} [data-metric="composable-owner-executions"]`,
+  );
+  assert.equal(composableOwnerFinalExecutions - composableOwnerInitialExecutions, 0);
+
   await page.screenshot({ path: screenshotPath, fullPage: true });
 
   const mobilePage = await browser.newPage({
@@ -579,6 +651,16 @@ try {
               islandOwnerFinalExecutions - islandOwnerInitialExecutions,
             staticSiblingUpdateExecutions:
               staticTreeFinalExecutions - staticTreeInitialExecutions,
+          },
+          composableBlocks: {
+            count: 3,
+            primaryOrder: ["Beta", "Alpha"],
+            secondaryItems: 4,
+            nestedConditional: "Nested value 3",
+            keyedDomIdentityPreserved: true,
+            childStateResetAfterOuterUnmount: true,
+            ownerUpdateExecutions:
+              composableOwnerFinalExecutions - composableOwnerInitialExecutions,
           },
         },
       },

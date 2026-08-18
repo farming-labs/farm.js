@@ -111,18 +111,6 @@ describe("React AOT conditional block compiler", () => {
       reason: /dynamic child structures/i,
     },
     {
-      name: "a nested conditional branch",
-      body: "{visible && <div>{enabled && <span>Enabled</span>}</div>}",
-      extra: "",
-      reason: /nested conditional blocks/i,
-    },
-    {
-      name: "a list branch",
-      body: "{visible && <ul>{items.map((item) => <li key={item}>{item}</li>)}</ul>}",
-      extra: "const items = ['a', 'b'];",
-      reason: /static host tree/i,
-    },
-    {
       name: "a hook call inside a branch",
       body: "{visible && <p>{useValue()}</p>}",
       extra: "function useValue() { return 'value'; }",
@@ -168,5 +156,37 @@ describe("React AOT conditional block compiler", () => {
       result.diagnostics.find((diagnostic) => diagnostic.component === "Unsupported")?.reason,
     ).toMatch(reason);
     expect(result.code).not.toContain("compiler-runtime");
+  });
+
+  it("composes nested host conditionals and keyed lists inside a branch", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function NestedBlocks() {
+        const [visible, setVisible] = useState(true);
+        const [enabled, setEnabled] = useState(false);
+        const [items, setItems] = useState([{ id: "a", label: "Alpha" }]);
+        return (
+          <section>
+            <button onClick={() => setVisible(!visible)}>Visible</button>
+            {visible && (
+              <article>
+                <h2>Inventory</h2>
+                {enabled ? <strong>Enabled</strong> : <span>Disabled</span>}
+                <ul>{items.map((item) => <li key={item.id}>{item.label}</li>)}</ul>
+              </article>
+            )}
+          </section>
+        );
+      }
+    `);
+
+    expect(result.compiled).toEqual(["NestedBlocks"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.code.match(/farmBlocks\.Conditional/g)).toHaveLength(2);
+    expect(result.code.match(/farmBlocks\.KeyedList/g)).toHaveLength(1);
+    expect(result.code).toContain("id={0}");
+    expect(result.code).toContain("id={1}");
+    expect(result.code).toContain("id={2}");
+    expect(result.code.match(/parent: 0/g)).toHaveLength(2);
   });
 });

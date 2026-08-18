@@ -4,8 +4,9 @@ This production-browser experiment answers two questions:
 
 1. Why build this compiler? Eligible local `useState` updates can patch precomputed DOM targets
    without rerunning the component body or asking React to reconcile the same static tree again.
-2. Where must it stop? Eligible host-only conditionals and keyed lists use small React-owned
-   boundaries. Effects, refs, unsupported list shapes, and other unproven structures stay on React.
+2. Where must it stop? Eligible conditionals, keyed lists, and component islands use small
+   React-owned boundaries. Effects, refs, unsupported list shapes, and other unproven structures
+   stay on React.
 
 The default `compiler: true` configuration automatically considers components. No annotation is
 needed. A component can explicitly opt out with `"use no compiler"`.
@@ -39,6 +40,7 @@ assertions, checks for console/runtime errors and horizontal overflow, saves scr
 | Controlled form bindings   | textarea/select/checkbox update, executions `0`         | —                                              | Form properties and textarea selection stay coherent.                  |
 | Logical conditional block  | branch mounts, updates, and unmounts; executions `0`    | —                                              | Only the isolated React block refreshes.                               |
 | Ternary conditional block  | `strong` and `span` replace each other; executions `0`  | —                                              | React preserves branch and event semantics without the outer rerender. |
+| Composable nested blocks   | two lists, nested conditions, and one component island  | —                                              | One block graph mounts, updates, and cleans up nested subscriptions.    |
 
 The package runtime test also measures one equivalent update under a React `Profiler`:
 
@@ -71,10 +73,10 @@ import { List } from "@farm.js/react/list";
 ```
 
 `List` is useful for custom stateful rows and still works as ordinary React when the compiler is
-off. Automatic maps and optimized `List` boundaries currently need to be the only meaningful child
-of their host container. Index keys, missing keys, chained maps, and mixed sibling structures fall
-back to the complete React component. Farm does not perform compiler-owned LIS moves in this stage;
-React remains the sole owner of row reconciliation.
+off. Automatic maps and optimized `List` boundaries may sit beside static children, other lists,
+and eligible conditional blocks. Index keys, missing keys, chained maps, and other unproven list
+expressions fall back to the complete React component. Farm does not perform compiler-owned LIS
+moves in this stage; React remains the sole owner of row reconciliation.
 
 Calling a Hook directly inside `items.map(...)` or a `List` render callback is invalid React because
 the number or order of Hook calls can change. Put the Hook inside a separate `Row` component and key
@@ -89,8 +91,14 @@ condition's state dependencies and lowers the child to a private React boundary.
 update refreshes that boundary while the user component's execution counter stays unchanged.
 
 This does not pre-mount both branches or bypass React's event system. React still creates, replaces,
-and removes the selected host branch. Custom components, hooks, fragments, nested conditionals,
-lists, refs, spreads, and dangerous HTML inside a branch intentionally fall back.
+and removes the selected host branch. A host branch may contain nested host conditionals, keyed-list
+boundaries, and supported component islands. Hooks directly in a branch, fragments, refs, spreads,
+and dangerous HTML intentionally fall back.
+
+The `08` card combines those boundary types under one outer conditional. It also proves that a
+hidden outer block removes its inner subscriptions: updates made while hidden do no render work,
+and remounting reads the newest compiler-cell values. Child-local React state resets after the
+outer branch unmounts, matching ordinary React semantics.
 
 ## Heavy compiler-on/off benchmark
 

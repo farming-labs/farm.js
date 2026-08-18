@@ -805,6 +805,73 @@ h1 span {
   margin-top: 1rem;
 }
 
+.composable-controls {
+  flex-wrap: wrap;
+}
+
+.composable-static {
+  margin: 1rem 0;
+  border-left: 2px solid #565650;
+  padding-left: 0.75rem;
+  color: #8d8d86;
+  font-size: 0.78rem;
+}
+
+.composable-stage {
+  display: grid;
+  gap: 1rem;
+  border: 1px solid #4d6334;
+  padding: 1rem;
+  background: rgb(184 255 91 / 0.035);
+}
+
+.composable-summary,
+.composable-row-set {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.composable-summary {
+  justify-content: space-between;
+}
+
+.composable-summary strong {
+  color: #d8ff9f;
+  font-size: 1.35rem;
+}
+
+.composable-summary button {
+  border: 1px solid #484842;
+  padding: 0.6rem 0.75rem;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.composable-row-set {
+  flex-wrap: wrap;
+}
+
+.composable-row-set > span,
+.composable-row-set > strong,
+.composable-row-set > em {
+  border: 1px solid #3b3b37;
+  padding: 0.45rem 0.6rem;
+  font: 0.65rem "Geist Mono Variable", ui-monospace, monospace;
+  font-style: normal;
+}
+
+.composable-row-set > i {
+  width: 1px;
+  align-self: stretch;
+  background: #45453f;
+}
+
+.composable-fixed {
+  color: #8d8d86;
+}
+
 .heavy-metrics > div {
   min-width: 0;
   padding: 1.25rem 0;

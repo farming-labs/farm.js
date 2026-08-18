@@ -1,6 +1,7 @@
 import { CompilerComparison } from "../components/compiler-comparison";
 import { CompilerEdgeLab } from "../components/compiler-edge-lab";
 import { CommonSyntaxExperiment } from "../components/common-syntax-experiment";
+import { ComposableBlockExperiment } from "../components/composable-block-experiment";
 import { ComponentIslandExperiment } from "../components/component-island-experiment";
 import { ConditionalBlockExperiment } from "../components/conditional-block-experiment";
 import { HeavyInteractionBenchmark } from "../components/heavy-interaction-benchmark";
@@ -71,6 +72,8 @@ export default function HomePage() {
       <HeavyInteractionBenchmark />
 
       <ComponentIslandExperiment />
+
+      <ComposableBlockExperiment />
 
       <section
         className="benchmark-report"

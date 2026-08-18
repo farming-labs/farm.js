@@ -52,6 +52,8 @@ export interface CompilerStyleBinding<Props> {
 export interface CompilerConditionalBlockBinding {
   kind: "block";
   id: number;
+  /** Nearest conditional boundary that owns this block, when nested. */
+  parent?: number;
   dependencies: readonly number[];
 }
 
@@ -622,21 +624,60 @@ export function createCompiledComponent<Props>(
         this.dirtyState.clear();
         if (dirty.size === 0) return;
         try {
-          let blockRefreshScheduled = false;
-          for (const binding of definitionReference.current.bindings) {
+          const bindings = definitionReference.current.bindings;
+          const blockBindings = new Map<number, CompilerConditionalBlockBinding>();
+          const affectedBlockIds = new Set<number>();
+
+          for (const binding of bindings) {
+            if (binding.kind !== "block") continue;
+            blockBindings.set(binding.id, binding);
             if (binding.dependencies.some((dependency) => dirty.has(dependency))) {
-              if (binding.kind === "block") {
-                const refresh = this.blockRefreshListeners.get(binding.id);
-                if (refresh) {
-                  blockRefreshScheduled = true;
-                  refresh(() => this.restoreInputSelection(inputSelection));
-                }
-              } else {
-                this.applyBinding(binding);
-              }
+              affectedBlockIds.add(binding.id);
             }
           }
-          if (!blockRefreshScheduled) this.restoreInputSelection(inputSelection);
+
+          const hasAffectedMountedAncestor = (
+            binding: CompilerConditionalBlockBinding,
+          ): boolean => {
+            let parent = binding.parent;
+            while (parent !== undefined) {
+              if (affectedBlockIds.has(parent) && this.blockRefreshListeners.has(parent)) {
+                return true;
+              }
+              parent = blockBindings.get(parent)?.parent;
+            }
+            return false;
+          };
+
+          const blockRefreshes = [...affectedBlockIds]
+            .map((id) => {
+              const binding = blockBindings.get(id);
+              const refresh = this.blockRefreshListeners.get(id);
+              return binding && refresh && !hasAffectedMountedAncestor(binding)
+                ? refresh
+                : undefined;
+            })
+            .filter(
+              (refresh): refresh is (afterCommit?: () => void) => void => refresh !== undefined,
+            );
+
+          for (const binding of bindings) {
+            if (
+              binding.kind !== "block" &&
+              binding.dependencies.some((dependency) => dirty.has(dependency))
+            ) {
+              this.applyBinding(binding);
+            }
+          }
+
+          let pendingBlockCommits = blockRefreshes.length;
+          for (const refresh of blockRefreshes) {
+            refresh(() => {
+              pendingBlockCommits -= 1;
+              if (pendingBlockCommits === 0) this.restoreInputSelection(inputSelection);
+            });
+          }
+          if (blockRefreshes.length === 0) this.restoreInputSelection(inputSelection);
         } catch (error) {
           this.bindingError = error;
           this.hasBindingError = true;

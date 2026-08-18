@@ -53,16 +53,16 @@ The directive is configurable and only has meaning in annotation mode.
 
 The current compiler handles components that it can prove have:
 
-- one host-element root and a statically known host-element tree around supported React component
-  islands;
+- one host-element root and a statically known host-element tree around supported conditional,
+  keyed-list, and React component-island boundaries;
 - an identifier props parameter or flat object destructuring with aliases and defaults;
 - top-level `useState` declarations;
 - optional compiler-safe derived `const` values declared after state and in source order;
 - whitelisted `Boolean`, `Number`, `String`, and deterministic `Math` calculations;
 - optional synchronous `const` or function-declaration handlers used by JSX events;
 - state-driven text, attributes, per-property inline styles, and controlled form properties;
-- host-only `condition && <element>` and `condition ? <element> : <element>` child blocks at
-  statically known locations;
+- host-rooted `condition && <element>` and `condition ? <element> : <element>` child blocks at
+  statically known locations, including supported nested boundaries;
 - direct item-keyed `collection.map(...)` children and explicit `List` boundaries at statically
   known container locations;
 - stable module-level child components with compiler-safe props;
@@ -85,10 +85,11 @@ For a common keyed map, no new API is required:
 </ul>
 ```
 
-The compiler can isolate this direct map when it is the container's only meaningful child, the key
-comes from the item rather than the array index, and the callback is otherwise safe. A list update
-then refreshes only an internal React boundary instead of executing the outer user component.
-React still reconciles the keyed rows and owns their DOM, events, lifecycle, and state.
+The compiler can isolate this direct map when the key comes from the item rather than the array
+index and the callback is otherwise safe. The map may sit beside static children, other lists, and
+eligible conditionals. A list update then refreshes only an internal React boundary instead of
+executing the outer user component. React still reconciles the keyed rows and owns their DOM,
+events, lifecycle, and state.
 
 For custom rows or an explicit key selector, use the public component:
 
@@ -106,8 +107,7 @@ import { List } from "@farm.js/react/list";
 `by` supplies the React key; and the child function returns one React element. Put Hooks inside the
 row component, not directly inside the iteration callback. With the compiler enabled, the
 optimized explicit shape requires inline `by` and child functions, a safe `each` expression, an
-item-derived key, and no meaningful siblings in the same host container. Other shapes keep normal
-React behavior.
+item-derived key, and a statically known location. Other shapes keep normal React behavior.
 
 A normal child component can become an automatic React-owned island:
 
@@ -127,11 +127,20 @@ Generated callback refs give directly patched host elements stable private targe
 React-owned component may therefore return `null`, a fragment, or multiple host nodes without
 shifting an unrelated compiler binding. These refs do not add attributes to SSR output.
 
-Conditional blocks deliberately start with a narrow contract. Each non-empty branch must have one
-lowercase host root and a static host-only subtree. An empty ternary branch may be `null` or `false`.
-Custom components, hooks, fragments, nested conditionals, lists, refs, attribute spreads, and
-`dangerouslySetInnerHTML` inside the block fall back to the normal React component. Both branch
-expressions are isolated at build time, but the inactive branch is not pre-mounted or cached.
+Conditional blocks deliberately keep a host-rooted contract. Each non-empty branch must have one
+lowercase host root, and an empty ternary branch may be `null` or `false`. That host tree may contain
+nested host conditionals, keyed lists, and supported component islands. A custom component used as
+the branch root, hooks directly in branch expressions, fragments, refs, attribute spreads, and
+`dangerouslySetInnerHTML` fall back to the normal React component. Both branch expressions are
+isolated at build time, but the inactive branch is not pre-mounted or cached.
+
+All supported boundary types share one component-wide block graph and one ID sequence. A nested
+binding records its nearest conditional parent. If one state flush affects both an outer
+conditional and its descendants, the runtime refreshes the mounted outer boundary once and skips
+the redundant descendant refreshes. React unmounts inner boundaries normally, their subscriptions
+are removed, and a later remount reads the latest compiler-cell values. List callback contents are
+not recursively compiled because one source location can create several keyed row instances;
+React owns each complete row subtree instead.
 
 Unsupported components fall back to React by default. Use `onUnsupported: "warn"` for diagnostics
 or `onUnsupported: "error"` while tightening an annotated migration.
@@ -157,6 +166,6 @@ assertion; it is not presented as a cross-machine timing benchmark.
 
 Application and prototype calls, dynamic style objects, handlers outside JSX events, nested,
 computed, and rest props patterns, async handlers, unkeyed or index-keyed lists, chained maps,
-mixed list siblings, unsupported conditional shapes, effects, and more advanced hook support
+unsupported conditional roots, effects, and more advanced hook support
 intentionally stay on React in this release. Farm does not perform compiler-owned LIS row moves;
 eligible keyed boundaries deliberately keep reconciliation under React.
