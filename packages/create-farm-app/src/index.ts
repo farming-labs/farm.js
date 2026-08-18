@@ -843,12 +843,16 @@ export function installDependencies(
   packageManager: PackageManager,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    const command =
-      process.platform === "win32" ? `${packageManager.name}.cmd` : packageManager.name;
+    const isWindows = process.platform === "win32";
+    const command = isWindows ? `${packageManager.name}.cmd` : packageManager.name;
+    // Node rejects spawning .cmd/.bat files without a shell since the fix for
+    // CVE-2024-27980 (EINVAL). Safe here: the command is one of npm|pnpm|yarn|bun
+    // and the argument list is a literal.
     const child = spawn(command, ["install"], {
       cwd: projectPath,
       env: process.env,
       stdio: "inherit",
+      shell: isWindows,
     });
 
     child.on("error", reject);
