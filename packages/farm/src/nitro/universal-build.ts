@@ -7469,6 +7469,30 @@ async function registerPrebuiltSSRPackageImport(
 }
 
 /**
+ * Move a file or directory, falling back to copy-and-remove when rename is
+ * not permitted. On Windows, fs.rename fails with EPERM/EACCES when another
+ * process (antivirus, indexing, a running dev server) holds a handle on the
+ * directory, and with EXDEV across drives; a copy is slower but succeeds.
+ */
+export async function moveVercelOutputPath(
+  src: string,
+  dest: string,
+  fs: typeof import("fs/promises"),
+): Promise<void> {
+  try {
+    await fs.rename(src, dest);
+    return;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException)?.code;
+    if (code !== "EPERM" && code !== "EACCES" && code !== "EXDEV" && code !== "ENOTEMPTY") {
+      throw error;
+    }
+  }
+  await fs.cp(src, dest, { recursive: true, force: true });
+  await fs.rm(src, { recursive: true, force: true });
+}
+
+/**
  * Post-process Vercel output to match Build Output API v3
  * Moves server/ to functions/__nitro.func/ and updates routes
  */
@@ -7494,17 +7518,18 @@ async function postProcessVercelOutput(
   for (const file of serverContents) {
     const src = path.join(serverDir, file);
     const dest = path.join(nitroFuncDir, file);
-    await fs.rename(src, dest);
+    await moveVercelOutputPath(src, dest, fs);
   }
 
-  // Remove empty server directory
-  await fs.rmdir(serverDir);
+  // Remove the emptied server directory
+  await fs.rm(serverDir, { recursive: true, force: true });
 
   // Rename public to static (Vercel expects static files in static/)
   try {
-    await fs.rename(publicDir, staticDir);
-  } catch {
+    await moveVercelOutputPath(publicDir, staticDir, fs);
+  } catch (error) {
     // public might not exist
+    if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") throw error;
   }
 
   // Add runtime assets before cloning route-specific functions.
