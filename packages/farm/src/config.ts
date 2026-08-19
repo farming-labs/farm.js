@@ -970,7 +970,7 @@ export async function loadConfig(
   for (const relativePath of searchPaths) {
     try {
       // Use path.join for proper path construction
-      const absolutePath = relativePath.startsWith("/")
+      const absolutePath = path.isAbsolute(relativePath)
         ? relativePath
         : path.join(root, relativePath);
 

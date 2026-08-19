@@ -215,6 +215,88 @@ export function getFarmLayerAliases(
   );
 }
 
+// Matches Windows drive-letter (`E:\`, `E:/`) and UNC (`\\server\share`) paths,
+// which would otherwise pass the "bare specifier" filter below. `path.isAbsolute`
+// only recognizes these on Windows, but esbuild can hand us such paths on any
+// platform (e.g. in cross-platform tests), and no valid package name contains
+// `:` or starts with `\`.
+const WINDOWS_ABSOLUTE_PATH_RE = /^(?:[A-Za-z]:[\\/]|\\\\)/;
+
+export function createFarmConfigResolutionPlugin(options: {
+  transform: EsbuildTransform;
+}): import("esbuild").Plugin {
+  const configEntryChecks = new Map<string, Promise<boolean>>();
+
+  return {
+    name: "farm-config-package-resolution",
+    setup(pluginBuild) {
+      pluginBuild.onResolve({ filter: /^@farm\.js\/core$/ }, async (args) => {
+        if (
+          args.pluginData?.farmConfigExternal ||
+          args.kind !== "import-statement" ||
+          !args.importer
+        ) {
+          return;
+        }
+
+        let configEntryCheck = configEntryChecks.get(args.importer);
+        if (!configEntryCheck) {
+          configEntryCheck = onlyImportsFarmConfigHelpers(args.importer, options.transform);
+          configEntryChecks.set(args.importer, configEntryCheck);
+        }
+        if (!(await configEntryCheck)) return;
+
+        const resolved = await pluginBuild.resolve(FARM_CONFIG_ENTRY, {
+          importer: args.importer,
+          kind: args.kind,
+          namespace: args.namespace,
+          resolveDir: args.resolveDir,
+          pluginData: { farmConfigExternal: true },
+        });
+        if (resolved.errors.length > 0 || !resolved.path) return;
+
+        return {
+          path: resolved.path,
+          external: true,
+          warnings: resolved.warnings,
+        };
+      });
+
+      pluginBuild.onResolve({ filter: /^[^./]/ }, async (args) => {
+        // The filter is meant to catch bare package specifiers, but Windows
+        // absolute paths (`E:\...`) match it too — including the entry point
+        // itself, which esbuild rejects when marked external.
+        if (
+          args.kind === "entry-point" ||
+          path.isAbsolute(args.path) ||
+          WINDOWS_ABSOLUTE_PATH_RE.test(args.path)
+        ) {
+          return;
+        }
+        if (args.pluginData?.farmConfigExternal) return;
+
+        const resolved = await pluginBuild.resolve(args.path, {
+          importer: args.importer,
+          kind: args.kind,
+          namespace: args.namespace,
+          resolveDir: args.resolveDir,
+          pluginData: { farmConfigExternal: true },
+        });
+
+        if (resolved.errors.length > 0 || !resolved.path) {
+          return { path: args.path, external: true };
+        }
+
+        return {
+          path: resolved.path,
+          external: true,
+          warnings: resolved.warnings,
+        };
+      });
+    },
+  };
+}
+
 export async function loadFarmConfigFile<TConfig = Record<string, any>>(
   configPath: string,
   options: { root: string; cacheRoot?: string },
@@ -222,7 +304,6 @@ export async function loadFarmConfigFile<TConfig = Record<string, any>>(
   const { build, transform } = await import("esbuild");
   const cacheRoot = path.resolve(options.cacheRoot || options.root);
   const configCacheDir = path.join(cacheRoot, ".farm", ".config-loader");
-  const configEntryChecks = new Map<string, Promise<boolean>>();
   await mkdir(configCacheDir, { recursive: true });
 
   const modulePath = path.join(
@@ -238,66 +319,7 @@ export async function loadFarmConfigFile<TConfig = Record<string, any>>(
     format: "esm",
     platform: "node",
     target: `node${process.versions.node.split(".")[0]}`,
-    plugins: [
-      {
-        name: "farm-config-package-resolution",
-        setup(pluginBuild) {
-          pluginBuild.onResolve({ filter: /^@farm.js\/core$/ }, async (args) => {
-            if (
-              args.pluginData?.farmConfigExternal ||
-              args.kind !== "import-statement" ||
-              !args.importer
-            ) {
-              return;
-            }
-
-            let configEntryCheck = configEntryChecks.get(args.importer);
-            if (!configEntryCheck) {
-              configEntryCheck = onlyImportsFarmConfigHelpers(args.importer, transform);
-              configEntryChecks.set(args.importer, configEntryCheck);
-            }
-            if (!(await configEntryCheck)) return;
-
-            const resolved = await pluginBuild.resolve(FARM_CONFIG_ENTRY, {
-              importer: args.importer,
-              kind: args.kind,
-              namespace: args.namespace,
-              resolveDir: args.resolveDir,
-              pluginData: { farmConfigExternal: true },
-            });
-            if (resolved.errors.length > 0 || !resolved.path) return;
-
-            return {
-              path: resolved.path,
-              external: true,
-              warnings: resolved.warnings,
-            };
-          });
-
-          pluginBuild.onResolve({ filter: /^[^./]/ }, async (args) => {
-            if (args.pluginData?.farmConfigExternal) return;
-
-            const resolved = await pluginBuild.resolve(args.path, {
-              importer: args.importer,
-              kind: args.kind,
-              namespace: args.namespace,
-              resolveDir: args.resolveDir,
-              pluginData: { farmConfigExternal: true },
-            });
-
-            if (resolved.errors.length > 0 || !resolved.path) {
-              return { path: args.path, external: true };
-            }
-
-            return {
-              path: resolved.path,
-              external: true,
-              warnings: resolved.warnings,
-            };
-          });
-        },
-      },
-    ],
+    plugins: [createFarmConfigResolutionPlugin({ transform })],
     jsx: "automatic",
     logLevel: "silent",
     sourcemap: "inline",
