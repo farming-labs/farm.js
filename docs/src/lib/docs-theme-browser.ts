@@ -23,10 +23,7 @@ function placeTitleDecorations(descriptionInBody: boolean): void {
   if (descriptionInBody) {
     let sibling = title.nextElementSibling;
     while (sibling) {
-      if (
-        sibling === host ||
-        sibling.matches(".not-prose, .fd-title-decorations-host")
-      ) {
+      if (sibling === host || sibling.matches(".not-prose, .fd-title-decorations-host")) {
         sibling = sibling.nextElementSibling;
         continue;
       }
