@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadFarmConfigFile } from "../layers";
+import { createFarmConfigResolutionPlugin, loadFarmConfigFile } from "../layers";
 
 const temporaryRoots = new Set<string>();
 
@@ -88,6 +88,87 @@ describe("Farm config helper import fast path", () => {
       extends: ["./base"],
       helperEntry: "config",
     });
+  });
+});
+
+describe("Farm config resolution plugin", () => {
+  type OnResolveArgs = {
+    path: string;
+    importer: string;
+    namespace: string;
+    resolveDir: string;
+    kind: string;
+    pluginData?: Record<string, unknown>;
+  };
+  type OnResolveCallback = (args: OnResolveArgs) => Promise<unknown>;
+
+  async function resolveWithPlugin(args: OnResolveArgs): Promise<unknown> {
+    const callbacks: Array<{ filter: RegExp; callback: OnResolveCallback }> = [];
+    const pluginBuild = {
+      onResolve(options: { filter: RegExp }, callback: OnResolveCallback) {
+        callbacks.push({ filter: options.filter, callback });
+      },
+      async resolve(specifier: string) {
+        return { path: `/resolved/${specifier}`, errors: [], warnings: [] };
+      },
+    };
+
+    const plugin = createFarmConfigResolutionPlugin({
+      transform: async () => ({ code: "", map: "", warnings: [] }),
+    });
+    plugin.setup(pluginBuild as never);
+
+    for (const { filter, callback } of callbacks) {
+      if (!filter.test(args.path)) continue;
+      const result = await callback(args);
+      if (result !== undefined) return result;
+    }
+    return undefined;
+  }
+
+  it("does not mark Windows entry points as external", async () => {
+    // Windows absolute paths match the bare-specifier filter (/^[^./]/); the
+    // entry point must not be externalized or esbuild fails with
+    // "The entry point ... cannot be marked as external".
+    await expect(
+      resolveWithPlugin({
+        path: "E:\\farming\\stacklens\\farm.config.ts",
+        importer: "",
+        namespace: "file",
+        resolveDir: "",
+        kind: "entry-point",
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("does not externalize Windows absolute import paths", async () => {
+    for (const importPath of [
+      "E:\\farming\\stacklens\\shared-config.ts",
+      "E:/farming/stacklens/shared-config.ts",
+      "\\\\server\\share\\shared-config.ts",
+    ]) {
+      await expect(
+        resolveWithPlugin({
+          path: importPath,
+          importer: "E:\\farming\\stacklens\\farm.config.ts",
+          namespace: "file",
+          resolveDir: "E:\\farming\\stacklens",
+          kind: "import-statement",
+        }),
+      ).resolves.toBeUndefined();
+    }
+  });
+
+  it("still externalizes bare package specifiers", async () => {
+    await expect(
+      resolveWithPlugin({
+        path: "picocolors",
+        importer: "/project/farm.config.ts",
+        namespace: "file",
+        resolveDir: "/project",
+        kind: "import-statement",
+      }),
+    ).resolves.toMatchObject({ external: true, path: "/resolved/picocolors" });
   });
 });
 
