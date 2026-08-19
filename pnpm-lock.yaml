@@ -55,14 +55,14 @@ importers:
         specifier: workspace:*
         version: link:../packages/farm
       '@farming-labs/docs':
-        specifier: 0.2.99
-        version: 0.2.99(react@19.2.8)(supports-color@10.2.2)
+        specifier: 0.2.108
+        version: 0.2.108(react@19.2.8)(supports-color@10.2.2)
       '@farming-labs/farmjs':
-        specifier: 0.2.103
-        version: 0.2.103(@farm.js/core@packages+farm)(@farming-labs/docs@0.2.99)(@farming-labs/theme@0.2.99)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(rollup@4.52.4)(supports-color@10.2.2)
+        specifier: 0.2.108
+        version: 0.2.108(@farm.js/core@packages+farm)(@farming-labs/docs@0.2.108)(@farming-labs/theme@0.2.108)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(rollup@4.52.4)(supports-color@10.2.2)
       '@farming-labs/theme':
-        specifier: 0.2.99
-        version: 0.2.99(@farming-labs/docs@0.2.99)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18)
+        specifier: 0.2.108
+        version: 0.2.108(@farming-labs/docs@0.2.108)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18)
       '@prisma/client':
         specifier: 6.7.0
         version: 6.7.0(prisma@6.7.0)(typescript@5.9.3)
@@ -394,7 +394,7 @@ importers:
         version: 0.2.99(@farm.js/core@packages+farm)(@farming-labs/docs@0.2.99)(@farming-labs/theme@0.2.99)(@types/react@18.3.26)(react-dom@19.2.8)(react@19.2.8)(rollup@4.52.4)(supports-color@10.2.2)
       '@farming-labs/theme':
         specifier: ^0.2.99
-        version: 0.2.99(@farming-labs/docs@0.2.99)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18)
+        version: 0.2.99(@farming-labs/docs@0.2.99)(@types/react-dom@18.3.7)(@types/react@18.3.26)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)
       react:
         specifier: 19.2.8
         version: 19.2.8
@@ -1870,6 +1870,37 @@ importers:
         specifier: ^1.1.0
         version: 1.6.1(@types/node@20.19.21)(jsdom@25.0.1)(supports-color@10.2.2)
 
+  packages/farm-preview-gateway:
+    devDependencies:
+      '@types/node':
+        specifier: ^20.10.5
+        version: 20.19.21
+      tsdown:
+        specifier: ^0.15.7
+        version: 0.15.7(supports-color@10.2.2)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+
+  packages/farm-preview-tunnel:
+    dependencies:
+      ws:
+        specifier: ^8.21.0
+        version: 8.21.0
+    devDependencies:
+      '@types/node':
+        specifier: ^20.10.5
+        version: 20.19.21
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
+      tsdown:
+        specifier: ^0.15.7
+        version: 0.15.7(supports-color@10.2.2)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+
   packages/farm-react:
     dependencies:
       '@babel/core':
@@ -1909,37 +1940,6 @@ importers:
       vitest:
         specifier: ^1.1.0
         version: 1.6.1(@types/node@20.19.21)(jsdom@25.0.1)(supports-color@10.2.2)
-
-  packages/farm-preview-gateway:
-    devDependencies:
-      '@types/node':
-        specifier: ^20.10.5
-        version: 20.19.21
-      tsdown:
-        specifier: ^0.15.7
-        version: 0.15.7(supports-color@10.2.2)(typescript@5.9.3)
-      typescript:
-        specifier: ^5.3.3
-        version: 5.9.3
-
-  packages/farm-preview-tunnel:
-    dependencies:
-      ws:
-        specifier: ^8.21.0
-        version: 8.21.0
-    devDependencies:
-      '@types/node':
-        specifier: ^20.10.5
-        version: 20.19.21
-      '@types/ws':
-        specifier: ^8.18.1
-        version: 8.18.1
-      tsdown:
-        specifier: ^0.15.7
-        version: 0.15.7(supports-color@10.2.2)(typescript@5.9.3)
-      typescript:
-        specifier: ^5.3.3
-        version: 5.9.3
 
   packages/farm-renderer-tests:
     dependencies:
@@ -2116,7 +2116,7 @@ importers:
         version: 2.0.0
       nitro:
         specifier: 3.0.1-alpha.0
-        version: 3.0.1-alpha.0(rolldown@1.2.4)(vite@6.4.1)
+        version: 3.0.1-alpha.0(rolldown@1.2.5)(vite@6.4.1)
       picocolors:
         specifier: ^1.0.0
         version: 1.1.1
@@ -4632,6 +4632,36 @@ packages:
       '@farm.js/tunnel-win32-x64-msvc': 0.1.0
     dev: false
 
+  /@farming-labs/docs@0.2.108(react@19.2.8)(supports-color@10.2.2):
+    resolution: {integrity: sha512-X9FwIBisdOtAjVFH84SA6xF7PE++fCQ1kiVpWUWk1tw6QpAtuLTn6vDbGFlboZSWSSEwzcjn7mEDjhUvqZymYQ==}
+    engines: {node: '>=20'}
+    hasBin: true
+    peerDependencies:
+      react: '>=19.2.0'
+    peerDependenciesMeta:
+      react:
+        optional: true
+    dependencies:
+      '@clack/prompts': 1.7.0
+      '@mdx-js/mdx': 3.1.1(supports-color@10.2.2)
+      '@modelcontextprotocol/server': 2.0.0
+      '@scalar/core': 0.4.6
+      '@vercel/sandbox': 2.4.0
+      github-slugger: 2.0.0
+      gray-matter: 4.0.3
+      jiti: 2.7.0
+      parse-entities: 4.0.2
+      picocolors: 1.1.1
+      react: 19.2.8
+      remark-gfm: 4.0.1(supports-color@10.2.2)
+      yaml: 2.9.0
+      zod: 4.3.6
+    transitivePeerDependencies:
+      - bare-abort-controller
+      - react-native-b4a
+      - supports-color
+    dev: false
+
   /@farming-labs/docs@0.2.44(react@19.2.8)(supports-color@10.2.2):
     resolution: {integrity: sha512-Y+qC2lC4sG36QeMAUXUQE8hYseNpFhkA2bCWjCxXdGAT4Mhw3pf1WwiT1umZFc2jvluN9ywVW1ShyN/BVMQxVA==}
     hasBin: true
@@ -4687,8 +4717,8 @@ packages:
       - supports-color
     dev: false
 
-  /@farming-labs/farmjs@0.2.103(@farm.js/core@packages+farm)(@farming-labs/docs@0.2.99)(@farming-labs/theme@0.2.99)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(rollup@4.52.4)(supports-color@10.2.2):
-    resolution: {integrity: sha512-HJ87wvyq8naz8Sa/AkmWsLmvzmUQ/vcoujHfT2MnGnpnq5YKdaCHfB3vXdj1go6z6xHFmU5+/VxlfhuC/Jmopg==}
+  /@farming-labs/farmjs@0.2.108(@farm.js/core@packages+farm)(@farming-labs/docs@0.2.108)(@farming-labs/theme@0.2.108)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(rollup@4.52.4)(supports-color@10.2.2):
+    resolution: {integrity: sha512-4+PAYDmHL1Pn+Jiyq4AzRtRa5itv43Nmea90N25o+idOIGsXvwuf26JAngc3LpCksB2o3Potvvo5RFHr3QAucw==}
     peerDependencies:
       '@farm.js/core': ^0.1.0-beta.19
       '@farming-labs/docs': '*'
@@ -4697,8 +4727,8 @@ packages:
       react-dom: ^18.2.0 || ^19.0.0
     dependencies:
       '@farm.js/core': link:packages/farm
-      '@farming-labs/docs': 0.2.99(react@19.2.8)(supports-color@10.2.2)
-      '@farming-labs/theme': 0.2.99(@farming-labs/docs@0.2.99)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18)
+      '@farming-labs/docs': 0.2.108(react@19.2.8)(supports-color@10.2.2)
+      '@farming-labs/theme': 0.2.108(@farming-labs/docs@0.2.108)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18)
       '@mdx-js/rollup': 3.1.1(rollup@4.52.4)(supports-color@10.2.2)
       '@scalar/core': 0.4.6
       fumadocs-core: 16.7.16(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(zod@4.3.6)
@@ -4740,7 +4770,7 @@ packages:
     dependencies:
       '@farm.js/core': link:packages/farm
       '@farming-labs/docs': 0.2.99(react@19.2.8)(supports-color@10.2.2)
-      '@farming-labs/theme': 0.2.99(@farming-labs/docs@0.2.99)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18)
+      '@farming-labs/theme': 0.2.99(@farming-labs/docs@0.2.99)(@types/react-dom@18.3.7)(@types/react@18.3.26)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)
       '@mdx-js/rollup': 3.1.1(rollup@4.52.4)(supports-color@10.2.2)
       '@scalar/core': 0.4.6
       fumadocs-core: 16.7.16(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(zod@4.3.6)
@@ -5109,7 +5139,55 @@ packages:
       '@farming-labs/strata-win32-x64-msvc': 0.1.2
     dev: false
 
-  /@farming-labs/theme@0.2.99(@farming-labs/docs@0.2.99)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18):
+  /@farming-labs/theme@0.2.108(@farming-labs/docs@0.2.108)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18):
+    resolution: {integrity: sha512-6znL/TDkB5aXJVD4J0/RAuoBLdcKfR2ES7UBPDE1+YKzTjio8wGZDUqcH/Az3LIjpCdiefHVizFHjEVH0pou5Q==}
+    peerDependencies:
+      '@farming-labs/docs': '>=0.0.1'
+      next: '>=16.0.0'
+      react: '>=19.2.0'
+      react-dom: '>=19.2.0'
+    peerDependenciesMeta:
+      next:
+        optional: true
+      react:
+        optional: true
+      react-dom:
+        optional: true
+    dependencies:
+      '@farming-labs/docs': 0.2.108(react@19.2.8)(supports-color@10.2.2)
+      fumadocs-core: 16.7.16(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(zod@4.3.6)
+      fumadocs-ui: 16.7.16(@types/react-dom@18.3.7)(@types/react@18.3.26)(fumadocs-core@16.7.16)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(tailwindcss@3.4.18)
+      gray-matter: 4.0.3
+      next: 16.2.4(@playwright/test@1.58.2)(react-dom@19.2.8)(react@19.2.8)
+      react: 19.2.8
+      react-dom: 19.2.8(react@19.2.8)
+      sugar-high: 0.9.5
+      zod: 4.3.6
+    transitivePeerDependencies:
+      - '@emotion/is-prop-valid'
+      - '@mdx-js/mdx'
+      - '@mixedbread/sdk'
+      - '@orama/core'
+      - '@oramacloud/client'
+      - '@tailwindcss/oxide'
+      - '@takumi-rs/image-response'
+      - '@tanstack/react-router'
+      - '@types/estree-jsx'
+      - '@types/hast'
+      - '@types/mdast'
+      - '@types/mdx'
+      - '@types/react'
+      - '@types/react-dom'
+      - algoliasearch
+      - flexsearch
+      - lucide-react
+      - react-router
+      - supports-color
+      - tailwindcss
+      - waku
+    dev: false
+
+  /@farming-labs/theme@0.2.99(@farming-labs/docs@0.2.99)(@types/react-dom@18.3.7)(@types/react@18.3.26)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2):
     resolution: {integrity: sha512-WZ150Ji5sdj5ECOPbasycKwbe9Af26PPnVLmpiBLXvEXoyJIYZqbiCL+08yjg4NeXzgpOD2tfVcDqW3r58vOcw==}
     peerDependencies:
       '@farming-labs/docs': '>=0.0.1'
@@ -5128,7 +5206,6 @@ packages:
       fumadocs-core: 16.7.16(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(zod@4.3.6)
       fumadocs-ui: 16.7.16(@types/react-dom@18.3.7)(@types/react@18.3.26)(fumadocs-core@16.7.16)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(tailwindcss@3.4.18)
       gray-matter: 4.0.3
-      next: 16.2.4(@playwright/test@1.58.2)(react-dom@19.2.8)(react@19.2.8)
       react: 19.2.8
       react-dom: 19.2.8(react@19.2.8)
       sugar-high: 0.9.5
@@ -6975,8 +7052,8 @@ packages:
   /@oxc-project/types@0.140.0:
     resolution: {integrity: sha512-h5LUOzGArYemnW1NMz/DuuQhBi96J6JL2Bk8zE4kvqxB5Sg3jxmCiH4uyOWHDkiKSt5vWlG4FIwCR/DbstcNRQ==}
 
-  /@oxc-project/types@0.144.0:
-    resolution: {integrity: sha512-nuhZIOLuI6TFQ32I/WnUx+SCPY7SdSKwgnFHydAuoS1+Z4BRcaP+RRJmGzl9lw+0OFF7UmaESf7KQRXaNLHypg==}
+  /@oxc-project/types@0.146.0:
+    resolution: {integrity: sha512-XC0QsnnhVe7sLIWmYmdPw7x5P0h4W8vUU3Nv1ySgWXtvCz8NizoAEpGXA0sOYoJQV2Rl13LgURAHQ5cI5ILCSA==}
 
   /@oxfmt/darwin-arm64@0.27.0:
     resolution: {integrity: sha512-3vwqyzNlVTVFVzHMlrqxb4tgVgHp6FYS0uIxsIZ/SeEDG0azaqiOw/2t8LlJ9f72PKRLWSey+Ak99tiKgpbsnQ==}
@@ -8386,6 +8463,14 @@ packages:
     engines: {node: '>= 10'}
     dev: false
 
+  /@rolldown/binding-android-arm-eabi@1.2.5:
+    resolution: {integrity: sha512-DLe/i+l8ynIBY7XEQ191TeZvCoowIGa18R+dIV30GW7DiOtp74i/xX8hs8GUjW5ARV7VZuie3d6AumSmCwbeRA==}
+    engines: {node: ^20.19.0 || >=22.12.0}
+    cpu: [arm]
+    os: [android]
+    requiresBuild: true
+    optional: true
+
   /@rolldown/binding-android-arm64@1.1.5:
     resolution: {integrity: sha512-lZg8fqIv2v7FF237bwMgzGZEJvGL79/s5knJ/i6FmsGF4XXlzccZ4jb+TrFIxtSSxFtIpdsgrPZeMk1I9AFcyQ==}
     engines: {node: ^20.19.0 || >=22.12.0}
@@ -8402,8 +8487,8 @@ packages:
     requiresBuild: true
     optional: true
 
-  /@rolldown/binding-android-arm64@1.2.4:
-    resolution: {integrity: sha512-jHC2cnyKz5xU2fhECtFl8OZ83cYNt13GZQD+0uMJ/X3o+ijmd56okHhTUwxVSHPx1IRVIJEZ1/1pPzeLCU6XKA==}
+  /@rolldown/binding-android-arm64@1.2.5:
+    resolution: {integrity: sha512-zXcwKlQApYAOELHd8PwKDFkagYF9Wy4e0RJ+0qnzl9Pjnpj75TEG8ufv40p2J7kCEfwZAsNiuzRIyNNMWT38ig==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [arm64]
     os: [android]
@@ -8426,8 +8511,8 @@ packages:
     requiresBuild: true
     optional: true
 
-  /@rolldown/binding-darwin-arm64@1.2.4:
-    resolution: {integrity: sha512-Dc5mPD8F5F/FS8i01syd7FTF6yB2fVthH/TRkjwJkzUK6EpoxHtqvZQP5Zwq80/5z19TWYHIg1KOHboCgVx/aQ==}
+  /@rolldown/binding-darwin-arm64@1.2.5:
+    resolution: {integrity: sha512-dK4QakI42nzWgJT5sm4y4y/O//D4OxM75/cH28RLV+nzIN9AY+YsbuUVrUTjlLjXR6vpyxFbSsbmNuJ6BP9sww==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [arm64]
     os: [darwin]
@@ -8450,14 +8535,6 @@ packages:
     requiresBuild: true
     optional: true
 
-  /@rolldown/binding-darwin-x64@1.2.4:
-    resolution: {integrity: sha512-fpDm4oBo6SqLvWUYCmFhdde3U9KH2fRNNMeAnAPAIwxRL345xutL0EtEUcuoxsoazdJGv/MuDBQHlCDrtbvqOg==}
-    engines: {node: ^20.19.0 || >=22.12.0}
-    cpu: [x64]
-    os: [darwin]
-    requiresBuild: true
-    optional: true
-
   /@rolldown/binding-freebsd-x64@1.1.5:
     resolution: {integrity: sha512-JMzDKCCXq93YccG5gz3hvOs1oXRKAf0XYpfOS88e+wZrC8Iugj6j68867vrYZkvpDDpKn/KoKORThmchMpF6TA==}
     engines: {node: ^20.19.0 || >=22.12.0}
@@ -8474,8 +8551,8 @@ packages:
     requiresBuild: true
     optional: true
 
-  /@rolldown/binding-freebsd-x64@1.2.4:
-    resolution: {integrity: sha512-rSJoreDE/HoIzoaib6MTp5jQtCTdMHKIvItAKT/ImS6Y6Ww76oUaeMyp4Vc/fAgd/ehji068IxetHXAnqUwN9A==}
+  /@rolldown/binding-freebsd-x64@1.2.5:
+    resolution: {integrity: sha512-/vCnNxlkxs9tKxNDcyWUePpJ/PgTzxIaVhoM5SmG8UV+GR/IcPam4VYxi7GIMo7PSDuNqlJqvprqii9NqqVCMw==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [x64]
     os: [freebsd]
@@ -8498,8 +8575,8 @@ packages:
     requiresBuild: true
     optional: true
 
-  /@rolldown/binding-linux-arm-gnueabihf@1.2.4:
-    resolution: {integrity: sha512-/jm8OGHgn7oGaJu3i/qZI9spUGcJ+y/lk43ttQ/iO1tOd9NissG6o97bighBCiL+BKRngmcDuR6ikfwYdJmVuQ==}
+  /@rolldown/binding-linux-arm-gnueabihf@1.2.5:
+    resolution: {integrity: sha512-abk0NLA519LxRCszmbE0jYKuQ9YPocOXTiOXOo6Yr+YAT95VH+PtqYAjOJvGKt3viEd/x4qzabAlwd5bHOOARg==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [arm]
     os: [linux]
@@ -8522,14 +8599,6 @@ packages:
     requiresBuild: true
     optional: true
 
-  /@rolldown/binding-linux-arm64-gnu@1.2.4:
-    resolution: {integrity: sha512-tIP06BeD9EqvECBrPZ+sqdPlYrT+aYaAiu1wYziVx5elRK/ftm33JxVDy2bXGbr6J0CrtirCkR87/X5a2euEng==}
-    engines: {node: ^20.19.0 || >=22.12.0}
-    cpu: [arm64]
-    os: [linux]
-    requiresBuild: true
-    optional: true
-
   /@rolldown/binding-linux-arm64-musl@1.1.5:
     resolution: {integrity: sha512-lAryqH7IteztmCXQXk0etKj4wBQ7Gx5S6LjKhsgp9zb8I5bsuvU/2llH1hDQcjsFeqIsovMVN339/8pUDDBXxA==}
     engines: {node: ^20.19.0 || >=22.12.0}
@@ -8546,8 +8615,8 @@ packages:
     requiresBuild: true
     optional: true
 
-  /@rolldown/binding-linux-arm64-musl@1.2.4:
-    resolution: {integrity: sha512-Ql1Q0EQqVThvn9VAVlwNzsUvbSFtCMGjLpRRi4pk5i7NZZ4n5ISiLMjHYtus4VQ2PvkSw24zyaCVsiS+sXPj1w==}
+  /@rolldown/binding-linux-arm64-musl@1.2.5:
+    resolution: {integrity: sha512-xMvZgnbZg4YVnR/AX2b3oOPDTFYJvUVaJg5FedA/LuvexAtXibZQej4cnTkw3rjsJ/ggUROB64TdtETiim+FYA==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [arm64]
     os: [linux]
@@ -8570,8 +8639,8 @@ packages:
     requiresBuild: true
     optional: true
 
-  /@rolldown/binding-linux-ppc64-gnu@1.2.4:
-    resolution: {integrity: sha512-GjbjXD4XXfN19D0LZNbmiCBUoDiRACsYHr0yaIbbn8aFsXjHZifcYqu/W5Er5X2X990WjHXFrxarn5chzItorQ==}
+  /@rolldown/binding-linux-ppc64-gnu@1.2.5:
+    resolution: {integrity: sha512-GRjeqTUDHTo5GwntsLaAMcBahG3nlpjftXWZLN73HiYQlhwEowvarFgQnRnQZtIp4keXX7quXFbG38uPZBa2EA==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [ppc64]
     os: [linux]
@@ -8594,8 +8663,8 @@ packages:
     requiresBuild: true
     optional: true
 
-  /@rolldown/binding-linux-s390x-gnu@1.2.4:
-    resolution: {integrity: sha512-p5WR0NOwaRmJ/B1b6IjEFLLivwEsf3PrdBIhRbhTCQisbo2SvHHpG4ELB/+FgQNnB88LTOF86upmJmbvZdQ2lw==}
+  /@rolldown/binding-linux-s390x-gnu@1.2.5:
+    resolution: {integrity: sha512-vLNTR45F2Uwc8AufkNXPmB4VliaXs+FvcheEogIzOXzO4l+LzieXF5A/TWxLy5HtqpsRCHUfd0lPVrrdgXdLHQ==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [s390x]
     os: [linux]
@@ -8618,8 +8687,8 @@ packages:
     requiresBuild: true
     optional: true
 
-  /@rolldown/binding-linux-x64-gnu@1.2.4:
-    resolution: {integrity: sha512-4/GyVjmhR+Tc6HLJvwc1sOhPqAZtySiSMesOZyX6JQ5XBxoTDEMKQzvo07NIK6nTon/SivlZqvhzvuVBNQhObQ==}
+  /@rolldown/binding-linux-x64-gnu@1.2.5:
+    resolution: {integrity: sha512-Mgj59/HTuYeK9Gz2MA+mBWKnHsAgkBSec15ZMb1st3oIfFbX7gCjOae7GydHhzcyQi9Z/7M1QuN9bR3oFqF0jQ==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [x64]
     os: [linux]
@@ -8642,8 +8711,8 @@ packages:
     requiresBuild: true
     optional: true
 
-  /@rolldown/binding-linux-x64-musl@1.2.4:
-    resolution: {integrity: sha512-l9eeLsCNvPpmSXUej0etw/J1eqV0Jj1D5G/xG6YTijmE6dkv6E2QezgWbTfQk63v952DPqrjOCoiqxq7Bw0YUQ==}
+  /@rolldown/binding-linux-x64-musl@1.2.5:
+    resolution: {integrity: sha512-mY8AP0/ichsbhAxGnLa3d3+MwV0EfgrPND2bplI3Ym8T6R2pJ0N87bvrKVwNXmdy3jnr6eQBecdqx/HMknBmpA==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [x64]
     os: [linux]
@@ -8666,8 +8735,8 @@ packages:
     requiresBuild: true
     optional: true
 
-  /@rolldown/binding-openharmony-arm64@1.2.4:
-    resolution: {integrity: sha512-e0F355MSTMm3+UOqtV3L24gFUp2N5m1f8L/7d56deik6va+AXdrt9F8LbzGpeWGWRbZEDq4m8NVnJDeBtf9DZg==}
+  /@rolldown/binding-openharmony-arm64@1.2.5:
+    resolution: {integrity: sha512-8SLssA2oweAxyRgDp789ACfRb/3P+zNRJpzZxSizxF9m8NUDQ4+3xjo8ttjhVGGw6Qxb70oZiEtIjaKikCO7Yw==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [arm64]
     os: [openharmony]
@@ -8712,8 +8781,8 @@ packages:
     requiresBuild: true
     optional: true
 
-  /@rolldown/binding-win32-arm64-msvc@1.2.4:
-    resolution: {integrity: sha512-AWLi0uBRYh6QlE7OKhiz+phZC0qwtij2QZmhmOdsLdFn64m7oMpooE9ICE3lhm9xMb4SpDo2WbHcxX1iFLFtqw==}
+  /@rolldown/binding-win32-arm64-msvc@1.2.5:
+    resolution: {integrity: sha512-vGbruD5zquhoc8D9SViXgN2FBJtNdTyQ4DtG+SWiEGlJiAzoKcZ2xp+xuXCffhubVdt0NJlTZqkeRuERy7g8Cw==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [arm64]
     os: [win32]
@@ -8736,8 +8805,8 @@ packages:
     requiresBuild: true
     optional: true
 
-  /@rolldown/binding-win32-x64-msvc@1.2.4:
-    resolution: {integrity: sha512-UwSDJOg3dqCAejWdxclJjCsh3Qq4vLYMDxmyHqo1btz3stK2VqgwNd3mm5tuIwzSlGIQ/1H9Hr+Zn09mrezNqQ==}
+  /@rolldown/binding-win32-x64-msvc@1.2.5:
+    resolution: {integrity: sha512-e/SXpgISz+IoqVcSSI0rx/d/he8zqLex+/rCWpnHpmVfmPIUjag9H6P7zotf0gJHwPUhQxZ/mF8tr6acebT9yw==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [x64]
     os: [win32]
@@ -15897,7 +15966,7 @@ packages:
       - uploadthing
     dev: false
 
-  /nitro@3.0.1-alpha.0(rolldown@1.2.4)(vite@6.4.1):
+  /nitro@3.0.1-alpha.0(rolldown@1.2.5)(vite@6.4.1):
     resolution: {integrity: sha512-lR3RplfXBOZXNlFQf9AJkqFVFhg5/CNbpBijM0dSYhGymb+FthJSdL6crmXVg518h2NVOd40rehhGZaf9ijW9w==}
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
@@ -15925,7 +15994,7 @@ packages:
       ofetch: 1.5.1
       ohash: 2.0.11
       rendu: 0.0.6
-      rolldown: 1.2.4
+      rolldown: 1.2.5
       rollup: 4.52.4
       srvx: 0.8.16
       undici: 7.16.0
@@ -17296,7 +17365,7 @@ packages:
       glob: 10.5.0
     dev: false
 
-  /rolldown-plugin-dts@0.16.11(rolldown@1.2.4)(supports-color@10.2.2)(typescript@5.9.3):
+  /rolldown-plugin-dts@0.16.11(rolldown@1.2.5)(supports-color@10.2.2)(typescript@5.9.3):
     resolution: {integrity: sha512-9IQDaPvPqTx3RjG2eQCK5GYZITo203BxKunGI80AGYicu1ySFTUyugicAaTZWRzFWh9DSnzkgNeMNbDWBbSs0w==}
     engines: {node: '>=20.18.0'}
     peerDependencies:
@@ -17324,7 +17393,7 @@ packages:
       dts-resolver: 2.1.2
       get-tsconfig: 4.12.0
       magic-string: 0.30.21
-      rolldown: 1.2.4
+      rolldown: 1.2.5
       typescript: 5.9.3
     transitivePeerDependencies:
       - oxc-resolver
@@ -17379,28 +17448,27 @@ packages:
       '@rolldown/binding-win32-arm64-msvc': 1.2.0
       '@rolldown/binding-win32-x64-msvc': 1.2.0
 
-  /rolldown@1.2.4:
-    resolution: {integrity: sha512-rSr7irW0K7QRWzjdJXqZowkcRdDtjRduh43rBltnVKd0VFq839l1lJoDvGJb6gl7+4rTTCrPWu+YfujUL8Ug7w==}
+  /rolldown@1.2.5:
+    resolution: {integrity: sha512-VD2IE5PUG4Oj8zz2VGykiYd5wbnjdIiSsNQb8Qu5B+noEp+A78mu2iVvpp27g8es14Tk9rofNs5Tku9iQCS4fA==}
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
     dependencies:
-      '@oxc-project/types': 0.144.0
+      '@oxc-project/types': 0.146.0
       '@rolldown/pluginutils': 1.0.1
     optionalDependencies:
-      '@rolldown/binding-android-arm64': 1.2.4
-      '@rolldown/binding-darwin-arm64': 1.2.4
-      '@rolldown/binding-darwin-x64': 1.2.4
-      '@rolldown/binding-freebsd-x64': 1.2.4
-      '@rolldown/binding-linux-arm-gnueabihf': 1.2.4
-      '@rolldown/binding-linux-arm64-gnu': 1.2.4
-      '@rolldown/binding-linux-arm64-musl': 1.2.4
-      '@rolldown/binding-linux-ppc64-gnu': 1.2.4
-      '@rolldown/binding-linux-s390x-gnu': 1.2.4
-      '@rolldown/binding-linux-x64-gnu': 1.2.4
-      '@rolldown/binding-linux-x64-musl': 1.2.4
-      '@rolldown/binding-openharmony-arm64': 1.2.4
-      '@rolldown/binding-win32-arm64-msvc': 1.2.4
-      '@rolldown/binding-win32-x64-msvc': 1.2.4
+      '@rolldown/binding-android-arm-eabi': 1.2.5
+      '@rolldown/binding-android-arm64': 1.2.5
+      '@rolldown/binding-darwin-arm64': 1.2.5
+      '@rolldown/binding-freebsd-x64': 1.2.5
+      '@rolldown/binding-linux-arm-gnueabihf': 1.2.5
+      '@rolldown/binding-linux-arm64-musl': 1.2.5
+      '@rolldown/binding-linux-ppc64-gnu': 1.2.5
+      '@rolldown/binding-linux-s390x-gnu': 1.2.5
+      '@rolldown/binding-linux-x64-gnu': 1.2.5
+      '@rolldown/binding-linux-x64-musl': 1.2.5
+      '@rolldown/binding-openharmony-arm64': 1.2.5
+      '@rolldown/binding-win32-arm64-msvc': 1.2.5
+      '@rolldown/binding-win32-x64-msvc': 1.2.5
 
   /rollup@4.52.4:
     resolution: {integrity: sha512-CLEVl+MnPAiKh5pl4dEWSyMTpuflgNQiLGhMv8ezD5W/qP8AKvmYpCOKRRNOh7oRKnauBZ4SyeYkMS+1VSyKwQ==}
@@ -18529,8 +18597,8 @@ packages:
       diff: 8.0.2
       empathic: 2.0.0
       hookable: 5.5.3
-      rolldown: 1.2.4
-      rolldown-plugin-dts: 0.16.11(rolldown@1.2.4)(supports-color@10.2.2)(typescript@5.9.3)
+      rolldown: 1.2.5
+      rolldown-plugin-dts: 0.16.11(rolldown@1.2.5)(supports-color@10.2.2)(typescript@5.9.3)
       semver: 7.7.3
       tinyexec: 1.0.1
       tinyglobby: 0.2.15
