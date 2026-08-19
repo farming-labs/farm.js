@@ -5,6 +5,7 @@ import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createCompiledComponent,
+  type CompiledComponentDefinition,
   type CompilerKeyedRowElement,
   type CompilerStateUpdater,
 } from "../compiler-runtime";
@@ -656,6 +657,152 @@ describe("compiled keyed-row runtime", () => {
       await flushCompilerUpdates();
     });
     expect(errors).toEqual([]);
+  });
+
+  it("preserves compiler state and row identity across a compatible Fast Refresh", async () => {
+    const hmrId = `keyed-rows-refresh-${Math.random()}`;
+    const definition = (prefix: string): CompiledComponentDefinition<Record<string, never>> => ({
+      displayName: "RefreshKeyedRows",
+      hmrId,
+      stateSignature: "1",
+      initialize: () => [[{ id: "a", label: "Alpha" }]],
+      render(_props, state, blocks) {
+        const items = () => state[0].get() as Item[];
+        const KeyedRows = blocks.KeyedRows;
+        return (
+          <section>
+            <button onClick={() => state[0].set([{ id: "a", label: "Updated" }])}>Update</button>
+            <KeyedRows
+              id={0}
+              render={() => (
+                <ul>
+                  {items().map((item) => (
+                    <li data-key={item.id} key={item.id}>
+                      {prefix}
+                      {item.label}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              items={items}
+              rowKey={(item: unknown) => (item as Item).id}
+              create={(item: unknown) => ({
+                kind: "element" as const,
+                tag: "li",
+                attributes: [{ name: "data-key", value: (item as Item).id }],
+                styles: [],
+                children: [[prefix, (item as Item).label]],
+              })}
+              bindings={[
+                {
+                  kind: "text" as const,
+                  path: [],
+                  read: (item: unknown) => [prefix, (item as Item).label],
+                },
+              ]}
+            />
+          </section>
+        );
+      },
+      bindings: [{ kind: "block" as const, id: 0, dependencies: [0] }],
+    });
+
+    const Initial = createCompiledComponent(definition("Before: "));
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<Initial />));
+    const row = container.querySelector("li")!;
+
+    await act(async () => {
+      const Updated = createCompiledComponent(definition("After: "));
+      expect(Updated).toBe(Initial);
+      await flushCompilerUpdates();
+    });
+    expect(container.querySelector("li")).toBe(row);
+    expect(row.textContent).toBe("After: Alpha");
+
+    await act(async () => {
+      container.querySelector("button")!.click();
+      await flushCompilerUpdates();
+    });
+    expect(container.querySelector("li")).toBe(row);
+    expect(row.textContent).toBe("After: Updated");
+  });
+
+  it("routes keyed-row binding failures through the nearest error boundary", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    class Boundary extends React.Component<{ children: React.ReactNode }, { failed: boolean }> {
+      state = { failed: false };
+
+      static getDerivedStateFromError() {
+        return { failed: true };
+      }
+
+      render() {
+        return this.state.failed ? <p>Recovered by boundary</p> : this.props.children;
+      }
+    }
+
+    const Inventory = createCompiledComponent({
+      displayName: "ThrowingKeyedRows",
+      initialize: () => [[{ id: "a", label: "Safe", selected: false }]],
+      render(_props: Record<string, never>, state, blocks) {
+        const items = () => state[0].get() as Item[];
+        const KeyedRows = blocks.KeyedRows;
+        return (
+          <section>
+            <button onClick={() => state[0].set([{ id: "a", label: "Broken", selected: true }])}>
+              Break binding
+            </button>
+            <KeyedRows
+              id={0}
+              render={() => (
+                <ul>
+                  {items().map((item) => (
+                    <li key={item.id}>{item.label}</li>
+                  ))}
+                </ul>
+              )}
+              items={items}
+              rowKey={(item) => (item as Item).id}
+              create={(item) => rowDescriptor(item as Item)}
+              bindings={[
+                {
+                  kind: "text",
+                  path: [],
+                  read: (item) => {
+                    if ((item as Item).selected) throw new Error("keyed row binding failed");
+                    return [(item as Item).label];
+                  },
+                },
+              ]}
+            />
+          </section>
+        );
+      },
+      bindings: [{ kind: "block", id: 0, dependencies: [0] }],
+    });
+
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () =>
+      root.render(
+        <Boundary>
+          <Inventory />
+        </Boundary>,
+      ),
+    );
+
+    await act(async () => {
+      container.querySelector("button")!.click();
+      await flushCompilerUpdates();
+    });
+    expect(container.textContent).toBe("Recovered by boundary");
   });
 
   it("matches React across 1,000 deterministic keyed operations", async () => {
