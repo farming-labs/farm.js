@@ -172,8 +172,8 @@ export function AutomaticKeyedListExperiment() {
       <header>
         <span className="experiment-number">04A</span>
         <div>
-          <h3>Automatic keyed boundary</h3>
-          <p>The build recognizes a direct keyed map and isolates the list.</p>
+          <h3>Compiled keyed rows</h3>
+          <p>AOT row instances patch and reorder host rows without rerunning the list.</p>
         </div>
       </header>
       <dl className="compact-metrics" aria-live="polite">
@@ -308,8 +308,8 @@ export function CompilerEdgeLab() {
         <span>HOOKS + KEYS</span>
         <p>
           Never call a Hook directly inside <code>items.map(...)</code>. Put the
-          Hook in a separate keyed row component. Automatic maps and the explicit
-          <code>List</code> boundary keep row identity and lifecycle under React.
+          Hook in a separate keyed row component. A host-only map can use compiled
+          rows; a component row keeps identity, Hooks, and lifecycle under React.
         </p>
       </aside>
     </section>

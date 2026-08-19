@@ -381,6 +381,21 @@ try {
     page,
     `${automaticList} [data-metric="executions"]`,
   );
+  await page.evaluate(() => {
+    const list = document.querySelector('[data-experiment="keyed-automatic"] [data-list="keyed"]');
+    window.__farmAutomaticAlpha = document.querySelector(
+      '[data-experiment="keyed-automatic"] [data-key="a"]',
+    );
+    window.__farmAutomaticBeta = document.querySelector(
+      '[data-experiment="keyed-automatic"] [data-key="b"]',
+    );
+    window.__farmAutomaticMoves = 0;
+    const insertBefore = list.insertBefore.bind(list);
+    list.insertBefore = (node, anchor) => {
+      if (node.parentNode === list) window.__farmAutomaticMoves += 1;
+      return insertBefore(node, anchor);
+    };
+  });
   await page.locator(`${automaticList} [data-action="add-item"]`).click();
   await page.locator(`${automaticList} [data-action="add-item"]`).click();
   await assertText(page, `${automaticList} [data-metric="items"]`, "4");
@@ -397,6 +412,22 @@ try {
     "Beta",
     "Alpha",
   ]);
+  assert.equal(
+    await page.evaluate(
+      () =>
+        window.__farmAutomaticAlpha ===
+          document.querySelector('[data-experiment="keyed-automatic"] [data-key="a"]') &&
+        window.__farmAutomaticBeta ===
+          document.querySelector('[data-experiment="keyed-automatic"] [data-key="b"]'),
+    ),
+    true,
+    "compiled keyed rows did not preserve surviving DOM identities",
+  );
+  assert.equal(
+    await page.evaluate(() => window.__farmAutomaticMoves),
+    3,
+    "reversing four keyed rows should move only the three rows outside the LIS",
+  );
 
   const explicitList = '[data-experiment="keyed-explicit"]';
   const explicitListInitialExecutions = await readNumber(
@@ -635,7 +666,9 @@ try {
             first: "Item 4",
             updateExecutions:
               automaticListFinalExecutions - automaticListInitialExecutions,
-            owner: "React boundary",
+            keyedDomIdentityPreserved: true,
+            lisMoves: 3,
+            owner: "Farm keyed rows",
           },
           explicitKeyedList: {
             order: ["Beta", "Alpha"],

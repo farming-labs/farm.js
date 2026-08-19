@@ -32,7 +32,9 @@ describe("React AOT keyed list compiler", () => {
 
     expect(result.compiled).toEqual(["Inventory"]);
     expect(result.diagnostics).toEqual([]);
-    expect(result.code).toContain("farmBlocks.KeyedList");
+    expect(result.code).toContain("farmBlocks.KeyedRows");
+    expect(result.code).toContain("rowKey={item => item.id}");
+    expect(result.code).toContain('kind: "element"');
     expect(result.code).toContain('kind: "block"');
     expect(result.code).toContain("dependencies: [0]");
     await expect(
@@ -41,7 +43,7 @@ describe("React AOT keyed list compiler", () => {
         jsx: "automatic",
       }),
     ).resolves.toMatchObject({
-      code: expect.stringContaining("farmBlocks.KeyedList"),
+      code: expect.stringContaining("farmBlocks.KeyedRows"),
     });
   });
 
@@ -128,6 +130,69 @@ describe("React AOT keyed list compiler", () => {
     expect(result.code).toContain("id={0}");
   });
 
+  it("compiles host-only public List rows while preserving the ordinary List fallback", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      import { List } from "@farm.js/react/list";
+      export function ExplicitRows() {
+        const [items, setItems] = useState([{ id: "a", label: "Alpha", active: false }]);
+        return (
+          <section>
+            <button onClick={() => setItems([...items].reverse())}>Reverse</button>
+            <ul>
+              <List each={items} by={(item) => item.id}>
+                {(item) => (
+                  <li className={item.active ? "active" : "idle"}>
+                    <span>{item.label}</span>
+                  </li>
+                )}
+              </List>
+            </ul>
+          </section>
+        );
+      }
+    `);
+
+    expect(result.compiled).toEqual(["ExplicitRows"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.code).toContain("farmBlocks.KeyedRows");
+    expect(result.code).toContain("rowKey={item => item.id}");
+    expect(result.code).toContain('name: "className"');
+    expect(result.code).toContain("path: [0]");
+  });
+
+  it.each([
+    {
+      name: "row events",
+      row: "<li key={item.id} onClick={() => setItems([])}>{item.label}</li>",
+    },
+    {
+      name: "custom row components",
+      row: "<InventoryRow key={item.id} item={item} />",
+    },
+    {
+      name: "row fragments",
+      row: "<li key={item.id}><>{item.label}</></li>",
+    },
+  ])("keeps $name in the React-owned list boundary", async ({ row }) => {
+    const result = await compile(`
+      import { useState } from "react";
+      import { InventoryRow } from "./inventory-row";
+      export function ReactOwnedRows() {
+        const [items, setItems] = useState([{ id: "a", label: "Alpha" }]);
+        return (
+          <section>
+            <ul>{items.map((item) => ${row})}</ul>
+          </section>
+        );
+      }
+    `);
+
+    expect(result.compiled).toEqual(["ReactOwnedRows"]);
+    expect(result.code).toContain("farmBlocks.KeyedList");
+    expect(result.code).not.toContain("farmBlocks.KeyedRows");
+  });
+
   it("falls back for an index-based explicit List key", async () => {
     const result = await compile(`
       import { useState } from "react";
@@ -183,7 +248,7 @@ describe("React AOT keyed list compiler", () => {
     expect(result.compiled).toEqual(["MixedBoundaries"]);
     expect(result.diagnostics).toEqual([]);
     expect(result.code).toContain("farmBlocks.Conditional");
-    expect(result.code).toContain("farmBlocks.KeyedList");
+    expect(result.code).toContain("farmBlocks.KeyedRows");
     expect(result.code).toContain("id={0}");
     expect(result.code).toContain("id={1}");
   });

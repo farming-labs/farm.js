@@ -69,11 +69,13 @@ The current compiler handles components that it can prove have:
 - React-managed event handlers; and
 - no refs, effects, or unsupported dynamic child structures.
 
-The generated component preserves React ownership of placement, props, events, SSR, and hydration.
-Local state cells batch updates into a microtask and patch only compiler-known DOM targets. For an
-eligible conditional, the runtime refreshes one small internal React boundary instead of executing
-the user component again. React mounts, replaces, or removes the selected branch, so events,
-unmounting, SSR, hydration, and error boundaries keep React semantics.
+The generated component preserves React ownership of initial placement, props, events, SSR, and
+hydration. Local state cells batch updates into a microtask and patch only compiler-known DOM
+targets. For an eligible conditional, the runtime refreshes one small internal React boundary
+instead of executing the user component again. React mounts, replaces, or removes the selected
+branch, so events, unmounting, SSR, hydration, and error boundaries keep React semantics. The one
+intentional post-mount ownership exception is a proven host-only keyed-row container, described
+below.
 
 For a common keyed map, no new API is required:
 
@@ -85,11 +87,17 @@ For a common keyed map, no new API is required:
 </ul>
 ```
 
-The compiler can isolate this direct map when the key comes from the item rather than the array
-index and the callback is otherwise safe. The map may sit beside static children, other lists, and
-eligible conditionals. A list update then refreshes only an internal React boundary instead of
-executing the outer user component. React still reconciles the keyed rows and owns their DOM,
-events, lifecycle, and state.
+When this map is the only meaningful child of a dedicated host container and its rows are host-only,
+the compiler prepares a row descriptor, a key reader, and exact text/attribute/style bindings at
+build time. After React performs the initial render or hydration, Farm adopts those row elements.
+Later list updates patch surviving rows by key, create or remove only the changed rows, and use a
+longest increasing subsequence (LIS) to minimize DOM moves during a reorder. The outer user
+component and the list callback do not rerun for those compiler-cell updates.
+
+React remains the fallback and compatibility boundary. A map beside static children, a row with
+events, a fragment, a ref, or a custom component, and other unsupported shapes use the existing
+React-owned keyed boundary. The outer compiled component can still be skipped, but React reconciles
+that list's rows and owns their events, lifecycle, and state.
 
 For custom rows or an explicit key selector, use the public component:
 
@@ -104,10 +112,13 @@ import { List } from "@farm.js/react/list";
 ```
 
 `List` also works with the compiler disabled. `each` accepts an iterable, `null`, or `undefined`;
-`by` supplies the React key; and the child function returns one React element. Put Hooks inside the
-row component, not directly inside the iteration callback. With the compiler enabled, the
-optimized explicit shape requires inline `by` and child functions, a safe `each` expression, an
-item-derived key, and a statically known location. Other shapes keep normal React behavior.
+`by` supplies the React key; and the child function returns one React element. An inline host-only
+row inside a dedicated container can use compiler-owned keyed rows. A custom row such as
+`StatefulRow` remains a React-owned keyed boundary, which is necessary for its Hooks, events,
+lifecycle, and Fiber state. Put Hooks inside the row component, not directly inside the iteration
+callback. The optimized explicit shape also requires inline `by` and child functions, a safe
+`each` expression, an item-derived key, and a statically known location. Other shapes keep normal
+React behavior.
 
 A normal child component can become an automatic React-owned island:
 
@@ -138,9 +149,9 @@ All supported boundary types share one component-wide block graph and one ID seq
 binding records its nearest conditional parent. If one state flush affects both an outer
 conditional and its descendants, the runtime refreshes the mounted outer boundary once and skips
 the redundant descendant refreshes. React unmounts inner boundaries normally, their subscriptions
-are removed, and a later remount reads the latest compiler-cell values. List callback contents are
-not recursively compiled because one source location can create several keyed row instances;
-React owns each complete row subtree instead.
+are removed, and a later remount reads the latest compiler-cell values. Host-only keyed rows have
+separate runtime instances per key. Unsupported row subtrees stay complete React-owned keyed
+boundaries instead of receiving ambiguous shared block IDs.
 
 Unsupported components fall back to React by default. Use `onUnsupported: "warn"` for diagnostics
 or `onUnsupported: "error"` while tightening an annotated migration.
@@ -166,6 +177,7 @@ assertion; it is not presented as a cross-machine timing benchmark.
 
 Application and prototype calls, dynamic style objects, handlers outside JSX events, nested,
 computed, and rest props patterns, async handlers, unkeyed or index-keyed lists, chained maps,
-unsupported conditional roots, effects, and more advanced hook support
-intentionally stay on React in this release. Farm does not perform compiler-owned LIS row moves;
-eligible keyed boundaries deliberately keep reconciliation under React.
+unsupported conditional roots, effects, and more advanced hook support intentionally stay on React
+in this release. Compiler-owned keyed rows are limited to a dedicated container with one host-only
+map or `List`. Row events, custom components, fragments, refs, SVG, mixed static siblings, and
+duplicate runtime keys keep or switch to React ownership.
