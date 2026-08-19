@@ -11,7 +11,7 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@farm.js/core": "0.1.0-beta.43",
+    "@farm.js/core": "0.1.0-beta.44",
     "@farm.js/react": "0.1.0-beta.0",
     "@fontsource-variable/geist": "5.3.0",
     "@fontsource-variable/geist-mono": "5.3.0",
@@ -19,7 +19,7 @@
     "react-dom": "19.2.8"
   },
   "devDependencies": {
-    "@farm.js/cli": "0.1.0-beta.43",
+    "@farm.js/cli": "0.1.0-beta.44",
     "@playwright/test": "^1.52.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
