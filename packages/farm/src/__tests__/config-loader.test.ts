@@ -3,6 +3,7 @@
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { createFarmConfigResolutionPlugin, loadFarmConfigFile } from "../layers";
 
@@ -159,7 +160,10 @@ describe("Farm config resolution plugin", () => {
     }
   });
 
-  it("still externalizes bare package specifiers", async () => {
+  it("externalizes bare package specifiers as file:// URLs", async () => {
+    // Raw absolute paths are written verbatim into the compiled config's
+    // import statements; on Windows, Node's ESM loader parses `E:\...` as a
+    // URL with protocol "e:" and rejects it, so externals must be file:// URLs.
     await expect(
       resolveWithPlugin({
         path: "picocolors",
@@ -168,7 +172,38 @@ describe("Farm config resolution plugin", () => {
         resolveDir: "/project",
         kind: "import-statement",
       }),
-    ).resolves.toMatchObject({ external: true, path: "/resolved/picocolors" });
+    ).resolves.toMatchObject({
+      external: true,
+      path: pathToFileURL(path.resolve("/resolved/picocolors")).href,
+    });
+  });
+
+  it("keeps unresolvable bare specifiers external without rewriting them", async () => {
+    const callbacks: Array<{ filter: RegExp; callback: OnResolveCallback }> = [];
+    const pluginBuild = {
+      onResolve(options: { filter: RegExp }, callback: OnResolveCallback) {
+        callbacks.push({ filter: options.filter, callback });
+      },
+      async resolve(specifier: string) {
+        return { path: "", errors: [{ text: `cannot resolve ${specifier}` }], warnings: [] };
+      },
+    };
+
+    const plugin = createFarmConfigResolutionPlugin({
+      transform: async () => ({ code: "", map: "", warnings: [] }),
+    });
+    plugin.setup(pluginBuild as never);
+
+    const bareCallback = callbacks.find(({ filter }) => filter.test("some-missing-package"));
+    await expect(
+      bareCallback?.callback({
+        path: "some-missing-package",
+        importer: "/project/farm.config.ts",
+        namespace: "file",
+        resolveDir: "/project",
+        kind: "import-statement",
+      }),
+    ).resolves.toMatchObject({ external: true, path: "some-missing-package" });
   });
 });
 

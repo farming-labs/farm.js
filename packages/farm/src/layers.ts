@@ -222,6 +222,14 @@ export function getFarmLayerAliases(
 // `:` or starts with `\`.
 const WINDOWS_ABSOLUTE_PATH_RE = /^(?:[A-Za-z]:[\\/]|\\\\)/;
 
+// External paths are written verbatim into the bundled config's import
+// statements. Node's ESM loader accepts `/abs/path` specifiers on POSIX, but a
+// raw Windows path like `E:\...` is parsed as a URL with protocol `e:` and
+// rejected, so absolute paths must be emitted as file:// URLs.
+function toExternalSpecifier(resolvedPath: string): string {
+  return path.isAbsolute(resolvedPath) ? pathToFileURL(resolvedPath).href : resolvedPath;
+}
+
 export function createFarmConfigResolutionPlugin(options: {
   transform: EsbuildTransform;
 }): import("esbuild").Plugin {
@@ -256,7 +264,7 @@ export function createFarmConfigResolutionPlugin(options: {
         if (resolved.errors.length > 0 || !resolved.path) return;
 
         return {
-          path: resolved.path,
+          path: toExternalSpecifier(resolved.path),
           external: true,
           warnings: resolved.warnings,
         };
@@ -288,7 +296,7 @@ export function createFarmConfigResolutionPlugin(options: {
         }
 
         return {
-          path: resolved.path,
+          path: toExternalSpecifier(resolved.path),
           external: true,
           warnings: resolved.warnings,
         };
