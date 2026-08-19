@@ -157,6 +157,15 @@ export function toRootRelativeUrlPath(
   return undefined;
 }
 
+/**
+ * Normalize a filesystem path to forward slashes. Node's fs accepts these on
+ * every platform, and module ids handed to bundlers (e.g. Nitro handler and
+ * task entries) must not contain backslashes.
+ */
+export function toPosixPath(filePath: string): string {
+  return filePath.replace(/\\/g, "/");
+}
+
 export function toViteModuleId(filePath: string, root: string): string {
   if (!path.isAbsolute(filePath)) return filePath;
 

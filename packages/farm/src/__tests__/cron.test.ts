@@ -129,6 +129,12 @@ describe("Farm cron", () => {
       "0 * * * *": "farm:cron:syncPlans",
     });
 
+    for (const task of Object.values(prepared.tasks)) {
+      // Nitro receives these as module ids; backslash Windows paths break
+      // resolution in the generated build (#395).
+      expect(task.handler).not.toContain("\\");
+    }
+
     const wrapper = await fs.readFile(prepared.tasks["farm:cron:dailyCleanup"].handler, "utf8");
     expect(wrapper).toContain('import { defineTask, useNitroApp } from "nitro/runtime"');
     expect(wrapper).toContain('const path = "/api/maintenance/cleanup"');

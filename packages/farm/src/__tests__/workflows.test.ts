@@ -227,6 +227,11 @@ describe("Farm workflows", () => {
       workflows: { secret: "test-secret" },
       server: { bodySizeLimit: 1234 },
     });
+    expect(prepared.handlerPath).not.toContain("\\");
+    for (const task of Object.values(prepared.tasks)) {
+      expect(task.handler).not.toContain("\\");
+    }
+
     const handlerSource = await fs.readFile(prepared.handlerPath!, "utf8");
 
     expect(handlerSource).toContain("const bodySizeLimit = 1234");

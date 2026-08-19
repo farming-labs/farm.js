@@ -1,3 +1,5 @@
+import { toPosixPath } from "./utils";
+
 export type FarmCronSchedule = string | string[];
 
 export interface FarmCronJobConfig {
@@ -121,7 +123,7 @@ export async function prepareFarmCronForNitro(config: {
   const tasks: PreparedFarmCron["tasks"] = {};
   for (const job of cron.jobs) {
     const taskName = getFarmCronTaskName(job.name);
-    const wrapperPath = path.join(generatedDir, `${safeFileName(job.name)}.mjs`);
+    const wrapperPath = toPosixPath(path.join(generatedDir, `${safeFileName(job.name)}.mjs`));
     await fs.writeFile(wrapperPath, createNitroCronTaskWrapper(job, cron.secretEnv), "utf8");
     tasks[taskName] = {
       handler: wrapperPath,

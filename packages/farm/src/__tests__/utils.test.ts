@@ -4,6 +4,7 @@ import {
   parseRoutePath,
   matchRoute,
   segmentsToPattern,
+  toPosixPath,
   toRootRelativeUrlPath,
   toViteModuleId,
 } from "../utils";
@@ -30,6 +31,17 @@ describe("toViteModuleId", () => {
       "/@fs/workspace/layer/routes.ts",
     );
     expect(toViteModuleId("virtual:farm-routes", root)).toBe("virtual:farm-routes");
+  });
+});
+
+describe("toPosixPath", () => {
+  it("normalizes Windows separators and leaves POSIX paths alone", () => {
+    expect(toPosixPath("E:\\farming\\app\\.farm\\.nitro\\farm-workflows\\http-handler.mjs")).toBe(
+      "E:/farming/app/.farm/.nitro/farm-workflows/http-handler.mjs",
+    );
+    expect(toPosixPath("/workspace/app/.farm/.nitro/nitro-entry.mjs")).toBe(
+      "/workspace/app/.farm/.nitro/nitro-entry.mjs",
+    );
   });
 });
 

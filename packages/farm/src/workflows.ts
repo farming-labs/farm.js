@@ -5,6 +5,7 @@ import {
   type FarmServerConfig,
   type ResolvedFarmServerConfig,
 } from "./server-http";
+import { toPosixPath } from "./utils";
 
 export type FarmWorkflowSchedule = string | string[];
 
@@ -311,7 +312,7 @@ export async function prepareFarmWorkflowsForNitro(config: {
   const scheduledTasks = createScheduledTasks(workflows);
 
   for (const workflow of workflows) {
-    const wrapperPath = path.join(generatedDir, `${safeFileName(workflow.id)}.mjs`);
+    const wrapperPath = toPosixPath(path.join(generatedDir, `${safeFileName(workflow.id)}.mjs`));
     await fs.writeFile(wrapperPath, createNitroTaskWrapper(workflow), "utf8");
     tasks[workflow.id] = {
       handler: wrapperPath,
@@ -319,7 +320,7 @@ export async function prepareFarmWorkflowsForNitro(config: {
     };
   }
 
-  const handlerPath = path.join(generatedDir, "http-handler.mjs");
+  const handlerPath = toPosixPath(path.join(generatedDir, "http-handler.mjs"));
   await fs.writeFile(
     handlerPath,
     createNitroWorkflowHTTPHandler(

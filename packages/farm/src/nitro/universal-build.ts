@@ -22,7 +22,7 @@ import { constants as fsConstants, existsSync, readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { builtinModules, createRequire } from "module";
 import { isDeepStrictEqual } from "node:util";
-import { logger } from "../utils";
+import { logger, toPosixPath } from "../utils";
 import { getClientModuleMetadata } from "../utils/client-component";
 import { isFarmMarkdownPageFile } from "../app-markdown";
 import type { ProgrammaticRedirectRoute } from "../routes";
@@ -7124,7 +7124,7 @@ export default async function farmNitroEventHandler(event) {
         : []),
       {
         route: "/**",
-        handler: nitroEntryPath,
+        handler: toPosixPath(nitroEntryPath),
       },
     ],
     routeRules: {
