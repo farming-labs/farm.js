@@ -73,6 +73,26 @@ interface KeyedListPlan {
   syntax: "map" | "list";
 }
 
+interface PendingKeyedRowBinding {
+  kind: "text" | "attribute" | "style";
+  path: number[];
+  name?: string;
+  value: t.Expression;
+}
+
+interface KeyedRowsPlan {
+  kind: "keyed-rows";
+  id: number;
+  parent?: number;
+  dependencies: number[];
+  source: t.JSXElement;
+  collection: t.Expression;
+  keyCallback: t.ArrowFunctionExpression | t.FunctionExpression;
+  renderCallback: t.ArrowFunctionExpression | t.FunctionExpression;
+  row: t.JSXElement;
+  bindings: PendingKeyedRowBinding[];
+}
+
 interface ComponentIslandPlan {
   kind: "component";
   id: number;
@@ -81,7 +101,11 @@ interface ComponentIslandPlan {
   source: t.JSXElement;
 }
 
-type ComposableBlockPlan = ConditionalBlockPlan | KeyedListPlan | ComponentIslandPlan;
+type ComposableBlockPlan =
+  | ConditionalBlockPlan
+  | KeyedListPlan
+  | KeyedRowsPlan
+  | ComponentIslandPlan;
 
 interface Candidate {
   name: string;
@@ -651,6 +675,250 @@ function analyzePublicList(
   return { dependencies: collectStateDependencies(element, statesByValue) };
 }
 
+interface KeyedRowsShape {
+  collection: t.Expression;
+  keyCallback: t.ArrowFunctionExpression | t.FunctionExpression;
+  renderCallback: t.ArrowFunctionExpression | t.FunctionExpression;
+  row: t.JSXElement;
+  dependencies: number[];
+  bindings: PendingKeyedRowBinding[];
+}
+
+function analyzeKeyedRowTree(
+  row: t.JSXElement,
+  renderCallback: t.ArrowFunctionExpression | t.FunctionExpression,
+  safeGlobals: ReadonlySet<string>,
+): { bindings?: PendingKeyedRowBinding[]; reason?: string } {
+  if (
+    renderCallback.async ||
+    renderCallback.generator ||
+    renderCallback.params.length < 1 ||
+    renderCallback.params.length > 2 ||
+    !t.isIdentifier(renderCallback.params[0]) ||
+    (renderCallback.params[1] !== undefined && !t.isIdentifier(renderCallback.params[1]))
+  ) {
+    return { reason: "compiled keyed rows require item and optional index identifiers" };
+  }
+
+  const bindings: PendingKeyedRowBinding[] = [];
+  const visit = (element: t.JSXElement, path: number[]): string | undefined => {
+    const tag = element.openingElement.name;
+    if (!t.isJSXIdentifier(tag) || !/^[a-z]/.test(tag.name)) {
+      return "compiled keyed rows support host elements only";
+    }
+    if (tag.name === "svg") return "compiled keyed rows do not support SVG yet";
+
+    for (const attribute of element.openingElement.attributes) {
+      if (t.isJSXSpreadAttribute(attribute)) {
+        return "compiled keyed rows do not support JSX attribute spreads";
+      }
+      const name = jsxAttributeName(attribute);
+      if (!name) return "compiled keyed rows do not support namespaced JSX attributes";
+      if (name === "ref" || name === "dangerouslySetInnerHTML") {
+        return `compiled keyed row ${name} requires React ownership`;
+      }
+      if (/^on[A-Z]/.test(name)) {
+        return "compiled keyed row events require React ownership";
+      }
+      if (name === "key") continue;
+      if (
+        !t.isJSXExpressionContainer(attribute.value) ||
+        t.isJSXEmptyExpression(attribute.value.expression)
+      ) {
+        continue;
+      }
+
+      const expression = attribute.value.expression;
+      if (name === "style") {
+        if (!t.isObjectExpression(expression)) {
+          return "compiled keyed row styles must use one inline object literal";
+        }
+        for (const property of expression.properties) {
+          if (
+            !t.isObjectProperty(property) ||
+            property.computed ||
+            !t.isExpression(property.value)
+          ) {
+            return "compiled keyed row styles do not support spreads, methods, or computed properties";
+          }
+          const propertyName = t.isIdentifier(property.key)
+            ? property.key.name
+            : t.isStringLiteral(property.key)
+              ? property.key.value
+              : undefined;
+          if (!propertyName || (propertyName.includes("-") && !propertyName.startsWith("--"))) {
+            return "compiled keyed row style names must use camelCase or a CSS custom property";
+          }
+          const unsupported = validateDerivedExpression(property.value, safeGlobals);
+          if (unsupported) {
+            return `compiled keyed row style ${propertyName} cannot use ${unsupported}`;
+          }
+          bindings.push({
+            kind: "style",
+            path: [...path],
+            name: propertyName,
+            value: cloneExpression(property.value),
+          });
+        }
+        continue;
+      }
+
+      if (name === "children") return "compiled keyed row children props are not supported yet";
+      const unsupported = validateDerivedExpression(expression, safeGlobals);
+      if (unsupported) return `compiled keyed row ${name} cannot use ${unsupported}`;
+      bindings.push({
+        kind: "attribute",
+        path: [...path],
+        name,
+        value: cloneExpression(expression),
+      });
+    }
+
+    const nestedElements = element.children.filter((child): child is t.JSXElement =>
+      t.isJSXElement(child),
+    );
+    if (element.children.some((child) => t.isJSXFragment(child))) {
+      return "compiled keyed rows do not support fragments yet";
+    }
+    const expressions = element.children.filter(
+      (child): child is t.JSXExpressionContainer =>
+        t.isJSXExpressionContainer(child) && !t.isJSXEmptyExpression(child.expression),
+    );
+    for (const child of expressions) {
+      const unsupported = validateDerivedExpression(child.expression as t.Expression, safeGlobals);
+      if (unsupported) return `compiled keyed row text cannot use ${unsupported}`;
+    }
+    if (nestedElements.length > 0 && expressions.length > 0) {
+      return "compiled keyed rows do not support dynamic text beside nested elements yet";
+    }
+    if (nestedElements.length === 0 && expressions.length > 0) {
+      const parts: t.Expression[] = [];
+      for (const child of element.children) {
+        if (t.isJSXText(child)) {
+          const text = cleanJsxText(child.value);
+          if (text) parts.push(t.stringLiteral(text));
+        } else if (t.isJSXExpressionContainer(child) && !t.isJSXEmptyExpression(child.expression)) {
+          parts.push(cloneExpression(child.expression));
+        }
+      }
+      bindings.push({ kind: "text", path: [...path], value: t.arrayExpression(parts) });
+    }
+
+    let elementIndex = 0;
+    for (const child of element.children) {
+      if (!t.isJSXElement(child)) continue;
+      const reason = visit(child, [...path, elementIndex]);
+      if (reason) return reason;
+      elementIndex += 1;
+    }
+    return undefined;
+  };
+
+  const reason = visit(row, []);
+  return reason ? { reason } : { bindings };
+}
+
+function analyzeKeyedRowsContainer(
+  container: t.JSXElement,
+  statesByValue: ReadonlyMap<string, StateBinding>,
+  safeGlobals: ReadonlySet<string>,
+  listNames: ReadonlySet<string>,
+): KeyedRowsShape | undefined {
+  if (
+    container.openingElement.attributes.some(
+      (attribute) =>
+        t.isJSXSpreadAttribute(attribute) ||
+        (t.isJSXAttribute(attribute) &&
+          t.isJSXIdentifier(attribute.name) &&
+          (attribute.name.name === "ref" || attribute.name.name === "dangerouslySetInnerHTML")),
+    )
+  ) {
+    return undefined;
+  }
+  for (const attribute of container.openingElement.attributes) {
+    if (
+      t.isJSXAttribute(attribute) &&
+      t.isJSXIdentifier(attribute.name) &&
+      t.isJSXExpressionContainer(attribute.value) &&
+      !t.isJSXEmptyExpression(attribute.value.expression) &&
+      !/^on[A-Z]/.test(attribute.name.name) &&
+      collectStateDependencies(attribute.value.expression, statesByValue).length > 0
+    ) {
+      return undefined;
+    }
+  }
+
+  const children = meaningfulJsxChildren(container);
+  if (children.length !== 1) return undefined;
+
+  let collection: t.Expression;
+  let keyCallback: t.ArrowFunctionExpression | t.FunctionExpression;
+  let renderCallback: t.ArrowFunctionExpression | t.FunctionExpression;
+  let row: t.JSXElement;
+  let dependencies: number[];
+
+  const child = children[0];
+  if (
+    t.isJSXExpressionContainer(child) &&
+    !t.isJSXEmptyExpression(child.expression) &&
+    isMapCall(child.expression)
+  ) {
+    const result = analyzeMapList(child.expression, statesByValue, safeGlobals);
+    if (result.reason) return undefined;
+    const callback = child.expression.arguments[0];
+    if (!t.isArrowFunctionExpression(callback) && !t.isFunctionExpression(callback))
+      return undefined;
+    const returned = returnedExpression(callback);
+    if (!returned || !t.isJSXElement(returned)) return undefined;
+    const key = jsxKeyExpression(returned);
+    if (!key) return undefined;
+    collection = (child.expression.callee as t.MemberExpression).object as t.Expression;
+    keyCallback = t.arrowFunctionExpression(
+      callback.params.map((parameter) => t.cloneNode(parameter, true)) as t.Identifier[],
+      cloneExpression(key),
+    );
+    renderCallback = callback;
+    row = returned;
+    dependencies = result.dependencies || [];
+  } else if (t.isJSXElement(child) && isPublicListElement(child, listNames)) {
+    const result = analyzePublicList(child, statesByValue, safeGlobals);
+    if (result.reason) return undefined;
+    const each = listAttributeExpression(child, "each");
+    const by = listAttributeExpression(child, "by");
+    const renderChild = meaningfulJsxChildren(child)[0];
+    if (
+      !each ||
+      (!t.isArrowFunctionExpression(by) && !t.isFunctionExpression(by)) ||
+      !t.isJSXExpressionContainer(renderChild) ||
+      t.isJSXEmptyExpression(renderChild.expression) ||
+      (!t.isArrowFunctionExpression(renderChild.expression) &&
+        !t.isFunctionExpression(renderChild.expression))
+    ) {
+      return undefined;
+    }
+    const returned = returnedExpression(renderChild.expression);
+    if (!returned || !t.isJSXElement(returned)) return undefined;
+    collection = each;
+    keyCallback = by;
+    renderCallback = renderChild.expression;
+    row = returned;
+    dependencies = result.dependencies || [];
+  } else {
+    return undefined;
+  }
+
+  const rowAnalysis = analyzeKeyedRowTree(row, renderCallback, safeGlobals);
+  if (rowAnalysis.reason) return undefined;
+  return {
+    collection,
+    keyCallback,
+    renderCallback,
+    row,
+    dependencies,
+    bindings: rowAnalysis.bindings || [],
+  };
+}
+
 function keyedListBoundary(
   blockRuntime: t.Identifier,
   plan: KeyedListPlan,
@@ -668,6 +936,150 @@ function keyedListBoundary(
         t.jsxAttribute(
           t.jsxIdentifier("render"),
           t.jsxExpressionContainer(t.arrowFunctionExpression([], cloneExpression(source))),
+        ),
+      ],
+      true,
+    ),
+    null,
+    [],
+    true,
+  );
+}
+
+function keyedRowElementDescriptor(element: t.JSXElement): t.ObjectExpression {
+  const tag = element.openingElement.name as t.JSXIdentifier;
+  const attributes: t.ObjectExpression[] = [];
+  const styles: t.ObjectExpression[] = [];
+
+  for (const attribute of element.openingElement.attributes) {
+    if (!t.isJSXAttribute(attribute)) continue;
+    const name = jsxAttributeName(attribute);
+    if (!name || name === "key" || /^on[A-Z]/.test(name)) continue;
+    if (name === "style") {
+      if (
+        t.isJSXExpressionContainer(attribute.value) &&
+        t.isObjectExpression(attribute.value.expression)
+      ) {
+        for (const property of attribute.value.expression.properties) {
+          if (!t.isObjectProperty(property) || !t.isExpression(property.value)) continue;
+          const propertyName = t.isIdentifier(property.key)
+            ? property.key.name
+            : (property.key as t.StringLiteral).value;
+          styles.push(
+            t.objectExpression([
+              t.objectProperty(t.identifier("name"), t.stringLiteral(propertyName)),
+              t.objectProperty(t.identifier("value"), cloneExpression(property.value)),
+            ]),
+          );
+        }
+      }
+      continue;
+    }
+
+    const value = attribute.value
+      ? t.isStringLiteral(attribute.value)
+        ? t.stringLiteral(attribute.value.value)
+        : t.isJSXExpressionContainer(attribute.value) &&
+            !t.isJSXEmptyExpression(attribute.value.expression)
+          ? cloneExpression(attribute.value.expression)
+          : t.identifier("undefined")
+      : t.booleanLiteral(true);
+    attributes.push(
+      t.objectExpression([
+        t.objectProperty(t.identifier("name"), t.stringLiteral(name)),
+        t.objectProperty(t.identifier("value"), value),
+      ]),
+    );
+  }
+
+  const children: t.Expression[] = [];
+  for (const child of element.children) {
+    if (t.isJSXText(child)) {
+      const text = cleanJsxText(child.value);
+      if (text) children.push(t.stringLiteral(text));
+    } else if (t.isJSXElement(child)) {
+      children.push(keyedRowElementDescriptor(child));
+    } else if (t.isJSXExpressionContainer(child) && !t.isJSXEmptyExpression(child.expression)) {
+      children.push(cloneExpression(child.expression));
+    }
+  }
+
+  return t.objectExpression([
+    t.objectProperty(t.identifier("kind"), t.stringLiteral("element")),
+    t.objectProperty(t.identifier("tag"), t.stringLiteral(tag.name)),
+    t.objectProperty(t.identifier("attributes"), t.arrayExpression(attributes)),
+    t.objectProperty(t.identifier("styles"), t.arrayExpression(styles)),
+    t.objectProperty(t.identifier("children"), t.arrayExpression(children)),
+  ]);
+}
+
+function keyedRowBindingObject(
+  binding: PendingKeyedRowBinding,
+  parameters: readonly t.Identifier[],
+): t.ObjectExpression {
+  const properties: t.ObjectProperty[] = [
+    t.objectProperty(t.identifier("kind"), t.stringLiteral(binding.kind)),
+    t.objectProperty(
+      t.identifier("path"),
+      t.arrayExpression(binding.path.map((part) => t.numericLiteral(part))),
+    ),
+  ];
+  if (binding.name) {
+    properties.push(t.objectProperty(t.identifier("name"), t.stringLiteral(binding.name)));
+  }
+  properties.push(
+    t.objectProperty(
+      t.identifier("read"),
+      t.arrowFunctionExpression(
+        parameters.map((parameter) => t.cloneNode(parameter, true)),
+        cloneExpression(binding.value),
+      ),
+    ),
+  );
+  return t.objectExpression(properties);
+}
+
+function keyedRowsBoundary(blockRuntime: t.Identifier, plan: KeyedRowsPlan): t.JSXElement {
+  const name = t.jsxMemberExpression(
+    t.jsxIdentifier(blockRuntime.name),
+    t.jsxIdentifier("KeyedRows"),
+  );
+  const parameters = plan.renderCallback.params.map((parameter) =>
+    t.cloneNode(parameter, true),
+  ) as t.Identifier[];
+  return t.jsxElement(
+    t.jsxOpeningElement(
+      name,
+      [
+        t.jsxAttribute(t.jsxIdentifier("id"), t.jsxExpressionContainer(t.numericLiteral(plan.id))),
+        t.jsxAttribute(
+          t.jsxIdentifier("render"),
+          t.jsxExpressionContainer(t.arrowFunctionExpression([], t.cloneNode(plan.source, true))),
+        ),
+        t.jsxAttribute(
+          t.jsxIdentifier("items"),
+          t.jsxExpressionContainer(t.arrowFunctionExpression([], cloneExpression(plan.collection))),
+        ),
+        t.jsxAttribute(
+          t.jsxIdentifier("rowKey"),
+          t.jsxExpressionContainer(t.cloneNode(plan.keyCallback, true)),
+        ),
+        t.jsxAttribute(
+          t.jsxIdentifier("create"),
+          t.jsxExpressionContainer(
+            t.arrowFunctionExpression(
+              parameters.map((parameter) => t.cloneNode(parameter, true)),
+              keyedRowElementDescriptor(plan.row),
+            ),
+          ),
+        ),
+        t.jsxAttribute(
+          t.jsxIdentifier("bindings"),
+          t.jsxExpressionContainer(
+            t.arrayExpression(
+              plan.bindings.map((binding) => keyedRowBindingObject(binding, parameters)),
+            ),
+          ),
         ),
       ],
       true,
@@ -895,6 +1307,23 @@ function analyzeComposableBlocks(
 
       if (t.isJSXElement(child)) {
         if (isHostElement(child)) {
+          const keyedRows = analyzeKeyedRowsContainer(child, statesByValue, safeGlobals, listNames);
+          if (keyedRows) {
+            plans.push({
+              kind: "keyed-rows",
+              id: nextId++,
+              parent,
+              dependencies: keyedRows.dependencies,
+              source: child,
+              collection: keyedRows.collection,
+              keyCallback: keyedRows.keyCallback,
+              renderCallback: keyedRows.renderCallback,
+              row: keyedRows.row,
+              bindings: keyedRows.bindings,
+            });
+            keyedElements.add(child);
+            continue;
+          }
           const nested = visitHost(child, parent, insideConditional);
           if (nested.reason) return { dependencies, reason: nested.reason };
           mergeDependencies(dependencies, nested.dependencies);
@@ -1051,6 +1480,9 @@ function lowerComposableBlocks(
     element.children = element.children.map((child) => {
       if (t.isJSXElement(child)) {
         const plan = planBySource.get(child);
+        if (plan?.kind === "keyed-rows") {
+          return keyedRowsBoundary(blockRuntime, plan);
+        }
         if (plan?.kind === "component") {
           return componentIslandBoundary(blockRuntime, plan, child);
         }

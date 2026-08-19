@@ -331,12 +331,12 @@ satisfy all of these rules:
 | Body                | Top-level `useState` declarations, optional compiler-safe derived values and synchronous named handlers, then one unconditional JSX return. |
 | State               | `const [value, setValue] = useState(initial)`, including lazy initializers, multiple cells, and queued functional updates.                  |
 | Root                | Exactly one lowercase host JSX element such as `button`, `section`, `input`, or `div`.                                                      |
-| Tree                | A statically known host tree around eligible conditional, keyed-list, and React component-island boundaries.                                |
+| Tree                | A statically known host tree around eligible conditional, keyed-list, compiled keyed-row, and component-island boundaries.                  |
 | Text bindings       | State-driven text in a leaf host element.                                                                                                   |
 | Attribute bindings  | Basic attributes, controlled form properties, and individual properties in one inline `style` object.                                       |
 | Events              | Inline handlers and synchronous `const` or function-declaration handlers, used directly or called inside an inline JSX handler.             |
 | Conditional blocks  | `condition && <host />` or `condition ? <host /> : <host />`; host branches may contain supported nested blocks.                            |
-| Keyed lists         | A direct keyed `items.map(...)`, or an explicit imported `List`, alongside static siblings or other supported block boundaries.             |
+| Keyed lists         | Direct item-keyed maps and imported `List`; dedicated host-only containers may use compiler-owned rows and LIS.                             |
 | Component islands   | Stable imported or module-level component identifiers with explicit compiler-safe props and no JSX children, spread, `ref`, or `key`.       |
 
 This component is eligible:
@@ -453,7 +453,7 @@ The optimization boundary matters: the surrounding compiled component and its un
 do not rerender, but React still renders and commits the small conditional boundary. A branch with
 substantial work therefore still pays for that branch work.
 
-### Keyed list boundaries
+### Compiled keyed rows and React list boundaries
 
 The compiler automatically recognizes a direct keyed map in a safe, statically known container:
 
@@ -471,10 +471,17 @@ export function Inventory() {
 }
 ```
 
-Farm records the list's state dependencies and replaces the map location with a small internal
-React boundary. Updating `items` refreshes that boundary without executing `Inventory` again.
-React still receives the keyed elements and performs the insert, removal, move, render, lifecycle,
-and commit work inside the list. The optimization isolates that work; it does not remove it.
+This dedicated `ul` has one meaningful child and each row is a host-only tree. Farm can therefore
+prepare the row's host descriptor, key reader, and exact text, attribute, and style bindings at
+build time. React still creates the initial elements during client render or hydration. After the
+component mounts, Farm adopts those elements as keyed row instances.
+
+Updating `items` then does not execute `Inventory` or its map callback. Surviving rows are found by
+key and their prepared bindings are patched directly. Missing keys remove only their row, and new
+keys create only their prepared host tree. During a reorder, Farm calculates the longest increasing
+subsequence (LIS) of the old row positions. Rows in that subsequence stay in place; only the other
+surviving rows move. LIS is a runtime move planner over compiler-prepared rows, not a claim that the
+future contents of an array are known at build time.
 
 Use the public `List` component when the key should be separate from the row renderer, or when rows
 are custom components:
@@ -507,10 +514,20 @@ function InventoryRow({ item }) {
 `List` is an ordinary React component, not compiler-only syntax. It accepts an `Iterable`, `null`,
 or `undefined`; calls `by(item, index)` to create each React key; and requires its child function to
 return one React element. It therefore renders correctly when the experimental compiler is off or
-when this particular use cannot be optimized. Hooks belong inside a row component such as
-`InventoryRow`, never directly inside the `List` child function or a `.map()` callback.
+when this particular use cannot be optimized. The `InventoryRow` example stays in a React-owned
+keyed boundary because a custom component may contain Hooks, events, context, effects, and local
+state. The surrounding compiled component can still avoid executing again. Hooks belong inside a
+row component such as `InventoryRow`, never directly inside the `List` child function or a
+`.map()` callback.
 
-The first automatic contract is deliberately narrow:
+The compiler uses two keyed-list tiers:
+
+1. A dedicated nested host container with one direct map or one `List`, returning a host-only row,
+   becomes compiler-owned keyed row instances. This is the path that patches bindings and uses LIS.
+2. A safe keyed map or `List` that cannot use compiler-owned rows becomes a small React-owned keyed
+   boundary. React reconciles its rows, while the outer user component still avoids rerunning.
+
+The first compiler-owned row contract is deliberately narrow:
 
 - The map must be a direct `collection.map(...)` with one synchronous inline callback returning one
   React element and an explicit item-derived `key`.
@@ -518,15 +535,24 @@ The first automatic contract is deliberately narrow:
   across insertion, removal, or reordering.
 - The optimized `List` shape uses inline `by` and child functions, a compiler-safe `each`
   expression, and an item-derived key.
-- A map or `List` may appear beside static host children, other keyed lists, and eligible
-  conditional boundaries in the same container.
+- The list must be the only meaningful child of its own nested lowercase host container. The
+  component's outermost return element and a container with static siblings use the React-owned
+  boundary for now.
+- The row is a statically known HTML host tree. Dynamic leaf text, attributes, controlled host
+  properties, and individual inline style properties are supported.
+- Row events, custom components, fragments, refs, SVG, attribute spreads, dangerous HTML, and
+  dynamic text mixed beside nested elements stay React-owned.
 - Chained expressions such as `items.filter(...).map(...)`, spread children, hooks in the callback,
   and other unproven shapes fall back to normal React.
 
 Stable keys must be unique among siblings and come from the item's identity, such as a database ID.
-Farm does not implement an LIS move algorithm in this release. A compiler-owned LIS can only be
-safe after the compiler owns an entire host-only list island; this boundary intentionally keeps
-React as the sole DOM and Fiber owner.
+If duplicate keys appear at runtime, Farm remounts that list container through its original React
+render instead of guessing which row owns the identity. Later updates remain on the React fallback
+for that mounted list. Unsupported source shapes also keep React ownership from the beginning.
+
+For example, changing `[A, B, C, D]` to `[D, A, B, C]` keeps `[A, B, C]` as the LIS and moves only
+`D`. Reversing four rows needs three moves because the LIS has length one. Insertions and removals
+still do their necessary DOM work; LIS only minimizes moves among surviving keys.
 
 ### React component islands
 
@@ -579,7 +605,7 @@ The refs produce no `data-*` marker or other extra server markup.
 
 ### Composable block graph
 
-Conditional, keyed-list, and component-island boundaries are analyzed together. The compiler
+Conditional, keyed-list, keyed-row, and component-island boundaries are analyzed together. The compiler
 assigns every boundary a component-wide ID, so IDs remain unique even when several block types
 share a container or are nested inside one conditional branch. Nested bindings also record the ID
 of their nearest outer conditional.
@@ -590,16 +616,18 @@ React then unmounts or replaces the branch normally. Inner boundaries unsubscrib
 unmount, so later updates while the branch is hidden do not target stale components. If the branch
 appears again, each boundary subscribes again and renders from the latest compiler-cell values.
 
-The compiler deliberately does not analyze block-shaped syntax inside a keyed list callback. That
-callback can execute once per row, so a single compile-time block ID would not identify one runtime
-instance. React owns the complete keyed row subtree instead; put Hooks and additional dynamic
-structure inside a keyed row component.
+The compiler deliberately does not assign ordinary component-wide block IDs to syntax inside a
+keyed row callback. A host-only optimized row instead receives a separate runtime instance per key
+and a build-time binding list relative to that row root. If the row needs nested conditionals,
+component islands, Hooks, events, or other dynamic structure, React owns the complete row subtree;
+put Hooks inside a keyed row component.
 
 ### What falls back to React
 
 | Unsupported shape                                                          | Why React keeps ownership                                                          |
 | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Unkeyed/index-keyed/chained maps or element arrays                         | Their structure or item identity is outside the isolated keyed-boundary contract.  |
+| Unkeyed/index-keyed/chained maps or element arrays                         | Their structure or item identity is outside the keyed-list contract.               |
+| Row events, components, fragments, refs, SVG, or mixed container children  | They require React ownership rather than compiler-created host rows.               |
 | Fragments or a custom component used as a conditional branch root          | Their structure is outside the current host-root conditional contract.             |
 | Dynamic/member component types, component spreads, refs, keys, or children | Their identity or ownership is outside the first component-island contract.        |
 | Effects or hooks other than the supported `useState` shape                 | Their lifecycle and ordering must remain under React's hook dispatcher.            |
@@ -614,11 +642,12 @@ structure inside a keyed row component.
 | Async/generator or generic components                                      | These function shapes are outside the current lowering.                            |
 | Setters called outside JSX event handlers                                  | The compiler only controls and batches event-driven local updates.                 |
 
-Keys do not make list reconciliation unnecessary. A key tells React which child identity survives
-an insert, removal, or move; React still compares the dynamic children. The compiler uses that
-identity to decide when a list can have its own refresh boundary, then hands the keyed elements to
-React. Calling a Hook directly inside a list iteration is invalid React because the number or order
-of calls can change. Put the Hook inside a keyed child component instead.
+Keys do not make list work disappear. A key identifies the row that survives an insert, removal,
+or move. On the compiler-owned host path, Farm compares those keys, reuses the matching row
+instances, and applies LIS to minimize moves. On the fallback path, React compares the keyed
+elements and owns reconciliation. Calling a Hook directly inside a list iteration is invalid React
+because the number or order of calls can change. Put the Hook inside a keyed child component
+instead; that custom row intentionally uses the React-owned path.
 
 ### Build-time transformation
 
@@ -654,17 +683,16 @@ do not receive the runtime import.
 The generated runtime wrapper is still a React component. Its responsibilities are split as
 follows:
 
-| React owns                                      | Compiler runtime owns                                                |
-| ----------------------------------------------- | -------------------------------------------------------------------- |
-| Initial element creation and placement          | Local compiler-cell values                                           |
-| SSR markup and hydration                        | Queuing local setter calls into one microtask                        |
-| JSX event registration and dispatch             | Comparing flushed values with `Object.is`                            |
-| Parent-driven prop updates                      | Selecting bindings whose state dependencies changed                  |
-| Unsupported trees, hooks, refs, and lifecycles  | Patching stable ref-owned text/attribute targets after local updates |
-| Host creation/removal inside an eligible block  | Refreshing only the matching internal conditional boundary           |
-| Keyed row identity, reconciliation, and DOM     | Refreshing only the matching internal keyed-list boundary            |
-| Component render, Hooks, context, and lifecycle | Refreshing only a dependent React component-island boundary          |
-| Unmounting and the surrounding component tree   | Reapplying bindings after a parent-driven React update               |
+| React owns                                             | Compiler runtime owns                                                     |
+| ------------------------------------------------------ | ------------------------------------------------------------------------- |
+| Initial element creation, SSR markup, and hydration    | Local compiler-cell values                                                |
+| JSX event registration and dispatch                    | Queuing local setter calls into one microtask                             |
+| Parent-driven prop updates                             | Comparing flushed values and selecting dependent bindings                 |
+| Unsupported trees, hooks, refs, events, and lifecycles | Patching stable ref-owned text, attribute, and style targets              |
+| Host creation/removal inside an eligible conditional   | Refreshing only the matching internal conditional boundary                |
+| React-owned custom or structurally complex keyed rows  | Host-only keyed-row identity, bindings, insertion, removal, and LIS moves |
+| Component render, Hooks, context, and lifecycle        | Refreshing only a dependent React component-island boundary               |
+| Unmounting and the surrounding component tree          | Reapplying bindings after a parent-driven React update                    |
 
 Queued functional setters preserve the event's state snapshot. Two calls such as
 `setCount(value => value + 1)` are applied in order during the same microtask flush, while reads
@@ -687,7 +715,9 @@ microtask. Composition events remain React-owned, so IME input keeps its normal 
 the resulting value, selection, and dependent bindings are patched together.
 
 The server output is ordinary React HTML and contains no compiler marker. React hydrates that
-markup normally; direct binding updates begin after the component mounts.
+markup normally; direct binding updates begin after the component mounts. An eligible keyed-row
+container adopts the already-hydrated child elements by their current order and generated keys, so
+it does not replace valid server rows during hydration.
 
 During development, compiled components receive a module-and-component identity plus a state-layout
 signature. A compatible Fast Refresh replaces the compiled definition while retaining the React
@@ -702,9 +732,11 @@ normal recovery path.
 
 The compiler uses fallback as a semantic boundary, not as an error-recovery trick. Generated
 callback refs keep direct DOM targets stable even when a React component island returns `null`, a
-fragment, or multiple nodes. Conditional, keyed-list, and component boundaries give dynamic
-structure back to React. Unsupported dynamic component types, refs, effects, and other unproven
-shapes keep the complete component on React; fallback is the optimization's correctness mechanism.
+fragment, or multiple nodes. Conditional, React-owned keyed-list, and component boundaries give
+complex dynamic structure back to React. Compiler-owned rows are limited to complete host-only
+containers because manually inserted DOM has no React Fiber for row events, components, or Hooks.
+Unsupported dynamic component types, refs, effects, and other unproven shapes keep React ownership;
+fallback is the optimization's correctness mechanism.
 
 Parent-driven prop updates also remain React updates. After React reconciles the new props, the
 runtime reapplies compiler-owned bindings from the current local cells so prop changes and local
@@ -730,13 +762,17 @@ The package and example test suites verify more than generated code:
   randomized updates;
 - automatic keyed maps and explicit `List` boundaries preserve keyed DOM nodes and stateful row
   identity across inserts, removals, updates, and reorders without rerunning the outer component;
+- compiler-owned host rows patch text, attributes, and styles in place, preserve focus and text
+  selection, use the LIS minimum for measured rotations and reversals, and remount through React
+  when runtime keys are duplicated;
 - component islands update only dependent children, preserve child-local state and context, route
   failures through React error boundaries, hydrate in Strict Mode, and safely drop queued updates
   after unmount;
 - stable ref targets remain correct when an earlier island switches among `null`, one node, and a
   multi-node fragment;
 - 1,000 deterministic object, array, and nullish component-prop transitions match normal React;
-- 1,000 deterministic randomized list operations produce the same ordered output as normal React;
+- 1,000 deterministic randomized compiler-owned list operations produce the same ordered output as
+  normal React while the list owner stays at one execution;
 - the public `List` renders iterable and nullish collections correctly with the compiler off;
 - the packaged runtime is exercised separately with React 18.3 and React 19;
 - boolean `data-*` and `aria-*` attributes keep React-compatible string values; and

@@ -116,7 +116,7 @@ describe("React AOT component island compiler", () => {
 
     expect(result.compiled).toEqual(["Dashboard"]);
     expect(result.code).toContain("farmBlocks.Conditional");
-    expect(result.code).toContain("farmBlocks.KeyedList");
+    expect(result.code).toContain("farmBlocks.KeyedRows");
     expect(result.code).toContain("farmBlocks.Component");
     expect(result.code).toContain("id={0}");
     expect(result.code).toContain("id={1}");

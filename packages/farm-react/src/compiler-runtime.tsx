@@ -67,6 +67,30 @@ export interface CompilerKeyedListBlockProps {
   render(): React.ReactNode;
 }
 
+export interface CompilerKeyedRowElement {
+  kind: "element";
+  tag: string;
+  attributes: readonly { name: string; value: unknown }[];
+  styles: readonly { name: string; value: unknown }[];
+  children: readonly (CompilerKeyedRowElement | unknown)[];
+}
+
+export interface CompilerKeyedRowBinding {
+  kind: "text" | "attribute" | "style";
+  path: readonly number[];
+  name?: string;
+  read(item: unknown, index: number): unknown;
+}
+
+export interface CompilerKeyedRowsBlockProps {
+  id: number;
+  render(): React.ReactElement;
+  items(): Iterable<unknown> | null | undefined;
+  rowKey(item: unknown, index: number): React.Key;
+  create(item: unknown, index: number): CompilerKeyedRowElement;
+  bindings: readonly CompilerKeyedRowBinding[];
+}
+
 export interface CompilerComponentBlockProps {
   id: number;
   render(): React.ReactNode;
@@ -75,6 +99,7 @@ export interface CompilerComponentBlockProps {
 export interface CompilerBlockRuntime {
   Conditional: React.ComponentType<CompilerConditionalBlockProps>;
   KeyedList: React.ComponentType<CompilerKeyedListBlockProps>;
+  KeyedRows: React.ComponentType<CompilerKeyedRowsBlockProps>;
   Component: React.ComponentType<CompilerComponentBlockProps>;
   target(id: number): React.RefCallback<Element>;
 }
@@ -422,6 +447,290 @@ function createKeyedListBlockComponent(
   return FarmKeyedListBlock;
 }
 
+interface CompilerKeyedRowInstance {
+  key: string;
+  element: Element;
+  values: unknown[];
+}
+
+function keyedRowIdentity(key: React.Key): string {
+  return String(key);
+}
+
+function isKeyedRowElement(value: unknown): value is CompilerKeyedRowElement {
+  return (
+    typeof value === "object" && value !== null && (value as { kind?: unknown }).kind === "element"
+  );
+}
+
+function createKeyedRowElement(document: Document, descriptor: CompilerKeyedRowElement): Element {
+  const element = document.createElement(descriptor.tag);
+  for (const attribute of descriptor.attributes) {
+    updateAttribute(element, attribute.name, attribute.value);
+  }
+  for (const style of descriptor.styles) updateStyle(element, style.name, style.value);
+  for (const child of descriptor.children) {
+    if (isKeyedRowElement(child)) {
+      element.append(createKeyedRowElement(document, child));
+      continue;
+    }
+    const text = renderTextValue(child);
+    if (text) element.append(document.createTextNode(text));
+  }
+  return element;
+}
+
+function findKeyedRowTarget(root: Element, path: readonly number[]): Element | null {
+  let current: Element | null = root;
+  for (const index of path) current = current?.children[index] || null;
+  return current;
+}
+
+function normalizedKeyedRowBindingValue(binding: CompilerKeyedRowBinding, value: unknown): unknown {
+  return binding.kind === "text" ? renderTextValue(value) : value;
+}
+
+function readKeyedRowBindingValues(
+  props: CompilerKeyedRowsBlockProps,
+  item: unknown,
+  index: number,
+): unknown[] {
+  return props.bindings.map((binding) =>
+    normalizedKeyedRowBindingValue(binding, binding.read(item, index)),
+  );
+}
+
+function applyKeyedRowBindings(
+  props: CompilerKeyedRowsBlockProps,
+  instance: CompilerKeyedRowInstance,
+  item: unknown,
+  index: number,
+): void {
+  for (let bindingIndex = 0; bindingIndex < props.bindings.length; bindingIndex += 1) {
+    const binding = props.bindings[bindingIndex];
+    const rawValue = binding.read(item, index);
+    const value = normalizedKeyedRowBindingValue(binding, rawValue);
+    if (Object.is(instance.values[bindingIndex], value)) continue;
+    instance.values[bindingIndex] = value;
+    const target = findKeyedRowTarget(instance.element, binding.path);
+    if (!target) continue;
+    if (binding.kind === "text") {
+      target.textContent = value as string;
+    } else if (binding.kind === "style" && binding.name) {
+      updateStyle(target, binding.name, rawValue);
+    } else if (binding.kind === "attribute" && binding.name) {
+      updateAttribute(target, binding.name, rawValue);
+    }
+  }
+}
+
+/** Returns positions forming the LIS while ignoring newly inserted (-1) entries. */
+function longestIncreasingSubsequencePositions(sequence: readonly number[]): Set<number> {
+  const tails: number[] = [];
+  const previous = Array.from({ length: sequence.length }, () => -1);
+
+  for (let index = 0; index < sequence.length; index += 1) {
+    if (sequence[index] < 0) continue;
+    let low = 0;
+    let high = tails.length;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (sequence[tails[middle]] < sequence[index]) low = middle + 1;
+      else high = middle;
+    }
+    if (low > 0) previous[index] = tails[low - 1];
+    tails[low] = index;
+  }
+
+  const positions = new Set<number>();
+  let cursor = tails.at(-1) ?? -1;
+  while (cursor >= 0) {
+    positions.add(cursor);
+    cursor = previous[cursor];
+  }
+  return positions;
+}
+
+function createKeyedRowsBlockComponent(
+  owner: Pick<ConditionalBlockOwner, "subscribe">,
+): React.ComponentType<CompilerKeyedRowsBlockProps> {
+  interface State {
+    fallback: boolean;
+  }
+
+  class FarmKeyedRowsBlock extends React.Component<CompilerKeyedRowsBlockProps, State> {
+    static displayName = "FarmCompiledKeyedRows";
+
+    state: State = { fallback: false };
+    private root: Element | null = null;
+    private mounted = false;
+    private fallbackRequested = false;
+    private fallbackVersion = 0;
+    private propSyncQueued = false;
+    private currentProps = this.props;
+    private unsubscribe: (() => void) | undefined;
+    private instances = new Map<string, CompilerKeyedRowInstance>();
+
+    private captureRoot = (root: Element | null) => {
+      this.root = root;
+    };
+
+    private readRows(
+      props: CompilerKeyedRowsBlockProps,
+    ): { items: unknown[]; keys: string[] } | null {
+      const source = props.items();
+      const items = source ? Array.from(source) : [];
+      const keys = items.map((item, index) => keyedRowIdentity(props.rowKey(item, index)));
+      if (new Set(keys).size !== keys.length) return null;
+      return { items, keys };
+    }
+
+    private adopt(): boolean {
+      if (!this.root) return false;
+      const rows = this.readRows(this.currentProps);
+      const elements = [...this.root.children];
+      if (!rows || rows.items.length !== elements.length) return false;
+      const instances = new Map<string, CompilerKeyedRowInstance>();
+      for (let index = 0; index < rows.items.length; index += 1) {
+        instances.set(rows.keys[index], {
+          key: rows.keys[index],
+          element: elements[index],
+          values: readKeyedRowBindingValues(this.currentProps, rows.items[index], index),
+        });
+      }
+      this.instances = instances;
+      return true;
+    }
+
+    private activateFallback(afterCommit?: () => void): void {
+      if (!this.mounted || this.state.fallback || this.fallbackRequested) {
+        afterCommit?.();
+        return;
+      }
+      this.fallbackRequested = true;
+      this.setState({ fallback: true }, afterCommit);
+    }
+
+    private reconcile(afterCommit?: () => void): void {
+      if (!this.mounted || !this.root) {
+        afterCommit?.();
+        return;
+      }
+      if (this.state.fallback) {
+        this.fallbackVersion += 1;
+        this.forceUpdate(afterCommit);
+        return;
+      }
+
+      const rows = this.readRows(this.currentProps);
+      if (!rows) {
+        this.activateFallback(afterCommit);
+        return;
+      }
+
+      const oldIndices = new Map<string, number>();
+      const activeElement = this.root.ownerDocument.activeElement;
+      const restoreFocus = Boolean(activeElement && this.root.contains(activeElement));
+      [...this.instances].forEach(([key], index) => oldIndices.set(key, index));
+      const nextKeys = new Set(rows.keys);
+      for (const [key, instance] of this.instances) {
+        if (!nextKeys.has(key)) instance.element.remove();
+      }
+
+      const sequence = rows.keys.map((key) => oldIndices.get(key) ?? -1);
+      const stablePositions = longestIncreasingSubsequencePositions(sequence);
+      const nextInstances: CompilerKeyedRowInstance[] = [];
+      for (let index = 0; index < rows.items.length; index += 1) {
+        const key = rows.keys[index];
+        const existing = this.instances.get(key);
+        if (existing) {
+          applyKeyedRowBindings(this.currentProps, existing, rows.items[index], index);
+          nextInstances.push(existing);
+          continue;
+        }
+        const element = createKeyedRowElement(
+          this.root.ownerDocument,
+          this.currentProps.create(rows.items[index], index),
+        );
+        nextInstances.push({
+          key,
+          element,
+          values: readKeyedRowBindingValues(this.currentProps, rows.items[index], index),
+        });
+      }
+
+      let anchor: ChildNode | null = null;
+      for (let index = nextInstances.length - 1; index >= 0; index -= 1) {
+        const instance = nextInstances[index];
+        if (sequence[index] < 0) {
+          this.root.insertBefore(instance.element, anchor);
+        } else if (!stablePositions.has(index) && instance.element.nextSibling !== anchor) {
+          this.root.insertBefore(instance.element, anchor);
+        }
+        anchor = instance.element;
+      }
+      this.instances = new Map(nextInstances.map((instance) => [instance.key, instance]));
+      if (
+        restoreFocus &&
+        activeElement?.isConnected &&
+        activeElement.ownerDocument.activeElement !== activeElement &&
+        "focus" in activeElement
+      ) {
+        (activeElement as HTMLElement).focus({ preventScroll: true });
+      }
+      afterCommit?.();
+    }
+
+    private refresh = (afterCommit?: () => void) => {
+      this.reconcile(afterCommit);
+    };
+
+    private schedulePropSync(): void {
+      if (this.propSyncQueued) return;
+      this.propSyncQueued = true;
+      queueMicrotask(() => {
+        this.propSyncQueued = false;
+        if (this.mounted && !this.state.fallback) this.reconcile();
+      });
+    }
+
+    shouldComponentUpdate(nextProps: CompilerKeyedRowsBlockProps, nextState: State): boolean {
+      this.currentProps = nextProps;
+      if (nextState.fallback || this.state.fallback) return true;
+      this.schedulePropSync();
+      return false;
+    }
+
+    componentDidMount(): void {
+      this.mounted = true;
+      this.unsubscribe = owner.subscribe(this.props.id, this.refresh);
+      if (!this.adopt()) this.activateFallback();
+    }
+
+    componentWillUnmount(): void {
+      this.mounted = false;
+      this.unsubscribe?.();
+      this.root = null;
+      this.instances.clear();
+    }
+
+    render(): React.ReactNode {
+      const container = this.currentProps.render();
+      if (!React.isValidElement(container) || typeof container.type !== "string") {
+        throw new TypeError(
+          `Compiled keyed rows ${this.currentProps.id} must own one host container.`,
+        );
+      }
+      return React.cloneElement(container, {
+        key: this.state.fallback ? `react-${this.fallbackVersion}` : "compiled",
+        ref: this.captureRoot,
+      } as React.Attributes);
+    }
+  }
+
+  return FarmKeyedRowsBlock;
+}
+
 function createComponentBlockComponent(
   owner: Pick<ConditionalBlockOwner, "subscribe">,
 ): React.ComponentType<CompilerComponentBlockProps> {
@@ -463,8 +772,9 @@ function createComponentBlockComponent(
 /**
  * Runtime target emitted by the AOT transform.
  *
- * React owns component placement, SSR, hydration, props, and event semantics.
- * Compiler cells own local state updates and patch only precomputed DOM paths.
+ * React owns initial placement, SSR, hydration, props, and event semantics.
+ * Compiler cells own local updates and precomputed DOM paths. A proven host-only
+ * keyed container may transfer its child-row ownership after mount.
  */
 export function createCompiledComponent<Props>(
   definition: CompiledComponentDefinition<Props>,
@@ -527,6 +837,9 @@ export function createCompiledComponent<Props>(
           subscribe: (id, refresh) => this.subscribeToBlock(id, refresh),
         }),
         KeyedList: createKeyedListBlockComponent({
+          subscribe: (id, refresh) => this.subscribeToBlock(id, refresh),
+        }),
+        KeyedRows: createKeyedRowsBlockComponent({
           subscribe: (id, refresh) => this.subscribeToBlock(id, refresh),
         }),
         Component: createComponentBlockComponent({

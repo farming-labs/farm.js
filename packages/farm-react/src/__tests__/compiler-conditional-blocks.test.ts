@@ -183,7 +183,7 @@ describe("React AOT conditional block compiler", () => {
     expect(result.compiled).toEqual(["NestedBlocks"]);
     expect(result.diagnostics).toEqual([]);
     expect(result.code.match(/farmBlocks\.Conditional/g)).toHaveLength(2);
-    expect(result.code.match(/farmBlocks\.KeyedList/g)).toHaveLength(1);
+    expect(result.code.match(/farmBlocks\.KeyedRows/g)).toHaveLength(1);
     expect(result.code).toContain("id={0}");
     expect(result.code).toContain("id={1}");
     expect(result.code).toContain("id={2}");

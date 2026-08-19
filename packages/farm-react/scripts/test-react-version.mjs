@@ -303,6 +303,73 @@ const testSource = String.raw`
   assert.equal(keyedExecutions, initialKeyedExecutions);
   flushSync(() => keyedRoot.unmount());
 
+  let keyedRowExecutions = 0;
+  const KeyedRows = createCompiledComponent({
+    displayName: "CompatibilityKeyedRows",
+    initialize: () => [["a", "b", "c", "d"]],
+    render(_props, state, blocks) {
+      keyedRowExecutions += 1;
+      const items = () => state[0].get();
+      return React.createElement(
+        "section",
+        null,
+        React.createElement(
+          "button",
+          { onClick: () => state[0].set((value) => [value[3], value[0], value[1], value[2]]) },
+          "Rotate",
+        ),
+        React.createElement(blocks.KeyedRows, {
+          id: 0,
+          render: () =>
+            React.createElement(
+              "ol",
+              null,
+              items().map((item) =>
+                React.createElement("li", { key: item, "data-key": item }, item.toUpperCase()),
+              ),
+            ),
+          items,
+          rowKey: (item) => item,
+          create: (item) => ({
+            kind: "element",
+            tag: "li",
+            attributes: [{ name: "data-key", value: item }],
+            styles: [],
+            children: [item.toUpperCase()],
+          }),
+          bindings: [
+            { kind: "text", path: [], read: (item) => [item.toUpperCase()] },
+          ],
+        }),
+      );
+    },
+    bindings: [{ kind: "block", id: 0, dependencies: [0] }],
+  });
+  const keyedRowsContainer = document.createElement("div");
+  document.body.append(keyedRowsContainer);
+  const keyedRowsRoot = createRoot(keyedRowsContainer);
+  flushSync(() => keyedRowsRoot.render(React.createElement(KeyedRows)));
+  const initialKeyedRowExecutions = keyedRowExecutions;
+  const originalA = keyedRowsContainer.querySelector("[data-key='a']");
+  const keyedRowsList = keyedRowsContainer.querySelector("ol");
+  const originalInsertBefore = keyedRowsList.insertBefore.bind(keyedRowsList);
+  let keyedRowMoves = 0;
+  keyedRowsList.insertBefore = (node, anchor) => {
+    if (node.parentNode === keyedRowsList) keyedRowMoves += 1;
+    return originalInsertBefore(node, anchor);
+  };
+  keyedRowsContainer.querySelector("button").click();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(
+    [...keyedRowsContainer.querySelectorAll("li")].map((row) => row.getAttribute("data-key")),
+    ["d", "a", "b", "c"],
+  );
+  assert.equal(keyedRowsContainer.querySelector("[data-key='a']"), originalA);
+  assert.equal(keyedRowMoves, 1);
+  assert.equal(keyedRowExecutions, initialKeyedRowExecutions);
+  flushSync(() => keyedRowsRoot.unmount());
+
   let islandExecutions = 0;
   let islandChildExecutions = 0;
   function IslandChild({ value }) {

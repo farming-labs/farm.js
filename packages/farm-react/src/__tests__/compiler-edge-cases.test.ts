@@ -52,7 +52,7 @@ describe("React AOT compiler safety boundaries", () => {
 
     expect(result.compiled).toEqual(["KeyedList"]);
     expect(result.diagnostics).toEqual([]);
-    expect(result.code).toContain("farmBlocks.KeyedList");
+    expect(result.code).toContain("farmBlocks.KeyedRows");
     expect(result.code).toContain("compiler-runtime");
   });
 
