@@ -139,6 +139,24 @@ export function resolveAppPath(root: string, ...paths: string[]): string {
   return path.resolve(root, ...paths);
 }
 
+/**
+ * Convert an absolute module path inside the project root to a root-relative
+ * URL path with forward slashes (e.g. `/src/app/page.tsx`), for values the
+ * client passes to dynamic `import()`. On Windows the naive root-prefix slice
+ * yields `\src\app\page.tsx`, which is not a valid module specifier. Returns
+ * undefined for paths outside the root so callers keep their own fallbacks.
+ */
+export function toRootRelativeUrlPath(
+  absolutePath: string,
+  projectRoot: string,
+): string | undefined {
+  if (absolutePath === projectRoot) return "";
+  if (absolutePath.startsWith(`${projectRoot}/`) || absolutePath.startsWith(`${projectRoot}\\`)) {
+    return absolutePath.slice(projectRoot.length).replace(/\\/g, "/");
+  }
+  return undefined;
+}
+
 export function toViteModuleId(filePath: string, root: string): string {
   if (!path.isAbsolute(filePath)) return filePath;
 

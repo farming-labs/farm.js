@@ -11,6 +11,7 @@ import {
   resolveAppPath,
   globFiles,
   logger,
+  toRootRelativeUrlPath,
   toViteModuleId,
 } from "../utils";
 import { collectSSGPages, resolveRouteRenderingConfigFromFile } from "../ssg";
@@ -561,12 +562,8 @@ export class RouteManager {
     }
 
     const toUrlPath = (absolutePath: string) => {
-      if (
-        absolutePath === normalizedProjectRoot ||
-        absolutePath.startsWith(`${normalizedProjectRoot}${path.sep}`)
-      ) {
-        return absolutePath.slice(normalizedProjectRoot.length);
-      }
+      const rootRelative = toRootRelativeUrlPath(absolutePath, normalizedProjectRoot);
+      if (rootRelative !== undefined) return rootRelative;
       if (path.isAbsolute(absolutePath)) {
         const normalized = absolutePath.replace(/\\/g, "/");
         return normalized.startsWith("/") ? `/@fs${normalized}` : `/@fs/${normalized}`;

@@ -1,6 +1,12 @@
 import path from "path";
 import { describe, it, expect } from "vitest";
-import { parseRoutePath, matchRoute, segmentsToPattern, toViteModuleId } from "../utils";
+import {
+  parseRoutePath,
+  matchRoute,
+  segmentsToPattern,
+  toRootRelativeUrlPath,
+  toViteModuleId,
+} from "../utils";
 import { createCliColors } from "../cli-colors";
 
 describe("createCliColors", () => {
@@ -24,6 +30,39 @@ describe("toViteModuleId", () => {
       "/@fs/workspace/layer/routes.ts",
     );
     expect(toViteModuleId("virtual:farm-routes", root)).toBe("virtual:farm-routes");
+  });
+});
+
+describe("toRootRelativeUrlPath", () => {
+  it("slices POSIX project paths to root-relative URL paths", () => {
+    expect(toRootRelativeUrlPath("/workspace/app/src/app/page.tsx", "/workspace/app")).toBe(
+      "/src/app/page.tsx",
+    );
+  });
+
+  it("emits forward slashes for Windows project paths", () => {
+    // The client feeds these values to dynamic import(); `\src\app\page.tsx`
+    // is not a valid module specifier and breaks hydration on Windows.
+    expect(toRootRelativeUrlPath("E:\\farming\\app\\src\\app\\page.tsx", "E:\\farming\\app")).toBe(
+      "/src/app/page.tsx",
+    );
+    expect(
+      toRootRelativeUrlPath("E:\\farming\\app\\src\\app\\layout.tsx", "E:\\farming\\app"),
+    ).toBe("/src/app/layout.tsx");
+  });
+
+  it("returns undefined for paths outside the root", () => {
+    expect(toRootRelativeUrlPath("/other/place/page.tsx", "/workspace/app")).toBeUndefined();
+    expect(toRootRelativeUrlPath("D:\\elsewhere\\page.tsx", "E:\\farming\\app")).toBeUndefined();
+    expect(toRootRelativeUrlPath("virtual:farm-routes", "/workspace/app")).toBeUndefined();
+  });
+
+  it("does not treat sibling directories sharing a prefix as inside the root", () => {
+    expect(toRootRelativeUrlPath("/workspace/app2/src/page.tsx", "/workspace/app")).toBeUndefined();
+  });
+
+  it("returns an empty path for the root itself", () => {
+    expect(toRootRelativeUrlPath("/workspace/app", "/workspace/app")).toBe("");
   });
 });
 

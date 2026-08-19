@@ -10,7 +10,7 @@ import type {
   SSGPage,
 } from "../types";
 import type { MatchedRouteSlot, RouteManager } from "../routing/route-manager";
-import { logger } from "../utils";
+import { logger, toRootRelativeUrlPath } from "../utils";
 import { getClientModuleMetadata } from "../utils/client-component";
 import { Writable } from "stream";
 import {
@@ -1192,9 +1192,7 @@ export class ServerRenderer {
       );
       const clientLayouts = layouts.map((layout, index) => ({
         pattern: layout.pattern,
-        modulePath: layout.modulePath.startsWith(this.config.root)
-          ? layout.modulePath.slice(this.config.root.length)
-          : layout.modulePath,
+        modulePath: toRootRelativeUrlPath(layout.modulePath, this.config.root) ?? layout.modulePath,
         shouldHydrate: layoutHydrationMetadata[index]?.shouldHydrate === true,
         islandStrategy: layoutHydrationMetadata[index]?.islandStrategy ?? null,
       }));
@@ -1936,8 +1934,8 @@ export class ServerRenderer {
         (slot: Record<string, any>) => ({
           ...slot,
           modulePath:
-            typeof slot.modulePath === "string" && slot.modulePath.startsWith(this.config.root)
-              ? slot.modulePath.slice(this.config.root.length)
+            typeof slot.modulePath === "string"
+              ? (toRootRelativeUrlPath(slot.modulePath, this.config.root) ?? slot.modulePath)
               : slot.modulePath,
         }),
       );
@@ -1947,9 +1945,7 @@ export class ServerRenderer {
       });
       const pagePath = (req as any).__FARM_PAGE_PATH__;
       const relativePath = pagePath
-        ? pagePath.startsWith(this.config.root)
-          ? pagePath.slice(this.config.root.length)
-          : pagePath
+        ? (toRootRelativeUrlPath(pagePath, this.config.root) ?? pagePath)
         : "/src/app/page.tsx";
       const deploymentId = this.getDeploymentId();
       const bootstrapScript = `<script>
@@ -2070,9 +2066,7 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
       const pagePath = (req as any).__FARM_PAGE_PATH__;
       const isClientComponent = (req as any).__FARM_IS_CLIENT_COMPONENT__ === true;
       const relativePath = pagePath
-        ? pagePath.startsWith(this.config.root)
-          ? pagePath.slice(this.config.root.length)
-          : pagePath
+        ? (toRootRelativeUrlPath(pagePath, this.config.root) ?? pagePath)
         : "/src/app/page.tsx";
 
       // Generate manifest for client-side SPA navigation (TanStack Start pattern)
@@ -2136,8 +2130,8 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
         (slot: Record<string, any>) => ({
           ...slot,
           modulePath:
-            typeof slot.modulePath === "string" && slot.modulePath.startsWith(this.config.root)
-              ? slot.modulePath.slice(this.config.root.length)
+            typeof slot.modulePath === "string"
+              ? (toRootRelativeUrlPath(slot.modulePath, this.config.root) ?? slot.modulePath)
               : slot.modulePath,
         }),
       );

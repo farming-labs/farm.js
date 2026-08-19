@@ -12,6 +12,7 @@ import type {
   RouterManagedTag,
 } from "./types";
 import { getClientModuleMetadata } from "../utils/client-component";
+import { toRootRelativeUrlPath } from "../utils";
 import { createFarmRouteRenderPlan } from "../navigation/render-plan";
 
 function layoutAppliesToRoute(layoutPattern: string, routePattern: string): boolean {
@@ -157,12 +158,8 @@ export async function generateDevManifest(
     ]),
   );
 
-  const toUrlPath = (absolutePath: string): string => {
-    if (absolutePath.startsWith(projectRoot)) {
-      return absolutePath.slice(projectRoot.length);
-    }
-    return absolutePath;
-  };
+  const toUrlPath = (absolutePath: string): string =>
+    toRootRelativeUrlPath(absolutePath, projectRoot) ?? absolutePath;
 
   const routeManifest: Record<string, RouteManifestEntry> = {};
   for (const route of routes) {
@@ -236,12 +233,8 @@ export async function generateProdManifest(
     ]),
   );
 
-  const toUrlPath = (absolutePath: string): string => {
-    if (absolutePath.startsWith(projectRoot)) {
-      return absolutePath.slice(projectRoot.length);
-    }
-    return absolutePath;
-  };
+  const toUrlPath = (absolutePath: string): string =>
+    toRootRelativeUrlPath(absolutePath, projectRoot) ?? absolutePath;
 
   // Map module paths to chunk info
   const moduleToChunk = new Map<string, ChunkInfo>();
