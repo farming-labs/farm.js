@@ -151,10 +151,7 @@ export function toRootRelativeUrlPath(
   projectRoot: string,
 ): string | undefined {
   if (absolutePath === projectRoot) return "";
-  if (
-    absolutePath.startsWith(`${projectRoot}/`) ||
-    absolutePath.startsWith(`${projectRoot}\\`)
-  ) {
+  if (absolutePath.startsWith(`${projectRoot}/`) || absolutePath.startsWith(`${projectRoot}\\`)) {
     return absolutePath.slice(projectRoot.length).replace(/\\/g, "/");
   }
   return undefined;
