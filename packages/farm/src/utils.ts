@@ -140,6 +140,15 @@ export function resolveAppPath(root: string, ...paths: string[]): string {
 }
 
 /**
+ * Format a module path for the specifier in a generated static import statement.
+ * JSON.stringify escapes backslashes on Windows so paths like `E:\workspace\app\...`
+ * do not produce invalid escape sequences in emitted source.
+ */
+export function toModuleImportPath(modulePath: string): string {
+  return JSON.stringify(modulePath);
+}
+
+/**
  * Convert an absolute module path inside the project root to a root-relative
  * URL path with forward slashes (e.g. `/src/app/page.tsx`), for values the
  * client passes to dynamic `import()`. On Windows the naive root-prefix slice

@@ -4,6 +4,7 @@ import {
   parseRoutePath,
   matchRoute,
   segmentsToPattern,
+  toModuleImportPath,
   toRootRelativeUrlPath,
   toViteModuleId,
 } from "../utils";
@@ -16,6 +17,21 @@ describe("createCliColors", () => {
 
   it("keeps redirected output plain", () => {
     expect(createCliColors(false).green("Farm.js")).toBe("Farm.js");
+  });
+});
+
+describe("toModuleImportPath", () => {
+  it("escapes Windows drive-letter paths for generated static imports", () => {
+    const modulePath = "E:\\workspace\\app\\src\\app\\api\\hello\\route.ts";
+    const importStatement = `import * as apiRoute0 from ${toModuleImportPath(modulePath)};`;
+
+    expect(importStatement).toBe(`import * as apiRoute0 from ${JSON.stringify(modulePath)};`);
+    expect(importStatement.includes("\f")).toBe(false);
+  });
+
+  it("keeps POSIX project paths unchanged aside from quoting", () => {
+    const modulePath = "/workspace/app/src/app/api/hello/route.ts";
+    expect(toModuleImportPath(modulePath)).toBe(JSON.stringify(modulePath));
   });
 });
 

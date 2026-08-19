@@ -22,7 +22,7 @@ import { constants as fsConstants, existsSync, readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { builtinModules, createRequire } from "module";
 import { isDeepStrictEqual } from "node:util";
-import { logger } from "../utils";
+import { logger, toModuleImportPath } from "../utils";
 import { getClientModuleMetadata } from "../utils/client-component";
 import { isFarmMarkdownPageFile } from "../app-markdown";
 import type { ProgrammaticRedirectRoute } from "../routes";
@@ -3420,7 +3420,7 @@ function generateVirtualEntryCode(
 
   apiRoutes.forEach((route, index) => {
     const varName = `apiRoute${index}`;
-    apiImports.push(`import * as ${varName} from "${route.filePath}";`);
+    apiImports.push(`import * as ${varName} from ${toModuleImportPath(route.filePath)};`);
     apiRegistrations.push(`
   {
     path: ${JSON.stringify(route.path)},
@@ -3462,7 +3462,7 @@ function generateVirtualEntryCode(
       return;
     }
 
-    pageImports.push(`import * as ${varName} from "${route.modulePath}";`);
+    pageImports.push(`import * as ${varName} from ${toModuleImportPath(route.modulePath)};`);
     const clientMetadata = getClientModuleMetadata(route.modulePath, config.root);
     pageRegistrations.push(`
   {
@@ -3488,7 +3488,7 @@ function generateVirtualEntryCode(
   layoutRoutes.forEach((layout, index) => {
     const varName = `layoutRoute${index}`;
     const clientMetadata = getClientModuleMetadata(layout.modulePath, config.root);
-    layoutImports.push(`import * as ${varName} from "${layout.modulePath}";`);
+    layoutImports.push(`import * as ${varName} from ${toModuleImportPath(layout.modulePath)};`);
     layoutRegistrations.push(`
   {
     pattern: ${JSON.stringify(layout.pattern)},
@@ -3502,7 +3502,7 @@ function generateVirtualEntryCode(
   const routeSlotRegistrations: string[] = [];
   routeSlots.forEach((slot, index) => {
     const varName = `routeSlot${index}`;
-    routeSlotImports.push(`import * as ${varName} from "${slot.modulePath}";`);
+    routeSlotImports.push(`import * as ${varName} from ${toModuleImportPath(slot.modulePath)};`);
     routeSlotRegistrations.push(`
   {
     name: ${JSON.stringify(slot.name)},
@@ -3521,7 +3521,7 @@ function generateVirtualEntryCode(
 
   errorRoutes.forEach((errorRoute, index) => {
     const varName = `errorRoute${index}`;
-    errorImports.push(`import * as ${varName} from "${errorRoute.modulePath}";`);
+    errorImports.push(`import * as ${varName} from ${toModuleImportPath(errorRoute.modulePath)};`);
     errorRegistrations.push(`
   {
     pattern: ${JSON.stringify(errorRoute.pattern)},
@@ -3533,9 +3533,11 @@ function generateVirtualEntryCode(
   const metadataImageRegistrations: string[] = [];
 
   metadataImageRoutes.forEach((image, index) => {
-    if (image.sourceType === "module") {
+    if (image.sourceType === "module" && image.modulePath) {
       const varName = `metadataImageRoute${index}`;
-      metadataImageImports.push(`import * as ${varName} from "${image.modulePath}";`);
+      metadataImageImports.push(
+        `import * as ${varName} from ${toModuleImportPath(image.modulePath)};`,
+      );
       metadataImageRegistrations.push(`
   {
     pattern: ${JSON.stringify(image.pattern)},
@@ -3554,7 +3556,9 @@ function generateVirtualEntryCode(
   const applicationMetadataRegistrations: string[] = [];
   applicationMetadataRoutes.forEach((metadata, index) => {
     const varName = `applicationMetadataRoute${index}`;
-    applicationMetadataImports.push(`import * as ${varName} from "${metadata.modulePath}";`);
+    applicationMetadataImports.push(
+      `import * as ${varName} from ${toModuleImportPath(metadata.modulePath)};`,
+    );
     applicationMetadataRegistrations.push(`
   {
     pattern: ${JSON.stringify(metadata.pattern)},
@@ -3570,7 +3574,7 @@ function generateVirtualEntryCode(
 
   middlewareRoutes.forEach((middlewareRoute, index) => {
     const varName = `fileMiddleware${index}`;
-    middlewareImports.push(`import * as ${varName} from "${middlewareRoute.filePath}";`);
+    middlewareImports.push(`import * as ${varName} from ${toModuleImportPath(middlewareRoute.filePath)};`);
     middlewareRegistrations.push(`
   {
     path: ${JSON.stringify(middlewareRoute.path)},
@@ -3580,7 +3584,9 @@ function generateVirtualEntryCode(
   });
 
   // Generate import for custom not-found page if exists
-  const notFoundImport = notFoundPath ? `import * as CustomNotFound from "${notFoundPath}";` : "";
+  const notFoundImport = notFoundPath
+    ? `import * as CustomNotFound from ${toModuleImportPath(notFoundPath)};`
+    : "";
   const apiRouteHelpersImport =
     apiRoutes.length > 0
       ? `import { invokeAPIRouteEndpoint, matchAPIRoute } from "@farm.js/core/api/runtime";`
@@ -3666,7 +3672,7 @@ import { fileURLToPath as farmDocsFileURLToPath } from "node:url";`
         : path.join(config.root, config.mdx.components)
       : null;
   const mdxComponentsImport = mdxComponentsPath
-    ? `import * as FarmMdxComponentsModule from "${mdxComponentsPath.replace(/\\/g, "/")}";`
+    ? `import * as FarmMdxComponentsModule from ${toModuleImportPath(mdxComponentsPath)};`
     : "";
   const layerConfigPaths = (config.layers || [])
     .map((layer) => layer.configFile)
@@ -3675,7 +3681,7 @@ import { fileURLToPath as farmDocsFileURLToPath } from "node:url";`
   const layerConfigImports = layerConfigPaths
     .map(
       (configFile, index) =>
-        `import * as FarmLayerConfigModule${index} from "${configFile.replace(/\\/g, "/")}";`,
+        `import * as FarmLayerConfigModule${index} from ${toModuleImportPath(configFile)};`,
     )
     .join("\n");
   const layerConfigValues = layerConfigPaths.map(
@@ -3696,10 +3702,10 @@ import { fileURLToPath as farmDocsFileURLToPath } from "node:url";`
     ? `import { ${integrationRuntimeExports.join(", ")} } from "@farm.js/core/integrations";`
     : "";
   const instrumentationImport = instrumentationPath
-    ? `import * as FarmInstrumentationModule from "${instrumentationPath.replace(/\\/g, "/")}";`
+    ? `import * as FarmInstrumentationModule from ${toModuleImportPath(instrumentationPath)};`
     : "";
   const integrationImports = `
-${configModulePath ? `import * as FarmUserConfigModule from "${configModulePath}";` : ""}
+${configModulePath ? `import * as FarmUserConfigModule from ${toModuleImportPath(configModulePath)};` : ""}
 ${layerConfigImports}
 ${integrationRuntimeImport}
 `;
