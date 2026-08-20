@@ -207,6 +207,7 @@ export async function generateFarmTypeArtifacts(
  */
 
 import "@farm.js/core/image";
+import "@farm.js/core/css";
 
 ${unifiedSections.map(normalizeUnifiedTypeSection).join("\n\n")}
 `,
@@ -225,7 +226,7 @@ ${unifiedSections.map(normalizeUnifiedTypeSection).join("\n\n")}
 }
 
 function normalizeUnifiedTypeSection(section: string): string {
-  // The unified artifact already imports @farm.js/core/image, so it is a module.
+  // The unified artifact already imports Farm's asset types, so it is a module.
   // Individual generators add this marker for standalone declaration files, but
   // formatters remove the now-redundant export and make `farm generate --check`
   // report a false stale-file failure.

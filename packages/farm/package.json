@@ -132,6 +132,9 @@
       "agent-runtime": [
         "./dist/agent-runtime.d.ts"
       ],
+      "css": [
+        "./types/css.d.ts"
+      ],
       "image": [
         "./types/image.d.ts",
         "./dist/image.d.ts"
@@ -501,6 +504,9 @@
       "types": "./dist/agent-runtime.d.ts",
       "import": "./dist/agent-runtime.mjs",
       "require": "./dist/agent-runtime.cjs"
+    },
+    "./css": {
+      "types": "./types/css.d.ts"
     },
     "./image": {
       "types": "./types/image.d.ts",

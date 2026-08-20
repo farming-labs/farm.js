@@ -125,7 +125,9 @@ public endpoints can stay in `farm.config.ts`.
 
 ## Generated files
 
-Farm keeps project-specific route, environment, and internationalization declarations in one generated `src/farm.d.ts` file. Static image declarations come from `@farm.js/core`, so they do not add another file to your source tree. Generated API clients remain in `src/lib/api.generated.ts` because applications import that module directly.
+Farm keeps project-specific route, environment, and internationalization declarations in one generated `src/farm.d.ts` file. Static image and stylesheet declarations come from `@farm.js/core`, so global CSS side-effect imports and CSS Modules type-check without an application-owned declaration file. Generated API clients remain in `src/lib/api.generated.ts` because applications import that module directly.
+
+After upgrading an older project, run `farm generate` once to record the current framework type references. Existing generated files that import only `@farm.js/core/image` remain compatible with the stylesheet declarations.
 
 `farm dev` keeps generated types current as source files change; run the command manually when the dev server is not running.
 

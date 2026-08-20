@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 import { generateFarmTypeArtifacts } from "../type-artifacts";
 
@@ -71,6 +72,7 @@ describe("generateFarmTypeArtifacts", () => {
     expect(types).toContain('export type RoutePath =\n  | "/"');
     expect(types).toContain('_: import("./farm").RoutePath');
     expect(types).toContain('import "@farm.js/core/image"');
+    expect(types).toContain('import "@farm.js/core/css"');
     expect(readFileSync(apiTypesPath, "utf8")).toContain("hello: {");
     expect(readFileSync(apiTypesPath, "utf8")).toContain("post: typeof POST_hello;");
     expect(types).toContain('import type FarmConfig from "../farm.config"');
@@ -80,6 +82,74 @@ describe("generateFarmTypeArtifacts", () => {
     expect(imageTypes).toContain('declare module "*.png"');
     expect(imageTypes).toContain('import("@farm.js/core/image").StaticImageData');
     expect(imageTypes).toContain('declare module "*?url"');
+    const imageEntryTypes = readFileSync(path.join(process.cwd(), "types", "image.d.ts"), "utf8");
+    expect(imageEntryTypes).toContain('reference path="./css.d.ts"');
+    const cssTypes = readFileSync(path.join(process.cwd(), "types", "css.d.ts"), "utf8");
+    expect(cssTypes).toContain('declare module "*.css"');
+    expect(cssTypes).toContain('declare module "*.module.css"');
+
+    const packageJson = JSON.parse(
+      readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
+    ) as {
+      exports: Record<string, { types?: string }>;
+      typesVersions: Record<string, Record<string, string[]>>;
+    };
+    expect(packageJson.exports["./css"]?.types).toBe("./types/css.d.ts");
+    expect(packageJson.typesVersions["*"]?.css).toEqual(["./types/css.d.ts"]);
+  });
+
+  it("types global CSS side effects and CSS Modules", () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "farm-css-types-"));
+    const srcDir = path.join(root, "src");
+    mkdirSync(srcDir, { recursive: true });
+
+    const farmTypesPath = path.join(srcDir, "farm.d.ts");
+    const legacyFarmTypesPath = path.join(srcDir, "legacy-farm.d.ts");
+    const typeTestPath = path.join(srcDir, "styles.test.ts");
+    writeFileSync(farmTypesPath, 'import "@farm.js/core/css";\n');
+    writeFileSync(legacyFarmTypesPath, 'import "@farm.js/core/image";\n');
+    writeFileSync(path.join(srcDir, "globals.css"), "body {}\n");
+    writeFileSync(path.join(srcDir, "card.module.css"), ".card {}\n");
+    writeFileSync(
+      typeTestPath,
+      [
+        'import "./globals.css";',
+        'import styles from "./card.module.css";',
+        "const className: string = styles.card;",
+        "void className;",
+        "",
+      ].join("\n"),
+    );
+
+    const compilerOptions: ts.CompilerOptions = {
+      strict: true,
+      noEmit: true,
+      noUncheckedSideEffectImports: true,
+      skipLibCheck: true,
+      target: ts.ScriptTarget.ES2020,
+      module: ts.ModuleKind.ESNext,
+      moduleResolution: ts.ModuleResolutionKind.Bundler,
+      baseUrl: process.cwd(),
+      paths: {
+        "@farm.js/core/css": ["./types/css.d.ts"],
+        "@farm.js/core/image": ["./types/image.d.ts"],
+      },
+    };
+
+    for (const frameworkTypesPath of [farmTypesPath, legacyFarmTypesPath]) {
+      const program = ts.createProgram({
+        rootNames: [frameworkTypesPath, typeTestPath],
+        options: compilerOptions,
+      });
+      const diagnostics = ts.getPreEmitDiagnostics(program);
+      const formattedDiagnostics = ts.formatDiagnosticsWithColorAndContext(diagnostics, {
+        getCanonicalFileName: (fileName) => fileName,
+        getCurrentDirectory: () => process.cwd(),
+        getNewLine: () => "\n",
+      });
+
+      expect(formattedDiagnostics).toBe("");
+    }
   });
 
   it("generates one typed application from layer and project sources", async () => {
