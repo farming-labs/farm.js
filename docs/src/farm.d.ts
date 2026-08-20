@@ -4,6 +4,7 @@
  */
 
 import "@farm.js/core/image";
+import "@farm.js/core/css";
 
 /**
  * Auto-generated route types from src/app.
