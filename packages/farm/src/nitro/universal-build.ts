@@ -173,6 +173,55 @@ const FARM_SSR_OUTPUT_DIR = "farm-ssr";
 const FARM_CLIENT_BUILD_TARGET = ["es2020", "edge88", "firefox78", "chrome87", "safari14"];
 
 function resolveNitroRuntimeDependency(root: string, specifier: string): string {
+  return createRequire(resolveNitroPackageEntry(root)).resolve(specifier).split(path.sep).join("/");
+}
+
+/**
+ * Rollup fallback resolver for the temporary prerender server. Bare ids that
+ * the regular pipeline cannot resolve (Nitro virtual modules import Nitro's
+ * runtime dependencies without a real importer) are retried from Nitro's own
+ * package location, where pnpm's strict layout can supply them.
+ */
+export function createPrerenderRuntimeResolverPlugin(
+  root: string,
+  resolveNitroEntry: (projectRoot: string) => string = resolveNitroPackageEntry,
+): Rollup.Plugin {
+  let nitroEntry: string | null | undefined;
+
+  return {
+    name: "farm-prerender-runtime-resolver",
+    async resolveId(id, _importer, options) {
+      if (options.custom?.farmPrerenderRuntimeResolve) return null;
+      if (
+        id.startsWith("\0") ||
+        id.startsWith(".") ||
+        id.startsWith("#") ||
+        id.startsWith("virtual:") ||
+        path.isAbsolute(id) ||
+        NODE_BUILTIN_MODULES.has(id)
+      ) {
+        return null;
+      }
+
+      if (nitroEntry === undefined) {
+        try {
+          nitroEntry = resolveNitroEntry(root);
+        } catch {
+          nitroEntry = null;
+        }
+      }
+      if (!nitroEntry) return null;
+
+      return this.resolve(id, nitroEntry, {
+        ...options,
+        skipSelf: true,
+        custom: { ...options.custom, farmPrerenderRuntimeResolve: true },
+      });
+    },
+  };
+}
+
+function resolveNitroPackageEntry(root: string): string {
   const projectRequire = createRequire(path.join(root, "package.json"));
   let runtimeRequire = projectRequire;
   try {
@@ -180,8 +229,7 @@ function resolveNitroRuntimeDependency(root: string, specifier: string): string 
   } catch {
     // Source-only framework builds can resolve Nitro directly from the project.
   }
-  const nitroEntry = runtimeRequire.resolve("nitro");
-  return createRequire(nitroEntry).resolve(specifier).split(path.sep).join("/");
+  return runtimeRequire.resolve("nitro");
 }
 
 function cloneConfigValue<T>(value: T, seen = new WeakMap<object, unknown>()): T {
@@ -7309,6 +7357,27 @@ export default async function farmNitroEventHandler(event) {
       delete prerendererConfig.entry;
     });
   }
+  nitroInstance.hooks.hook("prerender:init", (prerenderer) => {
+    prerenderer.hooks.hook("rollup:before", (_prerenderNitro, rollupConfig) => {
+      // Nitro's virtual modules (storage, tasks, ...) emit bare imports of
+      // Nitro's own runtime dependencies (unstorage, h3, ...). Their virtual
+      // importer is discarded during resolution, so under pnpm's strict
+      // node_modules layout these transitive dependencies cannot be resolved,
+      // and rollup silently leaves them as bare imports in the temporary
+      // prerender server. Importing that server from the output directory
+      // then fails with ERR_MODULE_NOT_FOUND (#403). Retry unresolved bare
+      // ids from Nitro's own package context so they bundle like the rest.
+      const configuredPlugins = rollupConfig.plugins;
+      rollupConfig.plugins = [
+        ...(Array.isArray(configuredPlugins)
+          ? configuredPlugins
+          : configuredPlugins
+            ? [configuredPlugins]
+            : []),
+        createPrerenderRuntimeResolverPlugin(config.root),
+      ];
+    });
+  });
   await nitro.prepare(nitroInstance);
   await nitro.copyPublicAssets(nitroInstance);
   if (prerenderRoutes.length > 0 && canReusePrebuiltSSR) {
