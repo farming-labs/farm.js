@@ -326,12 +326,28 @@ try {
     `${logical} [data-branch="loading"]`,
     "Loading branch · update 0",
   );
+  await page.evaluate(() => {
+    window.__farmLogicalBranch = document.querySelector(
+      '[data-experiment="conditional-logical"] [data-branch="loading"]',
+    );
+  });
   await page.locator(`${logical} [data-action="increment-logical"]`).click();
   await assertText(page, `${logical} [data-metric="updates"]`, "1");
   await assertText(
     page,
     `${logical} [data-branch="loading"]`,
     "Loading branch · update 1",
+  );
+  assert.equal(
+    await page.evaluate(
+      () =>
+        window.__farmLogicalBranch ===
+        document.querySelector(
+          '[data-experiment="conditional-logical"] [data-branch="loading"]',
+        ),
+    ),
+    true,
+    "compiler-owned conditional replaced a stable branch while patching its text",
   );
   await page.locator(`${logical} [data-action="toggle-logical"]`).click();
   await assertText(page, `${logical} [data-metric="mounted"]`, "no");

@@ -247,7 +247,7 @@ describe("React AOT keyed list compiler", () => {
 
     expect(result.compiled).toEqual(["MixedBoundaries"]);
     expect(result.diagnostics).toEqual([]);
-    expect(result.code).toContain("farmBlocks.Conditional");
+    expect(result.code).toContain("farmBlocks.HostConditional");
     expect(result.code).toContain("farmBlocks.KeyedRows");
     expect(result.code).toContain("id={0}");
     expect(result.code).toContain("id={1}");

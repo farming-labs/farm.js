@@ -67,12 +67,36 @@ export interface CompilerKeyedListBlockProps {
   render(): React.ReactNode;
 }
 
-export interface CompilerKeyedRowElement {
+export interface CompilerHostElement {
   kind: "element";
   tag: string;
   attributes: readonly { name: string; value: unknown }[];
   styles: readonly { name: string; value: unknown }[];
-  children: readonly (CompilerKeyedRowElement | unknown)[];
+  children: readonly (CompilerHostElement | unknown)[];
+}
+
+export type CompilerKeyedRowElement = CompilerHostElement;
+
+export interface CompilerHostConditionalBinding {
+  kind: "text" | "attribute" | "style";
+  path: readonly number[];
+  name?: string;
+  read(): unknown;
+}
+
+export interface CompilerHostConditionalBranch {
+  create(): CompilerHostElement;
+  bindings: readonly CompilerHostConditionalBinding[];
+}
+
+export interface CompilerHostConditionalBlockProps {
+  id: number;
+  render(): React.ReactElement;
+  test(): unknown;
+  /** Logical && can produce a visible number instead of an empty branch. */
+  logical?: boolean;
+  truthy?: CompilerHostConditionalBranch;
+  falsy?: CompilerHostConditionalBranch;
 }
 
 export interface CompilerKeyedRowBinding {
@@ -98,6 +122,7 @@ export interface CompilerComponentBlockProps {
 
 export interface CompilerBlockRuntime {
   Conditional: React.ComponentType<CompilerConditionalBlockProps>;
+  HostConditional: React.ComponentType<CompilerHostConditionalBlockProps>;
   KeyedList: React.ComponentType<CompilerKeyedListBlockProps>;
   KeyedRows: React.ComponentType<CompilerKeyedRowsBlockProps>;
   Component: React.ComponentType<CompilerComponentBlockProps>;
@@ -447,43 +472,63 @@ function createKeyedListBlockComponent(
   return FarmKeyedListBlock;
 }
 
-interface CompilerKeyedRowInstance {
-  key: string;
+interface CompilerHostInstance {
   element: Element;
   values: unknown[];
 }
 
-function keyedRowIdentity(key: React.Key): string {
-  return String(key);
-}
-
-function isKeyedRowElement(value: unknown): value is CompilerKeyedRowElement {
+function isCompilerHostElement(value: unknown): value is CompilerHostElement {
   return (
     typeof value === "object" && value !== null && (value as { kind?: unknown }).kind === "element"
   );
 }
 
-function createKeyedRowElement(document: Document, descriptor: CompilerKeyedRowElement): Element {
+function createCompilerHostElement(document: Document, descriptor: CompilerHostElement): Element {
   const element = document.createElement(descriptor.tag);
   for (const attribute of descriptor.attributes) {
     updateAttribute(element, attribute.name, attribute.value);
   }
   for (const style of descriptor.styles) updateStyle(element, style.name, style.value);
   for (const child of descriptor.children) {
-    if (isKeyedRowElement(child)) {
-      element.append(createKeyedRowElement(document, child));
+    if (isCompilerHostElement(child)) {
+      element.append(createCompilerHostElement(document, child));
       continue;
     }
     const text = renderTextValue(child);
     if (text) element.append(document.createTextNode(text));
   }
+  // Select options and textarea text must exist before their controlled value
+  // is finalized. Reapplying is harmless for other attributes and avoids a
+  // transient/default selection becoming the compiled branch's final state.
+  for (const attribute of descriptor.attributes) {
+    if (attribute.name === "value" && (isSelectElement(element) || isTextAreaElement(element))) {
+      updateAttribute(element, attribute.name, attribute.value);
+    }
+  }
   return element;
 }
 
-function findKeyedRowTarget(root: Element, path: readonly number[]): Element | null {
+function matchesCompilerHostElement(element: Element, descriptor: CompilerHostElement): boolean {
+  if (element.tagName.toLowerCase() !== descriptor.tag.toLowerCase()) return false;
+  const expectedChildren = descriptor.children.filter(isCompilerHostElement);
+  if (element.children.length !== expectedChildren.length) return false;
+  return expectedChildren.every((child, index) =>
+    matchesCompilerHostElement(element.children[index], child),
+  );
+}
+
+function findCompilerHostTarget(root: Element, path: readonly number[]): Element | null {
   let current: Element | null = root;
   for (const index of path) current = current?.children[index] || null;
   return current;
+}
+
+interface CompilerKeyedRowInstance extends CompilerHostInstance {
+  key: string;
+}
+
+function keyedRowIdentity(key: React.Key): string {
+  return String(key);
 }
 
 function normalizedKeyedRowBindingValue(binding: CompilerKeyedRowBinding, value: unknown): unknown {
@@ -512,7 +557,7 @@ function applyKeyedRowBindings(
     const value = normalizedKeyedRowBindingValue(binding, rawValue);
     if (Object.is(instance.values[bindingIndex], value)) continue;
     instance.values[bindingIndex] = value;
-    const target = findKeyedRowTarget(instance.element, binding.path);
+    const target = findCompilerHostTarget(instance.element, binding.path);
     if (!target) continue;
     if (binding.kind === "text") {
       target.textContent = value as string;
@@ -522,6 +567,214 @@ function applyKeyedRowBindings(
       updateAttribute(target, binding.name, rawValue);
     }
   }
+}
+
+type CompilerHostConditionalSelection =
+  | { kind: "branch"; key: "truthy" | "falsy"; branch: CompilerHostConditionalBranch }
+  | { kind: "empty" }
+  | { kind: "fallback" };
+
+function hostConditionalSelection(
+  props: CompilerHostConditionalBlockProps,
+): CompilerHostConditionalSelection {
+  const test = props.test();
+  if (props.logical && !test) {
+    // React renders 0, NaN, and (where supported) 0n from `value && <Element />`.
+    // The host-only fast path cannot represent that primitive branch, so retain
+    // React's exact behavior rather than coercing it to an empty branch.
+    if (typeof test === "number" || typeof test === "bigint") return { kind: "fallback" };
+    return { kind: "empty" };
+  }
+  const key = test ? "truthy" : "falsy";
+  const branch = key === "truthy" ? props.truthy : props.falsy;
+  return branch ? { kind: "branch", key, branch } : { kind: "empty" };
+}
+
+function normalizedHostConditionalBindingValue(
+  binding: CompilerHostConditionalBinding,
+  value: unknown,
+): unknown {
+  return binding.kind === "text" ? renderTextValue(value) : value;
+}
+
+function readHostConditionalBindingValues(branch: CompilerHostConditionalBranch): unknown[] {
+  return branch.bindings.map((binding) =>
+    normalizedHostConditionalBindingValue(binding, binding.read()),
+  );
+}
+
+function applyHostConditionalBindings(
+  branch: CompilerHostConditionalBranch,
+  instance: CompilerHostInstance,
+): void {
+  for (let bindingIndex = 0; bindingIndex < branch.bindings.length; bindingIndex += 1) {
+    const binding = branch.bindings[bindingIndex];
+    const rawValue = binding.read();
+    const value = normalizedHostConditionalBindingValue(binding, rawValue);
+    if (Object.is(instance.values[bindingIndex], value)) continue;
+    instance.values[bindingIndex] = value;
+    const target = findCompilerHostTarget(instance.element, binding.path);
+    if (!target) continue;
+    if (binding.kind === "text") {
+      target.textContent = value as string;
+    } else if (binding.kind === "style" && binding.name) {
+      updateStyle(target, binding.name, rawValue);
+    } else if (binding.kind === "attribute" && binding.name) {
+      updateAttribute(target, binding.name, rawValue);
+    }
+  }
+}
+
+function createHostConditionalBlockComponent(
+  owner: Pick<ConditionalBlockOwner, "subscribe">,
+): React.ComponentType<CompilerHostConditionalBlockProps> {
+  interface State {
+    fallback: boolean;
+  }
+
+  class FarmHostConditionalBlock extends React.Component<CompilerHostConditionalBlockProps, State> {
+    static displayName = "FarmCompiledHostConditional";
+
+    state: State = { fallback: false };
+    private root: Element | null = null;
+    private mounted = false;
+    private fallbackRequested = false;
+    private fallbackVersion = 0;
+    private propSyncQueued = false;
+    private currentProps = this.props;
+    private unsubscribe: (() => void) | undefined;
+    private activeBranch: "truthy" | "falsy" | null = null;
+    private instance: CompilerHostInstance | null = null;
+
+    private captureRoot = (root: Element | null) => {
+      this.root = root;
+    };
+
+    private adopt(): boolean {
+      if (!this.root) return false;
+      const selection = hostConditionalSelection(this.currentProps);
+      if (selection.kind === "fallback") return false;
+      if (selection.kind === "empty") {
+        if (this.root.childNodes.length !== 0) return false;
+        this.activeBranch = null;
+        this.instance = null;
+        return true;
+      }
+      if (
+        this.root.childNodes.length !== 1 ||
+        this.root.firstElementChild === null ||
+        this.root.firstElementChild !== this.root.firstChild
+      ) {
+        return false;
+      }
+      const descriptor = selection.branch.create();
+      const element = this.root.firstElementChild;
+      if (!matchesCompilerHostElement(element, descriptor)) return false;
+      this.activeBranch = selection.key;
+      this.instance = {
+        element,
+        values: readHostConditionalBindingValues(selection.branch),
+      };
+      return true;
+    }
+
+    private activateFallback(afterCommit?: () => void): void {
+      if (!this.mounted || this.state.fallback || this.fallbackRequested) {
+        afterCommit?.();
+        return;
+      }
+      this.fallbackRequested = true;
+      this.setState({ fallback: true }, afterCommit);
+    }
+
+    private reconcile(afterCommit?: () => void): void {
+      if (!this.mounted || !this.root) {
+        afterCommit?.();
+        return;
+      }
+      if (this.state.fallback) {
+        this.fallbackVersion += 1;
+        this.forceUpdate(afterCommit);
+        return;
+      }
+
+      const selection = hostConditionalSelection(this.currentProps);
+      if (selection.kind === "fallback") {
+        this.activateFallback(afterCommit);
+        return;
+      }
+      if (selection.kind === "empty") {
+        if (this.instance) this.instance.element.remove();
+        this.activeBranch = null;
+        this.instance = null;
+        afterCommit?.();
+        return;
+      }
+      if (this.activeBranch === selection.key && this.instance) {
+        applyHostConditionalBindings(selection.branch, this.instance);
+        afterCommit?.();
+        return;
+      }
+
+      const element = createCompilerHostElement(this.root.ownerDocument, selection.branch.create());
+      this.root.replaceChildren(element);
+      this.activeBranch = selection.key;
+      this.instance = {
+        element,
+        values: readHostConditionalBindingValues(selection.branch),
+      };
+      afterCommit?.();
+    }
+
+    private refresh = (afterCommit?: () => void) => {
+      this.reconcile(afterCommit);
+    };
+
+    private schedulePropSync(): void {
+      if (this.propSyncQueued) return;
+      this.propSyncQueued = true;
+      queueMicrotask(() => {
+        this.propSyncQueued = false;
+        if (this.mounted && !this.state.fallback) this.reconcile();
+      });
+    }
+
+    shouldComponentUpdate(nextProps: CompilerHostConditionalBlockProps, nextState: State): boolean {
+      this.currentProps = nextProps;
+      if (nextState.fallback || this.state.fallback) return true;
+      this.schedulePropSync();
+      return false;
+    }
+
+    componentDidMount(): void {
+      this.mounted = true;
+      this.unsubscribe = owner.subscribe(this.props.id, this.refresh);
+      if (!this.adopt()) this.activateFallback();
+    }
+
+    componentWillUnmount(): void {
+      this.mounted = false;
+      this.unsubscribe?.();
+      this.root = null;
+      this.activeBranch = null;
+      this.instance = null;
+    }
+
+    render(): React.ReactNode {
+      const container = this.currentProps.render();
+      if (!React.isValidElement(container) || typeof container.type !== "string") {
+        throw new TypeError(
+          `Compiled host conditional ${this.currentProps.id} must own one host container.`,
+        );
+      }
+      return React.cloneElement(container, {
+        key: this.state.fallback ? `react-${this.fallbackVersion}` : "compiled",
+        ref: this.captureRoot,
+      } as React.Attributes);
+    }
+  }
+
+  return FarmHostConditionalBlock;
 }
 
 /** Returns positions forming the LIS while ignoring newly inserted (-1) entries. */
@@ -648,7 +901,7 @@ function createKeyedRowsBlockComponent(
           nextInstances.push(existing);
           continue;
         }
-        const element = createKeyedRowElement(
+        const element = createCompilerHostElement(
           this.root.ownerDocument,
           this.currentProps.create(rows.items[index], index),
         );
@@ -834,6 +1087,9 @@ export function createCompiledComponent<Props>(
       this.blockRuntime = {
         Conditional: createConditionalBlockComponent({
           setRoot: (id, root) => this.setBlockRoot(id, root),
+          subscribe: (id, refresh) => this.subscribeToBlock(id, refresh),
+        }),
+        HostConditional: createHostConditionalBlockComponent({
           subscribe: (id, refresh) => this.subscribeToBlock(id, refresh),
         }),
         KeyedList: createKeyedListBlockComponent({

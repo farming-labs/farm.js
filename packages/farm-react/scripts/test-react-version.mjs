@@ -237,6 +237,82 @@ const testSource = String.raw`
   assert.equal(conditionalExecutions, initialConditionalExecutions);
   flushSync(() => conditionalRoot.unmount());
 
+  let hostConditionalExecutions = 0;
+  const HostConditionalBlocks = createCompiledComponent({
+    displayName: "CompatibilityHostConditionalBlocks",
+    initialize: () => [true, 0],
+    render(_props, state, blocks) {
+      hostConditionalExecutions += 1;
+      return React.createElement(
+        "section",
+        null,
+        React.createElement(
+          "button",
+          { "data-increment": true, onClick: () => state[1].set((value) => Number(value) + 1) },
+          "Increment branch",
+        ),
+        React.createElement(
+          "button",
+          { "data-toggle": true, onClick: () => state[0].set((value) => !value) },
+          "Toggle branch",
+        ),
+        React.createElement(blocks.HostConditional, {
+          id: 0,
+          render: () =>
+            React.createElement(
+              "div",
+              { "data-slot": true },
+              state[0].get()
+                ? React.createElement("strong", { "data-branch": "enabled" }, "Enabled ", state[1].get())
+                : React.createElement("span", { "data-branch": "disabled" }, "Disabled ", state[1].get()),
+            ),
+          test: () => state[0].get(),
+          truthy: {
+            create: () => ({
+              kind: "element",
+              tag: "strong",
+              attributes: [{ name: "data-branch", value: "enabled" }],
+              styles: [],
+              children: [["Enabled ", state[1].get()]],
+            }),
+            bindings: [{ kind: "text", path: [], read: () => ["Enabled ", state[1].get()] }],
+          },
+          falsy: {
+            create: () => ({
+              kind: "element",
+              tag: "span",
+              attributes: [{ name: "data-branch", value: "disabled" }],
+              styles: [],
+              children: [["Disabled ", state[1].get()]],
+            }),
+            bindings: [{ kind: "text", path: [], read: () => ["Disabled ", state[1].get()] }],
+          },
+        }),
+      );
+    },
+    bindings: [{ kind: "block", id: 0, dependencies: [0, 1] }],
+  });
+  const hostConditionalContainer = document.createElement("div");
+  document.body.append(hostConditionalContainer);
+  const hostConditionalRoot = createRoot(hostConditionalContainer);
+  flushSync(() => hostConditionalRoot.render(React.createElement(HostConditionalBlocks)));
+  const initialHostConditionalExecutions = hostConditionalExecutions;
+  const initialHostBranch = hostConditionalContainer.querySelector("[data-branch='enabled']");
+  hostConditionalContainer.querySelector("[data-increment]").click();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(hostConditionalContainer.querySelector("[data-branch='enabled']"), initialHostBranch);
+  assert.equal(initialHostBranch.textContent, "Enabled 1");
+  hostConditionalContainer.querySelector("[data-toggle]").click();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(
+    hostConditionalContainer.querySelector("[data-branch='disabled']").textContent,
+    "Disabled 1",
+  );
+  assert.equal(hostConditionalExecutions, initialHostConditionalExecutions);
+  flushSync(() => hostConditionalRoot.unmount());
+
   const explicitListContainer = document.createElement("div");
   document.body.append(explicitListContainer);
   const explicitListRoot = createRoot(explicitListContainer);
