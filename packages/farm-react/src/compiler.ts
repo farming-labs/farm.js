@@ -536,6 +536,100 @@ function returnedExpression(
   return value && t.isExpression(value) ? value : undefined;
 }
 
+const SAFE_COLLECTION_PIPELINE_METHODS = new Set(["filter", "slice", "toReversed", "toSorted"]);
+
+function collectionPipelineMethod(expression: t.Expression): string | undefined {
+  if (
+    !t.isCallExpression(expression) ||
+    !t.isMemberExpression(expression.callee) ||
+    expression.callee.computed ||
+    !t.isExpression(expression.callee.object) ||
+    !t.isIdentifier(expression.callee.property)
+  ) {
+    return undefined;
+  }
+  return SAFE_COLLECTION_PIPELINE_METHODS.has(expression.callee.property.name)
+    ? expression.callee.property.name
+    : undefined;
+}
+
+function validateCollectionCallback(
+  callback: t.ArrowFunctionExpression | t.FunctionExpression,
+  method: "filter" | "toSorted",
+  safeGlobals: ReadonlySet<string>,
+): string | undefined {
+  const expectedParameters = method === "filter" ? "one item and an optional index" : "two items";
+  const validParameterCount =
+    method === "filter"
+      ? callback.params.length >= 1 && callback.params.length <= 2
+      : callback.params.length === 2;
+  if (
+    callback.async ||
+    callback.generator ||
+    !validParameterCount ||
+    callback.params.some((parameter) => !t.isIdentifier(parameter))
+  ) {
+    return `${method} callbacks must be synchronous and use ${expectedParameters}`;
+  }
+  if (containsDirectHookCall(callback)) {
+    return `Hooks cannot be called inside a ${method} callback`;
+  }
+  const value = returnedExpression(callback);
+  if (!value) return `${method} callbacks must return one expression`;
+  const unsupported = validateDerivedExpression(value, safeGlobals);
+  return unsupported ? `${method} callbacks cannot use ${unsupported}` : undefined;
+}
+
+function validateCollectionPipeline(
+  expression: t.Expression,
+  safeGlobals: ReadonlySet<string>,
+): string | undefined {
+  const method = collectionPipelineMethod(expression);
+  if (!method || !t.isCallExpression(expression)) {
+    return validateDerivedExpression(expression, safeGlobals);
+  }
+
+  const source = (expression.callee as t.MemberExpression).object as t.Expression;
+  const sourceUnsupported = collectionPipelineMethod(source)
+    ? validateCollectionPipeline(source, safeGlobals)
+    : validateDerivedExpression(source, safeGlobals);
+  if (sourceUnsupported) return sourceUnsupported;
+
+  if (method === "filter") {
+    if (
+      expression.arguments.length !== 1 ||
+      (!t.isArrowFunctionExpression(expression.arguments[0]) &&
+        !t.isFunctionExpression(expression.arguments[0]))
+    ) {
+      return "filter requires one inline callback";
+    }
+    return validateCollectionCallback(expression.arguments[0], "filter", safeGlobals);
+  }
+
+  if (method === "toSorted") {
+    if (expression.arguments.length === 0) return undefined;
+    if (
+      expression.arguments.length !== 1 ||
+      (!t.isArrowFunctionExpression(expression.arguments[0]) &&
+        !t.isFunctionExpression(expression.arguments[0]))
+    ) {
+      return "toSorted requires an optional inline comparator";
+    }
+    return validateCollectionCallback(expression.arguments[0], "toSorted", safeGlobals);
+  }
+
+  const maximumArguments = method === "slice" ? 2 : 0;
+  if (expression.arguments.length > maximumArguments) {
+    return `${method} accepts at most ${maximumArguments} compiler-safe arguments`;
+  }
+  for (const argument of expression.arguments) {
+    if (!t.isExpression(argument)) return `${method} does not support spread arguments`;
+    const unsupported = validateDerivedExpression(argument, safeGlobals);
+    if (unsupported) return `${method} arguments cannot use ${unsupported}`;
+  }
+  return undefined;
+}
+
 function containsDirectHookCall(
   callback: t.ArrowFunctionExpression | t.FunctionExpression,
 ): boolean {
@@ -618,7 +712,7 @@ function analyzeMapList(
 ): { dependencies?: number[]; reason?: string } {
   const callee = expression.callee as t.MemberExpression;
   const collection = callee.object as t.Expression;
-  const collectionUnsupported = validateDerivedExpression(collection, safeGlobals);
+  const collectionUnsupported = validateCollectionPipeline(collection, safeGlobals);
   if (collectionUnsupported) {
     return { reason: `keyed list collection cannot use ${collectionUnsupported}` };
   }
@@ -669,7 +763,7 @@ function analyzePublicList(
   const each = listAttributeExpression(element, "each");
   const by = listAttributeExpression(element, "by");
   if (!each || !by) return { reason: "List requires explicit each and by properties" };
-  const collectionUnsupported = validateDerivedExpression(each, safeGlobals);
+  const collectionUnsupported = validateCollectionPipeline(each, safeGlobals);
   if (collectionUnsupported) {
     return { reason: `List each cannot use ${collectionUnsupported}` };
   }
@@ -2289,7 +2383,9 @@ function compileCandidate(
       });
       continue;
     }
-    const unsupported = validateDerivedExpression(expanded, safeGlobals);
+    const unsupported = collectionPipelineMethod(expanded)
+      ? validateCollectionPipeline(expanded, safeGlobals)
+      : validateDerivedExpression(expanded, safeGlobals);
     if (unsupported) {
       return `derived local ${binding.name} cannot use ${unsupported}`;
     }

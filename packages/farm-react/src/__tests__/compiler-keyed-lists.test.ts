@@ -92,9 +92,9 @@ describe("React AOT keyed list compiler", () => {
       reason: /must depend on the mapped item/i,
     },
     {
-      name: "a collection call chain",
-      list: "items.filter((item) => item.visible).map((item) => <li key={item.id}>{item.label}</li>)",
-      reason: /collection cannot use function calls/i,
+      name: "an unproven collection callback call",
+      list: 'items.filter((item) => item.label.includes("a")).map((item) => <li key={item.id}>{item.label}</li>)',
+      reason: /filter callbacks cannot use function calls/i,
     },
   ])("falls back for $name", async ({ list, reason }) => {
     const result = await compile(`

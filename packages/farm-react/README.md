@@ -63,8 +63,8 @@ The current compiler handles components that it can prove have:
 - state-driven text, attributes, per-property inline styles, and controlled form properties;
 - host-rooted `condition && <element>` and `condition ? <element> : <element>` child blocks at
   statically known locations, including supported nested boundaries;
-- direct item-keyed `collection.map(...)` children and explicit `List` boundaries at statically
-  known container locations;
+- item-keyed `collection.map(...)` children and explicit `List` boundaries at statically known
+  container locations, including supported non-mutating collection pipelines;
 - stable module-level child components with compiler-safe props;
 - React-managed event handlers; and
 - no refs, effects, or unsupported dynamic child structures.
@@ -108,6 +108,36 @@ build time. After React performs the initial render or hydration, Farm adopts th
 Later list updates patch surviving rows by key, create or remove only the changed rows, and use a
 longest increasing subsequence (LIS) to minimize DOM moves during a reorder. The outer user
 component and the list callback do not rerun for those compiler-cell updates.
+
+A keyed collection may use derived locals or an inline chain of `filter`, `slice`, `toSorted`, and
+`toReversed`:
+
+```tsx
+const visible = items.filter((item) => item.visible && item.rank >= minimumRank);
+const page = visible
+  .toSorted((left, right) => left.rank - right.rank)
+  .slice(offset, offset + pageSize)
+  .toReversed();
+
+return (
+  <ul>
+    {page.map((item) => (
+      <li key={item.id}>{item.label}</li>
+    ))}
+  </ul>
+);
+```
+
+The compiler records dependencies used by the source collection, inline predicate, inline
+comparator, and slice arguments. It reruns the pipeline only when one of those compiler cells
+changes, then gives the result to the existing keyed-row and LIS runtime. The required filtering or
+sorting still runs; unrelated local updates avoid that work and do not rerun the outer component.
+Callbacks must be synchronous, inline, and contain one compiler-safe returned expression. Mutating
+`sort`, `reverse`, and `splice`, external or async callbacks, Hooks, assignments, spread arguments,
+and unproven calls use the original React fallback.
+
+`toSorted` and `toReversed` are emitted as standard runtime calls rather than polyfilled. Configure
+the TypeScript `lib` with ES2023 and target a runtime that supports them when using those methods.
 
 React remains the fallback and compatibility boundary. A map beside static children, a row with
 events, a fragment, a ref, or a custom component, and other unsupported shapes use the existing

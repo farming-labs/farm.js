@@ -28,6 +28,7 @@ for (const component of [
   "LogicalBlockPanel",
   "TernaryBlockPanel",
   "AutomaticKeyedListExperiment",
+  "DerivedCollectionExperiment",
   "ExplicitKeyedListExperiment",
   "StatefulListRow",
   "ComponentIslandExperiment",
@@ -445,6 +446,68 @@ try {
     "reversing four keyed rows should move only the three rows outside the LIS",
   );
 
+  const derivedCollection = '[data-experiment="derived-collection"]';
+  const derivedCollectionInitialExecutions = await readNumber(
+    page,
+    `${derivedCollection} [data-metric="executions"]`,
+  );
+  assert.deepEqual(
+    await page.locator(`${derivedCollection} li`).allTextContents(),
+    ["Delta", "Alpha", "Beta"],
+  );
+  await page.evaluate(() => {
+    window.__farmDerivedAlpha = document.querySelector(
+      '[data-experiment="derived-collection"] [data-key="a"]',
+    );
+  });
+  await page.locator(`${derivedCollection} [data-action="filter-items"]`).click();
+  await assertText(page, `${derivedCollection} [data-metric="minimum-rank"]`, "2");
+  assert.deepEqual(await page.locator(`${derivedCollection} li`).allTextContents(), [
+    "Delta",
+    "Alpha",
+  ]);
+  await page.locator(`${derivedCollection} [data-action="sort-items"]`).click();
+  await assertText(page, `${derivedCollection} [data-metric="direction"]`, "descending");
+  assert.deepEqual(await page.locator(`${derivedCollection} li`).allTextContents(), [
+    "Alpha",
+    "Delta",
+  ]);
+  await page.locator(`${derivedCollection} [data-action="update-derived-row"]`).click();
+  assert.deepEqual(await page.locator(`${derivedCollection} li`).allTextContents(), [
+    "Delta",
+    "Axiom",
+  ]);
+  await page.locator(`${derivedCollection} [data-action="filter-items"]`).click();
+  await page.locator(`${derivedCollection} [data-action="resize-page"]`).click();
+  assert.deepEqual(await page.locator(`${derivedCollection} li`).allTextContents(), [
+    "Delta",
+    "Axiom",
+  ]);
+  await page.locator(`${derivedCollection} [data-action="resize-page"]`).click();
+  const derivedCollectionOrder = await page.locator(`${derivedCollection} li`).allTextContents();
+  assert.deepEqual(derivedCollectionOrder, [
+    "Beta",
+    "Delta",
+    "Axiom",
+  ]);
+  assert.equal(
+    await page.evaluate(
+      () =>
+        window.__farmDerivedAlpha ===
+        document.querySelector('[data-experiment="derived-collection"] [data-key="a"]'),
+    ),
+    true,
+    "the derived collection did not preserve a surviving keyed row",
+  );
+  await page.locator(`${derivedCollection} [data-action="stress-items"]`).click();
+  const derivedStressRows = await page.locator(`${derivedCollection} li`).allTextContents();
+  assert.deepEqual(derivedStressRows, ["Row 484", "Row 290", "Row 96"]);
+  const derivedCollectionFinalExecutions = await readNumber(
+    page,
+    `${derivedCollection} [data-metric="executions"]`,
+  );
+  assert.equal(derivedCollectionFinalExecutions - derivedCollectionInitialExecutions, 0);
+
   const explicitList = '[data-experiment="keyed-explicit"]';
   const explicitListInitialExecutions = await readNumber(
     page,
@@ -685,6 +748,15 @@ try {
             keyedDomIdentityPreserved: true,
             lisMoves: 3,
             owner: "Farm keyed rows",
+          },
+          derivedCollection: {
+            order: derivedCollectionOrder,
+            stressSourceRows: 2048,
+            stressMountedRows: derivedStressRows.length,
+            updateExecutions:
+              derivedCollectionFinalExecutions - derivedCollectionInitialExecutions,
+            keyedDomIdentityPreserved: true,
+            operations: ["filter", "toSorted", "slice", "toReversed"],
           },
           explicitKeyedList: {
             order: ["Beta", "Alpha"],
