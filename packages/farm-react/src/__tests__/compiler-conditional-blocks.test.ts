@@ -97,6 +97,78 @@ describe("React AOT conditional block compiler", () => {
     expect(result.code.match(/farmBlocks\.Conditional/g)).toHaveLength(2);
   });
 
+  it("transfers a dedicated host-only container to the compiler runtime", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function PreparedStatus() {
+        const [enabled, setEnabled] = useState(true);
+        const [count, setCount] = useState(1);
+        return (
+          <main>
+            <button onClick={() => { setEnabled(!enabled); setCount(count + 1); }}>Change</button>
+            <div className="status-slot">
+              {enabled ? (
+                <strong className={count > 1 ? "ready" : "idle"} style={{ opacity: count / 10 }}>
+                  <span>Enabled {count}</span>
+                </strong>
+              ) : (
+                <span data-count={count}>Disabled {count}</span>
+              )}
+            </div>
+            <output>{count}</output>
+          </main>
+        );
+      }
+    `);
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.compiled).toEqual(["PreparedStatus"]);
+    expect(result.code.match(/farmBlocks\.HostConditional/g)).toHaveLength(1);
+    expect(result.code).not.toContain("farmBlocks.Conditional");
+    expect(result.code).toContain("truthy={{");
+    expect(result.code).toContain("falsy={{");
+    expect(result.code).toContain('tag: "strong"');
+    expect(result.code).toContain('tag: "span"');
+    expect(result.code).toContain('kind: "style"');
+    expect(result.code).toContain('kind: "attribute"');
+    expect(result.code).toContain('kind: "text"');
+    expect(result.code).toContain("dependencies: [0, 1]");
+    expect(result.code).toMatch(/<output ref=\{[^}]+\.target\(0\)\}>/);
+    await expect(
+      transformWithEsbuild(result.code, "/app/Conditional.tsx", {
+        loader: "tsx",
+        jsx: "automatic",
+      }),
+    ).resolves.toMatchObject({
+      code: expect.stringContaining("farmBlocks.HostConditional"),
+    });
+  });
+
+  it("prepares logical empty branches but keeps unsafe branch structures with React", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function SafeFallbacks() {
+        const [visible, setVisible] = useState(false);
+        return (
+          <main>
+            <button onClick={() => setVisible(!visible)}>Toggle</button>
+            <div>{visible && <p data-visible={visible}>Visible</p>}</div>
+            <div>{visible ? <button onClick={() => setVisible(false)}>Close</button> : null}</div>
+            <div><small>Static sibling</small>{visible && <b>Visible</b>}</div>
+            <div data-visible={visible}>{visible && <i>Dynamic container</i>}</div>
+            <div onClick={() => setVisible(false)}>{visible && <em>Event container</em>}</div>
+          </main>
+        );
+      }
+    `);
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.compiled).toEqual(["SafeFallbacks"]);
+    expect(result.code.match(/farmBlocks\.HostConditional/g)).toHaveLength(1);
+    expect(result.code.match(/farmBlocks\.Conditional/g)).toHaveLength(4);
+    expect(result.code).toContain("logical");
+  });
+
   it.each([
     {
       name: "a custom component branch",

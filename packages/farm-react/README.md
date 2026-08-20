@@ -71,11 +71,26 @@ The current compiler handles components that it can prove have:
 
 The generated component preserves React ownership of initial placement, props, events, SSR, and
 hydration. Local state cells batch updates into a microtask and patch only compiler-known DOM
-targets. For an eligible conditional, the runtime refreshes one small internal React boundary
-instead of executing the user component again. React mounts, replaces, or removes the selected
-branch, so events, unmounting, SSR, hydration, and error boundaries keep React semantics. The one
-intentional post-mount ownership exception is a proven host-only keyed-row container, described
-below.
+targets. Two proven, dedicated host containers can transfer child ownership after mount:
+host-only conditional branches and host-only keyed rows. React still creates or hydrates their
+initial DOM. Anything outside those narrow contracts uses a small React-owned boundary or the
+complete original component.
+
+For a common dedicated conditional, no new component or annotation is required:
+
+```tsx
+<div className="status-slot">
+  {enabled ? <strong>Enabled {count}</strong> : <span>Disabled {count}</span>}
+</div>
+```
+
+When the conditional is the container's only meaningful child, the container has only static
+properties, and each branch is a statically known host tree without events, refs, custom components,
+or other dynamic structures, the compiler emits
+both host descriptors and their exact text/attribute/style bindings. After the initial React render
+or hydration, a same-branch update patches those bindings without replacing the element. A condition
+change creates, removes, or replaces only the selected branch. No marker node is added to SSR output.
+More complex conditional shapes keep the existing React-owned conditional boundary.
 
 For a common keyed map, no new API is required:
 
@@ -138,12 +153,14 @@ Generated callback refs give directly patched host elements stable private targe
 React-owned component may therefore return `null`, a fragment, or multiple host nodes without
 shifting an unrelated compiler binding. These refs do not add attributes to SSR output.
 
-Conditional blocks deliberately keep a host-rooted contract. Each non-empty branch must have one
-lowercase host root, and an empty ternary branch may be `null` or `false`. That host tree may contain
-nested host conditionals, keyed lists, and supported component islands. A custom component used as
-the branch root, hooks directly in branch expressions, fragments, refs, attribute spreads, and
-`dangerouslySetInnerHTML` fall back to the normal React component. Both branch expressions are
-isolated at build time, but the inactive branch is not pre-mounted or cached.
+Conditional blocks have two safe ownership levels. A dedicated container with exactly one proven
+host-only conditional child can use compiler-owned branch instances. Events, keys, custom
+components, fragments, refs, SVG, attribute spreads, `dangerouslySetInnerHTML`, nested dynamic
+blocks, and static siblings in that container keep React ownership. The more general React-owned
+conditional path still accepts supported nested conditionals, keyed lists, and component islands.
+An empty ternary branch may be `null` or `false`. The inactive branch is described at build time but
+is never pre-mounted or cached. If a logical `&&` evaluates to a number such as `0`, the runtime also
+falls back to React so JavaScript and React rendering semantics remain exact.
 
 All supported boundary types share one component-wide block graph and one ID sequence. A nested
 binding records its nearest conditional parent. If one state flush affects both an outer

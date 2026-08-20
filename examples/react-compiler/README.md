@@ -4,9 +4,9 @@ This production-browser experiment answers two questions:
 
 1. Why build this compiler? Eligible local `useState` updates can patch precomputed DOM targets
    without rerunning the component body or asking React to reconcile the same static tree again.
-2. Where must it stop? Eligible conditionals, complex keyed lists, and component islands use small
-   React-owned boundaries. Dedicated host-only keyed lists can use compiler-owned rows and LIS.
-   Effects, refs, unsupported list shapes, and other unproven structures stay on React.
+2. Where must it stop? Dedicated host-only conditionals and keyed lists can use compiler-owned
+   branches or rows. Complex conditionals, custom rows, and component islands use small React-owned
+   boundaries. Effects, refs, unsupported shapes, and other unproven structures stay on React.
 
 The default `compiler: true` configuration automatically considers components. No annotation is
 needed. A component can explicitly opt out with `"use no compiler"`.
@@ -38,8 +38,8 @@ assertions, checks for console/runtime errors and horizontal overflow, saves scr
 | Explicit `List`             | stateful rows reorder, update executions `0`            | —                                              | React preserves custom-row state by key inside the isolated boundary.  |
 | Calculated style bindings   | value `6`, progress `50%`, update executions `0`        | —                                              | Safe calls and individual CSS properties use prepared dependencies.    |
 | Controlled form bindings   | textarea/select/checkbox update, executions `0`         | —                                              | Form properties and textarea selection stay coherent.                  |
-| Logical conditional block  | branch mounts, updates, and unmounts; executions `0`    | —                                              | Only the isolated React block refreshes.                               |
-| Ternary conditional block  | `strong` and `span` replace each other; executions `0`  | —                                              | React preserves branch and event semantics without the outer rerender. |
+| Logical conditional block  | stable branch patches, mounts, and unmounts; executions `0` | —                                           | A proven host branch updates without React reconciliation.             |
+| Ternary conditional block  | `strong` and `span` replace each other; executions `0`     | —                                           | Only the compiler-owned branch is replaced.                            |
 | Composable nested blocks   | two lists, nested conditions, and one component island  | —                                              | One block graph mounts, updates, and cleans up nested subscriptions.    |
 
 The package runtime test also measures one equivalent update under a React `Profiler`:
@@ -94,14 +94,16 @@ rejected rather than transformed.
 ## Conditional block boundary
 
 The `07A` and `07B` cards exercise `condition && <host />` and
-`condition ? <host /> : <host />` in the production browser build. The compiler records each
-condition's state dependencies and lowers the child to a private React boundary. A matching state
-update refreshes that boundary while the user component's execution counter stays unchanged.
+`condition ? <host /> : <host />` as the only child of a dedicated host container. The compiler
+records each condition and prepares descriptors plus text/attribute/style bindings for both host
+branches. React creates or hydrates the initial branch. After mount, a same-branch update patches
+that existing element, while a condition change mounts, removes, or replaces only the branch. The
+production assertion checks that updating `07A` keeps the exact same branch DOM node.
 
-This does not pre-mount both branches or bypass React's event system. React still creates, replaces,
-and removes the selected host branch. A host branch may contain nested host conditionals, keyed-list
-boundaries, and supported component islands. Hooks directly in a branch, fragments, refs, spreads,
-and dangerous HTML intentionally fall back.
+This does not pre-mount both branches or bypass React's event system. Branch events, custom
+components, fragments, refs, SVG, keys, spreads, nested dynamic blocks, and dangerous HTML keep a
+React-owned conditional boundary or fall back to the original component. A numeric logical value
+such as `0 && <p />` also remounts through React so visible primitive output is preserved exactly.
 
 The `08` card combines those boundary types under one outer conditional. It also proves that a
 hidden outer block removes its inner subscriptions: updates made while hidden do no render work,

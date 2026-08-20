@@ -15,7 +15,7 @@ export function LogicalBlockPanel() {
         <span className="experiment-number">07A</span>
         <div>
           <h3>Mount or remove one block</h3>
-          <p>The build isolates an eligible logical branch at one known location.</p>
+          <p>The build prepares this host branch and its exact DOM bindings.</p>
         </div>
       </header>
       <div className="conditional-stage" aria-live="polite">
@@ -42,7 +42,11 @@ export function LogicalBlockPanel() {
         </div>
       </dl>
       <div className="button-row">
-        <button data-action="toggle-logical" type="button" onClick={() => setLoading(!loading)}>
+        <button
+          data-action="toggle-logical"
+          type="button"
+          onClick={() => setLoading((value) => !value)}
+        >
           {loading ? "Remove branch" : "Mount branch"}
         </button>
         <button
@@ -66,7 +70,7 @@ export function TernaryBlockPanel() {
         <span className="experiment-number">07B</span>
         <div>
           <h3>Replace one branch</h3>
-          <p>React swaps the prepared host branch without rerunning this component body.</p>
+          <p>The compiler swaps the prepared host branch without rerunning this component body.</p>
         </div>
       </header>
       <div className="conditional-stage" aria-live="polite">
@@ -87,7 +91,7 @@ export function TernaryBlockPanel() {
         </div>
         <div>
           <dt>Owner</dt>
-          <dd>React</dd>
+          <dd>Compiler</dd>
         </div>
         <div>
           <dt>Executions</dt>
@@ -96,7 +100,11 @@ export function TernaryBlockPanel() {
           </dd>
         </div>
       </dl>
-      <button data-action="toggle-ternary" type="button" onClick={() => setEnabled(!enabled)}>
+      <button
+        data-action="toggle-ternary"
+        type="button"
+        onClick={() => setEnabled((value) => !value)}
+      >
         Replace branch
       </button>
     </article>
@@ -112,8 +120,8 @@ export function ConditionalBlockExperiment() {
         <span>CONDITIONAL BLOCKS / PRODUCTION PROOF</span>
         <h2 id="conditional-blocks-title">Change the branch, not the whole component.</h2>
         <p>
-          Logical and ternary host branches get a small React-owned boundary. A local condition
-          refreshes that boundary while the surrounding compiled component stays still.
+          A dedicated host container starts with React for SSR and hydration. After mount, the
+          compiler patches, mounts, removes, or replaces its proven host-only branch directly.
         </p>
       </div>
       <div className="edge-grid edge-grid--paired">
