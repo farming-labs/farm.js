@@ -11,8 +11,8 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@farm.js/better-auth": "0.1.0-beta.49",
-    "@farm.js/core": "0.1.0-beta.49",
+    "@farm.js/better-auth": "0.1.0-beta.50",
+    "@farm.js/core": "0.1.0-beta.50",
     "@fontsource-variable/geist": "5.3.0",
     "@fontsource-variable/geist-mono": "5.3.0",
     "better-auth": "1.6.25",
@@ -22,7 +22,7 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
-    "@farm.js/cli": "0.1.0-beta.49",
+    "@farm.js/cli": "0.1.0-beta.50",
     "@types/node": "20.19.9",
     "@types/pg": "8.20.0",
     "@types/react": "^19.0.0",
