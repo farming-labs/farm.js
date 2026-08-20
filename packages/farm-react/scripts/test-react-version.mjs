@@ -446,6 +446,88 @@ const testSource = String.raw`
   assert.equal(keyedRowExecutions, initialKeyedRowExecutions);
   flushSync(() => keyedRowsRoot.unmount());
 
+  let derivedCollectionExecutions = 0;
+  const DerivedCollections = createCompiledComponent({
+    displayName: "CompatibilityDerivedCollections",
+    initialize: () => [
+      [
+        { id: "a", label: "Alpha", rank: 1, visible: true },
+        { id: "b", label: "Beta", rank: 3, visible: true },
+        { id: "c", label: "Gamma", rank: 2, visible: false },
+      ],
+      0,
+    ],
+    render(_props, state, blocks) {
+      derivedCollectionExecutions += 1;
+      const items = () =>
+        state[0]
+          .get()
+          .filter((item) => item.visible && item.rank >= Number(state[1].get()))
+          .toSorted((left, right) => left.rank - right.rank)
+          .slice(0, 2)
+          .toReversed();
+      return React.createElement(
+        "section",
+        null,
+        React.createElement(
+          "button",
+          {
+            onClick: () => {
+              state[0].set((value) =>
+                value.map((item) =>
+                  item.id === "b" ? { ...item, label: "Bravo", rank: 4 } : item,
+                ),
+              );
+              state[1].set(2);
+            },
+          },
+          "Update pipeline",
+        ),
+        React.createElement(blocks.KeyedRows, {
+          id: 0,
+          render: () =>
+            React.createElement(
+              "ol",
+              null,
+              items().map((item) =>
+                React.createElement("li", { key: item.id, "data-key": item.id }, item.label),
+              ),
+            ),
+          items,
+          rowKey: (item) => item.id,
+          create: (item) => ({
+            kind: "element",
+            tag: "li",
+            attributes: [{ name: "data-key", value: item.id }],
+            styles: [],
+            children: [item.label],
+          }),
+          bindings: [{ kind: "text", path: [], read: (item) => [item.label] }],
+        }),
+      );
+    },
+    bindings: [{ kind: "block", id: 0, dependencies: [0, 1] }],
+  });
+  const derivedCollectionContainer = document.createElement("div");
+  document.body.append(derivedCollectionContainer);
+  const derivedCollectionRoot = createRoot(derivedCollectionContainer);
+  flushSync(() => derivedCollectionRoot.render(React.createElement(DerivedCollections)));
+  const initialDerivedCollectionExecutions = derivedCollectionExecutions;
+  const originalBeta = derivedCollectionContainer.querySelector("[data-key='b']");
+  derivedCollectionContainer.querySelector("button").click();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(
+    [...derivedCollectionContainer.querySelectorAll("li")].map((row) => [
+      row.getAttribute("data-key"),
+      row.textContent,
+    ]),
+    [["b", "Bravo"]],
+  );
+  assert.equal(derivedCollectionContainer.querySelector("[data-key='b']"), originalBeta);
+  assert.equal(derivedCollectionExecutions, initialDerivedCollectionExecutions);
+  flushSync(() => derivedCollectionRoot.unmount());
+
   let islandExecutions = 0;
   let islandChildExecutions = 0;
   function IslandChild({ value }) {

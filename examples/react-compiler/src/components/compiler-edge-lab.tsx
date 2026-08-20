@@ -7,6 +7,7 @@ let compiledBatchExecutions = 0;
 let reactBatchExecutions = 0;
 let multipleBindingExecutions = 0;
 let automaticListExecutions = 0;
+let derivedCollectionExecutions = 0;
 let explicitListExecutions = 0;
 
 export function CompiledBatchExperiment() {
@@ -224,6 +225,117 @@ export function AutomaticKeyedListExperiment() {
   );
 }
 
+interface PipelineItem extends ListItem {
+  rank: number;
+  visible: boolean;
+}
+
+export function DerivedCollectionExperiment() {
+  const [items, setItems] = useState<PipelineItem[]>([
+    { id: "a", label: "Alpha", rank: 3, visible: true },
+    { id: "b", label: "Beta", rank: 1, visible: true },
+    { id: "c", label: "Gamma", rank: 2, visible: false },
+    { id: "d", label: "Delta", rank: 4, visible: true },
+  ]);
+  const [minimumRank, setMinimumRank] = useState(0);
+  const [pageSize, setPageSize] = useState(3);
+  const [descending, setDescending] = useState(false);
+  const visibleItems = items.filter(
+    (item) => item.visible && item.rank >= minimumRank,
+  );
+  const orderedItems = visibleItems.toSorted((left, right) =>
+    descending ? right.rank - left.rank : left.rank - right.rank,
+  );
+  const pageItems = orderedItems.slice(0, pageSize).toReversed();
+
+  return (
+    <article className="edge-card" data-experiment="derived-collection">
+      <header>
+        <span className="experiment-number">04B</span>
+        <div>
+          <h3>Derived keyed collection</h3>
+          <p>Filter, order, and window dependencies feed the same keyed-row runtime.</p>
+        </div>
+      </header>
+      <dl className="compact-metrics" aria-live="polite">
+        <div>
+          <dt>Minimum rank</dt>
+          <dd data-metric="minimum-rank">{minimumRank}</dd>
+        </div>
+        <div>
+          <dt>Direction</dt>
+          <dd data-metric="direction">{descending ? "descending" : "ascending"}</dd>
+        </div>
+        <div>
+          <dt>Executions</dt>
+          <dd data-metric="executions">
+            {typeof window === "undefined" ? 1 : ++derivedCollectionExecutions}
+          </dd>
+        </div>
+      </dl>
+      <ol data-list="derived-collection">
+        {pageItems.map((item) => (
+          <li data-key={item.id} data-rank={item.rank} key={item.id}>
+            {item.label}
+          </li>
+        ))}
+      </ol>
+      <div className="button-row">
+        <button
+          type="button"
+          data-action="filter-items"
+          onClick={() => setMinimumRank((value) => (value === 0 ? 2 : 0))}
+        >
+          Toggle filter
+        </button>
+        <button
+          type="button"
+          data-action="sort-items"
+          onClick={() => setDescending((value) => !value)}
+        >
+          Reverse order
+        </button>
+        <button
+          type="button"
+          data-action="resize-page"
+          onClick={() => setPageSize((value) => (value === 3 ? 2 : 3))}
+        >
+          Resize window
+        </button>
+        <button
+          type="button"
+          data-action="update-derived-row"
+          onClick={() =>
+            setItems((value) =>
+              value.map((item) =>
+                item.id === "a" ? { ...item, label: "Axiom", rank: 5 } : item,
+              ),
+            )
+          }
+        >
+          Update row
+        </button>
+        <button
+          type="button"
+          data-action="stress-items"
+          onClick={() =>
+            setItems(
+              Array.from({ length: 2048 }, (_, index) => ({
+                id: `stress-${index}`,
+                label: `Row ${index}`,
+                rank: index % 97,
+                visible: index % 2 === 0,
+              })),
+            )
+          }
+        >
+          Load 2,048 rows
+        </button>
+      </div>
+    </article>
+  );
+}
+
 function StatefulListRow({ item }: { item: ListItem }) {
   const [clicks, setClicks] = useState(0);
   return (
@@ -242,7 +354,7 @@ export function ExplicitKeyedListExperiment() {
   return (
     <article className="edge-card" data-experiment="keyed-explicit">
       <header>
-        <span className="experiment-number">04B</span>
+        <span className="experiment-number">04C</span>
         <div>
           <h3>Explicit List boundary</h3>
           <p>A key selector supports custom rows while React preserves their state.</p>
@@ -301,6 +413,7 @@ export function CompilerEdgeLab() {
       </div>
       <div className="edge-grid">
         <AutomaticKeyedListExperiment />
+        <DerivedCollectionExperiment />
         <ExplicitKeyedListExperiment />
       </div>
 

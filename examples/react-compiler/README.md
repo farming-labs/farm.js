@@ -35,6 +35,7 @@ assertions, checks for console/runtime errors and horizontal overflow, saves scr
 | Batched functional updates  | count `2`, snapshot `0`, update executions `0`          | count `2`, snapshot `0`, update executions `1` | The compiler preserves queued updater and event snapshot behavior.     |
 | Two state cells             | text/class/data/input all update, update executions `0` | —                                              | AOT dependency lists update only bindings affected by each state cell. |
 | Automatic keyed map         | stable row DOM, three LIS moves for a four-row reversal  | —                                              | AOT rows patch in place and use the minimum reorder moves.              |
+| Derived keyed collection    | 2,048 source rows filter, sort, slice, and reverse; executions `0` | —                                      | Collection dependencies feed keyed rows without rerunning the owner.    |
 | Explicit `List`             | stateful rows reorder, update executions `0`            | —                                              | React preserves custom-row state by key inside the isolated boundary.  |
 | Calculated style bindings   | value `6`, progress `50%`, update executions `0`        | —                                              | Safe calls and individual CSS properties use prepared dependencies.    |
 | Controlled form bindings   | textarea/select/checkbox update, executions `0`         | —                                              | Form properties and textarea selection stay coherent.                  |
@@ -80,11 +81,18 @@ use the same compiler-owned row path. A custom stateful row such as `<Row item={
 React-owned keyed boundary so React preserves its Hooks, events, lifecycle, and Fiber state. The
 outer compiled component can still avoid rerunning.
 
-The compiler-owned path requires one direct map or `List` as the only meaningful child of a nested
-host container. Row events, custom components, fragments, refs, SVG, static siblings in that same
-container, index or missing keys, chained maps, and other unproven shapes use React reconciliation.
-Duplicate keys discovered at runtime also remount that container through React. LIS reduces moves;
-it does not make insertions, removals, key comparison, or DOM updates disappear.
+The compiler-owned path requires one keyed map or `List` as the only meaningful child of a nested
+host container. Its collection may chain synchronous inline `filter`, `slice`, `toSorted`, and
+`toReversed` operations. The compiler records the state dependencies used by those operations and
+reruns the pipeline only when one changes; it still performs the necessary filtering or sorting.
+Mutating methods, external or async callbacks, Hooks, assignments, spread arguments, and unproven
+calls fall back to React. Row events, custom components, fragments, refs, SVG, static siblings in
+that same container, and index or missing keys also use React reconciliation. Duplicate keys
+discovered at runtime remount that container through React. LIS reduces moves; it does not make
+insertions, removals, key comparison, collection work, or DOM updates disappear.
+
+The example includes ES2023 TypeScript library declarations because `toSorted` and `toReversed`
+are standard runtime methods that the compiler preserves rather than polyfills.
 
 Calling a Hook directly inside `items.map(...)` or a `List` render callback is invalid React because
 the number or order of Hook calls can change. Put the Hook inside a separate `Row` component and key

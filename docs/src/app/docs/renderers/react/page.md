@@ -323,21 +323,21 @@ policy.
 The current compiler deliberately supports a smaller subset than general React. A component must
 satisfy all of these rules:
 
-| Area                | Current supported shape                                                                                                                     |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| Component discovery | A top-level, capitalized function declaration, function expression, or arrow component in application `.tsx` or `.jsx`.                     |
-| Function shape      | Synchronous, non-generator, non-generic block body with zero parameters, one props identifier, or flat object props destructuring.          |
-| Props               | Flat object destructuring supports shorthand names, aliases, and defaults. Nested, computed, and rest patterns fall back.                   |
-| Body                | Top-level `useState` declarations, optional compiler-safe derived values and synchronous named handlers, then one unconditional JSX return. |
-| State               | `const [value, setValue] = useState(initial)`, including lazy initializers, multiple cells, and queued functional updates.                  |
-| Root                | Exactly one lowercase host JSX element such as `button`, `section`, `input`, or `div`.                                                      |
-| Tree                | A statically known host tree around eligible conditional, keyed-list, compiled keyed-row, and component-island boundaries.                  |
-| Text bindings       | State-driven text in a leaf host element.                                                                                                   |
-| Attribute bindings  | Basic attributes, controlled form properties, and individual properties in one inline `style` object.                                       |
-| Events              | Inline handlers and synchronous `const` or function-declaration handlers, used directly or called inside an inline JSX handler.             |
-| Conditional blocks  | Logical/ternary host branches; dedicated host-only containers may use compiler-owned branch instances and bindings.                         |
-| Keyed lists         | Direct item-keyed maps and imported `List`; dedicated host-only containers may use compiler-owned rows and LIS.                             |
-| Component islands   | Stable imported or module-level component identifiers with explicit compiler-safe props and no JSX children, spread, `ref`, or `key`.       |
+| Area                | Current supported shape                                                                                                                                    |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Component discovery | A top-level, capitalized function declaration, function expression, or arrow component in application `.tsx` or `.jsx`.                                    |
+| Function shape      | Synchronous, non-generator, non-generic block body with zero parameters, one props identifier, or flat object props destructuring.                         |
+| Props               | Flat object destructuring supports shorthand names, aliases, and defaults. Nested, computed, and rest patterns fall back.                                  |
+| Body                | Top-level `useState` declarations, optional compiler-safe derived values and synchronous named handlers, then one unconditional JSX return.                |
+| State               | `const [value, setValue] = useState(initial)`, including lazy initializers, multiple cells, and queued functional updates.                                 |
+| Root                | Exactly one lowercase host JSX element such as `button`, `section`, `input`, or `div`.                                                                     |
+| Tree                | A statically known host tree around eligible conditional, keyed-list, compiled keyed-row, and component-island boundaries.                                 |
+| Text bindings       | State-driven text in a leaf host element.                                                                                                                  |
+| Attribute bindings  | Basic attributes, controlled form properties, and individual properties in one inline `style` object.                                                      |
+| Events              | Inline handlers and synchronous `const` or function-declaration handlers, used directly or called inside an inline JSX handler.                            |
+| Conditional blocks  | Logical/ternary host branches; dedicated host-only containers may use compiler-owned branch instances and bindings.                                        |
+| Keyed lists         | Item-keyed maps and imported `List`, including safe non-mutating collection pipelines; dedicated host-only containers may use compiler-owned rows and LIS. |
+| Component islands   | Stable imported or module-level component identifiers with explicit compiler-safe props and no JSX children, spread, `ref`, or `key`.                      |
 
 This component is eligible:
 
@@ -384,9 +384,11 @@ Derived values are expanded into the generated bindings, so they do not create a
 force a component rerender. They may use literals, props, state, operators, optional/member access,
 conditionals, templates, earlier derived values, and a small call whitelist. The whitelist contains
 `Boolean`, `Number`, `String`, and `Math.abs`, `ceil`, `floor`, `max`, `min`, `round`, `sign`, and
-`trunc`. A name is not treated as built-in when the component shadows it. Application helpers,
-prototype methods, `Math.random`, optional calls, assignments, identity-bearing object or array
-literals, functions, JSX, constructors, and other unproven expressions still fall back to React.
+`trunc`. Safe keyed collections additionally accept the non-mutating pipeline described below. A
+name is not treated as built-in when the component shadows it. Outside that pipeline, application
+helpers, prototype methods, `Math.random`, optional calls, assignments, identity-bearing object or
+array literals, functions, JSX, constructors, and other unproven expressions still fall back to
+React.
 
 For destructured props, the original component wrapper still performs JavaScript destructuring on
 every parent render. Defaults therefore apply only to `undefined`, aliases keep their normal local
@@ -485,6 +487,50 @@ subsequence (LIS) of the old row positions. Rows in that subsequence stay in pla
 surviving rows move. LIS is a runtime move planner over compiler-prepared rows, not a claim that the
 future contents of an array are known at build time.
 
+#### Derived collection pipelines
+
+The collection may be prepared through an inline, non-mutating pipeline before the final keyed
+`.map(...)` or before it is passed to `List`:
+
+```tsx
+const visibleItems = items.filter((item) => item.visible && item.rank >= minimumRank);
+const orderedItems = visibleItems.toSorted((left, right) => left.rank - right.rank);
+const pageItems = orderedItems.slice(offset, offset + pageSize).toReversed();
+
+return (
+  <ul>
+    {pageItems.map((item) => (
+      <li key={item.id}>{item.label}</li>
+    ))}
+  </ul>
+);
+```
+
+The compiler expands those derived locals, records the state cells used by the collection,
+predicate, comparator, and window arguments, and subscribes the keyed boundary to only those
+dependencies. When one changes, the pipeline runs once to produce the next collection. The existing
+keyed-row runtime then reuses surviving rows, patches their bindings, and applies LIS to the new key
+order. An unrelated state update does not rerun the pipeline or the outer component.
+
+The initial pipeline contract supports:
+
+- `filter` with one synchronous inline callback using an item and optional index;
+- `slice` with up to two compiler-safe arguments;
+- `toSorted` with no comparator or one synchronous inline two-item comparator;
+- `toReversed` without arguments; and
+- any sequence of those methods followed by one keyed `.map(...)` or used as `List each`.
+
+Callback bodies must contain one compiler-safe returned expression. Assignments, Hooks, async
+callbacks, spread arguments, calls to unproven helpers or prototype methods, external callbacks,
+and mutating methods such as `sort`, `reverse`, and `splice` keep the original React component. The
+compiler does not claim that filtering or sorting is free: it avoids unrelated component execution
+and React reconciliation, while the necessary collection work still runs when one of its own
+dependencies changes.
+
+Farm leaves these standard methods in the generated JavaScript; it does not inject a polyfill.
+Applications using `toSorted` or `toReversed` must target runtimes that provide them and include an
+ES2023 TypeScript library. `filter` and `slice` do not require that newer library.
+
 Use the public `List` component when the key should be separate from the row renderer, or when rows
 are custom components:
 
@@ -531,8 +577,8 @@ The compiler uses two keyed-list tiers:
 
 The first compiler-owned row contract is deliberately narrow:
 
-- The map must be a direct `collection.map(...)` with one synchronous inline callback returning one
-  React element and an explicit item-derived `key`.
+- The map must use one synchronous inline callback returning one React element and an explicit
+  item-derived `key`. Its collection may be direct or use the supported non-mutating pipeline.
 - An array-index key is rejected for compiler isolation because it does not preserve item identity
   across insertion, removal, or reordering.
 - The optimized `List` shape uses inline `by` and child functions, a compiler-safe `each`
@@ -544,8 +590,8 @@ The first compiler-owned row contract is deliberately narrow:
   properties, and individual inline style properties are supported.
 - Row events, custom components, fragments, refs, SVG, attribute spreads, dangerous HTML, and
   dynamic text mixed beside nested elements stay React-owned.
-- Chained expressions such as `items.filter(...).map(...)`, spread children, hooks in the callback,
-  and other unproven shapes fall back to normal React.
+- Unsupported or mutating collection methods, spread children, Hooks in callbacks, and other
+  unproven shapes fall back to normal React.
 
 Stable keys must be unique among siblings and come from the item's identity, such as a database ID.
 If duplicate keys appear at runtime, Farm remounts that list container through its original React
@@ -628,7 +674,7 @@ put Hooks inside a keyed row component.
 
 | Unsupported shape                                                                                            | Why React keeps ownership                                                          |
 | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
-| Unkeyed/index-keyed/chained maps or element arrays                                                           | Their structure or item identity is outside the keyed-list contract.               |
+| Unkeyed/index-keyed maps, unsupported or mutating collection pipelines, or element arrays                    | Their structure, purity, or item identity is outside the keyed-list contract.      |
 | Row events, components, fragments, refs, SVG, or mixed container children                                    | They require React ownership rather than compiler-created host rows.               |
 | Branch events, keys, components, fragments, refs, SVG, or nested blocks in a dedicated conditional container | They require the React-owned conditional path rather than compiler-created hosts.  |
 | Dynamic/member component types, component spreads, refs, keys, or children                                   | Their identity or ownership is outside the first component-island contract.        |
@@ -781,6 +827,10 @@ The package and example test suites verify more than generated code:
 - 1,000 deterministic object, array, and nullish component-prop transitions match normal React;
 - 1,000 deterministic randomized compiler-owned list operations produce the same ordered output as
   normal React while the list owner stays at one execution;
+- 5,000 deterministic filter, sort, slice, reverse, insertion, removal, and row-update transitions
+  produce the same keyed output as normal React while preserving surviving DOM rows;
+- the production browser experiment derives a keyed window from 2,048 source rows without
+  rerunning the owner component or corrupting the existing compiler experiments;
 - the public `List` renders iterable and nullish collections correctly with the compiler off;
 - the packaged runtime is exercised separately with React 18.3 and React 19;
 - boolean `data-*` and `aria-*` attributes keep React-compatible string values; and
