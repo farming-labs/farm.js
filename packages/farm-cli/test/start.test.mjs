@@ -37,7 +37,7 @@ test("resolves a start plan for the node target and maps port/host to Nitro env 
     assert.equal(plan.target, "node");
     assert.equal(plan.preset, "node-server");
     assert.equal(plan.serverEntry, serverEntry);
-    assert.deepEqual(plan.command, { command: "node", args: [serverEntry] });
+    assert.deepEqual(plan.command, { command: process.execPath, args: [serverEntry] });
     assert.deepEqual(plan.env, { NITRO_PORT: "4000", NITRO_HOST: "0.0.0.0" });
   });
 });
@@ -55,6 +55,23 @@ test("defaults to the node-server preset when no deploy target is configured", a
     assert.equal(plan.preset, "node-server");
     assert.equal(plan.serverEntry, serverEntry);
     assert.deepEqual(plan.env, {});
+  });
+});
+
+test("rejects presets without a known local server entry", async () => {
+  await withTempRoot("farm-cli-start-preset-", async (root) => {
+    await writeFile(
+      path.join(root, "farm.config.mjs"),
+      "export default { deploy: { preset: 'deno' } };\n",
+    );
+
+    await assert.rejects(createFarmStartPlan({ root }), (error) => {
+      assert.equal(error.name, "FarmStartError");
+      assert.equal(error.code, "UNSUPPORTED_PRESET");
+      assert.match(error.message, /deno/);
+      assert.match(error.message, /deploy\.target: "node"/);
+      return true;
+    });
   });
 });
 

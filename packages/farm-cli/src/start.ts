@@ -1,5 +1,6 @@
 import { loadConfig, logger, resolveDeployConfig, resolveDeployOutputPath } from "@farm.js/core";
 import { spawn } from "child_process";
+import { constants as osConstants } from "os";
 import { existsSync } from "fs";
 import path from "path";
 
@@ -79,7 +80,8 @@ export async function createFarmStartPlan(options: FarmStartOptions = {}): Promi
     preset,
     outputDir,
     serverEntry,
-    command: { command: "node", args: [serverEntry] },
+    // process.execPath avoids PATH lookup and Windows shim issues.
+    command: { command: process.execPath, args: [serverEntry] },
     env,
   };
 }
@@ -88,7 +90,7 @@ export async function startFarm(options: FarmStartOptions = {}): Promise<void> {
   const plan = await createFarmStartPlan(options);
   logger.info(`Starting Node server: node ${path.relative(plan.root, plan.serverEntry)}`);
 
-  const child = spawn(process.execPath, plan.command.args, {
+  const child = spawn(plan.command.command, plan.command.args, {
     cwd: plan.root,
     stdio: "inherit",
     env: { ...process.env, ...plan.env },
@@ -101,12 +103,20 @@ export async function startFarm(options: FarmStartOptions = {}): Promise<void> {
   };
   const cleanups = [forward("SIGINT"), forward("SIGTERM")];
 
-  await new Promise<void>((resolve, reject) => {
-    child.on("error", reject);
-    child.on("exit", (code, signal) => {
-      for (const cleanup of cleanups) cleanup();
-      if (!signal && code !== null) process.exitCode = code;
-      resolve();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      child.on("error", reject);
+      child.on("exit", (code, signal) => {
+        if (signal) {
+          // Conventional shell encoding for signal-terminated processes.
+          process.exitCode = 128 + (osConstants.signals[signal] ?? 1);
+        } else if (code !== null) {
+          process.exitCode = code;
+        }
+        resolve();
+      });
     });
-  });
+  } finally {
+    for (const cleanup of cleanups) cleanup();
+  }
 }
