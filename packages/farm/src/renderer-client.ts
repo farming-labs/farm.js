@@ -7,7 +7,7 @@ import {
   type FarmNavigationState,
   type FarmNavigateOptions,
 } from "./client/spa-router";
-import { FARM_URL_SEARCH_CHANGE_EVENT } from "./client/url-search-sync";
+import { subscribeHistoryChange } from "./client/history-sync";
 import { getFarmClientDataCache, type FarmClientCacheStatus } from "./client-cache";
 import type { ServerFn } from "./server-fn";
 import type { ServerQuery } from "./server-query";
@@ -76,13 +76,11 @@ export function createRendererRouter(options: FarmRendererRouterOptions = {}): F
         listener();
       };
       const unsubscribeNavigation = router.subscribeNavigation(notify);
-      window.addEventListener("popstate", notify);
-      window.addEventListener(FARM_URL_SEARCH_CHANGE_EVENT, notify);
+      const unsubscribeHistory = subscribeHistoryChange(notify);
       read();
       return () => {
         unsubscribeNavigation();
-        window.removeEventListener("popstate", notify);
-        window.removeEventListener(FARM_URL_SEARCH_CHANGE_EVENT, notify);
+        unsubscribeHistory();
       };
     },
     push(href, navigateOptions) {

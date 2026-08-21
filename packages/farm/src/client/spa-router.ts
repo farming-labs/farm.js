@@ -1,6 +1,7 @@
 "use client";
 
 import { readDeferredDataResponse } from "../deferred";
+import { notifyHistoryChange } from "./history-sync";
 import {
   createFarmDeploymentMismatchError,
   createFarmDeploymentRequestHeaders,
@@ -697,7 +698,7 @@ export class SPARouter {
       window.history.pushState(nextState, "", url);
     }
 
-    window.dispatchEvent(new PopStateEvent("popstate", { state: nextState }));
+    notifyHistoryChange("page-state");
   }
 
   /**

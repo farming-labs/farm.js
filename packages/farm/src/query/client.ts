@@ -7,7 +7,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { notifyUrlSearchObservers } from "../client/url-search-sync";
+import { notifyHistoryChange } from "../client/history-sync";
 import { emitter } from "./sync";
 export { parseRouteParams, loadRouteParams, type RouteParamsInput } from "./params";
 
@@ -100,7 +100,7 @@ const updateURL = (
         emitter.emitUpdate(actualSearchParams);
       }
 
-      notifyUrlSearchObservers(shallow);
+      if (shallow) notifyHistoryChange("url-search");
 
       if (scroll) {
         window.scrollTo(0, 0);
