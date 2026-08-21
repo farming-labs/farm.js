@@ -16,6 +16,8 @@
     "@farming-labs/docs": "0.2.110",
     "@farming-labs/farmjs": "0.2.110",
     "@farming-labs/theme": "0.2.110",
+    "@farming-labs/theme-production": "npm:@farming-labs/theme@0.2.99",
+    "@farming-labs/theme-runtime": "https://pkg.pr.new/farming-labs/docs/@farming-labs/theme@490",
     "@prisma/client": "6.7.0",
     "better-call": "^1.0.19",
     "lucide-react": "1.23.0",

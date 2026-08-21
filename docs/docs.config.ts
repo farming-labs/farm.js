@@ -1,5 +1,5 @@
 import { defineDocs } from "@farming-labs/docs";
-import { pixelBorder } from "@farming-labs/theme/pixel-border";
+import { pixelBorder } from "@farming-labs/theme-production/pixel-border";
 import type { FarmDocsSidebarItem, FarmDocsSocialImageConfig } from "@farm.js/core";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
