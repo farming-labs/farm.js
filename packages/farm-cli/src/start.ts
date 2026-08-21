@@ -75,7 +75,7 @@ export async function createFarmStartPlan(options: FarmStartOptions = {}): Promi
 
   return {
     root,
-    target,
+    target: "node",
     preset,
     outputDir,
     serverEntry,
