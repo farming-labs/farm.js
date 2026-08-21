@@ -48,6 +48,7 @@ import { FARM_VERSION } from "./version";
 import { createDeferredDataResponse } from "./deferred";
 import { _withAfterNodeMiddleware } from "./after";
 import { shouldBypassFarmRouterForDottedPath } from "./dev-static";
+import { findClientServerFnViolation, formatServerFnBoundaryError } from "./server-query-boundary";
 import {
   createFarmDeploymentMismatchResponse,
   FARM_DEPLOYMENT_ID_HEADER,
@@ -2554,6 +2555,21 @@ export const manifest = getManifest();
     },
 
     async transform(code, id, transformOptions) {
+      if (!transformOptions?.ssr) {
+        const currentConfig = (farmApp?.getConfig() ?? options) as FarmVitePluginOptions;
+        if (currentConfig.experimental?.serverActions !== true) {
+          // Without the server-function transform there is no client stub for
+          // server queries: bundling the defining module into the browser
+          // executes the server handler there. Fail with an actionable
+          // boundary error instead of Vite's Node-builtin externalization
+          // failure at runtime.
+          const violation = findClientServerFnViolation(code, id);
+          if (violation) {
+            this.error(formatServerFnBoundaryError(violation, id));
+          }
+        }
+      }
+
       if (typeof imageImports.transform === "function") {
         const imageModule = await imageImports.transform.call(this, code, id, transformOptions);
         if (imageModule) return imageModule;

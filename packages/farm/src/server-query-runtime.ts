@@ -40,6 +40,30 @@ const serverQueryClientState = (serverQueryClientGlobal[FARM_SERVER_QUERY_CLIENT
   active: [],
 });
 
+// Global symbol registry key set on raw server query implementations by
+// createServerQuery. Referenced via Symbol.for instead of importing
+// server-query.ts, which would pull the server handler pipeline into the
+// client bundle.
+const RAW_SERVER_QUERY_SYMBOL = Symbol.for("farm.server-query");
+
+/**
+ * A query reaching the browser should be a transformed server reference. The
+ * raw implementation carries the server query symbol; executing it here would
+ * run the server handler in the browser (#408). During SSR the raw
+ * implementation is expected and runs directly.
+ */
+function assertNotRawServerQueryInBrowser(query: unknown): void {
+  if (typeof window === "undefined" || typeof document === "undefined") return;
+  if (!(query as Record<symbol, unknown> | null)?.[RAW_SERVER_QUERY_SYMBOL]) return;
+  throw new Error(
+    [
+      "useServerQuery received a raw server query implementation in the browser.",
+      "Server query handlers run only on the server. Enable the server-function transform (add @farm.js/plugin/rsc and set experimental.serverActions: true in farm.config.ts) so client imports become server references,",
+      "or call the query from server code / an API route (createAPIClient) instead.",
+    ].join("\n"),
+  );
+}
+
 export function beginFarmServerQueryAction(
   actionId: string,
   args: readonly unknown[],
@@ -134,6 +158,7 @@ async function executeServerQuery<TInput, TData>(
   provisionalKey: string,
   options: ServerQueryFetchOptions,
 ): Promise<TData> {
+  assertNotRawServerQueryInBrowser(query);
   const cache = getFarmClientDataCache();
   const inflight = cache.getInflight<TData>(provisionalKey);
   if (inflight) return inflight;
