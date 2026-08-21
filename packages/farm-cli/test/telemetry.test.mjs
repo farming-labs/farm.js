@@ -7,7 +7,10 @@ import test from "node:test";
 import {
   getFarmTelemetryConfigFile,
   getFarmTelemetryStatus,
+  resolveFarmCreateAppTelemetryCommand,
+  resolveFarmTelemetryCommand,
   setFarmTelemetryEnabled,
+  trackFarmCreateAppCommand,
   trackFarmCommand,
   trackFarmProjectCreated,
 } from "../dist/telemetry.mjs";
@@ -130,6 +133,53 @@ test("explicit telemetry sends only the strict command payload", async () => {
     assert.equal(payload.eventType, "command_invoked");
     assert.equal(payload.command, "deploy");
     assert.equal(JSON.stringify(payload).includes(process.cwd()), false);
+  });
+});
+
+test("published CLI command paths are explicitly allowlisted", () => {
+  for (const command of [
+    "dev",
+    "build",
+    "auth:migrate",
+    "upgrade",
+    "generate",
+    "doctor",
+    "explain",
+    "preview",
+    "migrate",
+    "cron:list",
+    "cron:run",
+    "add:integration",
+    "deploy",
+  ]) {
+    assert.equal(resolveFarmTelemetryCommand(command), command);
+  }
+
+  assert.equal(resolveFarmTelemetryCommand("telemetry:disable"), undefined);
+  assert.equal(resolveFarmCreateAppTelemetryCommand("create"), "create");
+  assert.equal(resolveFarmCreateAppTelemetryCommand("list-templates"), "list-templates");
+  assert.equal(resolveFarmCreateAppTelemetryCommand("unknown"), undefined);
+});
+
+test("create-app commands use the generator package identity", async () => {
+  await withTelemetryEnvironment(async () => {
+    process.env.FARM_TELEMETRY = "1";
+    let payload;
+    globalThis.fetch = async (_url, init) => {
+      payload = JSON.parse(init.body);
+      return { ok: true };
+    };
+
+    await trackFarmCreateAppCommand({
+      command: "list-templates",
+      packageVersion: "0.1.0-beta.52",
+    });
+
+    assert.equal(payload.eventType, "command_invoked");
+    assert.equal(payload.source, "create-app");
+    assert.equal(payload.packageName, "@farm.js/create-app");
+    assert.equal(payload.command, "list-templates");
+    assert.equal(payload.deployTarget, undefined);
   });
 });
 

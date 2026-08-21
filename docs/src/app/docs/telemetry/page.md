@@ -6,10 +6,11 @@ section: "Reference"
 
 # Anonymous telemetry
 
-Farm.js includes optional anonymous product telemetry in `@farm.js/cli` and
-`@farm.js/create-app`. Telemetry is **enabled by default** for interactive local commands. It helps the
-maintainers understand which coarse framework paths are useful and where compatibility work should
-be focused.
+Farm.js includes optional anonymous product telemetry in both published CLI packages:
+`@farm.js/cli` (`farm`) and `@farm.js/create-app` (the generator behind commands such as
+`pnpm create @farm.js/app`). Telemetry is **enabled by default** for interactive local commands. It
+helps the maintainers understand which coarse framework paths are useful and where compatibility
+work should be focused.
 
 This is separate from [application observability](/docs/observability). OpenTelemetry describes what
 your application does and is configured by the application owner. Farm.js product telemetry only
@@ -49,12 +50,17 @@ The preference file is stored at:
 
 ## Data that is sent
 
-Farm currently sends two versioned event types:
+Farm currently sends two versioned event types across both CLI packages:
 
-| Event             | Fields                                                                                        |
-| ----------------- | --------------------------------------------------------------------------------------------- |
-| `command_invoked` | Allowlisted command, optional deploy target, Farm package/version, Node major, OS, CPU class. |
-| `project_created` | Allowlisted starter, renderer, package manager, TypeScript/install booleans, runtime fields.  |
+| Event             | Fields                                                                                                  |
+| ----------------- | ------------------------------------------------------------------------------------------------------- |
+| `command_invoked` | Allowlisted command from `farm` or `create-farm-app`, package/version, optional deploy target, runtime. |
+| `project_created` | Allowlisted starter, renderer, package manager, TypeScript/install booleans, runtime fields.            |
+
+The `farm` binary records each actionable command path, including nested commands such as
+`auth:migrate`, `cron:list`, `cron:run`, and `add:integration`. The app generator records `create`
+or `list-templates`, and a completed scaffold also records `project_created`. Help, version, and the
+`farm telemetry` privacy-control commands do not emit events.
 
 Every request also has a random event ID for deduplication and the random local installation ID.
 The server immediately converts the installation ID into an HMAC hash using a server-only salt;

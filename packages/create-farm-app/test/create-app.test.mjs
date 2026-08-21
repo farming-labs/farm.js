@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
+import { once } from "node:events";
 import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -65,6 +67,55 @@ test("lists every integration starter from the CLI", () => {
     "workos",
   ]) {
     assert.match(output, new RegExp(`\\b${template}\\b`));
+  }
+});
+
+test("tracks the create-app list-templates command with the generator package identity", async () => {
+  const configDir = await mkdtemp(path.join(os.tmpdir(), "create-farm-app-telemetry-"));
+  const events = [];
+  const server = createServer((request, response) => {
+    const chunks = [];
+    request.on("data", (chunk) => chunks.push(chunk));
+    request.on("end", () => {
+      events.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+      response.writeHead(202, { "content-type": "application/json" });
+      response.end('{"ok":true}');
+    });
+  });
+
+  try {
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+
+    const child = spawn(
+      process.execPath,
+      [path.join(packageDir, "bin/create-farm-app.js"), "--list-templates"],
+      {
+        env: {
+          ...process.env,
+          DO_NOT_TRACK: "0",
+          FARM_TELEMETRY: "1",
+          FARM_TELEMETRY_CONFIG_DIR: configDir,
+          FARM_TELEMETRY_DISABLED: "0",
+          FARM_TELEMETRY_ENDPOINT: `http://127.0.0.1:${address.port}/events`,
+        },
+        stdio: "pipe",
+      },
+    );
+    const [exitCode] = await once(child, "close");
+
+    assert.equal(exitCode, 0);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].eventType, "command_invoked");
+    assert.equal(events[0].source, "create-app");
+    assert.equal(events[0].packageName, "@farm.js/create-app");
+    assert.equal(events[0].command, "list-templates");
+  } finally {
+    server.close();
+    await once(server, "close");
+    await rm(configDir, { recursive: true, force: true });
   }
 });
 

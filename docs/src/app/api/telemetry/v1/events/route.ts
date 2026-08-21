@@ -10,7 +10,7 @@ const MAX_RATE_LIMIT_ENTRIES = 4_096;
 const PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1_000;
 const DEFAULT_RETENTION_DAYS = 90;
 
-const commands = [
+const farmCommands = [
   "dev",
   "build",
   "auth:migrate",
@@ -25,6 +25,8 @@ const commands = [
   "add:integration",
   "deploy",
 ] as const;
+
+const createAppCommands = ["create", "list-templates"] as const;
 
 const templates = [
   "basic",
@@ -60,14 +62,24 @@ const runtimeFields = {
   architecture: z.enum(["arm64", "x64", "other"]),
 };
 
-const commandEventSchema = z
+const farmCommandEventSchema = z
   .object({
     ...runtimeFields,
     eventType: z.literal("command_invoked"),
     source: z.literal("cli"),
     packageName: z.literal("@farm.js/cli"),
-    command: z.enum(commands),
+    command: z.enum(farmCommands),
     deployTarget: z.enum(["vercel", "cloudflare", "netlify", "node", "custom"]).optional(),
+  })
+  .strict();
+
+const createAppCommandEventSchema = z
+  .object({
+    ...runtimeFields,
+    eventType: z.literal("command_invoked"),
+    source: z.literal("create-app"),
+    packageName: z.literal("@farm.js/create-app"),
+    command: z.enum(createAppCommands),
   })
   .strict();
 
@@ -85,8 +97,9 @@ const projectCreatedEventSchema = z
   })
   .strict();
 
-const telemetryEventSchema = z.discriminatedUnion("eventType", [
-  commandEventSchema,
+const telemetryEventSchema = z.union([
+  farmCommandEventSchema,
+  createAppCommandEventSchema,
   projectCreatedEventSchema,
 ]);
 
@@ -155,7 +168,7 @@ function databaseRecord(event: TelemetryEvent, hash: string) {
     packageName: event.packageName,
     packageVersion: event.packageVersion,
     command: event.eventType === "command_invoked" ? event.command : null,
-    deployTarget: event.eventType === "command_invoked" ? event.deployTarget : null,
+    deployTarget: "deployTarget" in event ? event.deployTarget : null,
     template: event.eventType === "project_created" ? event.template : null,
     renderer: event.eventType === "project_created" ? event.renderer : null,
     packageManager: event.eventType === "project_created" ? event.packageManager : null,

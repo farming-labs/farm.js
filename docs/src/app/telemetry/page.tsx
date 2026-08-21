@@ -34,6 +34,7 @@ type RecentEvent = {
   id: string;
   eventType: string;
   source: string;
+  packageName: string;
   packageVersion: string;
   command: string | null;
   packageManager: string | null;
@@ -54,6 +55,7 @@ type TelemetryData =
       projectsCreated: number;
       recentEvents: RecentEvent[];
       eventTypes: GroupCount[];
+      packages: GroupCount[];
       commands: GroupCount[];
       versions: GroupCount[];
       templates: GroupCount[];
@@ -144,6 +146,7 @@ async function loadTelemetryData(limit: number): Promise<TelemetryData> {
       projectsCreated,
       recentEvents,
       eventTypeRows,
+      packageRows,
       commandRows,
       versionRows,
       templateRows,
@@ -165,6 +168,7 @@ async function loadTelemetryData(limit: number): Promise<TelemetryData> {
           id: true,
           eventType: true,
           source: true,
+          packageName: true,
           packageVersion: true,
           command: true,
           packageManager: true,
@@ -178,6 +182,11 @@ async function loadTelemetryData(limit: number): Promise<TelemetryData> {
       }),
       prisma.farmTelemetryEvent.groupBy({
         by: ["eventType"],
+        _count: { _all: true },
+        _max: { createdAt: true },
+      }),
+      prisma.farmTelemetryEvent.groupBy({
+        by: ["packageName"],
         _count: { _all: true },
         _max: { createdAt: true },
       }),
@@ -227,6 +236,7 @@ async function loadTelemetryData(limit: number): Promise<TelemetryData> {
       eventTypes: groups(
         eventTypeRows.map((row) => ({ ...row, key: row.eventType })) as GroupRow[],
       ),
+      packages: groups(packageRows.map((row) => ({ ...row, key: row.packageName })) as GroupRow[]),
       commands: groups(commandRows.map((row) => ({ ...row, key: row.command })) as GroupRow[]),
       versions: groups(
         versionRows.map((row) => ({ ...row, key: row.packageVersion })) as GroupRow[],
@@ -488,6 +498,7 @@ export default async function TelemetryPage({ searchParams }: TelemetryPageProps
 
         <section className="mt-3 grid gap-3 xl:grid-cols-2 2xl:grid-cols-3">
           <GroupTable title="Event types" rows={data.eventTypes} />
+          <GroupTable title="CLI packages" rows={data.packages} />
           <GroupTable title="CLI commands" rows={data.commands} />
           <GroupTable title="Farm versions" rows={data.versions} />
           <GroupTable title="Starter templates" rows={data.templates} />
@@ -513,7 +524,7 @@ export default async function TelemetryPage({ searchParams }: TelemetryPageProps
                   <th className="px-4 py-2 font-normal">Received</th>
                   <th className="px-4 py-2 font-normal">Event</th>
                   <th className="px-4 py-2 font-normal">Detail</th>
-                  <th className="px-4 py-2 font-normal">Version</th>
+                  <th className="px-4 py-2 font-normal">Package</th>
                   <th className="px-4 py-2 font-normal">Source</th>
                   <th className="px-4 py-2 font-normal">Runtime</th>
                 </tr>
@@ -532,7 +543,7 @@ export default async function TelemetryPage({ searchParams }: TelemetryPageProps
                         </td>
                         <td className="px-4 py-2.5 font-mono text-xs text-white/70">{detail}</td>
                         <td className="px-4 py-2.5 font-mono text-xs text-white/70">
-                          {event.packageVersion}
+                          {event.packageName}@{event.packageVersion}
                         </td>
                         <td className="px-4 py-2.5 font-mono text-xs text-white/55">
                           {event.source}
