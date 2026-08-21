@@ -97,7 +97,9 @@ function tryPublishPackage(pkg) {
   } catch (error) {
     const output = `${error.stdout ?? ""}${error.stderr ?? ""}${error.message ?? ""}`;
     if (isRetryableStagedPublishError(output)) {
-      console.log(`${pkg.name}@${pkg.version} is staged on the registry; waiting for it to finalize.`);
+      console.log(
+        `${pkg.name}@${pkg.version} is staged on the registry; waiting for it to finalize.`,
+      );
       return;
     }
     throw new Error(`Failed to republish ${pkg.name}@${pkg.version}:\n${output}`);
