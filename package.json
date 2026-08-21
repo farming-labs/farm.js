@@ -12,7 +12,7 @@
   "scripts": {
     "build": "pnpm -r --filter \"./packages/*\" build",
     "dev": "turbo --filter \"./packages/*\" dev",
-    "test": "node --test scripts/release-beta.test.js && node scripts/test-packages.js",
+    "test": "node --test scripts/release-beta.test.js scripts/publish-beta.test.js && node scripts/test-packages.js",
     "test:farm": "pnpm --filter @farm.js/core test",
     "test:renderers": "node scripts/test-renderers.mjs",
     "test:ci": "node scripts/run-tests.js",
@@ -52,7 +52,7 @@
     "release:canary": "bumpp --preid canary && pnpm run publish:canary",
     "publish:dry-run": "pnpm -r --filter \"./packages/*\" publish --dry-run --access public --tag beta --publish-branch main",
     "publish:latest": "pnpm -r --filter \"./packages/*\" publish --access public --tag latest --publish-branch main",
-    "publish:beta": "pnpm -r --filter \"./packages/*\" publish --access public --tag beta --publish-branch main && pnpm run dist-tags:promote-betas",
+    "publish:beta": "node scripts/publish-beta.js",
     "publish:canary": "pnpm -r --filter \"./packages/*\" publish --access public --tag canary --publish-branch main",
     "dist-tags:promote-betas": "node scripts/promote-betas.js"
   },
