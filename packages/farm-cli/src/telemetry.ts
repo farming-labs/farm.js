@@ -24,6 +24,8 @@ const FARM_COMMANDS = [
   "deploy",
 ] as const;
 
+const CREATE_APP_COMMANDS = ["create", "list-templates"] as const;
+
 const FARM_TEMPLATES = [
   "basic",
   "react-compiler",
@@ -49,6 +51,7 @@ const PACKAGE_MANAGERS = ["npm", "pnpm", "yarn", "bun"] as const;
 const DEPLOY_TARGETS = ["vercel", "cloudflare", "netlify", "node", "custom"] as const;
 
 export type FarmTelemetryCommand = (typeof FARM_COMMANDS)[number];
+export type FarmCreateAppTelemetryCommand = (typeof CREATE_APP_COMMANDS)[number];
 export type FarmTelemetryTemplate = (typeof FARM_TEMPLATES)[number];
 export type FarmTelemetryRenderer = (typeof RENDERERS)[number];
 export type FarmTelemetryPackageManager = (typeof PACKAGE_MANAGERS)[number];
@@ -84,6 +87,11 @@ export interface FarmCommandTelemetryInput {
   deployTarget?: string;
 }
 
+export interface FarmCreateAppCommandTelemetryInput {
+  command: FarmCreateAppTelemetryCommand;
+  packageVersion: string;
+}
+
 export interface FarmProjectCreatedTelemetryInput {
   packageVersion: string;
   template?: string;
@@ -106,11 +114,21 @@ export interface FarmTelemetryStatus {
 type FarmTelemetryEvent =
   | (FarmTelemetryEventBase & {
       eventType: "command_invoked";
+      source: "cli";
+      packageName: "@farm.js/cli";
       command: FarmTelemetryCommand;
       deployTarget?: FarmTelemetryDeployTarget;
     })
   | (FarmTelemetryEventBase & {
+      eventType: "command_invoked";
+      source: "create-app";
+      packageName: "@farm.js/create-app";
+      command: FarmCreateAppTelemetryCommand;
+    })
+  | (FarmTelemetryEventBase & {
       eventType: "project_created";
+      source: "create-app";
+      packageName: "@farm.js/create-app";
       template?: FarmTelemetryTemplate;
       renderer?: FarmTelemetryRenderer;
       packageManager?: FarmTelemetryPackageManager;
@@ -321,6 +339,14 @@ export function resolveFarmTelemetryCommand(value: string): FarmTelemetryCommand
     : undefined;
 }
 
+export function resolveFarmCreateAppTelemetryCommand(
+  value: string,
+): FarmCreateAppTelemetryCommand | undefined {
+  return (CREATE_APP_COMMANDS as readonly string[]).includes(value)
+    ? (value as FarmCreateAppTelemetryCommand)
+    : undefined;
+}
+
 export async function trackFarmCommand(input: FarmCommandTelemetryInput): Promise<void> {
   const deployTarget = allowlisted(input.deployTarget, DEPLOY_TARGETS);
   await track({
@@ -330,6 +356,20 @@ export async function trackFarmCommand(input: FarmCommandTelemetryInput): Promis
     packageVersion: sanitizeVersion(input.packageVersion),
     command: input.command,
     ...(deployTarget ? { deployTarget } : {}),
+  });
+}
+
+export async function trackFarmCreateAppCommand(
+  input: FarmCreateAppCommandTelemetryInput,
+): Promise<void> {
+  const command = allowlisted(input.command, CREATE_APP_COMMANDS);
+  if (!command) return;
+  await track({
+    eventType: "command_invoked",
+    source: "create-app",
+    packageName: "@farm.js/create-app",
+    packageVersion: sanitizeVersion(input.packageVersion),
+    command,
   });
 }
 

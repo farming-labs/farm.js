@@ -1,6 +1,11 @@
 declare module "@farm.js/cli/telemetry" {
   export function showFarmTelemetryNotice(): Promise<void>;
 
+  export function trackFarmCreateAppCommand(input: {
+    command: "create" | "list-templates";
+    packageVersion: string;
+  }): Promise<void>;
+
   export function trackFarmProjectCreated(input: {
     packageVersion: string;
     template?: string;
