@@ -6,6 +6,7 @@ import {
   type FarmNavigationBlockerContext,
   type FarmNavigationState,
 } from "./spa-router";
+import { subscribeUrlSearchObservers } from "./url-search-sync";
 import { getFarmI18nClientState } from "../i18n/client-runtime";
 import { stripFarmLocaleFromPathname } from "../i18n/routing";
 
@@ -55,8 +56,8 @@ export function useRouter(options: UseRouterOptions = {}) {
     };
 
     handlePopState();
-    window.addEventListener("popstate", handlePopState);
-    return () => window.removeEventListener("popstate", handlePopState);
+    const unsubscribe = subscribeUrlSearchObservers(handlePopState);
+    return unsubscribe;
   }, [basePath, routeMatcher]);
 
   const push = (href: string) => {

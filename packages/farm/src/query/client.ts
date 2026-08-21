@@ -7,6 +7,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { notifyUrlSearchObservers } from "../client/url-search-sync";
 import { emitter } from "./sync";
 export { parseRouteParams, loadRouteParams, type RouteParamsInput } from "./params";
 
@@ -79,10 +80,12 @@ const updateURL = (
 
   if (newUrl !== currentUrl) {
     const update = () => {
+      const historyState = window.history.state;
+
       if (history === "replaceState") {
-        window.history.replaceState(null, "", newUrl);
+        window.history.replaceState(historyState, "", newUrl);
       } else {
-        window.history.pushState(null, "", newUrl);
+        window.history.pushState(historyState, "", newUrl);
       }
 
       if (emitUpdate) {
@@ -90,11 +93,7 @@ const updateURL = (
         emitter.emitUpdate(actualSearchParams);
       }
 
-      if (shallow) {
-        setTimeout(() => {
-          window.dispatchEvent(new PopStateEvent("popstate"));
-        }, 0);
-      }
+      notifyUrlSearchObservers(shallow);
 
       if (scroll) {
         window.scrollTo(0, 0);

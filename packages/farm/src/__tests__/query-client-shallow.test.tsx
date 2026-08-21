@@ -1,0 +1,322 @@
+/**
+ * @vitest-environment jsdom
+ */
+import { act, createElement } from "react";
+import { createRoot } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useSearchParams } from "../navigation";
+import { pushState as pushFarmPageState, readPageState, SPARouter } from "../client/spa-router";
+import { usePageState } from "../client/router";
+import {
+  FARM_URL_SEARCH_CHANGE_EVENT,
+  notifyUrlSearchObservers,
+} from "../client/url-search-sync";
+import { asString, useQueryState, useQueryStates } from "../query/client";
+
+describe("useQueryState shallow routing", () => {
+  let container: HTMLDivElement;
+  let root: ReturnType<typeof createRoot> | undefined;
+  let spaRouter: SPARouter | undefined;
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    window.history.replaceState(null, "", "/");
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+  });
+
+  afterEach(() => {
+    if (root) {
+      act(() => {
+        root?.unmount();
+      });
+    }
+    container.remove();
+    root = undefined;
+    spaRouter?.destroy();
+    spaRouter = undefined;
+    delete (window as any).__FARM_SPA_ROUTER__;
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+    delete (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
+  });
+
+  it("dispatches synthetic popstate when shallow is true and no Farm router is installed", async () => {
+    vi.useFakeTimers();
+    const popstate = vi.fn();
+    window.addEventListener("popstate", popstate);
+
+    let setUrl!: (value: string | null) => void;
+
+    function App() {
+      const [, set] = useQueryState("url", asString);
+      setUrl = set;
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+
+    act(() => {
+      setUrl("https://example.com");
+    });
+
+    act(() => {
+      vi.runAllTimers();
+    });
+
+    expect(window.location.search).toBe("?url=https%3A%2F%2Fexample.com");
+    expect(popstate).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not dispatch synthetic popstate when shallow is false", async () => {
+    vi.useFakeTimers();
+    const popstate = vi.fn();
+    window.addEventListener("popstate", popstate);
+
+    let setUrl!: (value: string | null) => void;
+
+    function App() {
+      const [, set] = useQueryState("url", asString, { shallow: false });
+      setUrl = set;
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+
+    act(() => {
+      setUrl("https://example.com");
+    });
+
+    act(() => {
+      vi.runAllTimers();
+    });
+
+    expect(window.location.search).toBe("?url=https%3A%2F%2Fexample.com");
+    expect(popstate).not.toHaveBeenCalled();
+  });
+
+  it("does not trigger SPA navigation when shallow is true and Farm router is installed", async () => {
+    vi.useFakeTimers();
+    const popstate = vi.fn();
+    const urlSearchChange = vi.fn();
+    window.addEventListener("popstate", popstate);
+    window.addEventListener(FARM_URL_SEARCH_CHANGE_EVENT, urlSearchChange);
+
+    const fetchPage = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            props: {},
+            modulePath: "/src/app/page.tsx",
+            metadata: { title: "Next" },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchPage);
+
+    spaRouter = new SPARouter({ scrollRestoration: false });
+    const onNavigate = vi.fn();
+    spaRouter.setNavigationHandler(onNavigate);
+    (window as any).__FARM_SPA_ROUTER__ = spaRouter;
+
+    let setUrl!: (value: string | null) => void;
+
+    function App() {
+      const [, set] = useQueryState("url", asString);
+      setUrl = set;
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+
+    act(() => {
+      setUrl("https://example.com");
+    });
+
+    await act(async () => {
+      vi.runAllTimers();
+      await Promise.resolve();
+    });
+
+    expect(window.location.search).toBe("?url=https%3A%2F%2Fexample.com");
+    expect(fetchPage).not.toHaveBeenCalled();
+    expect(onNavigate).not.toHaveBeenCalled();
+    expect(popstate).not.toHaveBeenCalled();
+    expect(urlSearchChange).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps sibling useQueryState hooks in sync via emitter when Farm router is installed", async () => {
+    vi.useFakeTimers();
+    spaRouter = new SPARouter({ scrollRestoration: false });
+    (window as any).__FARM_SPA_ROUTER__ = spaRouter;
+
+    let primaryValue: string | null = null;
+    let secondaryValue: string | null = null;
+    let setUrl!: (value: string | null) => void;
+
+    function App() {
+      const [value, set] = useQueryState("url", asString);
+      const [mirror] = useQueryState("url", asString);
+      primaryValue = value;
+      secondaryValue = mirror;
+      setUrl = set;
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+
+    act(() => {
+      setUrl("https://example.com");
+    });
+
+    act(() => {
+      vi.runAllTimers();
+    });
+
+    expect(primaryValue).toBe("https://example.com");
+    expect(secondaryValue).toBe("https://example.com");
+  });
+
+  it("keeps useSearchParams in sync when Farm router is installed", async () => {
+    vi.useFakeTimers();
+    spaRouter = new SPARouter({ scrollRestoration: false });
+    (window as any).__FARM_SPA_ROUTER__ = spaRouter;
+
+    let searchParams: URLSearchParams | undefined;
+    let setUrl!: (value: string | null) => void;
+
+    function App() {
+      const [, set] = useQueryState("url", asString);
+      searchParams = useSearchParams();
+      setUrl = set;
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+
+    act(() => {
+      setUrl("https://example.com");
+    });
+
+    act(() => {
+      vi.runAllTimers();
+    });
+
+    expect(searchParams?.get("url")).toBe("https://example.com");
+  });
+
+  it("covers useQueryStates with the same URL sync path", async () => {
+    vi.useFakeTimers();
+    const urlSearchChange = vi.fn();
+    window.addEventListener(FARM_URL_SEARCH_CHANGE_EVENT, urlSearchChange);
+
+    spaRouter = new SPARouter({ scrollRestoration: false });
+    (window as any).__FARM_SPA_ROUTER__ = spaRouter;
+
+    let setValues!: (updates: { q?: string | null }) => void;
+
+    function App() {
+      const [, set] = useQueryStates({ q: asString });
+      setValues = set;
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+
+    act(() => {
+      setValues({ q: "farm" });
+    });
+
+    act(() => {
+      vi.runAllTimers();
+    });
+
+    expect(window.location.search).toBe("?q=farm");
+    expect(urlSearchChange).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves Farm page history state when updating query params", async () => {
+    vi.useFakeTimers();
+    spaRouter = new SPARouter({ scrollRestoration: false });
+    (window as any).__FARM_SPA_ROUTER__ = spaRouter;
+
+    pushFarmPageState({ modal: "open" });
+    expect(readPageState()).toEqual({ modal: "open" });
+
+    let setUrl!: (value: string | null) => void;
+    let pageState: { modal: string } | null = null;
+
+    function App() {
+      const [, set] = useQueryState("url", asString);
+      pageState = usePageState<{ modal: string }>();
+      setUrl = set;
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+
+    act(() => {
+      setUrl("https://example.com");
+    });
+
+    act(() => {
+      vi.runAllTimers();
+    });
+
+    expect(window.location.search).toBe("?url=https%3A%2F%2Fexample.com");
+    expect(readPageState()).toEqual({ modal: "open" });
+    expect(pageState).toEqual({ modal: "open" });
+  });
+
+  it("does not leak SPA router popstate listeners across tests", async () => {
+    vi.useFakeTimers();
+    spaRouter = new SPARouter({ scrollRestoration: false });
+    (window as any).__FARM_SPA_ROUTER__ = spaRouter;
+
+    const fetchPage = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ props: {}, modulePath: "/page.tsx" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchPage);
+
+    notifyUrlSearchObservers(true);
+    act(() => {
+      vi.runAllTimers();
+    });
+
+    spaRouter.destroy();
+    spaRouter = undefined;
+    delete (window as any).__FARM_SPA_ROUTER__;
+
+    fetchPage.mockClear();
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    await Promise.resolve();
+
+    expect(fetchPage).not.toHaveBeenCalled();
+  });
+});
