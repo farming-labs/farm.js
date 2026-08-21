@@ -123,6 +123,24 @@ program
     }
   });
 
+program
+  .command("start")
+  .description("Run the Node server produced by farm build")
+  .option("-r, --root <root>", "Root directory", process.cwd())
+  .option("-p, --port <port>", "Port for the server to listen on")
+  .option("-H, --host <host>", "Host for the server to bind to")
+  .action(async (options) => {
+    try {
+      const { startFarm } = require("../dist/index.js");
+      await startFarm(options);
+    } catch (error) {
+      const code = error?.name === "FarmStartError" ? ` [${error.code}]` : "";
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`Failed to start${code}: ${message}`);
+      process.exitCode = 1;
+    }
+  });
+
 const authCommand = program.command("auth").description("Manage Farm-native authentication");
 
 authCommand
