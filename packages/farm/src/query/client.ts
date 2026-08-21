@@ -7,6 +7,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { notifyUrlSearchObservers } from "../client/url-search-sync";
 import { emitter } from "./sync";
 export { parseRouteParams, loadRouteParams, type RouteParamsInput } from "./params";
 
@@ -79,10 +80,19 @@ const updateURL = (
 
   if (newUrl !== currentUrl) {
     const update = () => {
+      // Preserve Farm's history state (page state, interception markers) and
+      // keep its recorded path in sync with the new query string so pops
+      // report the entry's real location.
+      const historyState = window.history.state;
+      const nextHistoryState =
+        historyState && typeof historyState === "object" && "path" in historyState
+          ? { ...historyState, path: newUrl }
+          : historyState;
+
       if (history === "replaceState") {
-        window.history.replaceState(null, "", newUrl);
+        window.history.replaceState(nextHistoryState, "", newUrl);
       } else {
-        window.history.pushState(null, "", newUrl);
+        window.history.pushState(nextHistoryState, "", newUrl);
       }
 
       if (emitUpdate) {
@@ -90,11 +100,7 @@ const updateURL = (
         emitter.emitUpdate(actualSearchParams);
       }
 
-      if (shallow) {
-        setTimeout(() => {
-          window.dispatchEvent(new PopStateEvent("popstate"));
-        }, 0);
-      }
+      notifyUrlSearchObservers(shallow);
 
       if (scroll) {
         window.scrollTo(0, 0);

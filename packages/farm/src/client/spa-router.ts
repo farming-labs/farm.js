@@ -158,6 +158,18 @@ export class SPARouter {
     | "failNavigation"
   >;
 
+  private readonly onPopState = (event: PopStateEvent) => {
+    void this.handlePopState(event);
+  };
+
+  private readonly onBeforeUnload = (event: BeforeUnloadEvent) => {
+    if (this.blockers.size > 0) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+    this.saveScrollPosition(window.location.pathname);
+  };
+
   constructor(options: RouterOptions = {}) {
     this.options = {
       prefetchTimeout: options.prefetchTimeout ?? 100,
@@ -169,17 +181,18 @@ export class SPARouter {
 
     if (typeof window !== "undefined") {
       // Listen for popstate (back/forward navigation)
-      window.addEventListener("popstate", this.handlePopState.bind(this));
+      window.addEventListener("popstate", this.onPopState);
 
       // Save scroll position before unload
-      window.addEventListener("beforeunload", (event) => {
-        if (this.blockers.size > 0) {
-          event.preventDefault();
-          event.returnValue = "";
-        }
-        this.saveScrollPosition(window.location.pathname);
-      });
+      window.addEventListener("beforeunload", this.onBeforeUnload);
     }
+  }
+
+  /** Remove global listeners. Intended for tests and teardown. */
+  destroy(): void {
+    if (typeof window === "undefined") return;
+    window.removeEventListener("popstate", this.onPopState);
+    window.removeEventListener("beforeunload", this.onBeforeUnload);
   }
 
   /**
@@ -765,13 +778,18 @@ function dispatchDeploymentMismatch(error: Error): void {
 /**
  * Get or create the global router instance
  */
+export function getInstalledFarmSPARouter(): SPARouter | undefined {
+  if (typeof window === "undefined") return undefined;
+  return (window as Window & { __FARM_SPA_ROUTER__?: SPARouter }).__FARM_SPA_ROUTER__;
+}
+
 export function getRouter(): SPARouter {
   if (typeof window === "undefined") {
     // Return a no-op router for SSR
     return new SPARouter();
   }
 
-  const installedRouter = (window as any).__FARM_SPA_ROUTER__ as SPARouter | undefined;
+  const installedRouter = getInstalledFarmSPARouter();
   if (installedRouter) {
     routerInstance = installedRouter;
     return installedRouter;
