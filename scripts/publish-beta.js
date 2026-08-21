@@ -42,11 +42,14 @@ function parsePublishBetaArgs(args) {
 }
 
 /**
- * A staged publish surfaces as a 409 conflict; the version becomes visible
- * once the registry finalizes it, so the failure is retryable by waiting.
+ * A publish the registry has accepted but not yet made visible surfaces on
+ * retry as either a 409 ("previously staged version") or a 403 ("cannot
+ * publish over the previously published versions"). Both mean the version
+ * will appear once the registry finishes propagating, so the failure is
+ * retryable by waiting; other 403s (auth, policy) are not matched.
  */
 function isRetryableStagedPublishError(output) {
-  return /previously staged version|E409|409 Conflict/i.test(output);
+  return /previously staged version|previously published versions|E409|409 Conflict/i.test(output);
 }
 
 function readPublicPackages() {
