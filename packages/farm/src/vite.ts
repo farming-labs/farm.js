@@ -47,7 +47,7 @@ import { farmEnvironmentFunctionsPlugin } from "./environment-vite";
 import { FARM_VERSION } from "./version";
 import { createDeferredDataResponse } from "./deferred";
 import { _withAfterNodeMiddleware } from "./after";
-import { devServableFileExists } from "./dev-static";
+import { shouldBypassFarmRouterForDottedPath } from "./dev-static";
 import {
   createFarmDeploymentMismatchResponse,
   FARM_DEPLOYMENT_ID_HEADER,
@@ -1742,19 +1742,18 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           }
 
           // Dotted paths are usually static assets (modules, images, source
-          // maps), but dots are also valid inside route segments. Only skip
-          // the router when the request maps to a real file on disk or no app
-          // route matches the pathname.
-          if (requestPathname.includes(".") && !requestPathname.endsWith(".html")) {
-            const matchesAppRoute = Boolean(
-              farmApp?.getRouteManager()?.matchRoute(requestPathname)?.route,
-            );
-            if (
-              !matchesAppRoute ||
-              devServableFileExists(requestPathname, [server.config.publicDir, server.config.root])
-            ) {
-              return next();
-            }
+          // maps), but dots are also valid inside route segments and in
+          // application metadata routes (/manifest.webmanifest, /sitemap.xml,
+          // /robots.txt, metadata images). Only skip the router when the
+          // request maps to a real file on disk or nothing in the app matches
+          // the pathname.
+          if (
+            shouldBypassFarmRouterForDottedPath(requestPathname, farmApp?.getRouteManager(), [
+              server.config.publicDir,
+              server.config.root,
+            ])
+          ) {
+            return next();
           }
 
           // Handle SPA page-data requests for client-side navigation
