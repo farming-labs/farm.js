@@ -1,6 +1,35 @@
 import * as fs from "fs";
 import * as path from "path";
 
+interface DottedPathRouteMatcher {
+  matchRoute(pathname: string): { route: unknown } | null | undefined;
+  matchMetadataRoute(pathname: string): object | null;
+  matchMetadataImage(pathname: string): object | null;
+}
+
+/**
+ * Decide whether the dev server should hand a dotted request path to the
+ * static pipeline instead of Farm's renderer. Dotted paths are usually asset
+ * requests, but they are also how page routes with dotted segments and
+ * application metadata routes (/manifest.webmanifest, /sitemap.xml,
+ * /robots.txt, generated metadata images) are addressed, so the router is
+ * only bypassed when nothing in the app matches the pathname or a real file
+ * shadows it.
+ */
+export function shouldBypassFarmRouterForDottedPath(
+  pathname: string,
+  routeManager: DottedPathRouteMatcher | null | undefined,
+  baseDirs: Array<string | false | undefined>,
+): boolean {
+  if (!pathname.includes(".") || pathname.endsWith(".html")) return false;
+  const matchesAppRoute = Boolean(
+    routeManager?.matchRoute(pathname)?.route ||
+    routeManager?.matchMetadataRoute(pathname) ||
+    routeManager?.matchMetadataImage(pathname),
+  );
+  return !matchesAppRoute || devServableFileExists(pathname, baseDirs);
+}
+
 /**
  * Route segments may legitimately contain dots (e.g. /kinfish/farm.js), so a
  * dot alone cannot classify a dev request as a static asset. A dotted path is
