@@ -163,10 +163,6 @@ describe("React AOT keyed list compiler", () => {
 
   it.each([
     {
-      name: "row events",
-      row: "<li key={item.id} onClick={() => setItems([])}>{item.label}</li>",
-    },
-    {
       name: "custom row components",
       row: "<InventoryRow key={item.id} item={item} />",
     },
