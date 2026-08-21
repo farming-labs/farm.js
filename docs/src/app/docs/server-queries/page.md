@@ -13,6 +13,16 @@ deduplication, prefetching, `staleTime`, stale-while-revalidate, focus and recon
 invalidation, and optimistic cache writes. Farm implements this behavior in its own cache and
 generated server references; it does not install or wrap TanStack Query.
 
+> **Browser usage requires the server-function transform**
+>
+> The generated browser server references come from the `@farm.js/plugin/rsc` transform, enabled by
+> adding the plugin and setting `experimental.serverActions: true` in `farm.config.ts`. Without it,
+> `useServerQuery`, `prefetchServerQuery`, and `fetchServerQuery` can only run during server
+> rendering: importing a query module from `"use client"` code would bundle the server handler into
+> the browser, and Farm fails the build with a boundary error instead. In apps without the
+> transform, call queries from server components, or expose an API route and use
+> [`createAPIClient`](/docs/api-client) from client components.
+
 ## Declare a query
 
 **src/features/products/queries.ts**
