@@ -13,7 +13,7 @@
  *   --verify-only  Skip the initial bulk publish and only verify, retry
  *                  stragglers, and promote. Useful to resume after a failure.
  */
-const { execFileSync, execFile } = require("node:child_process");
+const { execFileSync } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 
