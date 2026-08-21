@@ -8,7 +8,6 @@
     "auth:migrate": "farm auth migrate",
     "check": "pnpm type-check && pnpm build",
     "deploy": "farm deploy",
-    "start": "farm start",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {

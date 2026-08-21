@@ -20,6 +20,14 @@ export {
   type FarmDeployPlan,
 } from "./deploy";
 export {
+  createFarmStartPlan,
+  FarmStartError,
+  startFarm,
+  type FarmStartErrorCode,
+  type FarmStartOptions,
+  type FarmStartPlan,
+} from "./start";
+export {
   createPreviewTunnelPlan,
   parsePreviewPublicUrl,
   previewFarm,

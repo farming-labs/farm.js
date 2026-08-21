@@ -11,6 +11,7 @@ const REQUEST_TIMEOUT_MS = 750;
 const FARM_COMMANDS = [
   "dev",
   "build",
+  "start",
   "auth:migrate",
   "upgrade",
   "generate",

@@ -43,7 +43,7 @@ Point the application scripts at Farm when the first route is ready:
   "scripts": {
     "dev": "farm dev",
     "build": "farm build",
-    "start": "farm start"
+    "start": "node .output/server/index.mjs"
   }
 }
 ```

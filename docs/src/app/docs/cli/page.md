@@ -34,6 +34,7 @@ React is the default renderer. `--renderer preact`, `--renderer solid`, `--rende
 | -------------------------------- | -------------------------------------------------------------------- |
 | farm dev                         | Start the dev server.                                                |
 | farm build                       | Build the app for the configured target.                             |
+| farm start                       | Run the Node server produced by farm build.                          |
 | farm upgrade --latest            | Upgrade installed Farm packages to the latest stable release.        |
 | farm upgrade --beta              | Upgrade installed Farm packages to the latest beta release.          |
 | farm doctor                      | Inspect a running app, or fall back to project configuration checks. |
