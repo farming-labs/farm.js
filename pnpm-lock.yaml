@@ -55,20 +55,20 @@ importers:
         specifier: workspace:*
         version: link:../packages/farm
       '@farming-labs/docs':
-        specifier: 0.2.110
-        version: 0.2.110(react@19.2.8)(supports-color@10.2.2)
+        specifier: 0.2.111
+        version: 0.2.111(react@19.2.8)(supports-color@10.2.2)
       '@farming-labs/farmjs':
-        specifier: 0.2.110
-        version: 0.2.110(@farm.js/core@packages+farm)(@farming-labs/docs@0.2.110)(@farming-labs/theme@0.2.110)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(rollup@4.52.4)(supports-color@10.2.2)
+        specifier: 0.2.111
+        version: 0.2.111(@farm.js/core@packages+farm)(@farming-labs/docs@0.2.111)(@farming-labs/theme@0.2.111)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(rollup@4.52.4)(supports-color@10.2.2)
       '@farming-labs/theme':
-        specifier: 0.2.110
-        version: 0.2.110(@farming-labs/docs@0.2.110)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18)
+        specifier: 0.2.111
+        version: 0.2.111(@farming-labs/docs@0.2.111)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18)
       '@farming-labs/theme-production':
         specifier: npm:@farming-labs/theme@0.2.99
-        version: /@farming-labs/theme@0.2.99(@farming-labs/docs@0.2.110)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18)
+        version: /@farming-labs/theme@0.2.99(@farming-labs/docs@0.2.111)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18)
       '@farming-labs/theme-runtime':
-        specifier: https://pkg.pr.new/farming-labs/docs/@farming-labs/theme@490
-        version: '@pkg.pr.new/farming-labs/docs/@farming-labs/theme@490(@farming-labs/docs@0.2.110)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18)'
+        specifier: npm:@farming-labs/theme@0.2.111
+        version: /@farming-labs/theme@0.2.111(@farming-labs/docs@0.2.111)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18)
       '@prisma/client':
         specifier: 6.7.0
         version: 6.7.0(prisma@6.7.0)(typescript@5.9.3)
@@ -4638,8 +4638,8 @@ packages:
       '@farm.js/tunnel-win32-x64-msvc': 0.1.0
     dev: false
 
-  /@farming-labs/docs@0.2.110(react@19.2.8)(supports-color@10.2.2):
-    resolution: {integrity: sha512-I7nwW2vc/Qs/SdLQENxUmxaULRM37+xSSpCu7TRGx/UgwK9Mm2/IVidS4m1CbeQi5DK0fvJNQX/UBtG7FhzOkg==}
+  /@farming-labs/docs@0.2.111(react@19.2.8)(supports-color@10.2.2):
+    resolution: {integrity: sha512-68IER89L1H0POpbN1Fq1YkaYc+j1Uyn4Pjg3CJocibEocVw5c5crqVR6D5VHStIrn8ljYxcQoHMSB1aolvA4dw==}
     engines: {node: '>=20'}
     hasBin: true
     peerDependencies:
@@ -4723,8 +4723,8 @@ packages:
       - supports-color
     dev: false
 
-  /@farming-labs/farmjs@0.2.110(@farm.js/core@packages+farm)(@farming-labs/docs@0.2.110)(@farming-labs/theme@0.2.110)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(rollup@4.52.4)(supports-color@10.2.2):
-    resolution: {integrity: sha512-9dvaPYUz6RYYzlc3NxuXb3JfEp7u0XKUKo4u4S1cRiij3CDsP/WmylTFEiqTY1v6SjNNzU7WqVFoE18SJakAUw==}
+  /@farming-labs/farmjs@0.2.111(@farm.js/core@packages+farm)(@farming-labs/docs@0.2.111)(@farming-labs/theme@0.2.111)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(rollup@4.52.4)(supports-color@10.2.2):
+    resolution: {integrity: sha512-aV5gNGjUklLqc/b/bb0jf1h5GBSAxxZbRIRG5PayDHPs6KjSFqIvBR1THMlQg5QTa12oH/9gM68lN70XJIh3pw==}
     peerDependencies:
       '@farm.js/core': ^0.1.0-beta.19
       '@farming-labs/docs': '*'
@@ -4733,8 +4733,8 @@ packages:
       react-dom: ^18.2.0 || ^19.0.0
     dependencies:
       '@farm.js/core': link:packages/farm
-      '@farming-labs/docs': 0.2.110(react@19.2.8)(supports-color@10.2.2)
-      '@farming-labs/theme': 0.2.110(@farming-labs/docs@0.2.110)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18)
+      '@farming-labs/docs': 0.2.111(react@19.2.8)(supports-color@10.2.2)
+      '@farming-labs/theme': 0.2.111(@farming-labs/docs@0.2.111)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18)
       '@mdx-js/rollup': 3.1.1(rollup@4.52.4)(supports-color@10.2.2)
       '@scalar/core': 0.4.6
       fumadocs-core: 16.7.16(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(zod@4.3.6)
@@ -5145,8 +5145,8 @@ packages:
       '@farming-labs/strata-win32-x64-msvc': 0.1.2
     dev: false
 
-  /@farming-labs/theme@0.2.110(@farming-labs/docs@0.2.110)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18):
-    resolution: {integrity: sha512-MQWmNIt0GRqRdsNLWHas0Ij0XRjlQ6IIn8fHmghxcouDw4tGZaT4F8cC2gfKrFfOgj14D0/wCYTVRd/p71+lcg==}
+  /@farming-labs/theme@0.2.111(@farming-labs/docs@0.2.111)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18):
+    resolution: {integrity: sha512-9UNcBA2WndnJTKRom6ffLvONWrD2PNWadYham/g3ej6x7cl459Lv9sN3qPRCSltoeo4ODG4H99y68S58mW8oaA==}
     peerDependencies:
       '@farming-labs/docs': '>=0.0.1'
       next: '>=16.0.0'
@@ -5160,7 +5160,7 @@ packages:
       react-dom:
         optional: true
     dependencies:
-      '@farming-labs/docs': 0.2.110(react@19.2.8)(supports-color@10.2.2)
+      '@farming-labs/docs': 0.2.111(react@19.2.8)(supports-color@10.2.2)
       fumadocs-core: 16.7.16(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(zod@4.3.6)
       fumadocs-ui: 16.7.16(@types/react-dom@18.3.7)(@types/react@18.3.26)(fumadocs-core@16.7.16)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(tailwindcss@3.4.18)
       gray-matter: 4.0.3
@@ -5193,7 +5193,7 @@ packages:
       - waku
     dev: false
 
-  /@farming-labs/theme@0.2.99(@farming-labs/docs@0.2.110)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18):
+  /@farming-labs/theme@0.2.99(@farming-labs/docs@0.2.111)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18):
     resolution: {integrity: sha512-WZ150Ji5sdj5ECOPbasycKwbe9Af26PPnVLmpiBLXvEXoyJIYZqbiCL+08yjg4NeXzgpOD2tfVcDqW3r58vOcw==}
     peerDependencies:
       '@farming-labs/docs': '>=0.0.1'
@@ -5208,7 +5208,7 @@ packages:
       react-dom:
         optional: true
     dependencies:
-      '@farming-labs/docs': 0.2.110(react@19.2.8)(supports-color@10.2.2)
+      '@farming-labs/docs': 0.2.111(react@19.2.8)(supports-color@10.2.2)
       fumadocs-core: 16.7.16(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(zod@4.3.6)
       fumadocs-ui: 16.7.16(@types/react-dom@18.3.7)(@types/react@18.3.26)(fumadocs-core@16.7.16)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(tailwindcss@3.4.18)
       gray-matter: 4.0.3
@@ -20209,55 +20209,4 @@ packages:
 
   /zwitch@2.0.4:
     resolution: {integrity: sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A==}
-    dev: false
-
-  '@pkg.pr.new/farming-labs/docs/@farming-labs/theme@490(@farming-labs/docs@0.2.110)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18)':
-    resolution: {tarball: https://pkg.pr.new/farming-labs/docs/@farming-labs/theme@490}
-    id: '@pkg.pr.new/farming-labs/docs/@farming-labs/theme@490'
-    name: '@farming-labs/theme'
-    version: 0.2.110
-    peerDependencies:
-      '@farming-labs/docs': '>=0.0.1'
-      next: '>=16.0.0'
-      react: '>=19.2.0'
-      react-dom: '>=19.2.0'
-    peerDependenciesMeta:
-      next:
-        optional: true
-      react:
-        optional: true
-      react-dom:
-        optional: true
-    dependencies:
-      '@farming-labs/docs': 0.2.110(react@19.2.8)(supports-color@10.2.2)
-      fumadocs-core: 16.7.16(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(zod@4.3.6)
-      fumadocs-ui: 16.7.16(@types/react-dom@18.3.7)(@types/react@18.3.26)(fumadocs-core@16.7.16)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(tailwindcss@3.4.18)
-      gray-matter: 4.0.3
-      next: 16.2.4(@playwright/test@1.58.2)(react-dom@19.2.8)(react@19.2.8)
-      react: 19.2.8
-      react-dom: 19.2.8(react@19.2.8)
-      sugar-high: 0.9.5
-      zod: 4.3.6
-    transitivePeerDependencies:
-      - '@emotion/is-prop-valid'
-      - '@mdx-js/mdx'
-      - '@mixedbread/sdk'
-      - '@orama/core'
-      - '@oramacloud/client'
-      - '@tailwindcss/oxide'
-      - '@takumi-rs/image-response'
-      - '@tanstack/react-router'
-      - '@types/estree-jsx'
-      - '@types/hast'
-      - '@types/mdast'
-      - '@types/mdx'
-      - '@types/react'
-      - '@types/react-dom'
-      - algoliasearch
-      - flexsearch
-      - lucide-react
-      - react-router
-      - supports-color
-      - tailwindcss
-      - waku
     dev: false
