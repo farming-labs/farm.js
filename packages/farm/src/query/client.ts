@@ -80,12 +80,19 @@ const updateURL = (
 
   if (newUrl !== currentUrl) {
     const update = () => {
+      // Preserve Farm's history state (page state, interception markers) and
+      // keep its recorded path in sync with the new query string so pops
+      // report the entry's real location.
       const historyState = window.history.state;
+      const nextHistoryState =
+        historyState && typeof historyState === "object" && "path" in historyState
+          ? { ...historyState, path: newUrl }
+          : historyState;
 
       if (history === "replaceState") {
-        window.history.replaceState(historyState, "", newUrl);
+        window.history.replaceState(nextHistoryState, "", newUrl);
       } else {
-        window.history.pushState(historyState, "", newUrl);
+        window.history.pushState(nextHistoryState, "", newUrl);
       }
 
       if (emitUpdate) {

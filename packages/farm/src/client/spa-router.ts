@@ -162,6 +162,14 @@ export class SPARouter {
     void this.handlePopState(event);
   };
 
+  private readonly onBeforeUnload = (event: BeforeUnloadEvent) => {
+    if (this.blockers.size > 0) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+    this.saveScrollPosition(window.location.pathname);
+  };
+
   constructor(options: RouterOptions = {}) {
     this.options = {
       prefetchTimeout: options.prefetchTimeout ?? 100,
@@ -176,13 +184,7 @@ export class SPARouter {
       window.addEventListener("popstate", this.onPopState);
 
       // Save scroll position before unload
-      window.addEventListener("beforeunload", (event) => {
-        if (this.blockers.size > 0) {
-          event.preventDefault();
-          event.returnValue = "";
-        }
-        this.saveScrollPosition(window.location.pathname);
-      });
+      window.addEventListener("beforeunload", this.onBeforeUnload);
     }
   }
 
@@ -190,6 +192,7 @@ export class SPARouter {
   destroy(): void {
     if (typeof window === "undefined") return;
     window.removeEventListener("popstate", this.onPopState);
+    window.removeEventListener("beforeunload", this.onBeforeUnload);
   }
 
   /**

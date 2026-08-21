@@ -7,10 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useSearchParams } from "../navigation";
 import { pushState as pushFarmPageState, readPageState, SPARouter } from "../client/spa-router";
 import { usePageState } from "../client/router";
-import {
-  FARM_URL_SEARCH_CHANGE_EVENT,
-  notifyUrlSearchObservers,
-} from "../client/url-search-sync";
+import { FARM_URL_SEARCH_CHANGE_EVENT, notifyUrlSearchObservers } from "../client/url-search-sync";
 import { asString, useQueryState, useQueryStates } from "../query/client";
 
 describe("useQueryState shallow routing", () => {
@@ -288,6 +285,9 @@ describe("useQueryState shallow routing", () => {
     expect(window.location.search).toBe("?url=https%3A%2F%2Fexample.com");
     expect(readPageState()).toEqual({ modal: "open" });
     expect(pageState).toEqual({ modal: "open" });
+    expect((window.history.state as { path?: string }).path).toBe(
+      "/?url=https%3A%2F%2Fexample.com",
+    );
   });
 
   it("does not leak SPA router popstate listeners across tests", async () => {
