@@ -22,6 +22,13 @@ test("treats staged-version conflicts as retryable", () => {
     ),
   );
   assert.ok(isRetryableStagedPublishError("npm error code E409"));
+  // The registry reports an accepted-but-unpropagated version as a 403 on
+  // republish; observed on the v0.1.0-beta.54 release.
+  assert.ok(
+    isRetryableStagedPublishError(
+      "npm error 403 403 Forbidden - PUT https://registry.npmjs.org/@farm.js%2fauth - You cannot publish over the previously published versions: 0.1.0-beta.54.",
+    ),
+  );
 });
 
 test("does not retry unrelated publish failures", () => {
