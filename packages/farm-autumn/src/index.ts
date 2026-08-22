@@ -292,6 +292,40 @@ type AutumnUpdateCustomizeItems = NonNullable<
 
 const pendingAutumnMeterProjection = new Map<string, number>();
 
+// Replay cache for /billing/report-usage idempotency. autumn-js 1.2.7 has no
+// provider-side event dedupe, so a retried report with the same key must be
+// answered from here instead of re-applying the usage. Per-instance, like the
+// projection map above; multi-instance deployments still need provider-side
+// dedupe once the SDK supports it.
+const REPORTED_USAGE_EVENT_TTL_MS = 24 * 60 * 60 * 1000;
+const REPORTED_USAGE_EVENT_LIMIT = 10_000;
+const reportedUsageEvents = new Map<
+  string,
+  { at: number; result: AutumnBillingReportUsageResult }
+>();
+
+function getReportedUsageEvent(key: string): AutumnBillingReportUsageResult | null {
+  const entry = reportedUsageEvents.get(key);
+  if (!entry) {
+    return null;
+  }
+  if (Date.now() - entry.at > REPORTED_USAGE_EVENT_TTL_MS) {
+    reportedUsageEvents.delete(key);
+    return null;
+  }
+  return entry.result;
+}
+
+function setReportedUsageEvent(key: string, result: AutumnBillingReportUsageResult): void {
+  reportedUsageEvents.set(key, { at: Date.now(), result });
+  if (reportedUsageEvents.size > REPORTED_USAGE_EVENT_LIMIT) {
+    const oldest = reportedUsageEvents.keys().next().value;
+    if (oldest !== undefined) {
+      reportedUsageEvents.delete(oldest);
+    }
+  }
+}
+
 type ResolvedAutumnIntegrationPath<
   TPath extends string | undefined,
   TDefault extends string,
@@ -1779,6 +1813,11 @@ export function autumn<TInput extends AutumnIntegrationInput>(
           if (typeof body.quantity !== "number" || !Number.isFinite(body.quantity)) {
             return new Response("A numeric quantity is required.", { status: 400 });
           }
+          if (!body.idempotencyKey) {
+            return new Response("An idempotencyKey is required for Autumn usage reporting.", {
+              status: 400,
+            });
+          }
 
           const meter = billing.meters?.[body.key];
           if (!meter) {
@@ -1792,6 +1831,15 @@ export function autumn<TInput extends AutumnIntegrationInput>(
           }
 
           const resolved = await requireOwner(ctx, billing, sdk);
+
+          // A retried report with the same key replays the original result
+          // instead of applying the usage a second time.
+          const idempotencyCacheKey = `${resolved.externalCustomerId}:${featureId}:${body.idempotencyKey}`;
+          const replayed = getReportedUsageEvent(idempotencyCacheKey);
+          if (replayed) {
+            return Response.json(replayed);
+          }
+
           const active = resolveActiveProduct(resolved.customer, products);
           const planId = active.product?.planId ?? "free";
           const plan = plans[planId] ?? {};
@@ -1892,7 +1940,7 @@ export function autumn<TInput extends AutumnIntegrationInput>(
             resolved.tools,
           );
 
-          return Response.json({
+          const result = {
             key: body.key,
             quantity: body.quantity,
             customerId: resolved.customer.id,
@@ -1915,7 +1963,10 @@ export function autumn<TInput extends AutumnIntegrationInput>(
                 : typeof softLimit === "number" && nextUsed >= softLimit
                   ? "Included usage has been exhausted. Additional usage is billable."
                   : null,
-          } satisfies AutumnBillingReportUsageResult);
+          } satisfies AutumnBillingReportUsageResult;
+
+          setReportedUsageEvent(idempotencyCacheKey, result);
+          return Response.json(result);
         },
       }),
       integrationRoute.post(checkPath, {
