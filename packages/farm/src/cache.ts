@@ -472,7 +472,7 @@ export class FarmDataCache {
   isStale(entry: FarmCacheStaleEntry, now = Date.now()): boolean {
     if (
       typeof entry.revalidate === "number" &&
-      entry.revalidate > 0 &&
+      entry.revalidate >= 0 &&
       now - entry.createdAt >= entry.revalidate * 1000
     ) {
       return true;
@@ -740,8 +740,6 @@ const farmDataCacheGlobal = globalThis as typeof globalThis & {
   [FARM_DATA_CACHE_SYMBOL]?: FarmDataCache;
 };
 const sharedFarmDataCache = (farmDataCacheGlobal[FARM_DATA_CACHE_SYMBOL] ??= new FarmDataCache());
-const functionIds = new WeakMap<Function, number>();
-let nextFunctionId = 0;
 
 export function getFarmDataCache(): FarmDataCache {
   return sharedFarmDataCache;
@@ -891,9 +889,10 @@ function normalizeRevalidate(revalidate: number | false | undefined): number | f
   if (revalidate === false || revalidate === undefined) {
     return revalidate;
   }
-  if (!Number.isFinite(revalidate) || revalidate <= 0) {
+  if (!Number.isFinite(revalidate) || revalidate < 0) {
     return undefined;
   }
+  // 0 is meaningful: the entry is stale immediately, i.e. always re-produced.
   return revalidate;
 }
 
@@ -987,16 +986,22 @@ function assertFarmCacheInvalidationTarget(
 }
 
 function getFunctionCacheIdentity(fn: Function): string {
-  if (fn.name) {
-    return `name:${fn.name}`;
-  }
+  // The name alone collides across modules — two different functions both
+  // named getUser would share cache entries. Include a hash of the source so
+  // only genuinely identical functions share, and the identity stays stable
+  // across processes and restarts.
+  const name = fn.name || "anonymous";
+  return `${name}:${hashFunctionSource(String(fn))}`;
+}
 
-  let id = functionIds.get(fn);
-  if (!id) {
-    id = ++nextFunctionId;
-    functionIds.set(fn, id);
+function hashFunctionSource(source: string): string {
+  // FNV-1a, 32-bit.
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < source.length; index++) {
+    hash ^= source.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
   }
-  return `anonymous:${id}`;
+  return (hash >>> 0).toString(36);
 }
 
 function stableSerialize(value: unknown, seen = new WeakSet<object>()): string {
