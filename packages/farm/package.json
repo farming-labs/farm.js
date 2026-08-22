@@ -625,13 +625,13 @@
     "@opentelemetry/sdk-trace-base": "2.10.0",
     "@types/react": "^18.2.45",
     "@types/react-dom": "^18.2.18",
-    "@vitest/coverage-v8": "^1.1.0",
+    "@vitest/coverage-v8": "^3.2.7",
     "jsdom": "^25.0.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "tsup": "^8.3.5",
     "typescript": "^5.3.3",
-    "vitest": "^1.1.0"
+    "vitest": "^3.2.7"
   },
   "peerDependencies": {
     "react": "^18.2.0 || ^19.0.0",
