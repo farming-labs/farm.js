@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useSearchParams } from "../navigation";
 import { pushState as pushFarmPageState, readPageState, SPARouter } from "../client/spa-router";
 import { usePageState } from "../client/router";
-import { FARM_URL_SEARCH_CHANGE_EVENT, notifyUrlSearchObservers } from "../client/url-search-sync";
+import { FARM_HISTORY_CHANGE_EVENT, notifyHistoryChange } from "../client/history-sync";
 import { asString, useQueryState, useQueryStates } from "../query/client";
 
 describe("useQueryState shallow routing", () => {
@@ -101,9 +101,9 @@ describe("useQueryState shallow routing", () => {
   it("does not trigger SPA navigation when shallow is true and Farm router is installed", async () => {
     vi.useFakeTimers();
     const popstate = vi.fn();
-    const urlSearchChange = vi.fn();
+    const historyChange = vi.fn();
     window.addEventListener("popstate", popstate);
-    window.addEventListener(FARM_URL_SEARCH_CHANGE_EVENT, urlSearchChange);
+    window.addEventListener(FARM_HISTORY_CHANGE_EVENT, historyChange);
 
     const fetchPage = vi.fn(
       async () =>
@@ -149,7 +149,7 @@ describe("useQueryState shallow routing", () => {
     expect(fetchPage).not.toHaveBeenCalled();
     expect(onNavigate).not.toHaveBeenCalled();
     expect(popstate).not.toHaveBeenCalled();
-    expect(urlSearchChange).toHaveBeenCalledTimes(1);
+    expect(historyChange).toHaveBeenCalledTimes(1);
   });
 
   it("keeps sibling useQueryState hooks in sync via emitter when Farm router is installed", async () => {
@@ -220,8 +220,8 @@ describe("useQueryState shallow routing", () => {
 
   it("covers useQueryStates with the same URL sync path", async () => {
     vi.useFakeTimers();
-    const urlSearchChange = vi.fn();
-    window.addEventListener(FARM_URL_SEARCH_CHANGE_EVENT, urlSearchChange);
+    const historyChange = vi.fn();
+    window.addEventListener(FARM_HISTORY_CHANGE_EVENT, historyChange);
 
     spaRouter = new SPARouter({ scrollRestoration: false });
     (window as any).__FARM_SPA_ROUTER__ = spaRouter;
@@ -248,7 +248,7 @@ describe("useQueryState shallow routing", () => {
     });
 
     expect(window.location.search).toBe("?q=farm");
-    expect(urlSearchChange).toHaveBeenCalledTimes(1);
+    expect(historyChange).toHaveBeenCalledTimes(1);
   });
 
   it("preserves Farm page history state when updating query params", async () => {
@@ -304,7 +304,7 @@ describe("useQueryState shallow routing", () => {
     );
     vi.stubGlobal("fetch", fetchPage);
 
-    notifyUrlSearchObservers(true);
+    notifyHistoryChange("url-search");
     act(() => {
       vi.runAllTimers();
     });

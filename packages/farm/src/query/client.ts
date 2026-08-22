@@ -7,7 +7,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { notifyUrlSearchObservers } from "../client/url-search-sync";
+import { notifyHistoryChange, subscribeHistoryChange } from "../client/history-sync";
 import { emitter } from "./sync";
 export { parseRouteParams, loadRouteParams, type RouteParamsInput } from "./params";
 
@@ -100,7 +100,7 @@ const updateURL = (
         emitter.emitUpdate(actualSearchParams);
       }
 
-      notifyUrlSearchObservers(shallow);
+      if (shallow) notifyHistoryChange("url-search");
 
       if (scroll) {
         window.scrollTo(0, 0);
@@ -218,12 +218,16 @@ export function useQueryState<TParser extends Parser<any>>(
       }
     };
 
-    window.addEventListener("popstate", onPopState);
+    // Page-state writes with an href can change the query string without a
+    // popstate, so listen through the shared history channel (real
+    // back/forward events included). Self-updates no-op via the Object.is
+    // comparison above.
+    const unsubscribeHistory = subscribeHistoryChange(onPopState);
     emitter.on("update", onEmitterUpdate);
     emitter.onKey(key, onKeyUpdate);
 
     return () => {
-      window.removeEventListener("popstate", onPopState);
+      unsubscribeHistory();
       emitter.off("update", onEmitterUpdate);
       emitter.offKey(key, onKeyUpdate);
     };
@@ -319,11 +323,11 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
       applyChange(searchParams, true);
     };
 
-    window.addEventListener("popstate", onPopState);
+    const unsubscribeHistory = subscribeHistoryChange(onPopState);
     emitter.on("update", onEmitterUpdate);
 
     return () => {
-      window.removeEventListener("popstate", onPopState);
+      unsubscribeHistory();
       emitter.off("update", onEmitterUpdate);
     };
   }, [watchKeys, parsers]);
