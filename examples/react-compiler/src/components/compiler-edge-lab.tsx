@@ -9,6 +9,7 @@ let multipleBindingExecutions = 0;
 let automaticListExecutions = 0;
 let derivedCollectionExecutions = 0;
 let interactiveListExecutions = 0;
+let editableListExecutions = 0;
 let rowConditionalListExecutions = 0;
 let explicitListExecutions = 0;
 
@@ -422,6 +423,144 @@ export function InteractiveKeyedListExperiment() {
   );
 }
 
+interface EditableListItem extends InteractiveListItem {
+  priority: "low" | "high";
+}
+
+export function EditableKeyedListExperiment() {
+  const [items, setItems] = useState<EditableListItem[]>([
+    { id: "a", label: "Compiler graph", done: false, priority: "high" },
+    { id: "b", label: "Hydration pass", done: true, priority: "low" },
+    { id: "c", label: "Runtime cleanup", done: false, priority: "high" },
+  ]);
+  const [edits, setEdits] = useState(0);
+
+  return (
+    <article className="edge-card" data-experiment="keyed-editable">
+      <header>
+        <span className="experiment-number">04D</span>
+        <div>
+          <h3>Editable keyed rows</h3>
+          <p>Each input stays with its key while Farm patches values, checks, and row output.</p>
+        </div>
+      </header>
+      <dl className="compact-metrics" aria-live="polite">
+        <div>
+          <dt>Rows</dt>
+          <dd data-metric="rows">{items.length}</dd>
+        </div>
+        <div>
+          <dt>Edits</dt>
+          <dd data-metric="edits">{edits}</dd>
+        </div>
+        <div>
+          <dt>Executions</dt>
+          <dd data-metric="executions">
+            {typeof window === "undefined" ? 1 : ++editableListExecutions}
+          </dd>
+        </div>
+      </dl>
+      <ul className="editable-keyed-list" data-list="editable">
+        {items.map((item, index) => (
+          <li
+            className={
+              item.done ? "editable-keyed-row editable-keyed-row--done" : "editable-keyed-row"
+            }
+            data-key={item.id}
+            key={item.id}
+          >
+            <label>
+              <span>Name</span>
+              <input
+                aria-label={`Name for ${item.id}`}
+                data-control="name"
+                onChange={(event) => {
+                  setItems((current) =>
+                    current.map((row) =>
+                      row.id === item.id ? { ...row, label: event.currentTarget.value } : row,
+                    ),
+                  );
+                  setEdits((value) => value + 1);
+                }}
+                value={item.label}
+              />
+            </label>
+            <label>
+              <span>Priority</span>
+              <select
+                aria-label={`Priority for ${item.id}`}
+                data-control="priority"
+                onChange={(event) => {
+                  setItems((current) =>
+                    current.map((row) =>
+                      row.id === item.id
+                        ? {
+                            ...row,
+                            priority: event.currentTarget.value as EditableListItem["priority"],
+                          }
+                        : row,
+                    ),
+                  );
+                  setEdits((value) => value + 1);
+                }}
+                value={item.priority}
+              >
+                <option value="low">Low</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+            <label className="editable-keyed-check">
+              <input
+                aria-label={`Done for ${item.id}`}
+                checked={item.done}
+                data-control="done"
+                onChange={(event) => {
+                  setItems((current) =>
+                    current.map((row) =>
+                      row.id === item.id ? { ...row, done: event.currentTarget.checked } : row,
+                    ),
+                  );
+                  setEdits((value) => value + 1);
+                }}
+                type="checkbox"
+              />
+              <span>Completed</span>
+            </label>
+            <output data-row-output={item.id}>
+              ROW {index + 1} · {item.label} · {item.priority} · {item.done ? "done" : "open"}
+            </output>
+          </li>
+        ))}
+      </ul>
+      <div className="button-row">
+        <button
+          data-action="rotate-editable-rows"
+          onClick={() => setItems((current) => [current[2], current[0], current[1]])}
+          type="button"
+        >
+          Rotate rows
+        </button>
+        <button
+          data-action="load-editable-rows"
+          onClick={() =>
+            setItems(
+              Array.from({ length: 256 }, (_, index) => ({
+                id: `editable-${index}`,
+                label: `Task ${index}`,
+                done: index % 3 === 0,
+                priority: index % 2 === 0 ? "high" : "low",
+              })),
+            )
+          }
+          type="button"
+        >
+          Load 256 rows
+        </button>
+      </div>
+    </article>
+  );
+}
+
 interface ConditionalListItem extends InteractiveListItem {
   expanded: boolean;
 }
@@ -440,7 +579,7 @@ export function RowConditionalListExperiment() {
   return (
     <article className="edge-card" data-experiment="keyed-row-conditionals">
       <header>
-        <span className="experiment-number">04D</span>
+        <span className="experiment-number">04E</span>
         <div>
           <h3>Conditional row blocks</h3>
           <p>Each key owns small branch boundaries that update independently.</p>
@@ -540,7 +679,7 @@ export function ExplicitKeyedListExperiment() {
   return (
     <article className="edge-card" data-experiment="keyed-explicit">
       <header>
-        <span className="experiment-number">04E</span>
+        <span className="experiment-number">04F</span>
         <div>
           <h3>Explicit List boundary</h3>
           <p>A key selector supports custom rows while React preserves their state.</p>
@@ -601,6 +740,7 @@ export function CompilerEdgeLab() {
         <AutomaticKeyedListExperiment />
         <DerivedCollectionExperiment />
         <InteractiveKeyedListExperiment />
+        <EditableKeyedListExperiment />
         <RowConditionalListExperiment />
         <ExplicitKeyedListExperiment />
       </div>
