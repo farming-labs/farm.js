@@ -94,13 +94,17 @@ function createSourceFrame(location: StackLocation): DefaultErrorSourceFrame | u
 
 function sanitizeStack(stack: string, root: string): string {
   const normalizedRoot = path.resolve(root);
-  return redactErrorText(stack)
-    .split(normalizedRoot)
-    .join("<project>")
-    .split("\n")
-    .filter((line, index) => index === 0 || !line.includes("node:internal"))
-    .slice(0, 14)
-    .join("\n");
+  return (
+    redactErrorText(stack)
+      .split(normalizedRoot)
+      .join("<project>")
+      // Match displayPath, which reports project-relative paths with POSIX separators.
+      .replace(/<project>[^\s)]*/g, (segment) => segment.split("\\").join("/"))
+      .split("\n")
+      .filter((line, index) => index === 0 || !line.includes("node:internal"))
+      .slice(0, 14)
+      .join("\n")
+  );
 }
 
 export function createDefaultErrorDiagnostics(

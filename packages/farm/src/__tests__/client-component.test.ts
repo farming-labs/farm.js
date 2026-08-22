@@ -1,3 +1,4 @@
+import { pathToFileURL } from "node:url";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -83,10 +84,13 @@ describe("client component path resolution", () => {
       "'use client';\nexport default function Page() { return null; }\n",
     );
 
-    expect(resolveModuleSourcePath(`file://${sourceFile}`, root)).toBe(sourceFile);
-    expect(isClientComponentModule(`file://${sourceFile}`, root)).toBe(true);
-    expect(resolveModuleSourcePath(`/@fs${sourceFile}`, root)).toBe(sourceFile);
-    expect(isClientComponentModule(`/@fs${sourceFile}`, root)).toBe(true);
+    const fileUrl = pathToFileURL(sourceFile).href;
+    const fsId = `/@fs/${sourceFile.split(path.sep).join("/").replace(/^\/+/, "")}`;
+
+    expect(resolveModuleSourcePath(fileUrl, root)).toBe(sourceFile);
+    expect(isClientComponentModule(fileUrl, root)).toBe(true);
+    expect(resolveModuleSourcePath(fsId, root)).toBe(sourceFile);
+    expect(isClientComponentModule(fsId, root)).toBe(true);
   });
 
   it("supports hydratable server pages through export const hydrate = true", () => {

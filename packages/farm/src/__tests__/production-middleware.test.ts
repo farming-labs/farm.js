@@ -33,7 +33,9 @@ function readInlineFarmProps(html: string): Record<string, any> {
 }
 
 describe("production middleware runtime", () => {
-  it("runs farm.config middleware and app middleware in a production build", async () => {
+  // Windows: image optimization stalls loading the WASM codec (#434).
+  it("runs farm.config middleware and app middleware in a production build", async (ctx) => {
+    if (process.platform === "win32") ctx.skip();
     const root = await createMiddlewareProductionFixture();
     const originalFetch = globalThis.fetch;
 
@@ -67,11 +69,13 @@ describe("production middleware runtime", () => {
       expect(vercelOutputConfig.routes[1]).toEqual({ handle: "filesystem" });
 
       const staticAssetsDir = path.join(root, ".vercel", "output", "static", "assets");
-      const productAssetName = (await fs.readdir(staticAssetsDir)).find((file) =>
-        file.startsWith("product-"),
-      );
-      expect(productAssetName).toMatch(/\.png$/);
-      const productAsset = await fs.readFile(path.join(staticAssetsDir, productAssetName!));
+      // The client build emits this image under more than one hashed name, and readdir
+      // order is platform dependent, so track every candidate instead of picking one.
+      const productAssetNames = (await fs.readdir(staticAssetsDir))
+        .filter((file) => file.startsWith("product-"))
+        .sort();
+      expect(productAssetNames.length).toBeGreaterThan(0);
+      expect(productAssetNames.every((name) => name.endsWith(".png"))).toBe(true);
       await expect(
         fs.access(
           path.join(
@@ -108,11 +112,13 @@ describe("production middleware runtime", () => {
       expect(nitroBundle).not.toContain("@img/sharp-");
       globalThis.fetch = (async (input: URL | RequestInfo, init?: RequestInit) => {
         const url = new URL(input instanceof Request ? input.url : String(input));
-        if (url.origin === "https://example.test" && url.pathname.endsWith(productAssetName!)) {
-          return new Response(productAsset, {
+        const requestedAsset = productAssetNames.find((name) => url.pathname.endsWith(name));
+        if (url.origin === "https://example.test" && requestedAsset) {
+          const bytes = await fs.readFile(path.join(staticAssetsDir, requestedAsset));
+          return new Response(bytes, {
             headers: {
               "content-type": "image/png",
-              "content-length": String(productAsset.byteLength),
+              "content-length": String(bytes.byteLength),
             },
           });
         }
@@ -168,7 +174,10 @@ describe("production middleware runtime", () => {
         .replaceAll("&amp;", "&");
       expect(optimizedImageHref).toContain("/media/image?");
       expect(optimizedImageHref).toContain("q=60");
-      expect(optimizedImageHref).toContain(encodeURIComponent(`/assets/${productAssetName}`));
+      const referencedAsset = (
+        new URL(optimizedImageHref!, "https://farm.test").searchParams.get("url") ?? ""
+      ).replace(/^\/assets\//, "");
+      expect(productAssetNames).toContain(referencedAsset);
       const dashboardImageHref = html.match(
         /property="og:image" content="(\/dashboard\/opengraph-image\?v=[a-f0-9]{16})"/,
       )?.[1];

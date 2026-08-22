@@ -17,7 +17,8 @@ async function createFixture(externalRewriteOrigin?: string): Promise<string> {
   const root = await fs.mkdtemp(path.join(packageRoot, ".tmp-production-ssg-"));
 
   await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
-  await fs.symlink(packageRoot, path.join(root, "node_modules", "@farm.js", "core"), "dir");
+  // Junctions need no Windows privilege; the type is ignored on POSIX.
+  await fs.symlink(packageRoot, path.join(root, "node_modules", "@farm.js", "core"), "junction");
   await fs.mkdir(path.join(root, "src", "app", "static"), { recursive: true });
   await fs.mkdir(path.join(root, "src", "app", "refreshing"), { recursive: true });
   await fs.mkdir(path.join(root, "src", "app", "blog", "[slug]"), { recursive: true });
@@ -194,7 +195,7 @@ export default function SafeRulePage() {
 async function createRuntimeSensitiveFixture(kind: "context" | "plugin" | "i18n"): Promise<string> {
   const root = await fs.mkdtemp(path.join(packageRoot, `.tmp-production-ssg-${kind}-`));
   await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
-  await fs.symlink(packageRoot, path.join(root, "node_modules", "@farm.js", "core"), "dir");
+  await fs.symlink(packageRoot, path.join(root, "node_modules", "@farm.js", "core"), "junction");
   await fs.mkdir(path.join(root, "src", "app", "sensitive"), { recursive: true });
   if (kind === "i18n") {
     await fs.mkdir(path.join(root, "src", "messages"), { recursive: true });

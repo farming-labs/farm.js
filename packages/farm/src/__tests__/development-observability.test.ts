@@ -8,6 +8,8 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 
+const isWindows = process.platform === "win32";
+
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const farmOTelRoot = path.resolve(packageRoot, "../farm-otel");
 
@@ -39,23 +41,30 @@ async function waitForServer(url: string, output: () => string): Promise<Respons
 }
 
 describe("development OpenTelemetry tracing", () => {
-  it("starts instrumentation before traffic and flushes request traces on server close", async () => {
+  // Windows has no POSIX signals: child.kill("SIGTERM") maps to TerminateProcess,
+  // so graceful shutdown never runs and its effects cannot be observed.
+  it("starts instrumentation before traffic and flushes request traces on server close", async (ctx) => {
+    if (isWindows) ctx.skip();
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-development-otel-"));
     const traceOutput = path.join(root, "traces.jsonl");
     let developmentServer: ReturnType<typeof spawn> | undefined;
 
     try {
       await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
-      await fs.symlink(farmOTelRoot, path.join(root, "node_modules", "@farm.js", "otel"), "dir");
+      await fs.symlink(
+        farmOTelRoot,
+        path.join(root, "node_modules", "@farm.js", "otel"),
+        "junction",
+      );
       await fs.symlink(
         await fs.realpath(path.join(packageRoot, "node_modules", "react")),
         path.join(root, "node_modules", "react"),
-        "dir",
+        "junction",
       );
       await fs.symlink(
         await fs.realpath(path.join(packageRoot, "node_modules", "react-dom")),
         path.join(root, "node_modules", "react-dom"),
-        "dir",
+        "junction",
       );
       await fs.mkdir(path.join(root, "src", "app"), { recursive: true });
       await fs.writeFile(
@@ -183,7 +192,7 @@ await server.listen(Number(process.env.PORT));
       if (developmentServer && developmentServer.exitCode === null) {
         developmentServer.kill("SIGKILL");
       }
-      await fs.rm(root, { recursive: true, force: true });
+      await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   }, 60_000);
 });

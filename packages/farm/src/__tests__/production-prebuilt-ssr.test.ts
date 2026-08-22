@@ -14,6 +14,8 @@ import { defineIntegration } from "../integrations";
 import { definePlugin } from "../plugin";
 import { logger } from "../utils";
 
+const isWindows = process.platform === "win32";
+
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 async function createProductionFixture(): Promise<string> {
@@ -22,7 +24,7 @@ async function createProductionFixture(): Promise<string> {
   await fs.mkdir(path.join(root, "node_modules", "@farm.js"), {
     recursive: true,
   });
-  await fs.symlink(packageRoot, path.join(root, "node_modules", "@farm.js", "core"), "dir");
+  await fs.symlink(packageRoot, path.join(root, "node_modules", "@farm.js", "core"), "junction");
   await fs.mkdir(path.join(root, "src", "app"), { recursive: true });
   await fs.mkdir(path.join(root, "src", "lib"), { recursive: true });
   await fs.writeFile(
@@ -72,8 +74,8 @@ async function linkReact18(root: string): Promise<void> {
     throw new Error("React 18 compatibility fixture dependencies are missing");
   }
 
-  await fs.symlink(reactPath, path.join(root, "node_modules", "react"), "dir");
-  await fs.symlink(reactDOMPath, path.join(root, "node_modules", "react-dom"), "dir");
+  await fs.symlink(reactPath, path.join(root, "node_modules", "react"), "junction");
+  await fs.symlink(reactDOMPath, path.join(root, "node_modules", "react-dom"), "junction");
 }
 
 async function getAvailablePort(): Promise<number> {
@@ -565,7 +567,10 @@ export default function DynamicPage({ params }) {
     }
   }, 120_000);
 
-  it("drains in-flight requests and closes production resources on SIGTERM", async () => {
+  // Windows has no POSIX signals: child.kill("SIGTERM") maps to TerminateProcess,
+  // so graceful shutdown never runs and its effects cannot be observed.
+  it("drains in-flight requests and closes production resources on SIGTERM", async (ctx) => {
+    if (isWindows) ctx.skip();
     const root = await createProductionFixture();
     const markerPath = path.join(root, "production-lifecycle.log");
     const apiDir = path.join(root, "src", "app", "api", "slow");
@@ -709,7 +714,10 @@ export default defineConfig({
     }
   }, 120_000);
 
-  it("shuts down when SIGTERM interrupts runtime startup", async () => {
+  // Windows has no POSIX signals: child.kill("SIGTERM") maps to TerminateProcess,
+  // so graceful shutdown never runs and its effects cannot be observed.
+  it("shuts down when SIGTERM interrupts runtime startup", async (ctx) => {
+    if (isWindows) ctx.skip();
     const root = await createProductionFixture();
     const markerPath = path.join(root, "production-startup-signal.log");
     const serverConfig = { gracefulShutdownTimeout: "500ms" as const };

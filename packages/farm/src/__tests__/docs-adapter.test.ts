@@ -1,5 +1,6 @@
 // @vitest-environment node
 
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { createFarmDocsAdapterHandler, hasFarmDocsRuntimeAdapter } from "../docs/adapter";
 import type { FarmDocsResolvedConfig } from "../docs/types";
@@ -62,7 +63,7 @@ describe("Farm docs runtime adapters", () => {
     expect(runtimeConfig).toMatchObject({
       entry: "docs",
       docsPath: "/docs",
-      contentDir: "/workspace/app/content/docs",
+      contentDir: path.resolve("/workspace/app", "content", "docs"),
     });
     expect(hostOptions).toMatchObject({
       rootDir: "/workspace/app",

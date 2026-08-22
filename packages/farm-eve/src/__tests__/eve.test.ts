@@ -47,7 +47,8 @@ describe("Eve Vercel output", () => {
     await writeFile(join(root, "package.json"), '{"type":"module"}\n');
     await writeFile(join(workspaceRoot, ".vercel", "project.json"), "{}\n");
     await writeFile(join(outputDirectory, "config.json"), '{"version":3,"routes":[]}\n');
-    await symlink(packageDirectory, join(root, "node_modules", "eve"), "dir");
+    // Junctions need no Windows privilege; the type is ignored on POSIX.
+    await symlink(packageDirectory, join(root, "node_modules", "eve"), "junction");
 
     await writeEveVercelOutput({
       root,

@@ -15,7 +15,8 @@ async function createFixture(): Promise<string> {
   const root = await fs.mkdtemp(path.join(packageRoot, ".tmp-production-public-dir-"));
 
   await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
-  await fs.symlink(packageRoot, path.join(root, "node_modules", "@farm.js", "core"), "dir");
+  // Junctions need no Windows privilege; the type is ignored on POSIX.
+  await fs.symlink(packageRoot, path.join(root, "node_modules", "@farm.js", "core"), "junction");
   await fs.mkdir(path.join(root, "src", "app"), { recursive: true });
   await fs.mkdir(path.join(root, "static", "nested"), { recursive: true });
   await fs.writeFile(

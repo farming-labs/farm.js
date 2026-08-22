@@ -1,3 +1,4 @@
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   createFarmClientOptimizeDepsConfig,
@@ -43,7 +44,7 @@ describe("mergeFarmViteConfig", () => {
 
   it("maps @ to the configured application source directory", () => {
     expect(createFarmSourceAlias("/workspace/app", "web")).toEqual({
-      "@": "/workspace/app/web",
+      "@": path.resolve("/workspace/app", "web"),
     });
   });
 
