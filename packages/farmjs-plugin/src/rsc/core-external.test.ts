@@ -187,9 +187,7 @@ export const schema = z.string();`;
     ).toThrow(/@farm.js\/core\/storage is not supported.*isolated server output/s);
   });
 
-  // Windows: the Nitro build exhausts file handles reading the pnpm store (#458).
-  it("builds and boots a real RSC app with exact-root runtime imports outside the workspace", async (ctx) => {
-    if (process.platform === "win32") ctx.skip();
+  it("builds and boots a real RSC app with exact-root runtime imports outside the workspace", async () => {
     const fixtureRoot = mkdtempSync(path.join(tmpdir(), "farm-rsc-root-runtime-"));
     const isolatedRoot = mkdtempSync(path.join(tmpdir(), "farm-rsc-root-output-"));
     const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
