@@ -45,29 +45,28 @@ export class OpenAPIGenerator {
    * Get type from Zod type
    */
   private getTypeFromZodType(zodType: z.ZodType<any>): AllowedType {
-    const typeName = (zodType as any)._def?.typeName;
-    if (typeName) {
-      if (typeName === "ZodString") return "string";
-      if (typeName === "ZodNumber") return "number";
-      if (typeName === "ZodBoolean") return "boolean";
-      if (typeName === "ZodArray") return "array";
-      if (typeName === "ZodObject") return "object";
-    }
-    return "string";
+    const tag = (zodType as any)._def?.type;
+    return typeof tag === "string" && allowedType.has(tag) ? (tag as AllowedType) : "string";
   }
 
   /**
    * Process Zod type to OpenAPI schema
    */
   private processZodType(zodType: z.ZodType<any>): any {
-    // Handle ZodOptional
-    if (zodType instanceof z.ZodOptional) {
+    // Handle ZodOptional and ZodNullable
+    if (zodType instanceof z.ZodOptional || zodType instanceof z.ZodNullable) {
       const innerType = (zodType as any)._def.innerType;
       const innerSchema = this.processZodType(innerType);
       return {
         ...innerSchema,
         nullable: true,
       };
+    }
+
+    // Handle ZodDefault. The value is always present after parsing, so the
+    // documented type is the wrapped one.
+    if (zodType instanceof z.ZodDefault) {
+      return this.processZodType((zodType as any)._def.innerType);
     }
 
     // Handle ZodObject
@@ -95,10 +94,9 @@ export class OpenAPIGenerator {
 
     // Handle ZodArray
     if (zodType instanceof z.ZodArray) {
-      const itemType = (zodType as any)._def.type;
       return {
         type: "array",
-        items: this.processZodType(itemType),
+        items: this.processZodType((zodType as any)._def.element),
         description: (zodType as any).description,
       };
     }
@@ -107,7 +105,7 @@ export class OpenAPIGenerator {
     if (zodType instanceof z.ZodEnum) {
       return {
         type: "string",
-        enum: (zodType as any)._def.values,
+        enum: (zodType as any).options,
         description: (zodType as any).description,
       };
     }
@@ -118,18 +116,24 @@ export class OpenAPIGenerator {
       description: (zodType as any).description,
     };
 
-    // Add constraints if available
-    if ("minLength" in zodType && (zodType as any).minLength) {
-      baseSchema.minLength = (zodType as any).minLength;
-    }
-    if ("maxLength" in zodType && (zodType as any).maxLength) {
-      baseSchema.maxLength = (zodType as any).maxLength;
-    }
-    if ("min" in zodType && (zodType as any).min !== undefined) {
-      baseSchema.minimum = (zodType as any).min;
-    }
-    if ("max" in zodType && (zodType as any).max !== undefined) {
-      baseSchema.maximum = (zodType as any).max;
+    // Add constraints if available. `min`/`max` are methods rather than values, so
+    // the bounds are read from `minValue`/`maxValue`. An absent bound is reported as
+    // `null` or as an infinity depending on the schema, and neither belongs in the
+    // document; a finite check keeps a `0` bound and drops both.
+    const constraints: Array<[string, unknown]> = [
+      ["minLength", (zodType as any).minLength],
+      ["maxLength", (zodType as any).maxLength],
+      ["minimum", (zodType as any).minValue],
+      ["maximum", (zodType as any).maxValue],
+    ];
+    for (const [key, value] of constraints) {
+      // Zod 4's .int() implies bounds of +/-Number.MAX_SAFE_INTEGER; those are
+      // implementation details of the safe-integer range, not author-declared
+      // constraints, and would otherwise stamp every integer field with
+      // maximum: 9007199254740991.
+      if (Number.isFinite(value) && Math.abs(value as number) !== Number.MAX_SAFE_INTEGER) {
+        baseSchema[key] = value;
+      }
     }
 
     return baseSchema;
