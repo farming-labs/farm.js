@@ -9,6 +9,7 @@ import {
   defineFarmConfig,
   loadConfig,
   resolveConfig,
+  detectPlatformDeployTarget,
   resolveDeployConfig,
   resolveDocsConfig,
   resolveMigrationsConfig,
@@ -682,6 +683,48 @@ describe("resolveMigrationsConfig", () => {
         },
       ],
     });
+  });
+});
+
+describe("detectPlatformDeployTarget", () => {
+  it("maps platform build env vars to deploy targets", () => {
+    expect(detectPlatformDeployTarget({ VERCEL: "1" })).toBe("vercel");
+    expect(detectPlatformDeployTarget({ NETLIFY: "true" })).toBe("netlify");
+    expect(detectPlatformDeployTarget({ CF_PAGES: "1" })).toBe("cloudflare");
+    expect(detectPlatformDeployTarget({})).toBeUndefined();
+    expect(detectPlatformDeployTarget({ VERCEL: "" })).toBeUndefined();
+  });
+});
+
+describe("resolveDeployConfig platform detection", () => {
+  it("uses the detected platform when nothing selects a preset", () => {
+    const deploy = resolveDeployConfig({}, { env: { VERCEL: "1" } });
+    expect(deploy.target).toBe("vercel");
+    expect(deploy.preset).toBe("vercel");
+    expect(deploy.outputDir).toBe(".vercel/output");
+  });
+
+  it("never overrides an explicit target, even when it cannot deploy there", () => {
+    const deploy = resolveDeployConfig({ deploy: { target: "node" } }, { env: { VERCEL: "1" } });
+    expect(deploy.target).toBe("node");
+    expect(deploy.preset).toBe("node-server");
+  });
+
+  it("never overrides an explicit preset", () => {
+    const deploy = resolveDeployConfig({ preset: "node-server" }, { env: { NETLIFY: "true" } });
+    expect(deploy.target).toBe("node");
+    expect(deploy.preset).toBe("node-server");
+  });
+
+  it("respects CLI overrides above detection", () => {
+    const deploy = resolveDeployConfig({}, { target: "cloudflare", env: { VERCEL: "1" } });
+    expect(deploy.target).toBe("cloudflare");
+  });
+
+  it("keeps the node-server default outside platform CI", () => {
+    const deploy = resolveDeployConfig({}, { env: {} });
+    expect(deploy.target).toBe("node");
+    expect(deploy.preset).toBe("node-server");
   });
 });
 
