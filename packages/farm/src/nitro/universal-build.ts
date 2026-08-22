@@ -1501,7 +1501,7 @@ function createHistoryState(path, pageState, currentState) {
 `.trim();
 }
 
-function generateUniversalRouterStateProperties(): string {
+export function generateUniversalRouterStateProperties(): string {
   return `
   blockers: new Set(),
   navigationListeners: new Set(),
@@ -1572,7 +1572,13 @@ function generateUniversalRouterStateProperties(): string {
     } else {
       window.history.pushState(nextState, "", url);
     }
-    window.dispatchEvent(new PopStateEvent("popstate", { state: nextState }));
+    // Announce on the dedicated history channel; a synthetic popstate would
+    // be treated as back/forward by the popstate listener below and trigger
+    // a full navigation for a shallow page-state write. The bundled client
+    // hooks subscribe to this event via subscribeHistoryChange.
+    window.dispatchEvent(
+      new CustomEvent("farm:historychange", { detail: { kind: "page-state" } }),
+    );
   },
 
   registerScrollElement: function(key, element) {
