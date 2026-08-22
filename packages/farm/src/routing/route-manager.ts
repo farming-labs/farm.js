@@ -1283,15 +1283,16 @@ export class RouteManager {
   }
 }
 
-function interpolateRedirectDestination(
+export function interpolateRedirectDestination(
   destination: string,
   params: Record<string, string>,
 ): string {
   let result = destination;
 
   for (const [key, value] of Object.entries(params)) {
-    result = replaceAll(result, `[...${key}]`, value);
+    // Longest token first: [[...key]] contains [...key], which contains [key].
     result = replaceAll(result, `[[...${key}]]`, value);
+    result = replaceAll(result, `[...${key}]`, value);
     result = replaceAll(result, `[${key}]`, value);
     result = replaceAll(result, `:${key}*`, value);
     result = replaceAll(result, `:${key}`, value);
