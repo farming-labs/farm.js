@@ -469,7 +469,7 @@ export class SPARouter {
 
     if (options.scroll) {
       if (options.url.hash) {
-        const element = document.querySelector(options.url.hash);
+        const element = getHashTargetElement(options.url.hash);
         if (element) {
           element.scrollIntoView();
         }
@@ -868,4 +868,29 @@ function createNavigationLocation(url: URL): FarmNavigationLocation {
 
 function getScrollElementStorageKey(path: string, key: string): string {
   return `farm-scroll-${path}:${key}`;
+}
+
+export function getHashTargetElement(hash: string): Element | null {
+  // The fragment is not a CSS selector: ids starting with a digit or
+  // containing selector characters (#2-installation, #a.b) throw in
+  // querySelector. Match by id (decoded first, then raw) and fall back to
+  // anchor name, mirroring native fragment navigation.
+  const fragment = hash.startsWith("#") ? hash.slice(1) : hash;
+  if (!fragment) {
+    return null;
+  }
+
+  let decoded = fragment;
+  try {
+    decoded = decodeURIComponent(fragment);
+  } catch {
+    // Keep the raw fragment when the percent-encoding is malformed.
+  }
+
+  return (
+    document.getElementById(decoded) ||
+    document.getElementById(fragment) ||
+    document.getElementsByName(decoded)[0] ||
+    null
+  );
 }
