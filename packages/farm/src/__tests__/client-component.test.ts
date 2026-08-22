@@ -35,6 +35,33 @@ describe("client component path resolution", () => {
     );
   });
 
+  it("detects directives preceded by comments or other directives", () => {
+    const afterBlockComment =
+      '/* Copyright 2026 Acme */\n"use client";\nexport default function Counter() { return null; }\n';
+    const afterLineComment =
+      '// @generated\n"use client";\nexport default function Counter() { return null; }\n';
+    const afterUseStrict =
+      '"use strict";\n"use client";\nexport default function Counter() { return null; }\n';
+
+    expect(hasUseClientDirective(afterBlockComment)).toBe(true);
+    expect(hasUseClientDirective(afterLineComment)).toBe(true);
+    expect(hasUseClientDirective(afterUseStrict)).toBe(true);
+
+    expect(stripUseClientDirective(afterBlockComment)).toBe(
+      "/* Copyright 2026 Acme */\nexport default function Counter() { return null; }\n",
+    );
+  });
+
+  it("ignores use client strings that are not part of the directive prologue", () => {
+    expect(hasUseClientDirective('const directive = "use client";\n')).toBe(false);
+    expect(hasUseClientDirective('export default function Page() { return "use client"; }\n')).toBe(
+      false,
+    );
+    expect(hasUseClientDirective('// just a comment mentioning "use client"\nconst x = 1;\n')).toBe(
+      false,
+    );
+  });
+
   it("detects explicit hydrate exports", () => {
     expect(
       hasHydrateExport("export const hydrate = true;\nexport default function Page() {}"),
