@@ -331,6 +331,12 @@ function encodeDeferredValue(
     output[key] = encodeDeferredValue(item, context, ancestors);
   }
   ancestors.delete(value);
+  // User data that happens to have the marker shape must not be revived as a
+  // deferred reference. Real ids never start with "!", so prefix-escape the
+  // value; revive strips one "!" back off.
+  if (isDeferredMarker(output)) {
+    return { [FARM_DEFERRED_MARKER]: `!${output[FARM_DEFERRED_MARKER]}` };
+  }
   return output;
 }
 
@@ -342,6 +348,10 @@ function reviveDeferredValue(
 ): unknown {
   if (isDeferredMarker(value)) {
     const id = value[FARM_DEFERRED_MARKER];
+    // Escaped user data, not a deferred reference — restore the original.
+    if (id.startsWith("!")) {
+      return { [FARM_DEFERRED_MARKER]: id.slice(1) };
+    }
     const controller = getControlledDeferred(id, controllers);
     const settlement = settlements?.[id];
     if (settlement && controller.promise.status === "pending") {

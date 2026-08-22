@@ -52,6 +52,26 @@ describe("deferred route data", () => {
     expect(resolved.self).toBe(revived.value);
   });
 
+  it("round-trips user data shaped like the deferred marker", async () => {
+    const payload = {
+      meta: { $farmDeferred: "external-id" },
+      alreadyEscaped: { $farmDeferred: "!keep-bang" },
+      notAMarker: { $farmDeferred: "x", extra: 1 },
+    };
+    const prepared = prepareDeferredData(payload);
+
+    const revived = reviveDeferredData(
+      prepared.data,
+      snapshotDeferredData(prepared.records),
+    ) as typeof payload;
+
+    expect(revived.meta).toEqual({ $farmDeferred: "external-id" });
+    expect(revived.alreadyEscaped).toEqual({ $farmDeferred: "!keep-bang" });
+    expect(revived.notAMarker).toEqual({ $farmDeferred: "x", extra: 1 });
+    // None of these become promises.
+    expect(typeof (revived.meta as any).then).toBe("undefined");
+  });
+
   it("returns immediate data while deferred fields continue streaming", async () => {
     const source = createControlledPromise<string[]>();
     const response = createDeferredDataResponse({
