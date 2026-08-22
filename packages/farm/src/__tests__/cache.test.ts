@@ -272,6 +272,39 @@ describe("server cache primitives", () => {
     await expect(getStats()).resolves.toEqual({ calls: 2 });
   });
 
+  it("keeps same-named functions in separate cache entries", async () => {
+    // Two different functions that happen to share the name getUser, as two
+    // modules would. Before including the source in the identity, the second
+    // wrapper served the first wrapper's cached data.
+    const fromA = (() => {
+      const getUser = async () => ({ from: "A" });
+      return unstable_cache(getUser);
+    })();
+    const fromB = (() => {
+      const getUser = async () => ({ from: "B" });
+      return unstable_cache(getUser);
+    })();
+
+    await expect(fromA()).resolves.toEqual({ from: "A" });
+    await expect(fromB()).resolves.toEqual({ from: "B" });
+  });
+
+  it("treats revalidate: 0 as always stale", async () => {
+    let calls = 0;
+    const getPrices = unstable_cache(
+      async () => {
+        calls++;
+        return { calls };
+      },
+      ["prices"],
+      { revalidate: 0 },
+    );
+
+    await expect(getPrices()).resolves.toEqual({ calls: 1 });
+    await expect(getPrices()).resolves.toEqual({ calls: 2 });
+    expect(calls).toBe(2);
+  });
+
   it("dedupes concurrent cache fills", async () => {
     let calls = 0;
     const getProfile = unstable_cache(async () => {
