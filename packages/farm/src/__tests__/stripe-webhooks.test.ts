@@ -182,4 +182,94 @@ describe("stripe webhooks", () => {
       "connect:account.updated:stripe",
     ]);
   });
+
+  it("advances currentPeriodEnd from item-level data on subscription renewals", async () => {
+    const previousPeriodEnd = new Date("2026-08-01T00:00:00Z");
+    const renewedPeriodEnd = Math.floor(new Date("2026-09-01T00:00:00Z").getTime() / 1000);
+    const saved: Array<Record<string, unknown>> = [];
+
+    const integration = stripe({
+      instance: {
+        async createCheckoutSession() {
+          return { id: "cs_test", url: "https://example.com/checkout" };
+        },
+        async createPortalSession() {
+          return { url: "https://example.com/portal" };
+        },
+        async retrieveCheckoutSession() {
+          throw new Error("not used");
+        },
+        async constructWebhookEvent(input: { payload: string }) {
+          return {
+            ...(JSON.parse(input.payload) as {
+              id: string;
+              type: string;
+              data: Record<string, unknown>;
+            }),
+            raw: input.payload,
+          };
+        },
+      },
+      webhooks: {
+        path: "/billing/webhook",
+        secret: "whsec_test",
+      },
+      billing: {
+        resolveOwner() {
+          return { kind: "user" as const, id: "user_1" };
+        },
+        hooks: {
+          async getBillingAccountByStripeCustomerId() {
+            return {
+              owner: { kind: "user" as const, id: "user_1" },
+              planId: "pro",
+              status: "active" as const,
+              stripeCustomerId: "cus_1",
+              stripeSubscriptionId: "sub_1",
+              currentPeriodEnd: previousPeriodEnd,
+              trialEndsAt: null,
+              trialUsedAt: null,
+              cancelAtPeriodEnd: false,
+            };
+          },
+          async saveBillingSnapshot(snapshot: Record<string, unknown>) {
+            saved.push(snapshot);
+          },
+        },
+      },
+    });
+
+    const route = integration.routes.find(
+      (candidate) => candidate.path === "/billing/webhook" && candidate.method === "POST",
+    );
+    expect(route).toBeTruthy();
+
+    const request = new Request("http://example.com/billing/webhook", {
+      method: "POST",
+      headers: { "stripe-signature": "signature" },
+      body: JSON.stringify({
+        id: "evt_renewal",
+        type: "customer.subscription.updated",
+        data: {
+          id: "sub_1",
+          customer: "cus_1",
+          status: "active",
+          // API >= 2025-03-31 carries the billing period on items, not the
+          // subscription itself.
+          items: {
+            data: [{ current_period_end: renewedPeriodEnd }],
+          },
+        },
+      }),
+    });
+
+    const response = await route!.handler(
+      request,
+      createContext(request, "POST", "/billing/webhook", integration.instance),
+    );
+
+    expect(response.status).toBe(200);
+    expect(saved).toHaveLength(1);
+    expect(saved[0].currentPeriodEnd).toEqual(new Date(renewedPeriodEnd * 1000));
+  });
 });
