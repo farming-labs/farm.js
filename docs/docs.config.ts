@@ -3,7 +3,17 @@ import { pixelBorder } from "@farming-labs/theme-production/pixel-border";
 import type { FarmDocsSidebarItem, FarmDocsSocialImageConfig } from "@farm.js/core";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { siCloudflare, siNextdotjs, siNuxt, siPreact, siSvelte, siTanstack } from "simple-icons";
+import {
+  siCloudflare,
+  siNextdotjs,
+  siNuxt,
+  siPreact,
+  siReact,
+  siSolid,
+  siSvelte,
+  siTanstack,
+  siVuedotjs,
+} from "simple-icons";
 
 type FarmDocsSerializableConfig = Parameters<typeof defineDocs>[0] & {
   favicon?: string;
@@ -64,6 +74,7 @@ const icons = {
     "0 0 300 300",
   ),
   "brand-preact": brandPath(siPreact.path),
+  "brand-react": brandPath(siReact.path),
   "brand-resend": brandPath(
     "M14.679 0c4.648 0 7.413 2.765 7.413 6.434s-2.765 6.434-7.413 6.434H12.33L24 24h-8.245l-8.88-8.44c-.636-.588-.93-1.273-.93-1.86 0-.831.587-1.565 1.713-1.883l4.574-1.224c1.737-.465 2.936-1.81 2.936-3.572 0-2.153-1.761-3.4-3.939-3.4H0V0z",
   ),
@@ -76,6 +87,7 @@ const icons = {
   "brand-supabase": brandPath(
     "M11.9 1.036c-.015-.986-1.26-1.41-1.874-.637L.764 12.05C-.33 13.427.65 15.455 2.409 15.455h9.579l.113 7.51c.014.985 1.259 1.408 1.873.636l9.262-11.653c1.093-1.375.113-3.403-1.645-3.403h-9.642z",
   ),
+  "brand-solid": brandPath(siSolid.path),
   "brand-svelte": brandPath(siSvelte.path),
   "brand-tanstack": brandPath(siTanstack.path),
   "brand-trigger": brandSvg(
@@ -85,6 +97,7 @@ const icons = {
     '<path d="M170.8 115V340.6H341.2L284.4 397H170.8C139.418 397 114 371.761 114 340.6V115H170.8Z" fill="currentColor" stroke="none"></path><path d="M398 284.2L341.2 340.6V115H398V284.2Z" fill="currentColor" stroke="none"></path>',
     "0 0 512 512",
   ),
+  "brand-vue": brandPath(siVuedotjs.path),
   "brand-workos": brandSvg(
     '<path fill="currentColor" stroke="none" d="M0 24c0 1.1.3 2.1.8 3l9.7 16.8c1 1.7 2.5 3.1 4.4 3.7 3.6 1.2 7.5-.3 9.4-3.5l2.3-4.1-9.2-16 9.8-16.9L29.5 3c.7-1.2 1.6-2.2 2.7-3h-15c-2.6 0-5.1 1.4-6.4 3.7L.8 21C.3 21.9 0 22.9 0 24z"></path><path fill="currentColor" stroke="none" d="M55.4 24c0-1.1-.3-2.1-.8-3L44.8 4c-1.9-3.3-5.8-4.7-9.4-3.5-1.9.6-3.4 2-4.4 3.7L28.7 8 38 24l-9.8 16.9-2.3 4.1c-.7 1.2-1.6 2.2-2.7 3h15.1c2.6 0 5.1-1.4 6.4-3.7l10-17.3c.4-.9.7-1.9.7-3z"></path>',
     "0 0 55.4 48",
@@ -154,10 +167,10 @@ const sidebar = [
         icon: "layout",
         children: [
           { label: "Overview", slug: "renderers", icon: "layout" },
-          { label: "React", slug: "renderers/react", icon: "code" },
+          { label: "React", slug: "renderers/react", icon: "brand-react" },
           { label: "Preact", slug: "renderers/preact", icon: "brand-preact" },
-          { label: "Solid", slug: "renderers/solid", icon: "code" },
-          { label: "Vue", slug: "renderers/vue", icon: "code" },
+          { label: "Solid", slug: "renderers/solid", icon: "brand-solid" },
+          { label: "Vue", slug: "renderers/vue", icon: "brand-vue" },
           { label: "Svelte", slug: "renderers/svelte", icon: "brand-svelte" },
         ],
       },
