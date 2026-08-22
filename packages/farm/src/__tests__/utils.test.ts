@@ -27,8 +27,9 @@ describe("toViteModuleId", () => {
     expect(toViteModuleId(path.join(root, "src", "farm.routes.tsx"), root)).toBe(
       "/src/farm.routes.tsx",
     );
-    expect(toViteModuleId(path.resolve("/workspace/layer/routes.ts"), root)).toBe(
-      "/@fs/workspace/layer/routes.ts",
+    const external = path.resolve("/workspace/layer/routes.ts");
+    expect(toViteModuleId(external, root)).toBe(
+      `/@fs/${toPosixPath(external).replace(/^\/+/, "")}`,
     );
     expect(toViteModuleId("virtual:farm-routes", root)).toBe("virtual:farm-routes");
   });

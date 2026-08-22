@@ -31,7 +31,9 @@ export function resolveModuleSourcePath(modulePath: string, root?: string): stri
     }
 
     if (modulePath.startsWith("/@fs/")) {
-      candidates.add(modulePath.slice(4));
+      // Vite emits /@fs/C:/... on Windows, where the leading slash is not part of the path.
+      const fsPath = withoutQuery.slice("/@fs/".length);
+      candidates.add(path.normalize(/^[A-Za-z]:/.test(fsPath) ? fsPath : `/${fsPath}`));
     }
   }
 

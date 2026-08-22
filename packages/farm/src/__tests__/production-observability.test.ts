@@ -10,6 +10,8 @@ import { describe, expect, it } from "vitest";
 import { build } from "../build";
 import { resolveConfig } from "../config";
 
+const isWindows = process.platform === "win32";
+
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const farmOTelRoot = path.resolve(packageRoot, "../farm-otel");
 
@@ -41,24 +43,35 @@ async function waitForServer(url: string, output: () => string): Promise<Respons
 }
 
 describe("production OpenTelemetry tracing", () => {
-  it("starts instrumentation before traffic and flushes request traces during graceful shutdown", async () => {
+  // Windows has no POSIX signals: child.kill("SIGTERM") maps to TerminateProcess,
+  // so graceful shutdown never runs and its effects cannot be observed.
+  it("starts instrumentation before traffic and flushes request traces during graceful shutdown", async (ctx) => {
+    if (isWindows) ctx.skip();
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-production-otel-"));
     const traceOutput = path.join(root, "traces.jsonl");
     let productionServer: ReturnType<typeof spawn> | undefined;
 
     try {
       await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
-      await fs.symlink(packageRoot, path.join(root, "node_modules", "@farm.js", "core"), "dir");
-      await fs.symlink(farmOTelRoot, path.join(root, "node_modules", "@farm.js", "otel"), "dir");
+      await fs.symlink(
+        packageRoot,
+        path.join(root, "node_modules", "@farm.js", "core"),
+        "junction",
+      );
+      await fs.symlink(
+        farmOTelRoot,
+        path.join(root, "node_modules", "@farm.js", "otel"),
+        "junction",
+      );
       await fs.symlink(
         await fs.realpath(path.join(packageRoot, "node_modules", "react")),
         path.join(root, "node_modules", "react"),
-        "dir",
+        "junction",
       );
       await fs.symlink(
         await fs.realpath(path.join(packageRoot, "node_modules", "react-dom")),
         path.join(root, "node_modules", "react-dom"),
-        "dir",
+        "junction",
       );
       await fs.mkdir(path.join(root, "src", "app", "api", "health"), { recursive: true });
       await fs.writeFile(
@@ -223,7 +236,7 @@ export function register(context) {
       if (productionServer && productionServer.exitCode === null) {
         productionServer.kill("SIGKILL");
       }
-      await fs.rm(root, { recursive: true, force: true });
+      await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   }, 120_000);
 });

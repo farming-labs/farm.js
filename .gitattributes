@@ -1,0 +1,3 @@
+# Check out with LF everywhere. Several tests match multi-line snippets of source
+# files, and a CRLF checkout on Windows breaks those comparisons.
+* text=auto eol=lf

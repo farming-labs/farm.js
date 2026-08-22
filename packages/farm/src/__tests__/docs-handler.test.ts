@@ -603,7 +603,9 @@ describe("createFarmDocsHandler", () => {
     const manifest = createFarmDocsLastModifiedManifest(docsDir);
 
     expect(new Date(manifest.pages["page.md"]).toISOString()).toBe(commitDate);
-  });
+    // Eight synchronous git spawns, which are slow enough on Windows to pass the
+    // default timeout.
+  }, 30_000);
 
   it("renders docs-style breadcrumbs only for nested docs pages", async () => {
     const { root, docs } = await createDocsFixture();

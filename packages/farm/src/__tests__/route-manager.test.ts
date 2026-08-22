@@ -5,6 +5,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { RouteManager, shouldSuggestStaticRenderingForI18n } from "../routing/route-manager";
 import type { FarmConfig } from "../types";
 
+/** "/test" is not an absolute path on Windows, so resolve it per platform. */
+const TEST_ROOT = path.resolve("/test");
+const appPath = (...segments: string[]) => path.join(TEST_ROOT, "src", "app", ...segments);
+
 // Mock the file system utilities
 vi.mock("../utils", async () => {
   const actual = await vi.importActual("../utils");
@@ -36,7 +40,7 @@ describe("RouteManager", () => {
 
   beforeEach(() => {
     mockConfig = {
-      root: "/test",
+      root: TEST_ROOT,
       srcDir: "src",
       outDir: "dist",
       basePath: "/",
@@ -216,8 +220,8 @@ describe("RouteManager", () => {
       expect(vi.mocked(globFiles).mock.calls.some(([pattern]) => pattern.includes("vue"))).toBe(
         true,
       );
-      expect(routeManager.getRoutes().get("/")?.modulePath).toBe("/test/src/app/page.vue");
-      expect(routeManager.getLayouts().get("/")?.modulePath).toBe("/test/src/app/layout.vue");
+      expect(routeManager.getRoutes().get("/")?.modulePath).toBe(appPath("page.vue"));
+      expect(routeManager.getLayouts().get("/")?.modulePath).toBe(appPath("layout.vue"));
     });
 
     it("reuses compiled navigation metadata until route discovery invalidates it", async () => {
@@ -272,7 +276,7 @@ describe("RouteManager", () => {
       expect(layouts.size).toBe(1);
       expect(loadings.size).toBe(2);
       expect(errors.size).toBe(2);
-      expect(routes.get("/docs")?.modulePath).toBe("/test/src/app/docs/page.mdx");
+      expect(routes.get("/docs")?.modulePath).toBe(appPath("docs", "page.mdx"));
     });
 
     it("uses page.md as the markdown representation beside page.tsx", async () => {
@@ -287,8 +291,8 @@ describe("RouteManager", () => {
       await routeManager.discoverRoutes();
 
       expect(routeManager.getRoutes().get("/about")).toMatchObject({
-        modulePath: "/test/src/app/about/page.tsx",
-        markdownSourcePath: "/test/src/app/about/page.md",
+        modulePath: appPath("about", "page.tsx"),
+        markdownSourcePath: appPath("about", "page.md"),
       });
     });
 
@@ -362,7 +366,7 @@ describe("RouteManager", () => {
         new Set(["/", "/pricing", "/dashboard"]),
       );
       expect(routeManager.matchRoute("/").route?.modulePath).toBe(
-        "/test/src/app/(marketing)/page.tsx",
+        appPath("(marketing)", "page.tsx"),
       );
       expect(routeManager.matchRoute("/pricing").route?.pattern).toBe("/pricing");
       expect(routeManager.matchRoute("/dashboard").route?.pattern).toBe("/dashboard");

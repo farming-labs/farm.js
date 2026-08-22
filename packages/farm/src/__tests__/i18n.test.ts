@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { readFarmI18nCatalogs } from "../i18n/catalog";
 import { resolveFarmI18nConfig } from "../i18n/config";
@@ -34,7 +34,7 @@ describe("Farm i18n configuration", () => {
       locales: ["en-US", "am"],
       defaultLocale: "en-US",
       fallbackLocale: "en-US",
-      messages: "/app/src/messages",
+      messages: resolve("/app", "src", "messages"),
       routing: "prefix-except-default",
       detection: ["url", "cookie", "accept-language"],
       strict: true,

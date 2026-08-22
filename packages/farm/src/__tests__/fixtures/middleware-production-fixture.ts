@@ -11,7 +11,8 @@ export async function createMiddlewareProductionFixture(): Promise<string> {
   await fs.mkdir(path.join(root, "node_modules", "@farm.js"), {
     recursive: true,
   });
-  await fs.symlink(packageRoot, path.join(root, "node_modules", "@farm.js", "core"), "dir");
+  // Junctions need no Windows privilege; the type is ignored on POSIX.
+  await fs.symlink(packageRoot, path.join(root, "node_modules", "@farm.js", "core"), "junction");
 
   await fs.mkdir(path.join(root, "src", "app", "dashboard", "settings"), {
     recursive: true,
@@ -447,5 +448,6 @@ export default function userSitemap({ params, path }: any) {
 }
 
 export async function cleanupMiddlewareProductionFixture(root: string): Promise<void> {
-  await fs.rm(root, { recursive: true, force: true });
+  // Windows keeps handles on spawned servers and loaded .node files briefly after exit.
+  await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }

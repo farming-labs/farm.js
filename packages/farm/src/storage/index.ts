@@ -226,10 +226,20 @@ async function loadDatabaseDriver(config: FarmStorageDatabaseConfig): Promise<Dr
   ]);
 
   const database = createDatabase(connectorModule.default(extractDriverOptions(config) || {}));
-  return db0DriverModule.default({
+  const driver = db0DriverModule.default({
     database,
     tableName: config.tableName,
   });
+
+  // The db0 driver has no dispose, so this connection is Farm's to close. Databases
+  // handed to `databaseStorage` stay owned by the caller and are left open.
+  return {
+    ...driver,
+    async dispose() {
+      await driver.dispose?.();
+      await database.dispose();
+    },
+  };
 }
 
 async function resolveDriver(config?: FarmStorageMountConfig): Promise<Driver> {
