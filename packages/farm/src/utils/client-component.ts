@@ -92,8 +92,32 @@ export function hasUseClientDirective(content: string | null): boolean {
   if (!content) {
     return false;
   }
+
+  // Fast path: directive at the very start of the file.
   const normalized = content.trimStart();
-  return normalized.startsWith("'use client'") || normalized.startsWith('"use client"');
+  if (normalized.startsWith("'use client'") || normalized.startsWith('"use client"')) {
+    return true;
+  }
+  if (!normalized.includes("use client")) {
+    return false;
+  }
+
+  // Directive-prologue semantics allow comments and other directives (e.g.
+  // "use strict") before "use client". Scan the leading string-literal
+  // statements with the comment-aware tokenizer.
+  for (const token of tokenizeModuleSource(content)) {
+    if (token.kind === "string") {
+      if (token.value === "use client") {
+        return true;
+      }
+      continue;
+    }
+    if (token.kind === "punctuation" && token.value === ";") {
+      continue;
+    }
+    return false;
+  }
+  return false;
 }
 
 export function hasHydrateExport(content: string | null): boolean {
@@ -337,7 +361,12 @@ export function getIslandStrategyExport(content: string | null): FarmIslandStrat
 }
 
 export function stripUseClientDirective(content: string): string {
-  return content.replace(/^\s*(["'])use client\1\s*;?\s*/, "");
+  // Comments (and other directives) may precede "use client"; keep them and
+  // remove only the directive itself.
+  return content.replace(
+    /^((?:\s|\/\/[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/)*)(["'])use client\2\s*;?\s*/,
+    "$1",
+  );
 }
 
 /**
