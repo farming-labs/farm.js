@@ -12,6 +12,7 @@ import {
 } from "../client/history-sync";
 import { usePageState } from "../client/router";
 import { readPageState, SPARouter } from "../client/spa-router";
+import { asString, useQueryState } from "../query/client";
 
 let active: SPARouter | undefined;
 const listeners: Array<() => void> = [];
@@ -211,6 +212,31 @@ describe("page state writes do not navigate", () => {
     });
 
     expect(seen.at(-1)).toEqual({ modal: "cart" });
+  });
+
+  it("resyncs useQueryState when a page-state write changes the query string", async () => {
+    const h = mountRouter();
+    let panel: string | null = null;
+
+    function Probe() {
+      const [value] = useQueryState("panel", asString);
+      panel = value;
+      return null;
+    }
+
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() => root?.render(createElement(Probe)));
+
+    await act(async () => {
+      h.router.pushState({ modal: "cart" }, "/?panel=open");
+      await settle();
+    });
+
+    expect(window.location.search).toBe("?panel=open");
+    expect(panel).toBe("open");
+    expect(h.fetched()).toEqual([]);
   });
 
   it("still runs the navigation pipeline for a real back/forward event", async () => {
