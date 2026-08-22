@@ -494,6 +494,42 @@ function jsxAttributeName(attribute: t.JSXAttribute): string | undefined {
   return t.isJSXIdentifier(attribute.name) ? attribute.name.name : undefined;
 }
 
+function jsxAttribute(element: t.JSXElement, name: string): t.JSXAttribute | undefined {
+  return element.openingElement.attributes.find(
+    (attribute): attribute is t.JSXAttribute =>
+      t.isJSXAttribute(attribute) && jsxAttributeName(attribute) === name,
+  );
+}
+
+function staticJsxAttributeString(attribute: t.JSXAttribute | undefined): string | undefined {
+  if (!attribute?.value) return attribute ? "" : undefined;
+  if (t.isStringLiteral(attribute.value)) return attribute.value.value;
+  if (
+    t.isJSXExpressionContainer(attribute.value) &&
+    t.isStringLiteral(attribute.value.expression)
+  ) {
+    return attribute.value.expression.value;
+  }
+  return undefined;
+}
+
+function controlledSelectHasDynamicOptions(element: t.JSXElement): boolean {
+  let dynamic = false;
+  t.traverseFast(element, (node) => {
+    if (dynamic || !t.isJSXElement(node)) return;
+    const tag = node.openingElement.name;
+    if (!t.isJSXIdentifier(tag) || (tag.name !== "option" && tag.name !== "optgroup")) return;
+    dynamic = node.openingElement.attributes.some(
+      (attribute) =>
+        t.isJSXSpreadAttribute(attribute) ||
+        (t.isJSXAttribute(attribute) &&
+          t.isJSXExpressionContainer(attribute.value) &&
+          !t.isJSXEmptyExpression(attribute.value.expression)),
+    );
+  });
+  return dynamic;
+}
+
 interface ConditionalBlockShape {
   test: t.Expression;
   logical: boolean;
@@ -854,10 +890,127 @@ function validateKeyedRowEventHandler(
   return reason;
 }
 
+function stabilizeDeferredEventCurrentTarget(
+  handler: t.ArrowFunctionExpression | t.FunctionExpression,
+  compilerSetters: ReadonlySet<string>,
+): t.ArrowFunctionExpression | t.FunctionExpression {
+  const cloned = t.cloneNode(handler, true);
+  const eventParameter = cloned.params[0];
+  if (!t.isIdentifier(eventParameter) || compilerSetters.size === 0) return cloned;
+  const file = expressionFile(cloned);
+  const expression = (file.program.body[0] as t.ExpressionStatement).expression;
+  if (!t.isArrowFunctionExpression(expression) && !t.isFunctionExpression(expression)) {
+    return cloned;
+  }
+  const rootBindingIdentifier = expression.params[0];
+  const snapshots: Array<{ identifier: t.Identifier; value: t.Expression }> = [];
+  const snapshotsByProperty = new Map<string, t.Identifier>();
+  const replaceCurrentTarget = (
+    path: NodePath<t.MemberExpression | t.OptionalMemberExpression>,
+  ) => {
+    const property = path.node.property;
+    const isCurrentTarget = path.node.computed
+      ? t.isStringLiteral(property, { value: "currentTarget" })
+      : t.isIdentifier(property, { name: "currentTarget" });
+    if (!isCurrentTarget || !t.isIdentifier(path.node.object, { name: eventParameter.name }))
+      return;
+    const binding = path.scope.getBinding(eventParameter.name);
+    if (!binding || binding.identifier !== rootBindingIdentifier) return;
+    const setterCall = path.findParent(
+      (parent) =>
+        parent.isCallExpression() &&
+        t.isIdentifier(parent.node.callee) &&
+        compilerSetters.has(parent.node.callee.name),
+    );
+    if (!setterCall) return;
+    const deferredFunction = path.findParent(
+      (parent) => parent.isFunction() && parent.node !== expression,
+    );
+    if (!deferredFunction || !deferredFunction.findParent((parent) => parent === setterCall))
+      return;
+
+    const parent = path.parentPath;
+    const propertyRead =
+      (parent?.isMemberExpression() || parent?.isOptionalMemberExpression()) &&
+      parent.node.object === path.node
+        ? parent
+        : path;
+    const snapshotProperty =
+      propertyRead === path
+        ? "element"
+        : propertyRead.node.computed
+          ? t.isStringLiteral(propertyRead.node.property)
+            ? propertyRead.node.property.value
+            : `computed${snapshots.length}`
+          : t.isIdentifier(propertyRead.node.property)
+            ? propertyRead.node.property.name
+            : `property${snapshots.length}`;
+    let snapshot = snapshotsByProperty.get(snapshotProperty);
+    if (!snapshot) {
+      const suffix = snapshotProperty
+        .replace(/[^A-Za-z0-9_$]/g, " ")
+        .replace(/(?:^|\s+)([A-Za-z0-9_$])/g, (_match, character: string) =>
+          character.toUpperCase(),
+        )
+        .replace(/\s/g, "");
+      snapshot = uniqueLocalIdentifier(`_farmCurrentTarget${suffix}`, [
+        expression,
+        ...snapshots.map((entry) => entry.identifier),
+      ]);
+      snapshotsByProperty.set(snapshotProperty, snapshot);
+      snapshots.push({
+        identifier: snapshot,
+        value: t.cloneNode(propertyRead.node, true) as t.Expression,
+      });
+    }
+    propertyRead.replaceWith(t.cloneNode(snapshot));
+    propertyRead.skip();
+  };
+  traverse(file, {
+    MemberExpression: replaceCurrentTarget,
+    OptionalMemberExpression: replaceCurrentTarget,
+  });
+  if (snapshots.length === 0) return expression;
+
+  const declarations = snapshots.map(({ identifier, value }) =>
+    t.variableDeclaration("const", [t.variableDeclarator(t.cloneNode(identifier), value)]),
+  );
+  if (t.isBlockStatement(expression.body)) {
+    expression.body.body.unshift(...declarations);
+  } else {
+    expression.body = t.blockStatement([...declarations, t.returnStatement(expression.body)]);
+  }
+  return expression;
+}
+
+function stabilizeDeferredEventCurrentTargets(
+  root: t.JSXElement,
+  compilerSetters: ReadonlySet<string>,
+): t.JSXElement {
+  const file = expressionFile(t.cloneNode(root, true));
+  traverse(file, {
+    JSXAttribute(path) {
+      if (!t.isJSXIdentifier(path.node.name) || !/^on[A-Z]/.test(path.node.name.name)) return;
+      const value = path.node.value;
+      if (
+        !t.isJSXExpressionContainer(value) ||
+        (!t.isArrowFunctionExpression(value.expression) &&
+          !t.isFunctionExpression(value.expression))
+      ) {
+        return;
+      }
+      value.expression = stabilizeDeferredEventCurrentTarget(value.expression, compilerSetters);
+    },
+  });
+  const expression = (file.program.body[0] as t.ExpressionStatement).expression;
+  return t.isJSXElement(expression) ? expression : t.cloneNode(root, true);
+}
+
 function analyzeKeyedRowTree(
   row: t.JSXElement,
   renderCallback: t.ArrowFunctionExpression | t.FunctionExpression,
   safeGlobals: ReadonlySet<string>,
+  compilerSetters: ReadonlySet<string>,
 ): {
   bindings?: PendingKeyedRowBinding[];
   events?: PendingKeyedRowEvent[];
@@ -890,12 +1043,25 @@ function analyzeKeyedRowTree(
         .map(jsxAttributeName)
         .filter((name): name is string => name !== undefined),
     );
-    if (
-      (tag.name === "input" || tag.name === "textarea" || tag.name === "select") &&
-      (attributeNames.has("value") || attributeNames.has("checked")) &&
-      [...attributeNames].some((name) => /^on[A-Z]/.test(name))
-    ) {
-      return "controlled form elements in interactive compiled keyed rows require React ownership";
+    const controlled = attributeNames.has("value") || attributeNames.has("checked");
+    if (attributeNames.has("contentEditable")) {
+      return "content-editable keyed rows require React ownership";
+    }
+    if (tag.name === "input" && controlled) {
+      const type = jsxAttribute(element, "type");
+      const staticType = staticJsxAttributeString(type);
+      if (type && staticType === undefined) {
+        return "controlled keyed row inputs require a static type";
+      }
+      if (attributeNames.has("value") && staticType?.toLowerCase() === "file") {
+        return "file inputs require React ownership";
+      }
+    }
+    if (tag.name === "textarea" && controlled && meaningfulJsxChildren(element).length > 0) {
+      return "controlled keyed row textareas cannot also use children";
+    }
+    if (tag.name === "select" && controlled && controlledSelectHasDynamicOptions(element)) {
+      return "controlled keyed row selects require static options";
     }
 
     for (const attribute of element.openingElement.attributes) {
@@ -931,7 +1097,7 @@ function analyzeKeyedRowTree(
           id: events.length,
           path: [...path],
           name,
-          value: t.cloneNode(handler, true),
+          value: stabilizeDeferredEventCurrentTarget(handler, compilerSetters),
         });
         continue;
       }
@@ -1167,7 +1333,12 @@ function analyzeKeyedRowsContainer(
     return undefined;
   }
 
-  const rowAnalysis = analyzeKeyedRowTree(row, renderCallback, safeGlobals);
+  const rowAnalysis = analyzeKeyedRowTree(
+    row,
+    renderCallback,
+    safeGlobals,
+    new Set([...statesByValue.values()].map((state) => state.setterName)),
+  );
   if (rowAnalysis.reason) return undefined;
   return {
     collection,
@@ -2804,10 +2975,14 @@ function compileCandidate(
   const handlerRewrite = rewriteHandlerAccess(rootWithDerived, handlersByName);
   if (handlerRewrite.reason) return handlerRewrite.reason;
   if (!handlerRewrite.root) return "event handlers could not be prepared safely";
-  const expandedRoot = rewriteDestructuredPropAccess(
+  const expandedRootWithDeferredEvents = rewriteDestructuredPropAccess(
     handlerRewrite.root,
     propsPlan.destructuredNames,
     propsPlan.definitionParameter,
+  );
+  const expandedRoot = stabilizeDeferredEventCurrentTargets(
+    expandedRootWithDeferredEvents,
+    new Set(states.map((state) => state.setterName)),
   );
   const setterReason = validateSetterUsage(expandedRoot, statesBySetter);
   if (setterReason) return setterReason;

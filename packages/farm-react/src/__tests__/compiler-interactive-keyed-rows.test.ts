@@ -134,19 +134,153 @@ describe("React AOT interactive keyed-row compiler", () => {
     expect(result.code).not.toContain("farmBlocks.KeyedRows");
   });
 
-  it("keeps controlled interactive row inputs under React ownership", async () => {
+  it("compiles controlled host form fields while React keeps their events", async () => {
     const result = await compile(`
       import { useState } from "react";
       export function Tasks() {
+        const [items, setItems] = useState([
+          { id: "a", label: "Alpha", note: "Ready", done: false, priority: "high" },
+        ]);
+        return (
+          <section>
+            <ul>
+              {items.map((item, index) => (
+                <li key={item.id}>
+                  <input
+                    onChange={(event) => setItems((current) => current.map((row) => row.id === item.id ? { ...row, label: event.currentTarget.value } : row))}
+                    value={item.label}
+                  />
+                  <textarea
+                    onInput={(event) => setItems((current) => current.map((row) => row.id === item.id ? { ...row, note: event.currentTarget.value } : row))}
+                    value={item.note}
+                  />
+                  <input
+                    checked={item.done}
+                    onChange={(event) => setItems((current) => current.map((row) => row.id === item.id ? { ...row, done: event.currentTarget.checked } : row))}
+                    type="checkbox"
+                  />
+                  <select
+                    onChange={(event) => setItems((current) => current.map((row) => row.id === item.id ? { ...row, priority: event.currentTarget.value } : row))}
+                    value={item.priority}
+                  >
+                    <option value="low">Low</option>
+                    <option value="high">High</option>
+                  </select>
+                  <output>{index}:{item.label}:{item.note}:{item.done ? "done" : "open"}:{item.priority}</output>
+                </li>
+              ))}
+            </ul>
+          </section>
+        );
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Tasks"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.code).toContain("farmBlocks.KeyedRows");
+    expect(result.code).toContain('name: "value"');
+    expect(result.code).toContain('name: "checked"');
+    expect(result.code).toContain('name: "onChange"');
+    expect(result.code).toContain('name: "onInput"');
+    expect(result.code).toContain("const _farmCurrentTargetValue = event.currentTarget.value");
+    expect(result.code).toContain("const _farmCurrentTargetChecked = event.currentTarget.checked");
+    expect(result.code).toContain("label: _farmCurrentTargetValue");
+    expect(result.code).toContain("done: _farmCurrentTargetChecked");
+    expect(result.code).not.toContain("addEventListener");
+    await expect(
+      transformWithEsbuild(result.code, "/app/InteractiveRows.tsx", {
+        loader: "tsx",
+        jsx: "automatic",
+      }),
+    ).resolves.toMatchObject({ code: expect.stringContaining("farmBlocks.KeyedRows") });
+  });
+
+  it("supports controlled keyed-row inputs through the public List boundary", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      import { List } from "@farm.js/react/list";
+      export function Tasks() {
         const [items, setItems] = useState([{ id: "a", label: "Alpha" }]);
+        return (
+          <section>
+            <ul>
+              <List each={items} by={(item) => item.id}>
+                {(item) => (
+                  <li>
+                    <input
+                      onChange={(event) => setItems((current) => current.map((row) => row.id === item.id ? { ...row, label: event.currentTarget.value } : row))}
+                      value={item.label}
+                    />
+                  </li>
+                )}
+              </List>
+            </ul>
+          </section>
+        );
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Tasks"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.code).toContain("farmBlocks.KeyedRows");
+    expect(result.code).toContain("_farmRowEvent(item, 0, 0)");
+  });
+
+  it.each([
+    {
+      name: "a file input value",
+      control: '<input type="file" value={item.label} onChange={(event) => setItems([])} />',
+    },
+    {
+      name: "a dynamic input type",
+      control: "<input type={item.type} value={item.label} onChange={(event) => setItems([])} />",
+    },
+    {
+      name: "dynamic select options",
+      control:
+        "<select value={item.label} onChange={(event) => setItems([])}><option value={item.label}>{item.label}</option></select>",
+    },
+    {
+      name: "textarea children alongside value",
+      control:
+        "<textarea value={item.label} onChange={(event) => setItems([])}>{item.label}</textarea>",
+    },
+    {
+      name: "content-editable state",
+      control: "<div contentEditable onInput={(event) => setItems([])}>{item.label}</div>",
+    },
+  ])("keeps $name in the React-owned list fallback", async ({ control }) => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Tasks() {
+        const [items, setItems] = useState([{ id: "a", label: "Alpha", type: "text" }]);
+        return (
+          <section>
+            <ul>{items.map((item) => <li key={item.id}>${control}</li>)}</ul>
+          </section>
+        );
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Tasks"]);
+    expect(result.code).toContain("farmBlocks.KeyedList");
+    expect(result.code).not.toContain("farmBlocks.KeyedRows");
+  });
+
+  it("snapshots deferred form values even when the row falls back to React", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Tasks() {
+        const [items, setItems] = useState([{ id: "a", label: "Alpha", type: "text" }]);
         return (
           <section>
             <ul>
               {items.map((item) => (
                 <li key={item.id}>
                   <input
-                    onChange={(event) => setItems([{ ...item, label: event.currentTarget.value }])}
+                    type={item.type}
                     value={item.label}
+                    onChange={(event) => setItems((current) => current.map((row) => row.id === item.id ? { ...row, label: event.currentTarget.value } : row))}
                   />
                 </li>
               ))}
@@ -159,5 +293,7 @@ describe("React AOT interactive keyed-row compiler", () => {
     expect(result.compiled).toEqual(["Tasks"]);
     expect(result.code).toContain("farmBlocks.KeyedList");
     expect(result.code).not.toContain("farmBlocks.KeyedRows");
+    expect(result.code).toContain("const _farmCurrentTargetValue = event.currentTarget.value");
+    expect(result.code).toContain("label: _farmCurrentTargetValue");
   });
 });
