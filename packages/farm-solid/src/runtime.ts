@@ -62,6 +62,67 @@ export function isValidElement(value: unknown): boolean {
   return value !== null && value !== undefined && value !== false;
 }
 
+// CSS properties whose numeric values are unitless in React's style objects.
+const UNITLESS_STYLE_PROPERTIES = new Set([
+  "animation-iteration-count",
+  "aspect-ratio",
+  "border-image-outset",
+  "border-image-slice",
+  "border-image-width",
+  "column-count",
+  "columns",
+  "fill-opacity",
+  "flex",
+  "flex-grow",
+  "flex-shrink",
+  "flood-opacity",
+  "font-weight",
+  "grid-area",
+  "grid-column",
+  "grid-column-end",
+  "grid-column-start",
+  "grid-row",
+  "grid-row-end",
+  "grid-row-start",
+  "line-clamp",
+  "line-height",
+  "opacity",
+  "order",
+  "orphans",
+  "stop-opacity",
+  "stroke-dasharray",
+  "stroke-dashoffset",
+  "stroke-miterlimit",
+  "stroke-opacity",
+  "stroke-width",
+  "tab-size",
+  "widows",
+  "z-index",
+  "zoom",
+]);
+
+function farmStyleObjectToCss(style: Record<string, unknown>): string {
+  return Object.entries(style)
+    .filter(([, value]) => value !== null && value !== undefined && value !== false)
+    .map(([name, value]) => {
+      const property = name.startsWith("--")
+        ? name
+        : name
+            .replace(/[A-Z]/g, (character) => `-${character.toLowerCase()}`)
+            .replace(/^ms-/, "-ms-");
+      // React appends px to non-zero numbers outside the unitless set.
+      const cssValue =
+        typeof value === "number" &&
+        value !== 0 &&
+        !property.startsWith("--") &&
+        !UNITLESS_STYLE_PROPERTIES.has(property)
+          ? `${value}px`
+          : String(value);
+      return `${property}: ${cssValue}`;
+    })
+    .join("; ");
+}
+
 function normalizeProps(element: FarmSolidElement): Record<string, unknown> {
   const props = { ...element.props };
 
@@ -77,6 +138,16 @@ function normalizeProps(element: FarmSolidElement): Record<string, unknown> {
     const html = props.dangerouslySetInnerHTML as { __html?: unknown } | undefined;
     props.innerHTML = html?.__html == null ? "" : String(html.__html);
     delete props.dangerouslySetInnerHTML;
+  }
+  // React-shaped style objects: camelCase keys, numeric px values. Serialize
+  // to a CSS string so Solid renders them identically on server and client.
+  if (props.style && typeof props.style === "object" && !Array.isArray(props.style)) {
+    props.style = farmStyleObjectToCss(props.style as Record<string, unknown>);
+  }
+  // Solid's DOM event prop for dblclick is onDblClick.
+  if ("onDoubleClick" in props && !("onDblClick" in props)) {
+    props.onDblClick = props.onDoubleClick;
+    delete props.onDoubleClick;
   }
   delete props.suppressHydrationWarning;
 

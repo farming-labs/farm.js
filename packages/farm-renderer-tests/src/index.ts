@@ -109,6 +109,19 @@ export function defineRendererServerConformance(runtime: RendererServerFixture):
       expect(typeof first).toBe("string");
       expect(second).toBe(first);
     });
+
+    it("serializes React numeric style values with px units", async () => {
+      const html = await runtime.renderToString(
+        runtime.createElement("div", {
+          style: { marginTop: 4, width: 100, opacity: 0.5, zIndex: 3 },
+        }),
+      );
+
+      expect(html).toMatch(/margin-top:\s*4px/);
+      expect(html).toMatch(/width:\s*100px/);
+      expect(html).toMatch(/opacity:\s*0?\.5/);
+      expect(html).toMatch(/z-index:\s*3(?!px)/);
+    });
   });
 }
 
@@ -138,6 +151,38 @@ export function defineRendererClientConformance(options: {
 
       root.unmount();
       await settleClientRender(() => expect(container.childNodes).toHaveLength(0));
+      container.remove();
+    });
+
+    it("applies numeric styles with px and wires onDoubleClick to dblclick", async () => {
+      const container = document.createElement("div");
+      document.body.append(container);
+      const root = options.client.createRoot(container);
+      let doubleClicks = 0;
+
+      root.render(
+        options.client.createElement(
+          "button",
+          {
+            style: { width: 100, opacity: 0.5 },
+            onDoubleClick: () => doubleClicks++,
+          },
+          "Double-click me",
+        ),
+      );
+      await settleClientRender(() => {
+        const button = container.querySelector("button");
+        expect(button).toBeTruthy();
+        expect(button!.style.width).toBe("100px");
+        expect(button!.style.opacity).toBe("0.5");
+      });
+
+      container
+        .querySelector("button")!
+        .dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+      expect(doubleClicks).toBe(1);
+
+      root.unmount();
       container.remove();
     });
 
