@@ -400,6 +400,101 @@ describe("interactive compiled keyed-row runtime", () => {
     expect(observed[observed.length - 1]).toBe("Second newest:1");
   });
 
+  it("keeps row DOM state across updates while in duplicate-key fallback", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    let updateItems: (next: CompilerStateUpdater) => void = () => undefined;
+    const Tasks = createCompiledComponent({
+      displayName: "FallbackRowDomState",
+      initialize: () => [
+        [
+          { id: "a", label: "Alpha" },
+          { id: "b", label: "Beta" },
+        ],
+      ],
+      render(_props: Record<string, never>, state, blocks) {
+        updateItems = (next) => state[0].set(next);
+        const items = () => state[0].get() as Item[];
+        const KeyedRows = blocks.KeyedRows;
+        return (
+          <main>
+            <KeyedRows
+              bindings={[
+                {
+                  kind: "text",
+                  path: [0],
+                  read: (item) => [(item as Item).label],
+                },
+              ]}
+              create={(item, index) => interactiveRowDescriptor(item as Item, index)}
+              events={[]}
+              id={0}
+              items={items}
+              render={() => (
+                <ul>
+                  {items().map((item, index) => (
+                    <li data-done={false} data-key={item.id} key={`${item.id}-${index}`}>
+                      <span>{item.label}</span>
+                      <input data-row={index} />
+                    </li>
+                  ))}
+                </ul>
+              )}
+              rowKey={(item) => (item as Item).id}
+            />
+          </main>
+        );
+      },
+      bindings: [{ kind: "block", id: 0, dependencies: [0] }],
+    });
+
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<Tasks />));
+
+    // Duplicate keys force the block into permanent React fallback.
+    await act(async () => {
+      updateItems([
+        { id: "a", label: "Alpha first" },
+        { id: "a", label: "Alpha second" },
+      ]);
+      await flushCompilerUpdates();
+    });
+
+    // Back to unique keys: still fallback, but reconciliation is safe again
+    // (one final remount is allowed for this transition).
+    await act(async () => {
+      updateItems([
+        { id: "a", label: "Alpha" },
+        { id: "b", label: "Beta" },
+      ]);
+      await flushCompilerUpdates();
+    });
+
+    const input = container.querySelector<HTMLInputElement>("input[data-row='0']");
+    expect(input).not.toBeNull();
+    input!.value = "typed";
+
+    // Unique-key updates while in fallback must reconcile in place instead of
+    // remounting the list and wiping uncontrolled inputs.
+    await act(async () => {
+      updateItems([
+        { id: "a", label: "Alpha renamed" },
+        { id: "b", label: "Beta renamed" },
+      ]);
+      await flushCompilerUpdates();
+    });
+
+    expect([...container.querySelectorAll("li span")].map((node) => node.textContent)).toEqual([
+      "Alpha renamed",
+      "Beta renamed",
+    ]);
+    const afterUpdate = container.querySelector<HTMLInputElement>("input[data-row='0']");
+    expect(afterUpdate).toBe(input);
+    expect(afterUpdate!.value).toBe("typed");
+  });
+
   it("hydrates in StrictMode, recovers mismatched text, and drops queued work after unmount", async () => {
     let executions = 0;
     const observed: string[] = [];

@@ -270,6 +270,83 @@ describe("compiler-owned host conditional runtime", () => {
     expect(container.querySelector("[data-slot='numeric']")?.textContent).toBe("Visible");
   });
 
+  it("keeps DOM state across updates while in permanent fallback", async () => {
+    let setFlag: (next: CompilerStateUpdater) => void = () => undefined;
+    let setLabel: (next: CompilerStateUpdater) => void = () => undefined;
+    const Panel = createCompiledComponent({
+      displayName: "FallbackDomStatePanel",
+      initialize: () => [true, "one"],
+      render(_props: Record<string, never>, state, blocks) {
+        setFlag = (next) => state[0].set(next);
+        setLabel = (next) => state[1].set(next);
+        const HostConditional = blocks.HostConditional;
+        return (
+          <section>
+            <HostConditional
+              id={0}
+              render={() => (
+                // The whitespace text nodes around the branch make adopt()
+                // fail its single-element check, so the block enters
+                // permanent React fallback at mount.
+                <div data-slot="box">
+                  {" "}
+                  {state[0].get() ? (
+                    <b title={String(state[1].get())}>
+                      <input data-slot="field" />
+                    </b>
+                  ) : (
+                    <i>off</i>
+                  )}{" "}
+                </div>
+              )}
+              test={() => state[0].get()}
+              truthy={{
+                create: () => ({
+                  kind: "element",
+                  tag: "b",
+                  attributes: [],
+                  styles: [],
+                  children: [],
+                }),
+                bindings: [],
+              }}
+            />
+          </section>
+        );
+      },
+      bindings: [{ kind: "block", id: 0, dependencies: [0, 1] }],
+    });
+
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<Panel />));
+
+    const input = container.querySelector<HTMLInputElement>("[data-slot='field']");
+    expect(input).not.toBeNull();
+    input!.value = "typed";
+
+    // An update to a dependency the branch renders must reconcile in place.
+    await act(async () => {
+      setLabel("two");
+      await flushCompilerUpdates();
+    });
+
+    const afterUpdate = container.querySelector<HTMLInputElement>("[data-slot='field']");
+    expect(container.querySelector("b")?.getAttribute("title")).toBe("two");
+    expect(afterUpdate).toBe(input);
+    expect(afterUpdate!.value).toBe("typed");
+
+    // Branch switches still work through React's normal reconciliation.
+    await act(async () => {
+      setFlag(false);
+      await flushCompilerUpdates();
+    });
+    expect(container.querySelector("[data-slot='field']")).toBeNull();
+    expect(container.querySelector("i")?.textContent).toBe("off");
+  });
+
   it("combines a parent prop commit and local branch update in the same event", async () => {
     let childExecutions = 0;
     const Child = createCompiledComponent({
