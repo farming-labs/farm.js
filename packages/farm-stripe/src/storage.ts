@@ -372,6 +372,65 @@ async function withPrismaDataFieldsFallback<T>(
   return await operation(nextData);
 }
 
+/**
+ * Serialize concurrent ensureCustomer calls per owner: the double-click /
+ * two-tab case lands in one process, where sharing the in-flight promise
+ * guarantees a single Stripe customer and a single billing row. Cross-process
+ * races are narrowed by the Stripe idempotency key in
+ * createStripeCustomerForOwner.
+ */
+function withSerializedEnsureCustomer(
+  adapter: StripeBillingStorageAdapter,
+): StripeBillingStorageAdapter {
+  const inflight = new Map<string, Promise<{ customerId: string }>>();
+
+  return {
+    ...adapter,
+    ensureCustomer(input) {
+      const key = `${input.owner.kind}:${input.owner.id}`;
+      const pending = inflight.get(key);
+      if (pending) {
+        return pending;
+      }
+      const task = adapter.ensureCustomer(input).finally(() => {
+        inflight.delete(key);
+      });
+      inflight.set(key, task);
+      return task;
+    },
+  };
+}
+
+async function createStripeCustomerForOwner(
+  stripe: Stripe,
+  owner: StripeBillingOwner,
+): Promise<Stripe.Customer> {
+  const params: Stripe.CustomerCreateParams = {
+    email: owner.email,
+    metadata: {
+      ownerId: owner.id,
+      ownerKind: owner.kind,
+    },
+  };
+
+  try {
+    // A stable per-owner idempotency key makes concurrent ensureCustomer
+    // calls (double-click, two tabs) receive the same customer from Stripe
+    // instead of creating one each.
+    return await stripe.customers.create(params, {
+      idempotencyKey: `farm-ensure-customer-${owner.kind}-${owner.id}`,
+    });
+  } catch (error) {
+    // The same key with different params (e.g. the owner's email changed
+    // within Stripe's idempotency window) is rejected by Stripe; fall back
+    // to a plain create rather than failing the request.
+    if ((error as { type?: string }).type === "StripeIdempotencyError") {
+      return stripe.customers.create(params);
+    }
+    throw error;
+  }
+}
+
 function createBillingRecordId(): string {
   const randomUuid = globalThis.crypto?.randomUUID?.();
   if (randomUuid) {
@@ -519,7 +578,7 @@ export function prismaStorageAdapter(options: PrismaStorageOptions): StripeBilli
     });
   }
 
-  return {
+  return withSerializedEnsureCustomer({
     async getBillingAccount(owner) {
       const record = await findByOwner(owner);
       return record ? toSnapshot(record) : null;
@@ -538,17 +597,21 @@ export function prismaStorageAdapter(options: PrismaStorageOptions): StripeBilli
         };
       }
 
-      const customer = await stripe.customers.create({
-        email: owner.email,
-        metadata: {
-          ownerId: owner.id,
-          ownerKind: owner.kind,
-        },
-      });
+      const customer = await createStripeCustomerForOwner(stripe, owner);
 
-      if (existing?.id) {
+      // A concurrent ensureCustomer may have persisted a customer while ours
+      // was created; settle on what is stored instead of writing a second row.
+      const latest = await findByOwner(owner);
+      if (typeof latest?.stripeCustomerId === "string" && latest.stripeCustomerId) {
+        return {
+          customerId: latest.stripeCustomerId,
+        };
+      }
+
+      const target = latest ?? existing;
+      if (target?.id) {
         await delegate.update({
-          where: { id: existing.id },
+          where: { id: target.id },
           data: {
             stripeCustomerId: customer.id,
           },
@@ -648,7 +711,7 @@ export function prismaStorageAdapter(options: PrismaStorageOptions): StripeBilli
         ["seatQuantity", "trialEndsAt", "productId"],
       );
     },
-  };
+  });
 }
 
 export function ormStorageAdapter(options: StripeOrmStorageOptions): StripeBillingStorageAdapter {
@@ -687,7 +750,7 @@ export function ormStorageAdapter(options: StripeOrmStorageOptions): StripeBilli
     });
   }
 
-  return {
+  return withSerializedEnsureCustomer({
     async getBillingAccount(owner) {
       const record = await findByOwner(owner);
       return record ? toSnapshot(record) : null;
@@ -708,19 +771,25 @@ export function ormStorageAdapter(options: StripeOrmStorageOptions): StripeBilli
         };
       }
 
-      const customer = await stripe.customers.create({
-        email: owner.email,
-        metadata: {
-          ownerId: owner.id,
-          ownerKind: owner.kind,
-        },
-      });
+      const customer = await createStripeCustomerForOwner(stripe, owner);
 
+      // A concurrent ensureCustomer may have persisted a customer while ours
+      // was created; settle on what is stored instead of writing a second row.
+      const latest = await findByOwner(owner);
+      const latestCustomerId =
+        latest && getNullableString(latest, "stripeCustomerId", "stripe_customer_id");
+      if (latestCustomerId) {
+        return {
+          customerId: latestCustomerId,
+        };
+      }
+
+      const target = latest ?? existing;
       const model = await getModel();
-      if (existing?.id) {
+      if (target?.id) {
         await model.update({
           where: {
-            id: existing.id,
+            id: target.id,
           },
           data: {
             stripeCustomerId: customer.id,
@@ -803,7 +872,7 @@ export function ormStorageAdapter(options: StripeOrmStorageOptions): StripeBilli
         },
       });
     },
-  };
+  });
 }
 
 type SqliteDatabase = {
@@ -900,7 +969,7 @@ export function sqliteStorageAdapter(options: SqliteStorageOptions): StripeBilli
     return selectByOwner.get(owner.kind, owner.id) ?? null;
   }
 
-  return {
+  return withSerializedEnsureCustomer({
     async getBillingAccount(owner) {
       const record = readByOwner(owner);
       return record ? toSnapshot(record) : null;
@@ -921,15 +990,20 @@ export function sqliteStorageAdapter(options: SqliteStorageOptions): StripeBilli
         };
       }
 
-      const customer = await stripe.customers.create({
-        email: owner.email,
-        metadata: {
-          ownerId: owner.id,
-          ownerKind: owner.kind,
-        },
-      });
+      const customer = await createStripeCustomerForOwner(stripe, owner);
 
-      if (existing) {
+      // A concurrent ensureCustomer may have persisted a customer while ours
+      // was created; settle on what is stored instead of writing a second row.
+      const latest = readByOwner(owner);
+      const latestCustomerId =
+        latest && getNullableString(latest, "stripeCustomerId", "stripe_customer_id");
+      if (latestCustomerId) {
+        return {
+          customerId: latestCustomerId,
+        };
+      }
+
+      if (latest ?? existing) {
         updateCustomerByOwner.run(customer.id, owner.kind, owner.id);
       } else {
         insertRecord.run(
@@ -1005,7 +1079,7 @@ export function sqliteStorageAdapter(options: SqliteStorageOptions): StripeBilli
 
       clearByOwner.run(owner.kind, owner.id);
     },
-  };
+  });
 }
 
 type DrizzleStorageOptions = {
@@ -1056,7 +1130,7 @@ export function drizzleStorageAdapter(options: DrizzleStorageOptions): StripeBil
     return rows[0] ?? null;
   }
 
-  return {
+  return withSerializedEnsureCustomer({
     async getBillingAccount(owner) {
       const record = await firstByOwner(owner);
       return record ? toSnapshot(record) : null;
@@ -1075,22 +1149,26 @@ export function drizzleStorageAdapter(options: DrizzleStorageOptions): StripeBil
         };
       }
 
-      const customer = await stripe.customers.create({
-        email: owner.email,
-        metadata: {
-          ownerId: owner.id,
-          ownerKind: owner.kind,
-        },
-      });
+      const customer = await createStripeCustomerForOwner(stripe, owner);
 
-      if (existing?.id != null) {
+      // A concurrent ensureCustomer may have persisted a customer while ours
+      // was created; settle on what is stored instead of writing a second row.
+      const latest = await firstByOwner(owner);
+      if (typeof latest?.stripeCustomerId === "string" && latest.stripeCustomerId) {
+        return {
+          customerId: latest.stripeCustomerId,
+        };
+      }
+
+      const target = latest ?? existing;
+      if (target?.id != null) {
         await db
           .update(table)
           .set({
             stripeCustomerId: customer.id,
             updatedAt: new Date(),
           })
-          .where(eq(table.id, existing.id));
+          .where(eq(table.id, target.id));
       } else {
         await db.insert(table).values({
           ownerId: owner.id,
@@ -1169,5 +1247,5 @@ export function drizzleStorageAdapter(options: DrizzleStorageOptions): StripeBil
         })
         .where(eq(table.id, existing.id));
     },
-  };
+  });
 }
