@@ -277,6 +277,38 @@ describe("Middleware Chain", () => {
     expect(res.writeHead).toHaveBeenCalledWith(308, expect.any(Object));
   });
 
+  it("treats redirect source patterns literally except for glob stars", async () => {
+    const run = async (source: string, pathname: string): Promise<boolean> => {
+      const chain = middleware().redirect(source, "/moved");
+      const { handlers } = chain.build();
+      const req = createMockRequest(pathname);
+      const res = createMockResponse();
+      const ctx = createContext(req, res);
+      let index = 0;
+      const executeNext = async (): Promise<void> => {
+        if (index < handlers.length && !ctx._handled) {
+          const handler = handlers[index++];
+          await handler(ctx, executeNext);
+        }
+      };
+      await executeNext();
+      return ctx._handled;
+    };
+
+    // A dot must not act as a regex wildcard.
+    await expect(run("/promo.html", "/promo.html")).resolves.toBe(true);
+    await expect(run("/promo.html", "/promoXhtml")).resolves.toBe(false);
+
+    // Regex metacharacters in the pattern must not throw at request time.
+    await expect(run("/a(1)", "/a(1)")).resolves.toBe(true);
+    await expect(run("/a(1)", "/a1")).resolves.toBe(false);
+
+    // Glob stars keep their meaning.
+    await expect(run("/docs/*", "/docs/intro")).resolves.toBe(true);
+    await expect(run("/docs/*", "/docs/intro/deep")).resolves.toBe(false);
+    await expect(run("/docs/**", "/docs/intro/deep")).resolves.toBe(true);
+  });
+
   it("should support rewrite helper for route-specific middleware", async () => {
     // Simulate route-specific middleware at /old-url
     const chain = middleware("/old-url").rewrite("/new-url");

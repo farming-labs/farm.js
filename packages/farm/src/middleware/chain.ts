@@ -194,11 +194,15 @@ function matchPattern(pattern: string | RegExp, pathname: string): boolean {
     return pattern.test(pathname);
   }
 
+  // Protect glob stars, escape every regex metacharacter, then restore the
+  // globs — otherwise "/promo.html" also matches "/promoXhtml" and a pattern
+  // containing "(" throws at request time.
   const regexPattern = pattern
     .replace(/\*\*/g, "__DOUBLE_STAR__")
-    .replace(/\*/g, "[^/]+")
+    .replace(/\*/g, "__SINGLE_STAR__")
+    .replace(/[.+?^${}()|[\]\\/]/g, "\\$&")
     .replace(/__DOUBLE_STAR__/g, ".*")
-    .replace(/\//g, "\\/");
+    .replace(/__SINGLE_STAR__/g, "[^/]+");
 
   const regex = new RegExp(`^${regexPattern}$`);
   return regex.test(pathname);
