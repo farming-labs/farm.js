@@ -125,11 +125,12 @@ export class APITypeGenerator {
 
     // Build nested structure
     const nestedStructure: any = {};
+    const usedRouteNames = new Map<string, number>();
 
     for (const [path, routeList] of routeGroups) {
       const route = routeList[0];
       const importPath = this.getRouteImportPath(route, options.outFile);
-      const routeName = this.pathToRouteName(route.path);
+      const routeName = this.uniqueRouteName(route.path, usedRouteNames);
       const cleanPath = path === "/api" ? "" : path.replace(/^\/api\//, "");
       const parts = cleanPath ? cleanPath.split("/") : [];
 
@@ -206,9 +207,20 @@ ${typeExports}
   }
 
   private pathToRouteName(path: string): string {
+    // Replace (not strip) invalid identifier characters, so /api/id and
+    // /api/[id] do not normalize to the same name.
     return (path === "/api" ? "root" : path.replace(/^\/api\//, ""))
       .replace(/\//g, "_")
-      .replace(/[^a-zA-Z0-9_]/g, "");
+      .replace(/[^a-zA-Z0-9_]/g, "_");
+  }
+
+  private uniqueRouteName(path: string, usedNames: Map<string, number>): string {
+    const base = this.pathToRouteName(path);
+    const seen = usedNames.get(base);
+    usedNames.set(base, (seen ?? 0) + 1);
+    // Suffix any remaining collision so the generated import aliases are
+    // always distinct identifiers.
+    return seen ? `${base}_${seen + 1}` : base;
   }
 
   private structureToTypeString(obj: any, indent: number): string {
