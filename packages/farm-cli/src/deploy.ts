@@ -699,8 +699,14 @@ function formatCommand(executable: string, args: string[]): string {
   return [executable, ...args].map(formatCommandArgument).join(" ");
 }
 
+const SAFE_ARGUMENT =
+  process.platform === "win32"
+    ? // A backslash is an ordinary path separator here, not a shell escape.
+      /^[A-Za-z0-9_.\\/:=@+-]+$/
+    : /^[A-Za-z0-9_./:=@+-]+$/;
+
 function formatCommandArgument(argument: string): string {
-  if (/^[A-Za-z0-9_./:=@+-]+$/.test(argument)) return argument;
+  if (SAFE_ARGUMENT.test(argument)) return argument;
   return `'${argument.replace(/'/g, `'"'"'`)}'`;
 }
 

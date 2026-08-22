@@ -332,8 +332,17 @@ export async function buildRscNitro(options: BuildRscNitroOptions): Promise<void
     },
     // Externalize rsc/ssr so we don't bundle (they reference Vite-generated manifest). We copy dist into server output after build.
     rollupConfig: {
-      external: (id: string) =>
-        id.includes("../dist/") || id.includes("dist/rsc") || id.includes("dist/ssr"),
+      external: (id: string) => {
+        // Ids reach this predicate in both separator forms on Windows, and matching
+        // only the POSIX one makes the same module external in one pass and not in
+        // the next, which Rollup rejects.
+        const normalized = id.split("\\").join("/");
+        return (
+          normalized.includes("../dist/") ||
+          normalized.includes("dist/rsc") ||
+          normalized.includes("dist/ssr")
+        );
+      },
     },
     compatibilityDate: "2024-12-01",
     minify: true,

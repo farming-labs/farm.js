@@ -1,6 +1,7 @@
 import type { ResolvedFarmAuthConfig } from "./types.js";
 import {
   configureFarmAuth,
+  disposeFarmAuth as runDispose,
   getFarmAuthRuntime,
   migrateFarmAuth as runMigration,
 } from "./runtime.js";
@@ -48,4 +49,8 @@ export function createFarmAuthIntegration(
 
 export async function migrateFarmAuth(): Promise<void> {
   await runMigration();
+}
+
+export async function disposeFarmAuth(): Promise<void> {
+  await runDispose();
 }

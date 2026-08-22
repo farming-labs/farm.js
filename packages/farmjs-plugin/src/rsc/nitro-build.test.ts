@@ -39,7 +39,9 @@ async function stopProcess(child: ChildProcess): Promise<void> {
   await Promise.race([once(child, "exit"), delay(2_000)]);
   if (child.exitCode === null) {
     child.kill("SIGKILL");
-    await once(child, "exit");
+    // Bounded: Windows maps both signals to TerminateProcess, and waiting forever
+    // for an exit event that has already fired turns a failure into a hung run.
+    await Promise.race([once(child, "exit"), delay(5_000)]);
   }
 }
 

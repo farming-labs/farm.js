@@ -1,4 +1,5 @@
 import { defineConfig } from "vitest/config";
+import { farmTestDefaults } from "../../vitest.shared";
 
 export default defineConfig({
   css: {
@@ -7,6 +8,7 @@ export default defineConfig({
     },
   },
   test: {
+    ...farmTestDefaults,
     environment: "node",
     include: ["test/**/*.test.ts"],
   },
