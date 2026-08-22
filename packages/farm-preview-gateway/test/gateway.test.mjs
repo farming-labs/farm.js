@@ -93,6 +93,100 @@ test("expires stale preview clients before queueing public requests", async () =
   }
 });
 
+test("rejects claiming a preview name that is actively in use", async () => {
+  const store = new MemoryPreviewGatewayStore();
+  const gateway = await createGatewayServer(store);
+
+  try {
+    const first = await fetch(`${gateway.url}/api/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "demo", localUrl: "http://localhost:4321" }),
+    });
+    assert.equal(first.status, 200);
+    const firstSession = await first.json();
+
+    const second = await fetch(`${gateway.url}/api/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "demo", localUrl: "http://localhost:9999" }),
+    });
+    assert.equal(second.status, 409);
+    assert.match(await second.text(), /already active/);
+
+    // The original session still owns its name.
+    const session = await store.getSessionByName("demo");
+    assert.equal(session.id, firstSession.id);
+  } finally {
+    await gateway.close();
+  }
+});
+
+test("keeps a taken-over name routable after the stale session is deleted", async () => {
+  const store = new MemoryPreviewGatewayStore();
+  const gateway = await createGatewayServer(store, {
+    clientHeartbeatTimeoutMs: 20,
+    requestTimeoutMs: 2000,
+  });
+
+  try {
+    const first = await fetch(`${gateway.url}/api/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "demo", localUrl: "http://localhost:4321" }),
+    });
+    assert.equal(first.status, 200);
+    const stale = await first.json();
+
+    // Let the first session miss its heartbeat window, then take the name over.
+    await delay(50);
+    const second = await fetch(`${gateway.url}/api/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "demo", localUrl: "http://localhost:4322" }),
+    });
+    assert.equal(second.status, 200);
+    const takeover = await second.json();
+
+    // Deleting the stale session must not unroute the takeover session.
+    const deletion = await fetch(`${gateway.url}/api/sessions/${stale.id}?token=${stale.token}`, {
+      method: "DELETE",
+    });
+    assert.equal(deletion.status, 200);
+
+    const session = await store.getSessionByName("demo");
+    assert.ok(session, "expected the takeover session to still own the name");
+    assert.equal(session.id, takeover.id);
+
+    // Public traffic still reaches the takeover session's queue.
+    const publicRequest = fetch(`${gateway.url}/__preview/demo/health`);
+    const poll = await fetch(
+      `${gateway.url}/api/sessions/${takeover.id}/requests?token=${takeover.token}&wait=1000`,
+    ).then((response) => response.json());
+    assert.equal(poll.requests.length, 1);
+    assert.equal(poll.requests[0].path, "/health");
+
+    await fetch(
+      `${gateway.url}/api/sessions/${takeover.id}/responses/${poll.requests[0].id}?token=${takeover.token}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          status: 200,
+          headers: { "content-type": "text/plain" },
+          body: Buffer.from("takeover-ok").toString("base64"),
+          encoding: "base64",
+        }),
+      },
+    );
+    const response = await publicRequest;
+    assert.equal(response.status, 200);
+    assert.equal(await response.text(), "takeover-ok");
+  } finally {
+    await gateway.close();
+  }
+});
+
 async function createGatewayServer(store, options = {}) {
   const handler = createNodePreviewGatewayHandler({
     store,

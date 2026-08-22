@@ -210,7 +210,10 @@ export class MemoryPreviewGatewayStore implements PreviewGatewayStore {
   async touchSession(session: PreviewGatewaySession, ttlMs: number): Promise<void> {
     session.expiresAt = Date.now() + ttlMs;
     this.sessions.set(session.id, session);
-    this.names.set(session.name, session.id);
+    const nameOwner = this.names.get(session.name);
+    if (!nameOwner || nameOwner === session.id) {
+      this.names.set(session.name, session.id);
+    }
   }
 
   async enqueueRequest(sessionId: string, request: PreviewGatewayRequest): Promise<void> {
@@ -245,7 +248,11 @@ export class MemoryPreviewGatewayStore implements PreviewGatewayStore {
 
   async deleteSession(session: PreviewGatewaySession): Promise<void> {
     this.sessions.delete(session.id);
-    this.names.delete(session.name);
+    // The name may have been taken over by a newer session; only remove the
+    // mapping if it still points at the session being deleted.
+    if (this.names.get(session.name) === session.id) {
+      this.names.delete(session.name);
+    }
     this.queues.delete(session.id);
   }
 }
@@ -281,7 +288,10 @@ export class RedisRestPreviewGatewayStore implements PreviewGatewayStore {
       "PX",
       ttlMs,
     );
-    await this.command("SET", this.nameKey(session.name), session.id, "PX", ttlMs);
+    const nameOwner = await this.command<string | null>("GET", this.nameKey(session.name));
+    if (!nameOwner || nameOwner === session.id) {
+      await this.command("SET", this.nameKey(session.name), session.id, "PX", ttlMs);
+    }
     await this.command("EXPIRE", this.queueKey(session.id), Math.ceil(ttlMs / 1000));
   }
 
@@ -333,12 +343,14 @@ export class RedisRestPreviewGatewayStore implements PreviewGatewayStore {
   }
 
   async deleteSession(session: PreviewGatewaySession): Promise<void> {
-    await this.command(
-      "DEL",
-      this.sessionKey(session.id),
-      this.nameKey(session.name),
-      this.queueKey(session.id),
-    );
+    const keys = [this.sessionKey(session.id), this.queueKey(session.id)];
+    // The name may have been taken over by a newer session; only remove the
+    // mapping if it still points at the session being deleted.
+    const nameOwner = await this.command<string | null>("GET", this.nameKey(session.name));
+    if (nameOwner === session.id) {
+      keys.push(this.nameKey(session.name));
+    }
+    await this.command("DEL", ...keys);
   }
 
   private async command<T = unknown>(...args: Array<string | number>) {
@@ -394,7 +406,30 @@ async function createSession(
     name?: string;
     localUrl?: string;
   };
-  const name = sanitizePreviewName(input.name) || randomPreviewName();
+  const requestedName = sanitizePreviewName(input.name);
+  let name = requestedName || randomPreviewName();
+
+  // A name that is still owned by a live session cannot be claimed by a new
+  // one — otherwise any caller could repoint an active preview's public URL
+  // to their own session. Stale sessions (missed heartbeats) may be taken
+  // over, matching how public routing treats them.
+  for (let attempt = 0; ; attempt++) {
+    const existing = await store.getSessionByName(name);
+    if (!existing || !isPreviewClientOnline(existing, config)) {
+      break;
+    }
+    if (requestedName) {
+      return text(
+        `A Farm preview named "${name}" is already active. Choose another name or stop the running preview.`,
+        409,
+      );
+    }
+    if (attempt >= 4) {
+      return text("Could not allocate a unique preview name. Try again.", 503);
+    }
+    name = randomPreviewName();
+  }
+
   const hostname = `${name}.${config.domain}`;
   const session: PreviewGatewaySession = {
     id: randomId("sess"),
