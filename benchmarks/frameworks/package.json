@@ -8,5 +8,13 @@
   "engines": {
     "node": ">=22.19.0 <23 || >=24.11.0"
   },
-  "packageManager": "pnpm@8.12.1"
+  "packageManager": "pnpm@8.12.1",
+  "pnpm": {
+    "overrides": {
+      "brace-expansion@>=2.0.0 <2.1.4": "2.1.4",
+      "brace-expansion@>=4.0.0 <5.0.9": "5.0.9",
+      "js-yaml@>=4.0.0 <4.3.1": "4.3.1",
+      "nanoid@>=3.0.0 <3.3.18": "3.3.18"
+    }
+  }
 }

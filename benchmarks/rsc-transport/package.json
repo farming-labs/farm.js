@@ -15,5 +15,10 @@
   },
   "devDependencies": {
     "vite": "6.4.1"
+  },
+  "pnpm": {
+    "overrides": {
+      "nanoid@>=3.0.0 <3.3.18": "3.3.18"
+    }
   }
 }
