@@ -44,7 +44,7 @@
     "eve": "0.24.6",
     "tsup": "^8.5.1",
     "typescript": "^5.3.3",
-    "vitest": "^1.6.1"
+    "vitest": "^3.2.7"
   },
   "peerDependencies": {
     "eve": ">=0.24.6 <1"
