@@ -71,6 +71,15 @@ describe("client component path resolution", () => {
     );
   });
 
+  it("detects hydrate inside multi-name export lists and renames", () => {
+    expect(hasHydrateExport("const hydrate = true;\nexport { hydrate, Widget };")).toBe(true);
+    expect(hasHydrateExport("const hydrate = true;\nexport { Widget, hydrate };")).toBe(true);
+    expect(hasHydrateExport("const flag = true;\nexport { flag as hydrate };")).toBe(true);
+    // The exported name is what matters: hydrate renamed away is not an opt-in.
+    expect(hasHydrateExport("const hydrate = true;\nexport { hydrate as flag };")).toBe(false);
+    expect(hasHydrateExport("export { Widget };")).toBe(false);
+  });
+
   it("resolves project-relative /src module paths", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-path-"));
     tempDirs.push(root);

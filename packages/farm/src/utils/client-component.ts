@@ -126,10 +126,21 @@ export function hasHydrateExport(content: string | null): boolean {
   if (!content) {
     return false;
   }
-  return (
-    /\bexport\s+const\s+hydrate\s*=\s*true\b/.test(content) ||
-    /\bexport\s*\{\s*hydrate\s*\}\b/.test(content)
-  );
+  if (/\bexport\s+const\s+hydrate\s*=\s*true\b/.test(content)) {
+    return true;
+  }
+  // Export lists may carry several specifiers and as-renames; the module
+  // opts in when any specifier's *exported* name is hydrate.
+  for (const match of content.matchAll(/\bexport\s*\{([^}]*)\}/g)) {
+    for (const specifier of match[1].split(",")) {
+      const parts = specifier.trim().split(/\s+as\s+/);
+      const exportedName = (parts[1] ?? parts[0])?.trim();
+      if (exportedName === "hydrate") {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 interface ModuleSourceToken {
