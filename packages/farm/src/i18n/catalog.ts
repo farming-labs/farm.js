@@ -59,7 +59,11 @@ export function flattenFarmI18nCatalog(input: unknown, source = "i18n catalog"):
     if (typeof value === "string") {
       const key = segments.join(".");
       if (!key) throw new Error(`${source} contains an empty message key.`);
-      if (key in output) throw new Error(`${source} contains duplicate message key "${key}".`);
+      // Own-property check: `in` would see Object.prototype members, falsely
+      // rejecting legitimate keys like "toString" as duplicates.
+      if (Object.prototype.hasOwnProperty.call(output, key)) {
+        throw new Error(`${source} contains duplicate message key "${key}".`);
+      }
       output[key] = value;
       return;
     }
@@ -105,8 +109,12 @@ function validateFarmI18nCatalogs(
   for (const locale of config.locales) {
     const catalog = catalogs[locale] || {};
     const localeKeys = Object.keys(catalog).sort();
-    const missing = referenceKeys.filter((key) => !(key in catalog));
-    const extra = localeKeys.filter((key) => !(key in signatures));
+    const missing = referenceKeys.filter(
+      (key) => !Object.prototype.hasOwnProperty.call(catalog, key),
+    );
+    const extra = localeKeys.filter(
+      (key) => !Object.prototype.hasOwnProperty.call(signatures, key),
+    );
 
     if (config.strict && (missing.length > 0 || extra.length > 0)) {
       const details = [
