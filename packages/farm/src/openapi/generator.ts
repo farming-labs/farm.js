@@ -127,7 +127,11 @@ export class OpenAPIGenerator {
       ["maximum", (zodType as any).maxValue],
     ];
     for (const [key, value] of constraints) {
-      if (Number.isFinite(value)) {
+      // Zod 4's .int() implies bounds of +/-Number.MAX_SAFE_INTEGER; those are
+      // implementation details of the safe-integer range, not author-declared
+      // constraints, and would otherwise stamp every integer field with
+      // maximum: 9007199254740991.
+      if (Number.isFinite(value) && Math.abs(value as number) !== Number.MAX_SAFE_INTEGER) {
         baseSchema[key] = value;
       }
     }

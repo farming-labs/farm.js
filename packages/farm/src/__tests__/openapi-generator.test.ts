@@ -108,6 +108,15 @@ describe("OpenAPIGenerator schema conversion", () => {
     });
   });
 
+  it("does not emit Zod 4's implicit safe-integer bounds for int()", () => {
+    // .int() implies +/-Number.MAX_SAFE_INTEGER; only author-declared bounds
+    // belong in the document.
+    expect(toSchema(z.number().int())).not.toHaveProperty("maximum");
+    expect(toSchema(z.number().int())).not.toHaveProperty("minimum");
+    expect(toSchema(z.number().int().min(1))).toMatchObject({ type: "number", minimum: 1 });
+    expect(toSchema(z.number().int().min(1))).not.toHaveProperty("maximum");
+  });
+
   it("keeps a zero bound and omits an absent one", () => {
     expect(toSchema(z.number().min(0))).toMatchObject({ type: "number", minimum: 0 });
     expect(toSchema(z.number())).not.toHaveProperty("minimum");
