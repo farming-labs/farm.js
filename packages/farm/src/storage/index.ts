@@ -308,7 +308,11 @@ function createStorageClientFromResolver(resolveDriver: DriverResolver): FarmSto
 
           if (prop === "dispose") {
             return Promise.resolve(result).finally(() => {
+              // Disposing the storage also disposed the driver, so drop both
+              // cached promises: a later call must re-run the driver factory
+              // instead of rebuilding storage over the dead driver.
               storagePromise = undefined;
+              driverPromise = undefined;
             });
           }
 
