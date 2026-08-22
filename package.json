@@ -76,6 +76,7 @@
     "node": ">=20.0.0",
     "pnpm": ">=8.0.0"
   },
+  "packageManager": "pnpm@8.12.1",
   "pnpm": {
     "overrides": {
       "brace-expansion@>=1.0.0 <1.1.18": "1.1.18",
@@ -84,6 +85,5 @@
       "nanoid@>=3.0.0 <3.3.18": "3.3.18",
       "nanoid@>=4.0.0 <5.1.16": "5.1.16"
     }
-  },
-  "packageManager": "pnpm@8.12.1"
+  }
 }
