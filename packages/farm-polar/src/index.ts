@@ -685,17 +685,19 @@ function resolveHardLimit(
   return null;
 }
 
-function getMeterIncrement(
-  aggregation: PolarBillingMeter["aggregation"],
-  quantity: number,
-): number {
-  switch (aggregation) {
+function projectMeterUsage(input: {
+  aggregation: PolarBillingMeter["aggregation"];
+  currentUsed: number;
+  quantity: number;
+}): number {
+  switch (input.aggregation) {
     case "count":
-      return 1;
+      return input.currentUsed + 1;
     case "last":
-      return quantity;
+      // Gauge semantics: the newest reported value replaces the previous one.
+      return input.quantity;
     default:
-      return quantity;
+      return input.currentUsed + input.quantity;
   }
 }
 
@@ -733,7 +735,8 @@ function toEstimatedMeterChargeAmount(input: {
     return null;
   }
 
-  const uncappedAmount = Math.round(input.currentUsed * parsedUnitAmount * 100);
+  // Polar's metered unit amount is already expressed in cents.
+  const uncappedAmount = Math.round(input.currentUsed * parsedUnitAmount);
   if (typeof input.capAmount === "number") {
     return Math.min(uncappedAmount, input.capAmount);
   }
@@ -1574,8 +1577,11 @@ export function polar<TInput extends PolarIntegrationInput>(
             );
           }
 
-          const increment = getMeterIncrement(meter.aggregation, body.quantity);
-          const projectedCurrentPeriodUsed = currentUsed + increment;
+          const projectedCurrentPeriodUsed = projectMeterUsage({
+            aggregation: meter.aggregation,
+            currentUsed,
+            quantity: body.quantity,
+          });
           if (typeof hardLimit === "number" && projectedCurrentPeriodUsed > hardLimit) {
             return new Response(
               "The configured metered hard cap has been reached for the current billing period. Reported usage is blocked until the next cycle or a plan change.",
