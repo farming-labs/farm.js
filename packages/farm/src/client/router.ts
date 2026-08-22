@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { createFarmRouter, type FarmRouter, type FarmRouterRouteInput } from "../router";
 import {
+  getInstalledFarmSPARouter,
   getRouter as getSPARouter,
   readPageState,
   type FarmNavigationBlockerContext,
   type FarmNavigationState,
 } from "./spa-router";
-import { subscribeHistoryChange } from "./history-sync";
+import { notifyHistoryChange, subscribeHistoryChange } from "./history-sync";
 import { getFarmI18nClientState } from "../i18n/client-runtime";
 import { stripFarmLocaleFromPathname } from "../i18n/routing";
 
@@ -35,6 +36,32 @@ export interface UseBlockerReturn {
 /**
  * Hook for accessing router state and navigation
  */
+/**
+ * Imperative navigation for useRouter. Delegates to the installed SPA router
+ * so blockers run before the URL changes, history state is written by the
+ * router, and the action is labelled push/replace rather than pop. Without a
+ * Farm router (embedded usage) the URL is written directly and announced on
+ * the shared history channel, whose no-router fallback is the nuqs-style
+ * synthetic popstate this code previously hand-rolled.
+ */
+function navigateViaRouter(href: string, basePath: string, replace: boolean): void {
+  if (typeof window === "undefined") return;
+
+  const url = href.startsWith("/") ? basePath + href : href;
+  const spaRouter = getInstalledFarmSPARouter();
+  if (spaRouter) {
+    void spaRouter.navigate(url, { replace });
+    return;
+  }
+
+  if (replace) {
+    window.history.replaceState(null, "", url);
+  } else {
+    window.history.pushState(null, "", url);
+  }
+  notifyHistoryChange("url-search");
+}
+
 export function useRouter(options: UseRouterOptions = {}) {
   const basePath = options.basePath || "";
   const routes = options.routes;
@@ -61,19 +88,11 @@ export function useRouter(options: UseRouterOptions = {}) {
   }, [basePath, routeMatcher]);
 
   const push = (href: string) => {
-    if (typeof window === "undefined") return;
-
-    const url = href.startsWith("/") ? basePath + href : href;
-    window.history.pushState(null, "", url);
-    window.dispatchEvent(new PopStateEvent("popstate"));
+    navigateViaRouter(href, basePath, false);
   };
 
   const replace = (href: string) => {
-    if (typeof window === "undefined") return;
-
-    const url = href.startsWith("/") ? basePath + href : href;
-    window.history.replaceState(null, "", url);
-    window.dispatchEvent(new PopStateEvent("popstate"));
+    navigateViaRouter(href, basePath, true);
   };
 
   const pushState = <TState>(pageState: TState, href?: string) => {
