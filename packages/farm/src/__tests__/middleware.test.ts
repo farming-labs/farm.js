@@ -1381,6 +1381,18 @@ describe("Cookie Management Advanced", () => {
     expect(ctx.cookies.get("special")).toBe("test+value");
   });
 
+  it("should keep malformed percent-encoded cookie values raw instead of throwing", () => {
+    const req = createMockRequest("/test");
+    req.headers.cookie = "track=100%; broken=%E0%A4%A; session=abc123";
+    const res = createMockResponse();
+
+    const ctx = createContext(req, res);
+
+    expect(ctx.cookies.get("track")).toBe("100%");
+    expect(ctx.cookies.get("broken")).toBe("%E0%A4%A");
+    expect(ctx.cookies.get("session")).toBe("abc123");
+  });
+
   it("should set secure and httpOnly flags", () => {
     const req = createMockRequest("/test");
     const res = createMockResponse();

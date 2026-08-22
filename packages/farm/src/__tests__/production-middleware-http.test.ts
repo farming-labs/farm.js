@@ -34,6 +34,27 @@ describe("production middleware HTTP behavior", () => {
     ]);
   });
 
+  it("serves requests with malformed percent-encoded cookies instead of throwing", async () => {
+    const seen: Record<string, string | undefined> = {};
+    const runner = createProductionMiddlewareRunner({
+      config: {
+        handler(ctx) {
+          seen.track = ctx.cookies.get("track");
+          seen.session = ctx.cookies.get("session");
+        },
+      },
+    });
+
+    const result = await runner(
+      new Request("https://example.com/", {
+        headers: { cookie: "track=100%; session=abc123" },
+      }),
+    );
+
+    expect(result.response).toBeNull();
+    expect(seen).toEqual({ track: "100%", session: "abc123" });
+  });
+
   it("ignores forwarded client addresses unless trustProxy is enabled", async () => {
     const createRunner = (trustProxy: boolean) =>
       createProductionMiddlewareRunner({
