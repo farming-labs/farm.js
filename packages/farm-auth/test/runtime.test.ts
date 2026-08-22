@@ -6,10 +6,12 @@ import { createFarmAuthIntegration, disposeFarmAuth } from "../src/internal.js";
 import { auth } from "../src/server.js";
 
 const root = await mkdtemp(path.join(os.tmpdir(), "farm-auth-test-"));
+const disposeRoot = await mkdtemp(path.join(os.tmpdir(), "farm-auth-dispose-"));
 
 afterAll(async () => {
   await disposeFarmAuth();
   await rm(root, { recursive: true, force: true });
+  await rm(disposeRoot, { recursive: true, force: true });
 });
 
 describe("Farm Auth runtime", () => {
@@ -65,8 +67,25 @@ describe("Farm Auth runtime", () => {
     expect(session.user.email).toBe("person@farm.test");
   });
 
+  it("returns a 401 response for a required anonymous session", async () => {
+    try {
+      await auth.session({
+        request: new Request("http://localhost:3000/dashboard"),
+        required: true,
+      });
+      throw new Error("Expected auth.session to reject");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Response);
+      expect((error as Response).status).toBe(401);
+      await expect((error as Response).json()).resolves.toMatchObject({
+        code: "FARM_AUTH_REQUIRED",
+      });
+    }
+  });
+
+  // Kept last: it reconfigures the global runtime against disposeRoot, so any
+  // test running after it would recreate the runtime there.
   it("releases the database handle when the runtime is disposed", async () => {
-    const disposeRoot = await mkdtemp(path.join(os.tmpdir(), "farm-auth-dispose-"));
     const databasePath = path.join(disposeRoot, ".farm", "auth.sqlite");
     const integration = createFarmAuthIntegration(
       {
@@ -102,22 +121,5 @@ describe("Farm Auth runtime", () => {
 
     // Windows refuses to unlink a file whose handle is still open.
     await expect(rm(databasePath)).resolves.toBeUndefined();
-    await rm(disposeRoot, { recursive: true, force: true });
-  });
-
-  it("returns a 401 response for a required anonymous session", async () => {
-    try {
-      await auth.session({
-        request: new Request("http://localhost:3000/dashboard"),
-        required: true,
-      });
-      throw new Error("Expected auth.session to reject");
-    } catch (error) {
-      expect(error).toBeInstanceOf(Response);
-      expect((error as Response).status).toBe(401);
-      await expect((error as Response).json()).resolves.toMatchObject({
-        code: "FARM_AUTH_REQUIRED",
-      });
-    }
   });
 });
