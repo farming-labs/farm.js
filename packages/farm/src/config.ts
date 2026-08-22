@@ -49,6 +49,7 @@ import {
   type ResolvedFarmLayer,
 } from "./layers";
 import path from "path";
+import { logger } from "./utils";
 import { normalizeFarmDeploymentId } from "./deployment";
 import { resolveFarmDevtoolsConfig, type ResolvedFarmDevtoolsConfig } from "./devtools-config";
 import {
@@ -475,12 +476,35 @@ export function resolveDeployOutputPath(root: string, outputDir: string): string
   return path.isAbsolute(outputDir) ? outputDir : path.join(root, outputDir);
 }
 
+const PLATFORM_BUILD_ENV_TARGETS: ReadonlyArray<[string, FarmDeployTarget]> = [
+  ["VERCEL", "vercel"],
+  ["NETLIFY", "netlify"],
+  ["CF_PAGES", "cloudflare"],
+];
+
+/**
+ * Deploy target announced by the build environment (VERCEL=1, NETLIFY=true,
+ * CF_PAGES=1), or undefined outside platform CI.
+ */
+export function detectPlatformDeployTarget(
+  env: NodeJS.ProcessEnv = process.env,
+): FarmDeployTarget | undefined {
+  for (const [key, target] of PLATFORM_BUILD_ENV_TARGETS) {
+    if (env[key]) return target;
+  }
+  return undefined;
+}
+
+const warnedPlatformMismatches = new Set<string>();
+
 export function resolveDeployConfig(
   config: Pick<FarmUserConfig, "deploy" | "preset" | "distDir">,
   overrides: {
     target?: FarmDeployTarget;
     preset?: BaseFarmConfig["preset"];
     outputDir?: string;
+    /** Build environment consulted for platform detection. Tests inject this. */
+    env?: NodeJS.ProcessEnv;
   } = {},
 ): ResolvedFarmDeployConfig {
   const deploy = config.deploy || {};
@@ -491,11 +515,32 @@ export function resolveDeployConfig(
   // a node server into .vercel/output — a directory Vercel will deploy as
   // Build Output API content.
   const overrideTarget = normalizeDeployTarget(overrides.target);
-  const target = overrideTarget
+  let target = overrideTarget
     ? overrideTarget
     : overrides.preset
       ? getDeployTargetForPreset(overrides.preset)
       : normalizeDeployTarget(deploy.target);
+
+  // A platform build environment (Vercel, Netlify, Cloudflare Pages) can only
+  // deploy its own output shape. When nothing selects a preset, the
+  // node-server fallback would build an artifact the platform cannot serve,
+  // so honor the detected platform instead. An explicit configuration always
+  // wins; it just gets a warning when it cannot run where it is being built.
+  const detectedTarget = detectPlatformDeployTarget(overrides.env);
+  if (detectedTarget) {
+    const hasExplicitSelection = Boolean(
+      target || overrides.preset || deploy.preset || config.preset,
+    );
+    if (!hasExplicitSelection) {
+      target = detectedTarget;
+      if (!warnedPlatformMismatches.has(`select:${detectedTarget}`)) {
+        warnedPlatformMismatches.add(`select:${detectedTarget}`);
+        logger.info(
+          `Detected ${detectedTarget} build environment; using the ${detectedTarget} preset. Set deploy.target in farm.config.ts to override.`,
+        );
+      }
+    }
+  }
   const preset =
     overrides.preset ||
     deploy.preset ||
@@ -503,6 +548,15 @@ export function resolveDeployConfig(
     getPresetForDeployTarget(target) ||
     "node-server";
   const resolvedTarget = target || getDeployTargetForPreset(preset);
+  if (detectedTarget && resolvedTarget !== detectedTarget) {
+    const mismatchKey = `mismatch:${resolvedTarget}:${detectedTarget}`;
+    if (!warnedPlatformMismatches.has(mismatchKey)) {
+      warnedPlatformMismatches.add(mismatchKey);
+      logger.warn(
+        `The configured deploy target "${resolvedTarget ?? preset}" cannot be served by ${detectedTarget}, but this build is running in a ${detectedTarget} build environment. Set deploy.target: "${detectedTarget}" in farm.config.ts to deploy there.`,
+      );
+    }
+  }
   const platformOutput =
     resolvedTarget === "vercel"
       ? deploy.vercel?.outputDirectory
