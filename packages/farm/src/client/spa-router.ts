@@ -117,6 +117,13 @@ export type FarmNavigationListener = (state: FarmNavigationState) => void;
 
 const FARM_PAGE_STATE_KEY = "__farmPageState";
 const FARM_INTERCEPT_FROM_KEY = "__farmInterceptFrom";
+const FARM_HISTORY_INDEX_KEY = "__farmHistoryIndex";
+
+function readHistoryIndex(state: unknown): number | null {
+  if (!state || typeof state !== "object") return null;
+  const value = (state as Record<string, unknown>)[FARM_HISTORY_INDEX_KEY];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
 const IDLE_NAVIGATION_STATE: FarmNavigationState = {
   state: "idle",
   pending: false,
@@ -146,6 +153,9 @@ export class SPARouter {
   private blockers: Set<FarmNavigationBlocker> = new Set();
   private navigationListeners: Set<FarmNavigationListener> = new Set();
   private navigationState: FarmNavigationState = IDLE_NAVIGATION_STATE;
+  private currentHistoryPath: string | null = null;
+  private currentHistoryIndex: number | null = null;
+  private suppressNextPopState = false;
   private scrollElements: Map<string, HTMLElement> = new Map();
   private options: Required<Omit<RouterOptions, "deploymentId">> &
     Pick<RouterOptions, "deploymentId">;
@@ -186,6 +196,28 @@ export class SPARouter {
 
       // Save scroll position before unload
       window.addEventListener("beforeunload", this.onBeforeUnload);
+
+      // Track the rendered location and its position in the history stack so
+      // popstate can report a real `from` and revert blocked traversals.
+      this.currentHistoryPath = window.location.pathname + window.location.search;
+      const existingIndex = readHistoryIndex(window.history.state);
+      if (existingIndex == null) {
+        try {
+          window.history.replaceState(
+            {
+              ...((window.history.state as object | null) ?? {}),
+              [FARM_HISTORY_INDEX_KEY]: 0,
+            },
+            "",
+            window.location.href,
+          );
+          this.currentHistoryIndex = 0;
+        } catch {
+          this.currentHistoryIndex = null;
+        }
+      } else {
+        this.currentHistoryIndex = existingIndex;
+      }
     }
   }
 
@@ -440,12 +472,25 @@ export class SPARouter {
       options.state,
       undefined,
       options.pageData.interception?.from ?? null,
-    );
+    ) as Record<string, unknown>;
+    const nextHistoryIndex =
+      this.currentHistoryIndex == null
+        ? null
+        : options.replace
+          ? this.currentHistoryIndex
+          : this.currentHistoryIndex + 1;
+    if (nextHistoryIndex != null) {
+      historyState[FARM_HISTORY_INDEX_KEY] = nextHistoryIndex;
+    }
     if (options.replace) {
       window.history.replaceState(historyState, "", historyPath);
     } else {
       window.history.pushState(historyState, "", historyPath);
     }
+    this.currentHistoryIndex = nextHistoryIndex;
+    this.currentHistoryPath =
+      new URL(historyPath, window.location.origin).pathname +
+      new URL(historyPath, window.location.origin).search;
 
     if (options.pageData.metadata?.title) {
       document.title = options.pageData.metadata.title;
@@ -560,25 +605,71 @@ export class SPARouter {
   }
 
   /**
+   * Put the browser URL back on the rendered page after a blocked pop. When
+   * both entries carry a Farm history index the traversal is reversed
+   * exactly; otherwise the current path is pushed again, which restores the
+   * address bar at the cost of one extra history entry.
+   */
+  private revertBlockedPopState(event: PopStateEvent, from: string): void {
+    const eventIndex = readHistoryIndex(event.state);
+    if (eventIndex != null && this.currentHistoryIndex != null) {
+      const delta = eventIndex - this.currentHistoryIndex;
+      if (delta !== 0) {
+        this.suppressNextPopState = true;
+        window.history.go(-delta);
+        return;
+      }
+    }
+
+    try {
+      const restoredState: Record<string, unknown> = {
+        path: from,
+      };
+      if (this.currentHistoryIndex != null && eventIndex != null) {
+        restoredState[FARM_HISTORY_INDEX_KEY] = eventIndex + 1;
+        this.currentHistoryIndex = eventIndex + 1;
+      }
+      window.history.pushState(restoredState, "", from);
+    } catch {
+      // Leave the URL as-is if the history API rejects the write; the
+      // rendered page is still the blocked-from page.
+    }
+  }
+
+  /**
    * Handle browser back/forward navigation
    */
   private async handlePopState(event: PopStateEvent): Promise<void> {
     if (document.documentElement.dataset.farmDocsRuntime === "true") return;
 
+    if (this.suppressNextPopState) {
+      // This traversal is our own revert of a blocked pop; the rendered page
+      // never changed.
+      this.suppressNextPopState = false;
+      return;
+    }
+
     const path = window.location.pathname + window.location.search;
+    // The browser has already moved to the destination entry, so its state
+    // describes `to`; the page still rendered is the tracked current path.
+    const from = this.currentHistoryPath ?? path;
 
     if (
       await this.shouldBlockNavigation({
-        from: event.state?.path || path,
+        from,
         to: path,
         action: "pop",
       })
     ) {
+      this.revertBlockedPopState(event, from);
       return;
     }
 
+    this.currentHistoryPath = path;
+    this.currentHistoryIndex = readHistoryIndex(event.state);
+
     this.startNavigation({
-      from: event.state?.path || path,
+      from,
       to: createNavigationLocation(new URL(window.location.href)),
       action: "pop",
     });
@@ -686,17 +777,23 @@ export class SPARouter {
     if (typeof window === "undefined") return;
 
     const url = href ? new URL(href, window.location.origin).toString() : window.location.href;
-    const nextState = createHistoryState(
-      new URL(url).pathname + new URL(url).search,
-      state,
-      window.history.state,
-    );
+    const nextPath = new URL(url).pathname + new URL(url).search;
+    const nextState = createHistoryState(nextPath, state, window.history.state) as Record<
+      string,
+      unknown
+    >;
 
     if (action === "replace") {
       window.history.replaceState(nextState, "", url);
     } else {
+      if (this.currentHistoryIndex != null) {
+        nextState[FARM_HISTORY_INDEX_KEY] = this.currentHistoryIndex + 1;
+      }
       window.history.pushState(nextState, "", url);
+      this.currentHistoryIndex =
+        this.currentHistoryIndex == null ? null : this.currentHistoryIndex + 1;
     }
+    this.currentHistoryPath = nextPath;
 
     notifyHistoryChange("page-state");
   }
