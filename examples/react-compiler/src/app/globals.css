@@ -671,6 +671,102 @@ h1 span {
   padding: 0.4rem 0.6rem;
 }
 
+.edge-card .conditional-row-list {
+  display: grid;
+  align-items: stretch;
+  gap: 0.55rem;
+}
+
+.edge-card .conditional-row {
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.7rem 1rem;
+  padding: 0.75rem;
+  background: #0d0d0c;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease;
+}
+
+.edge-card .conditional-row:hover {
+  border-color: #696963;
+  background: #10100f;
+}
+
+.conditional-row__summary {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.conditional-row__summary span {
+  overflow: hidden;
+  color: #e9e9e3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conditional-row__summary small {
+  flex: 0 0 auto;
+  color: #696963;
+  font-size: 0.56rem;
+  letter-spacing: 0.07em;
+}
+
+.conditional-row__status {
+  min-width: 7rem;
+  text-align: right;
+}
+
+.conditional-row__status :is(strong, span) {
+  font-size: 0.58rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.conditional-row__status strong {
+  color: #b8ff5b;
+}
+
+.conditional-row__status span {
+  color: #777771;
+}
+
+.conditional-row__details {
+  min-height: 1.2rem;
+  grid-column: 1 / -1;
+  border-top: 1px solid #2a2a27;
+  padding-top: 0.55rem;
+}
+
+.conditional-row__details:empty {
+  display: none;
+}
+
+.conditional-row__details p {
+  margin: 0;
+  color: #8d8d86;
+  font-family: "Geist Sans Variable", sans-serif;
+  font-size: 0.68rem;
+  line-height: 1.45;
+}
+
+.conditional-row__actions {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.conditional-row__actions button {
+  min-height: 2.25rem;
+  padding: 0.35rem 0.55rem;
+}
+
 .keyed-row-stage {
   display: flex;
   min-height: 2.8rem;
@@ -1201,8 +1297,18 @@ code {
 
   .compact-metrics,
   .button-row,
+  .conditional-row__actions,
   .binding-form {
     grid-template-columns: 1fr;
+  }
+
+  .edge-card .conditional-row {
+    grid-template-columns: 1fr;
+  }
+
+  .conditional-row__status {
+    min-width: 0;
+    text-align: left;
   }
 
   .heavy-controls {

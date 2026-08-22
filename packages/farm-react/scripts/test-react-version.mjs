@@ -453,8 +453,8 @@ const testSource = String.raw`
   const InteractiveKeyedRows = createCompiledComponent({
     displayName: "CompatibilityInteractiveKeyedRows",
     initialize: () => [[
-      { id: "a", label: "Alpha" },
-      { id: "b", label: "Beta" },
+      { id: "a", label: "Alpha", done: false },
+      { id: "b", label: "Beta", done: true },
     ]],
     render(_props, state, blocks) {
       interactiveRowExecutions += 1;
@@ -465,7 +465,7 @@ const testSource = String.raw`
         null,
         React.createElement(blocks.KeyedRows, {
           id: 0,
-          render: (rowEvent) => {
+          render: (rowEvent, rowConditional) => {
             interactiveListRenders += 1;
             return React.createElement(
               "ol",
@@ -475,6 +475,15 @@ const testSource = String.raw`
                   "li",
                   { key: item.id, "data-key": item.id },
                   React.createElement("span", null, item.label),
+                  React.createElement(
+                    "div",
+                    { "data-status": true },
+                    rowConditional(item, index, 0, (current) =>
+                      current.done
+                        ? React.createElement("strong", null, current.label + " done")
+                        : React.createElement("small", null, "Open"),
+                    ),
+                  ),
                   React.createElement(
                     "button",
                     {
@@ -505,6 +514,13 @@ const testSource = String.raw`
               },
               {
                 kind: "element",
+                tag: "div",
+                attributes: [{ name: "data-status", value: true }],
+                styles: [],
+                children: [],
+              },
+              {
+                kind: "element",
                 tag: "button",
                 attributes: [
                   { name: "data-index", value: index },
@@ -517,7 +533,21 @@ const testSource = String.raw`
           }),
           bindings: [
             { kind: "text", path: [0], read: (item) => [item.label] },
-            { kind: "attribute", path: [1], name: "data-index", read: (_item, index) => index },
+            { kind: "attribute", path: [2], name: "data-index", read: (_item, index) => index },
+          ],
+          conditionals: [
+            {
+              id: 0,
+              path: [1],
+              logical: false,
+              test: (item) => item.done,
+              truthy: {
+                bindings: [
+                  { kind: "text", path: [], read: (item) => [item.label] },
+                ],
+              },
+              falsy: { bindings: [] },
+            },
           ],
           events: [
             {
@@ -526,7 +556,9 @@ const testSource = String.raw`
                 interactiveCalls.push(item.label + ":" + index + ":" + event.currentTarget.dataset.index);
                 state[0].set((current) =>
                   current.map((row) =>
-                    row.id === item.id ? { ...row, label: item.label + "!" } : row,
+                    row.id === item.id
+                      ? { ...row, label: item.label + "!", done: !item.done }
+                      : row,
                   ),
                 );
               },
@@ -549,6 +581,7 @@ const testSource = String.raw`
   await Promise.resolve();
   await Promise.resolve();
   assert.equal(interactiveAlpha.querySelector("span").textContent, "Alpha!");
+  assert.equal(interactiveAlpha.querySelector("[data-status]").textContent, "Alpha! done");
   assert.deepEqual(interactiveCalls, ["Alpha:0:0"]);
   assert.equal(interactiveRowExecutions, initialInteractiveExecutions);
   assert.equal(interactiveListRenders, initialInteractiveRenders);
@@ -558,6 +591,7 @@ const testSource = String.raw`
   await Promise.resolve();
   await Promise.resolve();
   assert.equal(interactiveAlpha.querySelector("span").textContent, "Alpha!!");
+  assert.equal(interactiveAlpha.querySelector("[data-status]").textContent, "Open");
   assert.deepEqual(interactiveCalls, ["Alpha:0:0", "Alpha!:0:0"]);
   assert.equal(interactiveContainer.querySelector("[data-key='a']"), interactiveAlpha);
 
@@ -575,6 +609,7 @@ const testSource = String.raw`
   await Promise.resolve();
   await Promise.resolve();
   assert.equal(interactiveAlpha.querySelector("span").textContent, "Alpha!!!");
+  assert.equal(interactiveAlpha.querySelector("[data-status]").textContent, "Alpha!!! done");
   assert.deepEqual(interactiveCalls, ["Alpha:0:0", "Alpha!:0:0", "Alpha!!:1:1"]);
   flushSync(() => interactiveRoot.unmount());
 
@@ -597,6 +632,10 @@ const testSource = String.raw`
   await Promise.resolve();
   await Promise.resolve();
   assert.equal(hydratedInteractiveAlpha.querySelector("span").textContent, "Alpha!");
+  assert.equal(
+    hydratedInteractiveAlpha.querySelector("[data-status]").textContent,
+    "Alpha! done",
+  );
   flushSync(() => interactiveHydrationRoot.unmount());
 
   let derivedCollectionExecutions = 0;
