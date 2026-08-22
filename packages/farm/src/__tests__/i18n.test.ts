@@ -219,6 +219,36 @@ describe("Farm ICU catalogs", () => {
     expect(runtime.translate("en", "cart.items", { count: 3 })).toBe("You have 3 items");
   });
 
+  it("accepts message keys that collide with Object.prototype members", async () => {
+    const root = await createCatalogFixture({
+      en: { labels: { toString: "As text", constructor: "Builder" }, valueOf: "Value" },
+      am: { labels: { toString: "Text", constructor: "Builder" }, valueOf: "Value" },
+    });
+    const config = resolveFarmI18nConfig(
+      { locales: ["en", "am"], defaultLocale: "en", strict: true },
+      { root },
+    );
+
+    const bundle = await readFarmI18nCatalogs(config);
+    expect(bundle.catalogs.en["labels.toString"]).toBe("As text");
+    expect(bundle.catalogs.en["valueOf"]).toBe("Value");
+  });
+
+  it("still reports prototype-named keys missing from a locale in strict mode", async () => {
+    const root = await createCatalogFixture({
+      en: { toString: "As text" },
+      am: {},
+    });
+    const config = resolveFarmI18nConfig(
+      { locales: ["en", "am"], defaultLocale: "en", strict: true },
+      { root },
+    );
+
+    await expect(readFarmI18nCatalogs(config)).rejects.toThrow(
+      "does not match the default catalog",
+    );
+  });
+
   it("fails strict validation when locale keys or variables differ", async () => {
     const root = await createCatalogFixture({
       en: { greeting: "Hello, {name}!", complete: "Done" },
