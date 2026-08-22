@@ -23,6 +23,8 @@ interface RuntimeState {
   config?: ResolvedFarmAuthConfig;
   options?: FarmAuthRuntimeOptions;
   runtime?: Promise<BetterAuthRuntime>;
+  /** Kept so the connection opened for the runtime can be closed again. */
+  database?: unknown;
 }
 
 type GlobalAuthState = typeof globalThis & {
@@ -49,7 +51,10 @@ export function configureFarmAuth(
   state.config = config;
   state.options = options;
   if (changed) {
+    const previous = state.database;
     state.runtime = undefined;
+    state.database = undefined;
+    if (previous) void closeDatabase(previous).catch(() => {});
   }
 }
 
@@ -61,7 +66,18 @@ export async function getFarmAuthRuntime(): Promise<BetterAuthRuntime> {
     );
   }
 
-  state.runtime ||= createRuntime(state.config, state.options);
+  if (!state.runtime) {
+    const runtime = createRuntime(state.config, state.options, (database) => {
+      // A dispose or reconfigure that raced this creation already closed what it
+      // knew about, so an orphaned connection closes itself instead of leaking.
+      if (state.runtime === runtime) {
+        state.database = database;
+      } else {
+        void closeDatabase(database).catch(() => {});
+      }
+    });
+    state.runtime = runtime;
+  }
   return state.runtime;
 }
 
@@ -75,6 +91,24 @@ export function getFarmAuthRequest(request?: Request): Request {
     );
   }
   return current;
+}
+
+/**
+ * Close the connection opened for the runtime and drop the cached instance.
+ *
+ * The runtime is cached on globalThis and its connection stays open for the life
+ * of the process, which leaves a file lock behind on SQLite and a pool open on
+ * every other driver. Call this from a teardown hook.
+ */
+export async function disposeFarmAuth(): Promise<void> {
+  const state = getState();
+  // Let an in-flight creation finish so its connection is registered and closed
+  // here, instead of resolving before the handle even exists.
+  if (state.runtime) await state.runtime.catch(() => {});
+  const database = state.database;
+  state.runtime = undefined;
+  state.database = undefined;
+  await closeDatabase(database);
 }
 
 export async function migrateFarmAuth(): Promise<void> {
@@ -98,8 +132,10 @@ export async function migrateFarmAuth(): Promise<void> {
 async function createRuntime(
   config: ResolvedFarmAuthConfig,
   options: FarmAuthRuntimeOptions,
+  onDatabase: (database: unknown) => void,
 ): Promise<BetterAuthRuntime> {
   const authOptions = await createBetterAuthOptions(config, options);
+  onDatabase(authOptions.database);
 
   if (options.mode === "development" && config.database.migrateInDevelopment) {
     const { getMigrations } = await import("better-auth/db/migration");
