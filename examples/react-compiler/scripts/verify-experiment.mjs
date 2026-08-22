@@ -29,6 +29,7 @@ for (const component of [
   "TernaryBlockPanel",
   "AutomaticKeyedListExperiment",
   "DerivedCollectionExperiment",
+  "InteractiveKeyedListExperiment",
   "ExplicitKeyedListExperiment",
   "StatefulListRow",
   "ComponentIslandExperiment",
@@ -508,6 +509,56 @@ try {
   );
   assert.equal(derivedCollectionFinalExecutions - derivedCollectionInitialExecutions, 0);
 
+  const interactiveList = '[data-experiment="keyed-interactive"]';
+  const interactiveListInitialExecutions = await readNumber(
+    page,
+    `${interactiveList} [data-metric="executions"]`,
+  );
+  await page.evaluate(() => {
+    window.__farmInteractiveAlpha = document.querySelector(
+      '[data-experiment="keyed-interactive"] [data-list="interactive"] [data-key="a"]',
+    );
+  });
+  const interactiveAlpha = `${interactiveList} li[data-key="a"]`;
+  await page.locator(`${interactiveAlpha} [data-action="toggle-interactive-row"]`).click();
+  await assertText(page, `${interactiveAlpha} span`, "Alpha! · done");
+  assert.equal(await page.locator(interactiveAlpha).getAttribute("data-done"), "true");
+  await page.locator(`${interactiveAlpha} [data-action="toggle-interactive-row"]`).click();
+  await assertText(page, `${interactiveAlpha} span`, "Alpha!! · open");
+  assert.equal(await page.locator(interactiveAlpha).getAttribute("data-done"), "false");
+  await assertText(page, `${interactiveList} [data-metric="captured"]`, "2");
+  await page.locator(`${interactiveList} [data-action="reverse-interactive-rows"]`).click();
+  await assertText(page, `${interactiveList} [data-metric="first"]`, "Gamma");
+  assert.deepEqual(
+    await page.locator(`${interactiveList} li > span`).allTextContents(),
+    ["Gamma · open", "Beta · open", "Alpha!! · open"],
+  );
+  assert.equal(
+    await page.evaluate(
+      () =>
+        window.__farmInteractiveAlpha ===
+        document.querySelector(
+          '[data-experiment="keyed-interactive"] [data-list="interactive"] [data-key="a"]',
+        ),
+    ),
+    true,
+    "React structural reconciliation did not preserve the interactive row identity",
+  );
+  await page.locator(`${interactiveAlpha} [data-action="toggle-interactive-row"]`).click();
+  await assertText(page, `${interactiveAlpha} span`, "Alpha!!! · done");
+  assert.equal(
+    await page
+      .locator(`${interactiveAlpha} [data-action="toggle-interactive-row"]`)
+      .getAttribute("data-index"),
+    "2",
+  );
+  await assertText(page, `${interactiveList} [data-metric="captured"]`, "3");
+  const interactiveListFinalExecutions = await readNumber(
+    page,
+    `${interactiveList} [data-metric="executions"]`,
+  );
+  assert.equal(interactiveListFinalExecutions - interactiveListInitialExecutions, 0);
+
   const explicitList = '[data-experiment="keyed-explicit"]';
   const explicitListInitialExecutions = await readNumber(
     page,
@@ -757,6 +808,15 @@ try {
               derivedCollectionFinalExecutions - derivedCollectionInitialExecutions,
             keyedDomIdentityPreserved: true,
             operations: ["filter", "toSorted", "slice", "toReversed"],
+          },
+          interactiveKeyedList: {
+            alpha: "Alpha!!! · done",
+            capturedClicks: 3,
+            updateExecutions:
+              interactiveListFinalExecutions - interactiveListInitialExecutions,
+            keyedDomIdentityPreserved: true,
+            structuralOwner: "React",
+            bindingOwner: "Farm",
           },
           explicitKeyedList: {
             order: ["Beta", "Alpha"],

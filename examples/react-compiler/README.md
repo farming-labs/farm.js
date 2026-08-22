@@ -36,6 +36,7 @@ assertions, checks for console/runtime errors and horizontal overflow, saves scr
 | Two state cells             | text/class/data/input all update, update executions `0` | —                                              | AOT dependency lists update only bindings affected by each state cell. |
 | Automatic keyed map         | stable row DOM, three LIS moves for a four-row reversal  | —                                              | AOT rows patch in place and use the minimum reorder moves.              |
 | Derived keyed collection    | 2,048 source rows filter, sort, slice, and reverse; executions `0` | —                                      | Collection dependencies feed keyed rows without rerunning the owner.    |
+| Interactive keyed rows      | latest item/index after updates and reorder; executions `0` | —                                           | React owns events/structure while Farm patches same-key row bindings.   |
 | Explicit `List`             | stateful rows reorder, update executions `0`            | —                                              | React preserves custom-row state by key inside the isolated boundary.  |
 | Calculated style bindings   | value `6`, progress `50%`, update executions `0`        | —                                              | Safe calls and individual CSS properties use prepared dependencies.    |
 | Controlled form bindings   | textarea/select/checkbox update, executions `0`         | —                                              | Form properties and textarea selection stay coherent.                  |
@@ -86,10 +87,22 @@ host container. Its collection may chain synchronous inline `filter`, `slice`, `
 `toReversed` operations. The compiler records the state dependencies used by those operations and
 reruns the pipeline only when one changes; it still performs the necessary filtering or sorting.
 Mutating methods, external or async callbacks, Hooks, assignments, spread arguments, and unproven
-calls fall back to React. Row events, custom components, fragments, refs, SVG, static siblings in
-that same container, and index or missing keys also use React reconciliation. Duplicate keys
-discovered at runtime remount that container through React. LIS reduces moves; it does not make
-insertions, removals, key comparison, collection work, or DOM updates disappear.
+calls fall back to React.
+
+An otherwise eligible host row can include inline synchronous events. React installs and dispatches
+those event props; Farm does not add a native listener. A stable proxy resolves the newest item and
+index for that key when the event fires. With the same key sequence, Farm patches the prepared row
+bindings without rerunning the map. When keys are inserted, removed, or reordered, React reconciles
+the structure once; Farm then adopts the committed rows and resumes direct same-key patches. The
+`04C` card verifies capture and stop-propagation behavior, latest-item lookup across three clicks,
+row identity through a reversal, and zero owner update executions.
+
+Non-inline or async row handlers, controlled interactive form fields, custom components, fragments,
+refs, SVG, static siblings in that same container, and index or missing keys use the React-owned
+list path. Duplicate keys discovered at runtime remount that container through React. LIS applies
+to non-interactive compiler-owned rows; interactive structural changes intentionally stay with
+React. Neither path makes insertions, removals, key comparison, collection work, or DOM updates
+disappear.
 
 The example includes ES2023 TypeScript library declarations because `toSorted` and `toReversed`
 are standard runtime methods that the compiler preserves rather than polyfills.

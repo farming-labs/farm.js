@@ -649,6 +649,28 @@ h1 span {
     monospace;
 }
 
+.interactive-keyed-list .interactive-row {
+  display: flex;
+  min-width: min(100%, 14rem);
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+  padding: 0.35rem 0.35rem 0.35rem 0.65rem;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease;
+}
+
+.interactive-keyed-list .interactive-row--done {
+  border-color: rgb(184 255 91 / 0.6);
+  background: rgb(184 255 91 / 0.07);
+}
+
+.interactive-keyed-list .interactive-row button {
+  min-height: 2.4rem;
+  padding: 0.4rem 0.6rem;
+}
+
 .keyed-row-stage {
   display: flex;
   min-height: 2.8rem;

@@ -77,6 +77,11 @@ export interface CompilerHostElement {
 
 export type CompilerKeyedRowElement = CompilerHostElement;
 
+export interface CompilerKeyedRowEvent {
+  name: string;
+  invoke(item: unknown, index: number, event: React.SyntheticEvent): unknown;
+}
+
 export interface CompilerHostConditionalBinding {
   kind: "text" | "attribute" | "style";
   path: readonly number[];
@@ -108,11 +113,18 @@ export interface CompilerKeyedRowBinding {
 
 export interface CompilerKeyedRowsBlockProps {
   id: number;
-  render(): React.ReactElement;
+  render(
+    event: (
+      item: unknown,
+      index: number,
+      eventId: number,
+    ) => React.EventHandler<React.SyntheticEvent>,
+  ): React.ReactElement;
   items(): Iterable<unknown> | null | undefined;
   rowKey(item: unknown, index: number): React.Key;
   create(item: unknown, index: number): CompilerKeyedRowElement;
   bindings: readonly CompilerKeyedRowBinding[];
+  events?: readonly CompilerKeyedRowEvent[];
 }
 
 export interface CompilerComponentBlockProps {
@@ -525,7 +537,11 @@ function findCompilerHostTarget(root: Element, path: readonly number[]): Element
 
 interface CompilerKeyedRowInstance extends CompilerHostInstance {
   key: string;
+  item: unknown;
+  index: number;
 }
+
+const UNSET_KEYED_ROW_BINDING = Symbol("unset interactive keyed-row binding");
 
 function keyedRowIdentity(key: React.Key): string {
   return String(key);
@@ -823,6 +839,10 @@ function createKeyedRowsBlockComponent(
     private currentProps = this.props;
     private unsubscribe: (() => void) | undefined;
     private instances = new Map<string, CompilerKeyedRowInstance>();
+    private readonly eventHandlers = new Map<
+      string,
+      Map<number, React.EventHandler<React.SyntheticEvent>>
+    >();
 
     private captureRoot = (root: Element | null) => {
       this.root = root;
@@ -838,6 +858,43 @@ function createKeyedRowsBlockComponent(
       return { items, keys };
     }
 
+    private rowEvent = (
+      item: unknown,
+      index: number,
+      eventId: number,
+    ): React.EventHandler<React.SyntheticEvent> => {
+      if (this.state.fallback) {
+        return (event) => this.currentProps.events?.[eventId]?.invoke(item, index, event);
+      }
+      const key = keyedRowIdentity(this.currentProps.rowKey(item, index));
+      let handlers = this.eventHandlers.get(key);
+      if (!handlers) {
+        handlers = new Map();
+        this.eventHandlers.set(key, handlers);
+      }
+      const existing = handlers.get(eventId);
+      if (existing) return existing;
+      const handler: React.EventHandler<React.SyntheticEvent> = (event) => {
+        const instance = this.instances.get(key);
+        const descriptor = this.currentProps.events?.[eventId];
+        if (!instance || !descriptor) return;
+        return descriptor.invoke(instance.item, instance.index, event);
+      };
+      handlers.set(eventId, handler);
+      return handler;
+    };
+
+    private hasInteractiveRows(): boolean {
+      return Boolean(this.currentProps.events?.length);
+    }
+
+    private pruneEventHandlers(keys: readonly string[]): void {
+      const active = new Set(keys);
+      for (const key of this.eventHandlers.keys()) {
+        if (!active.has(key)) this.eventHandlers.delete(key);
+      }
+    }
+
     private adopt(): boolean {
       if (!this.root) return false;
       const rows = this.readRows(this.currentProps);
@@ -845,13 +902,35 @@ function createKeyedRowsBlockComponent(
       if (!rows || rows.items.length !== elements.length) return false;
       const instances = new Map<string, CompilerKeyedRowInstance>();
       for (let index = 0; index < rows.items.length; index += 1) {
-        instances.set(rows.keys[index], {
+        if (
+          this.hasInteractiveRows() &&
+          !matchesCompilerHostElement(
+            elements[index],
+            this.currentProps.create(rows.items[index], index),
+          )
+        ) {
+          return false;
+        }
+        const instance: CompilerKeyedRowInstance = {
           key: rows.keys[index],
           element: elements[index],
-          values: readKeyedRowBindingValues(this.currentProps, rows.items[index], index),
-        });
+          values: this.hasInteractiveRows()
+            ? this.currentProps.bindings.map(() => UNSET_KEYED_ROW_BINDING)
+            : readKeyedRowBindingValues(this.currentProps, rows.items[index], index),
+          item: rows.items[index],
+          index,
+        };
+        if (this.hasInteractiveRows()) {
+          // React compares the next row against its previous virtual props, not
+          // against DOM values patched by Farm between commits. Reapply every
+          // binding after a structural React commit so both views converge
+          // before direct same-key patches resume.
+          applyKeyedRowBindings(this.currentProps, instance, rows.items[index], index);
+        }
+        instances.set(rows.keys[index], instance);
       }
       this.instances = instances;
+      this.pruneEventHandlers(rows.keys);
       return true;
     }
 
@@ -862,6 +941,20 @@ function createKeyedRowsBlockComponent(
       }
       this.fallbackRequested = true;
       this.setState({ fallback: true }, afterCommit);
+    }
+
+    private synchronizeInteractiveRows(afterCommit?: () => void): void {
+      this.forceUpdate(() => {
+        if (!this.mounted) {
+          afterCommit?.();
+          return;
+        }
+        if (!this.adopt()) {
+          this.activateFallback(afterCommit);
+          return;
+        }
+        afterCommit?.();
+      });
     }
 
     private reconcile(afterCommit?: () => void): void {
@@ -878,6 +971,16 @@ function createKeyedRowsBlockComponent(
       const rows = this.readRows(this.currentProps);
       if (!rows) {
         this.activateFallback(afterCommit);
+        return;
+      }
+
+      const previousKeys = [...this.instances.keys()];
+      if (
+        this.hasInteractiveRows() &&
+        (rows.keys.length !== previousKeys.length ||
+          rows.keys.some((key, index) => key !== previousKeys[index]))
+      ) {
+        this.synchronizeInteractiveRows(afterCommit);
         return;
       }
 
@@ -898,6 +1001,8 @@ function createKeyedRowsBlockComponent(
         const existing = this.instances.get(key);
         if (existing) {
           applyKeyedRowBindings(this.currentProps, existing, rows.items[index], index);
+          existing.item = rows.items[index];
+          existing.index = index;
           nextInstances.push(existing);
           continue;
         }
@@ -909,6 +1014,8 @@ function createKeyedRowsBlockComponent(
           key,
           element,
           values: readKeyedRowBindingValues(this.currentProps, rows.items[index], index),
+          item: rows.items[index],
+          index,
         });
       }
 
@@ -923,6 +1030,7 @@ function createKeyedRowsBlockComponent(
         anchor = instance.element;
       }
       this.instances = new Map(nextInstances.map((instance) => [instance.key, instance]));
+      this.pruneEventHandlers(rows.keys);
       if (
         restoreFocus &&
         activeElement?.isConnected &&
@@ -948,10 +1056,31 @@ function createKeyedRowsBlockComponent(
     }
 
     shouldComponentUpdate(nextProps: CompilerKeyedRowsBlockProps, nextState: State): boolean {
+      const wasInteractive = Boolean(this.currentProps.events?.length);
+      const willBeInteractive = Boolean(nextProps.events?.length);
       this.currentProps = nextProps;
       if (nextState.fallback || this.state.fallback) return true;
+      if (wasInteractive || willBeInteractive) {
+        // Parent prop updates and Fast Refresh definitions must pass through
+        // React so event locations, static row markup, and proxy identities
+        // cannot remain tied to an older render definition.
+        this.eventHandlers.clear();
+        return true;
+      }
       this.schedulePropSync();
       return false;
+    }
+
+    componentDidUpdate(previousProps: CompilerKeyedRowsBlockProps): void {
+      if (
+        this.state.fallback ||
+        previousProps === this.props ||
+        (!previousProps.events?.length && !this.props.events?.length) ||
+        this.adopt()
+      ) {
+        return;
+      }
+      this.activateFallback();
     }
 
     componentDidMount(): void {
@@ -965,10 +1094,11 @@ function createKeyedRowsBlockComponent(
       this.unsubscribe?.();
       this.root = null;
       this.instances.clear();
+      this.eventHandlers.clear();
     }
 
     render(): React.ReactNode {
-      const container = this.currentProps.render();
+      const container = this.currentProps.render(this.rowEvent);
       if (!React.isValidElement(container) || typeof container.type !== "string") {
         throw new TypeError(
           `Compiled keyed rows ${this.currentProps.id} must own one host container.`,

@@ -446,6 +446,159 @@ const testSource = String.raw`
   assert.equal(keyedRowExecutions, initialKeyedRowExecutions);
   flushSync(() => keyedRowsRoot.unmount());
 
+  let interactiveRowExecutions = 0;
+  let interactiveListRenders = 0;
+  let setInteractiveItems = () => undefined;
+  const interactiveCalls = [];
+  const InteractiveKeyedRows = createCompiledComponent({
+    displayName: "CompatibilityInteractiveKeyedRows",
+    initialize: () => [[
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+    ]],
+    render(_props, state, blocks) {
+      interactiveRowExecutions += 1;
+      setInteractiveItems = (next) => state[0].set(next);
+      const items = () => state[0].get();
+      return React.createElement(
+        "section",
+        null,
+        React.createElement(blocks.KeyedRows, {
+          id: 0,
+          render: (rowEvent) => {
+            interactiveListRenders += 1;
+            return React.createElement(
+              "ol",
+              null,
+              items().map((item, index) =>
+                React.createElement(
+                  "li",
+                  { key: item.id, "data-key": item.id },
+                  React.createElement("span", null, item.label),
+                  React.createElement(
+                    "button",
+                    {
+                      "data-index": index,
+                      onClick: rowEvent(item, index, 0),
+                      type: "button",
+                    },
+                    "Update",
+                  ),
+                ),
+              ),
+            );
+          },
+          items,
+          rowKey: (item) => item.id,
+          create: (item, index) => ({
+            kind: "element",
+            tag: "li",
+            attributes: [{ name: "data-key", value: item.id }],
+            styles: [],
+            children: [
+              {
+                kind: "element",
+                tag: "span",
+                attributes: [],
+                styles: [],
+                children: [item.label],
+              },
+              {
+                kind: "element",
+                tag: "button",
+                attributes: [
+                  { name: "data-index", value: index },
+                  { name: "type", value: "button" },
+                ],
+                styles: [],
+                children: ["Update"],
+              },
+            ],
+          }),
+          bindings: [
+            { kind: "text", path: [0], read: (item) => [item.label] },
+            { kind: "attribute", path: [1], name: "data-index", read: (_item, index) => index },
+          ],
+          events: [
+            {
+              name: "onClick",
+              invoke: (item, index, event) => {
+                interactiveCalls.push(item.label + ":" + index + ":" + event.currentTarget.dataset.index);
+                state[0].set((current) =>
+                  current.map((row) =>
+                    row.id === item.id ? { ...row, label: item.label + "!" } : row,
+                  ),
+                );
+              },
+            },
+          ],
+        }),
+      );
+    },
+    bindings: [{ kind: "block", id: 0, dependencies: [0] }],
+  });
+
+  const interactiveContainer = document.createElement("div");
+  document.body.append(interactiveContainer);
+  const interactiveRoot = createRoot(interactiveContainer);
+  flushSync(() => interactiveRoot.render(React.createElement(InteractiveKeyedRows)));
+  const initialInteractiveExecutions = interactiveRowExecutions;
+  const initialInteractiveRenders = interactiveListRenders;
+  const interactiveAlpha = interactiveContainer.querySelector("[data-key='a']");
+  interactiveAlpha.querySelector("button").click();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(interactiveAlpha.querySelector("span").textContent, "Alpha!");
+  assert.deepEqual(interactiveCalls, ["Alpha:0:0"]);
+  assert.equal(interactiveRowExecutions, initialInteractiveExecutions);
+  assert.equal(interactiveListRenders, initialInteractiveRenders);
+
+  const interactiveStateButton = interactiveAlpha.querySelector("button");
+  interactiveStateButton.click();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(interactiveAlpha.querySelector("span").textContent, "Alpha!!");
+  assert.deepEqual(interactiveCalls, ["Alpha:0:0", "Alpha!:0:0"]);
+  assert.equal(interactiveContainer.querySelector("[data-key='a']"), interactiveAlpha);
+
+  setInteractiveItems((current) => [...current].reverse());
+  await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync(() => {});
+  assert.deepEqual(
+    [...interactiveContainer.querySelectorAll("li")].map((row) => row.getAttribute("data-key")),
+    ["b", "a"],
+  );
+  assert.equal(interactiveContainer.querySelector("[data-key='a']"), interactiveAlpha);
+  assert.equal(interactiveListRenders, initialInteractiveRenders + 1);
+  interactiveAlpha.querySelector("button").click();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(interactiveAlpha.querySelector("span").textContent, "Alpha!!!");
+  assert.deepEqual(interactiveCalls, ["Alpha:0:0", "Alpha!:0:0", "Alpha!!:1:1"]);
+  flushSync(() => interactiveRoot.unmount());
+
+  const interactiveHydrationContainer = document.createElement("div");
+  interactiveHydrationContainer.innerHTML = renderToString(
+    React.createElement(InteractiveKeyedRows),
+  );
+  document.body.append(interactiveHydrationContainer);
+  const hydratedInteractiveAlpha = interactiveHydrationContainer.querySelector("[data-key='a']");
+  const interactiveHydrationRoot = hydrateRoot(
+    interactiveHydrationContainer,
+    React.createElement(InteractiveKeyedRows),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(
+    interactiveHydrationContainer.querySelector("[data-key='a']"),
+    hydratedInteractiveAlpha,
+  );
+  hydratedInteractiveAlpha.querySelector("button").click();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(hydratedInteractiveAlpha.querySelector("span").textContent, "Alpha!");
+  flushSync(() => interactiveHydrationRoot.unmount());
+
   let derivedCollectionExecutions = 0;
   const DerivedCollections = createCompiledComponent({
     displayName: "CompatibilityDerivedCollections",

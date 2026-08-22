@@ -8,6 +8,7 @@ let reactBatchExecutions = 0;
 let multipleBindingExecutions = 0;
 let automaticListExecutions = 0;
 let derivedCollectionExecutions = 0;
+let interactiveListExecutions = 0;
 let explicitListExecutions = 0;
 
 export function CompiledBatchExperiment() {
@@ -336,6 +337,90 @@ export function DerivedCollectionExperiment() {
   );
 }
 
+interface InteractiveListItem extends ListItem {
+  done: boolean;
+}
+
+export function InteractiveKeyedListExperiment() {
+  const [items, setItems] = useState<InteractiveListItem[]>([
+    { id: "a", label: "Alpha", done: false },
+    { id: "b", label: "Beta", done: false },
+    { id: "c", label: "Gamma", done: false },
+  ]);
+  const [captured, setCaptured] = useState(0);
+
+  return (
+    <article className="edge-card" data-experiment="keyed-interactive">
+      <header>
+        <span className="experiment-number">04C</span>
+        <div>
+          <h3>Interactive compiled rows</h3>
+          <p>React owns events and reorders; Farm patches same-key data without stale items.</p>
+        </div>
+      </header>
+      <dl className="compact-metrics" aria-live="polite">
+        <div>
+          <dt>First row</dt>
+          <dd data-metric="first">{items[0]?.label}</dd>
+        </div>
+        <div>
+          <dt>Captured clicks</dt>
+          <dd data-metric="captured">{captured}</dd>
+        </div>
+        <div>
+          <dt>Executions</dt>
+          <dd data-metric="executions">
+            {typeof window === "undefined" ? 1 : ++interactiveListExecutions}
+          </dd>
+        </div>
+      </dl>
+      <ul
+        className="interactive-keyed-list"
+        data-list="interactive"
+        onClickCapture={() => setCaptured((value) => value + 1)}
+      >
+        {items.map((item, index) => (
+          <li
+            className={item.done ? "interactive-row interactive-row--done" : "interactive-row"}
+            data-done={item.done}
+            data-key={item.id}
+            key={item.id}
+          >
+            <span>
+              {item.label} · {item.done ? "done" : "open"}
+            </span>
+            <button
+              data-action="toggle-interactive-row"
+              data-index={index}
+              data-key={item.id}
+              onClick={(event) => {
+                event.stopPropagation();
+                setItems((current) =>
+                  current.map((row) =>
+                    row.id === item.id
+                      ? { ...row, done: !item.done, label: `${item.label}!` }
+                      : row,
+                  ),
+                );
+              }}
+              type="button"
+            >
+              Toggle
+            </button>
+          </li>
+        ))}
+      </ul>
+      <button
+        data-action="reverse-interactive-rows"
+        onClick={() => setItems((current) => [...current].reverse())}
+        type="button"
+      >
+        Reverse interactive rows
+      </button>
+    </article>
+  );
+}
+
 function StatefulListRow({ item }: { item: ListItem }) {
   const [clicks, setClicks] = useState(0);
   return (
@@ -354,7 +439,7 @@ export function ExplicitKeyedListExperiment() {
   return (
     <article className="edge-card" data-experiment="keyed-explicit">
       <header>
-        <span className="experiment-number">04C</span>
+        <span className="experiment-number">04D</span>
         <div>
           <h3>Explicit List boundary</h3>
           <p>A key selector supports custom rows while React preserves their state.</p>
@@ -414,6 +499,7 @@ export function CompilerEdgeLab() {
       <div className="edge-grid">
         <AutomaticKeyedListExperiment />
         <DerivedCollectionExperiment />
+        <InteractiveKeyedListExperiment />
         <ExplicitKeyedListExperiment />
       </div>
 
