@@ -99,6 +99,14 @@ interface CachedPPRShell {
 interface PPRShellCacheOptions {
   pathname: string;
   search: string;
+  /**
+   * Locale the shell was rendered in, resolved once when these options are built.
+   * The shell carries `lang`, `dir`, the message catalog and the alternate links, so
+   * it cannot be shared across locales. It is captured rather than read at write
+   * time because the shell is stored from a streaming `onComplete` callback, which
+   * can run outside the request context that resolved the locale.
+   */
+  locale: string;
   revalidate?: number;
 }
 
@@ -624,8 +632,8 @@ export class ServerRenderer {
     return createFarmCacheKey(["ssg", normalizeRevalidatePath(urlPath)]);
   }
 
-  private getPPRCacheKey(pathname: string, search = ""): string {
-    return createFarmCacheKey(["ppr", normalizeRevalidatePath(pathname), search]);
+  private getPPRCacheKey(pathname: string, search = "", locale = ""): string {
+    return createFarmCacheKey(["ppr", locale, normalizeRevalidatePath(pathname), search]);
   }
 
   private getCachedSSGPage(urlPath: string) {
@@ -651,12 +659,14 @@ export class ServerRenderer {
     );
   }
 
-  private getCachedPPRShell(pathname: string, search: string) {
-    return this.dataCache.getEntryAsync<CachedPPRShell>(this.getPPRCacheKey(pathname, search));
+  private getCachedPPRShell(pathname: string, search: string, locale = "") {
+    return this.dataCache.getEntryAsync<CachedPPRShell>(
+      this.getPPRCacheKey(pathname, search, locale),
+    );
   }
 
   private async cachePPRShell(options: PPRShellCacheOptions, html: string): Promise<void> {
-    const key = this.getPPRCacheKey(options.pathname, options.search);
+    const key = this.getPPRCacheKey(options.pathname, options.search, options.locale);
     await this.dataCache.setAsync(
       key,
       { html },
@@ -1066,6 +1076,7 @@ export class ServerRenderer {
         ? {
             pathname,
             search: url.search,
+            locale: getFarmI18nClientSnapshot()?.locale ?? "",
             revalidate: renderingConfig.revalidate,
           }
         : undefined;
@@ -1089,8 +1100,13 @@ export class ServerRenderer {
       }
 
       if (pprShellOptions) {
-        const pprCacheKey = this.getPPRCacheKey(pathname, url.search);
-        const cachedPPRShell = await this.getCachedPPRShell(pathname, url.search);
+        // Same locale for the lookup and the later store, so the two cannot diverge.
+        const pprCacheKey = this.getPPRCacheKey(pathname, url.search, pprShellOptions.locale);
+        const cachedPPRShell = await this.getCachedPPRShell(
+          pathname,
+          url.search,
+          pprShellOptions.locale,
+        );
         if (cachedPPRShell) {
           emitFarmEvent({
             type: "ppr.shell.hit",
