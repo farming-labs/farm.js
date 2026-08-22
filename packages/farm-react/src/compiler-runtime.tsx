@@ -700,6 +700,9 @@ function createHostConditionalBlockComponent(
         return;
       }
       this.fallbackRequested = true;
+      // One key change on entry: the compiled path mutated the DOM behind
+      // React's back, so the first fallback render must rebuild the subtree.
+      this.fallbackVersion += 1;
       this.setState({ fallback: true }, afterCommit);
     }
 
@@ -709,7 +712,9 @@ function createHostConditionalBlockComponent(
         return;
       }
       if (this.state.fallback) {
-        this.fallbackVersion += 1;
+        // React owns the container while in fallback; re-render with the
+        // stable key so updates reconcile in place instead of remounting the
+        // subtree (which would wipe uncontrolled inputs, focus, and scroll).
         this.forceUpdate(afterCommit);
         return;
       }
@@ -835,6 +840,7 @@ function createKeyedRowsBlockComponent(
     private mounted = false;
     private fallbackRequested = false;
     private fallbackVersion = 0;
+    private fallbackKeysWereUnsafe = false;
     private propSyncQueued = false;
     private currentProps = this.props;
     private unsubscribe: (() => void) | undefined;
@@ -934,12 +940,24 @@ function createKeyedRowsBlockComponent(
       return true;
     }
 
+    private hasUnsafeFallbackKeys(): boolean {
+      try {
+        return this.readRows(this.currentProps) === null;
+      } catch {
+        return true;
+      }
+    }
+
     private activateFallback(afterCommit?: () => void): void {
       if (!this.mounted || this.state.fallback || this.fallbackRequested) {
         afterCommit?.();
         return;
       }
       this.fallbackRequested = true;
+      this.fallbackKeysWereUnsafe = this.hasUnsafeFallbackKeys();
+      // One key change on entry: the compiled path mutated the DOM behind
+      // React's back, so the first fallback render must rebuild the subtree.
+      this.fallbackVersion += 1;
       this.setState({ fallback: true }, afterCommit);
     }
 
@@ -963,7 +981,17 @@ function createKeyedRowsBlockComponent(
         return;
       }
       if (this.state.fallback) {
-        this.fallbackVersion += 1;
+        // React owns the container while in fallback; keep the key stable so
+        // updates reconcile in place instead of remounting the subtree (which
+        // would wipe uncontrolled inputs, focus, and scroll). The exception
+        // is duplicate runtime keys: React's reconciliation of a keyed list
+        // with duplicates is unreliable, so any render touched by them (this
+        // one, or the previously committed one) still remounts.
+        const unsafeKeys = this.hasUnsafeFallbackKeys();
+        if (unsafeKeys || this.fallbackKeysWereUnsafe) {
+          this.fallbackVersion += 1;
+        }
+        this.fallbackKeysWereUnsafe = unsafeKeys;
         this.forceUpdate(afterCommit);
         return;
       }
