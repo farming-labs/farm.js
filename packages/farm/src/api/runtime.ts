@@ -85,10 +85,14 @@ async function invokeAPIRouteEndpointInContext(
   }
 
   const url = new URL(request.url);
-  const query: Record<string, string> = {};
-  url.searchParams.forEach((value, key) => {
-    query[key] = value;
-  });
+  // Repeated keys collect into arrays, the same representation the rest of the
+  // framework hands to routes, and the same helper this path already uses for
+  // urlencoded and multipart bodies. Spread back onto a normal object so an
+  // endpoint without a query schema still receives the object shape it did
+  // before; `entriesToObject` has already dropped the prototype-poisoning keys.
+  const query: Record<string, string | string[]> = {
+    ...searchParamsToObject(url.searchParams),
+  };
 
   let body: any = undefined;
   if (request.method.toUpperCase() !== "GET" && request.method.toUpperCase() !== "HEAD") {
