@@ -1009,6 +1009,17 @@ export async function loadConfig(
       process.env[key] = value;
     }
   }
+  // An explicitly supplied config path must resolve — silently falling back
+  // to the default config would run against the wrong configuration.
+  if (configPath) {
+    const explicitPath = path.resolve(
+      path.isAbsolute(configPath) ? configPath : path.join(root, configPath),
+    );
+    if (!existsSync(explicitPath)) {
+      throw new Error(`Config file not found at ${configPath} (resolved to ${explicitPath}).`);
+    }
+  }
+
   const searchPaths = [
     configPath,
     "farm.config.ts",

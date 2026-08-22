@@ -114,6 +114,25 @@ describe("loadConfig", () => {
     expect(config).toMatchObject({ value: "ready" });
   });
 
+  it("throws when an explicitly supplied config path does not exist", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-config-missing-"));
+    // A default config exists, but the explicit path must not fall back to it.
+    await fs.writeFile(path.join(root, "farm.config.mjs"), "export default { value: 'default' };");
+
+    await expect(loadConfig(root, "farm.config.prod.ts", "production")).rejects.toThrow(
+      "Config file not found at farm.config.prod.ts",
+    );
+  });
+
+  it("loads an explicitly supplied config path that exists", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-config-explicit-"));
+    await fs.writeFile(path.join(root, "farm.config.mjs"), "export default { value: 'default' };");
+    await fs.writeFile(path.join(root, "custom.config.mjs"), "export default { value: 'custom' };");
+
+    const config = await loadConfig(root, "custom.config.mjs", "production");
+    expect(config).toMatchObject({ value: "custom" });
+  });
+
   it("loads env files before importing farm.config", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-config-env-"));
 
