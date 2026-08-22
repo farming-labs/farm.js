@@ -9,6 +9,16 @@ import type { MiddlewareContext, CookieJar, CookieOptions } from "./types";
 /**
  * Parse cookies from Cookie header
  */
+function decodeCookieValue(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    // Cookies are not required to be percent-encoded; keep the raw value
+    // instead of failing the whole request on malformed encoding.
+    return value;
+  }
+}
+
 function parseCookies(cookieHeader?: string): Record<string, string> {
   if (!cookieHeader) return {};
 
@@ -17,7 +27,7 @@ function parseCookies(cookieHeader?: string): Record<string, string> {
       const [name, ...rest] = cookie.split("=");
       const value = rest.join("=").trim();
       if (name && value) {
-        cookies[name.trim()] = decodeURIComponent(value);
+        cookies[name.trim()] = decodeCookieValue(value);
       }
       return cookies;
     },
