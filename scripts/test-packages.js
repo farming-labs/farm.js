@@ -12,6 +12,10 @@ const onlyWithNodeEngine = args.has("--only-with-node-engine");
 const currentNodeVersion = process.versions.node;
 const currentNodeMajor = Number(currentNodeVersion.split(".")[0]);
 
+// Packages with known Windows failures, tracked separately so the rest of the
+// suite can run on windows-latest. See #440.
+const WINDOWS_SKIPPED = new Set(["@farm.js/auth", "@farm.js/cli", "@farm.js/plugin"]);
+
 function supportsCurrentNode(range) {
   if (!range) {
     return true;
@@ -53,6 +57,13 @@ let skipped = 0;
 
 for (const pkg of packages) {
   const isCompatible = supportsCurrentNode(pkg.nodeEngine);
+
+  if (process.platform === "win32" && WINDOWS_SKIPPED.has(pkg.name)) {
+    skipped += 1;
+    console.log(`
+> Skipping ${pkg.name} (known Windows failures, see #440)`);
+    continue;
+  }
 
   if (onlyWithNodeEngine && !pkg.nodeEngine) {
     skipped += 1;

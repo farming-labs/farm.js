@@ -9,19 +9,27 @@ on:
 
 jobs:
   test:
-    name: Test
-    runs-on: ubuntu-latest
+    name: Test (${{ matrix.os }}, Node ${{ matrix.node-version }})
+    runs-on: ${{ matrix.os }}
 
     strategy:
       fail-fast: false
       matrix:
         include:
-          - node-version: 20
+          - os: ubuntu-latest
+            node-version: 20
             test_args: --skip-incompatible
-          - node-version: 22
+          - os: ubuntu-latest
+            node-version: 22
             test_args: --skip-incompatible --only-with-node-engine
-          - node-version: 24
+          - os: ubuntu-latest
+            node-version: 24
             test_args: --skip-incompatible --only-with-node-engine
+          # No --only-with-node-engine: @farm.js/core declares no engines field and
+          # would otherwise be skipped, which is the suite this entry exists to cover.
+          - os: windows-latest
+            node-version: 24
+            test_args: --skip-incompatible
 
     steps:
       - name: Checkout
@@ -57,7 +65,7 @@ jobs:
           NODE_OPTIONS: --max-old-space-size=8192
 
       - name: Check committed generated types
-        if: matrix.node-version == 20
+        if: matrix.os == 'ubuntu-latest' && matrix.node-version == 20
         run: pnpm --dir docs exec farm generate --check
 
       - name: Run tests
