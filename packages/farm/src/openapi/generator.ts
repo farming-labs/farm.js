@@ -45,7 +45,15 @@ export class OpenAPIGenerator {
    * Get type from Zod type
    */
   private getTypeFromZodType(zodType: z.ZodType<any>): AllowedType {
-    const typeName = (zodType as any)._def?.typeName;
+    const def = (zodType as any)._def;
+    // Zod 4 stores a lowercase name on `_def.type`; Zod 3 stored `_def.typeName`.
+    // In Zod 3 `_def.type` can also be the element schema of an array, so only
+    // trust it when it is a string.
+    const v4Type = typeof def?.type === "string" ? def.type : undefined;
+    if (v4Type && allowedType.has(v4Type)) {
+      return v4Type as AllowedType;
+    }
+    const typeName = def?.typeName;
     if (typeName) {
       if (typeName === "ZodString") return "string";
       if (typeName === "ZodNumber") return "number";
@@ -93,9 +101,24 @@ export class OpenAPIGenerator {
       }
     }
 
+    // Handle ZodDefault
+    if (zodType instanceof z.ZodDefault) {
+      const def = (zodType as any)._def;
+      const innerSchema = this.processZodType(def.innerType);
+      // Zod 3 stores a thunk, Zod 4 stores the value itself.
+      const defaultValue =
+        typeof def.defaultValue === "function" ? def.defaultValue() : def.defaultValue;
+      return {
+        ...innerSchema,
+        default: defaultValue,
+      };
+    }
+
     // Handle ZodArray
     if (zodType instanceof z.ZodArray) {
-      const itemType = (zodType as any)._def.type;
+      const def = (zodType as any)._def;
+      // Zod 4 stores the element schema on `_def.element`; Zod 3 stored it on `_def.type`.
+      const itemType = def.element ?? def.type;
       return {
         type: "array",
         items: this.processZodType(itemType),
@@ -107,7 +130,8 @@ export class OpenAPIGenerator {
     if (zodType instanceof z.ZodEnum) {
       return {
         type: "string",
-        enum: (zodType as any)._def.values,
+        // `.options` is public in both majors; `_def.values` only existed in Zod 3.
+        enum: (zodType as any).options ?? (zodType as any)._def.values,
         description: (zodType as any).description,
       };
     }
@@ -118,18 +142,35 @@ export class OpenAPIGenerator {
       description: (zodType as any).description,
     };
 
-    // Add constraints if available
-    if ("minLength" in zodType && (zodType as any).minLength) {
-      baseSchema.minLength = (zodType as any).minLength;
-    }
-    if ("maxLength" in zodType && (zodType as any).maxLength) {
-      baseSchema.maxLength = (zodType as any).maxLength;
-    }
-    if ("min" in zodType && (zodType as any).min !== undefined) {
-      baseSchema.minimum = (zodType as any).min;
-    }
-    if ("max" in zodType && (zodType as any).max !== undefined) {
-      baseSchema.maximum = (zodType as any).max;
+    // Add constraints if available. `.minLength`/`.maxLength` and
+    // `.minValue`/`.maxValue` hold the values in both Zod majors, while
+    // `.min`/`.max` are the builder methods.
+    if (baseSchema.type === "string") {
+      const { minLength, maxLength } = zodType as any;
+      if (typeof minLength === "number") {
+        baseSchema.minLength = minLength;
+      }
+      if (typeof maxLength === "number") {
+        baseSchema.maxLength = maxLength;
+      }
+    } else if (baseSchema.type === "number") {
+      const { minValue, maxValue } = zodType as any;
+      // Zod 4's `.int()` bounds numbers to ±MAX_SAFE_INTEGER; skip those
+      // implicit bounds so only user-provided constraints are documented.
+      if (
+        typeof minValue === "number" &&
+        Number.isFinite(minValue) &&
+        minValue !== Number.MIN_SAFE_INTEGER
+      ) {
+        baseSchema.minimum = minValue;
+      }
+      if (
+        typeof maxValue === "number" &&
+        Number.isFinite(maxValue) &&
+        maxValue !== Number.MAX_SAFE_INTEGER
+      ) {
+        baseSchema.maximum = maxValue;
+      }
     }
 
     return baseSchema;
