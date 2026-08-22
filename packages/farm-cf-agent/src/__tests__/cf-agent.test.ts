@@ -108,7 +108,10 @@ export default { fetch() { return new Response("agent"); } };
     expect(generated.assets.directory).toBe("./.output/public");
     expect(generated.durable_objects.bindings[0].class_name).toBe("CounterAgent");
 
-    const module = await import(`${pathToFileURL(result.wrapperPath).href}?test=${Date.now()}`);
+    // decodeURI because Vite resolves this id itself and fails on a percent-encoded
+    // path, which a Windows short name such as RUNNER~1 produces.
+    const wrapperUrl = decodeURI(pathToFileURL(result.wrapperPath).href);
+    const module = await import(`${wrapperUrl}?test=${Date.now()}`);
     expect(
       module.default.fetch(new Request("https://example.com/agents/counter/default")),
     ).toMatchObject({ status: 200 });
