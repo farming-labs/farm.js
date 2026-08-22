@@ -49,6 +49,14 @@ describe("server cache primitives", () => {
     );
   });
 
+  it("serializes object keys in locale-independent codepoint order", () => {
+    // localeCompare would order these a, ä, b, B under an English locale and
+    // a, b, B, z, ä under Swedish — the key must not depend on the host
+    // locale.
+    const key = createFarmCacheKey([{ b: 1, a: 2, B: 3, ä: 4 }]);
+    expect(key).toBe('[{"B":number:3,"a":number:2,"b":number:1,"ä":number:4}]');
+  });
+
   it("rejects invalid values returned by defined cache key factories", () => {
     const invalidKey = defineCacheKey<unknown>()((() => ({ scope: "product" })) as any);
 

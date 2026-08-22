@@ -1040,8 +1040,11 @@ function stableSerialize(value: unknown, seen = new WeakSet<object>()): string {
     }
     seen.add(value);
 
+    // Codepoint comparison, not localeCompare: the host locale must not
+    // change how a "stable" key serializes, or invalidations computed on one
+    // server can miss entries written by another.
     const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) =>
-      a.localeCompare(b),
+      a < b ? -1 : a > b ? 1 : 0,
     );
     const serialized = entries
       .map(([key, item]) => `${JSON.stringify(key)}:${stableSerialize(item, seen)}`)
