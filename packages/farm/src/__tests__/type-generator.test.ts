@@ -19,8 +19,45 @@ describe("APITypeGenerator", () => {
 
     expect(content).not.toContain("Generated at:");
     expect(content).toContain('"storage-demo": {');
-    expect(content).toContain("get: typeof GET_storagedemo;");
-    expect(content).toContain("post: typeof POST_storagedemo;");
+    expect(content).toContain("get: typeof GET_storage_demo;");
+    expect(content).toContain("post: typeof POST_storage_demo;");
+  });
+
+  it("keeps import aliases unique for routes that normalize alike", () => {
+    const generator = new APITypeGenerator("/tmp/app");
+
+    const content = generator.generateAPIRouter([
+      {
+        path: "/api/id",
+        methods: ["GET"],
+        filePath: "/tmp/app/api/id/route.ts",
+        relativePath: "api/id/route.ts",
+      },
+      {
+        path: "/api/[id]",
+        methods: ["GET"],
+        filePath: "/tmp/app/api/[id]/route.ts",
+        relativePath: "api/[id]/route.ts",
+      },
+      {
+        path: "/api/user-profile",
+        methods: ["GET"],
+        filePath: "/tmp/app/api/user-profile/route.ts",
+        relativePath: "api/user-profile/route.ts",
+      },
+      {
+        path: "/api/user_profile",
+        methods: ["GET"],
+        filePath: "/tmp/app/api/user_profile/route.ts",
+        relativePath: "api/user_profile/route.ts",
+      },
+    ]);
+
+    const aliases = [...content.matchAll(/import type \{ GET as (\w+) \}/g)].map(
+      (match) => match[1],
+    );
+    expect(aliases).toHaveLength(4);
+    expect(new Set(aliases).size).toBe(4);
   });
 
   it("creates the output directory before writing generated API types", () => {
