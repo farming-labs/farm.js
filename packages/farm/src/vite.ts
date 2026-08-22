@@ -2641,7 +2641,6 @@ if (import.meta.hot) {
         typeof wrapProviders === 'function' ? wrapProviders(nextElement) : nextElement
       ).then((wrappedElement) => {
         window.__FARM_REACT_ROOT__.render(wrappedElement);
-        console.log('[Farm.js] ⚡ HMR update applied');
       });
     }
   });
@@ -4170,7 +4169,6 @@ async function tryHydrateImportedPage(
       window.__FARM_REACT_ROOT__ = reactRoot;
       return true;
     } catch (error) {
-      console.log('[Farm.js] Hydration mismatch, using createRoot');
       appRoot = createRoot(container);
       appRoot.render(wrappedElement);
       window.__FARM_REACT_ROOT__ = appRoot;
@@ -4428,7 +4426,6 @@ async function renderPage(pageData) {
     activeLayoutPatterns = layoutPatterns;
     activeLayoutShouldHydrate = layoutShouldHydrate;
     window.__FARM_LOADING_MODULE__ = route.loadingModulePath || null;
-    console.log('[Farm.js] ⚡ Fragment navigated to:', path);
     return true;
   };
 
@@ -4450,7 +4447,6 @@ async function hydrate() {
   }
 
   if (await hydrateFarmDocsAdapterRuntime()) {
-    console.log('[Farm.js] ✅ Hydrated docs adapter');
     return;
   }
 
@@ -4486,7 +4482,6 @@ async function hydrate() {
     const hydratedSlots = await hydrateInitialRouteSlots();
     if (!shouldHydrate) {
       if (hydratedSlots) replayPreHydrationClicks();
-      console.log('[Farm.js] Server component - SPA router ready')
       return
     }
 
@@ -4514,7 +4509,6 @@ async function hydrate() {
       : document.getElementById('__farm_page__') || rootContainer;
 
     if (!pageContainer) {
-      console.log('[Farm.js] Server component - SPA router ready')
       return
     }
 
@@ -4584,11 +4578,8 @@ async function hydrate() {
           if (hydrated) {
             // The scheduler owns queue draining and exactly-once click replay.
             markFarmHydrated();
-            console.log('[Farm.js] ✅ Hydrated:', modulePath, '(' + islandStrategy + ')');
             return;
           }
-
-          console.log('[Farm.js] Server component - SPA router ready')
         },
       });
     } finally {
@@ -4666,13 +4657,10 @@ document.addEventListener('click', function(event) {
 
 if (import.meta.hot) {
   import.meta.hot.on('vite:beforeUpdate', () => {
-    console.log('[Farm.js] ⚡ Update detected')
     // Clear module cache on HMR to pick up changes
     pageModuleCache.clear();
   })
 }
-
-console.log('[Farm.js] 🌱 SPA Router initialized');
 `;
 }
 
