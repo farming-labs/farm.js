@@ -70,6 +70,11 @@ jobs:
 
       - name: Run tests
         run: pnpm test -- ${{ matrix.test_args }}
+        env:
+          # The Windows runner points TEMP at the short name C:\Users\RUNNER~1, and
+          # Vite cannot resolve a dynamic import whose path it percent-encodes.
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
 
       - name: Type check
         run: pnpm type-check
