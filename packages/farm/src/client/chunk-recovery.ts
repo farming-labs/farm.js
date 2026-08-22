@@ -43,8 +43,26 @@ export function isChunkLoadError(errorLike: unknown): boolean {
     return true;
   }
 
+  // Only treat same-origin script/style failures as chunk errors. A blocked
+  // or missing third-party asset (analytics, embeds) is not fixable by
+  // reloading, and reloading for it would loop for as long as it keeps
+  // failing.
   const targetUrl = getEventTargetAssetUrl(errorLike);
-  return Boolean(targetUrl && /\.(?:m?js|css)(?:[?#].*)?$/i.test(targetUrl));
+  return Boolean(
+    targetUrl && /\.(?:m?js|css)(?:[?#].*)?$/i.test(targetUrl) && isSameOriginAssetUrl(targetUrl),
+  );
+}
+
+function isSameOriginAssetUrl(url: string): boolean {
+  if (typeof window === "undefined" || !window.location) {
+    return false;
+  }
+
+  try {
+    return new URL(url, window.location.href).origin === window.location.origin;
+  } catch {
+    return false;
+  }
 }
 
 export function installChunkErrorRecovery(options: FarmChunkRecoveryOptions = {}): () => void {

@@ -55,6 +55,43 @@ describe("chunk error recovery", () => {
     expect(isChunkLoadError(linkEvent)).toBe(true);
   });
 
+  it("ignores load failures of cross-origin scripts and styles", () => {
+    const script = document.createElement("script");
+    script.src = "https://cdn.example.com/analytics.js";
+    const scriptEvent = new Event("error");
+    Object.defineProperty(scriptEvent, "target", { value: script });
+
+    const link = document.createElement("link");
+    link.href = "https://fonts.example.com/theme.css";
+    const linkEvent = new Event("error");
+    Object.defineProperty(linkEvent, "target", { value: link });
+
+    expect(isChunkLoadError(scriptEvent)).toBe(false);
+    expect(isChunkLoadError(linkEvent)).toBe(false);
+  });
+
+  it("does not reload when a third-party script keeps failing", () => {
+    const storage = new MemoryStorage();
+    const reload = vi.fn();
+    const cleanup = installChunkErrorRecovery({
+      storage,
+      reload,
+      now: () => 1000,
+    });
+
+    const script = document.createElement("script");
+    script.src = "https://cdn.example.com/blocked-by-adblock.js";
+    const event = new Event("error");
+    Object.defineProperty(event, "target", { value: script });
+
+    window.dispatchEvent(event);
+    window.dispatchEvent(event);
+
+    expect(reload).not.toHaveBeenCalled();
+
+    cleanup();
+  });
+
   it("reloads once for a chunk failure on the current page", () => {
     const storage = new MemoryStorage();
     const reload = vi.fn();
