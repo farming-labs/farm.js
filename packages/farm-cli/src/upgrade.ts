@@ -255,11 +255,16 @@ function getDependencySectionFlags(
 
 function runFarmUpgradeCommand(command: FarmUpgradeCommand): Promise<void> {
   return new Promise((resolve, reject) => {
-    const executable = process.platform === "win32" ? `${command.command}.cmd` : command.command;
+    const isWindows = process.platform === "win32";
+    const executable = isWindows ? `${command.command}.cmd` : command.command;
+    // Node rejects spawning .cmd/.bat files without a shell since the fix for
+    // CVE-2024-27980 (EINVAL). Safe here: the command is one of npm|pnpm|yarn|bun
+    // and the arguments are literal flags plus name@channel package specs.
     const child = spawn(executable, command.args, {
       cwd: command.cwd,
       env: process.env,
       stdio: "inherit",
+      shell: isWindows,
     });
 
     child.on("error", reject);
