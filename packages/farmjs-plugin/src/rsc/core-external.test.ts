@@ -45,20 +45,24 @@ async function stopProcess(child: ChildProcess): Promise<void> {
   await Promise.race([once(child, "exit"), delay(2_000)]);
   if (child.exitCode === null) {
     child.kill("SIGKILL");
-    await once(child, "exit");
+    // Bounded: Windows maps both signals to TerminateProcess, and waiting forever
+    // for an exit event that has already fired turns a failure into a hung run.
+    await Promise.race([once(child, "exit"), delay(5_000)]);
   }
 }
 
 describe("RSC core runtime bundling", () => {
   it("does not prefix absolute Vite environment output paths with the project root", () => {
-    const root = "/workspace/app";
+    const root = path.resolve("/workspace/app");
+    const absoluteOutDir = path.join(root, ".nitro", "vite", "dist", "rsc");
 
-    expect(resolveRscBuildOutputPath(root, "/workspace/app/.nitro/vite/dist/rsc", "index.js")).toBe(
-      "/workspace/app/.nitro/vite/dist/rsc/index.js",
+    // An absolute outDir is used as given, not resolved against the root again.
+    expect(resolveRscBuildOutputPath(root, absoluteOutDir, "index.js")).toBe(
+      path.join(absoluteOutDir, "index.js"),
     );
-    expect(resolveRscBuildOutputPath(root, ".nitro/vite/dist/ssr", "index.js")).toBe(
-      "/workspace/app/.nitro/vite/dist/ssr/index.js",
-    );
+    expect(
+      resolveRscBuildOutputPath(root, path.join(".nitro", "vite", "dist", "ssr"), "index.js"),
+    ).toBe(path.join(root, ".nitro", "vite", "dist", "ssr", "index.js"));
   });
 
   it("rewrites root runtime imports to focused standalone subpaths", async () => {

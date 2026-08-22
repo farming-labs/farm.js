@@ -1,4 +1,5 @@
 import { defineConfig } from "vitest/config";
+import { farmTestDefaults } from "../../vitest.shared";
 
 export default defineConfig({
   css: {
@@ -7,10 +8,7 @@ export default defineConfig({
     },
   },
   test: {
-    // The Vercel output test spawns the Eve adapter, which can pass the 5s default
-    // when the whole suite competes for the machine.
-    testTimeout: process.env.CI ? 60_000 : 30_000,
-    hookTimeout: process.env.CI ? 60_000 : 30_000,
+    ...farmTestDefaults,
     environment: "node",
   },
 });

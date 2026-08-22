@@ -219,6 +219,11 @@ async function fetchLiveSnapshot(
   }
 }
 
+/** Reported paths are shown to the user, so keep them POSIX on every platform. */
+function toPosix(value: string) {
+  return value.split(path.sep).join("/");
+}
+
 function createLiveReport(
   snapshot: LiveSnapshot,
   baseUrl: string,
@@ -313,7 +318,7 @@ async function createProjectReport(
         code: "CONFIG_VALID",
         title: "Farm config loads successfully",
         message: configFile
-          ? path.relative(root, configFile) || path.basename(configFile)
+          ? toPosix(path.relative(root, configFile)) || path.basename(configFile)
           : "Resolved config",
       });
     }
@@ -370,7 +375,7 @@ function applySafeProjectFixes(
       fixes.push({
         code: "ROOT_LAYOUT_CREATED",
         title: "Created the missing root layout",
-        filePath: path.relative(root, layoutPath),
+        filePath: toPosix(path.relative(root, layoutPath)),
       });
     }
   }
