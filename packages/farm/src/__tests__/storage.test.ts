@@ -9,6 +9,7 @@ import { createContext } from "../middleware/context";
 import {
   createFarmStorage,
   createStorageClient,
+  defineStorageClient,
   disposeStorage,
   getStorage,
   initStorage,
@@ -103,6 +104,64 @@ describe("Storage", () => {
     expect(await storage.getItem("greeting")).toEqual({ hello: "world" });
 
     await storage.dispose();
+  });
+
+  it("re-creates the driver after dispose instead of reviving the disposed one", async () => {
+    const created: Array<{ isDisposed: () => boolean }> = [];
+
+    function createScriptedDriver() {
+      const data = new Map<string, string>();
+      let disposed = false;
+      const assertOpen = () => {
+        if (disposed) throw new Error("driver used after dispose");
+      };
+      return {
+        isDisposed: () => disposed,
+        driver: {
+          name: "scripted",
+          hasItem: (key: string) => {
+            assertOpen();
+            return data.has(key);
+          },
+          getItem: (key: string) => {
+            assertOpen();
+            return data.get(key) ?? null;
+          },
+          setItem: (key: string, value: string) => {
+            assertOpen();
+            data.set(key, value);
+          },
+          removeItem: (key: string) => {
+            assertOpen();
+            data.delete(key);
+          },
+          getKeys: () => {
+            assertOpen();
+            return [...data.keys()];
+          },
+          dispose: () => {
+            disposed = true;
+          },
+        },
+      };
+    }
+
+    const client = defineStorageClient(() => {
+      const scripted = createScriptedDriver();
+      created.push(scripted);
+      return scripted.driver as never;
+    });
+
+    await client.setItem("greeting", "hello");
+    expect(created).toHaveLength(1);
+
+    await client.dispose();
+    expect(created[0].isDisposed()).toBe(true);
+
+    // A fresh driver must back post-dispose usage, not the disposed one.
+    await client.setItem("farewell", "goodbye");
+    expect(created).toHaveLength(2);
+    await expect(client.getItem("farewell")).resolves.toBe("goodbye");
   });
 
   it("supports mounted local namespaces with shorthand options", async () => {
