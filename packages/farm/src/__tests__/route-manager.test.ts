@@ -2,7 +2,11 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { RouteManager, shouldSuggestStaticRenderingForI18n } from "../routing/route-manager";
+import {
+  interpolateRedirectDestination,
+  RouteManager,
+  shouldSuggestStaticRenderingForI18n,
+} from "../routing/route-manager";
 import type { FarmConfig } from "../types";
 
 /** "/test" is not an absolute path on Windows, so resolve it per platform. */
@@ -674,5 +678,17 @@ describe("static rendering suggestions with i18n", () => {
         detection: ["url"],
       }),
     ).toBe(false);
+  });
+});
+
+describe("interpolateRedirectDestination", () => {
+  it("interpolates every bracket and colon parameter form", () => {
+    const params = { slug: "a/b", id: "42" };
+
+    expect(interpolateRedirectDestination("/new/[[...slug]]", params)).toBe("/new/a/b");
+    expect(interpolateRedirectDestination("/new/[...slug]", params)).toBe("/new/a/b");
+    expect(interpolateRedirectDestination("/new/[id]", params)).toBe("/new/42");
+    expect(interpolateRedirectDestination("/new/:slug*", params)).toBe("/new/a/b");
+    expect(interpolateRedirectDestination("/new/:id", params)).toBe("/new/42");
   });
 });
