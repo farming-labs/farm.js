@@ -2364,6 +2364,19 @@ function getSubscriptionCurrentPeriodEnd(subscription: Stripe.Subscription): str
   return typeof endTime === "number" ? new Date(endTime * 1000).toISOString() : null;
 }
 
+function getSubscriptionEventCurrentPeriodEnd(data: Record<string, unknown>): Date | null {
+  // Stripe API versions before 2025-03-31 carry current_period_end on the
+  // subscription itself; newer versions moved it to the subscription items.
+  const topLevel = (data as { current_period_end?: unknown }).current_period_end;
+  if (typeof topLevel === "number") {
+    return new Date(topLevel * 1000);
+  }
+
+  const items = (data as { items?: { data?: Array<{ current_period_end?: unknown }> } }).items;
+  const endTime = items?.data?.[0]?.current_period_end;
+  return typeof endTime === "number" ? new Date(endTime * 1000) : null;
+}
+
 function deriveFallbackCurrentPeriodStart(
   currentPeriodEnd: string | null,
   product: ResolvedStripeProduct | null,
@@ -3524,10 +3537,8 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
                         ? event.data.id
                         : existing.stripeSubscriptionId,
                     currentPeriodEnd:
-                      "current_period_end" in event.data &&
-                      typeof event.data.current_period_end === "number"
-                        ? new Date(event.data.current_period_end * 1000)
-                        : existing.currentPeriodEnd,
+                      getSubscriptionEventCurrentPeriodEnd(event.data as Record<string, unknown>) ??
+                      existing.currentPeriodEnd,
                     trialEndsAt:
                       "trial_end" in event.data && typeof event.data.trial_end === "number"
                         ? new Date(event.data.trial_end * 1000)
