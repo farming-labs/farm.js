@@ -579,7 +579,7 @@ function renderPrismaModel(model: CollectedSchemaModel) {
     }
 
     if (field.name !== fieldKey) {
-      attributes.push(`@map("${escapeString(field.name)}")`);
+      attributes.push(`@map("${escapeDoubleQuoted(field.name)}")`);
     }
 
     if (attributes.length) {
@@ -590,7 +590,7 @@ function renderPrismaModel(model: CollectedSchemaModel) {
 
     if (field.index) {
       modelLevelConstraints.push(
-        `@@index([${fieldKey}], map: "${escapeString(`${model.modelName}_${field.name}_idx`)}")`,
+        `@@index([${fieldKey}], map: "${escapeDoubleQuoted(`${model.modelName}_${field.name}_idx`)}")`,
       );
     }
   }
@@ -598,11 +598,11 @@ function renderPrismaModel(model: CollectedSchemaModel) {
   for (const constraint of model.model.constraints || []) {
     const fields = constraint.fields.join(", ");
     const attribute = constraint.type === "unique" ? "@@unique" : "@@index";
-    const suffix = constraint.name ? `, map: "${escapeString(constraint.name)}"` : "";
+    const suffix = constraint.name ? `, map: "${escapeDoubleQuoted(constraint.name)}"` : "";
     modelLevelConstraints.push(`${attribute}([${fields}]${suffix})`);
   }
 
-  lines.push(`  @@map("${escapeString(model.modelName)}")`);
+  lines.push(`  @@map("${escapeDoubleQuoted(model.modelName)}")`);
 
   for (const constraint of modelLevelConstraints) {
     lines.push(`  ${constraint}`);
@@ -639,7 +639,7 @@ function getPrismaDefaultAttribute(field: ResolvedSchemaField) {
   }
 
   if (typeof field.default === "string") {
-    return `@default("${escapeString(field.default)}")`;
+    return `@default("${escapeDoubleQuoted(field.default)}")`;
   }
 
   if (typeof field.default === "number" || typeof field.default === "boolean") {
@@ -714,7 +714,7 @@ function renderDrizzleModel(
   for (const [fieldKey, field] of Object.entries(model.model.fields)) {
     if (field.index) {
       lines.push(
-        `  ${fieldKey}Idx: index("${escapeString(`${model.modelName}_${field.name}_idx`)}").on(table.${fieldKey}),`,
+        `  ${fieldKey}Idx: index("${escapeDoubleQuoted(`${model.modelName}_${field.name}_idx`)}").on(table.${fieldKey}),`,
       );
     }
   }
@@ -725,7 +725,9 @@ function renderDrizzleModel(
     const name =
       constraint.name ||
       `${model.modelName}_${constraint.fields.map((fieldKey) => model.model.fields[fieldKey]?.name || fieldKey).join("_")}_${constraint.type}`;
-    lines.push(`  ${toCamelCase(name)}: ${builder}("${escapeString(name)}").on(${accessor}),`);
+    lines.push(
+      `  ${toCamelCase(name)}: ${builder}("${escapeDoubleQuoted(name)}").on(${accessor}),`,
+    );
   }
 
   lines.push("}));");
@@ -874,7 +876,7 @@ function getDrizzleDefaultExpression(field: ResolvedSchemaField, dialect: Genera
   }
 
   if (typeof field.default === "string") {
-    return `.default("${escapeString(field.default)}")`;
+    return `.default("${escapeDoubleQuoted(field.default)}")`;
   }
 
   if (typeof field.default === "number" || typeof field.default === "boolean") {
@@ -1077,7 +1079,7 @@ function getSqlDefaultExpression(field: ResolvedSchemaField, dialect: GenerateFa
   }
 
   if (typeof field.default === "string") {
-    return `'${escapeString(field.default)}'`;
+    return `'${escapeSqlString(field.default)}'`;
   }
 
   if (typeof field.default === "number") {
@@ -1104,7 +1106,9 @@ function generateMongoBootstrap(models: readonly CollectedSchemaModel[]) {
 
   for (const model of models) {
     lines.push(`  // Integration "${model.integrationKey}" model "${model.modelKey}"`);
-    lines.push(`  const ${model.exportName} = db.collection("${escapeString(model.modelName)}");`);
+    lines.push(
+      `  const ${model.exportName} = db.collection("${escapeDoubleQuoted(model.modelName)}");`,
+    );
 
     for (const [fieldKey, field] of Object.entries(model.model.fields)) {
       if (field.unique) {
@@ -1112,13 +1116,13 @@ function generateMongoBootstrap(models: readonly CollectedSchemaModel[]) {
         if (isNullableField(field)) {
           options.push("sparse: true");
         }
-        options.push(`name: "${escapeString(`${model.modelName}_${field.name}_unique`)}"`);
+        options.push(`name: "${escapeDoubleQuoted(`${model.modelName}_${field.name}_unique`)}"`);
         lines.push(
           `  await ${model.exportName}.createIndex({ ${JSON.stringify(field.name)}: 1 }, { ${options.join(", ")} });`,
         );
       } else if (field.index) {
         lines.push(
-          `  await ${model.exportName}.createIndex({ ${JSON.stringify(field.name)}: 1 }, { name: "${escapeString(`${model.modelName}_${field.name}_idx`)}" });`,
+          `  await ${model.exportName}.createIndex({ ${JSON.stringify(field.name)}: 1 }, { name: "${escapeDoubleQuoted(`${model.modelName}_${field.name}_idx`)}" });`,
         );
       }
 
@@ -1138,8 +1142,8 @@ function generateMongoBootstrap(models: readonly CollectedSchemaModel[]) {
         `${model.modelName}_${constraint.fields.map((fieldKey) => model.model.fields[fieldKey]?.name || fieldKey).join("_")}_${constraint.type}`;
       const options =
         constraint.type === "unique"
-          ? `{ unique: true, name: "${escapeString(indexName)}" }`
-          : `{ name: "${escapeString(indexName)}" }`;
+          ? `{ unique: true, name: "${escapeDoubleQuoted(indexName)}" }`
+          : `{ name: "${escapeDoubleQuoted(indexName)}" }`;
       lines.push(`  await ${model.exportName}.createIndex({ ${indexSpec} }, ${options});`);
     }
 
@@ -1194,8 +1198,14 @@ function toCamelCase(value: string) {
   return pascal ? pascal.charAt(0).toLowerCase() + pascal.slice(1) : pascal;
 }
 
-function escapeString(value: string) {
-  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/'/g, "''");
+export function escapeDoubleQuoted(value: string) {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+export function escapeSqlString(value: string) {
+  // Standard-conforming SQL string literal: only quote doubling; backslashes
+  // are literal characters.
+  return value.replace(/'/g, "''");
 }
 
 function escapeRegExp(value: string) {

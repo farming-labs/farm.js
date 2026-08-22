@@ -53,6 +53,8 @@ export {
   type RunNativePreviewTunnelOptions,
 } from "./preview-native";
 export {
+  escapeDoubleQuoted,
+  escapeSqlString,
   FarmGeneratedArtifactsStaleError,
   generateFarmArtifacts,
   type GenerateFarmOptions,
