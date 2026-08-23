@@ -35,7 +35,7 @@ const commands: readonly CommandOption[] = [
   {
     label: "Agent",
     command: [
-      "Farm.js is the framework for modern product-integrated apps. Build this as a production-ready Farm.js product app.",
+      "Farm.js is the full-stack React framework for product-integrated apps. Build this as a production-ready Farm.js product app.",
       "Before editing:",
       "1. Read the Farm.js site skill at https://farmjs.dev/skill.md and the agent working rules at https://farmjs.dev/AGENTS.md.",
       "2. Use https://farmjs.dev/llms.txt as the compact framework map. Start with https://farmjs.dev/docs/getting-started.md, https://farmjs.dev/docs/project-structure.md, and https://farmjs.dev/docs/reference.md, then fetch the smallest task-specific pages linked from the map.",

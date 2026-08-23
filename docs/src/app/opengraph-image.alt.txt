@@ -1,1 +1,1 @@
-Farm.js, a framework for product-integrated apps by Farming Labs
+Farm.js, the full-stack React framework for product-integrated apps by Farming Labs

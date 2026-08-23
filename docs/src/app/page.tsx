@@ -78,9 +78,9 @@ import type { FileTreeNode } from "../components/ui/file-tree";
 import { FlickeringGrid } from "../components/ui/flickering-grid";
 import { farmBenchmark, formatBenchmarkDuration } from "../lib/framework-benchmark";
 
-const homepageTitle = "Farm.js - Framework for modern integrated apps";
+const homepageTitle = "Farm.js - The full-stack React framework for product-integrated apps";
 const homepageDescription =
-  "Farm.js is the framework for modern integrated apps, unifying routing, typed APIs, middleware, integrations, docs, and deployment.";
+  "Farm.js is a full-stack React framework with streaming SSR, Server Actions, typed file-based routing, and first-party product integrations.";
 
 export const metadata = {
   metadataBase: "https://farmjs.dev",
@@ -925,13 +925,13 @@ function Hero() {
         </div>
         <HeroTitleFrame>
           <h1 className="max-w-full text-[1.125rem] font-medium leading-[1.02] tracking-normal text-white min-[360px]:text-[1.3125rem] min-[380px]:text-[1.4375rem] min-[400px]:text-[1.5rem] min-[420px]:text-[1.625rem] sm:text-[2.25rem] md:text-[2.625rem] lg:text-[3.25rem]">
-            <span className="block">a framework for</span>
-            <span className="block whitespace-nowrap">product-integrated apps</span>
+            <span className="block text-balance sm:whitespace-nowrap">the full-stack react framework</span>
+            <span className="block whitespace-nowrap">for product-integrated apps</span>
           </h1>
         </HeroTitleFrame>
         <p className="mt-5 max-w-[38rem] text-balance text-sm leading-6 text-white/56 sm:text-[15px] sm:leading-6">
-          Bring the stack you already use. Farm.js connects your app router, typed APIs, middleware,
-          integrations, docs, and deployment so they work together as one product.
+          Streaming SSR, Server Actions, and typed file-based routing, with first-party
+          integrations for auth, billing, email, and more. Everything ships together as one product.
         </p>
         <div className="mt-6 flex justify-center">
           <ButtonLink
