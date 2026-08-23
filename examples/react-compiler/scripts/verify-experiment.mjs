@@ -30,6 +30,7 @@ for (const component of [
   "AutomaticKeyedListExperiment",
   "DerivedCollectionExperiment",
   "InteractiveKeyedListExperiment",
+  "EditableKeyedListExperiment",
   "RowConditionalListExperiment",
   "ExplicitKeyedListExperiment",
   "StatefulListRow",
@@ -560,6 +561,98 @@ try {
   );
   assert.equal(interactiveListFinalExecutions - interactiveListInitialExecutions, 0);
 
+  const editableList = '[data-experiment="keyed-editable"]';
+  const editableListInitialExecutions = await readNumber(
+    page,
+    `${editableList} [data-metric="executions"]`,
+  );
+  const editableAlpha = `${editableList} [data-key="a"]`;
+  const editableAlphaName = page.locator(`${editableAlpha} [data-control="name"]`);
+  await page.evaluate(() => {
+    window.__farmEditableAlpha = document.querySelector(
+      '[data-experiment="keyed-editable"] [data-key="a"]',
+    );
+    window.__farmEditableAlphaName = document.querySelector(
+      '[data-experiment="keyed-editable"] [data-key="a"] [data-control="name"]',
+    );
+  });
+  await editableAlphaName.evaluate((input) => {
+    input.focus();
+    input.setSelectionRange(8, 8);
+  });
+  await page.keyboard.insertText("X");
+  assert.equal(await editableAlphaName.inputValue(), "CompilerX graph");
+  assert.deepEqual(
+    await editableAlphaName.evaluate((input) => [input.selectionStart, input.selectionEnd]),
+    [9, 9],
+  );
+  await page.locator(`${editableAlpha} [data-control="priority"]`).selectOption("low");
+  await page.locator(`${editableAlpha} [data-control="done"]`).check();
+  await assertText(page, `${editableList} [data-metric="edits"]`, "3");
+  await assertText(
+    page,
+    `${editableAlpha} [data-row-output="a"]`,
+    "ROW 1 · CompilerX graph · low · done",
+  );
+  await editableAlphaName.evaluate((input) => {
+    input.focus();
+    input.setSelectionRange(2, 6);
+  });
+  await page
+    .locator(`${editableList} [data-action="rotate-editable-rows"]`)
+    .evaluate((button) => button.click());
+  await page.waitForFunction(
+    () =>
+      [...document.querySelectorAll('[data-experiment="keyed-editable"] [data-list="editable"] > li')]
+        .map((row) => row.getAttribute("data-key"))
+        .join(",") === "c,a,b",
+  );
+  assert.deepEqual(
+    await page
+      .locator(`${editableList} [data-list="editable"] > li`)
+      .evaluateAll((rows) => rows.map((row) => row.getAttribute("data-key"))),
+    ["c", "a", "b"],
+  );
+  assert.equal(
+    await page.evaluate(
+      () =>
+        window.__farmEditableAlpha ===
+          document.querySelector('[data-experiment="keyed-editable"] [data-key="a"]') &&
+        window.__farmEditableAlphaName ===
+          document.querySelector(
+            '[data-experiment="keyed-editable"] [data-key="a"] [data-control="name"]',
+          ),
+    ),
+    true,
+    "React did not preserve the editable keyed row and input through the reorder",
+  );
+  assert.deepEqual(
+    await editableAlphaName.evaluate((input) => [
+      document.activeElement === input,
+      input.selectionStart,
+      input.selectionEnd,
+    ]),
+    [true, 2, 6],
+  );
+  await assertText(
+    page,
+    `${editableAlpha} [data-row-output="a"]`,
+    "ROW 2 · CompilerX graph · low · done",
+  );
+  const editableListAfterInteractions = await readNumber(
+    page,
+    `${editableList} [data-metric="executions"]`,
+  );
+  assert.equal(editableListAfterInteractions - editableListInitialExecutions, 0);
+  await page.locator(`${editableList} [data-action="load-editable-rows"]`).click();
+  await assertText(page, `${editableList} [data-metric="rows"]`, "256");
+  assert.equal(await page.locator(`${editableList} [data-list="editable"] > li`).count(), 256);
+  const editableListFinalExecutions = await readNumber(
+    page,
+    `${editableList} [data-metric="executions"]`,
+  );
+  assert.equal(editableListFinalExecutions - editableListInitialExecutions, 0);
+
   const rowConditionals = '[data-experiment="keyed-row-conditionals"]';
   const rowConditionalsInitialExecutions = await readNumber(
     page,
@@ -830,6 +923,14 @@ try {
               controlledFinalExecutions - controlledInitialExecutions,
             selectionPreserved: true,
             compositionObserved: true,
+          },
+          editableKeyedRows: {
+            edits: 3,
+            stressRows: 256,
+            updateExecutions:
+              editableListFinalExecutions - editableListInitialExecutions,
+            selectionPreserved: true,
+            identityPreserved: true,
           },
           calculatedBindings: {
             value: 6,

@@ -540,10 +540,71 @@ which may predate a direct DOM patch.
 
 The initial event contract is deliberately conservative: the row and descendants must still be a
 statically known HTML host tree; the handler must be inline, synchronous, and free of Hooks,
-`this`, `super`, and `arguments`; and controlled row inputs with change, input, selection, or
-composition events stay entirely React-owned. Non-inline or async handlers, custom row components,
-fragments, refs, SVG, spreads, and other unproven shapes use the React-owned keyed boundary. The
-same hybrid path is available to an eligible inline host row rendered through `List`.
+`this`, `super`, and `arguments`. Non-inline or async handlers, custom row components, fragments,
+refs, SVG, spreads, and other unproven shapes use the React-owned keyed boundary. The same hybrid
+path is available to an eligible inline host row rendered through `List`.
+
+#### Controlled fields in keyed rows
+
+An eligible host row can contain ordinary controlled form fields:
+
+```tsx
+<ul>
+  {items.map((item) => (
+    <li key={item.id}>
+      <input
+        value={item.label}
+        onChange={(event) =>
+          setItems((current) =>
+            current.map((row) =>
+              row.id === item.id ? { ...row, label: event.currentTarget.value } : row,
+            ),
+          )
+        }
+      />
+      <input
+        type="checkbox"
+        checked={item.done}
+        onChange={(event) =>
+          setItems((current) =>
+            current.map((row) =>
+              row.id === item.id ? { ...row, done: event.currentTarget.checked } : row,
+            ),
+          )
+        }
+      />
+      <select value={item.priority} onChange={/* the same keyed update pattern */}>
+        <option value="low">Low</option>
+        <option value="high">High</option>
+      </select>
+    </li>
+  ))}
+</ul>
+```
+
+React still creates or hydrates the controls, dispatches `change`, `input`, selection, and
+composition events, and reconciles any key insertion, removal, or reorder. Farm prepares the
+`value` and `checked` property bindings at build time. A same-key edit flushes the collection cell,
+looks up that row instance, and writes only the affected form properties and dependent row output;
+the owner component and map do not execute again.
+
+This is property-based rather than attribute-only. Text inputs and textareas update `.value`,
+checkboxes and radios update `.checked`, and controlled single or multiple selects update their
+selected options. The runtime avoids assigning an equal value, captures the focused text control's
+selection before the compiler microtask, and restores the range after its keyed boundary commits.
+Composition handlers remain React event props, so IME event order is unchanged.
+
+React exposes `event.currentTarget` only while an event handler is running. If a functional
+compiler-state updater refers to one of its properties, the transform snapshots that property read
+before queuing the updater. This preserves the common keyed update shown above without retaining or
+replaying the SyntheticEvent, and it prevents React's controlled-field restoration from changing a
+deferred `.value` or `.checked` read.
+
+The initial optimized contract requires a static input `type` and static `<option>`/`<optgroup>`
+attributes. File input values, dynamic input types, dynamic option state, `contentEditable`, refs,
+custom controls, async or non-inline handlers, and a controlled textarea that also has children use
+the React fallback. Duplicate keys discovered at runtime also switch that mounted list to React.
+These limits apply equally to automatically detected maps and inline host rows inside `List`.
 
 #### Row-local host conditionals
 
@@ -695,9 +756,9 @@ The optimized host-row contract is deliberately narrow:
   properties, and individual inline style properties are supported.
 - Inline synchronous row events and dedicated logical or ternary host slots are supported by the
   hybrid path. Branch events, nested dynamic blocks, conditionals mixed with siblings in one slot,
-  non-inline or async handlers, controlled interactive form fields, custom components, fragments,
-  refs, SVG, attribute spreads, dangerous HTML, and dynamic text mixed beside nested elements stay
-  React-owned.
+  non-inline or async handlers, file inputs, dynamic form control types or options, custom
+  components, fragments, refs, SVG, attribute spreads, dangerous HTML, and dynamic text mixed
+  beside nested elements stay React-owned.
 - Unsupported or mutating collection methods, spread children, Hooks in callbacks, and other
   unproven shapes fall back to normal React.
 
@@ -942,6 +1003,8 @@ The package and example test suites verify more than generated code:
 - interactive host rows keep React event propagation and `currentTarget`, resolve the latest item
   and index after same-key replacements and reorders, let React own structural commits, and resume
   direct binding patches without stale virtual-prop output;
+- editable keyed rows preserve input and row identity, focused selection, IME ordering, checkbox,
+  radio, textarea, and select state while direct same-key edits add no owner or map executions;
 - interactive rows stay coherent across combined parent/local updates, Strict Mode, compatible Fast
   Refresh, recoverable hydration mismatches, and an unmount before the compiler microtask flush;
 - row-local host conditionals refresh only changed keyed slots, remain coherent with inline events
@@ -959,6 +1022,8 @@ The package and example test suites verify more than generated code:
   produce the same keyed output as normal React while preserving surviving DOM rows;
 - 4,000 deterministic interactive data, structure, and event transitions match normal React while
   the compiled owner remains at one execution;
+- 2,000 deterministic controlled-form and structural transitions match normal React across text,
+  textarea, checkbox, radio, and select properties while the compiled owner stays at one execution;
 - 2,000 deterministic row-conditional data and structural transitions match normal React while the
   compiled owner remains at one execution;
 - the production browser experiment derives a keyed window from 2,048 source rows without
@@ -967,8 +1032,9 @@ The package and example test suites verify more than generated code:
   keyed DOM identity and capture/stop-propagation behavior, and observes zero owner update
   executions;
 - the public `List` renders iterable and nullish collections correctly with the compiler off;
-- the packaged runtime, including interactive keyed-row events, row-local conditions, reorders,
-  identity, and hydration, is exercised separately with React 18.3 and React 19;
+- the packaged runtime, including editable and interactive keyed-row events, row-local conditions,
+  reorders, identity, selection, and hydration, is exercised separately with React 18.3 and React
+  19;
 - boolean `data-*` and `aria-*` attributes keep React-compatible string values; and
 - unsupported list shapes, effects, refs, and unsupported dynamic component-island shapes remain
   on React without corrupting output.

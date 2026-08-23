@@ -189,10 +189,40 @@ and unproven calls use the original React fallback.
 the TypeScript `lib` with ES2023 and target a runtime that supports them when using those methods.
 
 React remains the fallback and compatibility boundary. A map beside static children, a row with a
-non-inline or async handler, a controlled interactive form field, a fragment, a ref, a custom
+non-inline or async handler, a file input or dynamic form control shape, a fragment, a ref, a custom
 component, or a conditional mixed directly beside other children in the same host slot uses the
 existing React-owned keyed boundary. The outer compiled component can still be skipped, but React
 reconciles that list's rows and owns their events, lifecycle, and state.
+
+Controlled host fields can use the hybrid keyed-row path:
+
+```tsx
+<ul>
+  {items.map((item) => (
+    <li key={item.id}>
+      <input
+        value={item.label}
+        onChange={(event) =>
+          setItems((current) =>
+            current.map((row) =>
+              row.id === item.id ? { ...row, label: event.currentTarget.value } : row,
+            ),
+          )
+        }
+      />
+      <input type="checkbox" checked={item.done} onChange={/* keyed update */} />
+    </li>
+  ))}
+</ul>
+```
+
+React owns the controls, events, hydration, and every structural commit. Farm patches `value`,
+`checked`, selected options, and dependent row bindings by stable key. It preserves focused text
+selection and leaves composition events on React. When `event.currentTarget` is referenced inside
+a queued functional compiler-state updater, generated code snapshots the referenced property while
+the handler is active. Static input types and static option attributes are required. File inputs,
+dynamic types or options, `contentEditable`, refs, custom controls, textarea children beside
+`value`, and async or non-inline handlers keep the React fallback.
 
 For custom rows or an explicit key selector, use the public component:
 
@@ -279,5 +309,5 @@ unsupported conditional roots, effects, and more advanced hook support intention
 in this release. Compiler-owned keyed rows are limited to a dedicated container with one host-only
 map or `List`. Inline synchronous events and dedicated row-local host conditional slots can use the
 hybrid keyed-row path, but branch events, nested dynamic blocks, conditionals mixed with siblings in
-one slot, non-inline or async row handlers, controlled interactive row forms, custom components,
-fragments, refs, SVG, and duplicate runtime keys keep or switch to React ownership.
+one slot, non-inline or async row handlers, unsupported form shapes, custom components, fragments,
+refs, SVG, and duplicate runtime keys keep or switch to React ownership.
