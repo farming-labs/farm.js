@@ -2,4 +2,8 @@ packages:
   - "packages/*"
   - "examples/*"
   - "examples/*/*"
+  # The StackBlitz playground installs published packages from npm so it can
+  # be opened standalone in the browser, so keep it out of the workspace.
+  - "!examples/stackblitz"
+  - "!examples/stackblitz/*"
   - "docs"

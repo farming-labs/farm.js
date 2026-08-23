@@ -26,6 +26,10 @@
   <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-Ready-blue.svg" alt="TypeScript ready" /></a>
 </p>
 
+<p align="center">
+  <a href="https://stackblitz.com/github/farming-labs/farm.js/tree/main/examples/stackblitz?file=src%2Fapp%2Fpage.tsx&title=Farm.js%20Playground"><img src="https://developer.stackblitz.com/img/open_in_stackblitz.svg" alt="Open in StackBlitz" /></a>
+</p>
+
 ## ✨ Built for Full-Stack Products
 
 | Feature                            | What it gives you                                                                                                                                                                               |
@@ -43,6 +47,10 @@
 > **Experimental native rendering:** Farm.js can automatically send eligible, server-only React subtrees through the [Strata](https://github.com/farming-labs/strata) native renderer while safely falling back to normal React rendering for unsupported trees.
 
 ## 🚀 Quick Start
+
+### Try It in Your Browser
+
+No install needed: [open the playground on StackBlitz](https://stackblitz.com/github/farming-labs/farm.js/tree/main/examples/stackblitz?file=src%2Fapp%2Fpage.tsx&title=Farm.js%20Playground) to see server rendering, client islands, and typed server calls in one page.
 
 ### Create a New App
 

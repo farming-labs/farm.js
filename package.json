@@ -6,6 +6,7 @@
     "packages/*",
     "examples/*",
     "examples/*/*",
+    "!examples/stackblitz",
     "docs",
     "playground"
   ],
