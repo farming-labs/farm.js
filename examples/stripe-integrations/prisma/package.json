@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "farm dev",
-    "build": "prisma generate && farm build",
-    "type-check": "prisma generate && tsc --noEmit",
+    "build": "node ../../../scripts/run-prisma-generate.mjs && farm build",
+    "type-check": "node ../../../scripts/run-prisma-generate.mjs && tsc --noEmit",
     "generate": "farm generate"
   },
   "dependencies": {
