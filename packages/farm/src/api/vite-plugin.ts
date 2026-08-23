@@ -354,8 +354,18 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
                 }
               }
 
+              // ctx.rewrite() mutates req.url; dispatch from the current
+              // value so dev matches production, where the rewritten request
+              // reaches the API router.
+              const currentUrl = req.url || url;
+              const currentPathname = currentUrl.split("?")[0];
+              if (currentPathname !== pathname && !matchAPIRoute(apiRoutesCache, currentPathname)) {
+                // Rewritten off the API surface; let the page pipeline serve it.
+                return next();
+              }
+
               // Convert Node request to Web Request
-              const fullUrl = `http://${req.headers.host || "localhost:3000"}${url}`;
+              const fullUrl = `http://${req.headers.host || "localhost:3000"}${currentUrl}`;
               const headers = new Headers();
               for (const [key, value] of Object.entries(req.headers)) {
                 if (value) {
@@ -382,7 +392,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
               const response = await apiRouterHandler(request);
 
               const duration = Date.now() - startTime;
-              logResponse(method, pathname, response.status, duration);
+              logResponse(method, currentPathname, response.status, duration);
 
               await sendWebResponse(res, response);
             } catch (error: any) {
