@@ -5,8 +5,9 @@ This production-browser experiment answers two questions:
 1. Why build this compiler? Eligible local `useState` updates can patch precomputed DOM targets
    without rerunning the component body or asking React to reconcile the same static tree again.
 2. Where must it stop? Dedicated host-only conditionals and keyed lists can use compiler-owned
-   branches or rows. Complex conditionals, custom rows, and component islands use small React-owned
-   boundaries. Effects, refs, unsupported shapes, and other unproven structures stay on React.
+   branches or rows. Keyed rows can also use React-owned local conditional slots with compiler
+   snapshots. Complex conditionals, custom rows, and component islands use React-owned boundaries.
+   Effects, refs, unsupported shapes, and other unproven structures stay on React.
 
 The default `compiler: true` configuration automatically considers components. No annotation is
 needed. A component can explicitly opt out with `"use no compiler"`.
@@ -37,6 +38,7 @@ assertions, checks for console/runtime errors and horizontal overflow, saves scr
 | Automatic keyed map         | stable row DOM, three LIS moves for a four-row reversal  | —                                              | AOT rows patch in place and use the minimum reorder moves.              |
 | Derived keyed collection    | 2,048 source rows filter, sort, slice, and reverse; executions `0` | —                                      | Collection dependencies feed keyed rows without rerunning the owner.    |
 | Interactive keyed rows      | latest item/index after updates and reorder; executions `0` | —                                           | React owns events/structure while Farm patches same-key row bindings.   |
+| Conditional row blocks      | only changed keyed branches refresh; owner executions `0`  | —                                           | Per-key snapshots isolate logical and ternary row content.              |
 | Explicit `List`             | stateful rows reorder, update executions `0`            | —                                              | React preserves custom-row state by key inside the isolated boundary.  |
 | Calculated style bindings   | value `6`, progress `50%`, update executions `0`        | —                                              | Safe calls and individual CSS properties use prepared dependencies.    |
 | Controlled form bindings   | textarea/select/checkbox update, executions `0`         | —                                              | Form properties and textarea selection stay coherent.                  |
@@ -96,6 +98,17 @@ bindings without rerunning the map. When keys are inserted, removed, or reordere
 the structure once; Farm then adopts the committed rows and resumes direct same-key patches. The
 `04C` card verifies capture and stop-propagation behavior, latest-item lookup across three clicks,
 row identity through a reversal, and zero owner update executions.
+
+The `04D` card adds two branch slots to every keyed row. Each logical or ternary expression is the
+only child of a persistent host container. Farm scopes the prepared test and branch-value snapshot
+to the row key, then asks React to refresh only a slot whose selected branch or active values
+changed. The card toggles status and details independently, rotates the rows, checks that their DOM
+identity survives, and verifies zero outer component executions for same-key updates.
+
+React still owns the branch Fiber, initial render, hydration, errors, and every structural list
+commit. This is why row conditionals do not use the manual insertion or LIS path. Branch events,
+components, fragments, refs, SVG, nested blocks, or a conditional mixed with another child in the
+same slot use the existing React-owned list fallback.
 
 Non-inline or async row handlers, controlled interactive form fields, custom components, fragments,
 refs, SVG, static siblings in that same container, and index or missing keys use the React-owned

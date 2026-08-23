@@ -1,4 +1,5 @@
 import React from "react";
+import { flushSync } from "react-dom";
 
 export type CompilerStateUpdater = unknown | ((previous: unknown) => unknown);
 
@@ -82,6 +83,20 @@ export interface CompilerKeyedRowEvent {
   invoke(item: unknown, index: number, event: React.SyntheticEvent): unknown;
 }
 
+export interface CompilerKeyedRowConditionalBranch {
+  bindings: readonly CompilerKeyedRowBinding[];
+}
+
+export interface CompilerKeyedRowConditional {
+  id: number;
+  /** Host-container path relative to the keyed row root. */
+  path: readonly number[];
+  test(item: unknown, index: number): unknown;
+  logical: boolean;
+  truthy?: CompilerKeyedRowConditionalBranch;
+  falsy?: CompilerKeyedRowConditionalBranch;
+}
+
 export interface CompilerHostConditionalBinding {
   kind: "text" | "attribute" | "style";
   path: readonly number[];
@@ -119,12 +134,19 @@ export interface CompilerKeyedRowsBlockProps {
       index: number,
       eventId: number,
     ) => React.EventHandler<React.SyntheticEvent>,
+    conditional: (
+      item: unknown,
+      index: number,
+      conditionalId: number,
+      render: (item: unknown, index: number) => React.ReactNode,
+    ) => React.ReactNode,
   ): React.ReactElement;
   items(): Iterable<unknown> | null | undefined;
   rowKey(item: unknown, index: number): React.Key;
   create(item: unknown, index: number): CompilerKeyedRowElement;
   bindings: readonly CompilerKeyedRowBinding[];
   events?: readonly CompilerKeyedRowEvent[];
+  conditionals?: readonly CompilerKeyedRowConditional[];
 }
 
 export interface CompilerComponentBlockProps {
@@ -520,12 +542,18 @@ function createCompilerHostElement(document: Document, descriptor: CompilerHostE
   return element;
 }
 
-function matchesCompilerHostElement(element: Element, descriptor: CompilerHostElement): boolean {
+function matchesCompilerHostElement(
+  element: Element,
+  descriptor: CompilerHostElement,
+  opaquePaths: ReadonlySet<string> = new Set(),
+  path: readonly number[] = [],
+): boolean {
   if (element.tagName.toLowerCase() !== descriptor.tag.toLowerCase()) return false;
+  if (opaquePaths.has(path.join("."))) return true;
   const expectedChildren = descriptor.children.filter(isCompilerHostElement);
   if (element.children.length !== expectedChildren.length) return false;
   return expectedChildren.every((child, index) =>
-    matchesCompilerHostElement(element.children[index], child),
+    matchesCompilerHostElement(element.children[index], child, opaquePaths, [...path, index]),
   );
 }
 
@@ -539,6 +567,7 @@ interface CompilerKeyedRowInstance extends CompilerHostInstance {
   key: string;
   item: unknown;
   index: number;
+  conditionalValues: Map<number, readonly unknown[]>;
 }
 
 const UNSET_KEYED_ROW_BINDING = Symbol("unset interactive keyed-row binding");
@@ -583,6 +612,50 @@ function applyKeyedRowBindings(
       updateAttribute(target, binding.name, rawValue);
     }
   }
+}
+
+function keyedRowConditionalSnapshot(
+  conditional: CompilerKeyedRowConditional,
+  item: unknown,
+  index: number,
+): readonly unknown[] {
+  const test = conditional.test(item, index);
+  if (conditional.logical && !test) {
+    return typeof test === "number" || typeof test === "bigint" ? ["primitive", test] : ["empty"];
+  }
+  const key = test ? "truthy" : "falsy";
+  const branch = key === "truthy" ? conditional.truthy : conditional.falsy;
+  if (!branch) return ["empty"];
+  return [
+    key,
+    ...branch.bindings.map((binding) =>
+      normalizedKeyedRowBindingValue(binding, binding.read(item, index)),
+    ),
+  ];
+}
+
+function readKeyedRowConditionalValues(
+  props: CompilerKeyedRowsBlockProps,
+  item: unknown,
+  index: number,
+): Map<number, readonly unknown[]> {
+  return new Map(
+    (props.conditionals || []).map((conditional) => [
+      conditional.id,
+      keyedRowConditionalSnapshot(conditional, item, index),
+    ]),
+  );
+}
+
+function keyedRowConditionalChanged(
+  previous: readonly unknown[] | undefined,
+  next: readonly unknown[],
+): boolean {
+  return (
+    !previous ||
+    previous.length !== next.length ||
+    next.some((value, index) => !Object.is(value, previous[index]))
+  );
 }
 
 type CompilerHostConditionalSelection =
@@ -832,6 +905,83 @@ function createKeyedRowsBlockComponent(
     fallback: boolean;
   }
 
+  type RowConditionalRefresh = (item: unknown, index: number, afterCommit?: () => void) => void;
+
+  interface RowConditionalOwner {
+    subscribe(key: string, id: number, refresh: RowConditionalRefresh): () => void;
+  }
+
+  interface RowConditionalProps {
+    owner: RowConditionalOwner;
+    rowKey: string;
+    id: number;
+    renderVersion: number;
+    item: unknown;
+    index: number;
+    render(item: unknown, index: number): React.ReactNode;
+  }
+
+  interface RowConditionalState {
+    renderVersion: number;
+    item: unknown;
+    index: number;
+  }
+
+  class FarmKeyedRowConditional extends React.Component<RowConditionalProps, RowConditionalState> {
+    static displayName = "FarmCompiledKeyedRowConditional";
+
+    state: RowConditionalState = {
+      renderVersion: this.props.renderVersion,
+      item: this.props.item,
+      index: this.props.index,
+    };
+    private unsubscribe: (() => void) | undefined;
+
+    static getDerivedStateFromProps(
+      props: RowConditionalProps,
+      state: RowConditionalState,
+    ): Partial<RowConditionalState> | null {
+      if (props.renderVersion === state.renderVersion) return null;
+      return {
+        renderVersion: props.renderVersion,
+        item: props.item,
+        index: props.index,
+      };
+    }
+
+    private refresh: RowConditionalRefresh = (item, index, afterCommit) => {
+      this.setState({ item, index }, afterCommit);
+    };
+
+    private subscribe(): void {
+      this.unsubscribe = this.props.owner.subscribe(this.props.rowKey, this.props.id, this.refresh);
+    }
+
+    componentDidMount(): void {
+      this.subscribe();
+    }
+
+    componentDidUpdate(previous: RowConditionalProps): void {
+      if (
+        previous.owner === this.props.owner &&
+        previous.rowKey === this.props.rowKey &&
+        previous.id === this.props.id
+      ) {
+        return;
+      }
+      this.unsubscribe?.();
+      this.subscribe();
+    }
+
+    componentWillUnmount(): void {
+      this.unsubscribe?.();
+    }
+
+    render(): React.ReactNode {
+      return this.props.render(this.state.item, this.state.index);
+    }
+  }
+
   class FarmKeyedRowsBlock extends React.Component<CompilerKeyedRowsBlockProps, State> {
     static displayName = "FarmCompiledKeyedRows";
 
@@ -845,10 +995,15 @@ function createKeyedRowsBlockComponent(
     private currentProps = this.props;
     private unsubscribe: (() => void) | undefined;
     private instances = new Map<string, CompilerKeyedRowInstance>();
+    private renderVersion = 0;
     private readonly eventHandlers = new Map<
       string,
       Map<number, React.EventHandler<React.SyntheticEvent>>
     >();
+    private readonly conditionalListeners = new Map<string, Map<number, RowConditionalRefresh>>();
+    private readonly conditionalOwner: RowConditionalOwner = {
+      subscribe: (key, id, refresh) => this.subscribeToRowConditional(key, id, refresh),
+    };
 
     private captureRoot = (root: Element | null) => {
       this.root = root;
@@ -890,8 +1045,47 @@ function createKeyedRowsBlockComponent(
       return handler;
     };
 
-    private hasInteractiveRows(): boolean {
-      return Boolean(this.currentProps.events?.length);
+    private rowConditional = (
+      item: unknown,
+      index: number,
+      conditionalId: number,
+      render: (item: unknown, index: number) => React.ReactNode,
+    ): React.ReactNode => {
+      if (this.state.fallback) return render(item, index);
+      const key = keyedRowIdentity(this.currentProps.rowKey(item, index));
+      return React.createElement(FarmKeyedRowConditional, {
+        key: `${key}:${conditionalId}`,
+        owner: this.conditionalOwner,
+        rowKey: key,
+        id: conditionalId,
+        renderVersion: this.renderVersion,
+        item,
+        index,
+        render,
+      });
+    };
+
+    private subscribeToRowConditional(
+      key: string,
+      id: number,
+      refresh: RowConditionalRefresh,
+    ): () => void {
+      let listeners = this.conditionalListeners.get(key);
+      if (!listeners) {
+        listeners = new Map();
+        this.conditionalListeners.set(key, listeners);
+      }
+      listeners.set(id, refresh);
+      return () => {
+        const current = this.conditionalListeners.get(key);
+        if (current?.get(id) !== refresh) return;
+        current.delete(id);
+        if (current.size === 0) this.conditionalListeners.delete(key);
+      };
+    }
+
+    private hasReactOwnedRows(props: CompilerKeyedRowsBlockProps = this.currentProps): boolean {
+      return Boolean(props.events?.length || props.conditionals?.length);
     }
 
     private pruneEventHandlers(keys: readonly string[]): void {
@@ -901,18 +1095,29 @@ function createKeyedRowsBlockComponent(
       }
     }
 
+    private pruneConditionalListeners(keys: readonly string[]): void {
+      const active = new Set(keys);
+      for (const key of this.conditionalListeners.keys()) {
+        if (!active.has(key)) this.conditionalListeners.delete(key);
+      }
+    }
+
     private adopt(): boolean {
       if (!this.root) return false;
       const rows = this.readRows(this.currentProps);
       const elements = [...this.root.children];
       if (!rows || rows.items.length !== elements.length) return false;
+      const opaqueConditionalPaths = new Set(
+        (this.currentProps.conditionals || []).map((conditional) => conditional.path.join(".")),
+      );
       const instances = new Map<string, CompilerKeyedRowInstance>();
       for (let index = 0; index < rows.items.length; index += 1) {
         if (
-          this.hasInteractiveRows() &&
+          this.hasReactOwnedRows() &&
           !matchesCompilerHostElement(
             elements[index],
             this.currentProps.create(rows.items[index], index),
+            opaqueConditionalPaths,
           )
         ) {
           return false;
@@ -920,13 +1125,18 @@ function createKeyedRowsBlockComponent(
         const instance: CompilerKeyedRowInstance = {
           key: rows.keys[index],
           element: elements[index],
-          values: this.hasInteractiveRows()
+          values: this.hasReactOwnedRows()
             ? this.currentProps.bindings.map(() => UNSET_KEYED_ROW_BINDING)
             : readKeyedRowBindingValues(this.currentProps, rows.items[index], index),
           item: rows.items[index],
           index,
+          conditionalValues: readKeyedRowConditionalValues(
+            this.currentProps,
+            rows.items[index],
+            index,
+          ),
         };
-        if (this.hasInteractiveRows()) {
+        if (this.hasReactOwnedRows()) {
           // React compares the next row against its previous virtual props, not
           // against DOM values patched by Farm between commits. Reapply every
           // binding after a structural React commit so both views converge
@@ -937,6 +1147,7 @@ function createKeyedRowsBlockComponent(
       }
       this.instances = instances;
       this.pruneEventHandlers(rows.keys);
+      this.pruneConditionalListeners(rows.keys);
       return true;
     }
 
@@ -961,7 +1172,7 @@ function createKeyedRowsBlockComponent(
       this.setState({ fallback: true }, afterCommit);
     }
 
-    private synchronizeInteractiveRows(afterCommit?: () => void): void {
+    private synchronizeReactOwnedRows(afterCommit?: () => void): void {
       this.forceUpdate(() => {
         if (!this.mounted) {
           afterCommit?.();
@@ -972,6 +1183,36 @@ function createKeyedRowsBlockComponent(
           return;
         }
         afterCommit?.();
+      });
+    }
+
+    private notifyConditionalChanges(
+      changes: readonly {
+        key: string;
+        id: number;
+        item: unknown;
+        index: number;
+      }[],
+      afterCommit?: () => void,
+    ): void {
+      if (changes.length === 0) {
+        afterCommit?.();
+        return;
+      }
+      let pending = changes.length;
+      const committed = () => {
+        pending -= 1;
+        if (pending === 0) afterCommit?.();
+      };
+      // The normal row bindings above are patched synchronously. Flush the
+      // React-owned conditional boundaries in the same turn as well so React
+      // 18 cannot expose a transient row where text and branch disagree.
+      flushSync(() => {
+        for (const change of changes) {
+          const refresh = this.conditionalListeners.get(change.key)?.get(change.id);
+          if (refresh) refresh(change.item, change.index, committed);
+          else committed();
+        }
       });
     }
 
@@ -1004,11 +1245,11 @@ function createKeyedRowsBlockComponent(
 
       const previousKeys = [...this.instances.keys()];
       if (
-        this.hasInteractiveRows() &&
+        this.hasReactOwnedRows() &&
         (rows.keys.length !== previousKeys.length ||
           rows.keys.some((key, index) => key !== previousKeys[index]))
       ) {
-        this.synchronizeInteractiveRows(afterCommit);
+        this.synchronizeReactOwnedRows(afterCommit);
         return;
       }
 
@@ -1024,11 +1265,28 @@ function createKeyedRowsBlockComponent(
       const sequence = rows.keys.map((key) => oldIndices.get(key) ?? -1);
       const stablePositions = longestIncreasingSubsequencePositions(sequence);
       const nextInstances: CompilerKeyedRowInstance[] = [];
+      const conditionalChanges: Array<{
+        key: string;
+        id: number;
+        item: unknown;
+        index: number;
+      }> = [];
       for (let index = 0; index < rows.items.length; index += 1) {
         const key = rows.keys[index];
         const existing = this.instances.get(key);
         if (existing) {
           applyKeyedRowBindings(this.currentProps, existing, rows.items[index], index);
+          const conditionalValues = readKeyedRowConditionalValues(
+            this.currentProps,
+            rows.items[index],
+            index,
+          );
+          for (const [id, values] of conditionalValues) {
+            if (keyedRowConditionalChanged(existing.conditionalValues.get(id), values)) {
+              conditionalChanges.push({ key, id, item: rows.items[index], index });
+            }
+          }
+          existing.conditionalValues = conditionalValues;
           existing.item = rows.items[index];
           existing.index = index;
           nextInstances.push(existing);
@@ -1044,6 +1302,11 @@ function createKeyedRowsBlockComponent(
           values: readKeyedRowBindingValues(this.currentProps, rows.items[index], index),
           item: rows.items[index],
           index,
+          conditionalValues: readKeyedRowConditionalValues(
+            this.currentProps,
+            rows.items[index],
+            index,
+          ),
         });
       }
 
@@ -1059,6 +1322,7 @@ function createKeyedRowsBlockComponent(
       }
       this.instances = new Map(nextInstances.map((instance) => [instance.key, instance]));
       this.pruneEventHandlers(rows.keys);
+      this.pruneConditionalListeners(rows.keys);
       if (
         restoreFocus &&
         activeElement?.isConnected &&
@@ -1067,7 +1331,7 @@ function createKeyedRowsBlockComponent(
       ) {
         (activeElement as HTMLElement).focus({ preventScroll: true });
       }
-      afterCommit?.();
+      this.notifyConditionalChanges(conditionalChanges, afterCommit);
     }
 
     private refresh = (afterCommit?: () => void) => {
@@ -1084,11 +1348,11 @@ function createKeyedRowsBlockComponent(
     }
 
     shouldComponentUpdate(nextProps: CompilerKeyedRowsBlockProps, nextState: State): boolean {
-      const wasInteractive = Boolean(this.currentProps.events?.length);
-      const willBeInteractive = Boolean(nextProps.events?.length);
+      const wasReactOwned = this.hasReactOwnedRows(this.currentProps);
+      const willBeReactOwned = this.hasReactOwnedRows(nextProps);
       this.currentProps = nextProps;
       if (nextState.fallback || this.state.fallback) return true;
-      if (wasInteractive || willBeInteractive) {
+      if (wasReactOwned || willBeReactOwned) {
         // Parent prop updates and Fast Refresh definitions must pass through
         // React so event locations, static row markup, and proxy identities
         // cannot remain tied to an older render definition.
@@ -1103,7 +1367,7 @@ function createKeyedRowsBlockComponent(
       if (
         this.state.fallback ||
         previousProps === this.props ||
-        (!previousProps.events?.length && !this.props.events?.length) ||
+        (!this.hasReactOwnedRows(previousProps) && !this.hasReactOwnedRows(this.props)) ||
         this.adopt()
       ) {
         return;
@@ -1123,10 +1387,12 @@ function createKeyedRowsBlockComponent(
       this.root = null;
       this.instances.clear();
       this.eventHandlers.clear();
+      this.conditionalListeners.clear();
     }
 
     render(): React.ReactNode {
-      const container = this.currentProps.render(this.rowEvent);
+      this.renderVersion += 1;
+      const container = this.currentProps.render(this.rowEvent, this.rowConditional);
       if (!React.isValidElement(container) || typeof container.type !== "string") {
         throw new TypeError(
           `Compiled keyed rows ${this.currentProps.id} must own one host container.`,

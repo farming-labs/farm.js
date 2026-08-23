@@ -87,6 +87,17 @@ interface PendingKeyedRowEvent {
   value: t.ArrowFunctionExpression | t.FunctionExpression;
 }
 
+interface PendingKeyedRowConditional {
+  id: number;
+  path: number[];
+  test: t.Expression;
+  logical: boolean;
+  truthy?: t.JSXElement;
+  falsy?: t.JSXElement;
+  truthyBindings: PendingKeyedRowBinding[];
+  falsyBindings: PendingKeyedRowBinding[];
+}
+
 interface HostConditionalPlan {
   kind: "host-conditional";
   id: number;
@@ -113,6 +124,7 @@ interface KeyedRowsPlan {
   row: t.JSXElement;
   bindings: PendingKeyedRowBinding[];
   events: PendingKeyedRowEvent[];
+  conditionals: PendingKeyedRowConditional[];
   syntax: "map" | "list";
 }
 
@@ -812,6 +824,7 @@ interface KeyedRowsShape {
   dependencies: number[];
   bindings: PendingKeyedRowBinding[];
   events: PendingKeyedRowEvent[];
+  conditionals: PendingKeyedRowConditional[];
   syntax: "map" | "list";
 }
 
@@ -848,6 +861,7 @@ function analyzeKeyedRowTree(
 ): {
   bindings?: PendingKeyedRowBinding[];
   events?: PendingKeyedRowEvent[];
+  conditionals?: PendingKeyedRowConditional[];
   reason?: string;
 } {
   if (
@@ -863,6 +877,7 @@ function analyzeKeyedRowTree(
 
   const bindings: PendingKeyedRowBinding[] = [];
   const events: PendingKeyedRowEvent[] = [];
+  const conditionals: PendingKeyedRowConditional[] = [];
   const visit = (element: t.JSXElement, path: number[]): string | undefined => {
     const tag = element.openingElement.name;
     if (!t.isJSXIdentifier(tag) || !/^[a-z]/.test(tag.name)) {
@@ -973,6 +988,49 @@ function analyzeKeyedRowTree(
       });
     }
 
+    const meaningfulChildren = meaningfulJsxChildren(element);
+    const conditionalChild = meaningfulChildren.find(
+      (child): child is t.JSXExpressionContainer =>
+        t.isJSXExpressionContainer(child) &&
+        !t.isJSXEmptyExpression(child.expression) &&
+        conditionalBlockShape(child.expression) !== null,
+    );
+    if (conditionalChild && !t.isJSXEmptyExpression(conditionalChild.expression)) {
+      if (meaningfulChildren.length !== 1) {
+        return "compiled keyed row conditionals must be the only child of a host container";
+      }
+      const shape = conditionalBlockShape(conditionalChild.expression);
+      if (!shape) return "compiled keyed row conditional shape is not supported";
+      const testUnsupported = validateDerivedExpression(shape.test, safeGlobals);
+      if (testUnsupported) {
+        return `compiled keyed row conditional test cannot use ${testUnsupported}`;
+      }
+      const truthyAnalysis = shape.truthy
+        ? analyzeHostConditionalTree(shape.truthy, safeGlobals)
+        : { bindings: [] as PendingKeyedRowBinding[] };
+      const falsyAnalysis = shape.falsy
+        ? analyzeHostConditionalTree(shape.falsy, safeGlobals)
+        : { bindings: [] as PendingKeyedRowBinding[] };
+      if (truthyAnalysis.reason || falsyAnalysis.reason) {
+        return (
+          truthyAnalysis.reason ||
+          falsyAnalysis.reason ||
+          "compiled keyed row conditional branch is not supported"
+        );
+      }
+      conditionals.push({
+        id: conditionals.length,
+        path: [...path],
+        test: cloneExpression(shape.test),
+        logical: shape.logical,
+        truthy: shape.truthy ? t.cloneNode(shape.truthy, true) : undefined,
+        falsy: shape.falsy ? t.cloneNode(shape.falsy, true) : undefined,
+        truthyBindings: truthyAnalysis.bindings || [],
+        falsyBindings: falsyAnalysis.bindings || [],
+      });
+      return undefined;
+    }
+
     const nestedElements = element.children.filter((child): child is t.JSXElement =>
       t.isJSXElement(child),
     );
@@ -1014,7 +1072,7 @@ function analyzeKeyedRowTree(
   };
 
   const reason = visit(row, []);
-  return reason ? { reason } : { bindings, events };
+  return reason ? { reason } : { bindings, events, conditionals };
 }
 
 function analyzeKeyedRowsContainer(
@@ -1119,6 +1177,7 @@ function analyzeKeyedRowsContainer(
     dependencies,
     bindings: rowAnalysis.bindings || [],
     events: rowAnalysis.events || [],
+    conditionals: rowAnalysis.conditionals || [],
     syntax,
   };
 }
@@ -1487,9 +1546,59 @@ function rewriteKeyedRowEventAttributes(
   visit(row, []);
 }
 
-function keyedRowsRenderSource(plan: KeyedRowsPlan, eventFactory: t.Identifier): t.JSXElement {
+function rewriteKeyedRowConditionalExpressions(
+  row: t.JSXElement,
+  conditionals: readonly PendingKeyedRowConditional[],
+  conditionalFactory: t.Identifier,
+  item: t.Identifier,
+  index: t.Expression,
+  renderParameters: readonly t.Identifier[],
+): void {
+  const conditionalByLocation = new Map(
+    conditionals.map((conditional) => [conditional.path.join("."), conditional] as const),
+  );
+  const visit = (element: t.JSXElement, path: number[]): void => {
+    const conditional = conditionalByLocation.get(path.join("."));
+    if (conditional) {
+      element.children = element.children.map((child) => {
+        if (
+          !t.isJSXExpressionContainer(child) ||
+          t.isJSXEmptyExpression(child.expression) ||
+          !conditionalBlockShape(child.expression)
+        ) {
+          return child;
+        }
+        return t.jsxExpressionContainer(
+          t.callExpression(t.cloneNode(conditionalFactory), [
+            t.cloneNode(item),
+            t.cloneNode(index),
+            t.numericLiteral(conditional.id),
+            t.arrowFunctionExpression(
+              renderParameters.map((parameter) => t.cloneNode(parameter, true)),
+              cloneExpression(child.expression),
+            ),
+          ]),
+        );
+      });
+      return;
+    }
+
+    let elementIndex = 0;
+    for (const child of element.children) {
+      if (!t.isJSXElement(child)) continue;
+      visit(child, [...path, elementIndex]);
+      elementIndex += 1;
+    }
+  };
+  visit(row, []);
+}
+
+function keyedRowsRenderSource(
+  plan: KeyedRowsPlan,
+  eventFactory: t.Identifier,
+  conditionalFactory: t.Identifier,
+): t.JSXElement {
   const source = t.cloneNode(plan.source, true);
-  if (plan.events.length === 0) return source;
   const child = meaningfulJsxChildren(source)[0];
   let callback: t.ArrowFunctionExpression | t.FunctionExpression | undefined;
   if (
@@ -1517,13 +1626,20 @@ function keyedRowsRenderSource(plan: KeyedRowsPlan, eventFactory: t.Identifier):
   const item = callback?.params[0];
   const index = callback?.params[1];
   if (!callback || !t.isJSXElement(row) || !t.isIdentifier(item)) return source;
-  rewriteKeyedRowEventAttributes(
-    row,
-    plan.events,
-    eventFactory,
-    item,
-    t.isIdentifier(index) ? index : t.numericLiteral(0),
-  );
+  const runtimeIndex = t.isIdentifier(index) ? index : t.numericLiteral(0);
+  if (plan.events.length > 0) {
+    rewriteKeyedRowEventAttributes(row, plan.events, eventFactory, item, runtimeIndex);
+  }
+  if (plan.conditionals.length > 0) {
+    rewriteKeyedRowConditionalExpressions(
+      row,
+      plan.conditionals,
+      conditionalFactory,
+      item,
+      runtimeIndex,
+      callback.params as t.Identifier[],
+    );
+  }
   return source;
 }
 
@@ -1551,6 +1667,56 @@ function keyedRowEventObject(
   ]);
 }
 
+function keyedRowConditionalBranchObject(
+  bindings: readonly PendingKeyedRowBinding[],
+  parameters: readonly t.Identifier[],
+): t.ObjectExpression {
+  return t.objectExpression([
+    t.objectProperty(
+      t.identifier("bindings"),
+      t.arrayExpression(bindings.map((binding) => keyedRowBindingObject(binding, parameters))),
+    ),
+  ]);
+}
+
+function keyedRowConditionalObject(
+  conditional: PendingKeyedRowConditional,
+  parameters: readonly t.Identifier[],
+): t.ObjectExpression {
+  const properties: t.ObjectProperty[] = [
+    t.objectProperty(t.identifier("id"), t.numericLiteral(conditional.id)),
+    t.objectProperty(
+      t.identifier("path"),
+      t.arrayExpression(conditional.path.map((part) => t.numericLiteral(part))),
+    ),
+    t.objectProperty(
+      t.identifier("test"),
+      t.arrowFunctionExpression(
+        parameters.map((parameter) => t.cloneNode(parameter, true)),
+        cloneExpression(conditional.test),
+      ),
+    ),
+    t.objectProperty(t.identifier("logical"), t.booleanLiteral(conditional.logical)),
+  ];
+  if (conditional.truthy) {
+    properties.push(
+      t.objectProperty(
+        t.identifier("truthy"),
+        keyedRowConditionalBranchObject(conditional.truthyBindings, parameters),
+      ),
+    );
+  }
+  if (conditional.falsy) {
+    properties.push(
+      t.objectProperty(
+        t.identifier("falsy"),
+        keyedRowConditionalBranchObject(conditional.falsyBindings, parameters),
+      ),
+    );
+  }
+  return t.objectExpression(properties);
+}
+
 function keyedRowsBoundary(blockRuntime: t.Identifier, plan: KeyedRowsPlan): t.JSXElement {
   const name = t.jsxMemberExpression(
     t.jsxIdentifier(blockRuntime.name),
@@ -1563,7 +1729,17 @@ function keyedRowsBoundary(blockRuntime: t.Identifier, plan: KeyedRowsPlan): t.J
     plan.source,
     ...plan.events.map((event) => event.value),
   ]);
-  const renderSource = keyedRowsRenderSource(plan, eventFactory);
+  const conditionalFactory = uniqueLocalIdentifier("_farmRowConditional", [
+    plan.source,
+    ...plan.conditionals.map((conditional) => conditional.test),
+  ]);
+  const renderSource = keyedRowsRenderSource(plan, eventFactory, conditionalFactory);
+  const renderFactoryParameters =
+    plan.conditionals.length > 0
+      ? [t.cloneNode(eventFactory), t.cloneNode(conditionalFactory)]
+      : plan.events.length > 0
+        ? [t.cloneNode(eventFactory)]
+        : [];
   return t.jsxElement(
     t.jsxOpeningElement(
       name,
@@ -1572,10 +1748,7 @@ function keyedRowsBoundary(blockRuntime: t.Identifier, plan: KeyedRowsPlan): t.J
         t.jsxAttribute(
           t.jsxIdentifier("render"),
           t.jsxExpressionContainer(
-            t.arrowFunctionExpression(
-              plan.events.length > 0 ? [t.cloneNode(eventFactory)] : [],
-              renderSource,
-            ),
+            t.arrowFunctionExpression(renderFactoryParameters, renderSource),
           ),
         ),
         t.jsxAttribute(
@@ -1610,6 +1783,20 @@ function keyedRowsBoundary(blockRuntime: t.Identifier, plan: KeyedRowsPlan): t.J
                 t.jsxExpressionContainer(
                   t.arrayExpression(
                     plan.events.map((event) => keyedRowEventObject(event, parameters)),
+                  ),
+                ),
+              ),
+            ]
+          : []),
+        ...(plan.conditionals.length > 0
+          ? [
+              t.jsxAttribute(
+                t.jsxIdentifier("conditionals"),
+                t.jsxExpressionContainer(
+                  t.arrayExpression(
+                    plan.conditionals.map((conditional) =>
+                      keyedRowConditionalObject(conditional, parameters),
+                    ),
                   ),
                 ),
               ),
@@ -1926,6 +2113,7 @@ function analyzeComposableBlocks(
               row: keyedRows.row,
               bindings: keyedRows.bindings,
               events: keyedRows.events,
+              conditionals: keyedRows.conditionals,
               syntax: keyedRows.syntax,
             });
             ownedElements.add(child);

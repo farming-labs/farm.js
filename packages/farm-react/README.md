@@ -66,6 +66,7 @@ The current compiler handles components that it can prove have:
 - item-keyed `collection.map(...)` children and explicit `List` boundaries at statically known
   container locations, including supported non-mutating collection pipelines;
 - inline synchronous events inside otherwise eligible host-only keyed rows;
+- row-local logical and ternary host branches inside stable keyed-row containers;
 - stable module-level child components with compiler-safe props;
 - React-managed event handlers; and
 - no refs, effects, or unsupported dynamic child structures.
@@ -73,9 +74,10 @@ The current compiler handles components that it can prove have:
 The generated component preserves React ownership of initial placement, props, events, SSR, and
 hydration. Local state cells batch updates into a microtask and patch only compiler-known DOM
 targets. Proven, dedicated host containers can transfer child ownership after mount for host-only
-conditional branches and non-interactive host-only keyed rows. An interactive host-only row uses a
-hybrid boundary instead: React retains its event handlers and structural reconciliation, while Farm
-patches same-key bindings. React still creates or hydrates all initial DOM. Anything outside those
+conditional branches and non-interactive host-only keyed rows. An interactive row or a row with
+local conditional slots uses a hybrid boundary instead: React retains its events, conditional
+Fibers, and structural reconciliation, while Farm patches same-key bindings and refreshes only
+changed row-local branches. React still creates or hydrates all initial DOM. Anything outside those
 narrow contracts uses a small React-owned boundary or the complete original component.
 
 For a common dedicated conditional, no new component or annotation is required:
@@ -132,6 +134,30 @@ insert, removal, or reorder asks React to reconcile the rows, adopts the committ
 reapplies current bindings, and then resumes direct same-key patches. This avoids creating eventful
 DOM outside React's Fiber tree.
 
+A keyed row may also contain dedicated conditional slots:
+
+```tsx
+<ul>
+  {items.map((item) => (
+    <li key={item.id}>
+      <span>{item.label}</span>
+      <div className="status-slot">
+        {item.done ? <strong>{item.label} complete</strong> : <span>In progress</span>}
+      </div>
+      <section className="details-slot">{item.expanded && <p>{item.description}</p>}</section>
+    </li>
+  ))}
+</ul>
+```
+
+Each conditional must be the only meaningful child of its persistent lowercase host container.
+The compiler records its test and branch bindings per row key. A same-key collection update compares
+those prepared snapshots and asks React to render only the conditional boundaries whose selected
+branch or branch values changed. Other conditional rows and the outer map stay untouched. Inserts,
+removals, and reorders remain React structural commits for these rows, after which Farm re-adopts
+the host skeleton and resumes row-local updates. This keeps empty branches, SSR, hydration,
+recoverable hydration errors, error boundaries, and Fast Refresh inside React's ownership.
+
 A keyed collection may use derived locals or an inline chain of `filter`, `slice`, `toSorted`, and
 `toReversed`:
 
@@ -163,10 +189,10 @@ and unproven calls use the original React fallback.
 the TypeScript `lib` with ES2023 and target a runtime that supports them when using those methods.
 
 React remains the fallback and compatibility boundary. A map beside static children, a row with a
-non-inline or async handler, a controlled interactive form field, a fragment, a ref, or a custom
-component, and other unsupported shapes use the existing React-owned keyed boundary. The outer
-compiled component can still be skipped, but React reconciles that list's rows and owns their
-events, lifecycle, and state.
+non-inline or async handler, a controlled interactive form field, a fragment, a ref, a custom
+component, or a conditional mixed directly beside other children in the same host slot uses the
+existing React-owned keyed boundary. The outer compiled component can still be skipped, but React
+reconciles that list's rows and owns their events, lifecycle, and state.
 
 For custom rows or an explicit key selector, use the public component:
 
@@ -216,13 +242,14 @@ An empty ternary branch may be `null` or `false`. The inactive branch is describ
 is never pre-mounted or cached. If a logical `&&` evaluates to a number such as `0`, the runtime also
 falls back to React so JavaScript and React rendering semantics remain exact.
 
-All supported boundary types share one component-wide block graph and one ID sequence. A nested
+All component-level boundary types share one block graph and one ID sequence. A nested
 binding records its nearest conditional parent. If one state flush affects both an outer
 conditional and its descendants, the runtime refreshes the mounted outer boundary once and skips
 the redundant descendant refreshes. React unmounts inner boundaries normally, their subscriptions
 are removed, and a later remount reads the latest compiler-cell values. Host-only keyed rows have
-separate runtime instances per key. Unsupported row subtrees stay complete React-owned keyed
-boundaries instead of receiving ambiguous shared block IDs.
+separate runtime instances per key. Row-local conditional IDs are scoped to that instance and
+paired with its stable key, so two rows can use the same build-time slot ID without sharing data or
+subscriptions. Unsupported row subtrees stay complete React-owned keyed boundaries.
 
 Unsupported components fall back to React by default. Use `onUnsupported: "warn"` for diagnostics
 or `onUnsupported: "error"` while tightening an annotated migration.
@@ -250,6 +277,7 @@ Application and prototype calls, dynamic style objects, handlers outside JSX eve
 computed, and rest props patterns, async handlers, unkeyed or index-keyed lists, chained maps,
 unsupported conditional roots, effects, and more advanced hook support intentionally stay on React
 in this release. Compiler-owned keyed rows are limited to a dedicated container with one host-only
-map or `List`. Inline synchronous events can use the hybrid keyed-row path, but non-inline or async
-row handlers, controlled interactive row forms, custom components, fragments, refs, SVG, mixed
-static siblings, and duplicate runtime keys keep or switch to React ownership.
+map or `List`. Inline synchronous events and dedicated row-local host conditional slots can use the
+hybrid keyed-row path, but branch events, nested dynamic blocks, conditionals mixed with siblings in
+one slot, non-inline or async row handlers, controlled interactive row forms, custom components,
+fragments, refs, SVG, and duplicate runtime keys keep or switch to React ownership.

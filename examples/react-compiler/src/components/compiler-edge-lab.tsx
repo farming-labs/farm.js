@@ -9,6 +9,7 @@ let multipleBindingExecutions = 0;
 let automaticListExecutions = 0;
 let derivedCollectionExecutions = 0;
 let interactiveListExecutions = 0;
+let rowConditionalListExecutions = 0;
 let explicitListExecutions = 0;
 
 export function CompiledBatchExperiment() {
@@ -421,6 +422,106 @@ export function InteractiveKeyedListExperiment() {
   );
 }
 
+interface ConditionalListItem extends InteractiveListItem {
+  expanded: boolean;
+}
+
+export function RowConditionalListExperiment() {
+  const [items, setItems] = useState<ConditionalListItem[]>([
+    { id: "a", label: "Compiler graph", done: true, expanded: true },
+    { id: "b", label: "Hydration checks", done: false, expanded: false },
+    { id: "c", label: "Runtime cleanup", done: false, expanded: true },
+  ]);
+  const visibleDetails =
+    Number(items[0]?.expanded) + Number(items[1]?.expanded) + Number(items[2]?.expanded);
+  const completedItems =
+    Number(items[0]?.done) + Number(items[1]?.done) + Number(items[2]?.done);
+
+  return (
+    <article className="edge-card" data-experiment="keyed-row-conditionals">
+      <header>
+        <span className="experiment-number">04D</span>
+        <div>
+          <h3>Conditional row blocks</h3>
+          <p>Each key owns small branch boundaries that update independently.</p>
+        </div>
+      </header>
+      <dl className="compact-metrics" aria-live="polite">
+        <div>
+          <dt>Open details</dt>
+          <dd data-metric="details">{visibleDetails}</dd>
+        </div>
+        <div>
+          <dt>Completed</dt>
+          <dd data-metric="completed">{completedItems}</dd>
+        </div>
+        <div>
+          <dt>Executions</dt>
+          <dd data-metric="executions">
+            {typeof window === "undefined" ? 1 : ++rowConditionalListExecutions}
+          </dd>
+        </div>
+      </dl>
+      <ul className="conditional-row-list" data-list="row-conditionals">
+        {items.map((item, index) => (
+          <li className="conditional-row" data-key={item.id} key={item.id}>
+            <div className="conditional-row__summary">
+              <span>{item.label}</span>
+              <small>ROW {index + 1}</small>
+            </div>
+            <div className="conditional-row__status" data-slot="status">
+              {item.done ? (
+                <strong>{item.label} complete</strong>
+              ) : (
+                <span>In progress</span>
+              )}
+            </div>
+            <div className="conditional-row__details" data-slot="details">
+              {item.expanded && <p>{item.label} keeps its keyed DOM identity.</p>}
+            </div>
+            <div className="conditional-row__actions">
+              <button
+                data-action="toggle-row-status"
+                onClick={() =>
+                  setItems((current) =>
+                    current.map((row) =>
+                      row.id === item.id ? { ...row, done: !item.done } : row,
+                    ),
+                  )
+                }
+                type="button"
+              >
+                {item.done ? "Reopen" : "Complete"}
+              </button>
+              <button
+                aria-expanded={item.expanded}
+                data-action="toggle-row-details"
+                onClick={() =>
+                  setItems((current) =>
+                    current.map((row) =>
+                      row.id === item.id ? { ...row, expanded: !item.expanded } : row,
+                    ),
+                  )
+                }
+                type="button"
+              >
+                {item.expanded ? "Hide details" : "Show details"}
+              </button>
+            </div>
+          </li>
+        ))}
+      </ul>
+      <button
+        data-action="rotate-conditional-rows"
+        onClick={() => setItems((current) => [current[2], current[0], current[1]])}
+        type="button"
+      >
+        Rotate keyed rows
+      </button>
+    </article>
+  );
+}
+
 function StatefulListRow({ item }: { item: ListItem }) {
   const [clicks, setClicks] = useState(0);
   return (
@@ -439,7 +540,7 @@ export function ExplicitKeyedListExperiment() {
   return (
     <article className="edge-card" data-experiment="keyed-explicit">
       <header>
-        <span className="experiment-number">04D</span>
+        <span className="experiment-number">04E</span>
         <div>
           <h3>Explicit List boundary</h3>
           <p>A key selector supports custom rows while React preserves their state.</p>
@@ -500,6 +601,7 @@ export function CompilerEdgeLab() {
         <AutomaticKeyedListExperiment />
         <DerivedCollectionExperiment />
         <InteractiveKeyedListExperiment />
+        <RowConditionalListExperiment />
         <ExplicitKeyedListExperiment />
       </div>
 

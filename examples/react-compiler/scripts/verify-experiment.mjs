@@ -30,6 +30,7 @@ for (const component of [
   "AutomaticKeyedListExperiment",
   "DerivedCollectionExperiment",
   "InteractiveKeyedListExperiment",
+  "RowConditionalListExperiment",
   "ExplicitKeyedListExperiment",
   "StatefulListRow",
   "ComponentIslandExperiment",
@@ -559,6 +560,67 @@ try {
   );
   assert.equal(interactiveListFinalExecutions - interactiveListInitialExecutions, 0);
 
+  const rowConditionals = '[data-experiment="keyed-row-conditionals"]';
+  const rowConditionalsInitialExecutions = await readNumber(
+    page,
+    `${rowConditionals} [data-metric="executions"]`,
+  );
+  await assertText(page, `${rowConditionals} [data-metric="details"]`, "2");
+  await assertText(page, `${rowConditionals} [data-metric="completed"]`, "1");
+  await page.evaluate(() => {
+    window.__farmConditionalRowA = document.querySelector(
+      '[data-experiment="keyed-row-conditionals"] [data-key="a"]',
+    );
+  });
+
+  const conditionalRowA = `${rowConditionals} [data-key="a"]`;
+  const conditionalRowB = `${rowConditionals} [data-key="b"]`;
+  await page.locator(`${conditionalRowA} [data-action="toggle-row-status"]`).click();
+  await assertText(page, `${conditionalRowA} [data-slot="status"]`, "In progress");
+  await assertText(page, `${rowConditionals} [data-metric="completed"]`, "0");
+  await assertText(
+    page,
+    `${conditionalRowA} [data-slot="details"]`,
+    "Compiler graph keeps its keyed DOM identity.",
+  );
+
+  await page.locator(`${conditionalRowB} [data-action="toggle-row-details"]`).click();
+  await assertText(
+    page,
+    `${conditionalRowB} [data-slot="details"]`,
+    "Hydration checks keeps its keyed DOM identity.",
+  );
+  await assertText(page, `${rowConditionals} [data-metric="details"]`, "3");
+
+  await page.locator(`${rowConditionals} [data-action="rotate-conditional-rows"]`).click();
+  assert.deepEqual(
+    await page
+      .locator(`${rowConditionals} [data-list="row-conditionals"] > li`)
+      .evaluateAll((rows) => rows.map((row) => row.getAttribute("data-key"))),
+    ["c", "a", "b"],
+  );
+  assert.equal(
+    await page.evaluate(
+      () =>
+        window.__farmConditionalRowA ===
+        document.querySelector('[data-experiment="keyed-row-conditionals"] [data-key="a"]'),
+    ),
+    true,
+    "React did not preserve a row-local conditional boundary through the reorder",
+  );
+  await page.locator(`${conditionalRowB} [data-action="toggle-row-status"]`).click();
+  await assertText(
+    page,
+    `${conditionalRowB} [data-slot="status"]`,
+    "Hydration checks complete",
+  );
+  await assertText(page, `${rowConditionals} [data-metric="completed"]`, "1");
+  const rowConditionalsFinalExecutions = await readNumber(
+    page,
+    `${rowConditionals} [data-metric="executions"]`,
+  );
+  assert.equal(rowConditionalsFinalExecutions - rowConditionalsInitialExecutions, 0);
+
   const explicitList = '[data-experiment="keyed-explicit"]';
   const explicitListInitialExecutions = await readNumber(
     page,
@@ -817,6 +879,16 @@ try {
             keyedDomIdentityPreserved: true,
             structuralOwner: "React",
             bindingOwner: "Farm",
+          },
+          keyedRowConditionals: {
+            order: ["c", "a", "b"],
+            openDetails: 3,
+            completed: 1,
+            updateExecutions:
+              rowConditionalsFinalExecutions - rowConditionalsInitialExecutions,
+            keyedDomIdentityPreserved: true,
+            structuralOwner: "React",
+            conditionalScheduling: "Farm snapshots",
           },
           explicitKeyedList: {
             order: ["Beta", "Alpha"],
