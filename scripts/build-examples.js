@@ -6,7 +6,9 @@ const path = require("node:path");
 const root = path.resolve(__dirname, "..");
 const examplesRoot = path.join(root, "examples");
 
-const ignoredDirs = new Set(["node_modules", ".output", ".vercel", ".eve", "dist"]);
+// "stackblitz" installs published packages from npm instead of workspace:*,
+// so it has no node_modules here and is built by StackBlitz itself.
+const ignoredDirs = new Set(["node_modules", ".output", ".vercel", ".eve", "dist", "stackblitz"]);
 const args = new Set(process.argv.slice(2).filter((arg) => arg !== "--"));
 const skipIncompatible = args.has("--skip-incompatible");
 const onlyWithNodeEngine = args.has("--only-with-node-engine");
