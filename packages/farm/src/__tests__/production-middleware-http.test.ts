@@ -34,6 +34,29 @@ describe("production middleware HTTP behavior", () => {
     ]);
   });
 
+  it("serves requests with malformed percent-encoded paths instead of throwing", async () => {
+    const seen: Array<Record<string, string>> = [];
+    const runner = createProductionMiddlewareRunner({
+      config: {
+        matcher: ["/dashboard/:slug"],
+        handler(ctx) {
+          seen.push({ ...(ctx.params ?? {}) });
+        },
+      },
+    });
+
+    // decodeURIComponent throws on these segments. Matching runs before any
+    // handler, so a throw here fails the request rather than 404ing it.
+    await expect(
+      runner(new Request("https://example.com/dashboard/caf%E9")),
+    ).resolves.toBeDefined();
+    await expect(runner(new Request("https://example.com/dashboard/%ZZ"))).resolves.toBeDefined();
+
+    // The raw segment is kept, so it simply does not match a real route.
+    const ok = await runner(new Request("https://example.com/dashboard/ok"));
+    expect(ok).toBeDefined();
+  });
+
   it("serves requests with malformed percent-encoded cookies instead of throwing", async () => {
     const seen: Record<string, string | undefined> = {};
     const runner = createProductionMiddlewareRunner({

@@ -4602,6 +4602,16 @@ function splitRuntimePath(pathname) {
   return normalizeRuntimePath(pathname).split("/").filter(Boolean);
 }
 
+function decodeRouteSegment(segment) {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    // Request paths are not guaranteed to be validly percent-encoded; a
+    // malformed segment must not throw out of route matching.
+    return segment;
+  }
+}
+
 const farmCatchAllParamSegments = Symbol("farm.catch-all-param-segments");
 
 function matchRuntimePathPattern(pattern, pathname) {
@@ -4640,7 +4650,7 @@ function matchRuntimePathPattern(pattern, pathname) {
     if (pathnameSegment === undefined) return null;
 
     if (dynamic || namedDynamic) {
-      params[(dynamic || namedDynamic)[1]] = decodeURIComponent(pathnameSegment);
+      params[(dynamic || namedDynamic)[1]] = decodeRouteSegment(pathnameSegment);
       pathIndex++;
       continue;
     }

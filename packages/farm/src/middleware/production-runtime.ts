@@ -453,6 +453,16 @@ function compilePathPattern(pattern: string): { regex: RegExp; params: string[] 
   };
 }
 
+function decodeRouteSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    // Request paths are not guaranteed to be validly percent-encoded; a
+    // malformed segment must not throw out of route matching.
+    return segment;
+  }
+}
+
 function matchPattern(
   pattern: string | RegExp,
   pathname: string,
@@ -483,7 +493,7 @@ function matchPattern(
 
   const values: Record<string, string> = {};
   params.forEach((param, index) => {
-    values[param] = decodeURIComponent(match[index + 1] || "");
+    values[param] = decodeRouteSegment(match[index + 1] || "");
   });
 
   return {
