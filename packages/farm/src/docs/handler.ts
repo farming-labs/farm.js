@@ -85,8 +85,18 @@ function normalizeEntry(entry: string | undefined): string {
   return `/${trimSlashes(entry)}`;
 }
 
+function decodeDocsPath(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    // Malformed percent-encoding in a request path must resolve to a
+    // non-matching slug (a 404), not throw out of the handler.
+    return value;
+  }
+}
+
 function normalizeSlug(value: string): string {
-  return trimSlashes(decodeURIComponent(value)).replace(/\.(mdx?|markdown)$/i, "");
+  return trimSlashes(decodeDocsPath(value)).replace(/\.(mdx?|markdown)$/i, "");
 }
 
 function resolveFarmDocsFavicon(

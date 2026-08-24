@@ -3175,6 +3175,16 @@ function matchesPath(pattern: string, pathname: string): boolean {
   return extractPathParams(pattern, pathname) !== null;
 }
 
+function decodeRouteSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    // Request paths are not guaranteed to be validly percent-encoded; a
+    // malformed segment must not throw out of route matching.
+    return segment;
+  }
+}
+
 function extractPathParams(pattern: string, pathname: string): FarmIntegrationRouteParams | null {
   const routeSegments = splitPath(pattern);
   const pathSegments = splitPath(pathname);
@@ -3190,12 +3200,12 @@ function extractPathParams(pattern: string, pathname: string): FarmIntegrationRo
     if (isCatchAllSegment(routeSegment)) {
       params[getSegmentParamName(routeSegment)] = pathSegments
         .slice(pathIndex)
-        .map((segment) => decodeURIComponent(segment));
+        .map((segment) => decodeRouteSegment(segment));
       return params;
     }
 
     if (isDynamicSegment(routeSegment)) {
-      params[getSegmentParamName(routeSegment)] = decodeURIComponent(pathSegment);
+      params[getSegmentParamName(routeSegment)] = decodeRouteSegment(pathSegment);
       routeIndex += 1;
       pathIndex += 1;
       continue;
