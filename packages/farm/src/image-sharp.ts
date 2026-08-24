@@ -22,23 +22,38 @@ export function createSharpImageTransformer(): FarmImageTransformer {
       .rotate()
       .resize({ width, fit: "inside", withoutEnlargement: true });
 
+    // When the Accept header matches none of the configured formats, keep the
+    // source's own format (svg rasterizes to png) instead of forcing JPEG —
+    // that preserved neither transparency nor the truth of the content type.
+    let encodedType: string;
     if (outputFormat === "image/avif") {
       pipeline = pipeline.avif({ quality });
+      encodedType = "image/avif";
     } else if (outputFormat === "image/webp") {
       pipeline = pipeline.webp({ quality });
-    } else if (sourceType === "image/png") {
+      encodedType = "image/webp";
+    } else if (sourceType === "image/png" || sourceType === "image/svg+xml") {
       pipeline = pipeline.png();
+      encodedType = "image/png";
     } else if (sourceType === "image/gif") {
       pipeline = pipeline.gif();
+      encodedType = "image/gif";
+    } else if (sourceType === "image/webp") {
+      pipeline = pipeline.webp({ quality });
+      encodedType = "image/webp";
+    } else if (sourceType === "image/avif") {
+      pipeline = pipeline.avif({ quality });
+      encodedType = "image/avif";
     } else {
       pipeline = pipeline.jpeg({ quality });
+      encodedType = "image/jpeg";
     }
 
     const body = await pipeline.toBuffer();
     throwIfAborted(signal);
     return {
       body,
-      contentType: outputFormat ?? normalizeSharpSourceType(sourceType),
+      contentType: encodedType,
     };
   };
 }
@@ -64,10 +79,6 @@ export function createNodeImageUrlValidator(config: ResolvedFarmImageConfig) {
       throw new FarmImageRequestError("PRIVATE_SOURCE", 400, "Private image source is not allowed");
     }
   };
-}
-
-function normalizeSharpSourceType(sourceType: string): string {
-  return sourceType === "image/svg+xml" ? "image/png" : sourceType;
 }
 
 function throwIfAborted(signal: AbortSignal): void {
