@@ -78,11 +78,19 @@ export class HMRManager {
       seen.add(mod);
       affected.add(mod);
 
-      // Traverse importers
+      // A self-accepting module is the HMR boundary: it re-runs with the
+      // update, so nothing above it is affected.
+      if (mod.isSelfAccepting) return;
+
       for (const importer of mod.importers) {
-        if (!importer.isSelfAccepting) {
-          traverse(importer);
+        // An importer that accepts this dependency is likewise a boundary:
+        // it receives the update, but its own importers do not. Accepting is
+        // per-edge, so the importer stays traversable via other dependencies.
+        if (importer.acceptedHmrDeps?.has(mod)) {
+          affected.add(importer);
+          continue;
         }
+        traverse(importer);
       }
     };
 
