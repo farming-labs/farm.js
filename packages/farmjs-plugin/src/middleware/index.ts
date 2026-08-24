@@ -19,6 +19,7 @@ import type { IncomingMessage, ServerResponse } from "http";
 import { createRequire } from "node:module";
 import { _withAfterNodeMiddleware } from "@farm.js/core/after";
 import { devServableFileExists } from "../dev-static.js";
+import { middlewareMatchesPath, parseCookies, serializeCookie } from "./matching.js";
 
 // Create require for ESM compatibility
 const require_ = createRequire(import.meta.url);
@@ -138,64 +139,6 @@ export interface DiscoveredMiddleware {
     | MiddlewareHandler
     | { build: () => { handlers: MiddlewareHandler[] }; setBasePath?: (path: string) => void };
   config?: { matcher?: string[] };
-}
-
-/**
- * Parse cookies from Cookie header
- */
-function parseCookies(cookieHeader?: string): Record<string, string> {
-  if (!cookieHeader) return {};
-
-  return cookieHeader.split(";").reduce(
-    (cookies, cookie) => {
-      const [name, ...rest] = cookie.split("=");
-      const value = rest.join("=").trim();
-      if (name && value) {
-        cookies[name.trim()] = decodeURIComponent(value);
-      }
-      return cookies;
-    },
-    {} as Record<string, string>,
-  );
-}
-
-/**
- * Serialize a cookie
- */
-function serializeCookie(name: string, value: string, options: CookieOptions = {}): string {
-  let cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}`;
-
-  if (options.maxAge) {
-    cookie += `; Max-Age=${options.maxAge}`;
-  }
-
-  if (options.expires) {
-    cookie += `; Expires=${options.expires.toUTCString()}`;
-  }
-
-  if (options.path) {
-    cookie += `; Path=${options.path}`;
-  } else {
-    cookie += "; Path=/";
-  }
-
-  if (options.domain) {
-    cookie += `; Domain=${options.domain}`;
-  }
-
-  if (options.secure) {
-    cookie += "; Secure";
-  }
-
-  if (options.httpOnly) {
-    cookie += "; HttpOnly";
-  }
-
-  if (options.sameSite) {
-    cookie += `; SameSite=${options.sameSite.charAt(0).toUpperCase() + options.sameSite.slice(1)}`;
-  }
-
-  return cookie;
 }
 
 /**
@@ -444,10 +387,7 @@ export default function farmMiddleware(options: FarmMiddlewareOptions = {}): Plu
 
         // Find applicable middleware (cascading from root to specific)
         const applicable = Array.from(middlewareCache.values())
-          .filter((mw) => {
-            if (mw.path === "/") return true;
-            return pathname.startsWith(mw.path) || pathname === mw.path;
-          })
+          .filter((mw) => middlewareMatchesPath(pathname, mw.path))
           .sort((a, b) => a.path.split("/").length - b.path.split("/").length);
 
         if (applicable.length === 0) return false;
