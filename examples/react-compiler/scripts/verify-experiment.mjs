@@ -33,6 +33,7 @@ for (const component of [
   "EditableKeyedListExperiment",
   "RowConditionalListExperiment",
   "ExplicitKeyedListExperiment",
+  "KeyedRangeExperiment",
   "StatefulListRow",
   "ComponentIslandExperiment",
   "ComposableBlockExperiment",
@@ -653,6 +654,91 @@ try {
   );
   assert.equal(editableListFinalExecutions - editableListInitialExecutions, 0);
 
+  const keyedRanges = '[data-experiment="keyed-ranges"]';
+  const keyedRangesInitialExecutions = await readNumber(
+    page,
+    `${keyedRanges} [data-metric="executions"]`,
+  );
+  await page.evaluate(() => {
+    const list = document.querySelector(
+      '[data-experiment="keyed-ranges"] [data-list="ranges"]',
+    );
+    window.__farmRangeHeader = list.querySelector('[data-static="range-header"]');
+    window.__farmRangeDivider = list.querySelector('[data-static="range-divider"]');
+    window.__farmRangeFooter = list.querySelector('[data-static="range-footer"]');
+    window.__farmRangeA = list.querySelector('[data-key="a"]');
+    window.__farmRangeX = list.querySelector('[data-key="x"]');
+    window.__farmRangeMoves = 0;
+    const insertBefore = list.insertBefore.bind(list);
+    list.insertBefore = (node, anchor) => {
+      if (node.parentNode === list && node.matches?.("[data-key]")) {
+        window.__farmRangeMoves += 1;
+      }
+      return insertBefore(node, anchor);
+    };
+  });
+  await page.locator(`${keyedRanges} [data-action="rotate-ranges"]`).click();
+  const primaryRangeOrder = await page
+    .locator(`${keyedRanges} [data-range="primary"]`)
+    .evaluateAll((rows) => rows.map((row) => row.getAttribute("data-key")));
+  const secondaryRangeOrder = await page
+    .locator(`${keyedRanges} [data-range="secondary"]`)
+    .evaluateAll((rows) => rows.map((row) => row.getAttribute("data-key")));
+  assert.deepEqual(primaryRangeOrder, ["d", "a", "b", "c"]);
+  assert.deepEqual(secondaryRangeOrder, ["z", "y", "x"]);
+  assert.equal(
+    await page.locator(`${keyedRanges} [data-list="ranges"]`).getAttribute("data-rows"),
+    "7",
+  );
+  assert.equal(await page.evaluate(() => window.__farmRangeMoves), 3);
+  assert.equal(
+    await page.evaluate(
+      () =>
+        window.__farmRangeHeader ===
+          document.querySelector(
+            '[data-experiment="keyed-ranges"] [data-static="range-header"]',
+          ) &&
+        window.__farmRangeDivider ===
+          document.querySelector(
+            '[data-experiment="keyed-ranges"] [data-static="range-divider"]',
+          ) &&
+        window.__farmRangeFooter ===
+          document.querySelector(
+            '[data-experiment="keyed-ranges"] [data-static="range-footer"]',
+          ) &&
+        window.__farmRangeA ===
+          document.querySelector('[data-experiment="keyed-ranges"] [data-key="a"]') &&
+        window.__farmRangeX ===
+          document.querySelector('[data-experiment="keyed-ranges"] [data-key="x"]'),
+    ),
+    true,
+    "keyed ranges did not preserve their rows and static shell",
+  );
+  await page.locator(`${keyedRanges} [data-action="clear-ranges"]`).click();
+  await assertText(page, `${keyedRanges} [data-metric="rows"]`, "0");
+  assert.equal(
+    await page.locator(`${keyedRanges} [data-list="ranges"]`).getAttribute("data-rows"),
+    "0",
+  );
+  assert.equal(await page.locator(`${keyedRanges} [data-key]`).count(), 0);
+  await assertText(
+    page,
+    `${keyedRanges} [data-static="range-footer"]`,
+    "0 ROWS / STATIC SHELL",
+  );
+  await page.locator(`${keyedRanges} [data-action="stress-ranges"]`).click();
+  await assertText(page, `${keyedRanges} [data-metric="rows"]`, "1024");
+  assert.equal(
+    await page.locator(`${keyedRanges} [data-list="ranges"]`).getAttribute("data-rows"),
+    "1024",
+  );
+  assert.equal(await page.locator(`${keyedRanges} [data-key]`).count(), 1024);
+  const keyedRangesFinalExecutions = await readNumber(
+    page,
+    `${keyedRanges} [data-metric="executions"]`,
+  );
+  assert.equal(keyedRangesFinalExecutions - keyedRangesInitialExecutions, 0);
+
   const rowConditionals = '[data-experiment="keyed-row-conditionals"]';
   const rowConditionalsInitialExecutions = await readNumber(
     page,
@@ -962,6 +1048,20 @@ try {
             keyedDomIdentityPreserved: true,
             lisMoves: 3,
             owner: "Farm keyed rows",
+          },
+          keyedRanges: {
+            ranges: 2,
+            rotation: {
+              primary: primaryRangeOrder,
+              secondary: secondaryRangeOrder,
+              lisMoves: 3,
+            },
+            stressRows: 1024,
+            updateExecutions:
+              keyedRangesFinalExecutions - keyedRangesInitialExecutions,
+            staticSiblingIdentityPreserved: true,
+            keyedDomIdentityPreserved: true,
+            owner: "Farm keyed ranges",
           },
           derivedCollection: {
             order: derivedCollectionOrder,

@@ -64,7 +64,8 @@ describe("React AOT composable block compiler", () => {
       result.diagnostics.find((diagnostic) => diagnostic.component === "ComposableDashboard"),
     ).toBeUndefined();
     expect(result.code.match(/farmBlocks\.Conditional/g)).toHaveLength(3);
-    expect(result.code.match(/farmBlocks\.KeyedList/g)).toHaveLength(3);
+    expect(result.code.match(/farmBlocks\.KeyedList/g)).toHaveLength(2);
+    expect(result.code.match(/farmBlocks\.KeyedRanges/g)).toHaveLength(1);
     expect(result.code.match(/farmBlocks\.Component/g)).toHaveLength(1);
 
     const ids = [...result.code.matchAll(/id=\{(\d+)\}/g)].map((match) => Number(match[1]));

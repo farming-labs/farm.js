@@ -649,6 +649,43 @@ h1 span {
     monospace;
 }
 
+.edge-card .keyed-range-list {
+  max-height: 19rem;
+  align-content: flex-start;
+  overflow-y: auto;
+  padding: 0.55rem;
+  border: 1px solid #33332f;
+  background: #0d0d0c;
+}
+
+.keyed-range-list [data-range] {
+  min-width: 6.5rem;
+  background: #111110;
+}
+
+.keyed-range-list [data-range="secondary"] {
+  border-color: #5a5a52;
+  color: #aaa9a1;
+}
+
+.keyed-range-list .keyed-range-static {
+  flex: 1 0 100%;
+  border-color: rgb(184 255 91 / 0.28);
+  color: #91b864;
+  background: rgb(184 255 91 / 0.035);
+  font-size: 0.56rem;
+  letter-spacing: 0.075em;
+}
+
+.keyed-range-list [data-static="range-divider"] {
+  margin-top: 0.15rem;
+}
+
+.keyed-range-list [data-static="range-footer"] {
+  color: #d8ff9f;
+  text-align: right;
+}
+
 .interactive-keyed-list .interactive-row {
   display: flex;
   min-width: min(100%, 14rem);
