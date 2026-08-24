@@ -613,6 +613,155 @@ const testSource = String.raw`
   assert.deepEqual(interactiveCalls, ["Alpha:0:0", "Alpha!:0:0", "Alpha!!:1:1"]);
   flushSync(() => interactiveRoot.unmount());
 
+  let editableRowExecutions = 0;
+  let editableListRenders = 0;
+  let setEditableItems = () => undefined;
+  const EditableKeyedRows = createCompiledComponent({
+    displayName: "CompatibilityEditableKeyedRows",
+    initialize: () => [[
+      { id: "a", label: "Alpha", done: false },
+      { id: "b", label: "Beta", done: true },
+    ]],
+    render(_props, state, blocks) {
+      editableRowExecutions += 1;
+      setEditableItems = (next) => state[0].set(next);
+      const items = () => state[0].get();
+      const update = (id, patch) =>
+        state[0].set((current) =>
+          current.map((item) => (item.id === id ? { ...item, ...patch } : item)),
+        );
+      return React.createElement(
+        "section",
+        null,
+        React.createElement(blocks.KeyedRows, {
+          id: 0,
+          render: (rowEvent) => {
+            editableListRenders += 1;
+            return React.createElement(
+              "ul",
+              null,
+              items().map((item, index) =>
+                React.createElement(
+                  "li",
+                  { key: item.id, "data-key": item.id },
+                  React.createElement("input", {
+                    "aria-label": "Label " + item.id,
+                    onInput: rowEvent(item, index, 0),
+                    value: item.label,
+                  }),
+                  React.createElement("input", {
+                    "aria-label": "Done " + item.id,
+                    checked: item.done,
+                    onChange: rowEvent(item, index, 1),
+                    type: "checkbox",
+                  }),
+                  React.createElement(
+                    "output",
+                    null,
+                    index + ":" + item.label + ":" + (item.done ? "done" : "open"),
+                  ),
+                ),
+              ),
+            );
+          },
+          items,
+          rowKey: (item) => item.id,
+          create: (item, index) => ({
+            kind: "element",
+            tag: "li",
+            attributes: [{ name: "data-key", value: item.id }],
+            styles: [],
+            children: [
+              {
+                kind: "element",
+                tag: "input",
+                attributes: [
+                  { name: "aria-label", value: "Label " + item.id },
+                  { name: "value", value: item.label },
+                ],
+                styles: [],
+                children: [],
+              },
+              {
+                kind: "element",
+                tag: "input",
+                attributes: [
+                  { name: "aria-label", value: "Done " + item.id },
+                  { name: "checked", value: item.done },
+                  { name: "type", value: "checkbox" },
+                ],
+                styles: [],
+                children: [],
+              },
+              {
+                kind: "element",
+                tag: "output",
+                attributes: [],
+                styles: [],
+                children: [index + ":" + item.label + ":" + (item.done ? "done" : "open")],
+              },
+            ],
+          }),
+          bindings: [
+            { kind: "attribute", path: [0], name: "value", read: (item) => item.label },
+            { kind: "attribute", path: [1], name: "checked", read: (item) => item.done },
+            {
+              kind: "text",
+              path: [2],
+              read: (item, index) => [index, ":", item.label, ":", item.done ? "done" : "open"],
+            },
+          ],
+          events: [
+            {
+              name: "onInput",
+              invoke: (item, _index, event) => update(item.id, { label: event.currentTarget.value }),
+            },
+            {
+              name: "onChange",
+              invoke: (item, _index, event) => update(item.id, { done: event.currentTarget.checked }),
+            },
+          ],
+        }),
+      );
+    },
+    bindings: [{ kind: "block", id: 0, dependencies: [0] }],
+  });
+
+  const editableContainer = document.createElement("div");
+  document.body.append(editableContainer);
+  const editableRoot = createRoot(editableContainer);
+  flushSync(() => editableRoot.render(React.createElement(EditableKeyedRows)));
+  const initialEditableExecutions = editableRowExecutions;
+  const initialEditableRenders = editableListRenders;
+  const editableAlpha = editableContainer.querySelector("[data-key='a']");
+  const editableInput = editableAlpha.querySelector("[aria-label='Label a']");
+  editableInput.focus();
+  editableInput.value = "AlXpha";
+  editableInput.setSelectionRange(3, 3);
+  editableInput.dispatchEvent(new dom.window.InputEvent("input", { bubbles: true, data: "X" }));
+  editableInput.value = "Alpha";
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(editableInput.value, "AlXpha");
+  assert.equal(editableInput.selectionStart, 3);
+  assert.equal(editableInput.selectionEnd, 3);
+  editableAlpha.querySelector("[aria-label='Done a']").click();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(editableAlpha.querySelector("[aria-label='Done a']").checked, true);
+  assert.equal(editableAlpha.querySelector("output").textContent, "0:AlXpha:done");
+  assert.equal(editableRowExecutions, initialEditableExecutions);
+  assert.equal(editableListRenders, initialEditableRenders);
+  setEditableItems((current) => [...current].reverse());
+  await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync(() => {});
+  assert.equal(editableContainer.querySelector("[data-key='a']"), editableAlpha);
+  assert.equal(editableContainer.querySelector("[aria-label='Label a']"), editableInput);
+  assert.equal(editableAlpha.querySelector("output").textContent, "1:AlXpha:done");
+  assert.equal(editableListRenders, initialEditableRenders + 1);
+  flushSync(() => editableRoot.unmount());
+
   const interactiveHydrationContainer = document.createElement("div");
   interactiveHydrationContainer.innerHTML = renderToString(
     React.createElement(InteractiveKeyedRows),

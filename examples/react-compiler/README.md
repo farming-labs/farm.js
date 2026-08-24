@@ -38,6 +38,7 @@ assertions, checks for console/runtime errors and horizontal overflow, saves scr
 | Automatic keyed map         | stable row DOM, three LIS moves for a four-row reversal  | —                                              | AOT rows patch in place and use the minimum reorder moves.              |
 | Derived keyed collection    | 2,048 source rows filter, sort, slice, and reverse; executions `0` | —                                      | Collection dependencies feed keyed rows without rerunning the owner.    |
 | Interactive keyed rows      | latest item/index after updates and reorder; executions `0` | —                                           | React owns events/structure while Farm patches same-key row bindings.   |
+| Editable keyed rows         | caret, fields, identity, and a 256-row load; executions `0` | —                                           | Controlled form properties update by key without rerunning the owner.  |
 | Conditional row blocks      | only changed keyed branches refresh; owner executions `0`  | —                                           | Per-key snapshots isolate logical and ternary row content.              |
 | Explicit `List`             | stateful rows reorder, update executions `0`            | —                                              | React preserves custom-row state by key inside the isolated boundary.  |
 | Calculated style bindings   | value `6`, progress `50%`, update executions `0`        | —                                              | Safe calls and individual CSS properties use prepared dependencies.    |
@@ -99,7 +100,14 @@ the structure once; Farm then adopts the committed rows and resumes direct same-
 `04C` card verifies capture and stop-propagation behavior, latest-item lookup across three clicks,
 row identity through a reversal, and zero owner update executions.
 
-The `04D` card adds two branch slots to every keyed row. Each logical or ternary expression is the
+The `04D` card contains controlled text, select, and checkbox fields. React keeps event, hydration,
+and structural ownership; Farm patches the prepared form properties and row output for the changed
+key. The production test edits in the middle of a focused input, changes the other fields, rotates
+the rows while checking DOM and selection identity, loads 256 rows, and observes zero owner update
+executions. File inputs, dynamic control types or option attributes, content-editable trees, refs,
+custom controls, and async or non-inline handlers remain React fallbacks.
+
+The `04E` card adds two branch slots to every keyed row. Each logical or ternary expression is the
 only child of a persistent host container. Farm scopes the prepared test and branch-value snapshot
 to the row key, then asks React to refresh only a slot whose selected branch or active values
 changed. The card toggles status and details independently, rotates the rows, checks that their DOM
@@ -110,12 +118,11 @@ commit. This is why row conditionals do not use the manual insertion or LIS path
 components, fragments, refs, SVG, nested blocks, or a conditional mixed with another child in the
 same slot use the existing React-owned list fallback.
 
-Non-inline or async row handlers, controlled interactive form fields, custom components, fragments,
-refs, SVG, static siblings in that same container, and index or missing keys use the React-owned
-list path. Duplicate keys discovered at runtime remount that container through React. LIS applies
-to non-interactive compiler-owned rows; interactive structural changes intentionally stay with
-React. Neither path makes insertions, removals, key comparison, collection work, or DOM updates
-disappear.
+Non-inline or async row handlers, unsupported form shapes, custom components, fragments, refs, SVG,
+static siblings in that same container, and index or missing keys use the React-owned list path.
+Duplicate keys discovered at runtime remount that container through React. LIS applies to
+non-interactive compiler-owned rows; interactive structural changes intentionally stay with React.
+Neither path makes insertions, removals, key comparison, collection work, or DOM updates disappear.
 
 The example includes ES2023 TypeScript library declarations because `toSorted` and `toReversed`
 are standard runtime methods that the compiler preserves rather than polyfills.

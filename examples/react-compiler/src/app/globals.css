@@ -671,6 +671,83 @@ h1 span {
   padding: 0.4rem 0.6rem;
 }
 
+.edge-card .editable-keyed-list {
+  display: grid;
+  max-height: 28rem;
+  align-items: stretch;
+  gap: 0.55rem;
+  overflow-y: auto;
+}
+
+.edge-card .editable-keyed-row {
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(0, 1.25fr) minmax(7rem, 0.75fr);
+  gap: 0.65rem;
+  padding: 0.75rem;
+  background: #0d0d0c;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease;
+}
+
+.edge-card .editable-keyed-row--done {
+  border-color: rgb(184 255 91 / 0.52);
+  background: rgb(184 255 91 / 0.045);
+}
+
+.editable-keyed-row > label:not(.editable-keyed-check) {
+  display: grid;
+  min-width: 0;
+  gap: 0.35rem;
+  color: #777771;
+  font-size: 0.56rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.editable-keyed-row :is(input[type="text"], input:not([type]), select) {
+  width: 100%;
+  min-width: 0;
+  height: 2.35rem;
+  border: 1px solid #3b3b37;
+  border-radius: 0;
+  padding: 0 0.65rem;
+  color: #e1e1da;
+  background: #10100f;
+  font: 0.66rem "Geist Mono Variable", ui-monospace, monospace;
+  outline: none;
+}
+
+.editable-keyed-row :is(input[type="text"], input:not([type]), select):focus-visible {
+  border-color: #b8ff5b;
+  box-shadow: 0 0 0 1px #b8ff5b;
+}
+
+.editable-keyed-check {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: #999992;
+  font-size: 0.62rem;
+}
+
+.editable-keyed-check input {
+  width: 1rem;
+  height: 1rem;
+  accent-color: #b8ff5b;
+}
+
+.editable-keyed-row output {
+  overflow: hidden;
+  grid-column: 1 / -1;
+  color: #8d8d86;
+  font-size: 0.58rem;
+  letter-spacing: 0.035em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .edge-card .conditional-row-list {
   display: grid;
   align-items: stretch;
@@ -1303,6 +1380,10 @@ code {
   }
 
   .edge-card .conditional-row {
+    grid-template-columns: 1fr;
+  }
+
+  .edge-card .editable-keyed-row {
     grid-template-columns: 1fr;
   }
 
