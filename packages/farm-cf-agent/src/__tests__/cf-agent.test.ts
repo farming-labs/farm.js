@@ -134,6 +134,52 @@ export default { fetch() { return new Response("agent"); } };
     await expect(access(join(root, "wrangler.jsonc"))).resolves.toBeUndefined();
   });
 
+  it("rewrites an environment-level main to the combined worker", async () => {
+    const root = await mkdtemp(join(tmpdir(), "farm-cf-agent-env-"));
+    const outputDir = join(root, ".output");
+    const configPath = join(root, "wrangler.jsonc");
+    await mkdir(join(root, "src"), { recursive: true });
+    await mkdir(join(outputDir, "server"), { recursive: true });
+    await mkdir(join(outputDir, "public"), { recursive: true });
+    await writeFile(
+      configPath,
+      `{
+        "name": "farm-agent",
+        "main": "src/agent.mjs",
+        "compatibility_date": "2026-07-16",
+        "env": {
+          "staging": { "main": "src/agent.staging.mjs" }
+        }
+      }\n`,
+    );
+    await writeFile(
+      join(root, "src", "agent.mjs"),
+      `export default { fetch() { return new Response("agent"); } };\n`,
+    );
+    await writeFile(
+      join(root, "src", "agent.staging.mjs"),
+      `export default { fetch() { return new Response("staging-agent"); } };\n`,
+    );
+    await writeFile(
+      join(outputDir, "server", "index.mjs"),
+      `export default { fetch() { return new Response("farm"); } };\n`,
+    );
+
+    const result = await writeCloudflareAgentOutput({
+      root,
+      outputDir,
+      config: "wrangler.jsonc",
+      routePrefix: "/agents",
+      environment: "staging",
+    });
+
+    const generated = parse(await readFile(result.configPath, "utf8"));
+    // Both the top-level and the selected env main must point at the wrapper,
+    // otherwise `wrangler deploy --env staging` serves only the agent Worker.
+    expect(generated.main).toBe("./.farm/cf-agent/worker.mjs");
+    expect(generated.env.staging.main).toBe("./.farm/cf-agent/worker.mjs");
+  });
+
   it("rejects unbundled Workers because they cannot compose Farm", async () => {
     const root = await mkdtemp(join(tmpdir(), "farm-cf-agent-unbundled-"));
     await writeFile(join(root, "wrangler.jsonc"), '{"main":"agent.mjs","no_bundle":true}\n');
