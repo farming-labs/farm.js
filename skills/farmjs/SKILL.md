@@ -1,33 +1,35 @@
 ---
 name: farmjs
-description: Use when building, debugging, documenting, or integrating Farm.js apps and packages. Covers Farm.js routing, config, internationalization, typed API clients, framework Cron, integrations such as Stripe/auth/email/jobs, storage, deployment, plugins, examples, and verification commands.
-metadata:
-  short-description: Build and debug Farm.js apps and integrations
+description: Build, debug, migrate, document, test, and deploy Farm.js applications and integrations. Use for Farm.js config, file routing, React/Preact/Solid/Vue/Svelte renderers, typed APIs and server queries, auth, storage, jobs, docs, themes, i18n, plugins, previews, observability, migrations, and deployment targets.
 ---
 
 # Farm.js
 
-Farm.js is a full-stack application framework in active development. Prefer local repository sources over memory:
+Farm.js is a full-stack application framework in active development. Treat the checked-out repository as the source of truth; do not infer current APIs from an older beta or another framework:
 
 - Docs: `README.md`, `docs/src/app/docs/**`
 - Core package: `packages/farm/src/**`
+- CLI: `packages/cli/src/**`
 - Integration package: `packages/farm-integrations/src/**`
 - Examples: `examples/**`
+- Current version: read `packages/farm/package.json` and keep all `@farm.js/*` packages aligned
 
 Use `rg` first when locating files. Read the closest example before adding new code.
 
 ## Default Workflow
 
-1. Identify the app/package:
+1. Inspect `package.json`, the lockfile, `farm.config.ts`, and `src/app`:
    - App config: `farm.config.ts`
    - Pages/layouts: `src/app/**`
    - Integration setup: `src/lib/integrations.ts`
    - Typed client export: `src/lib/api.ts`
    - Generated project types: `src/farm.d.ts`
-2. Match existing patterns in the nearest example.
-3. For provider integrations, verify both static types and production build.
-4. If touching Stripe/Prisma examples, ensure `prisma generate` runs immediately before `tsc` or `farm build`.
-5. Run focused checks first, then broad checks.
+2. Identify the selected renderer and deployment target before generating component code.
+3. Preserve the app's package manager, source layout, config, renderer, and deployment contract.
+4. Match existing patterns in the nearest current example.
+5. For provider integrations, verify both static types and the target-specific production build.
+6. If touching Prisma, run `prisma generate` immediately before `tsc` or `farm build`.
+7. Use `farm doctor` or `farm explain <path>` instead of guessing resolved runtime behavior.
 
 ## App Structure
 
@@ -46,10 +48,46 @@ Core imports:
 
 ```ts
 import type { PageProps, LayoutProps } from "@farm.js/core";
-import { Link, integrationClients } from "@farm.js/core/client";
+import { Link, createIntegrations } from "@farm.js/core/client";
 ```
 
 Use `"use client"` when a component uses React hooks, browser APIs, or client-only integration calls.
+
+## Create, Upgrade, and Renderers
+
+Follow the current beta channel for beta apps and use `pnpm create`, not `pnpm add`:
+
+```bash
+pnpm create @farm.js/app@beta my-app --template basic --typescript
+pnpm create @farm.js/app@beta my-app --template basic --renderer vue --typescript
+pnpm create @farm.js/app@beta --list-templates
+```
+
+React is the default renderer. The Basic and Better Auth starters support `react`, `preact`,
+`solid`, `vue`, and `svelte`; other integration starters may remain React-specific. Select a
+non-default renderer through its adapter in `farm.config.ts`:
+
+```ts
+import { defineConfig } from "@farm.js/core";
+import { vue } from "@farm.js/vue";
+
+export default defineConfig({ renderer: vue() });
+```
+
+React and Preact routes use `.tsx`/`.jsx`, Solid uses `.tsx`/`.jsx`, Vue uses `.vue`, and Svelte
+uses `.svelte`. Do not mix renderer component formats in one route tree. Use renderer-native client
+bindings from `@farm.js/solid/bindings`, `@farm.js/vue/bindings`, or
+`@farm.js/svelte/bindings`; keep APIs, middleware, secrets, storage, and deployment renderer-neutral.
+
+Upgrade every published Farm package together:
+
+```bash
+farm upgrade --beta
+farm upgrade --latest
+farm upgrade --beta --dry-run
+```
+
+Preserve local `workspace:`, `file:`, `link:`, `portal:`, and `catalog:` dependencies.
 
 ## Config Spec
 
@@ -69,16 +107,31 @@ export default defineConfig({
 
 Common config fields:
 
+- `extends`: compose local or package layers with project-first overrides
 - `srcDir`: app source directory; omit it to use the default `src`
+- `renderer`: React by default or a Preact, Solid, Vue, or Svelte adapter
+- `api`: typed browser API origin and base path
 - `experimental.serverComponents`: enables server component behavior
 - `integrations`: provider integrations object
+- `auth`: built-in email/password auth and sessions
+- `theme`: light, dark, and system behavior
 - `storage.mounts`: named storage instances
+- `migrations`: one-shot schema and provider commands
 - `i18n`: locale routes, detection signals, typed ICU catalogs, formatting, and RTL
 - `cron`: named portable UTC schedules mapped to GET API routes
+- `docs`, `md`, `mdx`: docs runtime, markdown mirrors, and MDX components
+- `deploy`: first-class target, Nitro preset, and output
+- `routeRules`: rendering, cache, redirects, CORS, and headers by route pattern
+- `security`: application CSP policy
+- `serverActions`: trusted origins and action body limits
+- `images`, `performance`: image policy and preload budgets
+- `openapi`: generated API reference
 - `plugins`: Farm plugins
 - `redirects()`, `headers()`, `rewrites()`: route behavior
 - `vite`: underlying Vite config
 - `suppressLintOnLink`: relax generated route typing for `Link href`
+
+Read `docs/src/app/docs/configuration/page.md` before adding an unfamiliar option.
 
 ## Routing Spec
 
@@ -86,8 +139,12 @@ Common config fields:
 - `src/app/about/page.tsx` maps to `/about`
 - `src/app/users/[id]/page.tsx` maps to `/users/:id`
 - `src/app/docs/[...slug]/page.tsx` maps to catch-all docs paths
+- `[[...slug]]` is optional catch-all; route groups do not appear in URLs
+- Named slots and intercepted routes are supported
 - Farm writes typed `Link href` declarations into `src/farm.d.ts`
 - Typed `href` supports query strings and hashes, for example `/users/123?tab=profile`
+- File boundaries include `loading`, `error`, and `not-found`
+- Route exports or route rules select dynamic, static, ISR, PPR, runtime, and cache behavior
 
 Page shape:
 
@@ -105,13 +162,12 @@ Layout shape:
 import type { LayoutProps } from "@farm.js/core";
 
 export default function RootLayout({ children }: LayoutProps) {
-  return (
-    <html lang="en">
-      <body>{children}</body>
-    </html>
-  );
+  return <main>{children}</main>;
 }
 ```
+
+Farm.js owns the `<html>`, `<head>`, and `<body>` document shell. Root layouts return application
+UI or a fragment; metadata exports and framework configuration control the managed document.
 
 ## Internationalization Spec
 
@@ -158,239 +214,92 @@ image URLs, and generated `lang`, `dir`, and `hreflang` markup. API routes stay 
 normal `/api/**` paths and can call the same server APIs. Read
 `docs/src/app/docs/internationalization/page.md` and `examples/i18n` before changing this feature.
 
-## Typed API Client Spec
+## Typed APIs and Server Data
 
-For app API routes, use `createAPIClient` from `@farm.js/core/client`.
+API routes live under `src/app/api/**/route.ts`. Prefer `createEndpoint` from
+`@farm.js/core/api` when input validation and generated caller types matter; plain HTTP method
+exports remain supported. Endpoint input accepts Zod or standard-schema validators for body, query,
+and headers. Farm also supports typed HTTP `QUERY`, multipart uploads, and streamed JSON results.
 
-For integration APIs, prefer `integrationClients<AppIntegrations>()`:
+Use `createAPIClient` from `@farm.js/core/client` for app routes. Calls such as
+`api.products.get(...)` resolve to `{ data, error }` results for HTTP failures and support caching,
+invalidation, retries, callbacks, optimistic updates, `useMutation`, and `useFetcher`.
+
+For integration APIs, use `createIntegrations<AppIntegrations>()` and preserve the configured
+namespace:
 
 ```ts
-import { integrationClients } from "@farm.js/core/client";
+import { createIntegrations } from "@farm.js/core/client";
 import type { AppIntegrations } from "./integrations";
 
-export const { api, apiClient } = integrationClients<AppIntegrations>();
+export const { api, apiClient } = createIntegrations<AppIntegrations>();
 ```
 
-Client calls resolve to result objects instead of throwing for HTTP errors:
+Use `createServerFn` for typed mutations/actions and `createServerQuery` for typed reads,
+deduplication, prefetch, stale-while-revalidate, focus/reconnect refresh, and structured invalidation.
+Browser server query/action references require Farm's documented server-function transform. Without
+it, keep the handler server-only and expose an API route instead.
 
-```ts
-const result = await apiClient.billing.products();
-
-if (result.error) {
-  console.error(result.error.message);
-} else {
-  console.log(result.data);
-}
-```
-
-Provider helpers may expose friendly methods like `apiClient.billing.products()`. Generic integration route APIs may be method-nested, such as `apiClient.auth.login.post({ body })`. Check the generated usage in the closest example.
+Parse route and search values with `loadRouteParams`, `loadSearchParams`, and the parsers in
+`@farm.js/core/query/server`. React client URL state uses `useQueryState` or `useQueryStates` from
+`@farm.js/core/query/client`. Preserve repeated values with `asArrayOf`.
 
 ## Integration Spec
 
-Define app integrations in `src/lib/integrations.ts`, then attach them in `farm.config.ts`.
+Define integrations in a server-only module and attach the registry in `farm.config.ts`:
 
 ```ts
+import { stripe } from "@farm.js/stripe";
+
 export const appIntegrations = {
-  billing: stripe(...),
-  auth: farmBetterAuth(...),
+  billing: stripe({
+    secretKey: process.env.STRIPE_SECRET_KEY,
+    webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
+  }),
 } as const;
 
 export type AppIntegrations = typeof appIntegrations;
 ```
 
-Available integration families in this repo include:
+The object key is the application namespace, so `billing` becomes `api.billing`. An integration
+may contribute routes/endpoints, typed callers, middleware, React providers, database schemas,
+validated config, plugins, setup/ready/dispose hooks, and runtime logs. Prefer `integrationRoute.*`
+or `endpoint.*` when the integration owns handlers and should generate caller types. An explicit
+`api` field describes callers only; it does not mount HTTP routes.
 
-- Auth: Auth0, AuthJS, Better Auth, Clerk, Supabase, WorkOS
-- Billing/payments: Stripe, Polar, Autumn
-- Email: Resend
-- Jobs: local jobs, trigger, Inngest
+## Provider Integrations and Auth
 
-When building a new integration, use core primitives from `@farm.js/core`:
+New apps import dedicated adapter packages such as `@farm.js/stripe`, `@farm.js/clerk`,
+`@farm.js/resend`, or `@farm.js/jobs`. The older `@farm.js/integrations/*` paths are
+compatibility re-exports, not the preferred authoring surface.
 
-- `defineIntegration`
-- `integrationRoute`
-- `FarmIntegrationAPI`
-- `FarmIntegrationHandlerContext`
-- `FarmIntegrationLogEvent`
-
-Follow existing provider code in `packages/farm-integrations/src/<provider>`.
-
-Integration routes can validate body and query input with Zod-compatible schemas:
-
-```ts
-import { z } from "zod";
-import { defineIntegration, integrationRoute } from "@farm.js/core";
-
-export const localDemo = defineIntegration({
-  category: "custom",
-  type: "local-demo",
-  instance: {},
-  routes: [
-    integrationRoute.post("/api/local-demo/message", {
-      input: {
-        body: z.object({
-          message: z.string().min(1),
-        }),
-        query: z.object({
-          count: z.coerce.number().int().positive().optional(),
-        }),
-      },
-      handler(_request, context) {
-        return Response.json({
-          message: context.input.body?.message,
-          count: context.input.query?.count,
-        });
-      },
-    }),
-  ],
-});
-```
-
-Use the CLI to scaffold an app integration registry and provider component:
+Use the CLI to keep package versions and wiring aligned:
 
 ```bash
 farm add integration --list
 farm add integration stripe
-farm add integration supabase --key auth
-farm add integration resend --file src/lib/integrations.ts
+farm add integration stripe --ui
+farm add integration jobs-trigger
 ```
 
-The command creates or updates `src/lib/integrations.ts`, adds a provider component under
-`src/lib/integrations/`, wires `farm.config.ts` when it can do so safely, and adds
-`@farm.js/integrations` to `package.json`.
+Current integration families include AI, Stripe, Autumn, Polar, Resend, Trigger.dev, Inngest,
+Unkey, Cloudflare agents, Eve, Auth0, Auth.js, Better Auth, Clerk, Supabase, WorkOS, custom
+integrations, UI registries, and ORM-backed data.
 
-## Stripe Integration Spec
+Provider adapters support two ownership modes: pass credentials so the adapter constructs its
+default SDK, or pass an app-owned vendor client through `instance`. Keep the vendor instance in a
+server-only module. Export the integration registry type so `createIntegrations` can infer callers.
 
-Simple checkout example: `examples/stripe-integration`.
+For ordinary email/password auth, install `@farm.js/auth` and use top-level `auth: true`. Read
+sessions through `auth.session()` or `auth.user()` from `@farm.js/auth/server`, and run
+`farm auth migrate` before production traffic. Use an explicit auth integration when the app must
+own Better Auth plugins/adapters or a provider-specific SDK. Never configure top-level `auth` and
+`integrations.auth` together.
 
-Server setup:
-
-```ts
-import Stripe from "stripe";
-import type { FarmIntegrationLogEvent } from "@farm.js/core";
-import { stripe, type StripeWebhookEvent } from "@farm.js/integrations/stripe";
-import { stripeCatalog } from "./stripe-catalog.ts";
-
-const stripeInstance = new Stripe(process.env.STRIPE_SECRET_KEY!);
-
-export const appIntegrations = {
-  billing: stripe({
-    products: stripeCatalog,
-    instance: stripeInstance,
-    webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
-    log(event: FarmIntegrationLogEvent) {
-      console.log("[stripe-example]", event.phase, event.route?.path || "none");
-    },
-    async onWebhook(event: StripeWebhookEvent) {
-      console.log("[stripe-example:webhook]", event.type, event.id);
-    },
-  }),
-} as const;
-```
-
-Catalog shape:
-
-```ts
-import type { StripeIntegrationProduct } from "@farm.js/integrations/stripe/client";
-
-export const stripeCatalog: StripeIntegrationProduct[] = [
-  {
-    id: "pro-yearly",
-    mode: "subscription",
-    interval: "year",
-    quantity: 1,
-    priceId: process.env.STRIPE_PRO_YEARLY_PRICE_ID,
-  },
-  {
-    id: "supporter-pack",
-    mode: "payment",
-    quantity: 1,
-    priceId: process.env.STRIPE_SUPPORTER_PACK_PRICE_ID,
-  },
-];
-```
-
-Client checkout:
-
-```ts
-const products = await apiClient.billing.products();
-
-const checkout = await apiClient.billing.checkout({
-  body: {
-    productId: "pro-yearly",
-    customerEmail: "demo@farmjs.dev",
-    successPath: "/success",
-    cancelPath: "/cancel",
-  },
-});
-
-if (checkout.data?.redirectTo) {
-  window.location.assign(checkout.data.redirectTo);
-}
-```
-
-Routes registered by the Stripe integration:
-
-```text
-/billing/products
-/billing/checkout
-/billing/session
-/billing/portal
-/billing/webhook
-```
-
-Full billing examples add status, features, limits, usage, current charges, invoices, trials, seats, and storage:
-
-```text
-examples/stripe-integrations/sqlite
-examples/stripe-integrations/prisma
-examples/stripe-integrations/prisma-org
-examples/stripe-integrations/drizzle
-```
-
-Full billing setup uses:
-
-```ts
-billing: {
-  resolveOwner,
-  plans,
-  products,
-  storage, // or hooks
-  hooks,
-}
-```
-
-Storage adapters:
-
-```ts
-import {
-  sqliteStorageAdapter,
-  prismaStorageAdapter,
-  drizzleStorageAdapter,
-} from "@farm.js/integrations/stripe";
-```
-
-Stripe environment:
-
-- `STRIPE_SECRET_KEY`
-- `STRIPE_WEBHOOK_SECRET`
-- `APP_BASE_URL` or provider-specific base URL
-- Product price ids such as `STRIPE_PRO_YEARLY_PRICE_ID`
-
-With dummy Stripe keys, route registration and local error handling can be tested, but hosted Checkout/webhooks require real Stripe test credentials.
-
-## Auth Integration Notes
-
-Read the matching example before editing:
-
-- `examples/auth0-integration`
-- `examples/authjs-integration`
-- `examples/farm-auth`
-- `examples/clerk-integration`
-- `examples/supabase-integration`
-- `examples/workos-integration`
-
-Auth integrations usually provide both server route registration and client API helpers. Keep env validation in server-only setup files. Avoid importing server SDKs into `"use client"` files.
+Custom integrations use `defineIntegration`, `integrationRoute` or `endpoint`, schema-validated
+config, lifecycle hooks, middleware, providers, database schemas, and typed caller contracts. Read
+`docs/src/app/docs/integrations/custom/page.md` and the closest dedicated provider guide before
+implementing one.
 
 ## Storage Spec
 
@@ -467,57 +376,67 @@ export const plugin = definePlugin({
 
 Built-in server plugins are imported from `@farm.js/core/plugin/server`, including logger and compression helpers. Plugins run in order; use `enforce: "pre"` or `enforce: "post"` when order matters.
 
+## Content, Runtime, and Deployment
+
+- Configure fonts through Farm so local or remote assets are self-hosted and hashed.
+- Configure `theme` for no-flash light/dark/system rendering and typed client/server access.
+- Use Farm image helpers plus the `images` allowlist and format policy for optimization.
+- Use `docs` for human docs, shared search, markdown, `llms.txt`, sitemap, robots, and agent APIs.
+- Use `md`/`mdx` for page mirrors and content routes; use `openapi` for API references.
+- Use `after()` only for short post-response work and a jobs integration for durable work.
+- Configure OpenTelemetry and Farm runtime events for correlated traces.
+
+`farm preview` exposes an already-running local app; it does not build or deploy. Bind remote
+sandbox development servers with `farm dev --host 0.0.0.0 --port <port>`. For deployment,
+prefer `deploy.target` for first-class targets and `deploy.preset` only for Nitro pass-through. A
+preset overrides a target. Use `farm deploy --plan` before shipping and run the exact target build.
+
+Current diagnostic and migration commands include:
+
+```bash
+farm doctor
+farm doctor --offline
+farm doctor --fix
+farm explain /products/42
+farm generate --check
+farm migrate inspect
+farm migrate next --write
+farm migrate tanstack --write
+farm telemetry status
+```
+
 ## Verification Commands
 
-Focused package checks:
+For an application, use its declared package manager and scripts:
+
+```bash
+pnpm farm generate --check
+pnpm typecheck
+pnpm build
+```
+
+Run the target-specific build when deployment behavior matters. For framework work, start focused
+and then broaden:
 
 ```bash
 pnpm --filter @farm.js/core test
-pnpm --filter @farm.js/integrations type-check
-pnpm --filter @farm.js/integrations build
+pnpm --filter @farm.js/cli test
 pnpm build
 pnpm lint
 ```
 
-Example checks:
-
-```bash
-pnpm --dir examples/stripe-integration type-check
-pnpm --dir examples/stripe-integration build
-pnpm --dir examples/stripe-integrations/sqlite type-check
-pnpm --dir examples/stripe-integrations/sqlite build
-```
-
-Prisma examples should generate Prisma client before typecheck/build:
-
-```bash
-pnpm --dir examples/stripe-integrations/prisma exec prisma generate
-pnpm --dir examples/stripe-integrations/prisma build
-
-pnpm --dir examples/stripe-integrations/prisma-org exec prisma generate
-pnpm --dir examples/stripe-integrations/prisma-org build
-```
-
-Smoke a Stripe example locally:
-
-```bash
-APP_BASE_URL=http://localhost:3010 \
-STRIPE_SECRET_KEY=sk_test_dummy \
-STRIPE_WEBHOOK_SECRET=whsec_dummy \
-pnpm --dir examples/stripe-integration exec farm dev --port 3010
-
-curl -i http://localhost:3010/
-curl -i http://localhost:3010/billing/products
-```
-
-Expected with dummy keys: homepage returns `200`; `/billing/products` reaches Stripe and returns an invalid-key error.
+Use the nearest current example's scripts instead of remembered example paths. If Prisma is involved,
+run its client generation immediately before type checking or building.
 
 ## Common Pitfalls
 
-- Import `Link` and integration clients from `@farm.js/core/client` unless the local example uses the root export.
+- Import `Link`, `createAPIClient`, and `createIntegrations` from current documented client entries.
 - Do not put server SDKs or secrets in `"use client"` modules.
-- Keep `AppIntegrations` exported from integration setup so `integrationClients<AppIntegrations>()` can infer types.
+- Keep `AppIntegrations` exported so `createIntegrations<AppIntegrations>()` can infer types.
 - For Supabase/custom route APIs, method calls may be nested, for example `.login.post(...)`, not `.login(...)`.
+- Do not mix renderer component formats, top-level auth with `integrations.auth`, or mismatched Farm package versions.
+- Do not import server query handlers into the browser without the server-function transform.
+- Do not use compatibility `@farm.js/integrations/*` imports for new code when a dedicated adapter exists.
 - Cron is not a durable workflow engine; protect production routes with `CRON_SECRET` and design handlers for repeated or overlapping delivery.
 - In monorepos with pnpm and Prisma, generated clients can be stale or shared; run `prisma generate` immediately before builds.
 - Run `pnpm format` before `pnpm lint` if `oxfmt --check` fails.
