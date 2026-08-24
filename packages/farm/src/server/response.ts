@@ -1,6 +1,31 @@
 import { once } from "node:events";
 import type { ServerResponse } from "node:http";
 
+/**
+ * Waits until the response can accept more writes. Resolves false when the
+ * client is gone (close or error): a disconnected socket never emits drain,
+ * so waiting on drain alone leaks the pending handler, its reader lock, and
+ * the response body for the life of the process.
+ */
+async function waitForWritable(res: ServerResponse): Promise<boolean> {
+  if (res.writableEnded || res.destroyed) {
+    return false;
+  }
+
+  const abort = new AbortController();
+  try {
+    return await Promise.race([
+      once(res, "drain", { signal: abort.signal }).then(() => true),
+      once(res, "close", { signal: abort.signal }).then(() => false),
+    ]);
+  } catch {
+    // events.once rejects when the emitter emits "error".
+    return false;
+  } finally {
+    abort.abort();
+  }
+}
+
 export async function sendWebResponse(res: ServerResponse, response: Response): Promise<void> {
   res.statusCode = response.status;
 
@@ -34,6 +59,13 @@ export async function sendWebResponse(res: ServerResponse, response: Response): 
 
   try {
     while (true) {
+      if (res.destroyed) {
+        // The client disconnected mid-response; drop the rest of the body so
+        // the handler can return.
+        await reader.cancel().catch(() => {});
+        return;
+      }
+
       const { done, value } = await reader.read();
       if (done) {
         break;
@@ -44,7 +76,10 @@ export async function sendWebResponse(res: ServerResponse, response: Response): 
       }
 
       if (!res.write(value)) {
-        await once(res, "drain");
+        if (!(await waitForWritable(res))) {
+          await reader.cancel().catch(() => {});
+          return;
+        }
       }
     }
 
