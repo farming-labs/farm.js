@@ -217,7 +217,14 @@ function normalizeDocsApiSlug(
     slug = slug.slice(entry.length + 1);
   }
 
-  return decodeURIComponent(slug).replace(/\.(mdx?|markdown)$/i, "");
+  let decoded = slug;
+  try {
+    decoded = decodeURIComponent(slug);
+  } catch {
+    // Malformed percent-encoding resolves to a non-matching slug (404),
+    // not an exception out of the handler.
+  }
+  return decoded.replace(/\.(mdx?|markdown)$/i, "");
 }
 
 function getDocsAPIPathTarget(request: Request): DocsAPIPathTarget {

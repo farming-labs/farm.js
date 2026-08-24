@@ -184,6 +184,21 @@ describe("createFarmDocsHandler", () => {
     return { root, docs, docsDir };
   }
 
+  it("answers malformed percent-encoded docs paths instead of throwing", async () => {
+    const { root, docs } = await createDocsFixture();
+    const handler = createFarmDocsHandler(docs, { root, srcDir: "src" });
+
+    // decodeURIComponent throws on these; the handler must resolve them to a
+    // non-matching slug rather than crash the process (#481).
+    const response = await handler(
+      new Request("http://farm.test/docs/caf%E9", {
+        headers: { accept: "text/html" },
+      }),
+    );
+
+    expect(response == null || response.status === 404).toBe(true);
+  });
+
   it("serves docs markdown files as HTML", async () => {
     const { root, docs } = await createDocsFixture();
     const handler = createFarmDocsHandler(docs, { root, srcDir: "src" });
@@ -759,6 +774,15 @@ describe("createDocsAPI", () => {
     );
     return root;
   }
+
+  it("answers malformed percent-encoded docs API paths instead of throwing", async () => {
+    const root = await createDocsFixture();
+    const handler = createFarmDocsAPIHandler({ rootDir: root, srcDir: "src" });
+
+    const response = await handler(new Request("http://farm.test/api/docs/%E0.md"));
+    expect(response).not.toBeNull();
+    expect(response!.status).toBe(404);
+  });
 
   it("creates a built-in Farm docs API handler for automatic /api/docs routing", async () => {
     const root = await createDocsFixture();
