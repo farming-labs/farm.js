@@ -13,9 +13,11 @@ export default function HomePage() {
           Farm.js Playground
         </h1>
         <p className="text-[15px] leading-relaxed text-neutral-400">
-          A full-stack React framework: server rendering, Server Actions, and
-          typed app-directory routing on Vite. This page rendered on the server
-          at <code className="text-neutral-200">{renderedAt}</code>. Edit{" "}
+          A product-integrated full-stack framework on Vite: typesafe APIs
+          and server functions, integrations as typed modules, and an
+          experimental compiler that turns component updates into direct DOM
+          patches. This page rendered on the server at{" "}
+          <code className="text-neutral-200">{renderedAt}</code>. Edit{" "}
           <code className="text-neutral-200">src/app/page.tsx</code> and watch
           it hot-reload.
         </p>
