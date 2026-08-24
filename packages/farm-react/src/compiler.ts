@@ -1390,11 +1390,36 @@ function analyzeKeyedRowsContainer(
   return analyzeKeyedRowChild(children[0], statesByValue, safeGlobals, listNames);
 }
 
+function isStaticKeyedRangeSibling(
+  element: t.JSXElement,
+  statesByValue: ReadonlyMap<string, StateBinding>,
+  safeGlobals: ReadonlySet<string>,
+): boolean {
+  for (const child of meaningfulJsxChildren(element)) {
+    if (t.isJSXFragment(child)) return false;
+    if (t.isJSXElement(child)) {
+      if (!isHostElement(child) || !isStaticKeyedRangeSibling(child, statesByValue, safeGlobals)) {
+        return false;
+      }
+      continue;
+    }
+    if (
+      t.isJSXExpressionContainer(child) &&
+      !t.isJSXEmptyExpression(child.expression) &&
+      !isTextExpression(child.expression, statesByValue, safeGlobals)
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function analyzeKeyedRangesContainer(
   container: t.JSXElement,
   statesByValue: ReadonlyMap<string, StateBinding>,
   safeGlobals: ReadonlySet<string>,
   listNames: ReadonlySet<string>,
+  allowSingleRange = false,
 ): { ranges: KeyedRangePlan[]; trailing: number; dependencies: number[] } | undefined {
   if (
     container.openingElement.attributes.some(
@@ -1409,7 +1434,7 @@ function analyzeKeyedRangesContainer(
   }
 
   const children = meaningfulJsxChildren(container);
-  if (children.length < 2) return undefined;
+  if (children.length < (allowSingleRange ? 1 : 2)) return undefined;
   const ranges: KeyedRangePlan[] = [];
   const dependencies = new Set<number>();
   let staticBefore = 0;
@@ -1432,16 +1457,7 @@ function analyzeKeyedRangesContainer(
       continue;
     }
     if (!t.isJSXElement(child) || !isHostElement(child)) return undefined;
-    let hostOnly = true;
-    t.traverseFast(child, (node) => {
-      if (
-        t.isJSXFragment(node) ||
-        (t.isJSXElement(node) && node !== child && !isHostElement(node))
-      ) {
-        hostOnly = false;
-      }
-    });
-    if (!hostOnly) return undefined;
+    if (!isStaticKeyedRangeSibling(child, statesByValue, safeGlobals)) return undefined;
     staticBefore += 1;
   }
   if (ranges.length === 0) return undefined;
@@ -2589,6 +2605,29 @@ function analyzeComposableBlocks(
     return { dependencies };
   };
 
+  const rootRanges = analyzeKeyedRangesContainer(root, statesByValue, safeGlobals, listNames, true);
+  if (rootRanges) {
+    plans.push({
+      kind: "keyed-ranges",
+      id: nextId++,
+      dependencies: rootRanges.dependencies,
+      source: root,
+      ranges: rootRanges.ranges,
+      trailing: rootRanges.trailing,
+    });
+    for (const range of rootRanges.ranges) {
+      if (t.isJSXElement(range.source)) ownedElements.add(range.source);
+      else keyedExpressions.add(range.source);
+    }
+    return {
+      plans,
+      componentElements,
+      conditionalExpressions,
+      ownedElements,
+      keyedExpressions,
+    };
+  }
+
   const result = visitHost(root, undefined, false);
   if (result.reason) return { reason: result.reason };
   return {
@@ -2636,6 +2675,10 @@ function lowerComposableBlocks(
   const planBySource = new Map<t.Node, ComposableBlockPlan>(
     plans.map((plan) => [plan.source, plan]),
   );
+  const rootPlan = planBySource.get(root);
+  if (rootPlan?.kind === "keyed-ranges") {
+    return keyedRangesBoundary(blockRuntime, rootPlan);
+  }
 
   const visit = (element: t.JSXElement): void => {
     element.children = element.children.map((child) => {

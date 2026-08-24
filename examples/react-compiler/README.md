@@ -41,7 +41,7 @@ assertions, checks for console/runtime errors and horizontal overflow, saves scr
 | Editable keyed rows         | caret, fields, identity, and a 256-row load; executions `0` | —                                           | Controlled form properties update by key without rerunning the owner.  |
 | Conditional row blocks      | only changed keyed branches refresh; owner executions `0`  | —                                           | Per-key snapshots isolate logical and ternary row content.              |
 | Explicit `List`             | stateful rows reorder, update executions `0`            | —                                              | React preserves custom-row state by key inside the isolated boundary.  |
-| Keyed DOM ranges            | two ranges, static-shell identity, three LIS moves, 1,024-row load | —                                    | Multiple host lists reconcile independently inside one container.      |
+| Root keyed ranges           | exact card root, two ranges, three LIS moves, 1,024-row load | —                                          | Multiple host lists reconcile without an artificial outer wrapper.     |
 | Calculated style bindings   | value `6`, progress `50%`, update executions `0`        | —                                              | Safe calls and individual CSS properties use prepared dependencies.    |
 | Controlled form bindings   | textarea/select/checkbox update, executions `0`         | —                                              | Form properties and textarea selection stay coherent.                  |
 | Logical conditional block  | stable branch patches, mounts, and unmounts; executions `0` | —                                           | A proven host branch updates without React reconciliation.             |
@@ -86,8 +86,8 @@ use the same compiler-owned row path. A custom stateful row such as `<Row item={
 React-owned keyed boundary so React preserves its Hooks, events, lifecycle, and Fiber state. The
 outer compiled component can still avoid rerunning.
 
-The compiler-owned path supports one dedicated keyed map/`List`, or multiple non-interactive host
-ranges separated by direct host siblings in one nested container. A collection may chain
+The compiler-owned path supports one dedicated keyed map/`List`, or one or more non-interactive host
+ranges in a nested or component-root container. A collection may chain
 synchronous inline `filter`, `slice`, `toSorted`, and `toReversed` operations. The compiler records
 the state dependencies used by those operations and reruns the pipeline only when one changes; it
 still performs the necessary filtering or sorting. Mutating methods, external or async callbacks,
@@ -119,11 +119,11 @@ commit. This is why row conditionals do not use the manual insertion or LIS path
 components, fragments, refs, SVG, nested blocks, or a conditional mixed with another child in the
 same slot use the existing React-owned list fallback.
 
-The `04G` card places two non-interactive maps between a shared header, divider, and footer. React
-renders the original `ul`; Farm adopts the direct element ranges after mount without inserting a
-wrapper or hydration marker. The production test rotates both ranges, observes three total LIS
-moves, preserves both surviving rows and all static siblings, crosses empty ranges, loads 1,024
-rows, and records zero owner update executions.
+The `04G` card is itself the returned host root. It places two non-interactive maps between its
+header, metrics, labels, and footer. React renders that original `article`; Farm adopts its direct
+element ranges after mount without inserting a wrapper or hydration marker. The production test
+rotates both ranges, observes three total LIS moves, preserves the root, surviving rows, and all
+static siblings, crosses empty ranges, loads 1,024 rows, and records zero owner update executions.
 
 Non-inline or async row handlers, unsupported form shapes, custom components, fragments, refs, SVG,
 interactive ranges beside siblings, and index or missing keys use the React-owned list path.

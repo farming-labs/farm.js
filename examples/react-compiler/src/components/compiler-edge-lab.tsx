@@ -733,15 +733,20 @@ export function KeyedRangeExperiment() {
   const total = primary.length + secondary.length;
 
   return (
-    <article className="edge-card" data-experiment="keyed-ranges">
-      <header>
+    <article
+      className="edge-card keyed-range-root"
+      data-experiment="keyed-ranges"
+      data-list="ranges"
+      data-rows={total}
+    >
+      <header data-static="range-header">
         <span className="experiment-number">04G</span>
         <div>
-          <h3>Keyed DOM ranges</h3>
-          <p>Two lists move independently while their shared header, divider, and footer stay put.</p>
+          <h3>Root keyed ranges</h3>
+          <p>The card itself owns two lists without an extra wrapper, marker, or React rerender.</p>
         </div>
       </header>
-      <dl className="compact-metrics" aria-live="polite">
+      <dl className="compact-metrics" data-static="range-metrics" aria-live="polite">
         <div>
           <dt>Ranges</dt>
           <dd data-metric="ranges">2</dd>
@@ -757,73 +762,71 @@ export function KeyedRangeExperiment() {
           </dd>
         </div>
       </dl>
-      <ul className="keyed-range-list" data-list="ranges" data-rows={total}>
-        <li className="keyed-range-static" data-static="range-header">
-          PRIMARY RANGE
-        </li>
-        {primary.map((item, index) => (
-          <li data-index={index} data-key={item.id} data-range="primary" key={item.id}>
-            {index + 1}. {item.label}
-          </li>
-        ))}
-        <li className="keyed-range-static" data-static="range-divider">
-          SECONDARY RANGE
-        </li>
-        {secondary.map((item, index) => (
-          <li data-index={index} data-key={item.id} data-range="secondary" key={item.id}>
-            {index + 1}. {item.label}
-          </li>
-        ))}
-        <li className="keyed-range-static" data-static="range-footer">
-          {total} ROWS / STATIC SHELL
-        </li>
-      </ul>
-      <div className="button-row">
-        <button
-          data-action="rotate-ranges"
-          onClick={() => {
-            setPrimary((items) =>
-              items.length > 1
-                ? [items[items.length - 1], ...items.slice(0, items.length - 1)]
-                : items,
-            );
-            setSecondary((items) => [...items].reverse());
-          }}
-          type="button"
-        >
-          Rotate both ranges
-        </button>
-        <button
-          data-action="clear-ranges"
-          onClick={() => {
-            setPrimary([]);
-            setSecondary([]);
-          }}
-          type="button"
-        >
-          Empty ranges
-        </button>
-        <button
-          data-action="stress-ranges"
-          onClick={() => {
-            setPrimary(
-              Array.from({ length: 512 }, (_, index) => ({
-                id: `primary-${index}`,
-                label: `Primary ${index}`,
-              })),
-            );
-            setSecondary(
-              Array.from({ length: 512 }, (_, index) => ({
-                id: `secondary-${index}`,
-                label: `Secondary ${index}`,
-              })),
-            );
-          }}
-          type="button"
-        >
-          Load 1,024 rows
-        </button>
+      <div className="keyed-range-static" data-static="range-primary-label">
+        PRIMARY RANGE
       </div>
+      {primary.map((item, index) => (
+        <div data-index={index} data-key={item.id} data-range="primary" key={item.id}>
+          {index + 1}. {item.label}
+        </div>
+      ))}
+      <div className="keyed-range-static" data-static="range-divider">
+        SECONDARY RANGE
+      </div>
+      {secondary.map((item, index) => (
+        <div data-index={index} data-key={item.id} data-range="secondary" key={item.id}>
+          {index + 1}. {item.label}
+        </div>
+      ))}
+      <footer className="keyed-range-footer" data-static="range-footer">
+        <span data-range-summary>{total} ROWS / ROOT SHELL</span>
+        <div className="button-row">
+          <button
+            data-action="rotate-ranges"
+            onClick={() => {
+              setPrimary((items) =>
+                items.length > 1
+                  ? [items[items.length - 1], ...items.slice(0, items.length - 1)]
+                  : items,
+              );
+              setSecondary((items) => [...items].reverse());
+            }}
+            type="button"
+          >
+            Rotate both ranges
+          </button>
+          <button
+            data-action="clear-ranges"
+            onClick={() => {
+              setPrimary([]);
+              setSecondary([]);
+            }}
+            type="button"
+          >
+            Empty ranges
+          </button>
+          <button
+            data-action="stress-ranges"
+            onClick={() => {
+              setPrimary(
+                Array.from({ length: 512 }, (_, index) => ({
+                  id: `primary-${index}`,
+                  label: `Primary ${index}`,
+                })),
+              );
+              setSecondary(
+                Array.from({ length: 512 }, (_, index) => ({
+                  id: `secondary-${index}`,
+                  label: `Secondary ${index}`,
+                })),
+              );
+            }}
+            type="button"
+          >
+            Load 1,024 rows
+          </button>
+        </div>
+      </footer>
     </article>
   );
 }

@@ -109,7 +109,7 @@ describe("React AOT keyed list compiler", () => {
     expect(result.diagnostics[0]?.reason).toMatch(reason);
   });
 
-  it("isolates a keyed list alongside static siblings", async () => {
+  it("compiles a component-root keyed range alongside static siblings", async () => {
     const result = await compile(`
       import { useState } from "react";
       export function MixedList() {
@@ -126,7 +126,8 @@ describe("React AOT keyed list compiler", () => {
     expect(result.compiled).toEqual(["MixedList"]);
     expect(result.diagnostics).toEqual([]);
     expect(result.code).toContain("<li>Static row</li>");
-    expect(result.code).toContain("farmBlocks.KeyedList");
+    expect(result.code).toContain("farmBlocks.KeyedRanges");
+    expect(result.code).not.toContain("farmBlocks.KeyedList");
     expect(result.code).toContain("id={0}");
   });
 

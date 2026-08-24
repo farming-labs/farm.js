@@ -655,14 +655,14 @@ try {
   assert.equal(editableListFinalExecutions - editableListInitialExecutions, 0);
 
   const keyedRanges = '[data-experiment="keyed-ranges"]';
+  const keyedRangesList = `${keyedRanges}[data-list="ranges"]`;
   const keyedRangesInitialExecutions = await readNumber(
     page,
     `${keyedRanges} [data-metric="executions"]`,
   );
   await page.evaluate(() => {
-    const list = document.querySelector(
-      '[data-experiment="keyed-ranges"] [data-list="ranges"]',
-    );
+    const list = document.querySelector('[data-experiment="keyed-ranges"][data-list="ranges"]');
+    window.__farmRangeRoot = list;
     window.__farmRangeHeader = list.querySelector('[data-static="range-header"]');
     window.__farmRangeDivider = list.querySelector('[data-static="range-divider"]');
     window.__farmRangeFooter = list.querySelector('[data-static="range-footer"]');
@@ -686,14 +686,16 @@ try {
     .evaluateAll((rows) => rows.map((row) => row.getAttribute("data-key")));
   assert.deepEqual(primaryRangeOrder, ["d", "a", "b", "c"]);
   assert.deepEqual(secondaryRangeOrder, ["z", "y", "x"]);
-  assert.equal(
-    await page.locator(`${keyedRanges} [data-list="ranges"]`).getAttribute("data-rows"),
-    "7",
-  );
+  assert.equal(await page.locator(keyedRangesList).getAttribute("data-rows"), "7");
+  assert.equal(await page.locator(keyedRangesList).evaluate((root) => root.tagName), "ARTICLE");
   assert.equal(await page.evaluate(() => window.__farmRangeMoves), 3);
   assert.equal(
     await page.evaluate(
       () =>
+        window.__farmRangeRoot ===
+          document.querySelector(
+            '[data-experiment="keyed-ranges"][data-list="ranges"]',
+          ) &&
         window.__farmRangeHeader ===
           document.querySelector(
             '[data-experiment="keyed-ranges"] [data-static="range-header"]',
@@ -716,22 +718,12 @@ try {
   );
   await page.locator(`${keyedRanges} [data-action="clear-ranges"]`).click();
   await assertText(page, `${keyedRanges} [data-metric="rows"]`, "0");
-  assert.equal(
-    await page.locator(`${keyedRanges} [data-list="ranges"]`).getAttribute("data-rows"),
-    "0",
-  );
+  assert.equal(await page.locator(keyedRangesList).getAttribute("data-rows"), "0");
   assert.equal(await page.locator(`${keyedRanges} [data-key]`).count(), 0);
-  await assertText(
-    page,
-    `${keyedRanges} [data-static="range-footer"]`,
-    "0 ROWS / STATIC SHELL",
-  );
+  await assertText(page, `${keyedRanges} [data-range-summary]`, "0 ROWS / ROOT SHELL");
   await page.locator(`${keyedRanges} [data-action="stress-ranges"]`).click();
   await assertText(page, `${keyedRanges} [data-metric="rows"]`, "1024");
-  assert.equal(
-    await page.locator(`${keyedRanges} [data-list="ranges"]`).getAttribute("data-rows"),
-    "1024",
-  );
+  assert.equal(await page.locator(keyedRangesList).getAttribute("data-rows"), "1024");
   assert.equal(await page.locator(`${keyedRanges} [data-key]`).count(), 1024);
   const keyedRangesFinalExecutions = await readNumber(
     page,
@@ -1061,7 +1053,8 @@ try {
               keyedRangesFinalExecutions - keyedRangesInitialExecutions,
             staticSiblingIdentityPreserved: true,
             keyedDomIdentityPreserved: true,
-            owner: "Farm keyed ranges",
+            rootHostIdentityPreserved: true,
+            owner: "Farm root keyed ranges",
           },
           derivedCollection: {
             order: derivedCollectionOrder,

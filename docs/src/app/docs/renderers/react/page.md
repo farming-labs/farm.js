@@ -735,9 +735,9 @@ The compiler uses four keyed-list tiers:
 
 1. A dedicated nested host container with one direct map or one `List`, returning a non-interactive
    host-only row, becomes compiler-owned keyed row instances. Farm patches bindings and uses LIS.
-2. A nested host container with static host siblings and one or more non-interactive keyed host
-   ranges becomes one compiler-owned range block. Farm preserves the static segments and applies
-   the same row descriptors and LIS reconciliation independently inside each range.
+2. A nested or component-root host container with one or more non-interactive keyed host ranges
+   becomes one compiler-owned range block. Farm preserves any static segments and applies the same
+   row descriptors and LIS reconciliation independently inside each range.
 3. The dedicated single-list shape with eligible inline events or row-local conditional slots
    keeps React event and structural ownership, while Farm patches same-key row bindings and refreshes
    only changed conditional boundaries.
@@ -772,14 +772,19 @@ update in one range cannot reorder another range or its surrounding static eleme
 attributes, and styles inside the static host siblings continue to use the outer component's direct
 bindings.
 
+The `ul` above may be the component's returned root. The generated root range block forwards that
+physical `ul` to the outer binding runtime, so stateful root attributes and styles still patch the
+same element. A root containing only one eligible map or `List` is supported as a range with no
+static segments. The compiler does not insert an extra parent merely to host the block.
+
 The first range-owned contract is deliberately non-interactive. Every meaningful direct child of
 the container must be either a lowercase host element or an eligible keyed map/`List`; every range
-must return a statically known host tree without events or row-local conditional slots. The
-component's outermost return container, fragments, components between ranges, interactive or
-controlled rows, and nested dynamic structures use the existing React-owned boundaries. Parent
-prop or compatible Fast Refresh changes remount this one range container through React so static
-markup cannot become stale. Duplicate keys or a mount/hydration shape that cannot be adopted also
-switch the complete container to React before later updates.
+must return a statically known host tree without events or row-local conditional slots. Fragments,
+components between ranges, interactive or controlled rows, and nested dynamic structures use the
+existing React-owned boundaries. Parent prop or compatible Fast Refresh changes remount this one
+range container through React so static markup cannot become stale. Duplicate keys or a
+mount/hydration shape that cannot be adopted also switch the complete container to React before
+later updates.
 
 The optimized host-row contract is deliberately narrow:
 
@@ -791,7 +796,7 @@ The optimized host-row contract is deliberately narrow:
   expression, and an item-derived key.
 - A single interactive list must be the only meaningful child of its nested lowercase host
   container. Non-interactive host rows may instead occupy one or more ranges separated by direct
-  host siblings. The component's outermost return container remains React-owned for now.
+  host siblings, either in a nested container or the component's returned host root.
 - The row is a statically known HTML host tree. Dynamic leaf text, attributes, controlled host
   properties, and individual inline style properties are supported.
 - Inline synchronous row events and dedicated logical or ternary host slots are supported by the
@@ -888,7 +893,7 @@ component.
 | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
 | Unkeyed/index-keyed maps, unsupported or mutating collection pipelines, or element arrays                    | Their structure, purity, or item identity is outside the keyed-list contract.      |
 | Unsupported row events/forms, components, fragments, refs, SVG, nested blocks, or mixed conditional slots    | Their event, lifecycle, or structure contract requires the React-owned row path.   |
-| Interactive ranges beside siblings, non-host range siblings, or a range in the component root                | The first range owner requires one nested host container and non-interactive rows. |
+| Interactive ranges beside siblings or non-host range siblings                                                | The range owner requires a host container and non-interactive host rows.           |
 | Branch events, keys, components, fragments, refs, SVG, or nested blocks in a dedicated conditional container | They require the React-owned conditional path rather than compiler-created hosts.  |
 | Dynamic/member component types, component spreads, refs, keys, or children                                   | Their identity or ownership is outside the first component-island contract.        |
 | Effects or hooks other than the supported `useState` shape                                                   | Their lifecycle and ordering must remain under React's hook dispatcher.            |
@@ -1041,9 +1046,9 @@ The package and example test suites verify more than generated code:
 - compiler-owned host rows patch text, attributes, and styles in place, preserve focus and text
   selection, use the LIS minimum for measured rotations and reversals, and remount through React
   when runtime keys are duplicated;
-- keyed DOM ranges preserve static siblings around multiple lists, support adjacent empty ranges,
-  apply LIS independently per range, and remount the complete container through React when keys or
-  parent-driven static markup invalidate adoption;
+- keyed DOM ranges preserve static siblings around multiple lists, support adjacent empty ranges
+  and exact component roots, apply LIS independently per range, and remount the complete container
+  through React when keys or parent-driven static markup invalidate adoption;
 - interactive host rows keep React event propagation and `currentTarget`, resolve the latest item
   and index after same-key replacements and reorders, let React own structural commits, and resume
   direct binding patches without stale virtual-prop output;
@@ -1062,8 +1067,9 @@ The package and example test suites verify more than generated code:
 - 1,000 deterministic object, array, and nullish component-prop transitions match normal React;
 - 1,000 deterministic randomized compiler-owned list operations produce the same ordered output as
   normal React while the list owner stays at one execution;
-- 2,000 deterministic updates across two keyed ranges match normal React while every static sibling
-  and surviving row keeps its DOM identity and the owner stays at one execution;
+- 2,000 deterministic updates each for nested and component-root keyed ranges match normal React
+  while every static sibling and surviving row keeps its DOM identity and the owner stays at one
+  execution;
 - 5,000 deterministic filter, sort, slice, reverse, insertion, removal, and row-update transitions
   produce the same keyed output as normal React while preserving surviving DOM rows;
 - 4,000 deterministic interactive data, structure, and event transitions match normal React while
@@ -1078,9 +1084,9 @@ The package and example test suites verify more than generated code:
   keyed DOM identity and capture/stop-propagation behavior, and observes zero owner update
   executions;
 - the public `List` renders iterable and nullish collections correctly with the compiler off;
-- the packaged runtime, including keyed ranges, editable and interactive keyed-row events,
-  row-local conditions, reorders, identity, selection, and hydration, is exercised separately with
-  React 18.3 and React 19;
+- the packaged runtime, including a keyed-range component root, editable and interactive keyed-row
+  events, row-local conditions, reorders, identity, selection, and hydration, is exercised
+  separately with React 18.3 and React 19;
 - boolean `data-*` and `aria-*` attributes keep React-compatible string values; and
 - unsupported list shapes, effects, refs, and unsupported dynamic component-island shapes remain
   on React without corrupting output.

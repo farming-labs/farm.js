@@ -472,27 +472,28 @@ const testSource = String.raw`
           { kind: "text", path: [], read: (item, index) => [index, ":", item.toUpperCase()] },
         ],
       });
-      return React.createElement(
-        "section",
-        null,
-        React.createElement(
-          "button",
-          {
-            onClick: () =>
-              state[0].set((current) => ({
-                primary: [...current.primary].reverse(),
-                secondary: [current.secondary[1], "z", current.secondary[0]],
-              })),
-          },
-          "Update ranges",
-        ),
-        React.createElement(blocks.KeyedRanges, {
-          id: 0,
-          render: () =>
+      return React.createElement(blocks.KeyedRanges, {
+        id: 0,
+        render: () =>
+          React.createElement(
+            "ul",
+            { "data-count": model().primary.length + model().secondary.length },
             React.createElement(
-              "ul",
-              null,
-              React.createElement("li", { "data-static": "header" }, "Primary"),
+              "li",
+              { "data-static": "header" },
+              "Primary ",
+              React.createElement(
+                "button",
+                {
+                  onClick: () =>
+                    state[0].set((current) => ({
+                      primary: [...current.primary].reverse(),
+                      secondary: [current.secondary[1], "z", current.secondary[0]],
+                    })),
+                },
+                "Update ranges",
+              ),
+            ),
               model().primary.map((item, index) =>
                 React.createElement(
                   "li",
@@ -509,16 +510,28 @@ const testSource = String.raw`
                 ),
               ),
               React.createElement("li", { "data-static": "footer" }, "End"),
-            ),
-          ranges: [
-            descriptor(1, () => model().primary),
-            descriptor(1, () => model().secondary),
-          ],
-          trailing: 1,
-        }),
-      );
+          ),
+        ranges: [
+          descriptor(1, () => model().primary),
+          descriptor(1, () => model().secondary),
+        ],
+        trailing: 1,
+      });
     },
-    bindings: [{ kind: "block", id: 0, dependencies: [0] }],
+    bindings: [
+      {
+        kind: "attribute",
+        path: [],
+        target: 0,
+        dependencies: [0],
+        name: "data-count",
+        read: (_props, state) => {
+          const model = state[0].get();
+          return model.primary.length + model.secondary.length;
+        },
+      },
+      { kind: "block", id: 0, dependencies: [0] },
+    ],
   });
   const keyedRangesContainer = document.createElement("div");
   document.body.append(keyedRangesContainer);
@@ -540,6 +553,8 @@ const testSource = String.raw`
   assert.equal(keyedRangesContainer.querySelector("[data-static='divider']"), rangeDivider);
   assert.equal(keyedRangesContainer.querySelector("[data-static='footer']"), rangeFooter);
   assert.equal(keyedRangesContainer.querySelector("[data-key='a']"), rangeA);
+  assert.equal(keyedRangesContainer.firstElementChild.tagName, "UL");
+  assert.equal(keyedRangesContainer.firstElementChild.dataset.count, "6");
   assert.equal(keyedRangeExecutions, initialKeyedRangeExecutions);
   flushSync(() => keyedRangesRoot.unmount());
 

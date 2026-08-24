@@ -649,41 +649,79 @@ h1 span {
     monospace;
 }
 
-.edge-card .keyed-range-list {
-  max-height: 19rem;
+.keyed-range-root {
+  display: grid;
+  max-height: 32rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   align-content: flex-start;
+  gap: 0.5rem;
   overflow-y: auto;
-  padding: 0.55rem;
-  border: 1px solid #33332f;
-  background: #0d0d0c;
 }
 
-.keyed-range-list [data-range] {
+.keyed-range-root > :is(header, .compact-metrics, .keyed-range-static, .keyed-range-footer) {
+  grid-column: 1 / -1;
+}
+
+.keyed-range-root > header {
+  margin-bottom: 0.4rem;
+}
+
+.keyed-range-root > .compact-metrics {
+  margin: 0.8rem 0;
+}
+
+.keyed-range-root > [data-range] {
   min-width: 6.5rem;
+  border: 1px solid #484842;
+  padding: 0.4rem 0.55rem;
+  color: #c8c8c1;
   background: #111110;
+  font:
+    0.66rem "Geist Mono Variable",
+    ui-monospace,
+    monospace;
 }
 
-.keyed-range-list [data-range="secondary"] {
+.keyed-range-root > [data-range="secondary"] {
   border-color: #5a5a52;
   color: #aaa9a1;
 }
 
-.keyed-range-list .keyed-range-static {
-  flex: 1 0 100%;
-  border-color: rgb(184 255 91 / 0.28);
+.keyed-range-root > .keyed-range-static {
+  border: 1px solid rgb(184 255 91 / 0.28);
+  padding: 0.45rem 0.55rem;
   color: #91b864;
   background: rgb(184 255 91 / 0.035);
-  font-size: 0.56rem;
+  font:
+    0.56rem "Geist Mono Variable",
+    ui-monospace,
+    monospace;
   letter-spacing: 0.075em;
 }
 
-.keyed-range-list [data-static="range-divider"] {
+.keyed-range-root > [data-static="range-divider"] {
   margin-top: 0.15rem;
 }
 
-.keyed-range-list [data-static="range-footer"] {
+.keyed-range-footer {
+  display: grid;
+  gap: 0.7rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid #33332f;
+}
+
+.keyed-range-footer [data-range-summary] {
   color: #d8ff9f;
+  font:
+    0.6rem "Geist Mono Variable",
+    ui-monospace,
+    monospace;
+  letter-spacing: 0.075em;
   text-align: right;
+}
+
+.keyed-range-footer .button-row {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .interactive-keyed-list .interactive-row {
@@ -1370,6 +1408,10 @@ code {
 
   .reason-grid article + article {
     padding-left: 0;
+  }
+
+  .keyed-range-footer .button-row {
+    grid-template-columns: 1fr;
   }
 
   .heavy-heading {
