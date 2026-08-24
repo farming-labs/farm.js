@@ -574,7 +574,17 @@ function isLegacyScheduleBody(value: Record<string, unknown>) {
 
 function readInlinePayload(value: Record<string, unknown>, reservedKeys: readonly string[]) {
   const payload = stripReservedKeys(value, reservedKeys);
-  return Object.keys(payload).length > 0 ? payload : undefined;
+  const keys = Object.keys(payload);
+  if (keys.length === 0) {
+    return undefined;
+  }
+  // Scalar task inputs are declared as { value: TInput } in the typed body;
+  // unwrap that encoding so run() receives the scalar itself, matching the
+  // legacy { input } form. Object inputs spread inline and keep their shape.
+  if (keys.length === 1 && keys[0] === "value") {
+    return payload.value;
+  }
+  return payload;
 }
 
 async function parseRequestBody(request: Request) {
