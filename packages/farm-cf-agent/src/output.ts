@@ -164,6 +164,10 @@ function createGeneratedWranglerConfig(input: {
       ...environments,
       [input.environment]: {
         ...selected,
+        // `main` is inheritable per environment: if the selected env overrides
+        // it, the raw agent entry survives and the deploy serves only the agent
+        // Worker. Rewrite it to the combined wrapper like the top-level main.
+        main: toConfigRelativePath(input.configDirectory, input.wrapperPath),
         compatibility_flags: withNodeCompatibility(
           selected.compatibility_flags ?? config.compatibility_flags,
         ),
