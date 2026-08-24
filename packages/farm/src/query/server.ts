@@ -66,7 +66,12 @@ export async function loadSearchParams<T extends Record<string, Parser<any>>>(
   const result = {} as { [K in keyof T]: ReturnType<T[K]["parse"]> };
 
   for (const [key, parser] of Object.entries(parsers)) {
-    const value = urlParams.get(key);
+    // Read every value, not just the first. A repeated key is joined with commas,
+    // the format `asArrayOf` parses and its `serialize` writes, so a repeated
+    // parameter round-trips. A single value is passed through untouched, so a
+    // value that already contains commas keeps its meaning.
+    const values = urlParams.getAll(key);
+    const value = values.length > 1 ? values.join(",") : (values[0] ?? null);
 
     if (value !== null && value !== "") {
       try {
