@@ -263,15 +263,35 @@ function createRequestFromNodeRequest(
   });
 }
 
-function withFarmRequestTracing(
+/** Exported for tests: the request boundary all Farm dev middlewares share. */
+export function withFarmRequestTracing(
   handler: Parameters<typeof _withAfterNodeMiddleware>[0],
 ): Connect.NextHandleFunction {
   const middleware = _withAfterNodeMiddleware(handler);
   return (req, res, next) => {
     const traceUrl = new URL(`http://${req.headers.host || "localhost:3000"}${req.url || "/"}`);
     const traceRequest = createRequestFromNodeRequest(req, traceUrl);
-    return runWithFarmRequestSpan(traceRequest, () => middleware(req, res, next), {
+    const result = runWithFarmRequestSpan(traceRequest, () => middleware(req, res, next), {
       getStatusCode: () => res.statusCode || 200,
+    });
+    // connect ignores returned promises, so a rejection from the handler
+    // becomes an unhandled rejection and kills the dev server process. A
+    // throw from one request must cost that request a 500, not an outage.
+    return Promise.resolve(result).catch((error) => {
+      console.error(
+        `[FARM] Unhandled error while handling ${req.method || "GET"} ${req.url || "/"}:`,
+        error,
+      );
+      if (res.writableEnded) {
+        return;
+      }
+      if (res.headersSent) {
+        res.destroy?.(error instanceof Error ? error : new Error(String(error)));
+        return;
+      }
+      res.statusCode = 500;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ error: "Internal server error" }));
     });
   };
 }
