@@ -80,8 +80,9 @@ import {
 } from "./security";
 import { resolveFarmThemeConfig } from "./theme/config";
 import type { ResolvedFarmThemeConfig } from "./theme/types";
-import { resolveFarmRenderer } from "./renderer";
+import { isReactRenderer, resolveFarmRenderer } from "./renderer";
 import type { FarmRenderer } from "./renderer";
+import { applyFarmDocsFrameworkAutoDetection } from "./docs/framework-detect";
 import { resolveFarmAPIConfig, type ResolvedFarmAPIConfig } from "./api/config";
 
 const FARM_RESOLVED_CUSTOM_CONTEXT = Symbol.for("farm.resolvedCustomContext");
@@ -857,6 +858,14 @@ export async function resolveConfig(
     mode,
   });
   userConfig = layerResolution.config;
+
+  // The docs adapter runtime is React-only today; other renderers keep the
+  // embedded docs handler without any migration notice.
+  if (isReactRenderer(resolveFarmRenderer(userConfig.renderer))) {
+    userConfig = await applyFarmDocsFrameworkAutoDetection(userConfig, {
+      root: userConfig.root || projectRoot,
+    });
+  }
 
   const redirects =
     typeof userConfig.redirects === "function"
