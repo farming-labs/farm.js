@@ -313,6 +313,24 @@ describe("server cache primitives", () => {
     expect(calls).toBe(2);
   });
 
+  it("treats revalidate: 0 as always stale through a distributed adapter", async () => {
+    const adapter = new TestSharedCacheAdapter();
+    const cache = new FarmDataCache({ adapter, namespace: "catalog" });
+    let calls = 0;
+    const produce = async () => ({ calls: ++calls });
+
+    // With an adapter configured, revalidate: 0 must still re-produce on every
+    // read (same semantics as the local cache), not serve a stored entry
+    // indefinitely.
+    await expect(cache.getOrSet("prices", produce, { revalidate: 0 })).resolves.toEqual({
+      calls: 1,
+    });
+    await expect(cache.getOrSet("prices", produce, { revalidate: 0 })).resolves.toEqual({
+      calls: 2,
+    });
+    expect(calls).toBe(2);
+  });
+
   it("dedupes concurrent cache fills", async () => {
     let calls = 0;
     const getProfile = unstable_cache(async () => {
