@@ -128,6 +128,27 @@ interface KeyedRowsPlan {
   syntax: "map" | "list";
 }
 
+interface KeyedRangePlan {
+  before: number;
+  source: t.Expression | t.JSXElement;
+  collection: t.Expression;
+  keyCallback: t.ArrowFunctionExpression | t.FunctionExpression;
+  renderCallback: t.ArrowFunctionExpression | t.FunctionExpression;
+  row: t.JSXElement;
+  bindings: PendingKeyedRowBinding[];
+  syntax: "map" | "list";
+}
+
+interface KeyedRangesPlan {
+  kind: "keyed-ranges";
+  id: number;
+  parent?: number;
+  dependencies: number[];
+  source: t.JSXElement;
+  ranges: KeyedRangePlan[];
+  trailing: number;
+}
+
 interface ComponentIslandPlan {
   kind: "component";
   id: number;
@@ -141,6 +162,7 @@ type ComposableBlockPlan =
   | HostConditionalPlan
   | KeyedListPlan
   | KeyedRowsPlan
+  | KeyedRangesPlan
   | ComponentIslandPlan;
 
 interface Candidate {
@@ -1241,6 +1263,98 @@ function analyzeKeyedRowTree(
   return reason ? { reason } : { bindings, events, conditionals };
 }
 
+interface KeyedRowChildShape extends KeyedRowsShape {
+  source: t.Expression | t.JSXElement;
+}
+
+function analyzeKeyedRowChild(
+  child: t.JSXElement["children"][number],
+  statesByValue: ReadonlyMap<string, StateBinding>,
+  safeGlobals: ReadonlySet<string>,
+  listNames: ReadonlySet<string>,
+): KeyedRowChildShape | undefined {
+  let collection: t.Expression;
+  let keyCallback: t.ArrowFunctionExpression | t.FunctionExpression;
+  let renderCallback: t.ArrowFunctionExpression | t.FunctionExpression;
+  let row: t.JSXElement;
+  let dependencies: number[];
+  let syntax: "map" | "list";
+  let source: t.Expression | t.JSXElement;
+
+  if (
+    t.isJSXExpressionContainer(child) &&
+    !t.isJSXEmptyExpression(child.expression) &&
+    isMapCall(child.expression)
+  ) {
+    const result = analyzeMapList(child.expression, statesByValue, safeGlobals);
+    if (result.reason) return undefined;
+    const callback = child.expression.arguments[0];
+    if (!t.isArrowFunctionExpression(callback) && !t.isFunctionExpression(callback))
+      return undefined;
+    const returned = returnedExpression(callback);
+    if (!returned || !t.isJSXElement(returned)) return undefined;
+    const key = jsxKeyExpression(returned);
+    if (!key) return undefined;
+    collection = (child.expression.callee as t.MemberExpression).object as t.Expression;
+    keyCallback = t.arrowFunctionExpression(
+      callback.params.map((parameter) => t.cloneNode(parameter, true)) as t.Identifier[],
+      cloneExpression(key),
+    );
+    renderCallback = callback;
+    row = returned;
+    dependencies = result.dependencies || [];
+    syntax = "map";
+    source = child.expression;
+  } else if (t.isJSXElement(child) && isPublicListElement(child, listNames)) {
+    const result = analyzePublicList(child, statesByValue, safeGlobals);
+    if (result.reason) return undefined;
+    const each = listAttributeExpression(child, "each");
+    const by = listAttributeExpression(child, "by");
+    const renderChild = meaningfulJsxChildren(child)[0];
+    if (
+      !each ||
+      (!t.isArrowFunctionExpression(by) && !t.isFunctionExpression(by)) ||
+      !t.isJSXExpressionContainer(renderChild) ||
+      t.isJSXEmptyExpression(renderChild.expression) ||
+      (!t.isArrowFunctionExpression(renderChild.expression) &&
+        !t.isFunctionExpression(renderChild.expression))
+    ) {
+      return undefined;
+    }
+    const returned = returnedExpression(renderChild.expression);
+    if (!returned || !t.isJSXElement(returned)) return undefined;
+    collection = each;
+    keyCallback = by;
+    renderCallback = renderChild.expression;
+    row = returned;
+    dependencies = result.dependencies || [];
+    syntax = "list";
+    source = child;
+  } else {
+    return undefined;
+  }
+
+  const rowAnalysis = analyzeKeyedRowTree(
+    row,
+    renderCallback,
+    safeGlobals,
+    new Set([...statesByValue.values()].map((state) => state.setterName)),
+  );
+  if (rowAnalysis.reason) return undefined;
+  return {
+    source,
+    collection,
+    keyCallback,
+    renderCallback,
+    row,
+    dependencies,
+    bindings: rowAnalysis.bindings || [],
+    events: rowAnalysis.events || [],
+    conditionals: rowAnalysis.conditionals || [],
+    syntax,
+  };
+}
+
 function analyzeKeyedRowsContainer(
   container: t.JSXElement,
   statesByValue: ReadonlyMap<string, StateBinding>,
@@ -1273,83 +1387,68 @@ function analyzeKeyedRowsContainer(
 
   const children = meaningfulJsxChildren(container);
   if (children.length !== 1) return undefined;
+  return analyzeKeyedRowChild(children[0], statesByValue, safeGlobals, listNames);
+}
 
-  let collection: t.Expression;
-  let keyCallback: t.ArrowFunctionExpression | t.FunctionExpression;
-  let renderCallback: t.ArrowFunctionExpression | t.FunctionExpression;
-  let row: t.JSXElement;
-  let dependencies: number[];
-  let syntax: "map" | "list";
-
-  const child = children[0];
+function analyzeKeyedRangesContainer(
+  container: t.JSXElement,
+  statesByValue: ReadonlyMap<string, StateBinding>,
+  safeGlobals: ReadonlySet<string>,
+  listNames: ReadonlySet<string>,
+): { ranges: KeyedRangePlan[]; trailing: number; dependencies: number[] } | undefined {
   if (
-    t.isJSXExpressionContainer(child) &&
-    !t.isJSXEmptyExpression(child.expression) &&
-    isMapCall(child.expression)
+    container.openingElement.attributes.some(
+      (attribute) =>
+        t.isJSXSpreadAttribute(attribute) ||
+        (t.isJSXAttribute(attribute) &&
+          t.isJSXIdentifier(attribute.name) &&
+          (attribute.name.name === "ref" || attribute.name.name === "dangerouslySetInnerHTML")),
+    )
   ) {
-    const result = analyzeMapList(child.expression, statesByValue, safeGlobals);
-    if (result.reason) return undefined;
-    const callback = child.expression.arguments[0];
-    if (!t.isArrowFunctionExpression(callback) && !t.isFunctionExpression(callback))
-      return undefined;
-    const returned = returnedExpression(callback);
-    if (!returned || !t.isJSXElement(returned)) return undefined;
-    const key = jsxKeyExpression(returned);
-    if (!key) return undefined;
-    collection = (child.expression.callee as t.MemberExpression).object as t.Expression;
-    keyCallback = t.arrowFunctionExpression(
-      callback.params.map((parameter) => t.cloneNode(parameter, true)) as t.Identifier[],
-      cloneExpression(key),
-    );
-    renderCallback = callback;
-    row = returned;
-    dependencies = result.dependencies || [];
-    syntax = "map";
-  } else if (t.isJSXElement(child) && isPublicListElement(child, listNames)) {
-    const result = analyzePublicList(child, statesByValue, safeGlobals);
-    if (result.reason) return undefined;
-    const each = listAttributeExpression(child, "each");
-    const by = listAttributeExpression(child, "by");
-    const renderChild = meaningfulJsxChildren(child)[0];
-    if (
-      !each ||
-      (!t.isArrowFunctionExpression(by) && !t.isFunctionExpression(by)) ||
-      !t.isJSXExpressionContainer(renderChild) ||
-      t.isJSXEmptyExpression(renderChild.expression) ||
-      (!t.isArrowFunctionExpression(renderChild.expression) &&
-        !t.isFunctionExpression(renderChild.expression))
-    ) {
-      return undefined;
-    }
-    const returned = returnedExpression(renderChild.expression);
-    if (!returned || !t.isJSXElement(returned)) return undefined;
-    collection = each;
-    keyCallback = by;
-    renderCallback = renderChild.expression;
-    row = returned;
-    dependencies = result.dependencies || [];
-    syntax = "list";
-  } else {
     return undefined;
   }
 
-  const rowAnalysis = analyzeKeyedRowTree(
-    row,
-    renderCallback,
-    safeGlobals,
-    new Set([...statesByValue.values()].map((state) => state.setterName)),
-  );
-  if (rowAnalysis.reason) return undefined;
+  const children = meaningfulJsxChildren(container);
+  if (children.length < 2) return undefined;
+  const ranges: KeyedRangePlan[] = [];
+  const dependencies = new Set<number>();
+  let staticBefore = 0;
+  for (const child of children) {
+    const range = analyzeKeyedRowChild(child, statesByValue, safeGlobals, listNames);
+    if (range) {
+      if (range.events.length > 0 || range.conditionals.length > 0) return undefined;
+      ranges.push({
+        before: staticBefore,
+        source: range.source,
+        collection: range.collection,
+        keyCallback: range.keyCallback,
+        renderCallback: range.renderCallback,
+        row: range.row,
+        bindings: range.bindings,
+        syntax: range.syntax,
+      });
+      for (const dependency of range.dependencies) dependencies.add(dependency);
+      staticBefore = 0;
+      continue;
+    }
+    if (!t.isJSXElement(child) || !isHostElement(child)) return undefined;
+    let hostOnly = true;
+    t.traverseFast(child, (node) => {
+      if (
+        t.isJSXFragment(node) ||
+        (t.isJSXElement(node) && node !== child && !isHostElement(node))
+      ) {
+        hostOnly = false;
+      }
+    });
+    if (!hostOnly) return undefined;
+    staticBefore += 1;
+  }
+  if (ranges.length === 0) return undefined;
   return {
-    collection,
-    keyCallback,
-    renderCallback,
-    row,
-    dependencies,
-    bindings: rowAnalysis.bindings || [],
-    events: rowAnalysis.events || [],
-    conditionals: rowAnalysis.conditionals || [],
-    syntax,
+    ranges,
+    trailing: staticBefore,
+    dependencies: [...dependencies].sort((left, right) => left - right),
   };
 }
 
@@ -1982,6 +2081,83 @@ function keyedRowsBoundary(blockRuntime: t.Identifier, plan: KeyedRowsPlan): t.J
   );
 }
 
+function keyedRangeObject(range: KeyedRangePlan): t.ObjectExpression {
+  const parameters = range.renderCallback.params.map((parameter) =>
+    t.cloneNode(parameter, true),
+  ) as t.Identifier[];
+  return t.objectExpression([
+    t.objectProperty(t.identifier("before"), t.numericLiteral(range.before)),
+    t.objectProperty(
+      t.identifier("items"),
+      t.arrowFunctionExpression([], cloneExpression(range.collection)),
+    ),
+    t.objectProperty(t.identifier("rowKey"), t.cloneNode(range.keyCallback, true)),
+    t.objectProperty(
+      t.identifier("create"),
+      t.arrowFunctionExpression(
+        parameters.map((parameter) => t.cloneNode(parameter, true)),
+        hostElementDescriptor(range.row),
+      ),
+    ),
+    t.objectProperty(
+      t.identifier("bindings"),
+      t.arrayExpression(
+        range.bindings.map((binding) => keyedRowBindingObject(binding, parameters)),
+      ),
+    ),
+  ]);
+}
+
+function keyedRangesBoundary(blockRuntime: t.Identifier, plan: KeyedRangesPlan): t.JSXElement {
+  const name = t.jsxMemberExpression(
+    t.jsxIdentifier(blockRuntime.name),
+    t.jsxIdentifier("KeyedRanges"),
+  );
+  const source = t.cloneNode(plan.source, true);
+  let rootRef: t.Expression | undefined;
+  source.openingElement.attributes = source.openingElement.attributes.filter((attribute) => {
+    if (
+      !t.isJSXAttribute(attribute) ||
+      jsxAttributeName(attribute) !== "ref" ||
+      !t.isJSXExpressionContainer(attribute.value) ||
+      t.isJSXEmptyExpression(attribute.value.expression)
+    ) {
+      return true;
+    }
+    rootRef = cloneExpression(attribute.value.expression);
+    return false;
+  });
+  return t.jsxElement(
+    t.jsxOpeningElement(
+      name,
+      [
+        t.jsxAttribute(t.jsxIdentifier("id"), t.jsxExpressionContainer(t.numericLiteral(plan.id))),
+        t.jsxAttribute(
+          t.jsxIdentifier("render"),
+          t.jsxExpressionContainer(t.arrowFunctionExpression([], source)),
+        ),
+        ...(rootRef
+          ? [t.jsxAttribute(t.jsxIdentifier("rootRef"), t.jsxExpressionContainer(rootRef))]
+          : []),
+        t.jsxAttribute(
+          t.jsxIdentifier("ranges"),
+          t.jsxExpressionContainer(
+            t.arrayExpression(plan.ranges.map((range) => keyedRangeObject(range))),
+          ),
+        ),
+        t.jsxAttribute(
+          t.jsxIdentifier("trailing"),
+          t.jsxExpressionContainer(t.numericLiteral(plan.trailing)),
+        ),
+      ],
+      true,
+    ),
+    null,
+    [],
+    true,
+  );
+}
+
 function hostConditionalBranchObject(
   branch: t.JSXElement,
   bindings: readonly PendingKeyedRowBinding[],
@@ -2254,6 +2430,25 @@ function analyzeComposableBlocks(
 
       if (t.isJSXElement(child)) {
         if (isHostElement(child)) {
+          const keyedRanges = insideConditional
+            ? undefined
+            : analyzeKeyedRangesContainer(child, statesByValue, safeGlobals, listNames);
+          if (keyedRanges) {
+            plans.push({
+              kind: "keyed-ranges",
+              id: nextId++,
+              parent,
+              dependencies: keyedRanges.dependencies,
+              source: child,
+              ranges: keyedRanges.ranges,
+              trailing: keyedRanges.trailing,
+            });
+            for (const range of keyedRanges.ranges) {
+              if (t.isJSXElement(range.source)) ownedElements.add(range.source);
+              else keyedExpressions.add(range.source);
+            }
+            continue;
+          }
           const hostConditional = analyzeHostConditionalContainer(
             child,
             statesByValue,
@@ -2451,6 +2646,9 @@ function lowerComposableBlocks(
         }
         if (plan?.kind === "keyed-rows") {
           return keyedRowsBoundary(blockRuntime, plan);
+        }
+        if (plan?.kind === "keyed-ranges") {
+          return keyedRangesBoundary(blockRuntime, plan);
         }
         if (plan?.kind === "component") {
           return componentIslandBoundary(blockRuntime, plan, child);

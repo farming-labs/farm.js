@@ -149,6 +149,24 @@ export interface CompilerKeyedRowsBlockProps {
   conditionals?: readonly CompilerKeyedRowConditional[];
 }
 
+export interface CompilerKeyedRange {
+  /** Number of static direct host siblings between this range and the previous range. */
+  before: number;
+  items(): Iterable<unknown> | null | undefined;
+  rowKey(item: unknown, index: number): React.Key;
+  create(item: unknown, index: number): CompilerKeyedRowElement;
+  bindings: readonly CompilerKeyedRowBinding[];
+}
+
+export interface CompilerKeyedRangesBlockProps {
+  id: number;
+  render(): React.ReactElement;
+  rootRef?: React.RefCallback<Element>;
+  ranges: readonly CompilerKeyedRange[];
+  /** Number of static direct host siblings after the final keyed range. */
+  trailing: number;
+}
+
 export interface CompilerComponentBlockProps {
   id: number;
   render(): React.ReactNode;
@@ -159,6 +177,7 @@ export interface CompilerBlockRuntime {
   HostConditional: React.ComponentType<CompilerHostConditionalBlockProps>;
   KeyedList: React.ComponentType<CompilerKeyedListBlockProps>;
   KeyedRows: React.ComponentType<CompilerKeyedRowsBlockProps>;
+  KeyedRanges: React.ComponentType<CompilerKeyedRangesBlockProps>;
   Component: React.ComponentType<CompilerComponentBlockProps>;
   target(id: number): React.RefCallback<Element>;
 }
@@ -580,8 +599,10 @@ function normalizedKeyedRowBindingValue(binding: CompilerKeyedRowBinding, value:
   return binding.kind === "text" ? renderTextValue(value) : value;
 }
 
+type CompilerKeyedRowBindingSource = Pick<CompilerKeyedRowsBlockProps, "bindings">;
+
 function readKeyedRowBindingValues(
-  props: CompilerKeyedRowsBlockProps,
+  props: CompilerKeyedRowBindingSource,
   item: unknown,
   index: number,
 ): unknown[] {
@@ -591,7 +612,7 @@ function readKeyedRowBindingValues(
 }
 
 function applyKeyedRowBindings(
-  props: CompilerKeyedRowsBlockProps,
+  props: CompilerKeyedRowBindingSource,
   instance: CompilerKeyedRowInstance,
   item: unknown,
   index: number,
@@ -1408,6 +1429,259 @@ function createKeyedRowsBlockComponent(
   return FarmKeyedRowsBlock;
 }
 
+function createKeyedRangesBlockComponent(
+  owner: Pick<ConditionalBlockOwner, "subscribe">,
+): React.ComponentType<CompilerKeyedRangesBlockProps> {
+  interface State {
+    fallback: boolean;
+  }
+
+  interface ReadRange {
+    items: unknown[];
+    keys: string[];
+  }
+
+  class FarmKeyedRangesBlock extends React.Component<CompilerKeyedRangesBlockProps, State> {
+    static displayName = "FarmCompiledKeyedRanges";
+
+    state: State = { fallback: false };
+    private root: Element | null = null;
+    private mounted = false;
+    private fallbackRequested = false;
+    private fallbackVersion = 0;
+    private propFallbackQueued = false;
+    private currentProps = this.props;
+    private unsubscribe: (() => void) | undefined;
+    private rangeInstances: Array<Map<string, CompilerKeyedRowInstance>> = [];
+    private staticSegments: Element[][] = [];
+
+    private captureRoot = (root: Element | null) => {
+      this.root = root;
+      this.currentProps.rootRef?.(root);
+    };
+
+    private readRange(range: CompilerKeyedRange): ReadRange | null {
+      const source = range.items();
+      const items = source ? Array.from(source) : [];
+      const keys = items.map((item, index) => keyedRowIdentity(range.rowKey(item, index)));
+      if (new Set(keys).size !== keys.length) return null;
+      return { items, keys };
+    }
+
+    private readRanges(props: CompilerKeyedRangesBlockProps): ReadRange[] | null {
+      const ranges: ReadRange[] = [];
+      for (const range of props.ranges) {
+        const rows = this.readRange(range);
+        if (!rows) return null;
+        ranges.push(rows);
+      }
+      return ranges;
+    }
+
+    private adopt(props: CompilerKeyedRangesBlockProps = this.currentProps): boolean {
+      if (!this.root || !Number.isSafeInteger(props.trailing) || props.trailing < 0) return false;
+      const rowsByRange = this.readRanges(props);
+      if (!rowsByRange) return false;
+      const elements = [...this.root.children];
+      const staticSegments: Element[][] = [];
+      const instancesByRange: Array<Map<string, CompilerKeyedRowInstance>> = [];
+      let cursor = 0;
+
+      for (let rangeIndex = 0; rangeIndex < props.ranges.length; rangeIndex += 1) {
+        const range = props.ranges[rangeIndex];
+        const rows = rowsByRange[rangeIndex];
+        if (!Number.isSafeInteger(range.before) || range.before < 0) return false;
+        const staticEnd = cursor + range.before;
+        if (staticEnd > elements.length) return false;
+        staticSegments.push(elements.slice(cursor, staticEnd));
+        cursor = staticEnd;
+
+        const rowEnd = cursor + rows.items.length;
+        if (rowEnd > elements.length) return false;
+        const instances = new Map<string, CompilerKeyedRowInstance>();
+        for (let index = 0; index < rows.items.length; index += 1) {
+          const element = elements[cursor + index];
+          if (!matchesCompilerHostElement(element, range.create(rows.items[index], index))) {
+            return false;
+          }
+          instances.set(rows.keys[index], {
+            key: rows.keys[index],
+            element,
+            values: readKeyedRowBindingValues(range, rows.items[index], index),
+            item: rows.items[index],
+            index,
+            conditionalValues: new Map(),
+          });
+        }
+        instancesByRange.push(instances);
+        cursor = rowEnd;
+      }
+
+      if (cursor + props.trailing !== elements.length) return false;
+      staticSegments.push(elements.slice(cursor));
+      this.staticSegments = staticSegments;
+      this.rangeInstances = instancesByRange;
+      return true;
+    }
+
+    private anchorAfter(rangeIndex: number): ChildNode | null {
+      for (let next = rangeIndex + 1; next < this.rangeInstances.length; next += 1) {
+        const staticAnchor = this.staticSegments[next]?.[0];
+        if (staticAnchor) return staticAnchor;
+        const rowAnchor = this.rangeInstances[next].values().next().value?.element;
+        if (rowAnchor) return rowAnchor;
+      }
+      return this.staticSegments[this.rangeInstances.length]?.[0] || null;
+    }
+
+    private reconcileRange(rangeIndex: number, rows: ReadRange): void {
+      if (!this.root) return;
+      const range = this.currentProps.ranges[rangeIndex];
+      const previous = this.rangeInstances[rangeIndex];
+      const oldIndices = new Map<string, number>();
+      [...previous.keys()].forEach((key, index) => oldIndices.set(key, index));
+      const nextKeys = new Set(rows.keys);
+      for (const [key, instance] of previous) {
+        if (!nextKeys.has(key)) instance.element.remove();
+      }
+
+      const sequence = rows.keys.map((key) => oldIndices.get(key) ?? -1);
+      const stablePositions = longestIncreasingSubsequencePositions(sequence);
+      const nextInstances: CompilerKeyedRowInstance[] = [];
+      for (let index = 0; index < rows.items.length; index += 1) {
+        const key = rows.keys[index];
+        const existing = previous.get(key);
+        if (existing) {
+          applyKeyedRowBindings(range, existing, rows.items[index], index);
+          existing.item = rows.items[index];
+          existing.index = index;
+          nextInstances.push(existing);
+          continue;
+        }
+        const element = createCompilerHostElement(
+          this.root.ownerDocument,
+          range.create(rows.items[index], index),
+        );
+        nextInstances.push({
+          key,
+          element,
+          values: readKeyedRowBindingValues(range, rows.items[index], index),
+          item: rows.items[index],
+          index,
+          conditionalValues: new Map(),
+        });
+      }
+
+      let anchor = this.anchorAfter(rangeIndex);
+      for (let index = nextInstances.length - 1; index >= 0; index -= 1) {
+        const instance = nextInstances[index];
+        if (sequence[index] < 0) {
+          this.root.insertBefore(instance.element, anchor);
+        } else if (!stablePositions.has(index) && instance.element.nextSibling !== anchor) {
+          this.root.insertBefore(instance.element, anchor);
+        }
+        anchor = instance.element;
+      }
+      this.rangeInstances[rangeIndex] = new Map(
+        nextInstances.map((instance) => [instance.key, instance]),
+      );
+    }
+
+    private reconcile(afterCommit?: () => void): void {
+      if (!this.mounted || !this.root) {
+        afterCommit?.();
+        return;
+      }
+      if (this.state.fallback) {
+        this.fallbackVersion += 1;
+        this.forceUpdate(afterCommit);
+        return;
+      }
+      const rowsByRange = this.readRanges(this.currentProps);
+      if (!rowsByRange || rowsByRange.length !== this.rangeInstances.length) {
+        this.activateFallback(afterCommit);
+        return;
+      }
+
+      const activeElement = this.root.ownerDocument.activeElement;
+      const restoreFocus = Boolean(activeElement && this.root.contains(activeElement));
+      for (let rangeIndex = rowsByRange.length - 1; rangeIndex >= 0; rangeIndex -= 1) {
+        this.reconcileRange(rangeIndex, rowsByRange[rangeIndex]);
+      }
+      if (
+        restoreFocus &&
+        activeElement?.isConnected &&
+        activeElement.ownerDocument.activeElement !== activeElement &&
+        "focus" in activeElement
+      ) {
+        (activeElement as HTMLElement).focus({ preventScroll: true });
+      }
+      afterCommit?.();
+    }
+
+    private refresh = (afterCommit?: () => void) => {
+      this.reconcile(afterCommit);
+    };
+
+    private activateFallback(afterCommit?: () => void): void {
+      if (!this.mounted || this.state.fallback || this.fallbackRequested) {
+        afterCommit?.();
+        return;
+      }
+      this.fallbackRequested = true;
+      this.setState({ fallback: true }, afterCommit);
+    }
+
+    private schedulePropFallback(): void {
+      if (this.propFallbackQueued) return;
+      this.propFallbackQueued = true;
+      queueMicrotask(() => {
+        this.propFallbackQueued = false;
+        if (this.mounted && !this.state.fallback) this.activateFallback();
+      });
+    }
+
+    shouldComponentUpdate(nextProps: CompilerKeyedRangesBlockProps, nextState: State): boolean {
+      this.currentProps = nextProps;
+      if (nextState.fallback || this.state.fallback) return true;
+      // Parent props and compatible Fast Refresh definitions can change static
+      // siblings that are deliberately outside the range descriptors. Remount
+      // this one container through React instead of retaining stale markup.
+      this.schedulePropFallback();
+      return false;
+    }
+
+    componentDidMount(): void {
+      this.mounted = true;
+      this.unsubscribe = owner.subscribe(this.props.id, this.refresh);
+      if (!this.adopt()) this.activateFallback();
+    }
+
+    componentWillUnmount(): void {
+      this.mounted = false;
+      this.unsubscribe?.();
+      this.root = null;
+      this.rangeInstances = [];
+      this.staticSegments = [];
+    }
+
+    render(): React.ReactNode {
+      const container = this.currentProps.render();
+      if (!React.isValidElement(container) || typeof container.type !== "string") {
+        throw new TypeError(
+          `Compiled keyed ranges ${this.currentProps.id} must own one host container.`,
+        );
+      }
+      return React.cloneElement(container, {
+        key: this.state.fallback ? `react-${this.fallbackVersion}` : "compiled",
+        ref: this.captureRoot,
+      } as React.Attributes);
+    }
+  }
+
+  return FarmKeyedRangesBlock;
+}
+
 function createComponentBlockComponent(
   owner: Pick<ConditionalBlockOwner, "subscribe">,
 ): React.ComponentType<CompilerComponentBlockProps> {
@@ -1520,6 +1794,9 @@ export function createCompiledComponent<Props>(
           subscribe: (id, refresh) => this.subscribeToBlock(id, refresh),
         }),
         KeyedRows: createKeyedRowsBlockComponent({
+          subscribe: (id, refresh) => this.subscribeToBlock(id, refresh),
+        }),
+        KeyedRanges: createKeyedRangesBlockComponent({
           subscribe: (id, refresh) => this.subscribeToBlock(id, refresh),
         }),
         Component: createComponentBlockComponent({

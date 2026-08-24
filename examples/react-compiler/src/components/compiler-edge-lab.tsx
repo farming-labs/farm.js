@@ -12,6 +12,7 @@ let interactiveListExecutions = 0;
 let editableListExecutions = 0;
 let rowConditionalListExecutions = 0;
 let explicitListExecutions = 0;
+let keyedRangeExecutions = 0;
 
 export function CompiledBatchExperiment() {
   const [count, setCount] = useState(0);
@@ -717,6 +718,116 @@ export function ExplicitKeyedListExperiment() {
   );
 }
 
+export function KeyedRangeExperiment() {
+  const [primary, setPrimary] = useState<ListItem[]>([
+    { id: "a", label: "Alpha" },
+    { id: "b", label: "Beta" },
+    { id: "c", label: "Gamma" },
+    { id: "d", label: "Delta" },
+  ]);
+  const [secondary, setSecondary] = useState<ListItem[]>([
+    { id: "x", label: "Xray" },
+    { id: "y", label: "Yankee" },
+    { id: "z", label: "Zulu" },
+  ]);
+  const total = primary.length + secondary.length;
+
+  return (
+    <article className="edge-card" data-experiment="keyed-ranges">
+      <header>
+        <span className="experiment-number">04G</span>
+        <div>
+          <h3>Keyed DOM ranges</h3>
+          <p>Two lists move independently while their shared header, divider, and footer stay put.</p>
+        </div>
+      </header>
+      <dl className="compact-metrics" aria-live="polite">
+        <div>
+          <dt>Ranges</dt>
+          <dd data-metric="ranges">2</dd>
+        </div>
+        <div>
+          <dt>Rows</dt>
+          <dd data-metric="rows">{total}</dd>
+        </div>
+        <div>
+          <dt>Executions</dt>
+          <dd data-metric="executions">
+            {typeof window === "undefined" ? 1 : ++keyedRangeExecutions}
+          </dd>
+        </div>
+      </dl>
+      <ul className="keyed-range-list" data-list="ranges" data-rows={total}>
+        <li className="keyed-range-static" data-static="range-header">
+          PRIMARY RANGE
+        </li>
+        {primary.map((item, index) => (
+          <li data-index={index} data-key={item.id} data-range="primary" key={item.id}>
+            {index + 1}. {item.label}
+          </li>
+        ))}
+        <li className="keyed-range-static" data-static="range-divider">
+          SECONDARY RANGE
+        </li>
+        {secondary.map((item, index) => (
+          <li data-index={index} data-key={item.id} data-range="secondary" key={item.id}>
+            {index + 1}. {item.label}
+          </li>
+        ))}
+        <li className="keyed-range-static" data-static="range-footer">
+          {total} ROWS / STATIC SHELL
+        </li>
+      </ul>
+      <div className="button-row">
+        <button
+          data-action="rotate-ranges"
+          onClick={() => {
+            setPrimary((items) =>
+              items.length > 1
+                ? [items[items.length - 1], ...items.slice(0, items.length - 1)]
+                : items,
+            );
+            setSecondary((items) => [...items].reverse());
+          }}
+          type="button"
+        >
+          Rotate both ranges
+        </button>
+        <button
+          data-action="clear-ranges"
+          onClick={() => {
+            setPrimary([]);
+            setSecondary([]);
+          }}
+          type="button"
+        >
+          Empty ranges
+        </button>
+        <button
+          data-action="stress-ranges"
+          onClick={() => {
+            setPrimary(
+              Array.from({ length: 512 }, (_, index) => ({
+                id: `primary-${index}`,
+                label: `Primary ${index}`,
+              })),
+            );
+            setSecondary(
+              Array.from({ length: 512 }, (_, index) => ({
+                id: `secondary-${index}`,
+                label: `Secondary ${index}`,
+              })),
+            );
+          }}
+          type="button"
+        >
+          Load 1,024 rows
+        </button>
+      </div>
+    </article>
+  );
+}
+
 export function CompilerEdgeLab() {
   return (
     <section className="edge-lab" aria-labelledby="edge-lab-title">
@@ -743,6 +854,7 @@ export function CompilerEdgeLab() {
         <EditableKeyedListExperiment />
         <RowConditionalListExperiment />
         <ExplicitKeyedListExperiment />
+        <KeyedRangeExperiment />
       </div>
 
       <aside className="hook-warning">

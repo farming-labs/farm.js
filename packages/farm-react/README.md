@@ -188,11 +188,36 @@ and unproven calls use the original React fallback.
 `toSorted` and `toReversed` are emitted as standard runtime calls rather than polyfilled. Configure
 the TypeScript `lib` with ES2023 and target a runtime that supports them when using those methods.
 
-React remains the fallback and compatibility boundary. A map beside static children, a row with a
-non-inline or async handler, a file input or dynamic form control shape, a fragment, a ref, a custom
-component, or a conditional mixed directly beside other children in the same host slot uses the
-existing React-owned keyed boundary. The outer compiled component can still be skipped, but React
-reconciles that list's rows and owns their events, lifecycle, and state.
+React remains the fallback and compatibility boundary. An interactive map beside static children,
+a non-host sibling between ranges, a row with a non-inline or async handler, a file input or dynamic
+form control shape, a fragment, a ref, a custom component, or a conditional mixed directly beside
+other children in the same host slot uses the existing React-owned keyed boundary. The outer
+compiled component can still be skipped, but React reconciles that list's rows and owns their
+events, lifecycle, and state.
+
+Non-interactive host maps can share one nested container with static host siblings:
+
+```tsx
+<ul>
+  <li>Primary</li>
+  {primary.map((item) => (
+    <li key={item.id}>{item.label}</li>
+  ))}
+  <li>Secondary</li>
+  {secondary.map((item) => (
+    <li key={item.id}>{item.label}</li>
+  ))}
+  <li>{primary.length + secondary.length} total</li>
+</ul>
+```
+
+The compiler emits one range block for that host container. React renders and hydrates the original
+markup. After mount, Farm records the static element segments and reconciles each keyed range with
+its own row table and LIS pass. It does not add wrappers or hydration markers. Stateful bindings in
+the static siblings still patch normally. Direct children must be host elements or eligible maps
+or `List` ranges; events, controlled rows, row conditionals, components, fragments, root-container
+ranges, and nested dynamic structures keep the React boundary. Duplicate keys, an adoption shape
+mismatch, or a parent-driven static markup change remounts the complete container through React.
 
 Controlled host fields can use the hybrid keyed-row path:
 
@@ -306,8 +331,9 @@ assertion; it is not presented as a cross-machine timing benchmark.
 Application and prototype calls, dynamic style objects, handlers outside JSX events, nested,
 computed, and rest props patterns, async handlers, unkeyed or index-keyed lists, chained maps,
 unsupported conditional roots, effects, and more advanced hook support intentionally stay on React
-in this release. Compiler-owned keyed rows are limited to a dedicated container with one host-only
-map or `List`. Inline synchronous events and dedicated row-local host conditional slots can use the
-hybrid keyed-row path, but branch events, nested dynamic blocks, conditionals mixed with siblings in
-one slot, non-inline or async row handlers, unsupported form shapes, custom components, fragments,
-refs, SVG, and duplicate runtime keys keep or switch to React ownership.
+in this release. Compiler-owned keyed rows support either one dedicated host-only map/`List` or
+multiple non-interactive ranges separated by host siblings. Inline synchronous events and dedicated
+row-local host conditional slots can use the single-list hybrid path, but branch events, interactive
+ranges beside siblings, nested dynamic blocks, conditionals mixed with siblings in one slot,
+non-inline or async row handlers, unsupported form shapes, custom components, fragments, refs, SVG,
+and duplicate runtime keys keep or switch to React ownership.
