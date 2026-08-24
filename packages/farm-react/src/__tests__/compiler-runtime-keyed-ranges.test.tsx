@@ -220,7 +220,6 @@ describe("compiled keyed DOM ranges", () => {
   });
 
   it("handles adjacent empty ranges and transitions in both directions", async () => {
-    const metrics = { executions: 0, rangeRenders: 0 };
     let update: (next: CompilerStateUpdater) => void = () => undefined;
     const AdjacentRanges = createCompiledComponent({
       displayName: "AdjacentRanges",
