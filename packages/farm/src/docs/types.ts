@@ -63,8 +63,12 @@ export type FarmDocsRuntimeConfig = Partial<DocsConfig> & {
 };
 
 export type FarmDocsConfigInput = FarmDocsRuntimeConfig & {
-  /** Versioned runtime descriptor supplied by an external docs adapter. */
-  adapter?: FarmDocsAdapterDescriptor;
+  /**
+   * Versioned runtime descriptor supplied by an external docs adapter.
+   * Set false to pin the embedded renderer and disable framework
+   * auto-detection.
+   */
+  adapter?: FarmDocsAdapterDescriptor | false;
   /**
    * Farm public route for docs, e.g. "/docs". When passed through
    * `config`, this is converted to the docs package's folder-style `entry`.
