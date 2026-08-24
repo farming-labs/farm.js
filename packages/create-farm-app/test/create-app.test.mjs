@@ -10,6 +10,11 @@ import { fileURLToPath } from "node:url";
 
 const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
+async function workspaceRendererVersion(rendererPackage) {
+  const manifestPath = path.resolve(packageDir, "..", rendererPackage, "package.json");
+  return JSON.parse(await readFile(manifestPath, "utf8")).version;
+}
+
 test("spaces the CLI banner and matches the website hero copy", async () => {
   const { showBanner } = await import("../dist/utils.mjs");
   const lines = [];
@@ -422,7 +427,10 @@ test("generates a Solid starter while keeping React as the default renderer", as
     const apiClient = await readFile(path.join(generatedDir, "src/lib/api-client.ts"), "utf8");
     const tsconfig = JSON.parse(await readFile(path.join(generatedDir, "tsconfig.json"), "utf8"));
 
-    assert.equal(packageJson.dependencies["@farm.js/solid"], "0.1.0-beta.26");
+    assert.equal(
+      packageJson.dependencies["@farm.js/solid"],
+      await workspaceRendererVersion("farm-solid"),
+    );
     assert.equal(packageJson.dependencies["solid-js"], "1.9.14");
     assert.equal(packageJson.dependencies.react, undefined);
     assert.equal(packageJson.dependencies["react-dom"], undefined);
@@ -518,7 +526,10 @@ test("generates a Vue SFC starter with typed server interaction", async () => {
     const layout = await readFile(path.join(generatedDir, "src/app/layout.vue"), "utf8");
     const tsconfig = JSON.parse(await readFile(path.join(generatedDir, "tsconfig.json"), "utf8"));
 
-    assert.equal(packageJson.dependencies["@farm.js/vue"], "0.1.0-beta.26");
+    assert.equal(
+      packageJson.dependencies["@farm.js/vue"],
+      await workspaceRendererVersion("farm-vue"),
+    );
     assert.equal(packageJson.dependencies.vue, "3.5.41");
     assert.equal(packageJson.dependencies.react, undefined);
     assert.equal(packageJson.dependencies["react-dom"], undefined);
