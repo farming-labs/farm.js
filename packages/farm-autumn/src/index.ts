@@ -875,7 +875,7 @@ function setProjectedUsage(input: {
   pendingAutumnMeterProjection.set(projectionKey(input), input.projectedUsage);
 }
 
-function normalizeAutumnStatus(
+export function normalizeAutumnStatus(
   customer: Customer | null,
   subscription: Customer["subscriptions"][number] | null,
 ): AutumnBillingStatus {
@@ -887,7 +887,14 @@ function normalizeAutumnStatus(
     return "past_due";
   }
 
-  if (subscription.canceledAt != null) {
+  // A subscription scheduled to cancel at period end has `canceledAt` set but
+  // remains usable until `expiresAt`. Only report the terminal "canceled"
+  // status once access has actually ended; until then it stays active/trialing
+  // and the cancellation is surfaced via `cancelAtPeriodEnd`.
+  if (
+    subscription.canceledAt != null &&
+    (subscription.expiresAt == null || subscription.expiresAt <= Date.now())
+  ) {
     return "canceled";
   }
 
@@ -900,6 +907,22 @@ function normalizeAutumnStatus(
   }
 
   return "active";
+}
+
+/**
+ * Whether the subscription is scheduled to cancel but has not yet ended: a
+ * cancellation exists (`canceledAt`) and access continues until a future
+ * `expiresAt`. This is the "cancels on <date>" state, distinct from a fully
+ * ended subscription.
+ */
+export function isAutumnCancelAtPeriodEnd(
+  subscription: Customer["subscriptions"][number] | null | undefined,
+): boolean {
+  return (
+    subscription?.canceledAt != null &&
+    subscription.expiresAt != null &&
+    subscription.expiresAt > Date.now()
+  );
 }
 
 function resolveActiveProduct(
@@ -1444,10 +1467,7 @@ export function autumn<TInput extends AutumnIntegrationInput>(
             subscriptionId: active.subscription?.id ?? null,
             currentPeriodStart: currentPeriodStart(active.subscription),
             currentPeriodEnd: currentPeriodEnd(active.subscription),
-            cancelAtPeriodEnd:
-              active.subscription?.expiresAt != null &&
-              (active.subscription.canceledAt == null ||
-                active.subscription.canceledAt > Date.now()),
+            cancelAtPeriodEnd: isAutumnCancelAtPeriodEnd(active.subscription),
             trialEndsAt: trialEndsAt(active.subscription),
             features: plan.features ?? {},
             limits: plan.limits ?? {},
