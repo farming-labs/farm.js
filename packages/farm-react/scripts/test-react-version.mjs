@@ -446,6 +446,103 @@ const testSource = String.raw`
   assert.equal(keyedRowExecutions, initialKeyedRowExecutions);
   flushSync(() => keyedRowsRoot.unmount());
 
+  let keyedRangeExecutions = 0;
+  const KeyedRanges = createCompiledComponent({
+    displayName: "CompatibilityKeyedRanges",
+    initialize: () => [{ primary: ["a", "b", "c"], secondary: ["x", "y"] }],
+    render(_props, state, blocks) {
+      keyedRangeExecutions += 1;
+      const model = () => state[0].get();
+      const descriptor = (before, items) => ({
+        before,
+        items,
+        rowKey: (item) => item,
+        create: (item, index) => ({
+          kind: "element",
+          tag: "li",
+          attributes: [
+            { name: "data-key", value: item },
+            { name: "data-index", value: index },
+          ],
+          styles: [],
+          children: [index + ":" + item.toUpperCase()],
+        }),
+        bindings: [
+          { kind: "attribute", path: [], name: "data-index", read: (_item, index) => index },
+          { kind: "text", path: [], read: (item, index) => [index, ":", item.toUpperCase()] },
+        ],
+      });
+      return React.createElement(
+        "section",
+        null,
+        React.createElement(
+          "button",
+          {
+            onClick: () =>
+              state[0].set((current) => ({
+                primary: [...current.primary].reverse(),
+                secondary: [current.secondary[1], "z", current.secondary[0]],
+              })),
+          },
+          "Update ranges",
+        ),
+        React.createElement(blocks.KeyedRanges, {
+          id: 0,
+          render: () =>
+            React.createElement(
+              "ul",
+              null,
+              React.createElement("li", { "data-static": "header" }, "Primary"),
+              model().primary.map((item, index) =>
+                React.createElement(
+                  "li",
+                  { key: item, "data-key": item, "data-index": index },
+                  index + ":" + item.toUpperCase(),
+                ),
+              ),
+              React.createElement("li", { "data-static": "divider" }, "Secondary"),
+              model().secondary.map((item, index) =>
+                React.createElement(
+                  "li",
+                  { key: item, "data-key": item, "data-index": index },
+                  index + ":" + item.toUpperCase(),
+                ),
+              ),
+              React.createElement("li", { "data-static": "footer" }, "End"),
+            ),
+          ranges: [
+            descriptor(1, () => model().primary),
+            descriptor(1, () => model().secondary),
+          ],
+          trailing: 1,
+        }),
+      );
+    },
+    bindings: [{ kind: "block", id: 0, dependencies: [0] }],
+  });
+  const keyedRangesContainer = document.createElement("div");
+  document.body.append(keyedRangesContainer);
+  const keyedRangesRoot = createRoot(keyedRangesContainer);
+  flushSync(() => keyedRangesRoot.render(React.createElement(KeyedRanges)));
+  const initialKeyedRangeExecutions = keyedRangeExecutions;
+  const rangeHeader = keyedRangesContainer.querySelector("[data-static='header']");
+  const rangeDivider = keyedRangesContainer.querySelector("[data-static='divider']");
+  const rangeFooter = keyedRangesContainer.querySelector("[data-static='footer']");
+  const rangeA = keyedRangesContainer.querySelector("[data-key='a']");
+  keyedRangesContainer.querySelector("button").click();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(
+    [...keyedRangesContainer.querySelectorAll("[data-key]")].map((row) => row.dataset.key),
+    ["c", "b", "a", "y", "z", "x"],
+  );
+  assert.equal(keyedRangesContainer.querySelector("[data-static='header']"), rangeHeader);
+  assert.equal(keyedRangesContainer.querySelector("[data-static='divider']"), rangeDivider);
+  assert.equal(keyedRangesContainer.querySelector("[data-static='footer']"), rangeFooter);
+  assert.equal(keyedRangesContainer.querySelector("[data-key='a']"), rangeA);
+  assert.equal(keyedRangeExecutions, initialKeyedRangeExecutions);
+  flushSync(() => keyedRangesRoot.unmount());
+
   let interactiveRowExecutions = 0;
   let interactiveListRenders = 0;
   let setInteractiveItems = () => undefined;
