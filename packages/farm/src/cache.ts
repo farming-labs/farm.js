@@ -716,7 +716,7 @@ export class FarmDataCache {
   private async isAdapterEntryStale(entry: FarmCacheEntry, now = Date.now()): Promise<boolean> {
     if (
       typeof entry.revalidate === "number" &&
-      entry.revalidate > 0 &&
+      entry.revalidate >= 0 &&
       now - entry.createdAt >= entry.revalidate * 1000
     ) {
       return true;
