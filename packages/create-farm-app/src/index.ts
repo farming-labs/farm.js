@@ -815,7 +815,10 @@ async function updatePackageJson(
     const content = await fs.readFile(packageJsonPath, "utf-8");
     const packageJson = JSON.parse(content);
 
-    packageJson.name = projectName;
+    // projectName may be a nested path (e.g. "apps/my-app"): the directory is
+    // created at that path, but an unscoped package name cannot contain a
+    // slash, so the manifest name is the final path segment only.
+    packageJson.name = path.basename(projectName.replace(/[\\/]+$/, "")) || projectName;
     if (packageManager.version) {
       packageJson.packageManager = `${packageManager.name}@${packageManager.version}`;
     }

@@ -32,6 +32,40 @@ test("spaces the CLI banner and matches the website hero copy", async () => {
   assert.doesNotMatch(lines.join("\n"), /React (?:meta-)?framework/i);
 });
 
+test("writes a valid package name when the target is a nested path", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "create-farm-app-nested-"));
+
+  try {
+    const projectName = "apps/my-nested-app";
+    execFileSync(
+      process.execPath,
+      [
+        path.join(packageDir, "bin/create-farm-app.js"),
+        projectName,
+        "--template",
+        "basic",
+        "--typescript",
+        "--skip-install",
+      ],
+      {
+        cwd: tempDir,
+        encoding: "utf8",
+        env: { ...process.env, npm_config_user_agent: "pnpm/11.18.0 npm/? node/v22.0.0" },
+      },
+    );
+
+    // The directory is created at the nested path...
+    const generatedDir = path.join(tempDir, "apps", "my-nested-app");
+    const packageJson = JSON.parse(await readFile(path.join(generatedDir, "package.json"), "utf8"));
+
+    // ...but the manifest name is the final segment, which is a valid npm name.
+    assert.equal(packageJson.name, "my-nested-app");
+    assert.doesNotMatch(packageJson.name, /[\\/]/);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("uses concise labels for CLI template choices", async () => {
   const source = await readFile(path.join(packageDir, "src/index.ts"), "utf8");
 
