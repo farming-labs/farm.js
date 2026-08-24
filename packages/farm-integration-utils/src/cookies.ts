@@ -13,6 +13,21 @@ export interface RequestCookieOptions {
   expires?: Date;
 }
 
+/**
+ * Decode a cookie value, tolerating malformed percent-encoding. A request can
+ * carry a cookie whose value is not valid UTF-8 percent-encoding (a latin-1
+ * value from an old link, a crawler, or an attacker-planted sibling-domain
+ * cookie); `decodeURIComponent` throws `URIError` on those. Falling back to the
+ * raw value keeps a single bad cookie from turning every auth route into a 500.
+ */
+function decodeCookieValue(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 export function parseCookieHeaderMap(header: string | null): Record<string, string> {
   if (!header) {
     return {};
@@ -25,7 +40,7 @@ export function parseCookieHeaderMap(header: string | null): Record<string, stri
       .filter(Boolean)
       .map((part) => {
         const [key, ...rest] = part.split("=");
-        return [key, decodeURIComponent(rest.join("="))];
+        return [key, decodeCookieValue(rest.join("="))];
       }),
   );
 }
