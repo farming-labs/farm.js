@@ -52,9 +52,27 @@ describe("production middleware HTTP behavior", () => {
     ).resolves.toBeDefined();
     await expect(runner(new Request("https://example.com/dashboard/%ZZ"))).resolves.toBeDefined();
 
-    // The raw segment is kept, so it simply does not match a real route.
+    // The raw segment is kept as the param value.
     const ok = await runner(new Request("https://example.com/dashboard/ok"));
     expect(ok).toBeDefined();
+    expect(seen).toEqual([{ slug: "caf%E9" }, { slug: "%ZZ" }, { slug: "ok" }]);
+  });
+
+  it("keeps raw values for malformed segments under a catch-all matcher", async () => {
+    const seen: Array<Record<string, string>> = [];
+    const runner = createProductionMiddlewareRunner({
+      config: {
+        matcher: ["/files/:path*"],
+        handler(ctx) {
+          seen.push({ ...(ctx.params ?? {}) });
+        },
+      },
+    });
+
+    await expect(
+      runner(new Request("https://example.com/files/docs/caf%E9/%ZZ")),
+    ).resolves.toBeDefined();
+    expect(seen).toHaveLength(1);
   });
 
   it("serves requests with malformed percent-encoded cookies instead of throwing", async () => {
