@@ -31,7 +31,7 @@ export interface PreviewGatewayRequest {
 
 export interface PreviewGatewayResponse {
   status: number;
-  headers?: Record<string, string>;
+  headers?: Record<string, string | string[]>;
   body?: string | null;
   encoding?: "base64";
 }
@@ -242,6 +242,11 @@ export async function createGatewaySession(
   return session;
 }
 
+function getSetCookies(headers: Headers): string[] {
+  const getSetCookie = (headers as Headers & { getSetCookie?: () => string[] }).getSetCookie;
+  return getSetCookie?.call(headers) || [];
+}
+
 export async function forwardGatewayRequest(
   target: PreviewTarget,
   request: PreviewGatewayRequest,
@@ -267,13 +272,19 @@ export async function forwardGatewayRequest(
       : undefined,
   });
 
-  const responseHeaders: Record<string, string> = {};
+  const responseHeaders: Record<string, string | string[]> = {};
   response.headers.forEach((value, key) => {
     const normalized = key.toLowerCase();
-    if (!HOP_BY_HOP_HEADERS.has(normalized)) {
+    // Set-Cookie is collected separately: Headers.forEach folds repeated
+    // headers into one comma-joined value, which corrupts multiple cookies.
+    if (!HOP_BY_HOP_HEADERS.has(normalized) && normalized !== "set-cookie") {
       responseHeaders[key] = value;
     }
   });
+  const setCookies = getSetCookies(response.headers);
+  if (setCookies.length > 0) {
+    responseHeaders["set-cookie"] = setCookies;
+  }
 
   return {
     status: response.status,

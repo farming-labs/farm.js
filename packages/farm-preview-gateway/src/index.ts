@@ -37,7 +37,10 @@ export interface PreviewGatewayRequest {
 
 export interface PreviewGatewayResponse {
   status: number;
-  headers?: Record<string, string>;
+  // A header may carry multiple values (notably Set-Cookie: a login response
+  // commonly sets a session cookie and a CSRF cookie). Those must survive as
+  // an array through the store and back onto the public response.
+  headers?: Record<string, string | string[]>;
   body?: string | null;
   encoding?: "base64";
 }
@@ -159,9 +162,17 @@ export function createNodePreviewGatewayHandler(options: PreviewGatewayOptions =
   return async function nodePreviewGatewayHandler(req: IncomingMessage, res: ServerResponse) {
     const response = await handler(nodeRequestToWebRequest(req));
     res.statusCode = response.status;
+    // Headers.forEach folds repeated headers into one comma-joined value, which
+    // corrupts multiple Set-Cookie. Emit those separately as an array so each
+    // cookie becomes its own header line.
+    const setCookies = response.headers.getSetCookie?.() ?? [];
     response.headers.forEach((value, key) => {
+      if (key.toLowerCase() === "set-cookie") return;
       res.setHeader(key, value);
     });
+    if (setCookies.length > 0) {
+      res.setHeader("set-cookie", setCookies);
+    }
     res.end(Buffer.from(await response.arrayBuffer()));
   };
 }
@@ -547,8 +558,13 @@ async function proxyPublicRequest(
   const headers = new Headers();
   for (const [key, value] of Object.entries(response.headers || {})) {
     const normalized = key.toLowerCase();
-    if (!HOP_BY_HOP_HEADERS.has(normalized)) {
-      headers.set(key, value);
+    if (HOP_BY_HOP_HEADERS.has(normalized)) {
+      continue;
+    }
+    // Append multi-valued headers (Set-Cookie) so every value reaches the
+    // visitor; Headers.set would keep only the last.
+    for (const single of Array.isArray(value) ? value : [value]) {
+      headers.append(key, single);
     }
   }
   headers.set("cache-control", "no-store");
