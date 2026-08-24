@@ -238,6 +238,32 @@ describe("Farm workflows", () => {
     expect(handlerSource).toContain('getHeader(event, "x-farm-workflow-secret")');
     expect(handlerSource).toContain("authorization.match(/^Bearer");
     expect(handlerSource).not.toContain('searchParams.get("secret")');
+    expect(handlerSource).toContain("function decodeRouteSegment(segment)");
+    expect(handlerSource).not.toContain("decodeURIComponent(event.context.params");
+  });
+
+  it("404s on a malformed percent-encoded workflow id instead of throwing", async () => {
+    const workflow = {
+      id: "sync-users",
+      filePath: "/virtual/sync-users.ts",
+      description: "Sync users.",
+      schedule: [],
+      routePath: "/api/_farm/workflows/sync-users",
+    };
+    const handler = createFarmWorkflowRequestHandler({
+      workflows: [workflow],
+      config: resolveWorkflowsConfig({ secret: "test-secret" }),
+      loadModule: async () => ({ default: { run: async () => ({}) } }),
+    });
+
+    // The id is decoded before the secret is checked, so these are reachable
+    // without credentials and must not throw out of the handler.
+    for (const id of ["caf%E9", "%ZZ", "a%"]) {
+      const response = await handler(
+        new Request(`https://example.com/api/_farm/workflows/${id}`, { method: "POST" }),
+      );
+      expect(response?.status).toBe(404);
+    }
   });
 
   it("adds scheduled workflows to Vercel crons without duplicating existing entries", () => {
