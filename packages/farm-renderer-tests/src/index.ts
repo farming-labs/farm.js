@@ -25,6 +25,9 @@ export interface RendererServerFixture {
   createElement(type: unknown, props?: unknown, ...children: unknown[]): unknown;
   isValidElement(value: unknown): boolean;
   renderToString(element: unknown): string | Promise<string>;
+  renderToStringWithHead?(
+    element: unknown,
+  ): { html: string; head: string } | Promise<{ html: string; head: string }>;
   generateHydrationScript?: () => string;
 }
 
@@ -108,6 +111,16 @@ export function defineRendererServerConformance(runtime: RendererServerFixture):
       const second = runtime.generateHydrationScript?.() ?? "";
       expect(typeof first).toBe("string");
       expect(second).toBe(first);
+    });
+
+    it("keeps renderToStringWithHead consistent with renderToString", async () => {
+      if (!runtime.renderToStringWithHead) return;
+
+      const element = runtime.createElement("p", null, `Head-capable ${runtime.name}`);
+      const rendered = await runtime.renderToStringWithHead(element);
+
+      expect(rendered.html).toBe(await runtime.renderToString(element));
+      expect(typeof rendered.head).toBe("string");
     });
 
     it("serializes React numeric style values with px units", async () => {

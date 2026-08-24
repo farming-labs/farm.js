@@ -4394,8 +4394,17 @@ async function renderFarmElement(ReactDOMServer, element) {
     };
   }
 
+  if (ReactDOMServer.renderToStringWithHead) {
+    const rendered = await ReactDOMServer.renderToStringWithHead(element);
+    return {
+      html: rendered.html,
+      head: rendered.head || "",
+      shellHtml: rendered.html,
+      streamErrors,
+    };
+  }
   const html = await ReactDOMServer.renderToString(element);
-  return { html, shellHtml: html, streamErrors };
+  return { html, head: "", shellHtml: html, streamErrors };
 }
 
 async function renderFarmElementToString(ReactDOMServer, element) {
@@ -5302,15 +5311,24 @@ ${
     }
   }
 
-  const rootMarkup = await renderFarmElementToString(
+  const renderedRoot = await renderFarmElement(
     ReactDOMServer,
     React.createElement("div", { id: "root" }, wrappedElement),
   );
+  let rootMarkup = renderedRoot.html;
+  if (rootMarkup === undefined) {
+    rootMarkup = await new Response(renderedRoot.stream).text();
+    if (renderedRoot.streamErrors.length > 0) throw renderedRoot.streamErrors[0];
+  }
   let html = source.replace(
     bodyMatch[0],
     // Function replacement: rendered markup may contain $-sequences ($&, $', $$).
     function() { return "<body" + bodyMatch[1] + ">" + rootMarkup + "</body>"; },
   );
+  if (renderedRoot.head) {
+    // Renderer-emitted head markup (e.g. <svelte:head>).
+    html = html.replace(/<[/]head>/i, function() { return renderedRoot.head + "\\n</head>"; });
+  }
   if (!html.includes('href="/__farm_client_css_href__"')) {
     const clientStylesheet = '  <link rel="stylesheet" href="/__farm_client_css_href__">\\n';
     const firstStyleIndex = html.search(/<style(?:\\s|>)/i);
@@ -6167,6 +6185,7 @@ async function handleFarmRequestInContext(
           }
         }
         
+        const rendererHead = renderedPage.head || "";
         let fullHtml;
         if (hasFullDocument) {
           // Layout provides full HTML structure - inject CSS and client script
@@ -6181,6 +6200,9 @@ async function handleFarmRequestInContext(
                 nextHeadContent += "\\n  <title>" + title + "</title>";
               }
               if (metaTags) nextHeadContent += metaTags;
+              // Renderer-emitted head markup (e.g. <svelte:head>). Function
+              // replacement below keeps $-sequences literal.
+              if (rendererHead) nextHeadContent += "\\n  " + rendererHead;
               return nextHeadContent === headContent
                 ? match
                 : "<head" + attrs + ">" + nextHeadContent + "\\n</head>";
@@ -6211,7 +6233,7 @@ async function handleFarmRequestInContext(
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   \${hasFavicon ? "" : '<link rel="icon" href="data:,">'}
-  <title>\${title}</title>\${metaTags}
+  <title>\${title}</title>\${metaTags}\${rendererHead ? "\\n  " + rendererHead : ""}
   <link rel="stylesheet" href="/__farm_client_css_href__">
   \${renderFarmRendererHydrationScript()}
 </head>

@@ -39,37 +39,77 @@ function renderFarmClientBootstrapScript(
   );
 }
 
+function createInjector() {
+  return new Function(
+    "html",
+    "title",
+    "metaTags",
+    "rendererHead",
+    "pageProps",
+    "routeSlotPayload",
+    "clientPageProps",
+    "renderFarmClientBootstrapScript",
+    "renderFarmRendererHydrationScript",
+    "let fullHtml;\n" + extractEmittedFullDocumentInjection() + "\nreturn fullHtml;",
+  ) as (
+    html: string,
+    title: string,
+    metaTags: string,
+    rendererHead: string,
+    pageProps: Record<string, unknown>,
+    routeSlotPayload: unknown[],
+    clientPageProps: Record<string, unknown>,
+    bootstrap: typeof renderFarmClientBootstrapScript,
+    hydration: () => string,
+  ) => string;
+}
+
 describe("generated full-document injection", () => {
   it("keeps $-sequences in page props literal when injecting the bootstrap script", () => {
-    const inject = new Function(
-      "html",
-      "title",
-      "metaTags",
-      "pageProps",
-      "routeSlotPayload",
-      "clientPageProps",
-      "renderFarmClientBootstrapScript",
-      "renderFarmRendererHydrationScript",
-      "let fullHtml;\n" + extractEmittedFullDocumentInjection() + "\nreturn fullHtml;",
-    );
+    const inject = createInjector();
 
     const clientPageProps = { note: "totals: $$ then $& then $' then $`" };
     const fullHtml = inject(
       "<html><head><title>App</title></head><body><main>page</main></body></html>",
       "Farm.js App",
       "",
+      "",
       { __farmCanonicalPath: "/notes" },
       [],
       clientPageProps,
       renderFarmClientBootstrapScript,
       () => "",
-    ) as string;
+    );
 
     // A string replacement would expand $& into </body> and $' into the rest of
     // the document, corrupting window.__FARM_PROPS__ and duplicating markup.
     expect(fullHtml).toContain(serializeFarmInlineValue(clientPageProps));
     expect(fullHtml.match(/<\/body>/gi)).toHaveLength(1);
     expect(fullHtml.match(/<\/html>/gi)).toHaveLength(1);
+  });
+
+  it("injects renderer-emitted head markup literally into the document head", () => {
+    const inject = createInjector();
+
+    // Svelte-style head payload with hydration markers and hostile
+    // $-sequences; a string replacement would expand them into markup.
+    const rendererHead = "<!--farm-head--><title>Docs $& $' page</title>";
+    const fullHtml = inject(
+      '<html><head><meta charset="utf-8"></head><body><main>page</main></body></html>',
+      "Farm.js App",
+      "",
+      rendererHead,
+      { __farmCanonicalPath: "/docs" },
+      [],
+      {},
+      renderFarmClientBootstrapScript,
+      () => "",
+    );
+
+    const headEnd = fullHtml.indexOf("</head>");
+    expect(fullHtml.indexOf(rendererHead)).toBeGreaterThan(-1);
+    expect(fullHtml.indexOf(rendererHead)).toBeLessThan(headEnd);
+    expect(fullHtml.split(rendererHead)).toHaveLength(2);
   });
 
   it("never passes dynamic markup as a string replacement in the generated document pipeline", () => {

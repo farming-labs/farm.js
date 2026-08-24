@@ -518,6 +518,20 @@ export class ServerRenderer {
   }
 
   /**
+   * Buffered render carrying document-head markup for renderers that emit it
+   * during render (e.g. <svelte:head>). Other renderers return an empty head.
+   */
+  private async renderElementToDocumentParts(
+    element: unknown,
+  ): Promise<{ html: string; head: string }> {
+    if (this.rendererRuntime.renderToStringWithHead) {
+      const rendered = await this.rendererRuntime.renderToStringWithHead(element);
+      return { html: rendered.html, head: rendered.head || "" };
+    }
+    return { html: await this.rendererRuntime.renderToString(element), head: "" };
+  }
+
+  /**
    * Render the route tree used by client navigation without producing a second
    * document response. Layout markers let the browser preserve the longest
    * common shell and replace only the first changed boundary.
@@ -2008,7 +2022,8 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
 </script>`;
       const deferredScript = createDeferredHydrationScript(deferredProps.records);
       const rendererHydrationScript = this.rendererRuntime.generateHydrationScript?.() || "";
-      const content = await this.rendererRuntime.renderToString(element);
+      const { html: content, head: rendererHead } =
+        await this.renderElementToDocumentParts(element);
       const {
         title,
         tags: metaTags,
@@ -2038,6 +2053,7 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
             `<meta name="farm-deployment-id" content="${escapeHtmlAttribute(deploymentId)}">`,
             metaTags,
             alternateTags,
+            rendererHead,
             renderFarmFontDevHead(this.config.root || process.cwd()),
             `<link rel="stylesheet" href="/src/app/globals.css">`,
             `<script type="module" src="/@vite/client"></script>`,
@@ -2061,7 +2077,7 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="farm-deployment-id" content="${escapeHtmlAttribute(deploymentId)}">
   ${hasFavicon ? "" : '<link rel="icon" href="data:,">'}
-  <title>${title}</title>${metaTags}${alternateTags}
+  <title>${title}</title>${metaTags}${alternateTags}${rendererHead ? `\n  ${rendererHead}` : ""}
   ${renderFarmFontDevHead(this.config.root || process.cwd())}
   <link rel="stylesheet" href="/src/app/globals.css">
   <script type="module" src="/@vite/client"></script>

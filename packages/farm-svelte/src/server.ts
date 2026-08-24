@@ -25,4 +25,15 @@ export async function renderToString(element: unknown): Promise<string> {
   return rendered.body;
 }
 
+/**
+ * Svelte components can emit document-head markup through <svelte:head>;
+ * Farm injects the returned head into the assembled document.
+ */
+export async function renderToStringWithHead(
+  element: unknown,
+): Promise<{ html: string; head: string }> {
+  const rendered = render(CompatRoot as Component<{ element: unknown }>, { props: { element } });
+  return { html: rendered.body, head: rendered.head };
+}
+
 export default SvelteCompat;
