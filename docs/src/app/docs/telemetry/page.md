@@ -38,6 +38,7 @@ Environment variables can provide an explicit per-process or organization-wide p
 | `FARM_TELEMETRY=0`          | Disables telemetry for the process.                                 |
 | `FARM_TELEMETRY_DISABLED=1` | Disables telemetry for the process.                                 |
 | `DO_NOT_TRACK=1`            | Disables telemetry and takes precedence over Farm's enable setting. |
+| `FARM_TELEMETRY_DEBUG=1`    | Prints delivery status without event contents or identifiers.       |
 
 Without the explicit `FARM_TELEMETRY=1` override, Farm skips test, CI, and non-interactive
 processes even when the saved local preference is enabled.
@@ -74,8 +75,10 @@ Farm does **not** collect or store:
 - environment variable names or values, database URLs, credentials, tokens, or other secrets;
 - IP addresses or user-agent strings.
 
-The client uses a short timeout and ignores network or server failures. Telemetry can never make a
-Farm command fail. There is no persistent retry queue.
+The client schedules delivery in the background so telemetry does not delay command execution, and
+network delivery does not keep a short-lived process open. A request has a three-second timeout and
+transient network, rate-limit, and server failures receive two bounded retries while the process
+remains alive. Telemetry can never make a Farm command fail, and there is no persistent retry queue.
 
 ## Endpoint, validation, and retention
 

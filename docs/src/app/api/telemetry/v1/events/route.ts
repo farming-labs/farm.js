@@ -1,6 +1,14 @@
 import { createHmac } from "node:crypto";
 import { getPrisma } from "../../../../../lib/prisma";
 import { z } from "zod";
+import {
+  FARM_CREATE_APP_TELEMETRY_COMMANDS,
+  FARM_TELEMETRY_COMMANDS,
+  FARM_TELEMETRY_DEPLOY_TARGETS,
+  FARM_TELEMETRY_PACKAGE_MANAGERS,
+  FARM_TELEMETRY_RENDERERS,
+  FARM_TELEMETRY_TEMPLATES,
+} from "../../../../../../../packages/farm-cli/src/telemetry-contract";
 
 const MAX_BODY_BYTES = 8 * 1024;
 const RATE_LIMIT_WINDOW_MS = 60_000;
@@ -9,44 +17,6 @@ const IDENTITY_RATE_LIMIT = 120;
 const MAX_RATE_LIMIT_ENTRIES = 4_096;
 const PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1_000;
 const DEFAULT_RETENTION_DAYS = 90;
-
-const farmCommands = [
-  "dev",
-  "build",
-  "auth:migrate",
-  "upgrade",
-  "generate",
-  "doctor",
-  "explain",
-  "preview",
-  "migrate",
-  "cron:list",
-  "cron:run",
-  "add:integration",
-  "deploy",
-] as const;
-
-const createAppCommands = ["create", "list-templates"] as const;
-
-const templates = [
-  "basic",
-  "react-compiler",
-  "auth",
-  "better-auth",
-  "ai",
-  "auth0",
-  "authjs",
-  "autumn",
-  "clerk",
-  "jobs-inngest",
-  "jobs-trigger",
-  "polar",
-  "resend",
-  "stripe",
-  "supabase",
-  "unkey",
-  "workos",
-] as const;
 
 const runtimeFields = {
   schemaVersion: z.literal(1),
@@ -68,8 +38,8 @@ const farmCommandEventSchema = z
     eventType: z.literal("command_invoked"),
     source: z.literal("cli"),
     packageName: z.literal("@farm.js/cli"),
-    command: z.enum(farmCommands),
-    deployTarget: z.enum(["vercel", "cloudflare", "netlify", "node", "custom"]).optional(),
+    command: z.enum(FARM_TELEMETRY_COMMANDS),
+    deployTarget: z.enum(FARM_TELEMETRY_DEPLOY_TARGETS).optional(),
   })
   .strict();
 
@@ -79,7 +49,7 @@ const createAppCommandEventSchema = z
     eventType: z.literal("command_invoked"),
     source: z.literal("create-app"),
     packageName: z.literal("@farm.js/create-app"),
-    command: z.enum(createAppCommands),
+    command: z.enum(FARM_CREATE_APP_TELEMETRY_COMMANDS),
   })
   .strict();
 
@@ -89,9 +59,9 @@ const projectCreatedEventSchema = z
     eventType: z.literal("project_created"),
     source: z.literal("create-app"),
     packageName: z.literal("@farm.js/create-app"),
-    template: z.enum(templates).optional(),
-    renderer: z.enum(["react", "preact", "solid", "vue", "svelte"]).optional(),
-    packageManager: z.enum(["npm", "pnpm", "yarn", "bun"]).optional(),
+    template: z.enum(FARM_TELEMETRY_TEMPLATES).optional(),
+    renderer: z.enum(FARM_TELEMETRY_RENDERERS).optional(),
+    packageManager: z.enum(FARM_TELEMETRY_PACKAGE_MANAGERS).optional(),
     typescript: z.boolean().optional(),
     installedDependencies: z.boolean().optional(),
   })

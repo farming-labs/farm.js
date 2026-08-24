@@ -113,6 +113,7 @@ export {
   type FarmUpgradeResult,
 } from "./upgrade";
 export {
+  flushFarmTelemetry,
   getFarmTelemetryConfigFile,
   getFarmTelemetryStatus,
   resolveFarmCreateAppTelemetryCommand,
