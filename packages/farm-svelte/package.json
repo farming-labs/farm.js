@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/svelte",
-  "version": "0.1.0-beta.29",
+  "version": "0.1.0-beta.30",
   "description": "Svelte renderer for FARMJS applications",
   "keywords": [
     "farmjs",
