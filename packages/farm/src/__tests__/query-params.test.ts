@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { asInteger, asString } from "../query/parsers";
+import { asArrayOf, asInteger, asString } from "../query/parsers";
 import { loadRouteParams, parseRouteParams } from "../query/params";
+import { loadSearchParams } from "../query/server";
 
 describe("query route params parsing", () => {
   it("parses route params synchronously with parser types", () => {
@@ -36,5 +37,46 @@ describe("query route params parsing", () => {
         { strict: true },
       ),
     ).toThrow('Failed to parse route param "id"');
+  });
+});
+
+describe("loadSearchParams", () => {
+  it("keeps every value of a repeated parameter", async () => {
+    // The searchParams page prop collects repeated keys into arrays.
+    await expect(
+      loadSearchParams(Promise.resolve({ tag: ["react", "vite", "zod"] }), {
+        tag: asArrayOf(asString),
+      }),
+    ).resolves.toEqual({ tag: ["react", "vite", "zod"] });
+
+    await expect(
+      loadSearchParams(Promise.resolve(new URLSearchParams("tag=react&tag=vite&tag=zod")), {
+        tag: asArrayOf(asString),
+      }),
+    ).resolves.toEqual({ tag: ["react", "vite", "zod"] });
+  });
+
+  it("keeps single and comma-joined values working unchanged", async () => {
+    await expect(
+      loadSearchParams(Promise.resolve({ tag: "react,vite" }), {
+        tag: asArrayOf(asString),
+      }),
+    ).resolves.toEqual({ tag: ["react", "vite"] });
+
+    await expect(
+      loadSearchParams(Promise.resolve({ q: "farm" }), {
+        q: asString,
+      }),
+    ).resolves.toEqual({ q: "farm" });
+  });
+
+  it("round-trips asArrayOf serialize output", async () => {
+    const parser = asArrayOf(asString);
+    const serialized = parser.serialize(["react", "vite", "zod"]);
+    await expect(
+      loadSearchParams(Promise.resolve(new URLSearchParams({ tag: serialized })), {
+        tag: parser,
+      }),
+    ).resolves.toEqual({ tag: ["react", "vite", "zod"] });
   });
 });

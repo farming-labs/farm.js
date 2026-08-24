@@ -66,7 +66,11 @@ export async function loadSearchParams<T extends Record<string, Parser<any>>>(
   const result = {} as { [K in keyof T]: ReturnType<T[K]["parse"]> };
 
   for (const [key, parser] of Object.entries(parsers)) {
-    const value = urlParams.get(key);
+    // Repeated parameters must all reach the parser: asArrayOf splits on
+    // commas — the same format its serialize writes — so joining the values
+    // round-trips, while single values pass through unchanged.
+    const values = urlParams.getAll(key);
+    const value = values.length > 1 ? values.join(",") : (values[0] ?? null);
 
     if (value !== null && value !== "") {
       try {
