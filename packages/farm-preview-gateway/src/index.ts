@@ -219,6 +219,10 @@ export class MemoryPreviewGatewayStore implements PreviewGatewayStore {
   }
 
   async touchSession(session: PreviewGatewaySession, ttlMs: number): Promise<void> {
+    // A concurrent delete (the preview was stopped) must win: a poll handler
+    // that outlives the DELETE must never resurrect a session that is no
+    // longer stored, or its name would look "online" and block a restart.
+    if (!this.sessions.has(session.id)) return;
     session.expiresAt = Date.now() + ttlMs;
     this.sessions.set(session.id, session);
     const nameOwner = this.names.get(session.name);
@@ -292,13 +296,18 @@ export class RedisRestPreviewGatewayStore implements PreviewGatewayStore {
       ...session,
       expiresAt: Date.now() + ttlMs,
     };
-    await this.command(
+    // XX only refreshes a session key that still exists. A poll handler that
+    // outlives a DELETE must not recreate the session (nor its name mapping),
+    // which would otherwise block reclaiming the name on restart.
+    const result = await this.command<string | null>(
       "SET",
       this.sessionKey(session.id),
       JSON.stringify(nextSession),
       "PX",
       ttlMs,
+      "XX",
     );
+    if (result === null) return;
     const nameOwner = await this.command<string | null>("GET", this.nameKey(session.name));
     if (!nameOwner || nameOwner === session.id) {
       await this.command("SET", this.nameKey(session.name), session.id, "PX", ttlMs);

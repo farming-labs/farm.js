@@ -59,6 +59,28 @@ test("proxies a public preview request through the gateway queue", async () => {
   }
 });
 
+test("does not resurrect a deleted session when a stale touch lands late", async () => {
+  const store = new MemoryPreviewGatewayStore();
+  const session = {
+    id: "sess-1",
+    name: "late-touch",
+    localUrl: "http://localhost:4321",
+    token: "tok",
+    expiresAt: Date.now() + 60_000,
+    lastHeartbeatAt: Date.now(),
+  };
+  await store.createSession(session, 60_000);
+
+  // The preview is stopped: the session is deleted while a poll handler still
+  // holds the old snapshot.
+  await store.deleteSession(session);
+  await store.touchSession(session, 60_000);
+
+  // A late touch must not bring the session (or its name mapping) back.
+  assert.equal(await store.getSessionById("sess-1"), undefined);
+  assert.equal(await store.getSessionByName("late-touch"), undefined);
+});
+
 test("replays every Set-Cookie header to the public visitor", async () => {
   const store = new MemoryPreviewGatewayStore();
   const gateway = await createGatewayServer(store);
