@@ -10,6 +10,7 @@ import type {
   MiddlewareResult,
 } from "./types";
 import { emitFarmEvent } from "../observability";
+import { decodeRouteSegment } from "../utils/decode";
 import { normalizeMiddlewareModule } from "./module";
 import { stripFarmLocaleFromPathname } from "../i18n/routing";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
@@ -451,16 +452,6 @@ function compilePathPattern(pattern: string): { regex: RegExp; params: string[] 
     regex: new RegExp(`^${parts.join("")}$`),
     params,
   };
-}
-
-function decodeRouteSegment(segment: string): string {
-  try {
-    return decodeURIComponent(segment);
-  } catch {
-    // Request paths are not guaranteed to be validly percent-encoded; a
-    // malformed segment must not throw out of route matching.
-    return segment;
-  }
 }
 
 function matchPattern(

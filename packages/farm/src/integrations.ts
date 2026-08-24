@@ -11,6 +11,7 @@ import type {
 } from "./integration-api";
 import type { InferFarmIntegrationOrmClient } from "./integration-orm";
 import { setFarmPluginIntegrationContext } from "./plugin-integration-context";
+import { decodeRouteSegment } from "./utils/decode";
 import type {
   FarmPlugin,
   FarmPluginContext,
@@ -3173,16 +3174,6 @@ function resolveMatcherParams(
 
 function matchesPath(pattern: string, pathname: string): boolean {
   return extractPathParams(pattern, pathname) !== null;
-}
-
-function decodeRouteSegment(segment: string): string {
-  try {
-    return decodeURIComponent(segment);
-  } catch {
-    // Request paths are not guaranteed to be validly percent-encoded; a
-    // malformed segment must not throw out of route matching.
-    return segment;
-  }
 }
 
 function extractPathParams(pattern: string, pathname: string): FarmIntegrationRouteParams | null {
