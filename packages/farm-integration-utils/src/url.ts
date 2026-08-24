@@ -10,7 +10,17 @@ export function getOrigin(request: Request, configuredBaseUrl?: string): string 
 }
 
 export function getReturnTo(rawValue: string | null | undefined, fallback = "/"): string {
+  // Must be a same-origin, root-relative path. A bare startsWith("/") check is
+  // not enough: "//evil.com" (protocol-relative) and "/\evil.com" (browsers
+  // and the URL parser treat "\" as "/") both begin with "/" yet resolve to a
+  // foreign origin when passed to `new URL(returnTo, origin)`, giving an open
+  // redirect after a legitimate login.
   if (!rawValue || !rawValue.startsWith("/")) {
+    return fallback;
+  }
+
+  const second = rawValue[1];
+  if (second === "/" || second === "\\") {
     return fallback;
   }
 
