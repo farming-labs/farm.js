@@ -5326,7 +5326,12 @@ ${
     function() { return "<body" + bodyMatch[1] + ">" + rootMarkup + "</body>"; },
   );
   if (renderedRoot.head) {
-    // Renderer-emitted head markup (e.g. <svelte:head>).
+    // Renderer-emitted head markup (e.g. <svelte:head>). First <title> wins,
+    // so the prebuilt shell's fallback title yields when the renderer
+    // supplies one; explicit titles are left in place.
+    if (/<title[\\s>]/i.test(renderedRoot.head)) {
+      html = html.replace(/<title>Farm\\.js App<[/]title>/i, "");
+    }
     html = html.replace(/<[/]head>/i, function() { return renderedRoot.head + "\\n</head>"; });
   }
   if (!html.includes('href="/__farm_client_css_href__"')) {
@@ -6186,6 +6191,10 @@ async function handleFarmRequestInContext(
         }
         
         const rendererHead = renderedPage.head || "";
+        // First <title> wins: the fallback framework title yields to a
+        // renderer-emitted one; explicit metadata titles still come first.
+        const suppressDefaultTitle =
+          !renderedMetadata.hasExplicitTitle && /<title[\\s>]/i.test(rendererHead);
         let fullHtml;
         if (hasFullDocument) {
           // Layout provides full HTML structure - inject CSS and client script
@@ -6233,7 +6242,7 @@ async function handleFarmRequestInContext(
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   \${hasFavicon ? "" : '<link rel="icon" href="data:,">'}
-  <title>\${title}</title>\${metaTags}\${rendererHead ? "\\n  " + rendererHead : ""}
+  \${suppressDefaultTitle ? "" : "<title>" + title + "</title>"}\${metaTags}\${rendererHead ? "\\n  " + rendererHead : ""}
   <link rel="stylesheet" href="/__farm_client_css_href__">
   \${renderFarmRendererHydrationScript()}
 </head>
