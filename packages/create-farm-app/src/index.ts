@@ -7,11 +7,7 @@ import {
   type AddFarmIntegrationResult,
   type FarmIntegrationProvider,
 } from "@farm.js/cli/add-integration";
-import {
-  showFarmTelemetryNotice,
-  trackFarmCreateAppCommand,
-  trackFarmProjectCreated,
-} from "@farm.js/cli/telemetry";
+import { trackFarmCreateAppCommand, trackFarmProjectCreated } from "@farm.js/cli/telemetry";
 import { logger, showBanner } from "./utils";
 
 interface CreateAppOptions {
@@ -209,8 +205,7 @@ export interface PackageManager {
 
 export async function createApp(projectName?: string, options: CreateAppOptions = {}) {
   showBanner();
-  await showFarmTelemetryNotice();
-  await trackFarmCreateAppCommand({
+  void trackFarmCreateAppCommand({
     command: options.listTemplates ? "list-templates" : "create",
     packageVersion: options.telemetryPackageVersion ?? "unknown",
   });
@@ -427,7 +422,7 @@ export async function createApp(projectName?: string, options: CreateAppOptions 
     }
   }
 
-  await trackFarmProjectCreated({
+  void trackFarmProjectCreated({
     packageVersion: options.telemetryPackageVersion ?? "unknown",
     template,
     renderer,

@@ -54,19 +54,14 @@ function telemetryDeployTarget(commandPath, options) {
   return undefined;
 }
 
-program.hook("preAction", async (_command, actionCommand) => {
+program.hook("preAction", (_command, actionCommand) => {
   const commandPath = telemetryCommandPath(actionCommand);
   if (commandPath.startsWith("telemetry")) return;
-  const {
-    resolveFarmTelemetryCommand,
-    showFarmTelemetryNotice,
-    trackFarmCommand,
-  } = require("../dist/telemetry.js");
-  await showFarmTelemetryNotice();
+  const { resolveFarmTelemetryCommand, trackFarmCommand } = require("../dist/telemetry.js");
   const command = resolveFarmTelemetryCommand(commandPath);
   if (!command) return;
   const options = actionCommand.opts();
-  await trackFarmCommand({
+  void trackFarmCommand({
     command,
     packageVersion: version,
     deployTarget: telemetryDeployTarget(commandPath, options),

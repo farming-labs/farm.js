@@ -1,62 +1,30 @@
 import { randomUUID } from "node:crypto";
 import { chmod, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import os from "node:os";
 import path from "node:path";
+import {
+  FARM_CREATE_APP_TELEMETRY_COMMANDS,
+  FARM_TELEMETRY_COMMANDS,
+  FARM_TELEMETRY_DEPLOY_TARGETS,
+  FARM_TELEMETRY_PACKAGE_MANAGERS,
+  FARM_TELEMETRY_RENDERERS,
+  FARM_TELEMETRY_TEMPLATES,
+} from "./telemetry-contract";
 
 const TELEMETRY_SCHEMA_VERSION = 1 as const;
 const DEFAULT_TELEMETRY_ENDPOINT = "https://farmjs.dev/api/telemetry/v1/events";
 const TELEMETRY_NOTICE_URL = "https://farmjs.dev/docs/telemetry";
-const REQUEST_TIMEOUT_MS = 750;
+const REQUEST_TIMEOUT_MS = 3_000;
+const RETRY_DELAYS_MS = [250, 750] as const;
 
-const FARM_COMMANDS = [
-  "dev",
-  "build",
-  "start",
-  "auth:migrate",
-  "upgrade",
-  "generate",
-  "doctor",
-  "explain",
-  "preview",
-  "migrate",
-  "cron:list",
-  "cron:run",
-  "add:integration",
-  "deploy",
-] as const;
-
-const CREATE_APP_COMMANDS = ["create", "list-templates"] as const;
-
-const FARM_TEMPLATES = [
-  "basic",
-  "react-compiler",
-  "auth",
-  "better-auth",
-  "ai",
-  "auth0",
-  "authjs",
-  "autumn",
-  "clerk",
-  "jobs-inngest",
-  "jobs-trigger",
-  "polar",
-  "resend",
-  "stripe",
-  "supabase",
-  "unkey",
-  "workos",
-] as const;
-
-const RENDERERS = ["react", "preact", "solid", "vue", "svelte"] as const;
-const PACKAGE_MANAGERS = ["npm", "pnpm", "yarn", "bun"] as const;
-const DEPLOY_TARGETS = ["vercel", "cloudflare", "netlify", "node", "custom"] as const;
-
-export type FarmTelemetryCommand = (typeof FARM_COMMANDS)[number];
-export type FarmCreateAppTelemetryCommand = (typeof CREATE_APP_COMMANDS)[number];
-export type FarmTelemetryTemplate = (typeof FARM_TEMPLATES)[number];
-export type FarmTelemetryRenderer = (typeof RENDERERS)[number];
-export type FarmTelemetryPackageManager = (typeof PACKAGE_MANAGERS)[number];
-export type FarmTelemetryDeployTarget = (typeof DEPLOY_TARGETS)[number];
+export type FarmTelemetryCommand = (typeof FARM_TELEMETRY_COMMANDS)[number];
+export type FarmCreateAppTelemetryCommand = (typeof FARM_CREATE_APP_TELEMETRY_COMMANDS)[number];
+export type FarmTelemetryTemplate = (typeof FARM_TELEMETRY_TEMPLATES)[number];
+export type FarmTelemetryRenderer = (typeof FARM_TELEMETRY_RENDERERS)[number];
+export type FarmTelemetryPackageManager = (typeof FARM_TELEMETRY_PACKAGE_MANAGERS)[number];
+export type FarmTelemetryDeployTarget = (typeof FARM_TELEMETRY_DEPLOY_TARGETS)[number];
 
 interface FarmTelemetryConfig {
   version: 1;
@@ -144,6 +112,10 @@ type FarmTelemetryGeneratedFields = Pick<
 type FarmTelemetryEventInput<T = FarmTelemetryEvent> = T extends FarmTelemetryEvent
   ? Omit<T, keyof FarmTelemetryGeneratedFields>
   : never;
+
+const pendingDeliveries = new Set<Promise<void>>();
+const retryTimers = new Set<NodeJS.Timeout>();
+let telemetryFlushWaiters = 0;
 
 function defaultConfig(): FarmTelemetryConfig {
   return {
@@ -335,7 +307,7 @@ export async function showFarmTelemetryNotice(): Promise<void> {
 }
 
 export function resolveFarmTelemetryCommand(value: string): FarmTelemetryCommand | undefined {
-  return (FARM_COMMANDS as readonly string[]).includes(value)
+  return (FARM_TELEMETRY_COMMANDS as readonly string[]).includes(value)
     ? (value as FarmTelemetryCommand)
     : undefined;
 }
@@ -343,56 +315,89 @@ export function resolveFarmTelemetryCommand(value: string): FarmTelemetryCommand
 export function resolveFarmCreateAppTelemetryCommand(
   value: string,
 ): FarmCreateAppTelemetryCommand | undefined {
-  return (CREATE_APP_COMMANDS as readonly string[]).includes(value)
+  return (FARM_CREATE_APP_TELEMETRY_COMMANDS as readonly string[]).includes(value)
     ? (value as FarmCreateAppTelemetryCommand)
     : undefined;
 }
 
-export async function trackFarmCommand(input: FarmCommandTelemetryInput): Promise<void> {
-  const deployTarget = allowlisted(input.deployTarget, DEPLOY_TARGETS);
-  await track({
-    eventType: "command_invoked",
-    source: "cli",
-    packageName: "@farm.js/cli",
-    packageVersion: sanitizeVersion(input.packageVersion),
-    command: input.command,
-    ...(deployTarget ? { deployTarget } : {}),
+export function trackFarmCommand(input: FarmCommandTelemetryInput): Promise<void> {
+  return schedule(async () => {
+    await showFarmTelemetryNotice();
+    const deployTarget = allowlisted(input.deployTarget, FARM_TELEMETRY_DEPLOY_TARGETS);
+    await track({
+      eventType: "command_invoked",
+      source: "cli",
+      packageName: "@farm.js/cli",
+      packageVersion: sanitizeVersion(input.packageVersion),
+      command: input.command,
+      ...(deployTarget ? { deployTarget } : {}),
+    });
   });
 }
 
-export async function trackFarmCreateAppCommand(
+export function trackFarmCreateAppCommand(
   input: FarmCreateAppCommandTelemetryInput,
 ): Promise<void> {
-  const command = allowlisted(input.command, CREATE_APP_COMMANDS);
-  if (!command) return;
-  await track({
-    eventType: "command_invoked",
-    source: "create-app",
-    packageName: "@farm.js/create-app",
-    packageVersion: sanitizeVersion(input.packageVersion),
-    command,
+  return schedule(async () => {
+    await showFarmTelemetryNotice();
+    const command = allowlisted(input.command, FARM_CREATE_APP_TELEMETRY_COMMANDS);
+    if (!command) return;
+    await track({
+      eventType: "command_invoked",
+      source: "create-app",
+      packageName: "@farm.js/create-app",
+      packageVersion: sanitizeVersion(input.packageVersion),
+      command,
+    });
   });
 }
 
-export async function trackFarmProjectCreated(
-  input: FarmProjectCreatedTelemetryInput,
-): Promise<void> {
-  const template = allowlisted(input.template, FARM_TEMPLATES);
-  const renderer = allowlisted(input.renderer, RENDERERS);
-  const packageManager = allowlisted(input.packageManager, PACKAGE_MANAGERS);
-  await track({
-    eventType: "project_created",
-    source: "create-app",
-    packageName: "@farm.js/create-app",
-    packageVersion: sanitizeVersion(input.packageVersion),
-    ...(template ? { template } : {}),
-    ...(renderer ? { renderer } : {}),
-    ...(packageManager ? { packageManager } : {}),
-    ...(typeof input.typescript === "boolean" ? { typescript: input.typescript } : {}),
-    ...(typeof input.installedDependencies === "boolean"
-      ? { installedDependencies: input.installedDependencies }
-      : {}),
+export function trackFarmProjectCreated(input: FarmProjectCreatedTelemetryInput): Promise<void> {
+  return schedule(async () => {
+    const template = allowlisted(input.template, FARM_TELEMETRY_TEMPLATES);
+    const renderer = allowlisted(input.renderer, FARM_TELEMETRY_RENDERERS);
+    const packageManager = allowlisted(input.packageManager, FARM_TELEMETRY_PACKAGE_MANAGERS);
+    await track({
+      eventType: "project_created",
+      source: "create-app",
+      packageName: "@farm.js/create-app",
+      packageVersion: sanitizeVersion(input.packageVersion),
+      ...(template ? { template } : {}),
+      ...(renderer ? { renderer } : {}),
+      ...(packageManager ? { packageManager } : {}),
+      ...(typeof input.typescript === "boolean" ? { typescript: input.typescript } : {}),
+      ...(typeof input.installedDependencies === "boolean"
+        ? { installedDependencies: input.installedDependencies }
+        : {}),
+    });
   });
+}
+
+function schedule(delivery: () => Promise<void>): Promise<void> {
+  const pending = Promise.resolve()
+    .then(delivery)
+    .catch(() => {
+      // Telemetry is best-effort and must never surface as an unhandled rejection.
+    });
+  pendingDeliveries.add(pending);
+  void pending.finally(() => pendingDeliveries.delete(pending));
+  return Promise.resolve();
+}
+
+/** Wait for background telemetry. Intended for tests and explicit process shutdown hooks. */
+export async function flushFarmTelemetry(): Promise<void> {
+  telemetryFlushWaiters += 1;
+  for (const timer of retryTimers) timer.ref?.();
+  try {
+    while (pendingDeliveries.size > 0) {
+      await Promise.allSettled(pendingDeliveries);
+    }
+  } finally {
+    telemetryFlushWaiters -= 1;
+    if (telemetryFlushWaiters === 0) {
+      for (const timer of retryTimers) timer.unref?.();
+    }
+  }
 }
 
 async function track(event: FarmTelemetryEventInput): Promise<void> {
@@ -419,22 +424,96 @@ async function track(event: FarmTelemetryEventInput): Promise<void> {
 }
 
 async function send(payload: FarmTelemetryEvent): Promise<void> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  timeout.unref?.();
-  try {
-    await fetch(getEndpoint(), {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-      keepalive: true,
-    });
-  } catch {
-    // Network and endpoint failures are intentionally ignored.
-  } finally {
-    clearTimeout(timeout);
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
+    const result = await sendOnce(payload);
+    if (result === "delivered" || result === "rejected") return;
+    const delay = RETRY_DELAYS_MS[attempt];
+    if (delay !== undefined) await wait(delay);
   }
+  debug("delivery failed after retries");
+}
+
+async function sendOnce(payload: FarmTelemetryEvent): Promise<"delivered" | "retry" | "rejected"> {
+  let endpoint: URL;
+  try {
+    endpoint = new URL(getEndpoint());
+  } catch {
+    debug("invalid endpoint URL");
+    return "rejected";
+  }
+
+  const requestTransport = endpoint.protocol === "http:" ? httpRequest : httpsRequest;
+  if (endpoint.protocol !== "http:" && endpoint.protocol !== "https:") {
+    debug(`unsupported endpoint protocol ${endpoint.protocol}`);
+    return "rejected";
+  }
+
+  const body = JSON.stringify(payload);
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (result: "delivered" | "retry" | "rejected") => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      resolve(result);
+    };
+    const request = requestTransport(
+      endpoint,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "content-length": Buffer.byteLength(body),
+        },
+      },
+      (response) => {
+        response.on("error", () => {
+          // The status code is sufficient; response bodies are never telemetry input.
+        });
+        response.resume();
+        const status = response.statusCode ?? 0;
+        if (status >= 200 && status < 300) return finish("delivered");
+        if (status === 408 || status === 425 || status === 429) {
+          debug(`temporary HTTP ${status}; retrying`);
+          return finish("retry");
+        }
+        if (status >= 500) {
+          debug(`server HTTP ${status}; retrying`);
+          return finish("retry");
+        }
+        debug(`event rejected with HTTP ${status}`);
+        return finish("rejected");
+      },
+    );
+    const timeout = setTimeout(() => {
+      request.destroy();
+      debug("network request timed out; retrying");
+      finish("retry");
+    }, REQUEST_TIMEOUT_MS);
+    timeout.unref?.();
+    request.once("socket", (socket) => socket.unref());
+    request.once("error", () => {
+      debug("network request failed; retrying");
+      finish("retry");
+    });
+    request.end(body);
+  });
+}
+
+function wait(delay: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      retryTimers.delete(timeout);
+      resolve();
+    }, delay);
+    retryTimers.add(timeout);
+    if (telemetryFlushWaiters === 0) timeout.unref?.();
+  });
+}
+
+function debug(message: string): void {
+  if (!isTrue(process.env.FARM_TELEMETRY_DEBUG)) return;
+  process.stderr.write(`[farm.telemetry] ${message}\n`);
 }
 
 function sanitizeVersion(value: string): string {
