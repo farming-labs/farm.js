@@ -110,6 +110,15 @@ export interface FarmServerRendererRuntime {
   createElement(type: unknown, props?: unknown, ...children: unknown[]): unknown;
   isValidElement(value: unknown): boolean;
   renderToString(element: unknown): string | Promise<string>;
+  /**
+   * Optional variant for renderers whose components emit document-head markup
+   * during render (e.g. <svelte:head>). `html` is the body markup exactly as
+   * renderToString would produce it; `head` is injected into the assembled
+   * document's <head>.
+   */
+  renderToStringWithHead?(
+    element: unknown,
+  ): { html: string; head: string } | Promise<{ html: string; head: string }>;
   /** Optional runtime copy of the descriptor capabilities for diagnostics. */
   readonly capabilities?: FarmRendererCapabilities;
   /** Optional bootstrap required before this renderer hydrates server markup. */
