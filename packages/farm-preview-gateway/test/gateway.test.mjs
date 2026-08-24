@@ -59,6 +59,53 @@ test("proxies a public preview request through the gateway queue", async () => {
   }
 });
 
+test("replays every Set-Cookie header to the public visitor", async () => {
+  const store = new MemoryPreviewGatewayStore();
+  const gateway = await createGatewayServer(store);
+
+  try {
+    const sessionResponse = await fetch(`${gateway.url}/api/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "cookie-check", localUrl: "http://localhost:4321" }),
+    });
+    const session = await sessionResponse.json();
+
+    const publicRequest = fetch(`${gateway.url}/__preview/cookie-check/login`, { method: "POST" });
+    const pollResponse = await fetch(
+      `${gateway.url}/api/sessions/${session.id}/requests?token=${session.token}&wait=1000`,
+    );
+    const poll = await pollResponse.json();
+
+    // A login response commonly sets both a session and a CSRF cookie.
+    await fetch(
+      `${gateway.url}/api/sessions/${session.id}/responses/${poll.requests[0].id}?token=${session.token}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          status: 200,
+          headers: {
+            "content-type": "text/plain",
+            "set-cookie": ["session=abc; Path=/; HttpOnly", "csrf=xyz; Path=/"],
+          },
+          body: Buffer.from("ok").toString("base64"),
+          encoding: "base64",
+        }),
+      },
+    );
+
+    const response = await publicRequest;
+    assert.equal(response.status, 200);
+    const setCookie = response.headers.getSetCookie();
+    assert.equal(setCookie.length, 2);
+    assert.ok(setCookie.some((cookie) => cookie.startsWith("session=abc")));
+    assert.ok(setCookie.some((cookie) => cookie.startsWith("csrf=xyz")));
+  } finally {
+    await gateway.close();
+  }
+});
+
 test("expires stale preview clients before queueing public requests", async () => {
   const store = new MemoryPreviewGatewayStore();
   const gateway = await createGatewayServer(store, {
