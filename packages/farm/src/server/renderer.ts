@@ -2028,7 +2028,14 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
         title,
         tags: metaTags,
         hasFavicon,
+        hasExplicitTitle,
       } = renderMetadataHead((req as any).__FARM_METADATA__);
+      // A renderer-emitted <title> (e.g. <svelte:head>) must take effect: the
+      // first <title> in a document wins, so the fallback framework title is
+      // suppressed when the renderer supplies one. Explicit metadata titles
+      // still come first and win.
+      const documentTitleTag =
+        !hasExplicitTitle && /<title[\s>]/i.test(rendererHead) ? "" : `<title>${title}</title>`;
       const i18nSnapshot = getFarmI18nClientSnapshot();
       const alternateTags = i18nSnapshot
         ? renderI18nAlternateLinks((req as any).__FARM_ROUTE__ || req.url || "/", i18nSnapshot)
@@ -2077,7 +2084,7 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="farm-deployment-id" content="${escapeHtmlAttribute(deploymentId)}">
   ${hasFavicon ? "" : '<link rel="icon" href="data:,">'}
-  <title>${title}</title>${metaTags}${alternateTags}${rendererHead ? `\n  ${rendererHead}` : ""}
+  ${documentTitleTag}${metaTags}${alternateTags}${rendererHead ? `\n  ${rendererHead}` : ""}
   ${renderFarmFontDevHead(this.config.root || process.cwd())}
   <link rel="stylesheet" href="/src/app/globals.css">
   <script type="module" src="/@vite/client"></script>

@@ -15,6 +15,8 @@ export interface RenderedMetadataHead {
   title: string;
   tags: string;
   hasFavicon: boolean;
+  /** False when the title is the framework fallback rather than configured. */
+  hasExplicitTitle: boolean;
 }
 
 type MetadataRecord = Metadata & Record<string, any>;
@@ -75,7 +77,8 @@ export function addMetadataImageReference(
 export function renderMetadataHead(metadata: MetadataRecord | undefined): RenderedMetadataHead {
   const resolvedMetadata = metadata || {};
   const metadataBase = resolveMetadataBase(resolvedMetadata);
-  const title = resolveMetadataTitle(resolvedMetadata.title) || "Farm.js App";
+  const explicitTitle = resolveMetadataTitle(resolvedMetadata.title);
+  const title = explicitTitle || "Farm.js App";
   const tags: string[] = [];
 
   appendMetaName(tags, "description", resolvedMetadata.description);
@@ -125,6 +128,7 @@ export function renderMetadataHead(metadata: MetadataRecord | undefined): Render
     title: escapeText(title),
     tags: tags.length > 0 ? `\n  ${tags.join("\n  ")}` : "",
     hasFavicon,
+    hasExplicitTitle: Boolean(explicitTitle),
   };
 }
 

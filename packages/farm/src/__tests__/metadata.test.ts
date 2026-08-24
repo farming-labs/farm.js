@@ -15,6 +15,22 @@ describe("metadata head rendering", () => {
     );
   });
 
+  it("distinguishes configured titles from the framework fallback", () => {
+    // The document assembly suppresses its fallback <title> when a renderer
+    // (e.g. <svelte:head>) emits one; that decision keys off this flag.
+    expect(renderMetadataHead({ title: "Dashboard" })).toMatchObject({
+      title: "Dashboard",
+      hasExplicitTitle: true,
+    });
+    expect(renderMetadataHead({})).toMatchObject({
+      title: "Farm.js App",
+      hasExplicitTitle: false,
+    });
+    expect(renderMetadataHead(undefined)).toMatchObject({
+      hasExplicitTitle: false,
+    });
+  });
+
   it("keeps the fallback available when only an Apple touch icon is configured", () => {
     const rendered = renderMetadataHead({
       icons: {
