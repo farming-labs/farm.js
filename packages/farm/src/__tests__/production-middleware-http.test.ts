@@ -34,6 +34,47 @@ describe("production middleware HTTP behavior", () => {
     ]);
   });
 
+  it("serves requests with malformed percent-encoded paths instead of throwing", async () => {
+    const seen: Array<Record<string, string>> = [];
+    const runner = createProductionMiddlewareRunner({
+      config: {
+        matcher: ["/dashboard/:slug"],
+        handler(ctx) {
+          seen.push({ ...(ctx.params ?? {}) });
+        },
+      },
+    });
+
+    // decodeURIComponent throws on these segments. Matching runs before any
+    // handler, so a throw here fails the request rather than 404ing it.
+    await expect(
+      runner(new Request("https://example.com/dashboard/caf%E9")),
+    ).resolves.toBeDefined();
+    await expect(runner(new Request("https://example.com/dashboard/%ZZ"))).resolves.toBeDefined();
+
+    // The raw segment is kept as the param value.
+    const ok = await runner(new Request("https://example.com/dashboard/ok"));
+    expect(ok).toBeDefined();
+    expect(seen).toEqual([{ slug: "caf%E9" }, { slug: "%ZZ" }, { slug: "ok" }]);
+  });
+
+  it("keeps raw values for malformed segments under a catch-all matcher", async () => {
+    const seen: Array<Record<string, string>> = [];
+    const runner = createProductionMiddlewareRunner({
+      config: {
+        matcher: ["/files/:path*"],
+        handler(ctx) {
+          seen.push({ ...(ctx.params ?? {}) });
+        },
+      },
+    });
+
+    await expect(
+      runner(new Request("https://example.com/files/docs/caf%E9/%ZZ")),
+    ).resolves.toBeDefined();
+    expect(seen).toHaveLength(1);
+  });
+
   it("serves requests with malformed percent-encoded cookies instead of throwing", async () => {
     const seen: Record<string, string | undefined> = {};
     const runner = createProductionMiddlewareRunner({

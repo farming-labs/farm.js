@@ -40,6 +40,16 @@ function isMiddlewareResponse(value: unknown): value is Response {
 /**
  * Middleware Manager - discovers and executes middleware
  */
+function decodeRouteSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    // Request paths are not guaranteed to be validly percent-encoded; a
+    // malformed segment must not throw out of route matching.
+    return segment;
+  }
+}
+
 export class MiddlewareManager {
   private middleware: DiscoveredMiddleware[] = [];
   private configMiddleware: DiscoveredMiddleware[] = [];
@@ -434,7 +444,7 @@ export class MiddlewareManager {
 
     const values: Record<string, string> = {};
     params.forEach((param, index) => {
-      values[param] = decodeURIComponent(match[index + 1] || "");
+      values[param] = decodeRouteSegment(match[index + 1] || "");
     });
 
     return {

@@ -1501,6 +1501,85 @@ function createHistoryState(path, pageState, currentState) {
 `.trim();
 }
 
+/**
+ * Path matcher emitted into the production runtime. Extracted so tests can
+ * assert the emitted source decodes segments through the guarded helper;
+ * a bare decodeURIComponent here throws URIError on malformed
+ * percent-encoding out of route matching in deployed apps (#502).
+ */
+export function generateRuntimePathMatcherSource(): string {
+  return `
+function normalizeRuntimePath(pathname) {
+  if (!pathname || pathname === "/") return "/";
+  return pathname.endsWith("/") ? pathname.replace(/\\/+$/, "") : pathname;
+}
+
+function splitRuntimePath(pathname) {
+  return normalizeRuntimePath(pathname).split("/").filter(Boolean);
+}
+
+function decodeRouteSegment(segment) {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    // Request paths are not guaranteed to be validly percent-encoded; a
+    // malformed segment must not throw out of route matching.
+    return segment;
+  }
+}
+
+const farmCatchAllParamSegments = Symbol("farm.catch-all-param-segments");
+
+function matchRuntimePathPattern(pattern, pathname) {
+  const patternSegments = splitRuntimePath(pattern);
+  const pathnameSegments = splitRuntimePath(pathname);
+  const params = {};
+  const catchAllParamSegments = {};
+  Object.defineProperty(params, farmCatchAllParamSegments, {
+    value: catchAllParamSegments,
+  });
+  let pathIndex = 0;
+
+  for (const segment of patternSegments) {
+    const optionalCatchAll = segment.match(/^\\[\\[\\.\\.\\.(.+)\\]\\]$/);
+    const catchAll = segment.match(/^\\[\\.\\.\\.(.+)\\]$/);
+    const dynamic = segment.match(/^\\[(.+)\\]$/);
+    const namedCatchAll = segment.match(/^:([^/]+)\\*$/);
+    const namedDynamic = segment.match(/^:([^/]+)$/);
+    const starCatchAll = segment.match(/^\\*([^?]+)(\\?)?$/);
+    const wildcard = segment === "*";
+
+    if (optionalCatchAll || catchAll || namedCatchAll || starCatchAll || wildcard) {
+      const name = wildcard
+        ? "wildcard"
+        : (optionalCatchAll || catchAll || namedCatchAll || starCatchAll)[1];
+      const remainingSegments = pathnameSegments.slice(pathIndex).map(decodeRouteSegment);
+      const remaining = remainingSegments.join("/");
+      if (!remaining && (catchAll || (starCatchAll && !starCatchAll[2]))) return null;
+      params[name] = remaining;
+      catchAllParamSegments[name] = remainingSegments;
+      pathIndex = pathnameSegments.length;
+      continue;
+    }
+
+    const pathnameSegment = pathnameSegments[pathIndex];
+    if (pathnameSegment === undefined) return null;
+
+    if (dynamic || namedDynamic) {
+      params[(dynamic || namedDynamic)[1]] = decodeRouteSegment(pathnameSegment);
+      pathIndex++;
+      continue;
+    }
+
+    if (segment !== pathnameSegment) return null;
+    pathIndex++;
+  }
+
+  return pathIndex === pathnameSegments.length ? params : null;
+}
+`.trim();
+}
+
 export function generateUniversalRouterStateProperties(): string {
   return `
   blockers: new Set(),
@@ -4593,64 +4672,7 @@ function hasPrivateFarmRequestHeaders(request, farmLocaleResolution) {
   );
 }
 
-function normalizeRuntimePath(pathname) {
-  if (!pathname || pathname === "/") return "/";
-  return pathname.endsWith("/") ? pathname.replace(/\\/+$/, "") : pathname;
-}
-
-function splitRuntimePath(pathname) {
-  return normalizeRuntimePath(pathname).split("/").filter(Boolean);
-}
-
-const farmCatchAllParamSegments = Symbol("farm.catch-all-param-segments");
-
-function matchRuntimePathPattern(pattern, pathname) {
-  const patternSegments = splitRuntimePath(pattern);
-  const pathnameSegments = splitRuntimePath(pathname);
-  const params = {};
-  const catchAllParamSegments = {};
-  Object.defineProperty(params, farmCatchAllParamSegments, {
-    value: catchAllParamSegments,
-  });
-  let pathIndex = 0;
-
-  for (const segment of patternSegments) {
-    const optionalCatchAll = segment.match(/^\\[\\[\\.\\.\\.(.+)\\]\\]$/);
-    const catchAll = segment.match(/^\\[\\.\\.\\.(.+)\\]$/);
-    const dynamic = segment.match(/^\\[(.+)\\]$/);
-    const namedCatchAll = segment.match(/^:([^/]+)\\*$/);
-    const namedDynamic = segment.match(/^:([^/]+)$/);
-    const starCatchAll = segment.match(/^\\*([^?]+)(\\?)?$/);
-    const wildcard = segment === "*";
-
-    if (optionalCatchAll || catchAll || namedCatchAll || starCatchAll || wildcard) {
-      const name = wildcard
-        ? "wildcard"
-        : (optionalCatchAll || catchAll || namedCatchAll || starCatchAll)[1];
-      const remainingSegments = pathnameSegments.slice(pathIndex).map(decodeURIComponent);
-      const remaining = remainingSegments.join("/");
-      if (!remaining && (catchAll || (starCatchAll && !starCatchAll[2]))) return null;
-      params[name] = remaining;
-      catchAllParamSegments[name] = remainingSegments;
-      pathIndex = pathnameSegments.length;
-      continue;
-    }
-
-    const pathnameSegment = pathnameSegments[pathIndex];
-    if (pathnameSegment === undefined) return null;
-
-    if (dynamic || namedDynamic) {
-      params[(dynamic || namedDynamic)[1]] = decodeURIComponent(pathnameSegment);
-      pathIndex++;
-      continue;
-    }
-
-    if (segment !== pathnameSegment) return null;
-    pathIndex++;
-  }
-
-  return pathIndex === pathnameSegments.length ? params : null;
-}
+${generateRuntimePathMatcherSource()}
 
 function getMatchingErrorBoundary(pathname) {
   const pathSegments = splitRuntimePath(pathname);
