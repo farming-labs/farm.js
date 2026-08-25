@@ -313,6 +313,110 @@ const testSource = String.raw`
   assert.equal(hostConditionalExecutions, initialHostConditionalExecutions);
   flushSync(() => hostConditionalRoot.unmount());
 
+  let conditionalRangeExecutions = 0;
+  const ConditionalRanges = createCompiledComponent({
+    displayName: "CompatibilityConditionalRanges",
+    initialize: () => [false, true, 0],
+    render(_props, state, blocks) {
+      conditionalRangeExecutions += 1;
+      const branch = (tag, slot, label) => ({
+        create: () => ({
+          kind: "element",
+          tag,
+          attributes: [{ name: "data-slot", value: slot }],
+          styles: [],
+          children: [[label, " ", state[2].get()]],
+        }),
+        bindings: [
+          { kind: "text", path: [], read: () => [label, " ", state[2].get()] },
+        ],
+      });
+      return React.createElement(blocks.ConditionalRanges, {
+        id: 0,
+        ranges: [
+          {
+            before: 3,
+            logical: true,
+            test: () => state[0].get(),
+            truthy: branch("p", "loading", "Loading"),
+          },
+          {
+            before: 1,
+            test: () => state[1].get(),
+            truthy: branch("strong", "status", "Enabled"),
+            falsy: branch("span", "status", "Disabled"),
+          },
+        ],
+        trailing: 1,
+        render: () =>
+          React.createElement(
+            "section",
+            { "data-count": state[2].get(), "data-owner": "conditional-ranges" },
+            React.createElement("header", { "data-static": "header" }, "Header"),
+            React.createElement(
+              "button",
+              { "data-increment": true, onClick: () => state[2].set((value) => Number(value) + 1) },
+              "Increment",
+            ),
+            React.createElement(
+              "button",
+              { "data-toggle-loading": true, onClick: () => state[0].set((value) => !value) },
+              "Toggle loading",
+            ),
+            state[0].get()
+              ? React.createElement("p", { "data-slot": "loading" }, "Loading ", state[2].get())
+              : null,
+            React.createElement("div", { "data-static": "divider" }, "Divider"),
+            state[1].get()
+              ? React.createElement("strong", { "data-slot": "status" }, "Enabled ", state[2].get())
+              : React.createElement("span", { "data-slot": "status" }, "Disabled ", state[2].get()),
+            React.createElement("footer", { "data-static": "footer", ref: blocks.target(0) }, "Count ", state[2].get()),
+          ),
+      });
+    },
+    bindings: [
+      {
+        kind: "attribute",
+        path: [],
+        dependencies: [2],
+        name: "data-count",
+        read: (_props, state) => state[2].get(),
+      },
+      {
+        kind: "text",
+        path: [5],
+        target: 0,
+        dependencies: [2],
+        read: (_props, state) => ["Count ", state[2].get()],
+      },
+      { kind: "block", id: 0, dependencies: [0, 1, 2] },
+    ],
+  });
+  const conditionalRangesContainer = document.createElement("div");
+  document.body.append(conditionalRangesContainer);
+  const conditionalRangesRoot = createRoot(conditionalRangesContainer);
+  flushSync(() => conditionalRangesRoot.render(React.createElement(ConditionalRanges)));
+  const conditionalRangesHost = conditionalRangesContainer.firstElementChild;
+  const conditionalRangesHeader = conditionalRangesContainer.querySelector("[data-static='header']");
+  const conditionalRangesStatus = conditionalRangesContainer.querySelector("[data-slot='status']");
+  const initialConditionalRangeExecutions = conditionalRangeExecutions;
+  conditionalRangesContainer.querySelector("[data-increment]").click();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(conditionalRangesContainer.firstElementChild, conditionalRangesHost);
+  assert.equal(conditionalRangesContainer.firstElementChild.dataset.count, "1");
+  assert.equal(conditionalRangesContainer.querySelector("[data-static='header']"), conditionalRangesHeader);
+  assert.equal(conditionalRangesContainer.querySelector("[data-slot='status']"), conditionalRangesStatus);
+  assert.equal(conditionalRangesStatus.textContent, "Enabled 1");
+  assert.equal(conditionalRangesContainer.querySelector("[data-static='footer']").textContent, "Count 1");
+  conditionalRangesContainer.querySelector("[data-toggle-loading]").click();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(conditionalRangesContainer.querySelector("[data-slot='loading']").textContent, "Loading 1");
+  assert.equal(conditionalRangesContainer.firstElementChild, conditionalRangesHost);
+  assert.equal(conditionalRangeExecutions, initialConditionalRangeExecutions);
+  flushSync(() => conditionalRangesRoot.unmount());
+
   const explicitListContainer = document.createElement("div");
   document.body.append(explicitListContainer);
   const explicitListRoot = createRoot(explicitListContainer);

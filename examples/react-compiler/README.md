@@ -46,6 +46,7 @@ assertions, checks for console/runtime errors and horizontal overflow, saves scr
 | Controlled form bindings   | textarea/select/checkbox update, executions `0`         | —                                              | Form properties and textarea selection stay coherent.                  |
 | Logical conditional block  | stable branch patches, mounts, and unmounts; executions `0` | —                                           | A proven host branch updates without React reconciliation.             |
 | Ternary conditional block  | `strong` and `span` replace each other; executions `0`     | —                                           | Only the compiler-owned branch is replaced.                            |
+| Root conditional ranges    | exact card root, two ranges, stable static siblings; executions `0` | —                                  | Direct branches reconcile without wrappers or marker nodes.            |
 | Composable nested blocks   | two lists, nested conditions, and one component island  | —                                              | One block graph mounts, updates, and cleans up nested subscriptions.    |
 
 The package runtime test also measures one equivalent update under a React `Profiler`:
@@ -148,10 +149,19 @@ branches. React creates or hydrates the initial branch. After mount, a same-bran
 that existing element, while a condition change mounts, removes, or replaces only the branch. The
 production assertion checks that updating `07A` keeps the exact same branch DOM node.
 
+The `07C` card covers the wider range form. Its returned `article` contains a logical branch and a
+ternary branch separated by static header, content, metrics, and footer elements. Farm adopts that
+exact component root after React renders or hydrates it. Updating values preserves a same-branch
+node; changing both conditions in one event mounts one range and replaces the other from the same
+state snapshot. The browser assertion then removes the logical range again and verifies that the
+root and every static sibling are still the original DOM nodes, no marker nodes were added, and the
+component recorded zero update executions.
+
 This does not pre-mount both branches or bypass React's event system. Branch events, custom
 components, fragments, refs, SVG, keys, spreads, nested dynamic blocks, and dangerous HTML keep a
 React-owned conditional boundary or fall back to the original component. A numeric logical value
-such as `0 && <p />` also remounts through React so visible primitive output is preserved exactly.
+such as `0 && <p />`, a parent-driven prop change, Fast Refresh, or invalid adopted DOM remounts the
+affected range container through React so visible output and React ownership remain exact.
 
 The `08` card combines those boundary types under one outer conditional. It also proves that a
 hidden outer block removes its inner subscriptions: updates made while hidden do no render work,

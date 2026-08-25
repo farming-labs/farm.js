@@ -27,6 +27,7 @@ for (const component of [
   "FormBindingPanel",
   "LogicalBlockPanel",
   "TernaryBlockPanel",
+  "ConditionalRangePanel",
   "AutomaticKeyedListExperiment",
   "DerivedCollectionExperiment",
   "InteractiveKeyedListExperiment",
@@ -396,6 +397,86 @@ try {
     `${ternary} [data-metric="executions"]`,
   );
   assert.equal(ternaryFinalExecutions - ternaryInitialExecutions, 0);
+
+  const conditionalRanges = '[data-experiment="conditional-ranges"]';
+  const conditionalRangesInitialExecutions = await readNumber(
+    page,
+    `${conditionalRanges} [data-metric="range-executions"]`,
+  );
+  await page.evaluate(() => {
+    const root = document.querySelector('[data-experiment="conditional-ranges"]');
+    window.__farmConditionalRangeRoot = root;
+    window.__farmConditionalRangeHeader = root.querySelector('[data-static="range-header"]');
+    window.__farmConditionalRangeContent = root.querySelector('[data-static="range-content"]');
+    window.__farmConditionalRangeMetrics = root.querySelector('[data-static="range-metrics"]');
+    window.__farmConditionalRangeFooter = root.querySelector('[data-static="range-footer"]');
+    window.__farmConditionalRangeStatus = root.querySelector('[data-slot="range-status"]');
+  });
+  await assertText(page, `${conditionalRanges} [data-slot="range-status"]`, "Enabled at 0");
+  assert.equal(await page.locator(`${conditionalRanges} [data-slot="range-loading"]`).count(), 0);
+
+  await page.locator(`${conditionalRanges} [data-action="increment-ranges"]`).click();
+  await assertText(page, `${conditionalRanges} [data-slot="range-status"]`, "Enabled at 1");
+  await assertText(page, `${conditionalRanges} [data-metric="range-updates"]`, "Update 1");
+  assert.equal(await page.locator(conditionalRanges).getAttribute("data-update"), "1");
+  assert.equal(
+    await page.evaluate(
+      () =>
+        window.__farmConditionalRangeStatus ===
+        document.querySelector('[data-experiment="conditional-ranges"] [data-slot="range-status"]'),
+    ),
+    true,
+    "a same-branch conditional range lost its DOM identity",
+  );
+
+  await page.locator(`${conditionalRanges} [data-action="toggle-ranges"]`).click();
+  await assertText(page, `${conditionalRanges} [data-slot="range-loading"]`, "Loading update 1");
+  await assertText(page, `${conditionalRanges} [data-slot="range-status"]`, "Disabled at 1");
+  assert.deepEqual(
+    await page.locator(conditionalRanges).evaluate((root) =>
+      [...root.children].map(
+        (child) => child.getAttribute("data-static") || child.getAttribute("data-slot"),
+      ),
+    ),
+    [
+      "range-header",
+      "range-loading",
+      "range-content",
+      "range-status",
+      "range-metrics",
+      "range-footer",
+    ],
+  );
+
+  await page.locator(`${conditionalRanges} [data-action="toggle-ranges"]`).click();
+  await assertText(page, `${conditionalRanges} [data-slot="range-status"]`, "Enabled at 1");
+  assert.equal(await page.locator(`${conditionalRanges} [data-slot="range-loading"]`).count(), 0);
+  const conditionalRangesIdentity = await page.evaluate(() => {
+    const root = document.querySelector('[data-experiment="conditional-ranges"]');
+    return {
+      root: window.__farmConditionalRangeRoot === root,
+      header:
+        window.__farmConditionalRangeHeader === root.querySelector('[data-static="range-header"]'),
+      content:
+        window.__farmConditionalRangeContent === root.querySelector('[data-static="range-content"]'),
+      metrics:
+        window.__farmConditionalRangeMetrics === root.querySelector('[data-static="range-metrics"]'),
+      footer:
+        window.__farmConditionalRangeFooter === root.querySelector('[data-static="range-footer"]'),
+    };
+  });
+  assert.deepEqual(conditionalRangesIdentity, {
+    root: true,
+    header: true,
+    content: true,
+    metrics: true,
+    footer: true,
+  });
+  const conditionalRangesFinalExecutions = await readNumber(
+    page,
+    `${conditionalRanges} [data-metric="range-executions"]`,
+  );
+  assert.equal(conditionalRangesFinalExecutions - conditionalRangesInitialExecutions, 0);
 
   const automaticList = '[data-experiment="keyed-automatic"]';
   const automaticListInitialExecutions = await readNumber(
@@ -1031,6 +1112,16 @@ try {
           conditionalTernaryBlock: {
             branch: "enabled",
             updateExecutions: ternaryFinalExecutions - ternaryInitialExecutions,
+          },
+          conditionalRanges: {
+            ranges: 2,
+            branch: "enabled",
+            updateExecutions:
+              conditionalRangesFinalExecutions - conditionalRangesInitialExecutions,
+            rootHostIdentityPreserved: conditionalRangesIdentity.root,
+            staticSiblingIdentityPreserved: Object.values(conditionalRangesIdentity).every(Boolean),
+            markerNodes: 0,
+            owner: "Farm root conditional ranges",
           },
           automaticKeyedList: {
             items: 4,

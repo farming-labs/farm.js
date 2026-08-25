@@ -119,6 +119,25 @@ export interface CompilerHostConditionalBlockProps {
   falsy?: CompilerHostConditionalBranch;
 }
 
+export interface CompilerConditionalRange {
+  /** Number of static direct host siblings between this slot and the previous slot. */
+  before: number;
+  test(): unknown;
+  /** Logical && can produce a visible number instead of an empty branch. */
+  logical?: boolean;
+  truthy?: CompilerHostConditionalBranch;
+  falsy?: CompilerHostConditionalBranch;
+}
+
+export interface CompilerConditionalRangesBlockProps {
+  id: number;
+  render(): React.ReactElement;
+  rootRef?: React.RefCallback<Element>;
+  ranges: readonly CompilerConditionalRange[];
+  /** Number of static direct host siblings after the final conditional slot. */
+  trailing: number;
+}
+
 export interface CompilerKeyedRowBinding {
   kind: "text" | "attribute" | "style";
   path: readonly number[];
@@ -175,6 +194,7 @@ export interface CompilerComponentBlockProps {
 export interface CompilerBlockRuntime {
   Conditional: React.ComponentType<CompilerConditionalBlockProps>;
   HostConditional: React.ComponentType<CompilerHostConditionalBlockProps>;
+  ConditionalRanges: React.ComponentType<CompilerConditionalRangesBlockProps>;
   KeyedList: React.ComponentType<CompilerKeyedListBlockProps>;
   KeyedRows: React.ComponentType<CompilerKeyedRowsBlockProps>;
   KeyedRanges: React.ComponentType<CompilerKeyedRangesBlockProps>;
@@ -683,9 +703,13 @@ type CompilerHostConditionalSelection =
   | { kind: "branch"; key: "truthy" | "falsy"; branch: CompilerHostConditionalBranch }
   | { kind: "empty" }
   | { kind: "fallback" };
+type CompilerHostConditionalPreparedSelection = Exclude<
+  CompilerHostConditionalSelection,
+  { kind: "fallback" }
+>;
 
 function hostConditionalSelection(
-  props: CompilerHostConditionalBlockProps,
+  props: Pick<CompilerHostConditionalBlockProps, "test" | "logical" | "truthy" | "falsy">,
 ): CompilerHostConditionalSelection {
   const test = props.test();
   if (props.logical && !test) {
@@ -890,6 +914,222 @@ function createHostConditionalBlockComponent(
   }
 
   return FarmHostConditionalBlock;
+}
+
+function createConditionalRangesBlockComponent(
+  owner: Pick<ConditionalBlockOwner, "subscribe">,
+): React.ComponentType<CompilerConditionalRangesBlockProps> {
+  interface State {
+    fallback: boolean;
+  }
+
+  interface ConditionalRangeInstance {
+    key: "truthy" | "falsy";
+    host: CompilerHostInstance;
+  }
+
+  class FarmConditionalRangesBlock extends React.Component<
+    CompilerConditionalRangesBlockProps,
+    State
+  > {
+    static displayName = "FarmCompiledConditionalRanges";
+
+    state: State = { fallback: false };
+    private root: Element | null = null;
+    private mounted = false;
+    private fallbackRequested = false;
+    private fallbackVersion = 0;
+    private propFallbackQueued = false;
+    private currentProps = this.props;
+    private unsubscribe: (() => void) | undefined;
+    private rangeInstances: Array<ConditionalRangeInstance | null> = [];
+    private staticSegments: Element[][] = [];
+
+    private captureRoot = (root: Element | null) => {
+      this.root = root;
+      this.currentProps.rootRef?.(root);
+    };
+
+    private readSelections(
+      props: CompilerConditionalRangesBlockProps,
+    ): CompilerHostConditionalPreparedSelection[] | null {
+      const selections: CompilerHostConditionalPreparedSelection[] = [];
+      for (const range of props.ranges) {
+        const selection = hostConditionalSelection(range);
+        if (selection.kind === "fallback") return null;
+        selections.push(selection);
+      }
+      return selections;
+    }
+
+    private adopt(props: CompilerConditionalRangesBlockProps = this.currentProps): boolean {
+      if (!this.root || !Number.isSafeInteger(props.trailing) || props.trailing < 0) return false;
+      const selections = this.readSelections(props);
+      if (!selections) return false;
+      const elements = [...this.root.children];
+      const staticSegments: Element[][] = [];
+      const instances: Array<ConditionalRangeInstance | null> = [];
+      let cursor = 0;
+
+      for (let rangeIndex = 0; rangeIndex < props.ranges.length; rangeIndex += 1) {
+        const range = props.ranges[rangeIndex];
+        if (!Number.isSafeInteger(range.before) || range.before < 0) return false;
+        const staticEnd = cursor + range.before;
+        if (staticEnd > elements.length) return false;
+        staticSegments.push(elements.slice(cursor, staticEnd));
+        cursor = staticEnd;
+
+        const selection = selections[rangeIndex];
+        if (selection.kind === "empty") {
+          instances.push(null);
+          continue;
+        }
+        const element = elements[cursor];
+        if (!element) return false;
+        const descriptor = selection.branch.create();
+        if (!matchesCompilerHostElement(element, descriptor)) return false;
+        instances.push({
+          key: selection.key,
+          host: {
+            element,
+            values: readHostConditionalBindingValues(selection.branch),
+          },
+        });
+        cursor += 1;
+      }
+
+      if (cursor + props.trailing !== elements.length) return false;
+      staticSegments.push(elements.slice(cursor));
+      this.staticSegments = staticSegments;
+      this.rangeInstances = instances;
+      return true;
+    }
+
+    private anchorAfter(rangeIndex: number): ChildNode | null {
+      for (let next = rangeIndex + 1; next < this.rangeInstances.length; next += 1) {
+        const staticAnchor = this.staticSegments[next]?.[0];
+        if (staticAnchor) return staticAnchor;
+        const rangeAnchor = this.rangeInstances[next]?.host.element;
+        if (rangeAnchor) return rangeAnchor;
+      }
+      return this.staticSegments[this.rangeInstances.length]?.[0] || null;
+    }
+
+    private reconcileRange(
+      rangeIndex: number,
+      selection: CompilerHostConditionalPreparedSelection,
+    ): void {
+      if (!this.root) return;
+      const previous = this.rangeInstances[rangeIndex];
+      if (selection.kind === "empty") {
+        previous?.host.element.remove();
+        this.rangeInstances[rangeIndex] = null;
+        return;
+      }
+      if (previous?.key === selection.key) {
+        applyHostConditionalBindings(selection.branch, previous.host);
+        return;
+      }
+
+      const element = createCompilerHostElement(this.root.ownerDocument, selection.branch.create());
+      if (previous) previous.host.element.replaceWith(element);
+      else this.root.insertBefore(element, this.anchorAfter(rangeIndex));
+      this.rangeInstances[rangeIndex] = {
+        key: selection.key,
+        host: {
+          element,
+          values: readHostConditionalBindingValues(selection.branch),
+        },
+      };
+    }
+
+    private reconcile(afterCommit?: () => void): void {
+      if (!this.mounted || !this.root) {
+        afterCommit?.();
+        return;
+      }
+      if (this.state.fallback) {
+        this.fallbackVersion += 1;
+        this.forceUpdate(afterCommit);
+        return;
+      }
+      if (this.currentProps.ranges.length !== this.rangeInstances.length) {
+        this.activateFallback(afterCommit);
+        return;
+      }
+      const selections = this.readSelections(this.currentProps);
+      if (!selections) {
+        this.activateFallback(afterCommit);
+        return;
+      }
+
+      for (let rangeIndex = this.rangeInstances.length - 1; rangeIndex >= 0; rangeIndex -= 1) {
+        this.reconcileRange(rangeIndex, selections[rangeIndex]);
+      }
+      afterCommit?.();
+    }
+
+    private refresh = (afterCommit?: () => void) => {
+      this.reconcile(afterCommit);
+    };
+
+    private activateFallback(afterCommit?: () => void): void {
+      if (!this.mounted || this.state.fallback || this.fallbackRequested) {
+        afterCommit?.();
+        return;
+      }
+      this.fallbackRequested = true;
+      this.setState({ fallback: true }, afterCommit);
+    }
+
+    private schedulePropFallback(): void {
+      if (this.propFallbackQueued) return;
+      this.propFallbackQueued = true;
+      queueMicrotask(() => {
+        this.propFallbackQueued = false;
+        if (this.mounted && !this.state.fallback) this.activateFallback();
+      });
+    }
+
+    shouldComponentUpdate(
+      nextProps: CompilerConditionalRangesBlockProps,
+      nextState: State,
+    ): boolean {
+      this.currentProps = nextProps;
+      if (nextState.fallback || this.state.fallback) return true;
+      this.schedulePropFallback();
+      return false;
+    }
+
+    componentDidMount(): void {
+      this.mounted = true;
+      this.unsubscribe = owner.subscribe(this.props.id, this.refresh);
+      if (!this.adopt()) this.activateFallback();
+    }
+
+    componentWillUnmount(): void {
+      this.mounted = false;
+      this.unsubscribe?.();
+      this.root = null;
+      this.rangeInstances = [];
+      this.staticSegments = [];
+    }
+
+    render(): React.ReactNode {
+      const container = this.currentProps.render();
+      if (!React.isValidElement(container) || typeof container.type !== "string") {
+        throw new TypeError(
+          `Compiled conditional ranges ${this.currentProps.id} must own one host container.`,
+        );
+      }
+      return React.cloneElement(container, {
+        key: this.state.fallback ? `react-${this.fallbackVersion}` : "compiled",
+        ref: this.captureRoot,
+      } as React.Attributes);
+    }
+  }
+
+  return FarmConditionalRangesBlock;
 }
 
 /** Returns positions forming the LIS while ignoring newly inserted (-1) entries. */
@@ -1790,6 +2030,9 @@ export function createCompiledComponent<Props>(
         HostConditional: createHostConditionalBlockComponent({
           subscribe: (id, refresh) => this.subscribeToBlock(id, refresh),
         }),
+        ConditionalRanges: createConditionalRangesBlockComponent({
+          subscribe: (id, refresh) => this.subscribeToBlock(id, refresh),
+        }),
         KeyedList: createKeyedListBlockComponent({
           subscribe: (id, refresh) => this.subscribeToBlock(id, refresh),
         }),
@@ -2015,6 +2258,12 @@ export function createCompiledComponent<Props>(
         return React.cloneElement(element as React.ReactElement<CompilerKeyedRangesBlockProps>, {
           rootRef: this.captureRoot,
         });
+      }
+      if (element.type === this.blockRuntime.ConditionalRanges) {
+        return React.cloneElement(
+          element as React.ReactElement<CompilerConditionalRangesBlockProps>,
+          { rootRef: this.captureRoot },
+        );
       }
       if (typeof element.type !== "string") {
         throw new TypeError(

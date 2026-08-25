@@ -112,6 +112,27 @@ interface HostConditionalPlan {
   falsyBindings: PendingKeyedRowBinding[];
 }
 
+interface ConditionalRangePlan {
+  before: number;
+  source: t.Expression;
+  test: t.Expression;
+  logical: boolean;
+  truthy?: t.JSXElement;
+  falsy?: t.JSXElement;
+  truthyBindings: PendingKeyedRowBinding[];
+  falsyBindings: PendingKeyedRowBinding[];
+}
+
+interface ConditionalRangesPlan {
+  kind: "conditional-ranges";
+  id: number;
+  parent?: number;
+  dependencies: number[];
+  source: t.JSXElement;
+  ranges: ConditionalRangePlan[];
+  trailing: number;
+}
+
 interface KeyedRowsPlan {
   kind: "keyed-rows";
   id: number;
@@ -160,6 +181,7 @@ interface ComponentIslandPlan {
 type ComposableBlockPlan =
   | ConditionalBlockPlan
   | HostConditionalPlan
+  | ConditionalRangesPlan
   | KeyedListPlan
   | KeyedRowsPlan
   | KeyedRangesPlan
@@ -1390,7 +1412,7 @@ function analyzeKeyedRowsContainer(
   return analyzeKeyedRowChild(children[0], statesByValue, safeGlobals, listNames);
 }
 
-function isStaticKeyedRangeSibling(
+function isStaticRangeSibling(
   element: t.JSXElement,
   statesByValue: ReadonlyMap<string, StateBinding>,
   safeGlobals: ReadonlySet<string>,
@@ -1398,7 +1420,7 @@ function isStaticKeyedRangeSibling(
   for (const child of meaningfulJsxChildren(element)) {
     if (t.isJSXFragment(child)) return false;
     if (t.isJSXElement(child)) {
-      if (!isHostElement(child) || !isStaticKeyedRangeSibling(child, statesByValue, safeGlobals)) {
+      if (!isHostElement(child) || !isStaticRangeSibling(child, statesByValue, safeGlobals)) {
         return false;
       }
       continue;
@@ -1457,7 +1479,7 @@ function analyzeKeyedRangesContainer(
       continue;
     }
     if (!t.isJSXElement(child) || !isHostElement(child)) return undefined;
-    if (!isStaticKeyedRangeSibling(child, statesByValue, safeGlobals)) return undefined;
+    if (!isStaticRangeSibling(child, statesByValue, safeGlobals)) return undefined;
     staticBefore += 1;
   }
   if (ranges.length === 0) return undefined;
@@ -1660,6 +1682,84 @@ function analyzeHostConditionalContainer(
     falsy: shape.falsy,
     truthyBindings: truthyAnalysis.bindings || [],
     falsyBindings: falsyAnalysis.bindings || [],
+  };
+}
+
+function analyzeConditionalRangesContainer(
+  container: t.JSXElement,
+  statesByValue: ReadonlyMap<string, StateBinding>,
+  safeGlobals: ReadonlySet<string>,
+  allowSingleRange = false,
+): { ranges: ConditionalRangePlan[]; trailing: number; dependencies: number[] } | undefined {
+  const containerName = container.openingElement.name;
+  if (
+    !t.isJSXIdentifier(containerName) ||
+    !/^[a-z]/.test(containerName.name) ||
+    containerName.name === "svg" ||
+    container.openingElement.attributes.some(
+      (attribute) =>
+        t.isJSXSpreadAttribute(attribute) ||
+        (t.isJSXAttribute(attribute) &&
+          t.isJSXIdentifier(attribute.name) &&
+          (attribute.name.name === "ref" || attribute.name.name === "dangerouslySetInnerHTML")),
+    )
+  ) {
+    return undefined;
+  }
+
+  const children = meaningfulJsxChildren(container);
+  if (children.length < (allowSingleRange ? 1 : 2)) return undefined;
+  const ranges: ConditionalRangePlan[] = [];
+  const dependencies = new Set<number>();
+  let staticBefore = 0;
+
+  for (const child of children) {
+    if (t.isJSXExpressionContainer(child) && !t.isJSXEmptyExpression(child.expression)) {
+      const shape = conditionalBlockShape(child.expression);
+      if (shape && !validateDerivedExpression(shape.test, safeGlobals)) {
+        const truthyAnalysis = shape.truthy
+          ? analyzeHostConditionalTree(shape.truthy, safeGlobals)
+          : { bindings: [] as PendingKeyedRowBinding[] };
+        const falsyAnalysis = shape.falsy
+          ? analyzeHostConditionalTree(shape.falsy, safeGlobals)
+          : { bindings: [] as PendingKeyedRowBinding[] };
+        if (truthyAnalysis.reason || falsyAnalysis.reason) return undefined;
+
+        const rangeDependencies = new Set(collectStateDependencies(shape.test, statesByValue));
+        for (const binding of [
+          ...(truthyAnalysis.bindings || []),
+          ...(falsyAnalysis.bindings || []),
+        ]) {
+          for (const dependency of collectStateDependencies(binding.value, statesByValue)) {
+            rangeDependencies.add(dependency);
+          }
+        }
+        for (const dependency of rangeDependencies) dependencies.add(dependency);
+        ranges.push({
+          before: staticBefore,
+          source: child.expression,
+          test: cloneExpression(shape.test),
+          logical: shape.logical,
+          truthy: shape.truthy,
+          falsy: shape.falsy,
+          truthyBindings: truthyAnalysis.bindings || [],
+          falsyBindings: falsyAnalysis.bindings || [],
+        });
+        staticBefore = 0;
+        continue;
+      }
+    }
+
+    if (!t.isJSXElement(child) || !isHostElement(child)) return undefined;
+    if (!isStaticRangeSibling(child, statesByValue, safeGlobals)) return undefined;
+    staticBefore += 1;
+  }
+
+  if (ranges.length === 0) return undefined;
+  return {
+    ranges,
+    trailing: staticBefore,
+    dependencies: [...dependencies].sort((left, right) => left - right),
   };
 }
 
@@ -2229,6 +2329,78 @@ function hostConditionalBoundary(
   return t.jsxElement(t.jsxOpeningElement(name, attributes, true), null, [], true);
 }
 
+function conditionalRangeObject(range: ConditionalRangePlan): t.ObjectExpression {
+  const properties: t.ObjectProperty[] = [
+    t.objectProperty(t.identifier("before"), t.numericLiteral(range.before)),
+    t.objectProperty(
+      t.identifier("test"),
+      t.arrowFunctionExpression([], cloneExpression(range.test)),
+    ),
+  ];
+  if (range.logical) {
+    properties.push(t.objectProperty(t.identifier("logical"), t.booleanLiteral(true)));
+  }
+  if (range.truthy) {
+    properties.push(
+      t.objectProperty(
+        t.identifier("truthy"),
+        hostConditionalBranchObject(range.truthy, range.truthyBindings),
+      ),
+    );
+  }
+  if (range.falsy) {
+    properties.push(
+      t.objectProperty(
+        t.identifier("falsy"),
+        hostConditionalBranchObject(range.falsy, range.falsyBindings),
+      ),
+    );
+  }
+  return t.objectExpression(properties);
+}
+
+function conditionalRangesBoundary(
+  blockRuntime: t.Identifier,
+  plan: ConditionalRangesPlan,
+): t.JSXElement {
+  const name = t.jsxMemberExpression(
+    t.jsxIdentifier(blockRuntime.name),
+    t.jsxIdentifier("ConditionalRanges"),
+  );
+  const source = t.cloneNode(plan.source, true);
+  const rootRefIndex = source.openingElement.attributes.findIndex(
+    (attribute) =>
+      t.isJSXAttribute(attribute) &&
+      t.isJSXIdentifier(attribute.name) &&
+      attribute.name.name === "ref",
+  );
+  const rootRef =
+    rootRefIndex >= 0
+      ? (source.openingElement.attributes.splice(rootRefIndex, 1)[0] as t.JSXAttribute)
+      : undefined;
+  const attributes: t.JSXAttribute[] = [
+    t.jsxAttribute(t.jsxIdentifier("id"), t.jsxExpressionContainer(t.numericLiteral(plan.id))),
+    t.jsxAttribute(
+      t.jsxIdentifier("render"),
+      t.jsxExpressionContainer(t.arrowFunctionExpression([], source)),
+    ),
+    t.jsxAttribute(
+      t.jsxIdentifier("ranges"),
+      t.jsxExpressionContainer(
+        t.arrayExpression(plan.ranges.map((range) => conditionalRangeObject(range))),
+      ),
+    ),
+    t.jsxAttribute(
+      t.jsxIdentifier("trailing"),
+      t.jsxExpressionContainer(t.numericLiteral(plan.trailing)),
+    ),
+  ];
+  if (rootRef?.value) {
+    attributes.push(t.jsxAttribute(t.jsxIdentifier("rootRef"), t.cloneNode(rootRef.value, true)));
+  }
+  return t.jsxElement(t.jsxOpeningElement(name, attributes, true), null, [], true);
+}
+
 function analyzeComponentIslandElement(
   element: t.JSXElement,
   statesByValue: ReadonlyMap<string, StateBinding>,
@@ -2465,6 +2637,24 @@ function analyzeComposableBlocks(
             }
             continue;
           }
+          const conditionalRanges = insideConditional
+            ? undefined
+            : analyzeConditionalRangesContainer(child, statesByValue, safeGlobals);
+          if (conditionalRanges) {
+            plans.push({
+              kind: "conditional-ranges",
+              id: nextId++,
+              parent,
+              dependencies: conditionalRanges.dependencies,
+              source: child,
+              ranges: conditionalRanges.ranges,
+              trailing: conditionalRanges.trailing,
+            });
+            for (const range of conditionalRanges.ranges) {
+              conditionalExpressions.add(range.source);
+            }
+            continue;
+          }
           const hostConditional = analyzeHostConditionalContainer(
             child,
             statesByValue,
@@ -2628,6 +2818,33 @@ function analyzeComposableBlocks(
     };
   }
 
+  const rootConditionalRanges = analyzeConditionalRangesContainer(
+    root,
+    statesByValue,
+    safeGlobals,
+    true,
+  );
+  if (rootConditionalRanges) {
+    plans.push({
+      kind: "conditional-ranges",
+      id: nextId++,
+      dependencies: rootConditionalRanges.dependencies,
+      source: root,
+      ranges: rootConditionalRanges.ranges,
+      trailing: rootConditionalRanges.trailing,
+    });
+    for (const range of rootConditionalRanges.ranges) {
+      conditionalExpressions.add(range.source);
+    }
+    return {
+      plans,
+      componentElements,
+      conditionalExpressions,
+      ownedElements,
+      keyedExpressions,
+    };
+  }
+
   const result = visitHost(root, undefined, false);
   if (result.reason) return { reason: result.reason };
   return {
@@ -2679,6 +2896,9 @@ function lowerComposableBlocks(
   if (rootPlan?.kind === "keyed-ranges") {
     return keyedRangesBoundary(blockRuntime, rootPlan);
   }
+  if (rootPlan?.kind === "conditional-ranges") {
+    return conditionalRangesBoundary(blockRuntime, rootPlan);
+  }
 
   const visit = (element: t.JSXElement): void => {
     element.children = element.children.map((child) => {
@@ -2692,6 +2912,9 @@ function lowerComposableBlocks(
         }
         if (plan?.kind === "keyed-ranges") {
           return keyedRangesBoundary(blockRuntime, plan);
+        }
+        if (plan?.kind === "conditional-ranges") {
+          return conditionalRangesBoundary(blockRuntime, plan);
         }
         if (plan?.kind === "component") {
           return componentIslandBoundary(blockRuntime, plan, child);
