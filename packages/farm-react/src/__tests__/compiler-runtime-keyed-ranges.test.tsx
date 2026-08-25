@@ -27,6 +27,21 @@ interface RangeBoardProps {
   title?: string;
 }
 
+class RootRangeErrorBoundary extends React.Component<
+  React.PropsWithChildren,
+  { message: string | null }
+> {
+  state = { message: null as string | null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { message: error.message };
+  }
+
+  render() {
+    return this.state.message ? <div role="alert">{this.state.message}</div> : this.props.children;
+  }
+}
+
 const roots = new Set<Root>();
 
 beforeEach(() => {
@@ -78,7 +93,10 @@ function rangeDescriptor(before: number, readItems: () => RangeItem[]): Compiler
   };
 }
 
-function defineRangeBoard(metrics: { executions: number; rangeRenders: number }) {
+function defineRangeBoard(
+  metrics: { executions: number; rangeRenders: number },
+  rootOwned = false,
+) {
   const initial: RangeModel = {
     primary: [
       { id: "a", label: "Alpha" },
@@ -103,39 +121,47 @@ function defineRangeBoard(metrics: { executions: number; rangeRenders: number })
       readModel = model;
       updateModel = (next) => state[0].set(next);
       const KeyedRanges = blocks.KeyedRanges;
-      return (
+      const ranges = (
+        <KeyedRanges
+          id={0}
+          ranges={[
+            rangeDescriptor(1, () => model().primary),
+            rangeDescriptor(1, () => model().secondary),
+          ]}
+          render={() => {
+            metrics.rangeRenders += 1;
+            return (
+              <ul
+                data-board="ranges"
+                data-count={model().primary.length + model().secondary.length}
+              >
+                <li data-static="header">{props.title || "Primary"}</li>
+                {model().primary.map((item, index) => (
+                  <li data-index={index} data-key={item.id} key={item.id}>
+                    {index}:{item.label}
+                  </li>
+                ))}
+                <li data-static="divider">Secondary</li>
+                {model().secondary.map((item, index) => (
+                  <li data-index={index} data-key={item.id} key={item.id}>
+                    {index}:{item.label}
+                  </li>
+                ))}
+                <li data-static="footer" ref={blocks.target(0)}>
+                  {model().primary.length + model().secondary.length} total
+                </li>
+              </ul>
+            );
+          }}
+          trailing={1}
+        />
+      );
+      return rootOwned ? (
+        ranges
+      ) : (
         <main>
           <h1>{props.title || "Ranges"}</h1>
-          <KeyedRanges
-            id={0}
-            ranges={[
-              rangeDescriptor(1, () => model().primary),
-              rangeDescriptor(1, () => model().secondary),
-            ]}
-            render={() => {
-              metrics.rangeRenders += 1;
-              return (
-                <ul data-board="ranges">
-                  <li data-static="header">{props.title || "Primary"}</li>
-                  {model().primary.map((item, index) => (
-                    <li data-index={index} data-key={item.id} key={item.id}>
-                      {index}:{item.label}
-                    </li>
-                  ))}
-                  <li data-static="divider">Secondary</li>
-                  {model().secondary.map((item, index) => (
-                    <li data-index={index} data-key={item.id} key={item.id}>
-                      {index}:{item.label}
-                    </li>
-                  ))}
-                  <li data-static="footer" ref={blocks.target(0)}>
-                    {model().primary.length + model().secondary.length} total
-                  </li>
-                </ul>
-              );
-            }}
-            trailing={1}
-          />
+          {ranges}
         </main>
       );
     },
@@ -150,6 +176,21 @@ function defineRangeBoard(metrics: { executions: number; rangeRenders: number })
           return [model.primary.length + model.secondary.length, " total"];
         },
       },
+      ...(rootOwned
+        ? [
+            {
+              kind: "attribute" as const,
+              path: [],
+              target: 1,
+              dependencies: [0],
+              name: "data-count",
+              read: (_props: RangeBoardProps, state: readonly { get(): unknown }[]) => {
+                const model = state[0].get() as RangeModel;
+                return model.primary.length + model.secondary.length;
+              },
+            },
+          ]
+        : []),
       { kind: "block", id: 0, dependencies: [0] },
     ],
   });
@@ -169,6 +210,50 @@ function rangeSnapshot(container: Element): string[] {
 }
 
 describe("compiled keyed DOM ranges", () => {
+  it("owns the exact component root and keeps root bindings coherent", async () => {
+    const metrics = { executions: 0, rangeRenders: 0 };
+    const board = defineRangeBoard(metrics, true);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.add(root);
+    await act(async () => root.render(<board.RangeBoard />));
+
+    const list = container.querySelector<HTMLUListElement>("[data-board='ranges']")!;
+    const header = list.querySelector('[data-static="header"]')!;
+    const divider = list.querySelector('[data-static="divider"]')!;
+    const footer = list.querySelector('[data-static="footer"]')!;
+    const alpha = list.querySelector('[data-key="a"]')!;
+    const xray = list.querySelector('[data-key="x"]')!;
+    const initialExecutions = metrics.executions;
+    const initialRangeRenders = metrics.rangeRenders;
+    expect(container.children).toHaveLength(1);
+    expect(container.firstElementChild).toBe(list);
+    expect(list.dataset.count).toBe("6");
+
+    await act(async () => {
+      board.updateModel((current) => {
+        const model = current as RangeModel;
+        return {
+          primary: [model.primary[3], ...model.primary.slice(0, 3)],
+          secondary: [...model.secondary, { id: "z", label: "Zulu" }],
+        };
+      });
+      await flushCompilerUpdates();
+    });
+
+    expect(container.firstElementChild).toBe(list);
+    expect(list.dataset.count).toBe("7");
+    expect(footer.textContent).toBe("7 total");
+    expect(list.querySelector('[data-static="header"]')).toBe(header);
+    expect(list.querySelector('[data-static="divider"]')).toBe(divider);
+    expect(list.querySelector('[data-static="footer"]')).toBe(footer);
+    expect(list.querySelector('[data-key="a"]')).toBe(alpha);
+    expect(list.querySelector('[data-key="x"]')).toBe(xray);
+    expect(metrics.executions).toBe(initialExecutions);
+    expect(metrics.rangeRenders).toBe(initialRangeRenders);
+  });
+
   it("reconciles two ranges while preserving every static sibling", async () => {
     const metrics = { executions: 0, rangeRenders: 0 };
     const board = defineRangeBoard(metrics);
@@ -284,10 +369,13 @@ describe("compiled keyed DOM ranges", () => {
     expect(container.querySelector('[data-static="footer"]')).toBe(footer);
   });
 
-  it("switches the complete container to React when runtime keys collide", async () => {
+  it.each([
+    ["nested container", false],
+    ["component root", true],
+  ])("switches the complete %s to React when runtime keys collide", async (_label, rootOwned) => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const metrics = { executions: 0, rangeRenders: 0 };
-    const board = defineRangeBoard(metrics);
+    const board = defineRangeBoard(metrics, rootOwned);
     const container = document.createElement("div");
     document.body.append(container);
     const root = createRoot(container);
@@ -324,179 +412,258 @@ describe("compiled keyed DOM ranges", () => {
     expect(metrics.rangeRenders).toBe(3);
   });
 
-  it("recovers hydration mismatches in StrictMode and drops queued work after unmount", async () => {
+  it("routes root-range update errors through the nearest error boundary", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const metrics = { executions: 0, rangeRenders: 0 };
-    const board = defineRangeBoard(metrics);
-    const serverHtml = renderToString(
-      <StrictMode>
-        <board.RangeBoard />
-      </StrictMode>,
-    );
-    const container = document.createElement("div");
-    container.innerHTML = serverHtml.replace("Primary", "Server mismatch");
-    document.body.append(container);
-    const recoverable = vi.fn();
-    const root = hydrateRoot(
-      container,
-      <StrictMode>
-        <board.RangeBoard />
-      </StrictMode>,
-      { onRecoverableError: recoverable },
-    );
-    roots.add(root);
-    await act(async () => flushCompilerUpdates());
-    expect(recoverable).toHaveBeenCalled();
-
-    await act(async () => {
-      board.updateModel((current) => ({
-        ...(current as RangeModel),
-        primary: [{ id: "hydrated", label: "Hydrated" }],
-      }));
-      await flushCompilerUpdates();
+    let update: (next: CompilerStateUpdater) => void = () => undefined;
+    const ThrowingRoot = createCompiledComponent({
+      displayName: "ThrowingRootRange",
+      initialize: () => [[{ id: "a", label: "Alpha" }]],
+      render(_props: Record<string, never>, state, blocks) {
+        const items = () => state[0].get() as RangeItem[];
+        update = (next) => state[0].set(next);
+        const KeyedRanges = blocks.KeyedRanges;
+        const descriptor = rangeDescriptor(0, items);
+        return (
+          <KeyedRanges
+            id={0}
+            ranges={[
+              {
+                ...descriptor,
+                create: (item, index) => {
+                  if ((item as RangeItem).label === "Throw") {
+                    throw new Error("root keyed range failed");
+                  }
+                  return descriptor.create(item, index);
+                },
+              },
+            ]}
+            render={() => (
+              <ul>
+                {items().map((item, index) => (
+                  <li data-index={index} data-key={item.id} key={item.id}>
+                    {index}:{item.label}
+                  </li>
+                ))}
+              </ul>
+            )}
+            trailing={0}
+          />
+        );
+      },
+      bindings: [{ kind: "block", id: 0, dependencies: [0] }],
     });
-    expect(container.querySelector('[data-key="hydrated"]')?.textContent).toBe("0:Hydrated");
-
-    await act(async () => {
-      board.updateModel({ primary: [], secondary: [] });
-      root.unmount();
-      await flushCompilerUpdates();
-    });
-    roots.delete(root);
-    expect(container.innerHTML).toBe("");
-  });
-
-  it("falls back safely when parent props change static sibling output", async () => {
-    const metrics = { executions: 0, rangeRenders: 0 };
-    const board = defineRangeBoard(metrics);
     const container = document.createElement("div");
     document.body.append(container);
     const root = createRoot(container);
     roots.add(root);
-    await act(async () => root.render(<board.RangeBoard title="First" />));
-    const originalList = container.querySelector("ul")!;
+    await act(async () =>
+      root.render(
+        <RootRangeErrorBoundary>
+          <ThrowingRoot />
+        </RootRangeErrorBoundary>,
+      ),
+    );
 
     await act(async () => {
-      root.render(<board.RangeBoard title="Second" />);
+      update([{ id: "broken", label: "Throw" }]);
       await flushCompilerUpdates();
     });
 
-    expect(container.querySelector("h1")?.textContent).toBe("Second");
-    expect(container.querySelector('[data-static="header"]')?.textContent).toBe("Second");
-    expect(container.querySelector("ul")).not.toBe(originalList);
-    expect(metrics.rangeRenders).toBe(2);
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe("root keyed range failed");
   });
 
-  it("matches normal React through 2,000 deterministic multi-range transitions", async () => {
-    const metrics = { executions: 0, rangeRenders: 0 };
-    const compiled = defineRangeBoard(metrics);
-    let normalModel = compiled.initial;
-    let setNormal: React.Dispatch<React.SetStateAction<RangeModel>> = () => undefined;
-
-    function NormalBoard() {
-      const [model, setModel] = useState(compiled.initial);
-      normalModel = model;
-      setNormal = setModel;
-      return (
-        <ul>
-          <li data-static="header">Primary</li>
-          {model.primary.map((item, index) => (
-            <li data-index={index} data-key={item.id} key={item.id}>
-              {index}:{item.label}
-            </li>
-          ))}
-          <li data-static="divider">Secondary</li>
-          {model.secondary.map((item, index) => (
-            <li data-index={index} data-key={item.id} key={item.id}>
-              {index}:{item.label}
-            </li>
-          ))}
-          <li data-static="footer">{model.primary.length + model.secondary.length} total</li>
-        </ul>
+  it.each([
+    ["nested container", false],
+    ["component root", true],
+  ])(
+    "recovers %s hydration mismatches in StrictMode and drops queued work after unmount",
+    async (_label, rootOwned) => {
+      vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const metrics = { executions: 0, rangeRenders: 0 };
+      const board = defineRangeBoard(metrics, rootOwned);
+      const serverHtml = renderToString(
+        <StrictMode>
+          <board.RangeBoard />
+        </StrictMode>,
       );
-    }
+      const container = document.createElement("div");
+      container.innerHTML = serverHtml.replace("Primary", "Server mismatch");
+      document.body.append(container);
+      const recoverable = vi.fn();
+      const root = hydrateRoot(
+        container,
+        <StrictMode>
+          <board.RangeBoard />
+        </StrictMode>,
+        { onRecoverableError: recoverable },
+      );
+      roots.add(root);
+      await act(async () => flushCompilerUpdates());
+      expect(recoverable).toHaveBeenCalled();
 
-    const compiledContainer = document.createElement("div");
-    const normalContainer = document.createElement("div");
-    document.body.append(compiledContainer, normalContainer);
-    const compiledRoot = createRoot(compiledContainer);
-    const normalRoot = createRoot(normalContainer);
-    roots.add(compiledRoot);
-    roots.add(normalRoot);
-    await act(async () => {
-      compiledRoot.render(<compiled.RangeBoard />);
-      normalRoot.render(<NormalBoard />);
-    });
-
-    let seed = 0x9e3779b9;
-    const random = () => {
-      seed = (seed * 1664525 + 1013904223) >>> 0;
-      return seed;
-    };
-    const operations = Array.from({ length: 2000 }, (_, step) => ({
-      operation: random() % 7,
-      selector: random(),
-      step,
-    }));
-    const update = (model: RangeModel, step: number): RangeModel => {
-      const { operation, selector } = operations[step];
-      const side = selector % 2 === 0 ? "primary" : "secondary";
-      const other = side === "primary" ? "secondary" : "primary";
-      const rows = model[side];
-      if (operation === 0 && rows.length > 0) {
-        const target = selector % rows.length;
-        return {
-          ...model,
-          [side]: rows.map((row, index) =>
-            index === target ? { ...row, label: `${row.label}.${step}` } : row,
-          ),
-        };
-      }
-      if (operation === 1 && rows.length < 24) {
-        const id = `${side[0]}${step}`;
-        return { ...model, [side]: [...rows, { id, label: `Item ${step}` }] };
-      }
-      if (operation === 2 && rows.length > 0) {
-        return { ...model, [side]: rows.slice(1) };
-      }
-      if (operation === 3) return { ...model, [side]: [...rows].reverse() };
-      if (operation === 4 && rows.length > 1) {
-        return { ...model, [side]: [...rows.slice(1), rows[0]] };
-      }
-      if (operation === 5 && rows.length > 0) {
-        const target = selector % rows.length;
-        const moved = rows[target];
-        return {
-          ...model,
-          [side]: rows.filter((_, index) => index !== target),
-          [other]: [...model[other], moved],
-        };
-      }
-      return model;
-    };
-    const snapshot = (container: Element) => ({
-      rows: rangeSnapshot(container),
-      footer: container.querySelector('[data-static="footer"]')?.textContent,
-    });
-    const initialExecutions = metrics.executions;
-    const initialRangeRenders = metrics.rangeRenders;
-
-    for (let offset = 0; offset < operations.length; offset += 20) {
       await act(async () => {
-        for (let step = offset; step < offset + 20; step += 1) {
-          const updater = (current: RangeModel) => update(current, step);
-          compiled.updateModel((current) => updater(current as RangeModel));
-          setNormal(updater);
-        }
+        board.updateModel((current) => ({
+          ...(current as RangeModel),
+          primary: [{ id: "hydrated", label: "Hydrated" }],
+        }));
         await flushCompilerUpdates();
       });
-      expect(compiled.readModel(), `model after batch ${offset}`).toEqual(normalModel);
-      expect(snapshot(compiledContainer), `DOM after batch ${offset}`).toEqual(
-        snapshot(normalContainer),
-      );
-    }
+      expect(container.querySelector('[data-key="hydrated"]')?.textContent).toBe("0:Hydrated");
 
-    expect(metrics.executions).toBe(initialExecutions);
-    expect(metrics.rangeRenders).toBe(initialRangeRenders);
-  }, 30_000);
+      await act(async () => {
+        board.updateModel({ primary: [], secondary: [] });
+        root.unmount();
+        await flushCompilerUpdates();
+      });
+      roots.delete(root);
+      expect(container.innerHTML).toBe("");
+    },
+  );
+
+  it.each([
+    ["nested container", false],
+    ["component root", true],
+  ])(
+    "falls back safely for %s when parent props change static output",
+    async (_label, rootOwned) => {
+      const metrics = { executions: 0, rangeRenders: 0 };
+      const board = defineRangeBoard(metrics, rootOwned);
+      const container = document.createElement("div");
+      document.body.append(container);
+      const root = createRoot(container);
+      roots.add(root);
+      await act(async () => root.render(<board.RangeBoard title="First" />));
+      const originalList = container.querySelector("ul")!;
+
+      await act(async () => {
+        root.render(<board.RangeBoard title="Second" />);
+        await flushCompilerUpdates();
+      });
+
+      if (!rootOwned) expect(container.querySelector("h1")?.textContent).toBe("Second");
+      expect(container.querySelector('[data-static="header"]')?.textContent).toBe("Second");
+      expect(container.querySelector("ul")).not.toBe(originalList);
+      expect(metrics.rangeRenders).toBe(2);
+    },
+  );
+
+  it.each([
+    ["nested container", false],
+    ["component root", true],
+  ])(
+    "matches normal React through 2,000 deterministic %s transitions",
+    async (_label, rootOwned) => {
+      const metrics = { executions: 0, rangeRenders: 0 };
+      const compiled = defineRangeBoard(metrics, rootOwned);
+      let normalModel = compiled.initial;
+      let setNormal: React.Dispatch<React.SetStateAction<RangeModel>> = () => undefined;
+
+      function NormalBoard() {
+        const [model, setModel] = useState(compiled.initial);
+        normalModel = model;
+        setNormal = setModel;
+        return (
+          <ul>
+            <li data-static="header">Primary</li>
+            {model.primary.map((item, index) => (
+              <li data-index={index} data-key={item.id} key={item.id}>
+                {index}:{item.label}
+              </li>
+            ))}
+            <li data-static="divider">Secondary</li>
+            {model.secondary.map((item, index) => (
+              <li data-index={index} data-key={item.id} key={item.id}>
+                {index}:{item.label}
+              </li>
+            ))}
+            <li data-static="footer">{model.primary.length + model.secondary.length} total</li>
+          </ul>
+        );
+      }
+
+      const compiledContainer = document.createElement("div");
+      const normalContainer = document.createElement("div");
+      document.body.append(compiledContainer, normalContainer);
+      const compiledRoot = createRoot(compiledContainer);
+      const normalRoot = createRoot(normalContainer);
+      roots.add(compiledRoot);
+      roots.add(normalRoot);
+      await act(async () => {
+        compiledRoot.render(<compiled.RangeBoard />);
+        normalRoot.render(<NormalBoard />);
+      });
+
+      let seed = 0x9e3779b9;
+      const random = () => {
+        seed = (seed * 1664525 + 1013904223) >>> 0;
+        return seed;
+      };
+      const operations = Array.from({ length: 2000 }, (_, step) => ({
+        operation: random() % 7,
+        selector: random(),
+        step,
+      }));
+      const update = (model: RangeModel, step: number): RangeModel => {
+        const { operation, selector } = operations[step];
+        const side = selector % 2 === 0 ? "primary" : "secondary";
+        const other = side === "primary" ? "secondary" : "primary";
+        const rows = model[side];
+        if (operation === 0 && rows.length > 0) {
+          const target = selector % rows.length;
+          return {
+            ...model,
+            [side]: rows.map((row, index) =>
+              index === target ? { ...row, label: `${row.label}.${step}` } : row,
+            ),
+          };
+        }
+        if (operation === 1 && rows.length < 24) {
+          const id = `${side[0]}${step}`;
+          return { ...model, [side]: [...rows, { id, label: `Item ${step}` }] };
+        }
+        if (operation === 2 && rows.length > 0) {
+          return { ...model, [side]: rows.slice(1) };
+        }
+        if (operation === 3) return { ...model, [side]: [...rows].reverse() };
+        if (operation === 4 && rows.length > 1) {
+          return { ...model, [side]: [...rows.slice(1), rows[0]] };
+        }
+        if (operation === 5 && rows.length > 0) {
+          const target = selector % rows.length;
+          const moved = rows[target];
+          return {
+            ...model,
+            [side]: rows.filter((_, index) => index !== target),
+            [other]: [...model[other], moved],
+          };
+        }
+        return model;
+      };
+      const snapshot = (container: Element) => ({
+        rows: rangeSnapshot(container),
+        footer: container.querySelector('[data-static="footer"]')?.textContent,
+      });
+      const initialExecutions = metrics.executions;
+      const initialRangeRenders = metrics.rangeRenders;
+
+      for (let offset = 0; offset < operations.length; offset += 20) {
+        await act(async () => {
+          for (let step = offset; step < offset + 20; step += 1) {
+            const updater = (current: RangeModel) => update(current, step);
+            compiled.updateModel((current) => updater(current as RangeModel));
+            setNormal(updater);
+          }
+          await flushCompilerUpdates();
+        });
+        expect(compiled.readModel(), `model after batch ${offset}`).toEqual(normalModel);
+        expect(snapshot(compiledContainer), `DOM after batch ${offset}`).toEqual(
+          snapshot(normalContainer),
+        );
+      }
+
+      expect(metrics.executions).toBe(initialExecutions);
+      expect(metrics.rangeRenders).toBe(initialRangeRenders);
+    },
+    30_000,
+  );
 });

@@ -85,33 +85,7 @@ describe("React AOT keyed-range compiler", () => {
     expect(result.code).not.toContain("farmBlocks.KeyedList");
   });
 
-  it("keeps interactive sibling ranges on the React-owned keyed boundary", async () => {
-    const result = await compile(`
-      import { useState } from "react";
-      export function Tasks() {
-        const [items, setItems] = useState([{ id: "a", label: "Alpha" }]);
-        return (
-          <section>
-            <ul>
-              <li data-static="header">Tasks</li>
-              {items.map((item) => (
-                <li key={item.id}>
-                  <button onClick={() => setItems([])}>{item.label}</button>
-                </li>
-              ))}
-              <li data-static="footer">End</li>
-            </ul>
-          </section>
-        );
-      }
-    `);
-
-    expect(result.compiled).toEqual(["Tasks"]);
-    expect(result.code).toContain("farmBlocks.KeyedList");
-    expect(result.code).not.toContain("farmBlocks.KeyedRanges");
-  });
-
-  it("keeps a keyed map in the component root on the existing React boundary", async () => {
+  it("keeps an interactive component-root range on the React-owned keyed boundary", async () => {
     const result = await compile(`
       import { useState } from "react";
       export function Tasks() {
@@ -119,7 +93,11 @@ describe("React AOT keyed-range compiler", () => {
         return (
           <ul>
             <li data-static="header">Tasks</li>
-            {items.map((item) => <li key={item.id}>{item.label}</li>)}
+            {items.map((item) => (
+              <li key={item.id}>
+                <button onClick={() => setItems([])}>{item.label}</button>
+              </li>
+            ))}
             <li data-static="footer">End</li>
           </ul>
         );
@@ -131,7 +109,79 @@ describe("React AOT keyed-range compiler", () => {
     expect(result.code).not.toContain("farmBlocks.KeyedRanges");
   });
 
-  it("keeps a component sibling outside the range-owned contract", async () => {
+  it("compiles a keyed range directly in the component root", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Tasks() {
+        const [items, setItems] = useState([{ id: "a", label: "Alpha" }]);
+        return (
+          <ul data-count={items.length}>
+            <li data-static="header">Tasks</li>
+            {items.map((item) => <li key={item.id}>{item.label}</li>)}
+            <li data-static="footer">{items.length} total</li>
+          </ul>
+        );
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Tasks"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.code).toContain("farmBlocks.KeyedRanges");
+    expect(result.code).toContain("before: 1");
+    expect(result.code).toContain("trailing={1}");
+    expect(result.code).not.toContain("farmBlocks.KeyedList");
+    await expect(
+      transformWithEsbuild(result.code, "/app/KeyedRanges.tsx", {
+        loader: "tsx",
+        jsx: "automatic",
+      }),
+    ).resolves.toMatchObject({ code: expect.stringContaining("farmBlocks.KeyedRanges") });
+  });
+
+  it("compiles one keyed map as the only child of the component root", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Tasks() {
+        const [items, setItems] = useState([{ id: "a", label: "Alpha" }]);
+        return (
+          <ul data-count={items.length}>
+            {items.map((item) => <li key={item.id}>{item.label}</li>)}
+          </ul>
+        );
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Tasks"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.code).toContain("farmBlocks.KeyedRanges");
+    expect(result.code).toContain("before: 0");
+    expect(result.code).toContain("trailing={0}");
+    expect(result.code).not.toContain("farmBlocks.KeyedList");
+  });
+
+  it("compiles an explicit List directly in the component root", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      import { List } from "@farm.js/react/list";
+      export function Tasks() {
+        const [items, setItems] = useState([{ id: "a", label: "Alpha" }]);
+        return (
+          <ul>
+            <List each={items} by={(item) => item.id}>
+              {(item) => <li>{item.label}</li>}
+            </List>
+          </ul>
+        );
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Tasks"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.code).toContain("farmBlocks.KeyedRanges");
+    expect(result.code).not.toContain("farmBlocks.KeyedList");
+  });
+
+  it("keeps a component sibling in the root outside the range-owned contract", async () => {
     const result = await compile(`
       import { useState } from "react";
       function Heading() {
@@ -140,18 +190,38 @@ describe("React AOT keyed-range compiler", () => {
       export function Tasks() {
         const [items, setItems] = useState([{ id: "a", label: "Alpha" }]);
         return (
-          <section>
-            <ul>
-              <Heading />
-              {items.map((item) => <li key={item.id}>{item.label}</li>)}
-              <li>End</li>
-            </ul>
-          </section>
+          <ul>
+            <Heading />
+            {items.map((item) => <li key={item.id}>{item.label}</li>)}
+            <li>End</li>
+          </ul>
         );
       }
     `);
 
     expect(result.compiled).toContain("Tasks");
+    expect(result.code).toContain("farmBlocks.KeyedList");
+    expect(result.code).not.toContain("farmBlocks.KeyedRanges");
+  });
+
+  it("preserves existing block composition when a root sibling contains dynamic structure", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Dashboard() {
+        const [open, setOpen] = useState(true);
+        const [items, setItems] = useState([{ id: "a", label: "Alpha" }]);
+        return (
+          <main>
+            <section>{open && <strong>{items.length} items</strong>}</section>
+            {items.map((item) => <article key={item.id}>{item.label}</article>)}
+          </main>
+        );
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Dashboard"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.code).toContain("farmBlocks.HostConditional");
     expect(result.code).toContain("farmBlocks.KeyedList");
     expect(result.code).not.toContain("farmBlocks.KeyedRanges");
   });

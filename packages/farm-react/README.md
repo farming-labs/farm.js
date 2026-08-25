@@ -195,7 +195,7 @@ other children in the same host slot uses the existing React-owned keyed boundar
 compiled component can still be skipped, but React reconciles that list's rows and owns their
 events, lifecycle, and state.
 
-Non-interactive host maps can share one nested container with static host siblings:
+Non-interactive host maps can share a nested or component-root container with static host siblings:
 
 ```tsx
 <ul>
@@ -213,11 +213,13 @@ Non-interactive host maps can share one nested container with static host siblin
 
 The compiler emits one range block for that host container. React renders and hydrates the original
 markup. After mount, Farm records the static element segments and reconciles each keyed range with
-its own row table and LIS pass. It does not add wrappers or hydration markers. Stateful bindings in
-the static siblings still patch normally. Direct children must be host elements or eligible maps
-or `List` ranges; events, controlled rows, row conditionals, components, fragments, root-container
-ranges, and nested dynamic structures keep the React boundary. Duplicate keys, an adoption shape
-mismatch, or a parent-driven static markup change remounts the complete container through React.
+its own row table and LIS pass. It does not add wrappers or hydration markers. When the container is
+the component root, the block forwards that exact host element to the outer binding runtime, so
+root attributes and styles keep updating normally. A root with one eligible map or `List` also
+works without static siblings. Direct children must be host elements or eligible ranges; events,
+controlled rows, row conditionals, components, fragments, and nested dynamic structures keep the
+React boundary. Duplicate keys, an adoption shape mismatch, or a parent-driven static markup change
+remounts the complete container through React.
 
 Controlled host fields can use the hybrid keyed-row path:
 
@@ -332,8 +334,8 @@ Application and prototype calls, dynamic style objects, handlers outside JSX eve
 computed, and rest props patterns, async handlers, unkeyed or index-keyed lists, chained maps,
 unsupported conditional roots, effects, and more advanced hook support intentionally stay on React
 in this release. Compiler-owned keyed rows support either one dedicated host-only map/`List` or
-multiple non-interactive ranges separated by host siblings. Inline synchronous events and dedicated
-row-local host conditional slots can use the single-list hybrid path, but branch events, interactive
-ranges beside siblings, nested dynamic blocks, conditionals mixed with siblings in one slot,
-non-inline or async row handlers, unsupported form shapes, custom components, fragments, refs, SVG,
-and duplicate runtime keys keep or switch to React ownership.
+one or more non-interactive ranges in a nested or component-root host container. Inline synchronous
+events and dedicated row-local host conditional slots can use the single-list hybrid path, but
+branch events, interactive ranges beside siblings, nested dynamic blocks, conditionals mixed with
+siblings in one slot, non-inline or async row handlers, unsupported form shapes, custom components,
+fragments, refs, SVG, and duplicate runtime keys keep or switch to React ownership.

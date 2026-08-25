@@ -2006,7 +2006,17 @@ export function createCompiledComponent<Props>(
       if (this.hasBindingError) throw this.bindingError;
       const currentDefinition = definitionReference.current;
       const element = currentDefinition.render(this.props, this.cells, this.blockRuntime);
-      if (!React.isValidElement(element) || typeof element.type !== "string") {
+      if (!React.isValidElement(element)) {
+        throw new TypeError(
+          `Compiled component ${currentDefinition.displayName} must return one host element.`,
+        );
+      }
+      if (element.type === this.blockRuntime.KeyedRanges) {
+        return React.cloneElement(element as React.ReactElement<CompilerKeyedRangesBlockProps>, {
+          rootRef: this.captureRoot,
+        });
+      }
+      if (typeof element.type !== "string") {
         throw new TypeError(
           `Compiled component ${currentDefinition.displayName} must return one host element.`,
         );

@@ -169,7 +169,8 @@ describe("React AOT derived collection compiler", () => {
 
     expect(result.compiled).toEqual(["IndexedFilter"]);
     expect(result.diagnostics).toEqual([]);
-    expect(result.code).toContain("farmBlocks.KeyedList");
+    expect(result.code).toContain("farmBlocks.KeyedRanges");
+    expect(result.code).not.toContain("farmBlocks.KeyedList");
     expect(result.code).toContain("dependencies: [0, 1]");
   });
 
