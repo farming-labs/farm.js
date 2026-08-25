@@ -266,6 +266,32 @@ describe("Farm workflows", () => {
     }
   });
 
+  it("keeps every value of a repeated query parameter in a GET trigger payload", async () => {
+    const workflow = {
+      id: "sync-users",
+      filePath: "/virtual/sync-users.ts",
+      description: "Sync users.",
+      schedule: [],
+      routePath: "/api/_farm/workflows/sync-users",
+    };
+    const run = vi.fn(async (ctx: any) => ({ received: ctx.payload }));
+    const handler = createFarmWorkflowRequestHandler({
+      workflows: [workflow],
+      config: resolveWorkflowsConfig({ secret: "test-secret" }),
+      loadModule: async () => ({ default: { run } }),
+    });
+
+    const response = await handler(
+      new Request("https://example.com/api/_farm/workflows/sync-users?tag=a&tag=b&one=x", {
+        method: "GET",
+        headers: { authorization: "Bearer test-secret" },
+      }),
+    );
+
+    expect(response?.status).toBe(200);
+    expect(run.mock.calls[0]?.[0].payload).toEqual({ tag: ["a", "b"], one: "x" });
+  });
+
   it("adds scheduled workflows to Vercel crons without duplicating existing entries", () => {
     const config = applyFarmWorkflowVercelCrons(
       {
