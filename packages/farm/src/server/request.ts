@@ -68,3 +68,11 @@ export function getCurrentRequest(): Request {
 
   return request;
 }
+
+// Some runtimes (StackBlitz WebContainers among them) lose AsyncLocalStorage
+// context across async boundaries mid-render. Callers whose feature can
+// degrade gracefully should use this instead of getCurrentRequest() so a
+// missing store never turns into a 500.
+export function getCurrentRequestOrNull(): Request | null {
+  return requestStore.getStore() ?? null;
+}
