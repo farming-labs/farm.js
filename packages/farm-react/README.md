@@ -315,20 +315,28 @@ Conditional blocks have three safe ownership levels. One or more proven host-onl
 may become compiler-owned ranges among static host siblings, including at the exact component root.
 A dedicated container with exactly one conditional child uses the smaller compiler-owned branch
 boundary. The more general React-owned conditional path accepts supported events, nested host
-conditionals, keyed lists, and component islands. Keys, custom components, fragments, refs, SVG,
-attribute spreads, `dangerouslySetInnerHTML`, nested dynamic blocks, and branch events keep React
-ownership. An empty ternary branch may be `null` or `false`. The inactive branch is described at
-build time but is never pre-mounted or cached. If a logical `&&` evaluates to a number such as `0`,
+conditionals, keyed lists, and component islands. A compiler-owned host branch may now recursively
+contain eligible host-only conditional ranges and non-interactive keyed ranges in nested host
+containers. Each nested range receives its own dependency entry and updates without rerunning or
+replacing the outer branch. Keys on branches, custom components, fragments, refs, SVG, attribute
+spreads, `dangerouslySetInnerHTML`, branch events, interactive rows, and mixed dynamic kinds in one
+direct-child range keep React ownership. An empty ternary branch may be `null` or `false`. The
+inactive branch is described at build time but is never pre-mounted or cached. If a logical `&&`
+evaluates to a number such as `0`,
 or adopted DOM no longer matches its descriptor, the affected container remounts through React so
 JavaScript, hydration, and React rendering semantics remain exact.
 
 All component-level boundary types share one block graph and one ID sequence. A nested
 binding records its nearest conditional parent. If one state flush affects both an outer
 conditional and its descendants, the runtime refreshes the mounted outer boundary once and skips
-the redundant descendant refreshes. React unmounts inner boundaries normally, their subscriptions
-are removed, and a later remount reads the latest compiler-cell values. Host-only keyed rows have
-separate runtime instances per key. Row-local conditional IDs are scoped to that instance and
-paired with its stable key, so two rows can use the same build-time slot ID without sharing data or
+the redundant descendant refreshes. React-owned inner boundaries unmount normally. Compiler-owned
+host scopes explicitly remove every nested subscription before their outer DOM is removed, and a
+later mount reads the latest compiler-cell values. Surviving keyed rows move with the existing LIS
+algorithm. Duplicate runtime keys, invalid adoption, or an unsafe logical value transfer the outer
+container back to React; descendant dependencies remain subscribed so that fallback stays live.
+Host-only keyed rows have separate runtime instances per key. Row-local conditional IDs are scoped
+to that instance and paired with its stable key, so two rows can use the same build-time slot ID
+without sharing data or
 subscriptions. Unsupported row subtrees stay complete React-owned keyed boundaries.
 
 Unsupported components fall back to React by default. Use `onUnsupported: "warn"` for diagnostics

@@ -456,8 +456,8 @@ The compiler-owned path is deliberately narrow:
 - Every non-empty branch has one lowercase HTML root and a statically known host-only descendant
   tree. Text, attributes, and individual inline style properties may use supported expressions.
 - Branch events, `key`, custom components, fragments, refs, SVG, `dangerouslySetInnerHTML`, JSX
-  spreads, nested dynamic blocks, and dynamic text mixed beside nested elements require React
-  ownership.
+  spreads, interactive keyed rows, mixed dynamic block kinds in one direct-child range, and dynamic
+  text mixed beside nested elements require React ownership.
 - A ternary may use `null` or `false` for an empty branch. For logical `&&`, a numeric falsy value
   such as `0` can be visible React output, so the runtime remounts that container through React
   instead of incorrectly treating it as empty.
@@ -470,6 +470,48 @@ descriptor and update behavior. It remains useful when a branch needs one fixed 
 ```tsx
 <div>{loading && <p>Loading…</p>}</div>
 ```
+
+### Recursive compiler-owned host blocks
+
+An eligible compiler-owned branch may contain more eligible host-only blocks:
+
+```tsx
+<div className="panel-slot">
+  {open ? (
+    <section>
+      <header>Inbox</header>
+      <div>{loading && <p>Loading…</p>}</div>
+      <ul>
+        <li>Fixed row</li>
+        {messages.map((message) => (
+          <li key={message.id}>{message.title}</li>
+        ))}
+      </ul>
+    </section>
+  ) : (
+    <aside>Closed</aside>
+  )}
+</div>
+```
+
+The outer `open` condition, nested `loading` range, and keyed `messages` range receive globally
+unique block IDs and separate dependency lists. Updating `loading` touches only its host range.
+Updating `messages` reuses matching rows, patches their prepared bindings, and applies LIS moves.
+Neither update reruns the component or replaces the outer `section`.
+
+If an outer condition and a descendant change in the same microtask, the scheduler commits the
+outer block first and suppresses the now-redundant child refresh. Removing an outer branch cleans
+every descendant subscription before removing its DOM. Reopening it creates the selected host tree
+from current compiler cells, so updates made while closed cannot become stale work.
+
+This recursive path is intentionally host-only. Nested conditional ranges may recurse again, and a
+nested container may own one or more non-interactive keyed ranges separated by static host
+siblings. Hooks, custom components, branch events, refs, SVG, fragments, dangerous HTML,
+interactive rows, nested structures inside a keyed row, or conditionals and lists mixed as direct
+siblings in the same range keep React ownership. React still renders the initial client/SSR tree,
+hydrates it, reports recoverable mismatches, and handles every fallback. Duplicate runtime keys or
+invalid adopted DOM remount the affected outer container through React; descendant dependencies
+remain live after that handoff.
 
 The existing React-owned conditional boundary remains the fallback for supported complex shapes.
 It can contain event handlers, nested host conditionals, keyed lists, and component islands while
@@ -911,24 +953,24 @@ component.
 
 ### What falls back to React
 
-| Unsupported shape                                                                                         | Why React keeps ownership                                                          |
-| --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Unkeyed/index-keyed maps, unsupported or mutating collection pipelines, or element arrays                 | Their structure, purity, or item identity is outside the keyed-list contract.      |
-| Unsupported row events/forms, components, fragments, refs, SVG, nested blocks, or mixed conditional slots | Their event, lifecycle, or structure contract requires the React-owned row path.   |
-| Interactive ranges beside siblings or non-host range siblings                                             | The range owner requires a host container and non-interactive host rows.           |
-| Branch events, keys, components, fragments, refs, SVG, or nested blocks in a compiled conditional range   | They require the React-owned conditional path rather than compiler-created hosts.  |
-| Dynamic/member component types, component spreads, refs, keys, or children                                | Their identity or ownership is outside the first component-island contract.        |
-| Effects or hooks other than the supported `useState` shape                                                | Their lifecycle and ordering must remain under React's hook dispatcher.            |
-| `ref` or `dangerouslySetInnerHTML`                                                                        | They directly participate in DOM ownership.                                        |
-| Stateful `children` or `key` bindings outside an eligible boundary                                        | These need structure or identity semantics.                                        |
-| Conditional style objects, style spreads, methods, or computed names                                      | The final property set or precedence cannot be prepared statically.                |
-| JSX attribute spreads or namespaced attributes                                                            | The compiler cannot currently enumerate a stable binding contract.                 |
-| Multiple/conditional returns or impure/control-flow statements                                            | The compiler only lowers a single, statically analyzable render path.              |
-| Derived calls, assignments, identity-bearing values, functions, or JSX                                    | Their evaluation timing, side effects, or identity cannot yet be preserved safely. |
-| Nested, computed, or rest props destructuring                                                             | These patterns need additional parameter-shape and identity analysis.              |
-| Async/generator/generic handlers or named handlers outside JSX events                                     | Their scheduling, identity, or closure semantics are outside the current lowering. |
-| Async/generator or generic components                                                                     | These function shapes are outside the current lowering.                            |
-| Setters called outside JSX event handlers                                                                 | The compiler only controls and batches event-driven local updates.                 |
+| Unsupported shape                                                                                                                     | Why React keeps ownership                                                          |
+| ------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Unkeyed/index-keyed maps, unsupported or mutating collection pipelines, or element arrays                                             | Their structure, purity, or item identity is outside the keyed-list contract.      |
+| Unsupported row events/forms, components, fragments, refs, SVG, nested blocks, or mixed conditional slots                             | Their event, lifecycle, or structure contract requires the React-owned row path.   |
+| Interactive ranges beside siblings or non-host range siblings                                                                         | The range owner requires a host container and non-interactive host rows.           |
+| Branch events, keys, components, fragments, refs, SVG, interactive rows, or unsupported nested blocks in a compiled conditional range | They require the React-owned conditional path rather than compiler-created hosts.  |
+| Dynamic/member component types, component spreads, refs, keys, or children                                                            | Their identity or ownership is outside the first component-island contract.        |
+| Effects or hooks other than the supported `useState` shape                                                                            | Their lifecycle and ordering must remain under React's hook dispatcher.            |
+| `ref` or `dangerouslySetInnerHTML`                                                                                                    | They directly participate in DOM ownership.                                        |
+| Stateful `children` or `key` bindings outside an eligible boundary                                                                    | These need structure or identity semantics.                                        |
+| Conditional style objects, style spreads, methods, or computed names                                                                  | The final property set or precedence cannot be prepared statically.                |
+| JSX attribute spreads or namespaced attributes                                                                                        | The compiler cannot currently enumerate a stable binding contract.                 |
+| Multiple/conditional returns or impure/control-flow statements                                                                        | The compiler only lowers a single, statically analyzable render path.              |
+| Derived calls, assignments, identity-bearing values, functions, or JSX                                                                | Their evaluation timing, side effects, or identity cannot yet be preserved safely. |
+| Nested, computed, or rest props destructuring                                                                                         | These patterns need additional parameter-shape and identity analysis.              |
+| Async/generator/generic handlers or named handlers outside JSX events                                                                 | Their scheduling, identity, or closure semantics are outside the current lowering. |
+| Async/generator or generic components                                                                                                 | These function shapes are outside the current lowering.                            |
+| Setters called outside JSX event handlers                                                                                             | The compiler only controls and batches event-driven local updates.                 |
 
 Keys do not make list work disappear. A key identifies the row that survives an insert, removal,
 or move. On the non-interactive compiler-owned host path, Farm compares those keys, reuses matching
@@ -1066,6 +1108,14 @@ The package and example test suites verify more than generated code:
   state snapshot;
 - 3,000 deterministic nested-range updates and 3,000 component-root-range updates match normal
   React while unchanged branches, static siblings, and the compiled owner keep their identity;
+- recursive host scopes preserve an outer branch and static siblings while independently updating
+  nested conditions, deeper conditions, and LIS-keyed ranges;
+- 3,000 deterministic recursive updates match normal React across outer toggles, nested branch
+  changes, inserts, removals, binding edits, reversals, and rotations without rerunning the owner;
+- recursive scopes clean queued work on unmount and outer removal, rebind on combined parent-prop
+  and local updates, adopt exact SSR output, recover after hydration mismatches, and keep React
+  fallback live after duplicate runtime keys, while nested binding failures reach React error
+  boundaries;
 - object, array, and nullish state transitions match normal React across 3,000 deterministic
   randomized updates;
 - automatic keyed maps and explicit `List` boundaries preserve keyed DOM nodes and stateful row

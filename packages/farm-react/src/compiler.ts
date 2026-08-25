@@ -110,6 +110,8 @@ interface HostConditionalPlan {
   falsy?: t.JSXElement;
   truthyBindings: PendingKeyedRowBinding[];
   falsyBindings: PendingKeyedRowBinding[];
+  descriptorBlocks?: ReadonlyMap<t.JSXElement, HostDescriptorBlockPlan>;
+  nestedPlans?: HostDescriptorBlockPlan[];
 }
 
 interface ConditionalRangePlan {
@@ -131,6 +133,7 @@ interface ConditionalRangesPlan {
   source: t.JSXElement;
   ranges: ConditionalRangePlan[];
   trailing: number;
+  descriptorBlocks?: ReadonlyMap<t.JSXElement, HostDescriptorBlockPlan>;
 }
 
 interface KeyedRowsPlan {
@@ -170,6 +173,28 @@ interface KeyedRangesPlan {
   trailing: number;
 }
 
+interface NestedHostConditionalRangesPlan {
+  kind: "nested-host-conditional-ranges";
+  id: number;
+  parent?: number;
+  dependencies: number[];
+  source: t.JSXElement;
+  ranges: ConditionalRangePlan[];
+  trailing: number;
+}
+
+interface NestedHostKeyedRangesPlan {
+  kind: "nested-host-keyed-ranges";
+  id: number;
+  parent?: number;
+  dependencies: number[];
+  source: t.JSXElement;
+  ranges: KeyedRangePlan[];
+  trailing: number;
+}
+
+type HostDescriptorBlockPlan = NestedHostConditionalRangesPlan | NestedHostKeyedRangesPlan;
+
 interface ComponentIslandPlan {
   kind: "component";
   id: number;
@@ -185,6 +210,8 @@ type ComposableBlockPlan =
   | KeyedListPlan
   | KeyedRowsPlan
   | KeyedRangesPlan
+  | NestedHostConditionalRangesPlan
+  | NestedHostKeyedRangesPlan
   | ComponentIslandPlan;
 
 interface Candidate {
@@ -1613,10 +1640,328 @@ function analyzeHostConditionalTree(
   return reason ? { reason } : { bindings };
 }
 
+interface RecursiveHostTreeAnalysis {
+  bindings: PendingKeyedRowBinding[];
+  plans: HostDescriptorBlockPlan[];
+  blocks: Map<t.JSXElement, HostDescriptorBlockPlan>;
+  reason?: string;
+}
+
+function analyzeRecursiveHostTree(
+  branch: t.JSXElement,
+  statesByValue: ReadonlyMap<string, StateBinding>,
+  safeGlobals: ReadonlySet<string>,
+  listNames: ReadonlySet<string>,
+  parent: number,
+  allocateId: () => number,
+): RecursiveHostTreeAnalysis {
+  const bindings: PendingKeyedRowBinding[] = [];
+  const plans: HostDescriptorBlockPlan[] = [];
+  const blocks = new Map<t.JSXElement, HostDescriptorBlockPlan>();
+
+  const merge = (analysis: RecursiveHostTreeAnalysis): string | undefined => {
+    if (analysis.reason) return analysis.reason;
+    bindings.push(...analysis.bindings);
+    plans.push(...analysis.plans);
+    for (const [element, plan] of analysis.blocks) blocks.set(element, plan);
+    return undefined;
+  };
+
+  const visit = (element: t.JSXElement, path: number[], owner: number): string | undefined => {
+    const tag = element.openingElement.name;
+    if (!t.isJSXIdentifier(tag) || !/^[a-z]/.test(tag.name)) {
+      return "recursive compiler-owned blocks support host elements only";
+    }
+    if (tag.name === "svg") return "recursive compiler-owned blocks do not support SVG yet";
+
+    for (const attribute of element.openingElement.attributes) {
+      if (t.isJSXSpreadAttribute(attribute)) {
+        return "recursive compiler-owned blocks do not support JSX attribute spreads";
+      }
+      const name = jsxAttributeName(attribute);
+      if (!name) return "recursive compiler-owned blocks do not support namespaced attributes";
+      if (name === "ref" || name === "dangerouslySetInnerHTML" || name === "key") {
+        return `recursive compiler-owned block ${name} requires React ownership`;
+      }
+      if (/^on[A-Z]/.test(name)) {
+        return "recursive compiler-owned block events require React ownership";
+      }
+      if (
+        !t.isJSXExpressionContainer(attribute.value) ||
+        t.isJSXEmptyExpression(attribute.value.expression)
+      ) {
+        continue;
+      }
+
+      const expression = attribute.value.expression;
+      if (name === "style") {
+        if (!t.isObjectExpression(expression)) {
+          return "recursive compiler-owned styles must use one inline object literal";
+        }
+        for (const property of expression.properties) {
+          if (
+            !t.isObjectProperty(property) ||
+            property.computed ||
+            !t.isExpression(property.value)
+          ) {
+            return "recursive compiler-owned styles do not support spreads, methods, or computed properties";
+          }
+          const propertyName = t.isIdentifier(property.key)
+            ? property.key.name
+            : t.isStringLiteral(property.key)
+              ? property.key.value
+              : undefined;
+          if (!propertyName || (propertyName.includes("-") && !propertyName.startsWith("--"))) {
+            return "recursive compiler-owned style names must use camelCase or a CSS custom property";
+          }
+          const unsupported = validateDerivedExpression(property.value, safeGlobals);
+          if (unsupported) {
+            return `recursive compiler-owned style ${propertyName} cannot use ${unsupported}`;
+          }
+          bindings.push({
+            kind: "style",
+            path: [...path],
+            name: propertyName,
+            value: cloneExpression(property.value),
+          });
+        }
+        continue;
+      }
+
+      if (name === "children") {
+        return "recursive compiler-owned children props are not supported yet";
+      }
+      const unsupported = validateDerivedExpression(expression, safeGlobals);
+      if (unsupported) return `recursive compiler-owned ${name} cannot use ${unsupported}`;
+      bindings.push({
+        kind: "attribute",
+        path: [...path],
+        name,
+        value: cloneExpression(expression),
+      });
+    }
+
+    const children = meaningfulJsxChildren(element);
+    const conditionalChildren = new Map<
+      t.Expression,
+      NonNullable<ReturnType<typeof conditionalBlockShape>>
+    >();
+    let conditionalContainer = children.length > 0;
+    for (const child of children) {
+      if (t.isJSXElement(child) && isHostElement(child)) continue;
+      if (t.isJSXExpressionContainer(child) && !t.isJSXEmptyExpression(child.expression)) {
+        const shape = conditionalBlockShape(child.expression);
+        if (shape && !validateDerivedExpression(shape.test, safeGlobals)) {
+          conditionalChildren.set(child.expression, shape);
+          continue;
+        }
+      }
+      conditionalContainer = false;
+      break;
+    }
+
+    if (conditionalContainer && conditionalChildren.size > 0) {
+      const id = allocateId();
+      const ranges: ConditionalRangePlan[] = [];
+      const dependencies = new Set<number>();
+      let staticBefore = 0;
+      for (const child of children) {
+        if (t.isJSXElement(child)) {
+          const beforeBindings = bindings.length;
+          const nested = analyzeRecursiveHostTree(
+            child,
+            statesByValue,
+            safeGlobals,
+            listNames,
+            owner,
+            allocateId,
+          );
+          const reason = merge(nested);
+          if (reason) return reason;
+          if (bindings.length !== beforeBindings) {
+            return "stateful static siblings beside recursive conditionals require React ownership";
+          }
+          staticBefore += 1;
+          continue;
+        }
+
+        if (!t.isJSXExpressionContainer(child) || t.isJSXEmptyExpression(child.expression)) {
+          return "recursive conditional ranges contain an unsupported child";
+        }
+        const expression = child.expression;
+        const shape = conditionalChildren.get(expression)!;
+        const truthy = shape.truthy
+          ? analyzeRecursiveHostTree(
+              shape.truthy,
+              statesByValue,
+              safeGlobals,
+              listNames,
+              id,
+              allocateId,
+            )
+          : { bindings: [], plans: [], blocks: new Map<t.JSXElement, HostDescriptorBlockPlan>() };
+        const falsy = shape.falsy
+          ? analyzeRecursiveHostTree(
+              shape.falsy,
+              statesByValue,
+              safeGlobals,
+              listNames,
+              id,
+              allocateId,
+            )
+          : { bindings: [], plans: [], blocks: new Map<t.JSXElement, HostDescriptorBlockPlan>() };
+        if (truthy.reason) return truthy.reason;
+        if (falsy.reason) return falsy.reason;
+        plans.push(...truthy.plans, ...falsy.plans);
+        for (const [nestedElement, plan] of truthy.blocks) blocks.set(nestedElement, plan);
+        for (const [nestedElement, plan] of falsy.blocks) blocks.set(nestedElement, plan);
+
+        for (const dependency of collectStateDependencies(shape.test, statesByValue)) {
+          dependencies.add(dependency);
+        }
+        for (const binding of [...truthy.bindings, ...falsy.bindings]) {
+          for (const dependency of collectStateDependencies(binding.value, statesByValue)) {
+            dependencies.add(dependency);
+          }
+        }
+        ranges.push({
+          before: staticBefore,
+          source: expression,
+          test: cloneExpression(shape.test),
+          logical: shape.logical,
+          truthy: shape.truthy,
+          falsy: shape.falsy,
+          truthyBindings: truthy.bindings,
+          falsyBindings: falsy.bindings,
+        });
+        staticBefore = 0;
+      }
+      const plan: NestedHostConditionalRangesPlan = {
+        kind: "nested-host-conditional-ranges",
+        id,
+        parent: owner,
+        dependencies: [...dependencies].sort((left, right) => left - right),
+        source: element,
+        ranges,
+        trailing: staticBefore,
+      };
+      plans.push(plan);
+      blocks.set(element, plan);
+      return undefined;
+    }
+
+    const keyedRanges: KeyedRangePlan[] = [];
+    let keyedContainer = children.length > 0;
+    let staticBefore = 0;
+    const keyedDependencies = new Set<number>();
+    const staticChildren: t.JSXElement[] = [];
+    for (const child of children) {
+      const range = analyzeKeyedRowChild(child, statesByValue, safeGlobals, listNames);
+      if (range && range.events.length === 0 && range.conditionals.length === 0) {
+        keyedRanges.push({
+          before: staticBefore,
+          source: range.source,
+          collection: range.collection,
+          keyCallback: range.keyCallback,
+          renderCallback: range.renderCallback,
+          row: range.row,
+          bindings: range.bindings,
+          syntax: range.syntax,
+        });
+        for (const dependency of range.dependencies) keyedDependencies.add(dependency);
+        staticBefore = 0;
+      } else if (t.isJSXElement(child) && isHostElement(child)) {
+        staticChildren.push(child);
+        staticBefore += 1;
+      } else {
+        keyedContainer = false;
+        break;
+      }
+    }
+
+    if (keyedContainer && keyedRanges.length > 0) {
+      const id = allocateId();
+      for (const child of staticChildren) {
+        const beforeBindings = bindings.length;
+        const nested = analyzeRecursiveHostTree(
+          child,
+          statesByValue,
+          safeGlobals,
+          listNames,
+          owner,
+          allocateId,
+        );
+        const reason = merge(nested);
+        if (reason) return reason;
+        if (bindings.length !== beforeBindings) {
+          return "stateful static siblings beside recursive keyed ranges require React ownership";
+        }
+      }
+      const plan: NestedHostKeyedRangesPlan = {
+        kind: "nested-host-keyed-ranges",
+        id,
+        parent: owner,
+        dependencies: [...keyedDependencies].sort((left, right) => left - right),
+        source: element,
+        ranges: keyedRanges,
+        trailing: staticBefore,
+      };
+      plans.push(plan);
+      blocks.set(element, plan);
+      return undefined;
+    }
+
+    if (element.children.some((child) => t.isJSXFragment(child))) {
+      return "recursive compiler-owned blocks do not support fragments yet";
+    }
+    const nestedElements = element.children.filter((child): child is t.JSXElement =>
+      t.isJSXElement(child),
+    );
+    const expressions = element.children.filter(
+      (child): child is t.JSXExpressionContainer =>
+        t.isJSXExpressionContainer(child) && !t.isJSXEmptyExpression(child.expression),
+    );
+    for (const child of expressions) {
+      const unsupported = validateDerivedExpression(child.expression as t.Expression, safeGlobals);
+      if (unsupported) return `recursive compiler-owned text cannot use ${unsupported}`;
+    }
+    if (nestedElements.length > 0 && expressions.length > 0) {
+      return "recursive compiler-owned blocks do not support dynamic text beside nested elements";
+    }
+    if (nestedElements.length === 0 && expressions.length > 0) {
+      const parts: t.Expression[] = [];
+      for (const child of element.children) {
+        if (t.isJSXText(child)) {
+          const text = cleanJsxText(child.value);
+          if (text) parts.push(t.stringLiteral(text));
+        } else if (t.isJSXExpressionContainer(child) && !t.isJSXEmptyExpression(child.expression)) {
+          parts.push(cloneExpression(child.expression));
+        }
+      }
+      bindings.push({ kind: "text", path: [...path], value: t.arrayExpression(parts) });
+    }
+
+    let elementIndex = 0;
+    for (const child of element.children) {
+      if (!t.isJSXElement(child)) continue;
+      const reason = visit(child, [...path, elementIndex], owner);
+      if (reason) return reason;
+      elementIndex += 1;
+    }
+    return undefined;
+  };
+
+  const reason = visit(branch, [], parent);
+  return { bindings, plans, blocks, reason };
+}
+
 function analyzeHostConditionalContainer(
   container: t.JSXElement,
   statesByValue: ReadonlyMap<string, StateBinding>,
   safeGlobals: ReadonlySet<string>,
+  listNames: ReadonlySet<string>,
+  parent: number,
+  allocateId: () => number,
 ): Omit<HostConditionalPlan, "kind" | "id" | "parent" | "source"> | undefined {
   const containerName = container.openingElement.name;
   if (
@@ -1661,11 +2006,25 @@ function analyzeHostConditionalContainer(
   if (!shape || validateDerivedExpression(shape.test, safeGlobals)) return undefined;
 
   const truthyAnalysis = shape.truthy
-    ? analyzeHostConditionalTree(shape.truthy, safeGlobals)
-    : { bindings: [] as PendingKeyedRowBinding[] };
+    ? analyzeRecursiveHostTree(
+        shape.truthy,
+        statesByValue,
+        safeGlobals,
+        listNames,
+        parent,
+        allocateId,
+      )
+    : { bindings: [], plans: [], blocks: new Map<t.JSXElement, HostDescriptorBlockPlan>() };
   const falsyAnalysis = shape.falsy
-    ? analyzeHostConditionalTree(shape.falsy, safeGlobals)
-    : { bindings: [] as PendingKeyedRowBinding[] };
+    ? analyzeRecursiveHostTree(
+        shape.falsy,
+        statesByValue,
+        safeGlobals,
+        listNames,
+        parent,
+        allocateId,
+      )
+    : { bindings: [], plans: [], blocks: new Map<t.JSXElement, HostDescriptorBlockPlan>() };
   if (truthyAnalysis.reason || falsyAnalysis.reason) return undefined;
 
   const dependencies = new Set(collectStateDependencies(shape.test, statesByValue));
@@ -1682,6 +2041,8 @@ function analyzeHostConditionalContainer(
     falsy: shape.falsy,
     truthyBindings: truthyAnalysis.bindings || [],
     falsyBindings: falsyAnalysis.bindings || [],
+    descriptorBlocks: new Map([...truthyAnalysis.blocks, ...falsyAnalysis.blocks]),
+    nestedPlans: [...truthyAnalysis.plans, ...falsyAnalysis.plans],
   };
 }
 
@@ -1689,8 +2050,19 @@ function analyzeConditionalRangesContainer(
   container: t.JSXElement,
   statesByValue: ReadonlyMap<string, StateBinding>,
   safeGlobals: ReadonlySet<string>,
-  allowSingleRange = false,
-): { ranges: ConditionalRangePlan[]; trailing: number; dependencies: number[] } | undefined {
+  allowSingleRange: boolean,
+  listNames: ReadonlySet<string>,
+  parent: number,
+  allocateId: () => number,
+):
+  | {
+      ranges: ConditionalRangePlan[];
+      trailing: number;
+      dependencies: number[];
+      descriptorBlocks: ReadonlyMap<t.JSXElement, HostDescriptorBlockPlan>;
+      nestedPlans: HostDescriptorBlockPlan[];
+    }
+  | undefined {
   const containerName = container.openingElement.name;
   if (
     !t.isJSXIdentifier(containerName) ||
@@ -1711,6 +2083,8 @@ function analyzeConditionalRangesContainer(
   if (children.length < (allowSingleRange ? 1 : 2)) return undefined;
   const ranges: ConditionalRangePlan[] = [];
   const dependencies = new Set<number>();
+  const descriptorBlocks = new Map<t.JSXElement, HostDescriptorBlockPlan>();
+  const nestedPlans: HostDescriptorBlockPlan[] = [];
   let staticBefore = 0;
 
   for (const child of children) {
@@ -1718,12 +2092,29 @@ function analyzeConditionalRangesContainer(
       const shape = conditionalBlockShape(child.expression);
       if (shape && !validateDerivedExpression(shape.test, safeGlobals)) {
         const truthyAnalysis = shape.truthy
-          ? analyzeHostConditionalTree(shape.truthy, safeGlobals)
-          : { bindings: [] as PendingKeyedRowBinding[] };
+          ? analyzeRecursiveHostTree(
+              shape.truthy,
+              statesByValue,
+              safeGlobals,
+              listNames,
+              parent,
+              allocateId,
+            )
+          : { bindings: [], plans: [], blocks: new Map<t.JSXElement, HostDescriptorBlockPlan>() };
         const falsyAnalysis = shape.falsy
-          ? analyzeHostConditionalTree(shape.falsy, safeGlobals)
-          : { bindings: [] as PendingKeyedRowBinding[] };
+          ? analyzeRecursiveHostTree(
+              shape.falsy,
+              statesByValue,
+              safeGlobals,
+              listNames,
+              parent,
+              allocateId,
+            )
+          : { bindings: [], plans: [], blocks: new Map<t.JSXElement, HostDescriptorBlockPlan>() };
         if (truthyAnalysis.reason || falsyAnalysis.reason) return undefined;
+        nestedPlans.push(...truthyAnalysis.plans, ...falsyAnalysis.plans);
+        for (const [element, plan] of truthyAnalysis.blocks) descriptorBlocks.set(element, plan);
+        for (const [element, plan] of falsyAnalysis.blocks) descriptorBlocks.set(element, plan);
 
         const rangeDependencies = new Set(collectStateDependencies(shape.test, statesByValue));
         for (const binding of [
@@ -1760,6 +2151,8 @@ function analyzeConditionalRangesContainer(
     ranges,
     trailing: staticBefore,
     dependencies: [...dependencies].sort((left, right) => left - right),
+    descriptorBlocks,
+    nestedPlans,
   };
 }
 
@@ -1790,7 +2183,10 @@ function keyedListBoundary(
   );
 }
 
-function hostElementDescriptor(element: t.JSXElement): t.ObjectExpression {
+function hostElementDescriptor(
+  element: t.JSXElement,
+  descriptorBlocks: ReadonlyMap<t.JSXElement, HostDescriptorBlockPlan> = new Map(),
+): t.ObjectExpression {
   const tag = element.openingElement.name as t.JSXIdentifier;
   const attributes: t.ObjectExpression[] = [];
   const styles: t.ObjectExpression[] = [];
@@ -1836,25 +2232,96 @@ function hostElementDescriptor(element: t.JSXElement): t.ObjectExpression {
     );
   }
 
+  const block = descriptorBlocks.get(element);
+  const conditionalBySource = new Map<t.Node, ConditionalRangePlan>();
+  const keyedBySource = new Map<t.Node, KeyedRangePlan>();
+  if (block?.kind === "nested-host-conditional-ranges") {
+    for (const range of block.ranges) conditionalBySource.set(range.source, range);
+  } else if (block?.kind === "nested-host-keyed-ranges") {
+    for (const range of block.ranges) keyedBySource.set(range.source, range);
+  }
+
   const children: t.Expression[] = [];
   for (const child of element.children) {
     if (t.isJSXText(child)) {
       const text = cleanJsxText(child.value);
       if (text) children.push(t.stringLiteral(text));
     } else if (t.isJSXElement(child)) {
-      children.push(hostElementDescriptor(child));
+      const keyedRange = keyedBySource.get(child);
+      if (keyedRange) {
+        children.push(keyedRangeDescriptorChildren(keyedRange, descriptorBlocks));
+      } else {
+        children.push(hostElementDescriptor(child, descriptorBlocks));
+      }
     } else if (t.isJSXExpressionContainer(child) && !t.isJSXEmptyExpression(child.expression)) {
-      children.push(cloneExpression(child.expression));
+      const conditionalRange = conditionalBySource.get(child.expression);
+      const keyedRange = keyedBySource.get(child.expression);
+      if (conditionalRange) {
+        children.push(conditionalRangeDescriptorChild(conditionalRange, descriptorBlocks));
+      } else if (keyedRange) {
+        children.push(keyedRangeDescriptorChildren(keyedRange, descriptorBlocks));
+      } else {
+        children.push(cloneExpression(child.expression));
+      }
     }
   }
 
-  return t.objectExpression([
+  const properties: Array<t.ObjectProperty> = [
     t.objectProperty(t.identifier("kind"), t.stringLiteral("element")),
     t.objectProperty(t.identifier("tag"), t.stringLiteral(tag.name)),
     t.objectProperty(t.identifier("attributes"), t.arrayExpression(attributes)),
     t.objectProperty(t.identifier("styles"), t.arrayExpression(styles)),
     t.objectProperty(t.identifier("children"), t.arrayExpression(children)),
-  ]);
+  ];
+  if (block) {
+    properties.push(
+      t.objectProperty(t.identifier("block"), nestedHostBlockObject(block, descriptorBlocks)),
+    );
+  }
+  return t.objectExpression(properties);
+}
+
+function conditionalRangeDescriptorChild(
+  range: ConditionalRangePlan,
+  descriptorBlocks: ReadonlyMap<t.JSXElement, HostDescriptorBlockPlan>,
+): t.Expression {
+  const truthy = range.truthy
+    ? hostElementDescriptor(range.truthy, descriptorBlocks)
+    : t.nullLiteral();
+  if (range.logical) {
+    return t.logicalExpression("&&", cloneExpression(range.test), truthy);
+  }
+  return t.conditionalExpression(
+    cloneExpression(range.test),
+    truthy,
+    range.falsy ? hostElementDescriptor(range.falsy, descriptorBlocks) : t.nullLiteral(),
+  );
+}
+
+function keyedRangeDescriptorChildren(
+  range: KeyedRangePlan,
+  descriptorBlocks: ReadonlyMap<t.JSXElement, HostDescriptorBlockPlan>,
+): t.Expression {
+  const parameters = range.renderCallback.params.map((parameter) =>
+    t.cloneNode(parameter, true),
+  ) as t.Identifier[];
+  const callback = t.arrowFunctionExpression(
+    parameters,
+    hostElementDescriptor(range.row, descriptorBlocks),
+  );
+  const collection = cloneExpression(range.collection);
+  if (range.syntax === "map") {
+    return t.callExpression(t.memberExpression(collection, t.identifier("map")), [callback]);
+  }
+  return t.callExpression(
+    t.memberExpression(
+      t.callExpression(t.memberExpression(t.identifier("Array"), t.identifier("from")), [
+        t.logicalExpression("||", collection, t.arrayExpression([])),
+      ]),
+      t.identifier("map"),
+    ),
+    [callback],
+  );
 }
 
 function keyedRowBindingObject(
@@ -2197,7 +2664,10 @@ function keyedRowsBoundary(blockRuntime: t.Identifier, plan: KeyedRowsPlan): t.J
   );
 }
 
-function keyedRangeObject(range: KeyedRangePlan): t.ObjectExpression {
+function keyedRangeObject(
+  range: KeyedRangePlan,
+  descriptorBlocks: ReadonlyMap<t.JSXElement, HostDescriptorBlockPlan> = new Map(),
+): t.ObjectExpression {
   const parameters = range.renderCallback.params.map((parameter) =>
     t.cloneNode(parameter, true),
   ) as t.Identifier[];
@@ -2212,7 +2682,7 @@ function keyedRangeObject(range: KeyedRangePlan): t.ObjectExpression {
       t.identifier("create"),
       t.arrowFunctionExpression(
         parameters.map((parameter) => t.cloneNode(parameter, true)),
-        hostElementDescriptor(range.row),
+        hostElementDescriptor(range.row, descriptorBlocks),
       ),
     ),
     t.objectProperty(
@@ -2277,11 +2747,12 @@ function keyedRangesBoundary(blockRuntime: t.Identifier, plan: KeyedRangesPlan):
 function hostConditionalBranchObject(
   branch: t.JSXElement,
   bindings: readonly PendingKeyedRowBinding[],
+  descriptorBlocks: ReadonlyMap<t.JSXElement, HostDescriptorBlockPlan> = new Map(),
 ): t.ObjectExpression {
   return t.objectExpression([
     t.objectProperty(
       t.identifier("create"),
-      t.arrowFunctionExpression([], hostElementDescriptor(branch)),
+      t.arrowFunctionExpression([], hostElementDescriptor(branch, descriptorBlocks)),
     ),
     t.objectProperty(
       t.identifier("bindings"),
@@ -2314,7 +2785,9 @@ function hostConditionalBoundary(
     attributes.push(
       t.jsxAttribute(
         t.jsxIdentifier("truthy"),
-        t.jsxExpressionContainer(hostConditionalBranchObject(plan.truthy, plan.truthyBindings)),
+        t.jsxExpressionContainer(
+          hostConditionalBranchObject(plan.truthy, plan.truthyBindings, plan.descriptorBlocks),
+        ),
       ),
     );
   }
@@ -2322,14 +2795,19 @@ function hostConditionalBoundary(
     attributes.push(
       t.jsxAttribute(
         t.jsxIdentifier("falsy"),
-        t.jsxExpressionContainer(hostConditionalBranchObject(plan.falsy, plan.falsyBindings)),
+        t.jsxExpressionContainer(
+          hostConditionalBranchObject(plan.falsy, plan.falsyBindings, plan.descriptorBlocks),
+        ),
       ),
     );
   }
   return t.jsxElement(t.jsxOpeningElement(name, attributes, true), null, [], true);
 }
 
-function conditionalRangeObject(range: ConditionalRangePlan): t.ObjectExpression {
+function conditionalRangeObject(
+  range: ConditionalRangePlan,
+  descriptorBlocks: ReadonlyMap<t.JSXElement, HostDescriptorBlockPlan> = new Map(),
+): t.ObjectExpression {
   const properties: t.ObjectProperty[] = [
     t.objectProperty(t.identifier("before"), t.numericLiteral(range.before)),
     t.objectProperty(
@@ -2344,7 +2822,7 @@ function conditionalRangeObject(range: ConditionalRangePlan): t.ObjectExpression
     properties.push(
       t.objectProperty(
         t.identifier("truthy"),
-        hostConditionalBranchObject(range.truthy, range.truthyBindings),
+        hostConditionalBranchObject(range.truthy, range.truthyBindings, descriptorBlocks),
       ),
     );
   }
@@ -2352,11 +2830,35 @@ function conditionalRangeObject(range: ConditionalRangePlan): t.ObjectExpression
     properties.push(
       t.objectProperty(
         t.identifier("falsy"),
-        hostConditionalBranchObject(range.falsy, range.falsyBindings),
+        hostConditionalBranchObject(range.falsy, range.falsyBindings, descriptorBlocks),
       ),
     );
   }
   return t.objectExpression(properties);
+}
+
+function nestedHostBlockObject(
+  plan: HostDescriptorBlockPlan,
+  descriptorBlocks: ReadonlyMap<t.JSXElement, HostDescriptorBlockPlan>,
+): t.ObjectExpression {
+  return t.objectExpression([
+    t.objectProperty(
+      t.identifier("kind"),
+      t.stringLiteral(
+        plan.kind === "nested-host-conditional-ranges" ? "conditional-ranges" : "keyed-ranges",
+      ),
+    ),
+    t.objectProperty(t.identifier("id"), t.numericLiteral(plan.id)),
+    t.objectProperty(
+      t.identifier("ranges"),
+      t.arrayExpression(
+        plan.kind === "nested-host-conditional-ranges"
+          ? plan.ranges.map((range) => conditionalRangeObject(range, descriptorBlocks))
+          : plan.ranges.map((range) => keyedRangeObject(range, descriptorBlocks)),
+      ),
+    ),
+    t.objectProperty(t.identifier("trailing"), t.numericLiteral(plan.trailing)),
+  ]);
 }
 
 function conditionalRangesBoundary(
@@ -2387,7 +2889,9 @@ function conditionalRangesBoundary(
     t.jsxAttribute(
       t.jsxIdentifier("ranges"),
       t.jsxExpressionContainer(
-        t.arrayExpression(plan.ranges.map((range) => conditionalRangeObject(range))),
+        t.arrayExpression(
+          plan.ranges.map((range) => conditionalRangeObject(range, plan.descriptorBlocks)),
+        ),
       ),
     ),
     t.jsxAttribute(
@@ -2637,40 +3141,60 @@ function analyzeComposableBlocks(
             }
             continue;
           }
+          const conditionalRangeStart = nextId;
+          const conditionalRangeId = nextId++;
           const conditionalRanges = insideConditional
             ? undefined
-            : analyzeConditionalRangesContainer(child, statesByValue, safeGlobals);
+            : analyzeConditionalRangesContainer(
+                child,
+                statesByValue,
+                safeGlobals,
+                false,
+                listNames,
+                conditionalRangeId,
+                () => nextId++,
+              );
           if (conditionalRanges) {
             plans.push({
               kind: "conditional-ranges",
-              id: nextId++,
+              id: conditionalRangeId,
               parent,
               dependencies: conditionalRanges.dependencies,
               source: child,
               ranges: conditionalRanges.ranges,
               trailing: conditionalRanges.trailing,
+              descriptorBlocks: conditionalRanges.descriptorBlocks,
             });
+            plans.push(...(conditionalRanges.nestedPlans || []));
             for (const range of conditionalRanges.ranges) {
               conditionalExpressions.add(range.source);
             }
             continue;
           }
+          nextId = conditionalRangeStart;
+          const hostConditionalStart = nextId;
+          const hostConditionalId = nextId++;
           const hostConditional = analyzeHostConditionalContainer(
             child,
             statesByValue,
             safeGlobals,
+            listNames,
+            hostConditionalId,
+            () => nextId++,
           );
           if (hostConditional) {
             plans.push({
               kind: "host-conditional",
-              id: nextId++,
+              id: hostConditionalId,
               parent,
               source: child,
               ...hostConditional,
             });
+            plans.push(...(hostConditional.nestedPlans || []));
             ownedElements.add(child);
             continue;
           }
+          nextId = hostConditionalStart;
           const keyedRows = analyzeKeyedRowsContainer(child, statesByValue, safeGlobals, listNames);
           if (keyedRows) {
             plans.push({
@@ -2818,21 +3342,28 @@ function analyzeComposableBlocks(
     };
   }
 
+  const rootConditionalRangeStart = nextId;
+  const rootConditionalRangeId = nextId++;
   const rootConditionalRanges = analyzeConditionalRangesContainer(
     root,
     statesByValue,
     safeGlobals,
     true,
+    listNames,
+    rootConditionalRangeId,
+    () => nextId++,
   );
   if (rootConditionalRanges) {
     plans.push({
       kind: "conditional-ranges",
-      id: nextId++,
+      id: rootConditionalRangeId,
       dependencies: rootConditionalRanges.dependencies,
       source: root,
       ranges: rootConditionalRanges.ranges,
       trailing: rootConditionalRanges.trailing,
+      descriptorBlocks: rootConditionalRanges.descriptorBlocks,
     });
+    plans.push(...(rootConditionalRanges.nestedPlans || []));
     for (const range of rootConditionalRanges.ranges) {
       conditionalExpressions.add(range.source);
     }
@@ -2844,6 +3375,7 @@ function analyzeComposableBlocks(
       keyedExpressions,
     };
   }
+  nextId = rootConditionalRangeStart;
 
   const result = visitHost(root, undefined, false);
   if (result.reason) return { reason: result.reason };

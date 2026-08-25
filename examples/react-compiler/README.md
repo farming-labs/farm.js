@@ -158,7 +158,7 @@ root and every static sibling are still the original DOM nodes, no marker nodes 
 component recorded zero update executions.
 
 This does not pre-mount both branches or bypass React's event system. Branch events, custom
-components, fragments, refs, SVG, keys, spreads, nested dynamic blocks, and dangerous HTML keep a
+components, fragments, refs, SVG, keys, spreads, unsupported nested structures, and dangerous HTML keep a
 React-owned conditional boundary or fall back to the original component. A numeric logical value
 such as `0 && <p />`, a parent-driven prop change, Fast Refresh, or invalid adopted DOM remounts the
 affected range container through React so visible output and React ownership remain exact.
@@ -167,6 +167,14 @@ The `08` card combines those boundary types under one outer conditional. It also
 hidden outer block removes its inner subscriptions: updates made while hidden do no render work,
 and remounting reads the newest compiler-cell values. Child-local React state resets after the
 outer branch unmounts, matching ordinary React semantics.
+
+The `09` card transfers the outer branch and its recursively nested host-only conditions and keyed
+ranges to compiler ownership. One action changes a nested condition, a deeper condition, and a
+keyed order while preserving the outer branch, static heading, and every surviving keyed row. The
+hide/update/show sequence verifies that removed scopes receive no stale work and remount from the
+latest cells. The production assertion records zero owner update executions. Interactive rows,
+Hooks, custom components, refs, SVG, branch events, and mixed conditional/list slots remain React
+fallbacks.
 
 ## Heavy compiler-on/off benchmark
 

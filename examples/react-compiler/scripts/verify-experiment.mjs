@@ -1001,6 +1001,74 @@ try {
   );
   assert.equal(composableOwnerFinalExecutions - composableOwnerInitialExecutions, 0);
 
+  const recursive = '[data-experiment="recursive-host-blocks"]';
+  const recursiveOwnerInitialExecutions = await readNumber(
+    page,
+    `${recursive} [data-metric="recursive-owner-executions"]`,
+  );
+  await assertText(page, `${recursive} [data-metric="recursive-open"]`, "open");
+  await page.evaluate(() => {
+    window.__farmRecursiveOuter = document.querySelector("[data-recursive-outer]");
+    window.__farmRecursiveStatic = document.querySelector("[data-recursive-static]");
+    window.__farmRecursiveRows = Object.fromEntries(
+      [...document.querySelectorAll("[data-recursive-row]")].map((row) => [
+        row.getAttribute("data-recursive-row"),
+        row,
+      ]),
+    );
+  });
+
+  await page.locator(`${recursive} [data-action="recursive-update"]`).click();
+  await assertText(page, `${recursive} [data-metric="recursive-updates"]`, "1");
+  await assertText(page, `${recursive} [data-recursive-details]`, "Details 1");
+  assert.deepEqual(
+    await page.locator(`${recursive} [data-recursive-row]`).allTextContents(),
+    ["Gamma · updated", "Beta", "Alpha"],
+  );
+  assert.equal(
+    await page.evaluate(() =>
+      Object.entries(window.__farmRecursiveRows).every(
+        ([key, row]) => row === document.querySelector(`[data-recursive-row="${key}"]`),
+      ),
+    ),
+    true,
+    "recursive keyed ranges replaced a surviving row",
+  );
+  assert.equal(
+    await page.evaluate(
+      () => window.__farmRecursiveOuter === document.querySelector("[data-recursive-outer]"),
+    ),
+    true,
+    "a nested update replaced the outer compiler-owned branch",
+  );
+  assert.equal(
+    await page.evaluate(
+      () => window.__farmRecursiveStatic === document.querySelector("[data-recursive-static]"),
+    ),
+    true,
+    "a nested update replaced the recursive static sibling",
+  );
+
+  await page.locator(`${recursive} [data-action="recursive-hide-update"]`).click();
+  await assertText(page, `${recursive} [data-metric="recursive-open"]`, "closed");
+  assert.equal(await page.locator(`${recursive} [data-recursive-outer]`).count(), 0);
+  await page.locator(`${recursive} [data-action="recursive-hidden-update"]`).click();
+  await assertText(page, `${recursive} [data-metric="recursive-updates"]`, "3");
+  assert.equal(await page.locator(`${recursive} [data-recursive-outer]`).count(), 0);
+
+  await page.locator(`${recursive} [data-action="recursive-show"]`).click();
+  await assertText(page, `${recursive} [data-metric="recursive-open"]`, "open");
+  await assertText(page, `${recursive} [data-recursive-details]`, "Details 3");
+  assert.deepEqual(
+    await page.locator(`${recursive} [data-recursive-row]`).allTextContents(),
+    ["Gamma · updated · updated", "Beta", "Alpha · updated"],
+  );
+  const recursiveOwnerFinalExecutions = await readNumber(
+    page,
+    `${recursive} [data-metric="recursive-owner-executions"]`,
+  );
+  assert.equal(recursiveOwnerFinalExecutions - recursiveOwnerInitialExecutions, 0);
+
   await page.screenshot({ path: screenshotPath, fullPage: true });
 
   const mobilePage = await browser.newPage({
@@ -1199,6 +1267,15 @@ try {
             childStateResetAfterOuterUnmount: true,
             ownerUpdateExecutions:
               composableOwnerFinalExecutions - composableOwnerInitialExecutions,
+          },
+          recursiveHostBlocks: {
+            updates: 3,
+            keyedOrder: ["c", "b", "a"],
+            deepestConditional: "Details 3",
+            keyedDomIdentityPreserved: true,
+            staleSubscriptionsAfterHide: 0,
+            ownerUpdateExecutions:
+              recursiveOwnerFinalExecutions - recursiveOwnerInitialExecutions,
           },
         },
       },

@@ -1160,7 +1160,8 @@ h1 span {
 
 .composable-row-set > span,
 .composable-row-set > strong,
-.composable-row-set > em {
+.composable-row-set > em,
+.composable-row-set > li {
   border: 1px solid #3b3b37;
   padding: 0.45rem 0.6rem;
   font: 0.65rem "Geist Mono Variable", ui-monospace, monospace;
@@ -1175,6 +1176,25 @@ h1 span {
 
 .composable-fixed {
   color: #8d8d86;
+}
+
+.recursive-host-slot {
+  min-height: 12rem;
+}
+
+.recursive-status {
+  min-height: 4rem;
+}
+
+.recursive-status > p,
+.recursive-status > div {
+  margin: 0;
+}
+
+[data-recursive-list] {
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 .heavy-metrics > div {
