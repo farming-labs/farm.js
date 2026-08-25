@@ -74,6 +74,8 @@ export interface CompilerHostElement {
   attributes: readonly { name: string; value: unknown }[];
   styles: readonly { name: string; value: unknown }[];
   children: readonly (CompilerHostElement | unknown)[];
+  /** Direct-child structure owned without creating another React fiber. */
+  block?: CompilerHostBlock;
 }
 
 export type CompilerKeyedRowElement = CompilerHostElement;
@@ -108,6 +110,22 @@ export interface CompilerHostConditionalBranch {
   create(): CompilerHostElement;
   bindings: readonly CompilerHostConditionalBinding[];
 }
+
+export interface CompilerHostConditionalRanges {
+  kind: "conditional-ranges";
+  id: number;
+  ranges: readonly CompilerConditionalRange[];
+  trailing: number;
+}
+
+export interface CompilerHostKeyedRanges {
+  kind: "keyed-ranges";
+  id: number;
+  ranges: readonly CompilerKeyedRange[];
+  trailing: number;
+}
+
+export type CompilerHostBlock = CompilerHostConditionalRanges | CompilerHostKeyedRanges;
 
 export interface CompilerHostConditionalBlockProps {
   id: number;
@@ -548,6 +566,7 @@ function createKeyedListBlockComponent(
 interface CompilerHostInstance {
   element: Element;
   values: unknown[];
+  scope?: CompilerHostTreeScope;
 }
 
 function isCompilerHostElement(value: unknown): value is CompilerHostElement {
@@ -562,14 +581,19 @@ function createCompilerHostElement(document: Document, descriptor: CompilerHostE
     updateAttribute(element, attribute.name, attribute.value);
   }
   for (const style of descriptor.styles) updateStyle(element, style.name, style.value);
-  for (const child of descriptor.children) {
+  const appendChild = (child: unknown): void => {
+    if (Array.isArray(child)) {
+      for (const nested of child) appendChild(nested);
+      return;
+    }
     if (isCompilerHostElement(child)) {
       element.append(createCompilerHostElement(document, child));
-      continue;
+      return;
     }
     const text = renderTextValue(child);
     if (text) element.append(document.createTextNode(text));
-  }
+  };
+  for (const child of descriptor.children) appendChild(child);
   // Select options and textarea text must exist before their controlled value
   // is finalized. Reapplying is harmless for other attributes and avoids a
   // transient/default selection becoming the compiled branch's final state.
@@ -588,12 +612,40 @@ function matchesCompilerHostElement(
   path: readonly number[] = [],
 ): boolean {
   if (element.tagName.toLowerCase() !== descriptor.tag.toLowerCase()) return false;
-  if (opaquePaths.has(path.join("."))) return true;
-  const expectedChildren = descriptor.children.filter(isCompilerHostElement);
+  if (opaquePaths.has(path.join(".")) || descriptor.block) return true;
+  const expectedChildren = flattenCompilerHostElements(descriptor.children);
   if (element.children.length !== expectedChildren.length) return false;
   return expectedChildren.every((child, index) =>
     matchesCompilerHostElement(element.children[index], child, opaquePaths, [...path, index]),
   );
+}
+
+function flattenCompilerHostElements(children: readonly unknown[]): CompilerHostElement[] {
+  const elements: CompilerHostElement[] = [];
+  const visit = (child: unknown): void => {
+    if (Array.isArray(child)) {
+      for (const nested of child) visit(nested);
+    } else if (isCompilerHostElement(child)) {
+      elements.push(child);
+    }
+  };
+  for (const child of children) visit(child);
+  return elements;
+}
+
+function collectCompilerHostBlockIds(descriptor: CompilerHostElement, ids: Set<number>): void {
+  for (const child of flattenCompilerHostElements(descriptor.children)) {
+    collectCompilerHostBlockIds(child, ids);
+  }
+  const block = descriptor.block;
+  if (!block || ids.has(block.id)) return;
+  ids.add(block.id);
+  if (block.kind === "conditional-ranges") {
+    for (const range of block.ranges) {
+      if (range.truthy) collectCompilerHostBlockIds(range.truthy.create(), ids);
+      if (range.falsy) collectCompilerHostBlockIds(range.falsy.create(), ids);
+    }
+  }
 }
 
 function findCompilerHostTarget(root: Element, path: readonly number[]): Element | null {
@@ -731,12 +783,6 @@ function normalizedHostConditionalBindingValue(
   return binding.kind === "text" ? renderTextValue(value) : value;
 }
 
-function readHostConditionalBindingValues(branch: CompilerHostConditionalBranch): unknown[] {
-  return branch.bindings.map((binding) =>
-    normalizedHostConditionalBindingValue(binding, binding.read()),
-  );
-}
-
 function applyHostConditionalBindings(
   branch: CompilerHostConditionalBranch,
   instance: CompilerHostInstance,
@@ -759,6 +805,535 @@ function applyHostConditionalBindings(
   }
 }
 
+interface CompilerHostTreeScope {
+  cleanup(): void;
+}
+
+const UNSET_HOST_CONDITIONAL_BINDING = Symbol("unset host conditional binding");
+
+function mountCompilerHostTree(
+  owner: Pick<ConditionalBlockOwner, "subscribe">,
+  element: Element,
+  descriptor: CompilerHostElement,
+  onFallback: () => void,
+): CompilerHostTreeScope | null {
+  if (!matchesCompilerHostElement(element, descriptor)) return null;
+  if (descriptor.block?.kind === "conditional-ranges") {
+    const controller = new CompilerNestedConditionalRanges(
+      owner,
+      element,
+      descriptor,
+      descriptor.block,
+      onFallback,
+    );
+    try {
+      if (controller.adopt()) return controller;
+      controller.cleanup();
+      return null;
+    } catch (error) {
+      controller.cleanup();
+      throw error;
+    }
+  }
+  if (descriptor.block?.kind === "keyed-ranges") {
+    const controller = new CompilerNestedKeyedRanges(
+      owner,
+      element,
+      descriptor,
+      descriptor.block,
+      onFallback,
+    );
+    try {
+      if (controller.adopt()) return controller;
+      controller.cleanup();
+      return null;
+    } catch (error) {
+      controller.cleanup();
+      throw error;
+    }
+  }
+
+  const descriptors = flattenCompilerHostElements(descriptor.children);
+  if (descriptors.length !== element.children.length) return null;
+  const scopes: CompilerHostTreeScope[] = [];
+  for (let index = 0; index < descriptors.length; index += 1) {
+    const scope = mountCompilerHostTree(
+      owner,
+      element.children[index],
+      descriptors[index],
+      onFallback,
+    );
+    if (!scope) {
+      for (const mounted of scopes) mounted.cleanup();
+      return null;
+    }
+    scopes.push(scope);
+  }
+  let active = true;
+  return {
+    cleanup() {
+      if (!active) return;
+      active = false;
+      for (const scope of scopes) scope.cleanup();
+    },
+  };
+}
+
+function mountCompilerHostInstance(
+  owner: Pick<ConditionalBlockOwner, "subscribe">,
+  element: Element,
+  descriptor: CompilerHostElement,
+  branch: Pick<CompilerHostConditionalBranch, "bindings">,
+  onFallback: () => void,
+): CompilerHostInstance | null {
+  const scope = mountCompilerHostTree(owner, element, descriptor, onFallback);
+  if (!scope) return null;
+  const instance: CompilerHostInstance = {
+    element,
+    scope,
+    values: branch.bindings.map(() => UNSET_HOST_CONDITIONAL_BINDING),
+  };
+  try {
+    applyHostConditionalBindings(branch as CompilerHostConditionalBranch, instance);
+  } catch (error) {
+    scope.cleanup();
+    throw error;
+  }
+  return instance;
+}
+
+interface NestedConditionalRangeInstance {
+  key: "truthy" | "falsy";
+  host: CompilerHostInstance;
+}
+
+class CompilerNestedConditionalRanges implements CompilerHostTreeScope {
+  private readonly instances: Array<NestedConditionalRangeInstance | null> = [];
+  private readonly staticSegments: Element[][] = [];
+  private readonly staticScopes: CompilerHostTreeScope[] = [];
+  private unsubscribe: (() => void) | undefined;
+  private active = true;
+
+  constructor(
+    private readonly owner: Pick<ConditionalBlockOwner, "subscribe">,
+    private readonly root: Element,
+    private readonly host: CompilerHostElement,
+    private readonly block: CompilerHostConditionalRanges,
+    private readonly onFallback: () => void,
+  ) {}
+
+  private readSelections(): CompilerHostConditionalPreparedSelection[] | null {
+    const selections: CompilerHostConditionalPreparedSelection[] = [];
+    for (const range of this.block.ranges) {
+      const selection = hostConditionalSelection(range);
+      if (selection.kind === "fallback") return null;
+      selections.push(selection);
+    }
+    return selections;
+  }
+
+  private mountStatic(
+    elements: readonly Element[],
+    descriptors: readonly CompilerHostElement[],
+  ): boolean {
+    if (elements.length !== descriptors.length) return false;
+    for (let index = 0; index < elements.length; index += 1) {
+      const scope = mountCompilerHostTree(
+        this.owner,
+        elements[index],
+        descriptors[index],
+        this.onFallback,
+      );
+      if (!scope) return false;
+      this.staticScopes.push(scope);
+    }
+    return true;
+  }
+
+  adopt(): boolean {
+    if (!Number.isSafeInteger(this.block.trailing) || this.block.trailing < 0) return false;
+    const selections = this.readSelections();
+    if (!selections) return false;
+    const elements = [...this.root.children];
+    const descriptors = flattenCompilerHostElements(this.host.children);
+    if (elements.length !== descriptors.length) return false;
+    let cursor = 0;
+
+    for (let index = 0; index < this.block.ranges.length; index += 1) {
+      const range = this.block.ranges[index];
+      if (!Number.isSafeInteger(range.before) || range.before < 0) {
+        this.cleanup();
+        return false;
+      }
+      const staticEnd = cursor + range.before;
+      if (
+        staticEnd > elements.length ||
+        !this.mountStatic(elements.slice(cursor, staticEnd), descriptors.slice(cursor, staticEnd))
+      ) {
+        this.cleanup();
+        return false;
+      }
+      this.staticSegments.push(elements.slice(cursor, staticEnd));
+      cursor = staticEnd;
+
+      const selection = selections[index];
+      if (selection.kind === "empty") {
+        this.instances.push(null);
+        continue;
+      }
+      const element = elements[cursor];
+      if (!element) {
+        this.cleanup();
+        return false;
+      }
+      const descriptor = selection.branch.create();
+      const host = mountCompilerHostInstance(
+        this.owner,
+        element,
+        descriptor,
+        selection.branch,
+        this.onFallback,
+      );
+      if (!host) {
+        this.cleanup();
+        return false;
+      }
+      this.instances.push({ key: selection.key, host });
+      cursor += 1;
+    }
+
+    const trailingEnd = cursor + this.block.trailing;
+    if (
+      trailingEnd !== elements.length ||
+      !this.mountStatic(elements.slice(cursor), descriptors.slice(cursor))
+    ) {
+      this.cleanup();
+      return false;
+    }
+    this.staticSegments.push(elements.slice(cursor));
+    this.unsubscribe = this.owner.subscribe(this.block.id, this.refresh);
+    return true;
+  }
+
+  private anchorAfter(rangeIndex: number): ChildNode | null {
+    for (let next = rangeIndex + 1; next < this.instances.length; next += 1) {
+      const staticAnchor = this.staticSegments[next]?.[0];
+      if (staticAnchor) return staticAnchor;
+      const rangeAnchor = this.instances[next]?.host.element;
+      if (rangeAnchor) return rangeAnchor;
+    }
+    return this.staticSegments[this.instances.length]?.[0] || null;
+  }
+
+  private reconcileRange(
+    rangeIndex: number,
+    selection: CompilerHostConditionalPreparedSelection,
+  ): boolean {
+    const previous = this.instances[rangeIndex];
+    if (selection.kind === "empty") {
+      previous?.host.scope?.cleanup();
+      previous?.host.element.remove();
+      this.instances[rangeIndex] = null;
+      return true;
+    }
+    if (previous?.key === selection.key) {
+      const descriptor = selection.branch.create();
+      previous.host.scope?.cleanup();
+      const scope = mountCompilerHostTree(
+        this.owner,
+        previous.host.element,
+        descriptor,
+        this.onFallback,
+      );
+      if (!scope) return false;
+      previous.host.scope = scope;
+      applyHostConditionalBindings(selection.branch, previous.host);
+      return true;
+    }
+
+    const descriptor = selection.branch.create();
+    const element = createCompilerHostElement(this.root.ownerDocument, descriptor);
+    const host = mountCompilerHostInstance(
+      this.owner,
+      element,
+      descriptor,
+      selection.branch,
+      this.onFallback,
+    );
+    if (!host) return false;
+    previous?.host.scope?.cleanup();
+    if (previous) previous.host.element.replaceWith(element);
+    else this.root.insertBefore(element, this.anchorAfter(rangeIndex));
+    this.instances[rangeIndex] = { key: selection.key, host };
+    return true;
+  }
+
+  private refresh = (afterCommit?: () => void) => {
+    if (!this.active) {
+      afterCommit?.();
+      return;
+    }
+    const selections = this.readSelections();
+    if (!selections || selections.length !== this.instances.length) {
+      this.onFallback();
+      afterCommit?.();
+      return;
+    }
+    for (let index = this.instances.length - 1; index >= 0; index -= 1) {
+      if (!this.reconcileRange(index, selections[index])) {
+        this.onFallback();
+        afterCommit?.();
+        return;
+      }
+    }
+    afterCommit?.();
+  };
+
+  cleanup(): void {
+    if (!this.active) return;
+    this.active = false;
+    this.unsubscribe?.();
+    for (const instance of this.instances) instance?.host.scope?.cleanup();
+    for (const scope of this.staticScopes) scope.cleanup();
+    this.instances.length = 0;
+    this.staticSegments.length = 0;
+    this.staticScopes.length = 0;
+  }
+}
+
+interface NestedReadKeyedRange {
+  items: unknown[];
+  keys: string[];
+}
+
+class CompilerNestedKeyedRanges implements CompilerHostTreeScope {
+  private readonly instances: Array<Map<string, CompilerKeyedRowInstance>> = [];
+  private readonly staticSegments: Element[][] = [];
+  private readonly staticScopes: CompilerHostTreeScope[] = [];
+  private unsubscribe: (() => void) | undefined;
+  private active = true;
+
+  constructor(
+    private readonly owner: Pick<ConditionalBlockOwner, "subscribe">,
+    private readonly root: Element,
+    private readonly host: CompilerHostElement,
+    private readonly block: CompilerHostKeyedRanges,
+    private readonly onFallback: () => void,
+  ) {}
+
+  private readRange(range: CompilerKeyedRange): NestedReadKeyedRange | null {
+    const source = range.items();
+    const items = source ? Array.from(source) : [];
+    const keys = items.map((item, index) => keyedRowIdentity(range.rowKey(item, index)));
+    return new Set(keys).size === keys.length ? { items, keys } : null;
+  }
+
+  private readRanges(): NestedReadKeyedRange[] | null {
+    const ranges: NestedReadKeyedRange[] = [];
+    for (const range of this.block.ranges) {
+      const rows = this.readRange(range);
+      if (!rows) return null;
+      ranges.push(rows);
+    }
+    return ranges;
+  }
+
+  private mountStatic(
+    elements: readonly Element[],
+    descriptors: readonly CompilerHostElement[],
+  ): boolean {
+    if (elements.length !== descriptors.length) return false;
+    for (let index = 0; index < elements.length; index += 1) {
+      const scope = mountCompilerHostTree(
+        this.owner,
+        elements[index],
+        descriptors[index],
+        this.onFallback,
+      );
+      if (!scope) return false;
+      this.staticScopes.push(scope);
+    }
+    return true;
+  }
+
+  adopt(): boolean {
+    if (!Number.isSafeInteger(this.block.trailing) || this.block.trailing < 0) return false;
+    const rowsByRange = this.readRanges();
+    if (!rowsByRange) return false;
+    const elements = [...this.root.children];
+    const descriptors = flattenCompilerHostElements(this.host.children);
+    if (elements.length !== descriptors.length) return false;
+    let cursor = 0;
+
+    for (let rangeIndex = 0; rangeIndex < this.block.ranges.length; rangeIndex += 1) {
+      const range = this.block.ranges[rangeIndex];
+      const rows = rowsByRange[rangeIndex];
+      if (!Number.isSafeInteger(range.before) || range.before < 0) {
+        this.cleanup();
+        return false;
+      }
+      const staticEnd = cursor + range.before;
+      if (
+        staticEnd > elements.length ||
+        !this.mountStatic(elements.slice(cursor, staticEnd), descriptors.slice(cursor, staticEnd))
+      ) {
+        this.cleanup();
+        return false;
+      }
+      this.staticSegments.push(elements.slice(cursor, staticEnd));
+      cursor = staticEnd;
+
+      const instances = new Map<string, CompilerKeyedRowInstance>();
+      for (let index = 0; index < rows.items.length; index += 1) {
+        const element = elements[cursor + index];
+        if (!element) {
+          this.cleanup();
+          return false;
+        }
+        const descriptor = range.create(rows.items[index], index);
+        const scope = mountCompilerHostTree(this.owner, element, descriptor, this.onFallback);
+        if (!scope) {
+          this.cleanup();
+          return false;
+        }
+        instances.set(rows.keys[index], {
+          key: rows.keys[index],
+          element,
+          scope,
+          values: range.bindings.map(() => UNSET_KEYED_ROW_BINDING),
+          item: rows.items[index],
+          index,
+          conditionalValues: new Map(),
+        });
+        applyKeyedRowBindings(range, instances.get(rows.keys[index])!, rows.items[index], index);
+      }
+      this.instances.push(instances);
+      cursor += rows.items.length;
+    }
+
+    const trailingEnd = cursor + this.block.trailing;
+    if (
+      trailingEnd !== elements.length ||
+      !this.mountStatic(elements.slice(cursor), descriptors.slice(cursor))
+    ) {
+      this.cleanup();
+      return false;
+    }
+    this.staticSegments.push(elements.slice(cursor));
+    this.unsubscribe = this.owner.subscribe(this.block.id, this.refresh);
+    return true;
+  }
+
+  private anchorAfter(rangeIndex: number): ChildNode | null {
+    for (let next = rangeIndex + 1; next < this.instances.length; next += 1) {
+      const staticAnchor = this.staticSegments[next]?.[0];
+      if (staticAnchor) return staticAnchor;
+      const rowAnchor = this.instances[next].values().next().value?.element;
+      if (rowAnchor) return rowAnchor;
+    }
+    return this.staticSegments[this.instances.length]?.[0] || null;
+  }
+
+  private reconcileRange(rangeIndex: number, rows: NestedReadKeyedRange): boolean {
+    const range = this.block.ranges[rangeIndex];
+    const previous = this.instances[rangeIndex];
+    const oldIndices = new Map<string, number>();
+    [...previous.keys()].forEach((key, index) => oldIndices.set(key, index));
+    const nextKeys = new Set(rows.keys);
+    for (const [key, instance] of previous) {
+      if (nextKeys.has(key)) continue;
+      instance.scope?.cleanup();
+      instance.element.remove();
+    }
+
+    const sequence = rows.keys.map((key) => oldIndices.get(key) ?? -1);
+    const stablePositions = longestIncreasingSubsequencePositions(sequence);
+    const nextInstances: CompilerKeyedRowInstance[] = [];
+    for (let index = 0; index < rows.items.length; index += 1) {
+      const key = rows.keys[index];
+      const existing = previous.get(key);
+      if (existing) {
+        applyKeyedRowBindings(range, existing, rows.items[index], index);
+        existing.item = rows.items[index];
+        existing.index = index;
+        nextInstances.push(existing);
+        continue;
+      }
+      const descriptor = range.create(rows.items[index], index);
+      const element = createCompilerHostElement(this.root.ownerDocument, descriptor);
+      const scope = mountCompilerHostTree(this.owner, element, descriptor, this.onFallback);
+      if (!scope) return false;
+      nextInstances.push({
+        key,
+        element,
+        scope,
+        values: readKeyedRowBindingValues(range, rows.items[index], index),
+        item: rows.items[index],
+        index,
+        conditionalValues: new Map(),
+      });
+    }
+
+    let anchor = this.anchorAfter(rangeIndex);
+    for (let index = nextInstances.length - 1; index >= 0; index -= 1) {
+      const instance = nextInstances[index];
+      if (
+        sequence[index] < 0 ||
+        (!stablePositions.has(index) && instance.element.nextSibling !== anchor)
+      ) {
+        this.root.insertBefore(instance.element, anchor);
+      }
+      anchor = instance.element;
+    }
+    this.instances[rangeIndex] = new Map(nextInstances.map((instance) => [instance.key, instance]));
+    return true;
+  }
+
+  private refresh = (afterCommit?: () => void) => {
+    if (!this.active) {
+      afterCommit?.();
+      return;
+    }
+    const rowsByRange = this.readRanges();
+    if (!rowsByRange || rowsByRange.length !== this.instances.length) {
+      this.onFallback();
+      afterCommit?.();
+      return;
+    }
+    const activeElement = this.root.ownerDocument.activeElement;
+    const restoreFocus = Boolean(activeElement && this.root.contains(activeElement));
+    for (let index = rowsByRange.length - 1; index >= 0; index -= 1) {
+      if (!this.reconcileRange(index, rowsByRange[index])) {
+        this.onFallback();
+        afterCommit?.();
+        return;
+      }
+    }
+    if (
+      restoreFocus &&
+      activeElement?.isConnected &&
+      activeElement.ownerDocument.activeElement !== activeElement &&
+      "focus" in activeElement
+    ) {
+      (activeElement as HTMLElement).focus({ preventScroll: true });
+    }
+    afterCommit?.();
+  };
+
+  cleanup(): void {
+    if (!this.active) return;
+    this.active = false;
+    this.unsubscribe?.();
+    for (const instances of this.instances) {
+      for (const instance of instances.values()) instance.scope?.cleanup();
+    }
+    for (const scope of this.staticScopes) scope.cleanup();
+    this.instances.length = 0;
+    this.staticSegments.length = 0;
+    this.staticScopes.length = 0;
+  }
+}
+
 function createHostConditionalBlockComponent(
   owner: Pick<ConditionalBlockOwner, "subscribe">,
 ): React.ComponentType<CompilerHostConditionalBlockProps> {
@@ -777,8 +1352,35 @@ function createHostConditionalBlockComponent(
     private propSyncQueued = false;
     private currentProps = this.props;
     private unsubscribe: (() => void) | undefined;
+    private fallbackUnsubscribers: Array<() => void> = [];
     private activeBranch: "truthy" | "falsy" | null = null;
     private instance: CompilerHostInstance | null = null;
+
+    private requestNestedFallback = () => {
+      this.instance?.scope?.cleanup();
+      this.activateFallback();
+    };
+
+    private subscribeFallbackDescendants(): void {
+      for (const unsubscribe of this.fallbackUnsubscribers) unsubscribe();
+      this.fallbackUnsubscribers = [];
+      const ids = new Set<number>();
+      if (this.currentProps.truthy) {
+        collectCompilerHostBlockIds(this.currentProps.truthy.create(), ids);
+      }
+      if (this.currentProps.falsy) {
+        collectCompilerHostBlockIds(this.currentProps.falsy.create(), ids);
+      }
+      ids.delete(this.currentProps.id);
+      for (const id of ids) {
+        this.fallbackUnsubscribers.push(
+          owner.subscribe(id, (afterCommit) => {
+            this.fallbackVersion += 1;
+            this.forceUpdate(afterCommit);
+          }),
+        );
+      }
+    }
 
     private captureRoot = (root: Element | null) => {
       this.root = root;
@@ -804,11 +1406,16 @@ function createHostConditionalBlockComponent(
       const descriptor = selection.branch.create();
       const element = this.root.firstElementChild;
       if (!matchesCompilerHostElement(element, descriptor)) return false;
-      this.activeBranch = selection.key;
-      this.instance = {
+      const instance = mountCompilerHostInstance(
+        owner,
         element,
-        values: readHostConditionalBindingValues(selection.branch),
-      };
+        descriptor,
+        selection.branch,
+        this.requestNestedFallback,
+      );
+      if (!instance) return false;
+      this.activeBranch = selection.key;
+      this.instance = instance;
       return true;
     }
 
@@ -818,6 +1425,10 @@ function createHostConditionalBlockComponent(
         return;
       }
       this.fallbackRequested = true;
+      this.instance?.scope?.cleanup();
+      this.instance = null;
+      this.activeBranch = null;
+      this.subscribeFallbackDescendants();
       // One key change on entry: the compiled path mutated the DOM behind
       // React's back, so the first fallback render must rebuild the subtree.
       this.fallbackVersion += 1;
@@ -843,6 +1454,7 @@ function createHostConditionalBlockComponent(
         return;
       }
       if (selection.kind === "empty") {
+        this.instance?.scope?.cleanup();
         if (this.instance) this.instance.element.remove();
         this.activeBranch = null;
         this.instance = null;
@@ -850,18 +1462,41 @@ function createHostConditionalBlockComponent(
         return;
       }
       if (this.activeBranch === selection.key && this.instance) {
+        const descriptor = selection.branch.create();
+        const scope = mountCompilerHostTree(
+          owner,
+          this.instance.element,
+          descriptor,
+          this.requestNestedFallback,
+        );
+        if (!scope) {
+          this.activateFallback(afterCommit);
+          return;
+        }
+        this.instance.scope?.cleanup();
+        this.instance.scope = scope;
         applyHostConditionalBindings(selection.branch, this.instance);
         afterCommit?.();
         return;
       }
 
-      const element = createCompilerHostElement(this.root.ownerDocument, selection.branch.create());
+      const descriptor = selection.branch.create();
+      const element = createCompilerHostElement(this.root.ownerDocument, descriptor);
+      const instance = mountCompilerHostInstance(
+        owner,
+        element,
+        descriptor,
+        selection.branch,
+        this.requestNestedFallback,
+      );
+      if (!instance) {
+        this.activateFallback(afterCommit);
+        return;
+      }
+      this.instance?.scope?.cleanup();
       this.root.replaceChildren(element);
       this.activeBranch = selection.key;
-      this.instance = {
-        element,
-        values: readHostConditionalBindingValues(selection.branch),
-      };
+      this.instance = instance;
       afterCommit?.();
     }
 
@@ -894,6 +1529,9 @@ function createHostConditionalBlockComponent(
     componentWillUnmount(): void {
       this.mounted = false;
       this.unsubscribe?.();
+      for (const unsubscribe of this.fallbackUnsubscribers) unsubscribe();
+      this.fallbackUnsubscribers = [];
+      this.instance?.scope?.cleanup();
       this.root = null;
       this.activeBranch = null;
       this.instance = null;
@@ -942,8 +1580,33 @@ function createConditionalRangesBlockComponent(
     private propFallbackQueued = false;
     private currentProps = this.props;
     private unsubscribe: (() => void) | undefined;
+    private fallbackUnsubscribers: Array<() => void> = [];
     private rangeInstances: Array<ConditionalRangeInstance | null> = [];
     private staticSegments: Element[][] = [];
+
+    private requestNestedFallback = () => {
+      for (const instance of this.rangeInstances) instance?.host.scope?.cleanup();
+      this.activateFallback();
+    };
+
+    private subscribeFallbackDescendants(): void {
+      for (const unsubscribe of this.fallbackUnsubscribers) unsubscribe();
+      this.fallbackUnsubscribers = [];
+      const ids = new Set<number>();
+      for (const range of this.currentProps.ranges) {
+        if (range.truthy) collectCompilerHostBlockIds(range.truthy.create(), ids);
+        if (range.falsy) collectCompilerHostBlockIds(range.falsy.create(), ids);
+      }
+      ids.delete(this.currentProps.id);
+      for (const id of ids) {
+        this.fallbackUnsubscribers.push(
+          owner.subscribe(id, (afterCommit) => {
+            this.fallbackVersion += 1;
+            this.forceUpdate(afterCommit);
+          }),
+        );
+      }
+    }
 
     private captureRoot = (root: Element | null) => {
       this.root = root;
@@ -969,13 +1632,22 @@ function createConditionalRangesBlockComponent(
       const elements = [...this.root.children];
       const staticSegments: Element[][] = [];
       const instances: Array<ConditionalRangeInstance | null> = [];
+      const cleanupInstances = () => {
+        for (const instance of instances) instance?.host.scope?.cleanup();
+      };
       let cursor = 0;
 
       for (let rangeIndex = 0; rangeIndex < props.ranges.length; rangeIndex += 1) {
         const range = props.ranges[rangeIndex];
-        if (!Number.isSafeInteger(range.before) || range.before < 0) return false;
+        if (!Number.isSafeInteger(range.before) || range.before < 0) {
+          cleanupInstances();
+          return false;
+        }
         const staticEnd = cursor + range.before;
-        if (staticEnd > elements.length) return false;
+        if (staticEnd > elements.length) {
+          cleanupInstances();
+          return false;
+        }
         staticSegments.push(elements.slice(cursor, staticEnd));
         cursor = staticEnd;
 
@@ -985,20 +1657,37 @@ function createConditionalRangesBlockComponent(
           continue;
         }
         const element = elements[cursor];
-        if (!element) return false;
+        if (!element) {
+          cleanupInstances();
+          return false;
+        }
         const descriptor = selection.branch.create();
-        if (!matchesCompilerHostElement(element, descriptor)) return false;
+        if (!matchesCompilerHostElement(element, descriptor)) {
+          cleanupInstances();
+          return false;
+        }
+        const host = mountCompilerHostInstance(
+          owner,
+          element,
+          descriptor,
+          selection.branch,
+          this.requestNestedFallback,
+        );
+        if (!host) {
+          cleanupInstances();
+          return false;
+        }
         instances.push({
           key: selection.key,
-          host: {
-            element,
-            values: readHostConditionalBindingValues(selection.branch),
-          },
+          host,
         });
         cursor += 1;
       }
 
-      if (cursor + props.trailing !== elements.length) return false;
+      if (cursor + props.trailing !== elements.length) {
+        cleanupInstances();
+        return false;
+      }
       staticSegments.push(elements.slice(cursor));
       this.staticSegments = staticSegments;
       this.rangeInstances = instances;
@@ -1018,29 +1707,54 @@ function createConditionalRangesBlockComponent(
     private reconcileRange(
       rangeIndex: number,
       selection: CompilerHostConditionalPreparedSelection,
-    ): void {
-      if (!this.root) return;
+    ): boolean {
+      if (!this.root) return false;
       const previous = this.rangeInstances[rangeIndex];
       if (selection.kind === "empty") {
+        previous?.host.scope?.cleanup();
         previous?.host.element.remove();
         this.rangeInstances[rangeIndex] = null;
-        return;
+        return true;
       }
       if (previous?.key === selection.key) {
+        const descriptor = selection.branch.create();
+        const scope = mountCompilerHostTree(
+          owner,
+          previous.host.element,
+          descriptor,
+          this.requestNestedFallback,
+        );
+        if (!scope) {
+          this.requestNestedFallback();
+          return false;
+        }
+        previous.host.scope?.cleanup();
+        previous.host.scope = scope;
         applyHostConditionalBindings(selection.branch, previous.host);
-        return;
+        return true;
       }
 
-      const element = createCompilerHostElement(this.root.ownerDocument, selection.branch.create());
+      const descriptor = selection.branch.create();
+      const element = createCompilerHostElement(this.root.ownerDocument, descriptor);
+      const host = mountCompilerHostInstance(
+        owner,
+        element,
+        descriptor,
+        selection.branch,
+        this.requestNestedFallback,
+      );
+      if (!host) {
+        this.requestNestedFallback();
+        return false;
+      }
+      previous?.host.scope?.cleanup();
       if (previous) previous.host.element.replaceWith(element);
       else this.root.insertBefore(element, this.anchorAfter(rangeIndex));
       this.rangeInstances[rangeIndex] = {
         key: selection.key,
-        host: {
-          element,
-          values: readHostConditionalBindingValues(selection.branch),
-        },
+        host,
       };
+      return true;
     }
 
     private reconcile(afterCommit?: () => void): void {
@@ -1064,7 +1778,10 @@ function createConditionalRangesBlockComponent(
       }
 
       for (let rangeIndex = this.rangeInstances.length - 1; rangeIndex >= 0; rangeIndex -= 1) {
-        this.reconcileRange(rangeIndex, selections[rangeIndex]);
+        if (!this.reconcileRange(rangeIndex, selections[rangeIndex])) {
+          afterCommit?.();
+          return;
+        }
       }
       afterCommit?.();
     }
@@ -1079,6 +1796,8 @@ function createConditionalRangesBlockComponent(
         return;
       }
       this.fallbackRequested = true;
+      for (const instance of this.rangeInstances) instance?.host.scope?.cleanup();
+      this.subscribeFallbackDescendants();
       this.setState({ fallback: true }, afterCommit);
     }
 
@@ -1110,6 +1829,9 @@ function createConditionalRangesBlockComponent(
     componentWillUnmount(): void {
       this.mounted = false;
       this.unsubscribe?.();
+      for (const unsubscribe of this.fallbackUnsubscribers) unsubscribe();
+      this.fallbackUnsubscribers = [];
+      for (const instance of this.rangeInstances) instance?.host.scope?.cleanup();
       this.root = null;
       this.rangeInstances = [];
       this.staticSegments = [];

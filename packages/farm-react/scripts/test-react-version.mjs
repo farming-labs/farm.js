@@ -313,6 +313,116 @@ const testSource = String.raw`
   assert.equal(hostConditionalExecutions, initialHostConditionalExecutions);
   flushSync(() => hostConditionalRoot.unmount());
 
+  let recursiveHostExecutions = 0;
+  const RecursiveHostBlocks = createCompiledComponent({
+    displayName: "CompatibilityRecursiveHostBlocks",
+    initialize: () => [true, false, [{ id: "a", label: "Alpha" }, { id: "b", label: "Beta" }]],
+    render(_props, state, blocks) {
+      recursiveHostExecutions += 1;
+      const readyBranch = {
+        create: () => ({ kind: "element", tag: "strong", attributes: [], styles: [], children: ["Ready"] }),
+        bindings: [],
+      };
+      const items = () => state[2].get();
+      const outerBranch = {
+        create: () => ({
+          kind: "element",
+          tag: "article",
+          attributes: [],
+          styles: [],
+          children: [
+            {
+              kind: "element",
+              tag: "div",
+              attributes: [],
+              styles: [],
+              children: [state[1].get() ? readyBranch.create() : null],
+              block: {
+                kind: "conditional-ranges",
+                id: 1,
+                ranges: [{ before: 0, test: () => state[1].get(), logical: true, truthy: readyBranch }],
+                trailing: 0,
+              },
+            },
+            {
+              kind: "element",
+              tag: "ul",
+              attributes: [],
+              styles: [],
+              children: [items().map((item) => ({ kind: "element", tag: "li", attributes: [{ name: "data-key", value: item.id }], styles: [], children: [item.label] }))],
+              block: {
+                kind: "keyed-ranges",
+                id: 2,
+                ranges: [{
+                  before: 0,
+                  items,
+                  rowKey: (item) => item.id,
+                  create: (item) => ({ kind: "element", tag: "li", attributes: [{ name: "data-key", value: item.id }], styles: [], children: [item.label] }),
+                  bindings: [{ kind: "text", path: [], read: (item) => item.label }],
+                }],
+                trailing: 0,
+              },
+            },
+          ],
+        }),
+        bindings: [],
+      };
+      return React.createElement(
+        "section",
+        null,
+        React.createElement("button", {
+          "data-recursive-update": true,
+          onClick: () => {
+            state[1].set((value) => !value);
+            state[2].set((value) => [...value].reverse());
+          },
+        }, "Update recursive blocks"),
+        React.createElement(blocks.HostConditional, {
+          id: 0,
+          render: () => React.createElement(
+            "div",
+            null,
+            React.createElement(
+              "article",
+              null,
+              React.createElement("div", null, state[1].get() ? React.createElement("strong", null, "Ready") : null),
+              React.createElement("ul", null, ...items().map((item) => React.createElement("li", { key: item.id, "data-key": item.id }, item.label))),
+            ),
+          ),
+          test: () => state[0].get(),
+          truthy: outerBranch,
+        }),
+      );
+    },
+    bindings: [
+      { kind: "block", id: 0, dependencies: [0] },
+      { kind: "block", id: 1, parent: 0, dependencies: [1] },
+      { kind: "block", id: 2, parent: 0, dependencies: [2] },
+    ],
+  });
+  const recursiveHostContainer = document.createElement("div");
+  document.body.append(recursiveHostContainer);
+  const recursiveHostRoot = createRoot(recursiveHostContainer);
+  flushSync(() => recursiveHostRoot.render(React.createElement(RecursiveHostBlocks)));
+  const initialRecursiveHostExecutions = recursiveHostExecutions;
+  const initialRecursiveArticle = recursiveHostContainer.querySelector("article");
+  const initialRecursiveRows = Object.fromEntries(
+    [...recursiveHostContainer.querySelectorAll("[data-key]")].map((row) => [row.getAttribute("data-key"), row]),
+  );
+  recursiveHostContainer.querySelector("[data-recursive-update]").click();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(recursiveHostContainer.querySelector("strong").textContent, "Ready");
+  assert.deepEqual(
+    [...recursiveHostContainer.querySelectorAll("[data-key]")].map((row) => row.getAttribute("data-key")),
+    ["b", "a"],
+  );
+  assert.equal(recursiveHostContainer.querySelector("article"), initialRecursiveArticle);
+  assert.equal(recursiveHostContainer.querySelector('[data-key="a"]'), initialRecursiveRows.a);
+  assert.equal(recursiveHostContainer.querySelector('[data-key="b"]'), initialRecursiveRows.b);
+  assert.equal(recursiveHostExecutions, initialRecursiveHostExecutions);
+  flushSync(() => recursiveHostRoot.unmount());
+
   let conditionalRangeExecutions = 0;
   const ConditionalRanges = createCompiledComponent({
     displayName: "CompatibilityConditionalRanges",
