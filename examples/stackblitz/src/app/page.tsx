@@ -39,11 +39,15 @@ export default function HomePage() {
 
       <section className="flex flex-col gap-3 rounded-lg border border-white/10 p-5">
         <h2 className="text-sm font-medium uppercase tracking-wide text-neutral-500">
-          Client island
+          Compiled client island
         </h2>
         <p className="text-sm text-neutral-400">
-          Only this counter's JavaScript is sent to the browser. The rest of
-          the page stays server-only.
+          This counter opts into the experimental AOT compiler with a{" "}
+          <code className="text-neutral-200">"use compiler"</code> directive
+          (see <code className="text-neutral-200">src/components/counter.tsx</code>):
+          its state updates patch the DOM directly, skipping the reconciler.
+          The guestbook below stays on the normal React path. Only the
+          islands' JavaScript is sent to the browser.
         </p>
         <Counter />
       </section>

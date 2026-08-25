@@ -3,6 +3,10 @@
 import { useState } from "react";
 
 export function Counter() {
+  // The directive opts this component into the experimental AOT compiler:
+  // its state updates patch the DOM directly instead of re-rendering through
+  // the reconciler. Remove the directive and it's a normal React component.
+  "use compiler";
   const [count, setCount] = useState(0);
 
   return (
