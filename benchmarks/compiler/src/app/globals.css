@@ -1,0 +1,19 @@
+body {
+  font-family: system-ui, sans-serif;
+  margin: 16px;
+}
+
+button {
+  margin-right: 8px;
+  padding: 4px 10px;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  padding: 1px 4px;
+}
+
+.row.selected {
+  background: #cde;
+}
