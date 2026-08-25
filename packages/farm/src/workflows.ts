@@ -5,6 +5,7 @@ import {
   type FarmServerConfig,
   type ResolvedFarmServerConfig,
 } from "./server-http";
+import { decodeRouteSegment } from "./utils/decode";
 import { toPosixPath } from "./utils";
 
 export type FarmWorkflowSchedule = string | string[];
@@ -212,7 +213,7 @@ export function createFarmWorkflowRequestHandler(options: FarmWorkflowHTTPHandle
       });
     }
 
-    const id = decodeURIComponent(url.pathname.slice(route.length + 1));
+    const id = decodeRouteSegment(url.pathname.slice(route.length + 1));
     const workflow = workflowsById.get(id);
     if (!workflow) {
       return Response.json({ error: `Workflow "${id}" was not found.` }, { status: 404 });
@@ -609,6 +610,14 @@ function json(value, status = 200) {
   });
 }
 
+function decodeRouteSegment(segment) {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}
+
 function getHeader(event, name) {
   return event.req.headers.get(name);
 }
@@ -644,7 +653,7 @@ export default new H3()
     return { workflows };
   })
   .all(route + "/:id", async (event) => {
-    const id = decodeURIComponent(event.context.params?.id || "");
+    const id = decodeRouteSegment(event.context.params?.id || "");
     if (!workflowIds.has(id)) {
       return json({ error: "Workflow " + id + " was not found." }, 404);
     }

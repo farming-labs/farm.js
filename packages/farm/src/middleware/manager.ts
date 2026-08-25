@@ -7,6 +7,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { ViteDevServer } from "vite";
+import { decodeRouteSegment } from "../utils/decode";
 import type { IncomingMessage, ServerResponse } from "http";
 import type {
   FarmMiddlewareConfig,
@@ -40,16 +41,6 @@ function isMiddlewareResponse(value: unknown): value is Response {
 /**
  * Middleware Manager - discovers and executes middleware
  */
-function decodeRouteSegment(segment: string): string {
-  try {
-    return decodeURIComponent(segment);
-  } catch {
-    // Request paths are not guaranteed to be validly percent-encoded; a
-    // malformed segment must not throw out of route matching.
-    return segment;
-  }
-}
-
 export class MiddlewareManager {
   private middleware: DiscoveredMiddleware[] = [];
   private configMiddleware: DiscoveredMiddleware[] = [];
