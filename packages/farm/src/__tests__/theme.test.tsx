@@ -62,6 +62,14 @@ describe("FARMJS theme configuration", () => {
     await expect(_runWithCurrentRequest(request, () => getTheme())).resolves.toBe("dark");
   });
 
+  it("falls back to the configured default when no request context exists", () => {
+    // Runtimes with partial AsyncLocalStorage support can lose the request
+    // store mid-render; the theme read must degrade instead of throwing.
+    _setDefaultFarmThemeConfig({ default: "dark", storageKey: "site-theme" });
+
+    expect(getTheme()).toBe("dark");
+  });
+
   it("shares the request snapshot across isolated dev SSR module graphs", async () => {
     _setDefaultFarmThemeConfig({ default: "dark", storageKey: "site-theme" });
     const request = new Request("https://farmjs.dev/dashboard", {

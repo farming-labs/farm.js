@@ -1,4 +1,4 @@
-import { getCurrentRequest } from "../server/request";
+import { getCurrentRequestOrNull } from "../server/request";
 import { _setFarmThemeServerSnapshotResolver } from "./bridge";
 import { resolveFarmThemeConfig } from "./config";
 import type {
@@ -17,12 +17,22 @@ export function _setDefaultFarmThemeConfig(
   defaultThemeConfig = resolveFarmThemeConfig(config, basePath);
 }
 
-export function getTheme(request: Request = getCurrentRequest()): FarmThemePreference {
+// The theme preference is cosmetic, so a missing request context must never
+// crash a render: without a request to read the cookie from, the configured
+// default applies. Runtimes with partial AsyncLocalStorage support (for
+// example StackBlitz WebContainers) can lose the store mid-render, and a
+// thrown error here would also take down the error page itself.
+export function getTheme(request: Request | null = getCurrentRequestOrNull()): FarmThemePreference {
+  if (!request) return defaultThemeConfig.default;
   return readFarmThemePreference(request, defaultThemeConfig);
 }
 
-export function getThemeSnapshot(request: Request = getCurrentRequest()): FarmThemeSnapshot {
-  const theme = readFarmThemePreference(request, defaultThemeConfig);
+export function getThemeSnapshot(
+  request: Request | null = getCurrentRequestOrNull(),
+): FarmThemeSnapshot {
+  const theme = request
+    ? readFarmThemePreference(request, defaultThemeConfig)
+    : defaultThemeConfig.default;
   return {
     theme,
     resolvedTheme: theme === "system" ? undefined : theme,
