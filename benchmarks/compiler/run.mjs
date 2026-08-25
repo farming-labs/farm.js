@@ -154,7 +154,7 @@ async function measureVariant(label, compilerEnabled) {
         samples[action].push(await measureAction(action));
       }
     }
-    const cpuPerIteration = (await cpuNow() - cpuStart) / measuredIterations;
+    const cpuPerIteration = ((await cpuNow()) - cpuStart) / measuredIterations;
 
     await browser.close();
 
@@ -169,9 +169,7 @@ async function measureVariant(label, compilerEnabled) {
         `${action.padEnd(7)} p50 ${result[action].p50.toFixed(2)}ms  p95 ${result[action].p95.toFixed(2)}ms`,
       );
     }
-    console.log(
-      `cpu (script+style+layout) per full iteration: ${cpuPerIteration.toFixed(2)}ms`,
-    );
+    console.log(`cpu (script+style+layout) per full iteration: ${cpuPerIteration.toFixed(2)}ms`);
     return result;
   } catch (error) {
     console.error(serverLog.slice(-2000));

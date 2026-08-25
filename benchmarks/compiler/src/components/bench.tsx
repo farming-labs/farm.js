@@ -108,10 +108,7 @@ export function Bench() {
       </p>
       <div>
         {rows.map((row, index) => (
-          <div
-            key={row.id}
-            className={index === selected % 1000 ? "row selected" : "row"}
-          >
+          <div key={row.id} className={index === selected % 1000 ? "row selected" : "row"}>
             <span>{row.id}</span>
             <strong>{row.label}</strong>
           </div>

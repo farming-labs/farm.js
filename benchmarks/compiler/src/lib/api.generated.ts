@@ -6,9 +6,5 @@
  * Runtime imports are used only at the type level.
  */
 
-
-
 // Type-only representation of your API routes
-export type APIRouter = {
-
-};
+export type APIRouter = {};
