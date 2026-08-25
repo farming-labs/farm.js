@@ -34,6 +34,7 @@
     "docs:check-navigation": "node scripts/check-docs-navigation.mjs",
     "build:examples": "node scripts/build-examples.js",
     "benchmark:frameworks": "node benchmarks/frameworks/run.mjs",
+    "benchmark:compiler": "node benchmarks/compiler/run.mjs",
     "benchmark:preview": "pnpm --filter @farm.js/preview-tunnel build && node benchmarks/preview-tunnel/run.mjs",
     "lint": "oxlint . && oxfmt --check . && node scripts/check-synthetic-popstate.mjs",
     "format": "oxlint --fix . && oxfmt .",
