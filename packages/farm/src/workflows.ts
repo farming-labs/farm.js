@@ -5,6 +5,7 @@ import {
   type FarmServerConfig,
   type ResolvedFarmServerConfig,
 } from "./server-http";
+import { searchParamsToObject } from "./search-params";
 import { decodeRouteSegment } from "./utils/decode";
 import { toPosixPath } from "./utils";
 
@@ -593,7 +594,8 @@ import { H3 } from "h3";
 import { runTask } from "nitro/runtime";
 import {
   createFarmRequestBodyErrorResponse,
-  readFarmRequestBody
+  readFarmRequestBody,
+  searchParamsToObject
 } from "@farm.js/core/internal/production-runtime";
 
 const route = ${JSON.stringify(config.route)};
@@ -638,7 +640,7 @@ function verifySecret(event) {
 
 async function readPayload(event) {
   if (event.req.method === "GET" || event.req.method === "HEAD") {
-    return Object.fromEntries(event.url.searchParams.entries());
+    return searchParamsToObject(event.url.searchParams);
   }
   const bytes = await readFarmRequestBody(event.req, bodySizeLimit);
   const text = new TextDecoder().decode(bytes);
@@ -702,7 +704,7 @@ function toWorkflowMetadata(workflow: FarmDiscoveredWorkflow) {
 async function readWorkflowPayload(request: Request, bodySizeLimit: number): Promise<unknown> {
   const url = new URL(request.url);
   if (request.method === "GET" || request.method === "HEAD") {
-    return Object.fromEntries(url.searchParams.entries());
+    return searchParamsToObject(url.searchParams);
   }
 
   const bytes = await readFarmRequestBody(request, bodySizeLimit);

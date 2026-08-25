@@ -224,6 +224,19 @@ describe("SearchParams in the production runtime", () => {
     expect(source).not.toContain("const searchParams: Record<string, string> = {};");
   });
 
+  it("triggers workflows with array-aware search params", () => {
+    const source = readSource("workflows.ts");
+
+    expect(source).toContain('import { searchParamsToObject } from "./search-params";');
+    expect(source).toContain("return searchParamsToObject(url.searchParams);");
+    // the emitted Nitro handler pulls it from the same re-export
+    expect(source).toContain(`  searchParamsToObject
+} from "@farm.js/core/internal/production-runtime";`);
+    expect(source).toContain("return searchParamsToObject(event.url.searchParams);");
+    expect(source).not.toContain("Object.fromEntries(url.searchParams.entries())");
+    expect(source).not.toContain("Object.fromEntries(event.url.searchParams.entries())");
+  });
+
   it("shares the dev renderer's helper", () => {
     const source = readSource("server", "renderer.ts");
 
