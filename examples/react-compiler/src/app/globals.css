@@ -619,6 +619,41 @@ h1 span {
   content: "";
 }
 
+.conditional-range-root {
+  grid-column: 1 / -1;
+  border-top: 1px solid #33332f;
+}
+
+.edge-card + .conditional-range-root {
+  border-left: 0;
+}
+
+.conditional-range-branch,
+.conditional-range-static {
+  display: flex;
+  min-height: 3.3rem;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 1rem;
+  border: 1px solid #33332f;
+  padding: 0.8rem 1rem;
+  background: #0d0d0c;
+}
+
+.conditional-range-static {
+  color: #8d8d86;
+  font:
+    0.7rem "Geist Mono Variable",
+    ui-monospace,
+    monospace;
+  letter-spacing: 0.035em;
+}
+
+.conditional-range-static strong {
+  color: #f3f3ed;
+  font-weight: 550;
+}
+
 .conditional-branch--paused {
   color: #999992;
 }

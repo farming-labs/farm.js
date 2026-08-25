@@ -31,19 +31,18 @@ describe("React AOT conditional block compiler", () => {
 
     expect(result.diagnostics).toEqual([]);
     expect(result.compiled).toEqual(["ConditionalPanel"]);
-    expect(result.code.match(/farmBlocks\.Conditional/g)).toHaveLength(2);
+    expect(result.code.match(/farmBlocks\.ConditionalRanges/g)).toHaveLength(1);
+    expect(result.code.match(/farmBlocks\.Conditional(?!Ranges)/g)).toBeNull();
     expect(result.code).toContain('kind: "block"');
     expect(result.code).toContain("id: 0");
-    expect(result.code).toContain("id: 1");
-    expect(result.code).toContain("dependencies: [0]");
-    expect(result.code).toContain("dependencies: [1]");
+    expect(result.code).toContain("dependencies: [0, 1]");
     await expect(
       transformWithEsbuild(result.code, "/app/Conditional.tsx", {
         loader: "tsx",
         jsx: "automatic",
       }),
     ).resolves.toMatchObject({
-      code: expect.stringContaining("farmBlocks.Conditional"),
+      code: expect.stringContaining("farmBlocks.ConditionalRanges"),
     });
   });
 
@@ -94,7 +93,8 @@ describe("React AOT conditional block compiler", () => {
 
     expect(result.diagnostics).toEqual([]);
     expect(result.compiled).toEqual(["EmptyBranches"]);
-    expect(result.code.match(/farmBlocks\.Conditional/g)).toHaveLength(2);
+    expect(result.code.match(/farmBlocks\.ConditionalRanges/g)).toHaveLength(1);
+    expect(result.code.match(/farmBlocks\.Conditional(?!Ranges)/g)).toBeNull();
   });
 
   it("transfers a dedicated host-only container to the compiler runtime", async () => {
