@@ -11,6 +11,12 @@ export function searchParamsToObject(
   const output: Record<string, string | string[] | undefined> = {};
 
   searchParams.forEach((value, key) => {
+    // Keys come from the request URL. Writing "__proto__" onto a plain object
+    // replaces its prototype instead of adding an entry, so a crafted query
+    // string could reshape the object handed to pages and workflow handlers.
+    // The API route helper (entriesToObject in api/runtime.ts) already skips
+    // these names; keep both representations consistent.
+    if (key === "__proto__" || key === "constructor" || key === "prototype") return;
     const existing = output[key];
     if (existing !== undefined) {
       if (Array.isArray(existing)) {

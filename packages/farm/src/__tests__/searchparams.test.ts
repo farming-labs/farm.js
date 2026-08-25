@@ -185,6 +185,28 @@ describe("searchParamsToObject", () => {
   });
 });
 
+describe("searchParamsToObject hardening", () => {
+  it("drops prototype-poisoning keys and keeps the prototype intact", () => {
+    // Repeated __proto__ keys previously rewrote the returned object's
+    // prototype via the read-then-assign flow.
+    const output = searchParamsToObject(
+      new URLSearchParams("__proto__=a&__proto__=b&constructor=c&prototype=d&tag=x"),
+    );
+
+    expect(Object.getPrototypeOf(output)).toBe(Object.prototype);
+    expect(output).toEqual({ tag: "x" });
+    expect(Object.keys(output)).toEqual(["tag"]);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
+  it("still collects ordinary repeated keys into arrays", () => {
+    expect(searchParamsToObject(new URLSearchParams("tag=a&tag=b&one=x"))).toEqual({
+      tag: ["a", "b"],
+      one: "x",
+    });
+  });
+});
+
 describe("SearchParams in the production runtime", () => {
   const readSource = (...segments: string[]) =>
     fs.readFileSync(path.join(process.cwd(), "src", ...segments), "utf-8");
