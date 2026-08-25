@@ -55,7 +55,7 @@ import {
 } from '@farm.js/core/middleware';
 import { invokeAPIRouteEndpoint, matchAPIRoute } from '@farm.js/core/api/runtime';
 import { _runWithAfterRequest } from '@farm.js/core/after';
-import { _runWithCurrentRequest } from '@farm.js/core/internal/production-runtime';
+import { _runWithCurrentRequest, searchParamsToObject } from '@farm.js/core/internal/production-runtime';
 
 const farmDeploymentId = ${JSON.stringify(ctx.deploymentId)};
 `;
@@ -741,7 +741,9 @@ async function handleFarmRequest(request) {
   const globalsCssPath = '/${ctx.srcDir}' + routesPath + '/globals.css';
   
   // Parse search params
-  const searchParams = Object.fromEntries(url.searchParams);
+  // Collect repeated keys into arrays, matching the searchParams prop shape
+  // every non-RSC environment produces (see core's search-params.ts).
+  const searchParams = searchParamsToObject(url.searchParams);
   
   // Page props passed to components (includes middleware shared data)
   const pageProps = { params, searchParams, middlewareData };
@@ -908,7 +910,7 @@ async function handleFarmRequest(request) {
         const Layout = LayoutModules[LayoutModules.length - 1]?.default;
         const LayoutComp = Layout || (function PassThrough({ children }) { return children; });
         const errParams = matched ? matched.params : {};
-        const errSearchParams = Object.fromEntries(url.searchParams);
+        const errSearchParams = searchParamsToObject(url.searchParams);
         const errorElement = h(ErrorComponent, {
           error: err,
           reset: () => {},
