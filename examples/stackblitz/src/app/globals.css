@@ -240,3 +240,66 @@ code {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Playground-specific extensions of the starter design system. */
+
+.playground-hero {
+  align-items: flex-start;
+  padding-top: clamp(3rem, 10vh, 6rem);
+}
+
+.playground-copy {
+  width: min(100%, 720px);
+}
+
+.playground-lede {
+  max-width: 620px;
+  margin: 1.4rem 0 0;
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+  line-height: 1.65;
+}
+
+.playground-lede code,
+.demo-note code {
+  border: 1px solid var(--line);
+  background: rgb(255 255 255 / 0.07);
+  padding: 0.05em 0.25em;
+  color: var(--ink);
+  font-size: 0.85em;
+}
+
+.demo-list {
+  max-width: 620px;
+  margin-top: 1.75rem;
+  border-block: 1px solid var(--line);
+}
+
+.demo-block {
+  padding: 1.15rem 0;
+}
+
+.demo-block + .demo-block {
+  border-top: 1px solid var(--line);
+}
+
+.demo-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  font-size: 0.67rem;
+  text-transform: uppercase;
+}
+
+.demo-heading span:first-child {
+  color: var(--ink);
+}
+
+.demo-note {
+  margin: 0.7rem 0 0.95rem;
+  color: var(--ink-soft);
+  font-size: 0.82rem;
+  line-height: 1.6;
+}

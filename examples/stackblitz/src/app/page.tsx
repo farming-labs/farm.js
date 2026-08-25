@@ -1,62 +1,74 @@
 import { Counter } from "../components/counter";
 import { Guestbook } from "../components/guestbook";
+import { ResourceLinks } from "../components/resource-links";
 
-// This page renders on the server. The two "use client" components below are
+// This page renders on the server. The "use client" components below are
 // hydrated as islands, and the rest of the page ships no JavaScript.
 export default function HomePage() {
   const renderedAt = new Date().toLocaleTimeString("en-US", { hour12: false });
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-2xl flex-col gap-10 px-6 py-16">
-      <header className="flex flex-col gap-3">
-        <h1 className="text-3xl font-semibold tracking-tight">
-          Farm.js Playground
-        </h1>
-        <p className="text-[15px] leading-relaxed text-neutral-400">
-          A product-integrated full-stack framework on Vite: typesafe APIs
-          and server functions, integrations as typed modules, and an
-          experimental compiler that turns component updates into direct DOM
-          patches. This page rendered on the server at{" "}
-          <code className="text-neutral-200">{renderedAt}</code>. Edit{" "}
-          <code className="text-neutral-200">src/app/page.tsx</code> and watch
-          it hot-reload.
-        </p>
-        <div className="flex gap-4 text-sm text-neutral-400">
-          <a
-            href="https://farmjs.dev"
-            className="underline underline-offset-4 hover:text-white"
-          >
-            Docs
-          </a>
-          <a
-            href="https://github.com/farming-labs/farm.js"
-            className="underline underline-offset-4 hover:text-white"
-          >
-            GitHub ★
-          </a>
+    <main className="landing-main">
+      <section className="hero-section playground-hero">
+        <div className="hero-copy playground-copy">
+          <div className="eyebrow-row">
+            <span>00</span>
+            <span>FARMJS / Playground</span>
+          </div>
+
+          <h1>
+            The framework, running in <code>your browser</code>.
+          </h1>
+
+          <p className="playground-lede">
+            A product-integrated full-stack framework on Vite: typesafe APIs
+            and server functions, integrations as typed modules, and an
+            experimental compiler that turns component updates into direct DOM
+            patches. This page rendered on the server at{" "}
+            <code>{renderedAt}</code>. Edit <code>src/app/page.tsx</code> and
+            watch it hot-reload.
+          </p>
+
+          <div className="demo-list">
+            <section className="demo-block" aria-label="Compiled client island">
+              <div className="demo-heading">
+                <span>01</span>
+                <span>Compiled client island</span>
+              </div>
+              <p className="demo-note">
+                This counter opts into the experimental AOT compiler with a{" "}
+                <code>"use compiler"</code> directive (see{" "}
+                <code>src/components/counter.tsx</code>): its state updates
+                patch the DOM directly, skipping the reconciler. The guestbook
+                below stays on the normal React path.
+              </p>
+              <Counter />
+            </section>
+
+            <section
+              className="demo-block"
+              aria-label="Server function guestbook"
+            >
+              <div className="demo-heading">
+                <span>02</span>
+                <span>Server function guestbook</span>
+              </div>
+              <p className="demo-note">
+                The form calls a <code>createServerFn</code> mutation through a
+                typed API client, validated with Zod on the server.
+              </p>
+              <Guestbook />
+            </section>
+          </div>
+
+          <ResourceLinks
+            className="resource-links"
+            primary={{
+              href: "https://github.com/farming-labs/farm.js",
+              label: "Star on GitHub",
+            }}
+          />
         </div>
-      </header>
-
-      <section className="flex flex-col gap-3 rounded-lg border border-white/10 p-5">
-        <h2 className="text-sm font-medium uppercase tracking-wide text-neutral-500">
-          Client island
-        </h2>
-        <p className="text-sm text-neutral-400">
-          Only this counter's JavaScript is sent to the browser. The rest of
-          the page stays server-only.
-        </p>
-        <Counter />
-      </section>
-
-      <section className="flex flex-col gap-4 rounded-lg border border-white/10 p-5">
-        <h2 className="text-sm font-medium uppercase tracking-wide text-neutral-500">
-          Server Function guestbook
-        </h2>
-        <p className="text-sm text-neutral-400">
-          The form calls a <code>createServerFn</code> mutation through a
-          typed API client, validated with Zod on the server.
-        </p>
-        <Guestbook />
       </section>
     </main>
   );
