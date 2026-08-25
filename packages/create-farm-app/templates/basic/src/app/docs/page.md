@@ -18,7 +18,7 @@ own `page.md` — for example `src/app/docs/configuration/page.md` is served at
 
 ## Configure
 
-Site-wide docs settings live in `docs.json` at the project root (title,
+Site-wide docs settings live in `docs.config.ts` at the project root (title,
 navigation, search, `llms.txt`, sitemap, and robots). Farm auto-detects the
 installed adapter because `farm.config.ts` sets `docs: { enabled: true }` — no
 manual wiring required.
