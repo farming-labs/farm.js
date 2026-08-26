@@ -174,6 +174,21 @@ interface KeyedRangesPlan {
   trailing: number;
 }
 
+type MixedRangePlan =
+  | ({ rangeKind: "conditional" } & ConditionalRangePlan)
+  | ({ rangeKind: "keyed" } & KeyedRangePlan);
+
+interface MixedRangesPlan {
+  kind: "mixed-ranges";
+  id: number;
+  parent?: number;
+  dependencies: number[];
+  source: t.JSXElement;
+  ranges: MixedRangePlan[];
+  trailing: number;
+  descriptorBlocks: ReadonlyMap<t.JSXElement, HostDescriptorBlockPlan>;
+}
+
 interface NestedHostConditionalRangesPlan {
   kind: "nested-host-conditional-ranges";
   id: number;
@@ -194,7 +209,20 @@ interface NestedHostKeyedRangesPlan {
   trailing: number;
 }
 
-type HostDescriptorBlockPlan = NestedHostConditionalRangesPlan | NestedHostKeyedRangesPlan;
+interface NestedHostMixedRangesPlan {
+  kind: "nested-host-mixed-ranges";
+  id: number;
+  parent?: number;
+  dependencies: number[];
+  source: t.JSXElement;
+  ranges: MixedRangePlan[];
+  trailing: number;
+}
+
+type HostDescriptorBlockPlan =
+  | NestedHostConditionalRangesPlan
+  | NestedHostKeyedRangesPlan
+  | NestedHostMixedRangesPlan;
 
 interface ComponentIslandPlan {
   kind: "component";
@@ -211,8 +239,10 @@ type ComposableBlockPlan =
   | KeyedListPlan
   | KeyedRowsPlan
   | KeyedRangesPlan
+  | MixedRangesPlan
   | NestedHostConditionalRangesPlan
   | NestedHostKeyedRangesPlan
+  | NestedHostMixedRangesPlan
   | ComponentIslandPlan;
 
 interface Candidate {
@@ -1746,6 +1776,46 @@ function analyzeRecursiveHostTree(
     }
 
     const children = meaningfulJsxChildren(element);
+    const hasConditionalRange = children.some(
+      (child) =>
+        t.isJSXExpressionContainer(child) &&
+        !t.isJSXEmptyExpression(child.expression) &&
+        conditionalBlockShape(child.expression) !== null,
+    );
+    const hasKeyedRange = children.some(
+      (child) =>
+        analyzeKeyedRowChild(child, statesByValue, safeGlobals, listNames, true) !== undefined,
+    );
+    if (hasConditionalRange && hasKeyedRange) {
+      const id = allocateId();
+      const mixed = analyzeMixedRangesContainer(
+        element,
+        statesByValue,
+        safeGlobals,
+        listNames,
+        id,
+        allocateId,
+      );
+      if (mixed) {
+        plans.push(...mixed.nestedPlans);
+        for (const [nestedElement, plan] of mixed.descriptorBlocks) {
+          blocks.set(nestedElement, plan);
+        }
+        const plan: NestedHostMixedRangesPlan = {
+          kind: "nested-host-mixed-ranges",
+          id,
+          parent: owner,
+          dependencies: mixed.dependencies,
+          source: element,
+          ranges: mixed.ranges,
+          trailing: mixed.trailing,
+        };
+        plans.push(plan);
+        blocks.set(element, plan);
+        return undefined;
+      }
+    }
+
     const conditionalChildren = new Map<
       t.Expression,
       NonNullable<ReturnType<typeof conditionalBlockShape>>
@@ -2224,6 +2294,162 @@ function analyzeConditionalRangesContainer(
   };
 }
 
+function analyzeMixedRangesContainer(
+  container: t.JSXElement,
+  statesByValue: ReadonlyMap<string, StateBinding>,
+  safeGlobals: ReadonlySet<string>,
+  listNames: ReadonlySet<string>,
+  parent: number,
+  allocateId: () => number,
+):
+  | {
+      ranges: MixedRangePlan[];
+      trailing: number;
+      dependencies: number[];
+      descriptorBlocks: ReadonlyMap<t.JSXElement, HostDescriptorBlockPlan>;
+      nestedPlans: HostDescriptorBlockPlan[];
+    }
+  | undefined {
+  const containerName = container.openingElement.name;
+  if (
+    !t.isJSXIdentifier(containerName) ||
+    !/^[a-z]/.test(containerName.name) ||
+    containerName.name === "svg" ||
+    container.openingElement.attributes.some(
+      (attribute) =>
+        t.isJSXSpreadAttribute(attribute) ||
+        (t.isJSXAttribute(attribute) &&
+          t.isJSXIdentifier(attribute.name) &&
+          (attribute.name.name === "ref" || attribute.name.name === "dangerouslySetInnerHTML")),
+    )
+  ) {
+    return undefined;
+  }
+
+  const children = meaningfulJsxChildren(container);
+  if (children.length < 2) return undefined;
+  const ranges: MixedRangePlan[] = [];
+  const dependencies = new Set<number>();
+  const descriptorBlocks = new Map<t.JSXElement, HostDescriptorBlockPlan>();
+  const nestedPlans: HostDescriptorBlockPlan[] = [];
+  let conditionalCount = 0;
+  let keyedCount = 0;
+  let staticBefore = 0;
+
+  const mergeAnalysis = (analysis: RecursiveHostTreeAnalysis): boolean => {
+    if (analysis.reason) return false;
+    nestedPlans.push(...analysis.plans);
+    for (const [element, plan] of analysis.blocks) descriptorBlocks.set(element, plan);
+    for (const binding of analysis.bindings) {
+      for (const dependency of collectStateDependencies(binding.value, statesByValue)) {
+        dependencies.add(dependency);
+      }
+    }
+    return true;
+  };
+
+  for (const child of children) {
+    if (t.isJSXExpressionContainer(child) && !t.isJSXEmptyExpression(child.expression)) {
+      const shape = conditionalBlockShape(child.expression);
+      if (shape && !validateDerivedExpression(shape.test, safeGlobals)) {
+        const truthyAnalysis = shape.truthy
+          ? analyzeRecursiveHostTree(
+              shape.truthy,
+              statesByValue,
+              safeGlobals,
+              listNames,
+              parent,
+              allocateId,
+            )
+          : { bindings: [], plans: [], blocks: new Map<t.JSXElement, HostDescriptorBlockPlan>() };
+        const falsyAnalysis = shape.falsy
+          ? analyzeRecursiveHostTree(
+              shape.falsy,
+              statesByValue,
+              safeGlobals,
+              listNames,
+              parent,
+              allocateId,
+            )
+          : { bindings: [], plans: [], blocks: new Map<t.JSXElement, HostDescriptorBlockPlan>() };
+        if (!mergeAnalysis(truthyAnalysis) || !mergeAnalysis(falsyAnalysis)) return undefined;
+        for (const dependency of collectStateDependencies(shape.test, statesByValue)) {
+          dependencies.add(dependency);
+        }
+        ranges.push({
+          rangeKind: "conditional",
+          before: staticBefore,
+          source: child.expression,
+          test: cloneExpression(shape.test),
+          logical: shape.logical,
+          truthy: shape.truthy,
+          falsy: shape.falsy,
+          truthyBindings: truthyAnalysis.bindings,
+          falsyBindings: falsyAnalysis.bindings,
+        });
+        conditionalCount += 1;
+        staticBefore = 0;
+        continue;
+      }
+    }
+
+    const keyed = analyzeKeyedRowChild(child, statesByValue, safeGlobals, listNames, true);
+    if (keyed) {
+      if (keyed.events.length > 0) return undefined;
+      const row = t.cloneNode(keyed.row, true);
+      row.openingElement.attributes = row.openingElement.attributes.filter(
+        (attribute) => !t.isJSXAttribute(attribute) || jsxAttributeName(attribute) !== "key",
+      );
+      const rowAnalysis = analyzeRecursiveHostTree(
+        row,
+        statesByValue,
+        safeGlobals,
+        listNames,
+        parent,
+        allocateId,
+      );
+      if (!mergeAnalysis(rowAnalysis)) return undefined;
+      for (const dependency of keyed.dependencies) dependencies.add(dependency);
+      ranges.push({
+        rangeKind: "keyed",
+        before: staticBefore,
+        source: keyed.source,
+        collection: keyed.collection,
+        keyCallback: keyed.keyCallback,
+        renderCallback: keyed.renderCallback,
+        row,
+        bindings: rowAnalysis.bindings,
+        syntax: keyed.syntax,
+      });
+      keyedCount += 1;
+      staticBefore = 0;
+      continue;
+    }
+
+    if (!t.isJSXElement(child) || !isHostElement(child)) return undefined;
+    const staticAnalysis = analyzeRecursiveHostTree(
+      child,
+      statesByValue,
+      safeGlobals,
+      listNames,
+      parent,
+      allocateId,
+    );
+    if (staticAnalysis.reason || staticAnalysis.bindings.length > 0) return undefined;
+    if (!mergeAnalysis(staticAnalysis)) return undefined;
+    staticBefore += 1;
+  }
+
+  if (conditionalCount === 0 || keyedCount === 0) return undefined;
+  return {
+    ranges,
+    trailing: staticBefore,
+    dependencies: [...dependencies].sort((left, right) => left - right),
+    descriptorBlocks,
+    nestedPlans,
+  };
+}
+
 function keyedListBoundary(
   blockRuntime: t.Identifier,
   plan: KeyedListPlan,
@@ -2262,7 +2488,7 @@ function hostElementDescriptor(
   for (const attribute of element.openingElement.attributes) {
     if (!t.isJSXAttribute(attribute)) continue;
     const name = jsxAttributeName(attribute);
-    if (!name || name === "key" || /^on[A-Z]/.test(name)) continue;
+    if (!name || name === "key" || name === "ref" || /^on[A-Z]/.test(name)) continue;
     if (name === "style") {
       if (
         t.isJSXExpressionContainer(attribute.value) &&
@@ -2307,6 +2533,11 @@ function hostElementDescriptor(
     for (const range of block.ranges) conditionalBySource.set(range.source, range);
   } else if (block?.kind === "nested-host-keyed-ranges") {
     for (const range of block.ranges) keyedBySource.set(range.source, range);
+  } else if (block?.kind === "nested-host-mixed-ranges") {
+    for (const range of block.ranges) {
+      if (range.rangeKind === "conditional") conditionalBySource.set(range.source, range);
+      else keyedBySource.set(range.source, range);
+    }
   }
 
   const children: t.Expression[] = [];
@@ -2921,20 +3152,23 @@ function nestedHostBlockObject(
   plan: HostDescriptorBlockPlan,
   descriptorBlocks: ReadonlyMap<t.JSXElement, HostDescriptorBlockPlan>,
 ): t.ObjectExpression {
+  const kind =
+    plan.kind === "nested-host-conditional-ranges"
+      ? "conditional-ranges"
+      : plan.kind === "nested-host-keyed-ranges"
+        ? "keyed-ranges"
+        : "mixed-ranges";
   return t.objectExpression([
-    t.objectProperty(
-      t.identifier("kind"),
-      t.stringLiteral(
-        plan.kind === "nested-host-conditional-ranges" ? "conditional-ranges" : "keyed-ranges",
-      ),
-    ),
+    t.objectProperty(t.identifier("kind"), t.stringLiteral(kind)),
     t.objectProperty(t.identifier("id"), t.numericLiteral(plan.id)),
     t.objectProperty(
       t.identifier("ranges"),
       t.arrayExpression(
         plan.kind === "nested-host-conditional-ranges"
           ? plan.ranges.map((range) => conditionalRangeObject(range, descriptorBlocks))
-          : plan.ranges.map((range) => keyedRangeObject(range, descriptorBlocks)),
+          : plan.kind === "nested-host-keyed-ranges"
+            ? plan.ranges.map((range) => keyedRangeObject(range, descriptorBlocks))
+            : plan.ranges.map((range) => mixedRangeObject(range, descriptorBlocks)),
       ),
     ),
     t.objectProperty(t.identifier("trailing"), t.numericLiteral(plan.trailing)),
@@ -2942,6 +3176,63 @@ function nestedHostBlockObject(
       ? [t.objectProperty(t.identifier("staticChildrenOnly"), t.booleanLiteral(true))]
       : []),
   ]);
+}
+
+function mixedRangeObject(
+  range: MixedRangePlan,
+  descriptorBlocks: ReadonlyMap<t.JSXElement, HostDescriptorBlockPlan>,
+): t.ObjectExpression {
+  const value =
+    range.rangeKind === "conditional"
+      ? conditionalRangeObject(range, descriptorBlocks)
+      : keyedRangeObject(range, descriptorBlocks);
+  value.properties.unshift(
+    t.objectProperty(t.identifier("kind"), t.stringLiteral(range.rangeKind)),
+  );
+  return value;
+}
+
+function mixedRangesBoundary(blockRuntime: t.Identifier, plan: MixedRangesPlan): t.JSXElement {
+  const name = t.jsxMemberExpression(
+    t.jsxIdentifier(blockRuntime.name),
+    t.jsxIdentifier("MixedRanges"),
+  );
+  const source = t.cloneNode(plan.source, true);
+  const rootRefIndex = source.openingElement.attributes.findIndex(
+    (attribute) => t.isJSXAttribute(attribute) && jsxAttributeName(attribute) === "ref",
+  );
+  const rootRef =
+    rootRefIndex >= 0
+      ? (source.openingElement.attributes.splice(rootRefIndex, 1)[0] as t.JSXAttribute)
+      : undefined;
+  const nestedPlan: NestedHostMixedRangesPlan = {
+    kind: "nested-host-mixed-ranges",
+    id: plan.id,
+    parent: plan.parent,
+    dependencies: plan.dependencies,
+    source: plan.source,
+    ranges: plan.ranges,
+    trailing: plan.trailing,
+  };
+  const descriptorBlocks = new Map(plan.descriptorBlocks);
+  descriptorBlocks.set(plan.source, nestedPlan);
+  const attributes: t.JSXAttribute[] = [
+    t.jsxAttribute(t.jsxIdentifier("id"), t.jsxExpressionContainer(t.numericLiteral(plan.id))),
+    t.jsxAttribute(
+      t.jsxIdentifier("render"),
+      t.jsxExpressionContainer(t.arrowFunctionExpression([], source)),
+    ),
+    t.jsxAttribute(
+      t.jsxIdentifier("create"),
+      t.jsxExpressionContainer(
+        t.arrowFunctionExpression([], hostElementDescriptor(plan.source, descriptorBlocks)),
+      ),
+    ),
+  ];
+  if (rootRef?.value) {
+    attributes.push(t.jsxAttribute(t.jsxIdentifier("rootRef"), t.cloneNode(rootRef.value, true)));
+  }
+  return t.jsxElement(t.jsxOpeningElement(name, attributes, true), null, [], true);
 }
 
 function conditionalRangesBoundary(
@@ -3205,6 +3496,42 @@ function analyzeComposableBlocks(
 
       if (t.isJSXElement(child)) {
         if (isHostElement(child)) {
+          const mixedRangeStart = nextId;
+          const mixedRangeId = nextId++;
+          const mixedRanges = insideConditional
+            ? undefined
+            : analyzeMixedRangesContainer(
+                child,
+                statesByValue,
+                safeGlobals,
+                listNames,
+                mixedRangeId,
+                () => nextId++,
+              );
+          if (mixedRanges) {
+            plans.push({
+              kind: "mixed-ranges",
+              id: mixedRangeId,
+              parent,
+              dependencies: mixedRanges.dependencies,
+              source: child,
+              ranges: mixedRanges.ranges,
+              trailing: mixedRanges.trailing,
+              descriptorBlocks: mixedRanges.descriptorBlocks,
+            });
+            plans.push(...mixedRanges.nestedPlans);
+            for (const range of mixedRanges.ranges) {
+              if (range.rangeKind === "conditional") {
+                conditionalExpressions.add(range.source);
+              } else if (t.isJSXElement(range.source)) {
+                ownedElements.add(range.source);
+              } else {
+                keyedExpressions.add(range.source);
+              }
+            }
+            continue;
+          }
+          nextId = mixedRangeStart;
           const keyedRanges = insideConditional
             ? undefined
             : analyzeKeyedRangesContainer(child, statesByValue, safeGlobals, listNames);
@@ -3424,6 +3751,46 @@ function analyzeComposableBlocks(
     return { dependencies };
   };
 
+  const rootMixedRangeStart = nextId;
+  const rootMixedRangeId = nextId++;
+  const rootMixedRanges = analyzeMixedRangesContainer(
+    root,
+    statesByValue,
+    safeGlobals,
+    listNames,
+    rootMixedRangeId,
+    () => nextId++,
+  );
+  if (rootMixedRanges) {
+    plans.push({
+      kind: "mixed-ranges",
+      id: rootMixedRangeId,
+      dependencies: rootMixedRanges.dependencies,
+      source: root,
+      ranges: rootMixedRanges.ranges,
+      trailing: rootMixedRanges.trailing,
+      descriptorBlocks: rootMixedRanges.descriptorBlocks,
+    });
+    plans.push(...rootMixedRanges.nestedPlans);
+    for (const range of rootMixedRanges.ranges) {
+      if (range.rangeKind === "conditional") {
+        conditionalExpressions.add(range.source);
+      } else if (t.isJSXElement(range.source)) {
+        ownedElements.add(range.source);
+      } else {
+        keyedExpressions.add(range.source);
+      }
+    }
+    return {
+      plans,
+      componentElements,
+      conditionalExpressions,
+      ownedElements,
+      keyedExpressions,
+    };
+  }
+  nextId = rootMixedRangeStart;
+
   const rootRanges = analyzeKeyedRangesContainer(root, statesByValue, safeGlobals, listNames, true);
   if (rootRanges) {
     plans.push({
@@ -3530,6 +3897,9 @@ function lowerComposableBlocks(
     plans.map((plan) => [plan.source, plan]),
   );
   const rootPlan = planBySource.get(root);
+  if (rootPlan?.kind === "mixed-ranges") {
+    return mixedRangesBoundary(blockRuntime, rootPlan);
+  }
   if (rootPlan?.kind === "keyed-ranges") {
     return keyedRangesBoundary(blockRuntime, rootPlan);
   }
@@ -3543,6 +3913,9 @@ function lowerComposableBlocks(
         const plan = planBySource.get(child);
         if (plan?.kind === "host-conditional") {
           return hostConditionalBoundary(blockRuntime, plan);
+        }
+        if (plan?.kind === "mixed-ranges") {
+          return mixedRangesBoundary(blockRuntime, plan);
         }
         if (plan?.kind === "keyed-rows") {
           return keyedRowsBoundary(blockRuntime, plan);

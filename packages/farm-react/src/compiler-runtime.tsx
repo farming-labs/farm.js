@@ -127,7 +127,17 @@ export interface CompilerHostKeyedRanges {
   staticChildrenOnly?: boolean;
 }
 
-export type CompilerHostBlock = CompilerHostConditionalRanges | CompilerHostKeyedRanges;
+export interface CompilerHostMixedRanges {
+  kind: "mixed-ranges";
+  id: number;
+  ranges: readonly CompilerMixedRange[];
+  trailing: number;
+}
+
+export type CompilerHostBlock =
+  | CompilerHostConditionalRanges
+  | CompilerHostKeyedRanges
+  | CompilerHostMixedRanges;
 
 export interface CompilerHostConditionalBlockProps {
   id: number;
@@ -199,6 +209,17 @@ export interface CompilerKeyedRange {
   bindings: readonly CompilerKeyedRowBinding[];
 }
 
+export type CompilerMixedRange =
+  | ({ kind: "conditional" } & CompilerConditionalRange)
+  | ({ kind: "keyed" } & CompilerKeyedRange);
+
+export interface CompilerMixedRangesBlockProps {
+  id: number;
+  render(): React.ReactElement;
+  create(): CompilerHostElement;
+  rootRef?: React.RefCallback<Element>;
+}
+
 export interface CompilerKeyedRangesBlockProps {
   id: number;
   render(): React.ReactElement;
@@ -220,6 +241,7 @@ export interface CompilerBlockRuntime {
   KeyedList: React.ComponentType<CompilerKeyedListBlockProps>;
   KeyedRows: React.ComponentType<CompilerKeyedRowsBlockProps>;
   KeyedRanges: React.ComponentType<CompilerKeyedRangesBlockProps>;
+  MixedRanges: React.ComponentType<CompilerMixedRangesBlockProps>;
   Component: React.ComponentType<CompilerComponentBlockProps>;
   target(id: number): React.RefCallback<Element>;
 }
@@ -668,11 +690,22 @@ function collectCompilerHostBlockIds(descriptor: CompilerHostElement, ids: Set<n
       if (range.truthy) collectCompilerHostBlockIds(range.truthy.create(), ids);
       if (range.falsy) collectCompilerHostBlockIds(range.falsy.create(), ids);
     }
-  } else {
+  } else if (block.kind === "keyed-ranges") {
     for (const range of block.ranges) {
       const source = range.items();
       const first = source ? Array.from(source)[0] : undefined;
       if (first !== undefined) collectCompilerHostBlockIds(range.create(first, 0), ids);
+    }
+  } else {
+    for (const range of block.ranges) {
+      if (range.kind === "conditional") {
+        if (range.truthy) collectCompilerHostBlockIds(range.truthy.create(), ids);
+        if (range.falsy) collectCompilerHostBlockIds(range.falsy.create(), ids);
+      } else {
+        const source = range.items();
+        const first = source ? Array.from(source)[0] : undefined;
+        if (first !== undefined) collectCompilerHostBlockIds(range.create(first, 0), ids);
+      }
     }
   }
 }
@@ -867,6 +900,23 @@ function mountCompilerHostTree(
   }
   if (descriptor.block?.kind === "keyed-ranges") {
     const controller = new CompilerNestedKeyedRanges(
+      owner,
+      element,
+      descriptor,
+      descriptor.block,
+      onFallback,
+    );
+    try {
+      if (controller.adopt()) return controller;
+      controller.cleanup();
+      return null;
+    } catch (error) {
+      controller.cleanup();
+      throw error;
+    }
+  }
+  if (descriptor.block?.kind === "mixed-ranges") {
+    const controller = new CompilerNestedMixedRanges(
       owner,
       element,
       descriptor,
@@ -1456,6 +1506,414 @@ class CompilerNestedKeyedRanges implements CompilerHostTreeScope {
     this.unsubscribe?.();
     for (const instances of this.instances) {
       for (const instance of instances.values()) instance.scope?.cleanup();
+    }
+    for (const scope of this.staticScopes) scope.cleanup();
+    this.instances.length = 0;
+    this.staticSegments.length = 0;
+    this.staticScopes.length = 0;
+  }
+}
+
+type NestedMixedRangeSnapshot =
+  | { kind: "conditional"; selection: CompilerHostConditionalPreparedSelection }
+  | { kind: "keyed"; rows: NestedReadKeyedRange };
+
+type NestedMixedRangeInstance =
+  | { kind: "conditional"; value: NestedConditionalRangeInstance | null }
+  | { kind: "keyed"; value: Map<string, CompilerKeyedRowInstance> };
+
+class CompilerNestedMixedRanges implements CompilerHostTreeScope {
+  private readonly instances: NestedMixedRangeInstance[] = [];
+  private readonly staticSegments: Element[][] = [];
+  private readonly staticScopes: CompilerHostTreeScope[] = [];
+  private unsubscribe: (() => void) | undefined;
+  private active = true;
+
+  constructor(
+    private readonly owner: Pick<ConditionalBlockOwner, "subscribe">,
+    private readonly root: Element,
+    private host: CompilerHostElement,
+    private block: CompilerHostMixedRanges,
+    private readonly onFallback: () => void,
+  ) {}
+
+  private readSnapshots(): NestedMixedRangeSnapshot[] | null {
+    const snapshots: NestedMixedRangeSnapshot[] = [];
+    for (const range of this.block.ranges) {
+      if (range.kind === "conditional") {
+        const selection = hostConditionalSelection(range);
+        if (selection.kind === "fallback") return null;
+        snapshots.push({ kind: "conditional", selection });
+        continue;
+      }
+      const source = range.items();
+      const items = source ? Array.from(source) : [];
+      const keys = items.map((item, index) => keyedRowIdentity(range.rowKey(item, index)));
+      if (new Set(keys).size !== keys.length) return null;
+      snapshots.push({ kind: "keyed", rows: { items, keys } });
+    }
+    return snapshots;
+  }
+
+  private mountStatic(
+    elements: readonly Element[],
+    descriptors: readonly CompilerHostElement[],
+  ): boolean {
+    if (elements.length !== descriptors.length) return false;
+    for (let index = 0; index < elements.length; index += 1) {
+      const scope = mountCompilerHostTree(
+        this.owner,
+        elements[index],
+        descriptors[index],
+        this.onFallback,
+      );
+      if (!scope) return false;
+      this.staticScopes.push(scope);
+    }
+    return true;
+  }
+
+  adopt(): boolean {
+    if (!Number.isSafeInteger(this.block.trailing) || this.block.trailing < 0) return false;
+    const snapshots = this.readSnapshots();
+    if (!snapshots) return false;
+    const elements = [...this.root.children];
+    const descriptors = flattenCompilerHostElements(this.host.children);
+    if (elements.length !== descriptors.length) return false;
+    let cursor = 0;
+
+    for (let rangeIndex = 0; rangeIndex < this.block.ranges.length; rangeIndex += 1) {
+      const range = this.block.ranges[rangeIndex];
+      const snapshot = snapshots[rangeIndex];
+      if (!Number.isSafeInteger(range.before) || range.before < 0 || range.kind !== snapshot.kind) {
+        this.cleanup();
+        return false;
+      }
+      const staticEnd = cursor + range.before;
+      if (
+        staticEnd > elements.length ||
+        !this.mountStatic(elements.slice(cursor, staticEnd), descriptors.slice(cursor, staticEnd))
+      ) {
+        this.cleanup();
+        return false;
+      }
+      this.staticSegments.push(elements.slice(cursor, staticEnd));
+      cursor = staticEnd;
+
+      if (range.kind === "conditional" && snapshot.kind === "conditional") {
+        if (snapshot.selection.kind === "empty") {
+          this.instances.push({ kind: "conditional", value: null });
+          continue;
+        }
+        const element = elements[cursor];
+        if (!element) {
+          this.cleanup();
+          return false;
+        }
+        const descriptor = snapshot.selection.branch.create();
+        const host = mountCompilerHostInstance(
+          this.owner,
+          element,
+          descriptor,
+          snapshot.selection.branch,
+          this.onFallback,
+        );
+        if (!host) {
+          this.cleanup();
+          return false;
+        }
+        this.instances.push({
+          kind: "conditional",
+          value: { key: snapshot.selection.key, host },
+        });
+        cursor += 1;
+        continue;
+      }
+
+      if (range.kind !== "keyed" || snapshot.kind !== "keyed") {
+        this.cleanup();
+        return false;
+      }
+      const keyedInstances = new Map<string, CompilerKeyedRowInstance>();
+      for (let index = 0; index < snapshot.rows.items.length; index += 1) {
+        const element = elements[cursor + index];
+        if (!element) {
+          this.cleanup();
+          return false;
+        }
+        const descriptor = range.create(snapshot.rows.items[index], index);
+        const scope = mountCompilerHostTree(this.owner, element, descriptor, this.onFallback);
+        if (!scope) {
+          this.cleanup();
+          return false;
+        }
+        const instance: CompilerKeyedRowInstance = {
+          key: snapshot.rows.keys[index],
+          element,
+          scope,
+          values: range.bindings.map(() => UNSET_KEYED_ROW_BINDING),
+          item: snapshot.rows.items[index],
+          index,
+          conditionalValues: new Map(),
+        };
+        try {
+          applyKeyedRowBindings(range, instance, snapshot.rows.items[index], index);
+        } catch (error) {
+          scope.cleanup();
+          throw error;
+        }
+        keyedInstances.set(snapshot.rows.keys[index], instance);
+      }
+      this.instances.push({ kind: "keyed", value: keyedInstances });
+      cursor += snapshot.rows.items.length;
+    }
+
+    const trailingEnd = cursor + this.block.trailing;
+    if (
+      trailingEnd !== elements.length ||
+      !this.mountStatic(elements.slice(cursor), descriptors.slice(cursor))
+    ) {
+      this.cleanup();
+      return false;
+    }
+    this.staticSegments.push(elements.slice(cursor));
+    this.unsubscribe = this.owner.subscribe(this.block.id, this.refresh);
+    return true;
+  }
+
+  private firstInstanceElement(instance: NestedMixedRangeInstance): Element | null {
+    if (instance.kind === "conditional") return instance.value?.host.element || null;
+    return instance.value.values().next().value?.element || null;
+  }
+
+  private anchorAfter(rangeIndex: number): ChildNode | null {
+    for (let next = rangeIndex + 1; next < this.instances.length; next += 1) {
+      const staticAnchor = this.staticSegments[next]?.[0];
+      if (staticAnchor) return staticAnchor;
+      const rangeAnchor = this.firstInstanceElement(this.instances[next]);
+      if (rangeAnchor) return rangeAnchor;
+    }
+    return this.staticSegments[this.instances.length]?.[0] || null;
+  }
+
+  private reconcileConditional(
+    rangeIndex: number,
+    range: CompilerMixedRange & { kind: "conditional" },
+    selection: CompilerHostConditionalPreparedSelection,
+  ): boolean {
+    const instance = this.instances[rangeIndex];
+    if (instance.kind !== "conditional") return false;
+    const previous = instance.value;
+    if (selection.kind === "empty") {
+      previous?.host.scope?.cleanup();
+      previous?.host.element.remove();
+      instance.value = null;
+      return true;
+    }
+    if (previous?.key === selection.key) {
+      const descriptor = selection.branch.create();
+      if (!previous.host.scope?.update(descriptor)) return false;
+      applyHostConditionalBindings(selection.branch, previous.host);
+      return true;
+    }
+    const descriptor = selection.branch.create();
+    const element = createCompilerHostElement(this.root.ownerDocument, descriptor);
+    const host = mountCompilerHostInstance(
+      this.owner,
+      element,
+      descriptor,
+      selection.branch,
+      this.onFallback,
+    );
+    if (!host) return false;
+    previous?.host.scope?.cleanup();
+    if (previous) previous.host.element.replaceWith(element);
+    else this.root.insertBefore(element, this.anchorAfter(rangeIndex));
+    instance.value = { key: selection.key, host };
+    return true;
+  }
+
+  private reconcileKeyed(
+    rangeIndex: number,
+    range: CompilerMixedRange & { kind: "keyed" },
+    rows: NestedReadKeyedRange,
+  ): boolean {
+    const instance = this.instances[rangeIndex];
+    if (instance.kind !== "keyed") return false;
+    const previous = instance.value;
+    const oldIndices = new Map<string, number>();
+    [...previous.keys()].forEach((key, index) => oldIndices.set(key, index));
+    const nextKeys = new Set(rows.keys);
+    for (const [key, row] of previous) {
+      if (nextKeys.has(key)) continue;
+      row.scope?.cleanup();
+      row.element.remove();
+    }
+
+    const sequence = rows.keys.map((key) => oldIndices.get(key) ?? -1);
+    const stablePositions = longestIncreasingSubsequencePositions(sequence);
+    const nextInstances: CompilerKeyedRowInstance[] = [];
+    for (let index = 0; index < rows.items.length; index += 1) {
+      const key = rows.keys[index];
+      const existing = previous.get(key);
+      if (existing) {
+        const descriptor = range.create(rows.items[index], index);
+        if (!existing.scope?.update(descriptor)) return false;
+        applyKeyedRowBindings(range, existing, rows.items[index], index);
+        existing.item = rows.items[index];
+        existing.index = index;
+        nextInstances.push(existing);
+        continue;
+      }
+      const descriptor = range.create(rows.items[index], index);
+      const element = createCompilerHostElement(this.root.ownerDocument, descriptor);
+      const scope = mountCompilerHostTree(this.owner, element, descriptor, this.onFallback);
+      if (!scope) return false;
+      let values: unknown[];
+      try {
+        values = readKeyedRowBindingValues(range, rows.items[index], index);
+      } catch (error) {
+        scope.cleanup();
+        throw error;
+      }
+      nextInstances.push({
+        key,
+        element,
+        scope,
+        values,
+        item: rows.items[index],
+        index,
+        conditionalValues: new Map(),
+      });
+    }
+
+    let anchor = this.anchorAfter(rangeIndex);
+    for (let index = nextInstances.length - 1; index >= 0; index -= 1) {
+      const row = nextInstances[index];
+      if (
+        sequence[index] < 0 ||
+        (!stablePositions.has(index) && row.element.nextSibling !== anchor)
+      ) {
+        this.root.insertBefore(row.element, anchor);
+      }
+      anchor = row.element;
+    }
+    instance.value = new Map(nextInstances.map((row) => [row.key, row]));
+    return true;
+  }
+
+  private reconcileRange(rangeIndex: number, snapshot: NestedMixedRangeSnapshot): boolean {
+    const range = this.block.ranges[rangeIndex];
+    if (range.kind !== snapshot.kind) return false;
+    return range.kind === "conditional" && snapshot.kind === "conditional"
+      ? this.reconcileConditional(rangeIndex, range, snapshot.selection)
+      : range.kind === "keyed" && snapshot.kind === "keyed"
+        ? this.reconcileKeyed(rangeIndex, range, snapshot.rows)
+        : false;
+  }
+
+  private refresh = (afterCommit?: () => void) => {
+    if (!this.active) {
+      afterCommit?.();
+      return;
+    }
+    const snapshots = this.readSnapshots();
+    if (!snapshots || snapshots.length !== this.instances.length) {
+      this.onFallback();
+      afterCommit?.();
+      return;
+    }
+    const activeElement = this.root.ownerDocument.activeElement;
+    const restoreFocus = Boolean(activeElement && this.root.contains(activeElement));
+    for (let index = snapshots.length - 1; index >= 0; index -= 1) {
+      if (!this.reconcileRange(index, snapshots[index])) {
+        this.onFallback();
+        afterCommit?.();
+        return;
+      }
+    }
+    if (
+      restoreFocus &&
+      activeElement?.isConnected &&
+      activeElement.ownerDocument.activeElement !== activeElement &&
+      "focus" in activeElement
+    ) {
+      (activeElement as HTMLElement).focus({ preventScroll: true });
+    }
+    afterCommit?.();
+  };
+
+  private updateStaticScopes(
+    descriptor: CompilerHostElement,
+    snapshots: readonly NestedMixedRangeSnapshot[],
+  ): boolean {
+    const descriptors = flattenCompilerHostElements(descriptor.children);
+    let descriptorIndex = 0;
+    let scopeIndex = 0;
+    for (let rangeIndex = 0; rangeIndex < this.block.ranges.length; rangeIndex += 1) {
+      const range = this.block.ranges[rangeIndex];
+      for (let index = 0; index < range.before; index += 1) {
+        const scope = this.staticScopes[scopeIndex++];
+        const child = descriptors[descriptorIndex++];
+        if (!scope || !child || !scope.update(child)) return false;
+      }
+      const snapshot = snapshots[rangeIndex];
+      if (snapshot.kind === "conditional") {
+        if (snapshot.selection.kind === "branch") descriptorIndex += 1;
+      } else {
+        descriptorIndex += snapshot.rows.items.length;
+      }
+    }
+    for (let index = 0; index < this.block.trailing; index += 1) {
+      const scope = this.staticScopes[scopeIndex++];
+      const child = descriptors[descriptorIndex++];
+      if (!scope || !child || !scope.update(child)) return false;
+    }
+    return scopeIndex === this.staticScopes.length && descriptorIndex === descriptors.length;
+  }
+
+  update(descriptor: CompilerHostElement): boolean {
+    const block = descriptor.block;
+    if (
+      !this.active ||
+      block?.kind !== "mixed-ranges" ||
+      block.id !== this.block.id ||
+      block.ranges.length !== this.block.ranges.length ||
+      block.trailing !== this.block.trailing ||
+      block.ranges.some(
+        (range, index) =>
+          range.kind !== this.block.ranges[index].kind ||
+          range.before !== this.block.ranges[index].before,
+      )
+    ) {
+      return false;
+    }
+    this.host = descriptor;
+    this.block = block;
+    const snapshots = this.readSnapshots();
+    if (
+      !snapshots ||
+      snapshots.length !== this.instances.length ||
+      !this.updateStaticScopes(descriptor, snapshots)
+    ) {
+      return false;
+    }
+    for (let index = snapshots.length - 1; index >= 0; index -= 1) {
+      if (!this.reconcileRange(index, snapshots[index])) return false;
+    }
+    return true;
+  }
+
+  cleanup(): void {
+    if (!this.active) return;
+    this.active = false;
+    this.unsubscribe?.();
+    for (const instance of this.instances) {
+      if (instance.kind === "conditional") {
+        instance.value?.host.scope?.cleanup();
+      } else {
+        for (const row of instance.value.values()) row.scope?.cleanup();
+      }
     }
     for (const scope of this.staticScopes) scope.cleanup();
     this.instances.length = 0;
@@ -2826,6 +3284,145 @@ function createKeyedRangesBlockComponent(
   return FarmKeyedRangesBlock;
 }
 
+function createMixedRangesBlockComponent(
+  owner: Pick<ConditionalBlockOwner, "subscribe">,
+): React.ComponentType<CompilerMixedRangesBlockProps> {
+  interface State {
+    fallback: boolean;
+  }
+
+  class FarmMixedRangesBlock extends React.Component<CompilerMixedRangesBlockProps, State> {
+    static displayName = "FarmCompiledMixedRanges";
+
+    state: State = { fallback: false };
+    private root: Element | null = null;
+    private mounted = false;
+    private fallbackRequested = false;
+    private fallbackVersion = 0;
+    private propFallbackQueued = false;
+    private currentProps = this.props;
+    private controller: CompilerNestedMixedRanges | null = null;
+    private fallbackUnsubscribers: Array<() => void> = [];
+
+    private captureRoot = (root: Element | null) => {
+      this.root = root;
+      this.currentProps.rootRef?.(root);
+    };
+
+    private clearFallbackSubscriptions(): void {
+      for (const unsubscribe of this.fallbackUnsubscribers) unsubscribe();
+      this.fallbackUnsubscribers = [];
+    }
+
+    private subscribeFallbackBlocks(): void {
+      this.clearFallbackSubscriptions();
+      const descriptor = this.currentProps.create();
+      const ids = new Set<number>();
+      collectCompilerHostBlockIds(descriptor, ids);
+      for (const id of ids) {
+        this.fallbackUnsubscribers.push(
+          owner.subscribe(id, (afterCommit) => {
+            if (!this.mounted || !this.state.fallback) {
+              afterCommit?.();
+              return;
+            }
+            this.fallbackVersion += 1;
+            this.forceUpdate(afterCommit);
+          }),
+        );
+      }
+    }
+
+    private adopt(): boolean {
+      if (!this.root) return false;
+      const descriptor = this.currentProps.create();
+      const block = descriptor.block;
+      if (block?.kind !== "mixed-ranges" || block.id !== this.currentProps.id) return false;
+      const controller = new CompilerNestedMixedRanges(
+        owner,
+        this.root,
+        descriptor,
+        block,
+        this.activateFallback,
+      );
+      try {
+        if (!controller.adopt()) {
+          controller.cleanup();
+          return false;
+        }
+      } catch (error) {
+        controller.cleanup();
+        throw error;
+      }
+      this.controller = controller;
+      return true;
+    }
+
+    private activateFallback = (afterCommit?: () => void): void => {
+      if (!this.mounted || this.state.fallback || this.fallbackRequested) {
+        afterCommit?.();
+        return;
+      }
+      this.fallbackRequested = true;
+      this.controller?.cleanup();
+      this.controller = null;
+      this.fallbackVersion += 1;
+      this.setState({ fallback: true }, () => {
+        this.subscribeFallbackBlocks();
+        afterCommit?.();
+      });
+    };
+
+    private schedulePropFallback(): void {
+      if (this.propFallbackQueued) return;
+      this.propFallbackQueued = true;
+      queueMicrotask(() => {
+        this.propFallbackQueued = false;
+        if (this.mounted && !this.state.fallback) this.activateFallback();
+      });
+    }
+
+    shouldComponentUpdate(nextProps: CompilerMixedRangesBlockProps, nextState: State): boolean {
+      this.currentProps = nextProps;
+      if (nextState.fallback || this.state.fallback) return true;
+      this.schedulePropFallback();
+      return false;
+    }
+
+    componentDidMount(): void {
+      this.mounted = true;
+      if (!this.adopt()) this.activateFallback();
+    }
+
+    componentDidUpdate(): void {
+      if (this.state.fallback) this.subscribeFallbackBlocks();
+    }
+
+    componentWillUnmount(): void {
+      this.mounted = false;
+      this.controller?.cleanup();
+      this.controller = null;
+      this.clearFallbackSubscriptions();
+      this.root = null;
+    }
+
+    render(): React.ReactNode {
+      const container = this.currentProps.render();
+      if (!React.isValidElement(container) || typeof container.type !== "string") {
+        throw new TypeError(
+          `Compiled mixed ranges ${this.currentProps.id} must own one host container.`,
+        );
+      }
+      return React.cloneElement(container, {
+        key: this.state.fallback ? `react-${this.fallbackVersion}` : "compiled",
+        ref: this.captureRoot,
+      } as React.Attributes);
+    }
+  }
+
+  return FarmMixedRangesBlock;
+}
+
 function createComponentBlockComponent(
   owner: Pick<ConditionalBlockOwner, "subscribe">,
 ): React.ComponentType<CompilerComponentBlockProps> {
@@ -2944,6 +3541,9 @@ export function createCompiledComponent<Props>(
           subscribe: (id, refresh) => this.subscribeToBlock(id, refresh),
         }),
         KeyedRanges: createKeyedRangesBlockComponent({
+          subscribe: (id, refresh) => this.subscribeToBlock(id, refresh),
+        }),
+        MixedRanges: createMixedRangesBlockComponent({
           subscribe: (id, refresh) => this.subscribeToBlock(id, refresh),
         }),
         Component: createComponentBlockComponent({
@@ -3168,6 +3768,11 @@ export function createCompiledComponent<Props>(
           element as React.ReactElement<CompilerConditionalRangesBlockProps>,
           { rootRef: this.captureRoot },
         );
+      }
+      if (element.type === this.blockRuntime.MixedRanges) {
+        return React.cloneElement(element as React.ReactElement<CompilerMixedRangesBlockProps>, {
+          rootRef: this.captureRoot,
+        });
       }
       if (typeof element.type !== "string") {
         throw new TypeError(

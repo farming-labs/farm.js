@@ -42,6 +42,7 @@ for (const component of [
   "KeyedRowHostBlockExperiment",
   "NestedKeyedRowExperiment",
   "RecursiveKeyedScopeExperiment",
+  "MixedRangeExperiment",
 ]) {
   assert.ok(compiledComponents.has(component), `${component} was not compiled`);
 }
@@ -1473,6 +1474,91 @@ try {
   );
   assert.equal(recursiveKeyedOwnerFinalExecutions - recursiveKeyedOwnerInitialExecutions, 0);
 
+  const mixedRanges = '[data-experiment="mixed-ranges"]';
+  const mixedRangeOwnerInitialExecutions = await readNumber(
+    page,
+    `${mixedRanges} [data-metric="mixed-range-owner-executions"]`,
+  );
+  await page.evaluate(() => {
+    window.__farmMixedItem0 = document.querySelector('[data-mixed-item="mixed-item-0"]');
+    window.__farmMixedTag00 = document.querySelector('[data-mixed-tag="mixed-tag-0-0"]');
+    window.__farmMixedHeader = document.querySelector('[data-mixed-static="header"]');
+    window.__farmMixedRowsBefore = document.querySelector('[data-mixed-static="rows-before"]');
+    window.__farmMixedFooter = document.querySelector('[data-mixed-static="footer"]');
+    window.__farmMixedRowMoves = 0;
+    window.__farmMixedTagMoves = 0;
+    const rows = document.querySelector("[data-mixed-range-list]");
+    const tags = document.querySelector('[data-mixed-tag-list="mixed-item-0"]');
+    const rowInsertBefore = rows.insertBefore.bind(rows);
+    rows.insertBefore = (node, anchor) => {
+      if (node.parentNode === rows && node.matches?.("[data-mixed-item]")) {
+        window.__farmMixedRowMoves += 1;
+      }
+      return rowInsertBefore(node, anchor);
+    };
+    const tagInsertBefore = tags.insertBefore.bind(tags);
+    tags.insertBefore = (node, anchor) => {
+      if (node.parentNode === tags && node.matches?.("[data-mixed-tag]")) {
+        window.__farmMixedTagMoves += 1;
+      }
+      return tagInsertBefore(node, anchor);
+    };
+  });
+
+  await page.locator(`${mixedRanges} [data-action="mixed-range-reconcile"]`).click();
+  await assertText(page, `${mixedRanges} [data-metric="mixed-range-updates"]`, "1");
+  await assertText(page, `${mixedRanges} [data-metric="mixed-range-loading"]`, "shown");
+  await assertText(page, `${mixedRanges} [data-metric="mixed-range-status"]`, "error");
+  assert.equal(await page.locator(`${mixedRanges} [data-mixed-loading]`).count(), 1);
+  assert.equal(
+    await page.locator(`${mixedRanges} [data-mixed-item]`).first().getAttribute("data-mixed-item"),
+    "mixed-item-31",
+  );
+  await assertText(page, `${mixedRanges} [data-mixed-item="mixed-item-0"] h3`, "Item 0 · updated");
+  assert.equal(
+    await page.locator(`${mixedRanges} [data-mixed-visible="mixed-item-0"]`).count(),
+    0,
+  );
+  assert.deepEqual(
+    await page
+      .locator(`${mixedRanges} [data-mixed-item="mixed-item-0"] [data-mixed-tag]`)
+      .evaluateAll((tags) => tags.map((tag) => tag.getAttribute("data-mixed-tag"))),
+    ["mixed-tag-0-2", "mixed-tag-0-0", "mixed-tag-0-1"],
+  );
+  assert.equal(await page.evaluate(() => window.__farmMixedRowMoves), 1);
+  assert.equal(await page.evaluate(() => window.__farmMixedTagMoves), 1);
+  assert.equal(
+    await page.evaluate(
+      () =>
+        window.__farmMixedItem0 === document.querySelector('[data-mixed-item="mixed-item-0"]') &&
+        window.__farmMixedTag00 === document.querySelector('[data-mixed-tag="mixed-tag-0-0"]') &&
+        window.__farmMixedHeader === document.querySelector('[data-mixed-static="header"]') &&
+        window.__farmMixedRowsBefore ===
+          document.querySelector('[data-mixed-static="rows-before"]') &&
+        window.__farmMixedFooter === document.querySelector('[data-mixed-static="footer"]'),
+    ),
+    true,
+    "mixed range reconciliation replaced a surviving row, nested tag, or static sibling",
+  );
+
+  await page.locator(`${mixedRanges} [data-action="mixed-range-replace"]`).click();
+  await assertText(page, `${mixedRanges} [data-metric="mixed-range-updates"]`, "2");
+  await assertText(page, `${mixedRanges} [data-metric="mixed-range-rows"]`, "32");
+  assert.equal(
+    await page.locator(`${mixedRanges} [data-mixed-item="mixed-item-1"]`).count(),
+    0,
+  );
+  await assertText(
+    page,
+    `${mixedRanges} [data-mixed-item="mixed-inserted-1"] h3`,
+    "Inserted after update 1",
+  );
+  const mixedRangeOwnerFinalExecutions = await readNumber(
+    page,
+    `${mixedRanges} [data-metric="mixed-range-owner-executions"]`,
+  );
+  assert.equal(mixedRangeOwnerFinalExecutions - mixedRangeOwnerInitialExecutions, 0);
+
   await page.screenshot({ path: screenshotPath, fullPage: true });
 
   const mobilePage = await browser.newPage({
@@ -1713,6 +1799,17 @@ try {
             staticSiblingIdentityPreserved: true,
             ownerUpdateExecutions:
               recursiveKeyedOwnerFinalExecutions - recursiveKeyedOwnerInitialExecutions,
+          },
+          mixedRanges: {
+            rows: 32,
+            outerLisMoves: 1,
+            nestedLisMoves: 1,
+            simultaneousConditionalUpdates: 2,
+            recursivelyNestedRanges: true,
+            staticSiblingIdentityPreserved: true,
+            removedAndInserted: true,
+            ownerUpdateExecutions:
+              mixedRangeOwnerFinalExecutions - mixedRangeOwnerInitialExecutions,
           },
         },
       },
