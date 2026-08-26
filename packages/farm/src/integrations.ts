@@ -2645,6 +2645,8 @@ async function runIntegrationRouteAfterHooks(
 function createQueryInput(searchParams: URLSearchParams): Record<string, string | string[]> {
   const input: Record<string, string | string[]> = {};
   searchParams.forEach((value, key) => {
+    if (key === "__proto__" || key === "constructor" || key === "prototype") return;
+
     const existing = input[key];
     if (existing === undefined) {
       input[key] = value;
@@ -2661,6 +2663,8 @@ function createFormInput(
 ): Record<string, FormDataEntryValue | FormDataEntryValue[]> {
   const input: Record<string, FormDataEntryValue | FormDataEntryValue[]> = {};
   formData.forEach((value, key) => {
+    if (key === "__proto__" || key === "constructor" || key === "prototype") return;
+
     const existing = input[key];
     if (existing === undefined) {
       input[key] = value;
