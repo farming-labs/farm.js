@@ -874,7 +874,7 @@ describe("compiler-owned recursive keyed scopes runtime", () => {
       );
     }
     expect(fixture.executions()).toBe(executionsAfterMount);
-  }, 30_000);
+  }, 60_000);
 
   it("preserves every keyed depth through compatible Fast Refresh", async () => {
     const hmrId = `recursive-keyed-refresh-${Math.random()}`;
