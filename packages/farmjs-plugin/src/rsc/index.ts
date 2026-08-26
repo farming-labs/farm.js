@@ -55,6 +55,9 @@ const { normalizeFarmDeploymentId } = require_(
 const { getFarmLayerAliases, getFarmSourceRoots, resolveFarmLayers } = require_(
   "@farm.js/core/server",
 ) as typeof import("@farm.js/core/server");
+const { searchParamsToObject } = require_(
+  "@farm.js/core/internal/production-runtime",
+) as typeof import("@farm.js/core/internal/production-runtime");
 
 export type { FarmRscPluginOptions, EntryContext };
 export { buildRscNitro, waitForRscManifest, waitForRscOutputs } from "./nitro-build.js";
@@ -1386,7 +1389,9 @@ if (document.readyState === 'loading') {
 
               // Parse URL params (basic dynamic route support)
               const params: Record<string, string> = {};
-              const searchParams = Object.fromEntries(new URLSearchParams(url.split("?")[1] || ""));
+              const searchParams = searchParamsToObject(
+                new URL(url, `http://${req.headers.host || "localhost:3000"}`).searchParams,
+              );
 
               // Render the page with middleware data
               const pageProps = {
