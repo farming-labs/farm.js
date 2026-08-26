@@ -45,11 +45,13 @@ describe("React AOT keyed-row conditional compiler", () => {
     expect(result.compiled).toEqual(["Tasks"]);
     expect(result.diagnostics).toEqual([]);
     expect(result.code).toContain("farmBlocks.KeyedRows");
-    expect(result.code).toContain("conditionals={[");
-    expect(result.code).toContain("_farmRowConditional(item, index, 0");
-    expect(result.code).toContain("_farmRowConditional(item, index, 1");
+    expect(result.code).toContain("hostBlocks={true}");
+    expect(result.code).toContain('kind: "conditional-ranges"');
+    expect(result.code).toContain("parent: 0");
+    expect(result.code).not.toContain("conditionals={[");
+    expect(result.code).not.toContain("_farmRowConditional");
     expect(result.code).toContain("logical: true");
-    expect(result.code).toContain("logical: false");
+    expect(result.code).toContain("falsy: {");
     expect(result.code).not.toContain("farmBlocks.KeyedList");
     await expect(
       transformWithEsbuild(result.code, "/app/RowConditionals.tsx", {
@@ -92,10 +94,6 @@ describe("React AOT keyed-row conditional compiler", () => {
   });
 
   it.each([
-    {
-      name: "a conditional beside another child in the same host",
-      content: "<span>Always</span>{item.done && <strong>Done</strong>}",
-    },
     {
       name: "an event inside the conditional branch",
       content: "{item.done && <button onClick={() => setItems([])}>Done</button>}",

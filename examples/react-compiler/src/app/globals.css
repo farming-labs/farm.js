@@ -1197,6 +1197,67 @@ h1 span {
   list-style: none;
 }
 
+.keyed-host-row-list {
+  display: grid;
+  max-height: 24rem;
+  gap: 0.5rem;
+  overflow: auto;
+  margin: 1rem 0 0;
+  padding: 0.75rem;
+  border: 1px solid #33332f;
+  background: #0d0d0c;
+  list-style: none;
+}
+
+.keyed-host-row-list > li {
+  display: grid;
+  grid-template-columns: minmax(8rem, 0.65fr) minmax(14rem, 1.35fr) minmax(7rem, 0.6fr);
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 42rem;
+  border: 1px solid #30302c;
+  padding: 0.65rem 0.75rem;
+  color: #c8c8c1;
+  font: 0.64rem "Geist Mono Variable", ui-monospace, monospace;
+}
+
+.keyed-host-status {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.keyed-host-status > :is(i, b) {
+  color: #666660;
+  font-size: 0.55rem;
+  font-style: normal;
+  font-weight: 500;
+}
+
+.keyed-host-status article,
+.keyed-host-status aside,
+[data-keyed-host-extra] {
+  min-width: 0;
+  color: #9d9d96;
+  font-style: normal;
+}
+
+.keyed-host-status article strong,
+.keyed-host-status article small,
+[data-keyed-host-extra] em {
+  display: block;
+  overflow: hidden;
+  color: #d8ff9f;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.keyed-host-status article small {
+  color: #84847d;
+}
+
 .heavy-metrics > div {
   min-width: 0;
   padding: 1.25rem 0;

@@ -23,6 +23,8 @@ pnpm --filter farm-react-compiler-example experiment
 ```
 
 The Playwright install is needed once per machine (or whenever its browser cache is cleared).
+Set `FARM_EXPERIMENT_BROWSER_PATH` to an existing Chrome or Chromium executable when the machine
+uses a managed browser installation instead of Playwright's downloaded browser.
 
 The command creates a production build, starts it on a local port, runs desktop and mobile Chromium
 assertions, checks for console/runtime errors and horizontal overflow, saves screenshots under
@@ -48,6 +50,7 @@ assertions, checks for console/runtime errors and horizontal overflow, saves scr
 | Ternary conditional block  | `strong` and `span` replace each other; executions `0`     | —                                           | Only the compiler-owned branch is replaced.                            |
 | Root conditional ranges    | exact card root, two ranges, stable static siblings; executions `0` | —                                  | Direct branches reconcile without wrappers or marker nodes.            |
 | Composable nested blocks   | two lists, nested conditions, and one component island  | —                                              | One block graph mounts, updates, and cleans up nested subscriptions.    |
+| Keyed row host blocks      | 1,000 rows, one LIS move, nested branch patches, executions `0` | —                                      | Each key owns its safe recursive host conditions without React commits. |
 
 The package runtime test also measures one equivalent update under a React `Profiler`:
 
@@ -109,16 +112,14 @@ the rows while checking DOM and selection identity, loads 256 rows, and observes
 executions. File inputs, dynamic control types or option attributes, content-editable trees, refs,
 custom controls, and async or non-inline handlers remain React fallbacks.
 
-The `04E` card adds two branch slots to every keyed row. Each logical or ternary expression is the
-only child of a persistent host container. Farm scopes the prepared test and branch-value snapshot
-to the row key, then asks React to refresh only a slot whose selected branch or active values
-changed. The card toggles status and details independently, rotates the rows, checks that their DOM
-identity survives, and verifies zero outer component executions for same-key updates.
+The `04E` card covers the interactive tier: Farm scopes a prepared branch snapshot to each row key,
+then asks React to refresh only a slot whose selected branch or active values changed. The card
+toggles status and details independently, rotates the rows, checks that their DOM identity survives,
+and verifies zero outer component executions for same-key updates.
 
 React still owns the branch Fiber, initial render, hydration, errors, and every structural list
-commit. This is why row conditionals do not use the manual insertion or LIS path. Branch events,
-components, fragments, refs, SVG, nested blocks, or a conditional mixed with another child in the
-same slot use the existing React-owned list fallback.
+commit for this interactive tier. Branch events, components, fragments, refs, SVG, and unsupported
+nested blocks use the existing React-owned list fallback.
 
 The `04G` card is itself the returned host root. It places two non-interactive maps between its
 header, metrics, labels, and footer. React renders that original `article`; Farm adopts its direct
@@ -175,6 +176,17 @@ hide/update/show sequence verifies that removed scopes receive no stale work and
 latest cells. The production assertion records zero owner update executions. Interactive rows,
 Hooks, custom components, refs, SVG, branch events, and mixed conditional/list slots remain React
 fallbacks.
+
+The `10` card transfers that recursive host ownership into each non-interactive keyed row. Its 1,000
+rows contain a ternary beside static siblings, a deeper logical branch, and a second row-local
+condition. One action rotates the list with one LIS move while replacing one branch and patching a
+surviving nested branch. The production assertion preserves the row, active branch, and both static
+siblings, then removes and inserts one row and verifies zero owner update executions. The same path
+is automatic for an eligible `.map(...)` or inline host row in `List`; it needs no new option.
+
+Hooks, custom components, row or branch events, refs, SVG, fragments, dangerous HTML, controlled
+inputs inside a condition, nested keyed lists, and unproven expressions stay on React. Duplicate
+runtime keys also switch the mounted list to React.
 
 ## Heavy compiler-on/off benchmark
 

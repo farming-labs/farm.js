@@ -184,6 +184,8 @@ export interface CompilerKeyedRowsBlockProps {
   bindings: readonly CompilerKeyedRowBinding[];
   events?: readonly CompilerKeyedRowEvent[];
   conditionals?: readonly CompilerKeyedRowConditional[];
+  /** Row descriptors contain compiler-owned nested host scopes. */
+  hostBlocks?: boolean;
 }
 
 export interface CompilerKeyedRange {
@@ -807,6 +809,7 @@ function applyHostConditionalBindings(
 
 interface CompilerHostTreeScope {
   cleanup(): void;
+  update(descriptor: CompilerHostElement): boolean;
 }
 
 const UNSET_HOST_CONDITIONAL_BINDING = Symbol("unset host conditional binding");
@@ -871,6 +874,14 @@ function mountCompilerHostTree(
   }
   let active = true;
   return {
+    update(nextDescriptor) {
+      if (!active || nextDescriptor.block || !matchesCompilerHostElement(element, nextDescriptor)) {
+        return false;
+      }
+      const nextChildren = flattenCompilerHostElements(nextDescriptor.children);
+      if (nextChildren.length !== scopes.length) return false;
+      return scopes.every((scope, index) => scope.update(nextChildren[index]));
+    },
     cleanup() {
       if (!active) return;
       active = false;
@@ -917,8 +928,8 @@ class CompilerNestedConditionalRanges implements CompilerHostTreeScope {
   constructor(
     private readonly owner: Pick<ConditionalBlockOwner, "subscribe">,
     private readonly root: Element,
-    private readonly host: CompilerHostElement,
-    private readonly block: CompilerHostConditionalRanges,
+    private host: CompilerHostElement,
+    private block: CompilerHostConditionalRanges,
     private readonly onFallback: () => void,
   ) {}
 
@@ -1038,15 +1049,7 @@ class CompilerNestedConditionalRanges implements CompilerHostTreeScope {
     }
     if (previous?.key === selection.key) {
       const descriptor = selection.branch.create();
-      previous.host.scope?.cleanup();
-      const scope = mountCompilerHostTree(
-        this.owner,
-        previous.host.element,
-        descriptor,
-        this.onFallback,
-      );
-      if (!scope) return false;
-      previous.host.scope = scope;
+      if (!previous.host.scope?.update(descriptor)) return false;
       applyHostConditionalBindings(selection.branch, previous.host);
       return true;
     }
@@ -1089,6 +1092,52 @@ class CompilerNestedConditionalRanges implements CompilerHostTreeScope {
     afterCommit?.();
   };
 
+  private updateStaticScopes(
+    descriptor: CompilerHostElement,
+    selections: readonly CompilerHostConditionalPreparedSelection[],
+  ): boolean {
+    const descriptors = flattenCompilerHostElements(descriptor.children);
+    let descriptorIndex = 0;
+    let scopeIndex = 0;
+    for (let rangeIndex = 0; rangeIndex < this.block.ranges.length; rangeIndex += 1) {
+      const range = this.block.ranges[rangeIndex];
+      for (let index = 0; index < range.before; index += 1) {
+        const scope = this.staticScopes[scopeIndex++];
+        const child = descriptors[descriptorIndex++];
+        if (!scope || !child || !scope.update(child)) return false;
+      }
+      if (selections[rangeIndex].kind === "branch") descriptorIndex += 1;
+    }
+    for (let index = 0; index < this.block.trailing; index += 1) {
+      const scope = this.staticScopes[scopeIndex++];
+      const child = descriptors[descriptorIndex++];
+      if (!scope || !child || !scope.update(child)) return false;
+    }
+    return scopeIndex === this.staticScopes.length && descriptorIndex === descriptors.length;
+  }
+
+  update(descriptor: CompilerHostElement): boolean {
+    const block = descriptor.block;
+    if (
+      !this.active ||
+      block?.kind !== "conditional-ranges" ||
+      block.id !== this.block.id ||
+      block.ranges.length !== this.block.ranges.length ||
+      block.trailing !== this.block.trailing ||
+      block.ranges.some((range, index) => range.before !== this.block.ranges[index].before)
+    ) {
+      return false;
+    }
+    this.host = descriptor;
+    this.block = block;
+    const selections = this.readSelections();
+    if (!selections || !this.updateStaticScopes(descriptor, selections)) return false;
+    for (let index = this.instances.length - 1; index >= 0; index -= 1) {
+      if (!this.reconcileRange(index, selections[index])) return false;
+    }
+    return true;
+  }
+
   cleanup(): void {
     if (!this.active) return;
     this.active = false;
@@ -1116,8 +1165,8 @@ class CompilerNestedKeyedRanges implements CompilerHostTreeScope {
   constructor(
     private readonly owner: Pick<ConditionalBlockOwner, "subscribe">,
     private readonly root: Element,
-    private readonly host: CompilerHostElement,
-    private readonly block: CompilerHostKeyedRanges,
+    private host: CompilerHostElement,
+    private block: CompilerHostKeyedRanges,
     private readonly onFallback: () => void,
   ) {}
 
@@ -1253,6 +1302,8 @@ class CompilerNestedKeyedRanges implements CompilerHostTreeScope {
       const key = rows.keys[index];
       const existing = previous.get(key);
       if (existing) {
+        const descriptor = range.create(rows.items[index], index);
+        if (!existing.scope?.update(descriptor)) return false;
         applyKeyedRowBindings(range, existing, rows.items[index], index);
         existing.item = rows.items[index];
         existing.index = index;
@@ -1319,6 +1370,58 @@ class CompilerNestedKeyedRanges implements CompilerHostTreeScope {
     }
     afterCommit?.();
   };
+
+  private updateStaticScopes(
+    descriptor: CompilerHostElement,
+    rowsByRange: readonly NestedReadKeyedRange[],
+  ): boolean {
+    const descriptors = flattenCompilerHostElements(descriptor.children);
+    let descriptorIndex = 0;
+    let scopeIndex = 0;
+    for (let rangeIndex = 0; rangeIndex < this.block.ranges.length; rangeIndex += 1) {
+      const range = this.block.ranges[rangeIndex];
+      for (let index = 0; index < range.before; index += 1) {
+        const scope = this.staticScopes[scopeIndex++];
+        const child = descriptors[descriptorIndex++];
+        if (!scope || !child || !scope.update(child)) return false;
+      }
+      descriptorIndex += rowsByRange[rangeIndex].items.length;
+    }
+    for (let index = 0; index < this.block.trailing; index += 1) {
+      const scope = this.staticScopes[scopeIndex++];
+      const child = descriptors[descriptorIndex++];
+      if (!scope || !child || !scope.update(child)) return false;
+    }
+    return scopeIndex === this.staticScopes.length && descriptorIndex === descriptors.length;
+  }
+
+  update(descriptor: CompilerHostElement): boolean {
+    const block = descriptor.block;
+    if (
+      !this.active ||
+      block?.kind !== "keyed-ranges" ||
+      block.id !== this.block.id ||
+      block.ranges.length !== this.block.ranges.length ||
+      block.trailing !== this.block.trailing ||
+      block.ranges.some((range, index) => range.before !== this.block.ranges[index].before)
+    ) {
+      return false;
+    }
+    this.host = descriptor;
+    this.block = block;
+    const rowsByRange = this.readRanges();
+    if (
+      !rowsByRange ||
+      rowsByRange.length !== this.instances.length ||
+      !this.updateStaticScopes(descriptor, rowsByRange)
+    ) {
+      return false;
+    }
+    for (let index = rowsByRange.length - 1; index >= 0; index -= 1) {
+      if (!this.reconcileRange(index, rowsByRange[index])) return false;
+    }
+    return true;
+  }
 
   cleanup(): void {
     if (!this.active) return;
@@ -1888,6 +1991,10 @@ function createKeyedRowsBlockComponent(
     fallback: boolean;
   }
 
+  const rowHostScopeOwner: Pick<ConditionalBlockOwner, "subscribe"> = {
+    subscribe: () => () => {},
+  };
+
   type RowConditionalRefresh = (item: unknown, index: number, afterCommit?: () => void) => void;
 
   interface RowConditionalOwner {
@@ -1992,6 +2099,10 @@ function createKeyedRowsBlockComponent(
       this.root = root;
     };
 
+    private requestHostScopeFallback = () => {
+      this.activateFallback();
+    };
+
     private readRows(
       props: CompilerKeyedRowsBlockProps,
     ): { items: unknown[]; keys: string[] } | null {
@@ -2071,6 +2182,26 @@ function createKeyedRowsBlockComponent(
       return Boolean(props.events?.length || props.conditionals?.length);
     }
 
+    private cleanupHostScopes(
+      instances: ReadonlyMap<string, CompilerKeyedRowInstance> = this.instances,
+    ): void {
+      for (const instance of instances.values()) instance.scope?.cleanup();
+    }
+
+    private mountRowHostScope(
+      element: Element,
+      descriptor: CompilerHostElement,
+      props: CompilerKeyedRowsBlockProps = this.currentProps,
+    ): CompilerHostTreeScope | null | undefined {
+      if (!props.hostBlocks) return undefined;
+      return mountCompilerHostTree(
+        rowHostScopeOwner,
+        element,
+        descriptor,
+        this.requestHostScopeFallback,
+      );
+    }
+
     private pruneEventHandlers(keys: readonly string[]): void {
       const active = new Set(keys);
       for (const key of this.eventHandlers.keys()) {
@@ -2095,19 +2226,23 @@ function createKeyedRowsBlockComponent(
       );
       const instances = new Map<string, CompilerKeyedRowInstance>();
       for (let index = 0; index < rows.items.length; index += 1) {
+        const descriptor = this.currentProps.create(rows.items[index], index);
         if (
           this.hasReactOwnedRows() &&
-          !matchesCompilerHostElement(
-            elements[index],
-            this.currentProps.create(rows.items[index], index),
-            opaqueConditionalPaths,
-          )
+          !matchesCompilerHostElement(elements[index], descriptor, opaqueConditionalPaths)
         ) {
+          this.cleanupHostScopes(instances);
+          return false;
+        }
+        const scope = this.mountRowHostScope(elements[index], descriptor);
+        if (this.currentProps.hostBlocks && !scope) {
+          this.cleanupHostScopes(instances);
           return false;
         }
         const instance: CompilerKeyedRowInstance = {
           key: rows.keys[index],
           element: elements[index],
+          scope: scope || undefined,
           values: this.hasReactOwnedRows()
             ? this.currentProps.bindings.map(() => UNSET_KEYED_ROW_BINDING)
             : readKeyedRowBindingValues(this.currentProps, rows.items[index], index),
@@ -2128,6 +2263,7 @@ function createKeyedRowsBlockComponent(
         }
         instances.set(rows.keys[index], instance);
       }
+      this.cleanupHostScopes();
       this.instances = instances;
       this.pruneEventHandlers(rows.keys);
       this.pruneConditionalListeners(rows.keys);
@@ -2151,6 +2287,7 @@ function createKeyedRowsBlockComponent(
       this.fallbackKeysWereUnsafe = this.hasUnsafeFallbackKeys();
       // One key change on entry: the compiled path mutated the DOM behind
       // React's back, so the first fallback render must rebuild the subtree.
+      this.cleanupHostScopes();
       this.fallbackVersion += 1;
       this.setState({ fallback: true }, afterCommit);
     }
@@ -2242,7 +2379,10 @@ function createKeyedRowsBlockComponent(
       [...this.instances].forEach(([key], index) => oldIndices.set(key, index));
       const nextKeys = new Set(rows.keys);
       for (const [key, instance] of this.instances) {
-        if (!nextKeys.has(key)) instance.element.remove();
+        if (!nextKeys.has(key)) {
+          instance.scope?.cleanup();
+          instance.element.remove();
+        }
       }
 
       const sequence = rows.keys.map((key) => oldIndices.get(key) ?? -1);
@@ -2258,6 +2398,13 @@ function createKeyedRowsBlockComponent(
         const key = rows.keys[index];
         const existing = this.instances.get(key);
         if (existing) {
+          if (this.currentProps.hostBlocks) {
+            const descriptor = this.currentProps.create(rows.items[index], index);
+            if (!existing.scope?.update(descriptor)) {
+              this.activateFallback(afterCommit);
+              return;
+            }
+          }
           applyKeyedRowBindings(this.currentProps, existing, rows.items[index], index);
           const conditionalValues = readKeyedRowConditionalValues(
             this.currentProps,
@@ -2275,13 +2422,20 @@ function createKeyedRowsBlockComponent(
           nextInstances.push(existing);
           continue;
         }
-        const element = createCompilerHostElement(
-          this.root.ownerDocument,
-          this.currentProps.create(rows.items[index], index),
-        );
+        const descriptor = this.currentProps.create(rows.items[index], index);
+        const element = createCompilerHostElement(this.root.ownerDocument, descriptor);
+        const scope = this.mountRowHostScope(element, descriptor);
+        if (this.currentProps.hostBlocks && !scope) {
+          for (const instance of nextInstances) {
+            if (!this.instances.has(instance.key)) instance.scope?.cleanup();
+          }
+          this.activateFallback(afterCommit);
+          return;
+        }
         nextInstances.push({
           key,
           element,
+          scope: scope || undefined,
           values: readKeyedRowBindingValues(this.currentProps, rows.items[index], index),
           item: rows.items[index],
           index,
@@ -2368,6 +2522,7 @@ function createKeyedRowsBlockComponent(
       this.mounted = false;
       this.unsubscribe?.();
       this.root = null;
+      this.cleanupHostScopes();
       this.instances.clear();
       this.eventHandlers.clear();
       this.conditionalListeners.clear();

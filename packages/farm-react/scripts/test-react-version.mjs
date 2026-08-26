@@ -660,6 +660,151 @@ const testSource = String.raw`
   assert.equal(keyedRowExecutions, initialKeyedRowExecutions);
   flushSync(() => keyedRowsRoot.unmount());
 
+  let keyedHostRowExecutions = 0;
+  const KeyedHostRows = createCompiledComponent({
+    displayName: "CompatibilityKeyedHostRows",
+    initialize: () => [[
+      { id: "a", label: "Alpha", done: false, detail: false },
+      { id: "b", label: "Beta", done: true, detail: true },
+      { id: "c", label: "Gamma", done: false, detail: true },
+    ]],
+    render(_props, state, blocks) {
+      keyedHostRowExecutions += 1;
+      const items = () => state[0].get();
+      const descriptor = (item, index) => {
+        const detailBranch = {
+          create: () => ({ kind: "element", tag: "small", attributes: [], styles: [], children: [item.label, " detail"] }),
+          bindings: [{ kind: "text", path: [], read: () => [item.label, " detail"] }],
+        };
+        const doneBranch = {
+          create: () => ({
+            kind: "element",
+            tag: "article",
+            attributes: [],
+            styles: [],
+            children: [
+              { kind: "element", tag: "strong", attributes: [], styles: [], children: [item.label, " done"] },
+              {
+                kind: "element",
+                tag: "div",
+                attributes: [],
+                styles: [],
+                children: [item.detail ? detailBranch.create() : null],
+                block: {
+                  kind: "conditional-ranges",
+                  id: 2,
+                  ranges: [{ before: 0, test: () => item.detail, logical: true, truthy: detailBranch }],
+                  trailing: 0,
+                },
+              },
+            ],
+          }),
+          bindings: [{ kind: "text", path: [0], read: () => [item.label, " done"] }],
+        };
+        const openBranch = {
+          create: () => ({ kind: "element", tag: "aside", attributes: [], styles: [], children: [item.label, " open"] }),
+          bindings: [{ kind: "text", path: [], read: () => [item.label, " open"] }],
+        };
+        return {
+          kind: "element",
+          tag: "li",
+          attributes: [{ name: "data-key", value: item.id }, { name: "data-index", value: index }],
+          styles: [],
+          children: [
+            { kind: "element", tag: "span", attributes: [], styles: [], children: [item.label] },
+            {
+              kind: "element",
+              tag: "div",
+              attributes: [{ name: "data-status", value: "" }],
+              styles: [],
+              children: [
+                { kind: "element", tag: "i", attributes: [], styles: [], children: ["State"] },
+                item.done ? doneBranch.create() : openBranch.create(),
+                { kind: "element", tag: "b", attributes: [], styles: [], children: ["Prepared"] },
+              ],
+              block: {
+                kind: "conditional-ranges",
+                id: 1,
+                ranges: [{ before: 1, test: () => item.done, truthy: doneBranch, falsy: openBranch }],
+                trailing: 1,
+              },
+            },
+          ],
+        };
+      };
+      const row = (item, index) => React.createElement(
+        "li",
+        { key: item.id, "data-key": item.id, "data-index": index },
+        React.createElement("span", null, item.label),
+        React.createElement(
+          "div",
+          { "data-status": true },
+          React.createElement("i", null, "State"),
+          item.done
+            ? React.createElement(
+                "article",
+                null,
+                React.createElement("strong", null, item.label, " done"),
+                React.createElement("div", null, item.detail ? React.createElement("small", null, item.label, " detail") : null),
+              )
+            : React.createElement("aside", null, item.label, " open"),
+          React.createElement("b", null, "Prepared"),
+        ),
+      );
+      return React.createElement(
+        "section",
+        null,
+        React.createElement("button", {
+          "data-keyed-host-update": true,
+          onClick: () => state[0].set((current) => {
+            const [a, b, c] = current;
+            return [{ ...c, done: true }, a, { ...b, label: "Beta newest", detail: false }];
+          }),
+        }, "Update keyed host rows"),
+        React.createElement(blocks.KeyedRows, {
+          id: 0,
+          hostBlocks: true,
+          items,
+          rowKey: (item) => item.id,
+          create: descriptor,
+          bindings: [
+            { kind: "attribute", path: [], name: "data-index", read: (_item, index) => index },
+            { kind: "text", path: [0], read: (item) => [item.label] },
+          ],
+          render: () => React.createElement("ul", null, ...items().map(row)),
+        }),
+      );
+    },
+    bindings: [
+      { kind: "block", id: 0, dependencies: [0] },
+      { kind: "block", id: 1, parent: 0, dependencies: [] },
+      { kind: "block", id: 2, parent: 1, dependencies: [] },
+    ],
+  });
+  const keyedHostContainer = document.createElement("div");
+  document.body.append(keyedHostContainer);
+  const keyedHostRoot = createRoot(keyedHostContainer);
+  flushSync(() => keyedHostRoot.render(React.createElement(KeyedHostRows)));
+  const initialKeyedHostExecutions = keyedHostRowExecutions;
+  const originalKeyedHostB = keyedHostContainer.querySelector('[data-key="b"]');
+  const originalKeyedHostBArticle = originalKeyedHostB.querySelector("article");
+  const originalKeyedHostBStatic = originalKeyedHostB.querySelector("i");
+  keyedHostContainer.querySelector("[data-keyed-host-update]").click();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(
+    [...keyedHostContainer.querySelectorAll("li")].map((row) => row.getAttribute("data-key")),
+    ["c", "a", "b"],
+  );
+  assert.equal(keyedHostContainer.querySelector('[data-key="b"]'), originalKeyedHostB);
+  assert.equal(keyedHostContainer.querySelector('[data-key="b"] article'), originalKeyedHostBArticle);
+  assert.equal(keyedHostContainer.querySelector('[data-key="b"] i'), originalKeyedHostBStatic);
+  assert.equal(keyedHostContainer.querySelector('[data-key="b"] strong').textContent, "Beta newest done");
+  assert.equal(keyedHostContainer.querySelector('[data-key="b"] small'), null);
+  assert.equal(keyedHostContainer.querySelector('[data-key="c"] article').textContent, "Gamma doneGamma detail");
+  assert.equal(keyedHostRowExecutions, initialKeyedHostExecutions);
+  flushSync(() => keyedHostRoot.unmount());
+
   let keyedRangeExecutions = 0;
   const KeyedRanges = createCompiledComponent({
     displayName: "CompatibilityKeyedRanges",
