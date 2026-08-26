@@ -131,15 +131,6 @@ export function createContext(
   const locals = parent?.locals ? new Map(parent.locals) : new Map<string, any>();
   const cookies = new CookieJarImpl(req, res);
 
-  // Copy existing headers
-  Object.entries(req.headers).forEach(([key, value]) => {
-    if (typeof value === "string") {
-      headers.set(key, value);
-    } else if (Array.isArray(value)) {
-      headers.set(key, value.join(", "));
-    }
-  });
-
   if (parent?.headers) {
     for (const [key, value] of Object.entries(parent.headers)) {
       headers.set(key, value);
