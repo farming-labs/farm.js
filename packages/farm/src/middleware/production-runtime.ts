@@ -132,7 +132,7 @@ function parseCookies(cookieHeader?: string | null): Record<string, string> {
 function serializeCookie(name: string, value: string, options: CookieOptions = {}): string {
   let cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}`;
 
-  if (options.maxAge) cookie += `; Max-Age=${options.maxAge}`;
+  if (options.maxAge != null) cookie += `; Max-Age=${options.maxAge}`;
   if (options.expires) cookie += `; Expires=${options.expires.toUTCString()}`;
   cookie += `; Path=${options.path || "/"}`;
   if (options.domain) cookie += `; Domain=${options.domain}`;

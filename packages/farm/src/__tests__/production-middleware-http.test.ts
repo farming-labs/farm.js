@@ -7,6 +7,19 @@ import {
 } from "../middleware/production-runtime";
 
 describe("production middleware HTTP behavior", () => {
+  it("preserves Max-Age=0 when expiring a cookie", async () => {
+    const runner = createProductionMiddlewareRunner({
+      config: {
+        handler(ctx) {
+          ctx.cookies.set("preview", "", { maxAge: 0 });
+        },
+      },
+    });
+
+    const result = await runner(new Request("https://example.com/"));
+    expect(result.headers.getSetCookie()).toEqual(["preview=; Max-Age=0; Path=/"]);
+  });
+
   it("keeps multiple middleware cookies as separate Set-Cookie headers", async () => {
     const runner = createProductionMiddlewareRunner({
       config: {
