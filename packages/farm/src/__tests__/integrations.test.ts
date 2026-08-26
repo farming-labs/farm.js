@@ -682,6 +682,74 @@ describe("integrations runtime", () => {
     expect(routeMiddleware).toHaveBeenCalledTimes(1);
   });
 
+  it("drops prototype keys from query and form inputs", async () => {
+    const describeInput = (value: unknown) => {
+      const input = value as Record<string, unknown>;
+      return {
+        input,
+        usesPlainPrototype: Object.getPrototypeOf(input) === Object.prototype,
+        ownsPrototypeKey: Object.hasOwn(input, "__proto__"),
+      };
+    };
+    const manager = createManager();
+    manager.addPlugins(
+      resolveIntegrationPlugins({
+        safeInput: defineIntegration({
+          category: "custom",
+          type: "safe-input",
+          instance: {},
+          routes: [
+            integrationRoute.get("/api/safe-input/query", {
+              query: z.any(),
+              handler(_request, context) {
+                return Response.json(describeInput(context.input.query));
+              },
+            }),
+            integrationRoute.post("/api/safe-input/form", {
+              bodyFormat: "form",
+              body: z.any(),
+              handler(_request, context) {
+                return Response.json(describeInput(context.input.body));
+              },
+            }),
+          ],
+        }),
+      }),
+    );
+
+    await manager.runHookParallel("init");
+    const runtime = getRegisteredIntegrationRuntime("safeInput");
+    expect(runtime).toBeDefined();
+
+    const queryResponse = await dispatchIntegrationRequest(
+      runtime!,
+      new Request(
+        "http://localhost/api/safe-input/query?safe=yes&__proto__=first&__proto__=second&constructor=blocked&prototype=blocked",
+      ),
+    );
+    expect(await queryResponse?.json()).toEqual({
+      input: { safe: "yes" },
+      usesPlainPrototype: true,
+      ownsPrototypeKey: false,
+    });
+
+    const formResponse = await dispatchIntegrationRequest(
+      runtime!,
+      new Request("http://localhost/api/safe-input/form", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: "safe=yes&__proto__=first&__proto__=second&constructor=blocked&prototype=blocked",
+      }),
+    );
+    expect(await formResponse?.json()).toEqual({
+      input: { safe: "yes" },
+      usesPlainPrototype: true,
+      ownsPrototypeKey: false,
+    });
+  });
+
   it("supports Better Call-style Zod body and query schemas on integration routes", async () => {
     const beforeHook = vi.fn();
     const manager = createManager();
