@@ -1,4 +1,5 @@
 import React from "react";
+import { materializeIterable } from "./iterable";
 
 export interface ListProps<Item> {
   /** Items to render. Nullish collections are treated as empty. */
@@ -17,7 +18,7 @@ export interface ListProps<Item> {
  * updates do not execute the surrounding user component.
  */
 export function List<Item>({ each, by, children }: ListProps<Item>): React.ReactElement {
-  const rows = each ? Array.from(each) : [];
+  const rows = materializeIterable(each);
   return React.createElement(
     React.Fragment,
     null,
