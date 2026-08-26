@@ -149,6 +149,7 @@ interface KeyedRowsPlan {
   bindings: PendingKeyedRowBinding[];
   events: PendingKeyedRowEvent[];
   conditionals: PendingKeyedRowConditional[];
+  descriptorBlocks?: ReadonlyMap<t.JSXElement, HostDescriptorBlockPlan>;
   syntax: "map" | "list";
 }
 
@@ -932,6 +933,7 @@ interface KeyedRowsShape {
   bindings: PendingKeyedRowBinding[];
   events: PendingKeyedRowEvent[];
   conditionals: PendingKeyedRowConditional[];
+  rowReason?: string;
   syntax: "map" | "list";
 }
 
@@ -1321,6 +1323,7 @@ function analyzeKeyedRowChild(
   statesByValue: ReadonlyMap<string, StateBinding>,
   safeGlobals: ReadonlySet<string>,
   listNames: ReadonlySet<string>,
+  acceptUnsupportedRow = false,
 ): KeyedRowChildShape | undefined {
   let collection: t.Expression;
   let keyCallback: t.ArrowFunctionExpression | t.FunctionExpression;
@@ -1389,7 +1392,7 @@ function analyzeKeyedRowChild(
     safeGlobals,
     new Set([...statesByValue.values()].map((state) => state.setterName)),
   );
-  if (rowAnalysis.reason) return undefined;
+  if (rowAnalysis.reason && !acceptUnsupportedRow) return undefined;
   return {
     source,
     collection,
@@ -1400,6 +1403,7 @@ function analyzeKeyedRowChild(
     bindings: rowAnalysis.bindings || [],
     events: rowAnalysis.events || [],
     conditionals: rowAnalysis.conditionals || [],
+    rowReason: rowAnalysis.reason,
     syntax,
   };
 }
@@ -1436,7 +1440,7 @@ function analyzeKeyedRowsContainer(
 
   const children = meaningfulJsxChildren(container);
   if (children.length !== 1) return undefined;
-  return analyzeKeyedRowChild(children[0], statesByValue, safeGlobals, listNames);
+  return analyzeKeyedRowChild(children[0], statesByValue, safeGlobals, listNames, true);
 }
 
 function isStaticRangeSibling(
@@ -1953,6 +1957,50 @@ function analyzeRecursiveHostTree(
 
   const reason = visit(branch, [], parent);
   return { bindings, plans, blocks, reason };
+}
+
+function analyzeCompilerOwnedKeyedRowHostBlocks(
+  shape: KeyedRowsShape,
+  statesByValue: ReadonlyMap<string, StateBinding>,
+  safeGlobals: ReadonlySet<string>,
+  listNames: ReadonlySet<string>,
+  parent: number,
+  allocateId: () => number,
+):
+  | {
+      row: t.JSXElement;
+      bindings: PendingKeyedRowBinding[];
+      descriptorBlocks: ReadonlyMap<t.JSXElement, HostDescriptorBlockPlan>;
+      nestedPlans: HostDescriptorBlockPlan[];
+    }
+  | undefined {
+  if (shape.events.length > 0) return undefined;
+
+  const row = t.cloneNode(shape.row, true);
+  row.openingElement.attributes = row.openingElement.attributes.filter(
+    (attribute) => !t.isJSXAttribute(attribute) || jsxAttributeName(attribute) !== "key",
+  );
+  const analysis = analyzeRecursiveHostTree(
+    row,
+    statesByValue,
+    safeGlobals,
+    listNames,
+    parent,
+    allocateId,
+  );
+  if (
+    analysis.reason ||
+    analysis.plans.length === 0 ||
+    analysis.plans.some((plan) => plan.kind !== "nested-host-conditional-ranges")
+  ) {
+    return undefined;
+  }
+  return {
+    row,
+    bindings: analysis.bindings,
+    descriptorBlocks: analysis.blocks,
+    nestedPlans: analysis.plans,
+  };
 }
 
 function analyzeHostConditionalContainer(
@@ -2617,7 +2665,7 @@ function keyedRowsBoundary(blockRuntime: t.Identifier, plan: KeyedRowsPlan): t.J
           t.jsxExpressionContainer(
             t.arrowFunctionExpression(
               parameters.map((parameter) => t.cloneNode(parameter, true)),
-              hostElementDescriptor(plan.row),
+              hostElementDescriptor(plan.row, plan.descriptorBlocks),
             ),
           ),
         ),
@@ -2652,6 +2700,14 @@ function keyedRowsBoundary(blockRuntime: t.Identifier, plan: KeyedRowsPlan): t.J
                     ),
                   ),
                 ),
+              ),
+            ]
+          : []),
+        ...(plan.descriptorBlocks?.size
+          ? [
+              t.jsxAttribute(
+                t.jsxIdentifier("hostBlocks"),
+                t.jsxExpressionContainer(t.booleanLiteral(true)),
               ),
             ]
           : []),
@@ -3195,26 +3251,48 @@ function analyzeComposableBlocks(
             continue;
           }
           nextId = hostConditionalStart;
+          const keyedRowsStart = nextId;
+          const keyedRowsId = nextId++;
           const keyedRows = analyzeKeyedRowsContainer(child, statesByValue, safeGlobals, listNames);
           if (keyedRows) {
+            const nestedStart = nextId;
+            const hostBlocks = analyzeCompilerOwnedKeyedRowHostBlocks(
+              keyedRows,
+              statesByValue,
+              safeGlobals,
+              listNames,
+              keyedRowsId,
+              () => nextId++,
+            );
+            if (!hostBlocks) nextId = nestedStart;
+            if (keyedRows.rowReason && !hostBlocks) {
+              nextId = keyedRowsStart;
+              const nested = visitHost(child, parent, insideConditional);
+              if (nested.reason) return { dependencies, reason: nested.reason };
+              mergeDependencies(dependencies, nested.dependencies);
+              continue;
+            }
             plans.push({
               kind: "keyed-rows",
-              id: nextId++,
+              id: keyedRowsId,
               parent,
               dependencies: keyedRows.dependencies,
               source: child,
               collection: keyedRows.collection,
               keyCallback: keyedRows.keyCallback,
               renderCallback: keyedRows.renderCallback,
-              row: keyedRows.row,
-              bindings: keyedRows.bindings,
+              row: hostBlocks?.row || keyedRows.row,
+              bindings: hostBlocks?.bindings || keyedRows.bindings,
               events: keyedRows.events,
-              conditionals: keyedRows.conditionals,
+              conditionals: hostBlocks ? [] : keyedRows.conditionals,
+              descriptorBlocks: hostBlocks?.descriptorBlocks,
               syntax: keyedRows.syntax,
             });
+            plans.push(...(hostBlocks?.nestedPlans || []));
             ownedElements.add(child);
             continue;
           }
+          nextId = keyedRowsStart;
           const nested = visitHost(child, parent, insideConditional);
           if (nested.reason) return { dependencies, reason: nested.reason };
           mergeDependencies(dependencies, nested.dependencies);

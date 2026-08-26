@@ -11,6 +11,7 @@ const compilerReportPath = path.resolve(".farm/react-compiler.json");
 const screenshotPath =
   process.env.FARM_EXPERIMENT_SCREENSHOT || "/tmp/farm-react-aot-edge-lab.png";
 const mobileScreenshotPath = screenshotPath.replace(/(\.[^.]+)?$/, "-mobile$1");
+const browserExecutablePath = process.env.FARM_EXPERIMENT_BROWSER_PATH;
 
 await access(serverEntry);
 const compilerReport = JSON.parse(await readFile(compilerReportPath, "utf8"));
@@ -38,6 +39,7 @@ for (const component of [
   "StatefulListRow",
   "ComponentIslandExperiment",
   "ComposableBlockExperiment",
+  "KeyedRowHostBlockExperiment",
 ]) {
   assert.ok(compiledComponents.has(component), `${component} was not compiled`);
 }
@@ -93,7 +95,10 @@ async function readNumber(page, selector) {
 let browser;
 try {
   await waitForServer();
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({
+    headless: true,
+    ...(browserExecutablePath ? { executablePath: browserExecutablePath } : {}),
+  });
   const page = await browser.newPage({
     viewport: { width: 1440, height: 1100 },
   });
@@ -1069,6 +1074,102 @@ try {
   );
   assert.equal(recursiveOwnerFinalExecutions - recursiveOwnerInitialExecutions, 0);
 
+  const keyedHostRows = '[data-experiment="keyed-row-host-blocks"]';
+  const keyedHostOwnerInitialExecutions = await readNumber(
+    page,
+    `${keyedHostRows} [data-metric="keyed-host-owner-executions"]`,
+  );
+  await assertText(page, `${keyedHostRows} [data-metric="keyed-host-rows"]`, "1000");
+  await assertText(page, `${keyedHostRows} [data-metric="keyed-host-first"]`, "row-0");
+  assert.equal(await page.locator(`${keyedHostRows} [data-keyed-host-row]`).count(), 1000);
+  await page.evaluate(() => {
+    const list = document.querySelector("[data-keyed-host-list]");
+    window.__farmKeyedHostRow0 = document.querySelector('[data-keyed-host-row="row-0"]');
+    window.__farmKeyedHostRow12 = document.querySelector('[data-keyed-host-row="row-12"]');
+    window.__farmKeyedHostRow12Article = window.__farmKeyedHostRow12.querySelector("article");
+    window.__farmKeyedHostRow12Before = window.__farmKeyedHostRow12.querySelector(
+      "[data-keyed-host-status] > i",
+    );
+    window.__farmKeyedHostRow12After = window.__farmKeyedHostRow12.querySelector(
+      "[data-keyed-host-status] > b",
+    );
+    window.__farmKeyedHostMoves = 0;
+    const insertBefore = list.insertBefore.bind(list);
+    list.insertBefore = (node, anchor) => {
+      if (node.parentNode === list && node.matches?.("[data-keyed-host-row]")) {
+        window.__farmKeyedHostMoves += 1;
+      }
+      return insertBefore(node, anchor);
+    };
+  });
+
+  await page.locator(`${keyedHostRows} [data-action="keyed-host-rotate"]`).click();
+  await assertText(page, `${keyedHostRows} [data-metric="keyed-host-updates"]`, "1");
+  await assertText(page, `${keyedHostRows} [data-metric="keyed-host-first"]`, "row-1");
+  await assertText(
+    page,
+    `${keyedHostRows} [data-keyed-host-row="row-0"] [data-keyed-host-branch]`,
+    "Task 0 · branch replaced open",
+  );
+  await assertText(
+    page,
+    `${keyedHostRows} [data-keyed-host-row="row-12"] strong`,
+    "Task 12 · nested patched complete",
+  );
+  await assertText(
+    page,
+    `${keyedHostRows} [data-keyed-host-row="row-12"] [data-keyed-host-extra]`,
+    "Task 12 · nested patched expanded",
+  );
+  assert.equal(
+    await page.locator(
+      `${keyedHostRows} [data-keyed-host-row="row-12"] [data-keyed-host-detail]`,
+    ).count(),
+    0,
+  );
+  assert.equal(
+    await page.locator(
+      `${keyedHostRows} [data-keyed-host-row="row-12"] article`,
+    ).evaluate((article) => article.style.opacity),
+    "0.72",
+  );
+  assert.equal(await page.evaluate(() => window.__farmKeyedHostMoves), 1);
+  assert.equal(
+    await page.evaluate(
+      () =>
+        window.__farmKeyedHostRow0 ===
+          document.querySelector('[data-keyed-host-row="row-0"]') &&
+        window.__farmKeyedHostRow12 ===
+          document.querySelector('[data-keyed-host-row="row-12"]') &&
+        window.__farmKeyedHostRow12Article ===
+          document.querySelector('[data-keyed-host-row="row-12"] article') &&
+        window.__farmKeyedHostRow12Before ===
+          document.querySelector('[data-keyed-host-row="row-12"] [data-keyed-host-status] > i') &&
+        window.__farmKeyedHostRow12After ===
+          document.querySelector('[data-keyed-host-row="row-12"] [data-keyed-host-status] > b'),
+    ),
+    true,
+    "the keyed row host update replaced a surviving row, branch, or static sibling",
+  );
+
+  await page.locator(`${keyedHostRows} [data-action="keyed-host-replace"]`).click();
+  await assertText(page, `${keyedHostRows} [data-metric="keyed-host-updates"]`, "2");
+  await assertText(page, `${keyedHostRows} [data-metric="keyed-host-rows"]`, "1000");
+  assert.equal(
+    await page.locator(`${keyedHostRows} [data-keyed-host-row="row-10"]`).count(),
+    0,
+  );
+  await assertText(
+    page,
+    `${keyedHostRows} [data-keyed-host-row="inserted-1"] [data-keyed-host-detail]`,
+    "Inserted after update 1 detail",
+  );
+  const keyedHostOwnerFinalExecutions = await readNumber(
+    page,
+    `${keyedHostRows} [data-metric="keyed-host-owner-executions"]`,
+  );
+  assert.equal(keyedHostOwnerFinalExecutions - keyedHostOwnerInitialExecutions, 0);
+
   await page.screenshot({ path: screenshotPath, fullPage: true });
 
   const mobilePage = await browser.newPage({
@@ -1276,6 +1377,16 @@ try {
             staleSubscriptionsAfterHide: 0,
             ownerUpdateExecutions:
               recursiveOwnerFinalExecutions - recursiveOwnerInitialExecutions,
+          },
+          keyedRowHostBlocks: {
+            rows: 1000,
+            firstKey: "row-1",
+            lisMoves: 1,
+            sameBranchIdentityPreserved: true,
+            nestedConditionPatched: true,
+            removedAndInserted: true,
+            ownerUpdateExecutions:
+              keyedHostOwnerFinalExecutions - keyedHostOwnerInitialExecutions,
           },
         },
       },
