@@ -1352,14 +1352,15 @@ describe("Header Management Advanced", () => {
     expect(ctx.headers.get("X-Custom")).toBe("value2");
   });
 
-  it("should preserve existing headers", () => {
+  it("keeps request headers separate from response headers", () => {
     const req = createMockRequest("/test");
     req.headers["existing-header"] = "existing-value";
 
     const res = createMockResponse();
     const ctx = createContext(req, res);
 
-    expect(ctx.headers.get("existing-header")).toBe("existing-value");
+    expect(ctx.request.headers["existing-header"]).toBe("existing-value");
+    expect(ctx.headers.has("existing-header")).toBe(false);
   });
 });
 
@@ -1807,6 +1808,30 @@ describe("Middleware Data Access (getMiddlewareData)", () => {
 });
 
 describe("Middleware Manager Data Flow", () => {
+  it("does not reflect private request headers into the response", async () => {
+    const manager = new MiddlewareManager("/tmp", undefined, [
+      {
+        matcher: "/**",
+        async handler(ctx, next) {
+          ctx.headers.set("x-farm-response", "yes");
+          await next();
+        },
+      },
+    ]);
+
+    const req = createMockRequest("/dashboard");
+    req.headers.authorization = "Bearer secret";
+    req.headers.cookie = "session=secret";
+    const res = createMockResponse();
+
+    await manager.execute(req, res);
+
+    expect(res.setHeader).toHaveBeenCalledWith("x-farm-response", "yes");
+    expect(res.setHeader).not.toHaveBeenCalledWith("authorization", expect.anything());
+    expect(res.setHeader).not.toHaveBeenCalledWith("cookie", expect.anything());
+    expect(res.setHeader).not.toHaveBeenCalledWith("host", expect.anything());
+  });
+
   it("executes farm.config middleware entries when their matcher matches", async () => {
     const seen: string[] = [];
     const manager = new MiddlewareManager("/tmp", undefined, [
