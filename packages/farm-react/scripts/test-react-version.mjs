@@ -805,6 +805,132 @@ const testSource = String.raw`
   assert.equal(keyedHostRowExecutions, initialKeyedHostExecutions);
   flushSync(() => keyedHostRoot.unmount());
 
+  let nestedKeyedExecutions = 0;
+  const NestedKeyedRows = createCompiledComponent({
+    displayName: "CompatibilityNestedKeyedRows",
+    initialize: () => [[
+      { id: "a", name: "Alpha", tasks: [{ id: "a1", title: "Design" }, { id: "a2", title: "Build" }] },
+      { id: "b", name: "Beta", tasks: [{ id: "b1", title: "Test" }, { id: "b2", title: "Ship" }] },
+    ]],
+    render(_props, state, blocks) {
+      nestedKeyedExecutions += 1;
+      const projects = () => state[0].get();
+      const taskDescriptor = (task, index) => ({
+        kind: "element",
+        tag: "li",
+        attributes: [{ name: "data-task", value: task.id }, { name: "data-index", value: index }],
+        styles: [],
+        children: [task.title],
+      });
+      const projectDescriptor = (project, index) => ({
+        kind: "element",
+        tag: "section",
+        attributes: [{ name: "data-project", value: project.id }, { name: "data-index", value: index }],
+        styles: [],
+        children: [
+          { kind: "element", tag: "h3", attributes: [], styles: [], children: [project.name] },
+          {
+            kind: "element",
+            tag: "ul",
+            attributes: [],
+            styles: [],
+            children: [
+              { kind: "element", tag: "i", attributes: [], styles: [], children: ["Tasks"] },
+              ...project.tasks.map(taskDescriptor),
+              { kind: "element", tag: "b", attributes: [], styles: [], children: ["End"] },
+            ],
+            block: {
+              kind: "keyed-ranges",
+              id: 1,
+              ranges: [{
+                before: 1,
+                items: () => project.tasks,
+                rowKey: (task) => task.id,
+                create: taskDescriptor,
+                bindings: [
+                  { kind: "attribute", path: [], name: "data-index", read: (_task, taskIndex) => taskIndex },
+                  { kind: "text", path: [], read: (task) => [task.title] },
+                ],
+              }],
+              trailing: 1,
+            },
+          },
+        ],
+      });
+      const projectMarkup = (project, index) => React.createElement(
+        "section",
+        { key: project.id, "data-project": project.id, "data-index": index },
+        React.createElement("h3", null, project.name),
+        React.createElement(
+          "ul",
+          null,
+          React.createElement("i", null, "Tasks"),
+          ...project.tasks.map((task, taskIndex) =>
+            React.createElement("li", { key: task.id, "data-task": task.id, "data-index": taskIndex }, task.title),
+          ),
+          React.createElement("b", null, "End"),
+        ),
+      );
+      return React.createElement(
+        "main",
+        null,
+        React.createElement("button", {
+          "data-nested-keyed-update": true,
+          onClick: () => state[0].set((current) => {
+            const [a, b] = current;
+            return [
+              { ...b, name: "Beta newest", tasks: [{ ...b.tasks[1], title: "Ship now" }, b.tasks[0]] },
+              a,
+            ];
+          }),
+        }, "Update nested keyed rows"),
+        React.createElement(blocks.KeyedRows, {
+          id: 0,
+          hostBlocks: true,
+          items: projects,
+          rowKey: (project) => project.id,
+          create: projectDescriptor,
+          bindings: [
+            { kind: "attribute", path: [], name: "data-index", read: (_project, index) => index },
+            { kind: "text", path: [0], read: (project) => [project.name] },
+          ],
+          render: () => React.createElement("div", null, ...projects().map(projectMarkup)),
+        }),
+      );
+    },
+    bindings: [
+      { kind: "block", id: 0, dependencies: [0] },
+      { kind: "block", id: 1, parent: 0, dependencies: [] },
+    ],
+  });
+  const nestedKeyedContainer = document.createElement("div");
+  document.body.append(nestedKeyedContainer);
+  const nestedKeyedRoot = createRoot(nestedKeyedContainer);
+  flushSync(() => nestedKeyedRoot.render(React.createElement(NestedKeyedRows)));
+  const initialNestedKeyedExecutions = nestedKeyedExecutions;
+  const originalProjectB = nestedKeyedContainer.querySelector('[data-project="b"]');
+  const originalTaskB1 = nestedKeyedContainer.querySelector('[data-task="b1"]');
+  const originalTaskB2 = nestedKeyedContainer.querySelector('[data-task="b2"]');
+  const originalNestedStatic = originalProjectB.querySelector("ul > i");
+  nestedKeyedContainer.querySelector("[data-nested-keyed-update]").click();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(
+    [...nestedKeyedContainer.querySelectorAll("[data-project]")].map((row) => row.dataset.project),
+    ["b", "a"],
+  );
+  assert.deepEqual(
+    [...originalProjectB.querySelectorAll("[data-task]")].map((row) => row.dataset.task),
+    ["b2", "b1"],
+  );
+  assert.equal(nestedKeyedContainer.querySelector('[data-project="b"]'), originalProjectB);
+  assert.equal(nestedKeyedContainer.querySelector('[data-task="b1"]'), originalTaskB1);
+  assert.equal(nestedKeyedContainer.querySelector('[data-task="b2"]'), originalTaskB2);
+  assert.equal(originalProjectB.querySelector("ul > i"), originalNestedStatic);
+  assert.equal(originalTaskB2.textContent, "Ship now");
+  assert.equal(nestedKeyedExecutions, initialNestedKeyedExecutions);
+  flushSync(() => nestedKeyedRoot.unmount());
+
   let keyedRangeExecutions = 0;
   const KeyedRanges = createCompiledComponent({
     displayName: "CompatibilityKeyedRanges",

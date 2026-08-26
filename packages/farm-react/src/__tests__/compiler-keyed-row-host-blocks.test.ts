@@ -179,7 +179,7 @@ describe("React AOT compiler-owned keyed-row host blocks", () => {
     expect(result.code).not.toContain("hostBlocks={true}");
   });
 
-  it("defers nested keyed lists inside a row while preserving normal React output", async () => {
+  it("prepares nested keyed lists inside an outer keyed row", async () => {
     const result = await compile(`
       import { useState } from "react";
       export function Inbox() {
@@ -201,9 +201,102 @@ describe("React AOT compiler-owned keyed-row host blocks", () => {
     `);
 
     expect(result.compiled).toEqual(["Inbox"]);
-    expect(result.code).not.toContain("hostBlocks={true}");
-    expect(result.code).toContain("farmBlocks.KeyedList");
+    expect(result.diagnostics).toEqual([]);
+    expect(result.code).toContain("hostBlocks={true}");
+    expect(result.code).toContain('kind: "keyed-ranges"');
+    expect(result.code).toContain("parent: 0");
+    expect(result.code).not.toContain("farmBlocks.KeyedList");
     expect(result.code).toContain("item.children.map");
+    await expect(
+      transformWithEsbuild(result.code, "/app/KeyedRowHostBlocks.tsx", {
+        loader: "tsx",
+        jsx: "automatic",
+      }),
+    ).resolves.toMatchObject({ code: expect.stringContaining("hostBlocks") });
+  });
+
+  it("supports multiple nested map and List ranges beside static siblings", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      import { List } from "@farm.js/react/list";
+      export function Projects() {
+        const [projects, setProjects] = useState([{ id: "p", name: "Farm", ready: true, tasks: [{ id: "t", title: "Test" }], notes: [{ id: "n", text: "Ship" }] }]);
+        return (
+          <main>
+            <button onClick={() => setProjects((rows) => [...rows])}>Refresh</button>
+            <div>
+              {projects.map((project) => (
+                <section key={project.id}>
+                  <h2>{project.name}</h2>
+                  <div>{project.ready && <strong>Ready</strong>}</div>
+                  <ul>
+                    <i>Tasks</i>
+                    {project.tasks.map((task, index) => <li key={task.id} data-index={index}>{task.title}</li>)}
+                    <b>Notes</b>
+                    <List each={project.notes} by={(note) => note.id}>
+                      {(note) => <li title={note.text}>{note.text}</li>}
+                    </List>
+                    <em>End</em>
+                  </ul>
+                </section>
+              ))}
+            </div>
+          </main>
+        );
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Projects"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.code).toContain("hostBlocks={true}");
+    expect(result.code.match(/kind: "keyed-ranges"/g)).toHaveLength(1);
+    expect(result.code.match(/before: /g)?.length).toBeGreaterThanOrEqual(2);
+    expect(result.code).toContain('kind: "conditional-ranges"');
+    expect(result.code).not.toContain("farmBlocks.KeyedList");
+  });
+
+  it.each([
+    {
+      name: "an interactive inner row",
+      row: "<li key={task.id}><button onClick={() => setItems([])}>{task.title}</button></li>",
+    },
+    {
+      name: "a custom component inner row",
+      row: "<TaskRow key={task.id} task={task} />",
+      declaration: "function TaskRow({ task }) { return <li>{task.title}</li>; }",
+    },
+    {
+      name: "an inner fragment row",
+      row: "<><li key={task.id}>{task.title}</li></>",
+    },
+    {
+      name: "an index-keyed inner row",
+      row: "<li key={index}>{task.title}</li>",
+    },
+  ])("keeps $name on React's safe row fallback", async ({ row, declaration = "" }) => {
+    const result = await compile(`
+      import { useState } from "react";
+      ${declaration}
+      export function Projects() {
+        const [items, setItems] = useState([{ id: "p", tasks: [{ id: "t", title: "Test" }] }]);
+        return (
+          <main>
+            <button onClick={() => setItems((rows) => [...rows])}>Refresh</button>
+            <div>
+              {items.map((item) => (
+                <section key={item.id}>
+                  <ol>{item.tasks.map((task, index) => ${row})}</ol>
+                </section>
+              ))}
+            </div>
+          </main>
+        );
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Projects"]);
+    expect(result.code).not.toContain("hostBlocks={true}");
+    expect(result.code).toContain("item.tasks.map");
   });
 
   it("keeps block ids unique across sibling lists and component-level blocks", async () => {
