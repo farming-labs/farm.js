@@ -242,6 +242,42 @@ describe("Farm workflows", () => {
     expect(handlerSource).not.toContain("decodeURIComponent(event.context.params");
   });
 
+  it("emits only internal imports the production runtime actually exports", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-workflow-imports-"));
+    await fs.mkdir(path.join(root, "src", "jobs"), { recursive: true });
+    await fs.writeFile(
+      path.join(root, "src", "jobs", "sync.mjs"),
+      "export default { async run() { return { ok: true }; } };",
+    );
+
+    const prepared = await prepareFarmWorkflowsForNitro({ root, workflows: {}, server: {} });
+    const handlerSource = await fs.readFile(prepared.handlerPath!, "utf8");
+    const productionRuntime = await import("../nitro/production-runtime");
+
+    // Only a real build resolves these specifiers, so a name missing from the
+    // internal entry fails `farm build` and nothing before it.
+    const importBlock = handlerSource.match(
+      /import\s*\{([^}]*)\}\s*from\s*"@farm\.js\/core\/internal\/production-runtime"/,
+    );
+    expect(importBlock).not.toBeNull();
+
+    const imported = importBlock![1]
+      .split(",")
+      .map((entry) =>
+        entry
+          .trim()
+          .replace(/^type\s+/, "")
+          .split(/\s+as\s+/)[0]!
+          .trim(),
+      )
+      .filter(Boolean);
+
+    expect(imported.length).toBeGreaterThan(0);
+    for (const name of imported) {
+      expect(productionRuntime).toHaveProperty(name);
+    }
+  });
+
   it("404s on a malformed percent-encoded workflow id instead of throwing", async () => {
     const workflow = {
       id: "sync-users",
