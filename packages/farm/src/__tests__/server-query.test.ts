@@ -15,6 +15,7 @@ import { _runWithCurrentRequest } from "../server/request";
 describe("createServerQuery", () => {
   afterEach(() => {
     getFarmDataCache().clear();
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -94,6 +95,25 @@ describe("createServerQuery", () => {
     invalidate(key);
     await expect(product({ id: "123" })).resolves.toEqual({ id: "123", source: "query-1" });
     expect(calls).toBe(1);
+  });
+
+  it("honors subsecond stale times without rounding them to one second", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    let calls = 0;
+    const query = createServerQuery({
+      key: () => ["subsecond"],
+      staleTime: "250ms",
+      async handler() {
+        return ++calls;
+      },
+    });
+
+    await expect(query()).resolves.toBe(1);
+    vi.setSystemTime(249);
+    await expect(query()).resolves.toBe(1);
+    vi.setSystemTime(250);
+    await expect(query()).resolves.toBe(2);
   });
 
   it("returns transport metadata only during a server action call", async () => {
