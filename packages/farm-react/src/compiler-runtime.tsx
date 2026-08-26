@@ -1,5 +1,6 @@
 import React from "react";
 import { flushSync } from "react-dom";
+import { materializeIterable } from "./iterable";
 
 export type CompilerStateUpdater = unknown | ((previous: unknown) => unknown);
 
@@ -670,8 +671,7 @@ function materializeCompilerHostChildren(descriptor: CompilerHostElement): reado
   for (const range of block.ranges) {
     children.push(...staticChildren.slice(cursor, cursor + range.before));
     cursor += range.before;
-    const source = range.items();
-    const items = source ? Array.from(source) : [];
+    const items = materializeIterable(range.items());
     children.push(...items.map((item, index) => range.create(item, index)));
   }
   children.push(...staticChildren.slice(cursor, cursor + block.trailing));
@@ -692,8 +692,7 @@ function collectCompilerHostBlockIds(descriptor: CompilerHostElement, ids: Set<n
     }
   } else if (block.kind === "keyed-ranges") {
     for (const range of block.ranges) {
-      const source = range.items();
-      const first = source ? Array.from(source)[0] : undefined;
+      const first = materializeIterable(range.items())[0];
       if (first !== undefined) collectCompilerHostBlockIds(range.create(first, 0), ids);
     }
   } else {
@@ -702,8 +701,7 @@ function collectCompilerHostBlockIds(descriptor: CompilerHostElement, ids: Set<n
         if (range.truthy) collectCompilerHostBlockIds(range.truthy.create(), ids);
         if (range.falsy) collectCompilerHostBlockIds(range.falsy.create(), ids);
       } else {
-        const source = range.items();
-        const first = source ? Array.from(source)[0] : undefined;
+        const first = materializeIterable(range.items())[0];
         if (first !== undefined) collectCompilerHostBlockIds(range.create(first, 0), ids);
       }
     }
@@ -1248,8 +1246,7 @@ class CompilerNestedKeyedRanges implements CompilerHostTreeScope {
   ) {}
 
   private readRange(range: CompilerKeyedRange): NestedReadKeyedRange | null {
-    const source = range.items();
-    const items = source ? Array.from(source) : [];
+    const items = materializeIterable(range.items());
     const keys = items.map((item, index) => keyedRowIdentity(range.rowKey(item, index)));
     return new Set(keys).size === keys.length ? { items, keys } : null;
   }
@@ -1546,8 +1543,7 @@ class CompilerNestedMixedRanges implements CompilerHostTreeScope {
         snapshots.push({ kind: "conditional", selection });
         continue;
       }
-      const source = range.items();
-      const items = source ? Array.from(source) : [];
+      const items = materializeIterable(range.items());
       const keys = items.map((item, index) => keyedRowIdentity(range.rowKey(item, index)));
       if (new Set(keys).size !== keys.length) return null;
       snapshots.push({ kind: "keyed", rows: { items, keys } });
@@ -2591,8 +2587,7 @@ function createKeyedRowsBlockComponent(
     private readRows(
       props: CompilerKeyedRowsBlockProps,
     ): { items: unknown[]; keys: string[] } | null {
-      const source = props.items();
-      const items = source ? Array.from(source) : [];
+      const items = materializeIterable(props.items());
       const keys = items.map((item, index) => keyedRowIdentity(props.rowKey(item, index)));
       if (new Set(keys).size !== keys.length) return null;
       return { items, keys };
@@ -3063,8 +3058,7 @@ function createKeyedRangesBlockComponent(
     };
 
     private readRange(range: CompilerKeyedRange): ReadRange | null {
-      const source = range.items();
-      const items = source ? Array.from(source) : [];
+      const items = materializeIterable(range.items());
       const keys = items.map((item, index) => keyedRowIdentity(range.rowKey(item, index)));
       if (new Set(keys).size !== keys.length) return null;
       return { items, keys };
