@@ -20,11 +20,13 @@ describe("React AOT conditional-range compiler", () => {
         const [enabled, setEnabled] = useState(true);
         return (
           <main data-active={loading || enabled}>
-            <header>Dashboard</header>
+            <header className={enabled ? "enabled" : "disabled"}>
+              Dashboard: {enabled ? "on" : "off"}
+            </header>
             {loading && <p data-state={loading ? "loading" : "idle"}>Loading…</p>}
             <section>Content</section>
             {enabled ? <strong>Enabled</strong> : <span>Disabled</span>}
-            <footer>Footer</footer>
+            <footer style={{ opacity: loading ? 0.5 : 1 }}>Footer</footer>
           </main>
         );
       }
@@ -37,6 +39,10 @@ describe("React AOT conditional-range compiler", () => {
     expect(result.code.match(/before: 1/g)).toHaveLength(2);
     expect(result.code).toContain("trailing={1}");
     expect(result.code).toContain("dependencies: [0, 1]");
+    expect(result.code).toContain("segment: 0");
+    expect(result.code).toContain("segment: 2");
+    expect(result.code).toContain('name: "className"');
+    expect(result.code).toContain('name: "opacity"');
     expect(result.code).toContain('name: "data-state"');
     expect(result.code).toContain('name: "data-active"');
     await expect(

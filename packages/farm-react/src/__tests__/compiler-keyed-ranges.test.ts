@@ -24,7 +24,9 @@ describe("React AOT keyed-range compiler", () => {
         return (
           <main>
             <ul data-count={primary.length + secondary.length}>
-              <li data-static="header">Primary</li>
+              <li className={primary.length > 1 ? "many" : "few"} data-static="header">
+                Primary: {primary.length}
+              </li>
               {primary.map((item, index) => (
                 <li data-index={index} key={item.id}>{item.label}</li>
               ))}
@@ -32,7 +34,12 @@ describe("React AOT keyed-range compiler", () => {
               {secondary.map((item, index) => (
                 <li data-index={index} key={item.id}>{item.label}</li>
               ))}
-              <li data-static="footer">{primary.length + secondary.length} total</li>
+              <li
+                data-static="footer"
+                style={{ opacity: secondary.length > 0 ? 1 : 0.5 }}
+              >
+                {primary.length + secondary.length} total
+              </li>
             </ul>
             <button onClick={() => setPrimary((items) => [...items].reverse())}>Primary</button>
             <button onClick={() => setSecondary((items) => [...items].reverse())}>Secondary</button>
@@ -47,6 +54,10 @@ describe("React AOT keyed-range compiler", () => {
     expect(result.code).toContain("ranges={[");
     expect(result.code.match(/before: 1/g)).toHaveLength(2);
     expect(result.code).toContain("trailing={1}");
+    expect(result.code).toContain("segment: 0");
+    expect(result.code).toContain("segment: 2");
+    expect(result.code).toContain('name: "className"');
+    expect(result.code).toContain('name: "opacity"');
     expect(result.code).toContain("farmBlocks.target");
     expect(result.code).toMatch(/rootRef=\{_?farmBlocks\.target\(/);
     expect(result.code).not.toContain("farmBlocks.KeyedList");
@@ -56,6 +67,36 @@ describe("React AOT keyed-range compiler", () => {
         jsx: "automatic",
       }),
     ).resolves.toMatchObject({ code: expect.stringContaining("farmBlocks.KeyedRanges") });
+  });
+
+  it("keeps state-independent render instrumentation on React's initial static path", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      let executions = 0;
+      export function Board() {
+        const [primary, setPrimary] = useState([{ id: "a", label: "Alpha" }]);
+        const [secondary, setSecondary] = useState([{ id: "b", label: "Beta" }]);
+        const total = primary.length + secondary.length;
+        return (
+          <article>
+            <dl>
+              <div><dt>Rows</dt><dd>{total}</dd></div>
+              <div><dt>Executions</dt><dd>{typeof window === "undefined" ? 1 : ++executions}</dd></div>
+            </dl>
+            {primary.map((item) => <p key={item.id}>{item.label}</p>)}
+            <i>SECONDARY</i>
+            {secondary.map((item) => <p key={item.id}>{item.label}</p>)}
+            <button onClick={() => setPrimary((items) => [...items].reverse())}>Reverse</button>
+          </article>
+        );
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Board"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.code).toContain("farmBlocks.KeyedRanges");
+    expect(result.code).not.toContain("farmBlocks.KeyedList");
+    expect(result.code).toContain("++executions");
   });
 
   it("supports an explicit List as one range beside host siblings", async () => {

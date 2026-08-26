@@ -30,12 +30,17 @@ interface Item {
 }
 
 interface Model {
+  title: string;
+  accent: boolean;
+  staticFail?: boolean;
   loading: boolean;
   error: boolean;
   items: Item[];
 }
 
 const initialModel: Model = {
+  title: "Inventory",
+  accent: false,
   loading: false,
   error: false,
   items: [
@@ -148,6 +153,39 @@ function itemDescriptor(item: Item, index: number): CompilerHostElement {
   );
 }
 
+function headerDescriptor(model: Model): CompilerHostElement {
+  return {
+    ...host(
+      "header",
+      [model.title],
+      [
+        { name: "className", value: model.accent ? "accent" : "plain" },
+        { name: "data-title", value: model.title.toLowerCase() },
+      ],
+    ),
+    styles: [{ name: "opacity", value: model.accent ? 1 : 0.6 }],
+  };
+}
+
+function dividerDescriptor(model: Model): CompilerHostElement {
+  return host(
+    "i",
+    [`Rows: ${model.items.length}`],
+    [{ name: "data-count", value: model.items.length }],
+  );
+}
+
+function footerDescriptor(model: Model): CompilerHostElement {
+  return {
+    ...host(
+      "footer",
+      [model.error ? "Blocked" : "Ready"],
+      [{ name: "data-summary", value: `${model.title}:${model.items.length}` }],
+    ),
+    styles: [{ name: "width", value: model.accent ? 24 : 12 }],
+  };
+}
+
 const itemBindings: CompilerKeyedRowBinding[] = [
   { kind: "attribute", path: [], name: "data-item-index", read: (_item, index) => index },
   {
@@ -166,16 +204,16 @@ function mixedDescriptor(readModel: () => Model, prefix = ""): CompilerHostEleme
     ...host(
       "section",
       [
-        host("header", ["Inventory"]),
+        headerDescriptor(model),
         ...(model.loading
           ? [host("p", ["Loading…"], [{ name: "data-loading", value: true }])]
           : []),
-        host("i", ["Rows"]),
+        dividerDescriptor(model),
         ...model.items.map(itemDescriptor),
         model.error
           ? host("strong", ["Error"], [{ name: "data-status", value: "error" }])
           : host("span", ["Ready"], [{ name: "data-status", value: "ready" }]),
-        host("footer", ["End"]),
+        footerDescriptor(model),
       ],
       [
         { name: "data-mixed", value: true },
@@ -212,6 +250,80 @@ function mixedDescriptor(readModel: () => Model, prefix = ""): CompilerHostEleme
         },
       ],
       trailing: 1,
+      bindings: [
+        {
+          kind: "text",
+          segment: 0,
+          sibling: 0,
+          path: [],
+          read: () => {
+            if (readModel().staticFail) throw new Error("static sibling binding failed");
+            return readModel().title;
+          },
+        },
+        {
+          kind: "attribute",
+          segment: 0,
+          sibling: 0,
+          path: [],
+          name: "className",
+          read: () => (readModel().accent ? "accent" : "plain"),
+        },
+        {
+          kind: "attribute",
+          segment: 0,
+          sibling: 0,
+          path: [],
+          name: "data-title",
+          read: () => readModel().title.toLowerCase(),
+        },
+        {
+          kind: "style",
+          segment: 0,
+          sibling: 0,
+          path: [],
+          name: "opacity",
+          read: () => (readModel().accent ? 1 : 0.6),
+        },
+        {
+          kind: "text",
+          segment: 1,
+          sibling: 0,
+          path: [],
+          read: () => ["Rows: ", readModel().items.length],
+        },
+        {
+          kind: "attribute",
+          segment: 1,
+          sibling: 0,
+          path: [],
+          name: "data-count",
+          read: () => readModel().items.length,
+        },
+        {
+          kind: "text",
+          segment: 3,
+          sibling: 0,
+          path: [],
+          read: () => (readModel().error ? "Blocked" : "Ready"),
+        },
+        {
+          kind: "attribute",
+          segment: 3,
+          sibling: 0,
+          path: [],
+          name: "data-summary",
+          read: () => `${readModel().title}:${readModel().items.length}`,
+        },
+        {
+          kind: "style",
+          segment: 3,
+          sibling: 0,
+          path: [],
+          name: "width",
+          read: () => (readModel().accent ? 24 : 12),
+        },
+      ],
     },
   };
 }
@@ -219,9 +331,15 @@ function mixedDescriptor(readModel: () => Model, prefix = ""): CompilerHostEleme
 function mixedMarkup(model: Model, prefix = "") {
   return (
     <section data-mixed data-prefix={prefix || undefined}>
-      <header>Inventory</header>
+      <header
+        className={model.accent ? "accent" : "plain"}
+        data-title={model.title.toLowerCase()}
+        style={{ opacity: model.accent ? 1 : 0.6 }}
+      >
+        {model.title}
+      </header>
       {model.loading && <p data-loading>Loading…</p>}
-      <i>Rows</i>
+      <i data-count={model.items.length}>Rows: {model.items.length}</i>
       {model.items.map((item, index) => (
         <article key={item.id} data-item={item.id} data-item-index={index}>
           <span>{item.label}</span>
@@ -241,7 +359,12 @@ function mixedMarkup(model: Model, prefix = "") {
       ) : (
         <span data-status="ready">Ready</span>
       )}
-      <footer>End</footer>
+      <footer
+        data-summary={`${model.title}:${model.items.length}`}
+        style={{ width: model.accent ? 24 : 12 }}
+      >
+        {model.error ? "Blocked" : "Ready"}
+      </footer>
     </section>
   );
 }
@@ -323,6 +446,8 @@ describe("compiler-owned mixed conditional and keyed ranges runtime", () => {
         const model = value as Model;
         const [a, b] = model.items;
         return {
+          title: "Inventory updated",
+          accent: true,
           loading: true,
           error: true,
           items: [
@@ -358,8 +483,17 @@ describe("compiler-owned mixed conditional and keyed ranges runtime", () => {
       ),
     ).toEqual(["a2", "a1", "a3"]);
     expect(container.querySelector("header")).toBe(header);
+    expect(header?.textContent).toBe("Inventory updated");
+    expect(header?.getAttribute("class")).toBe("accent");
+    expect(header?.getAttribute("data-title")).toBe("inventory updated");
+    expect((header as HTMLElement | null)?.style.opacity).toBe("1");
     expect(container.querySelector("section > i")).toBe(divider);
+    expect(divider?.textContent).toBe("Rows: 2");
+    expect(divider?.getAttribute("data-count")).toBe("2");
     expect(container.querySelector("footer")).toBe(footer);
+    expect(footer?.textContent).toBe("Blocked");
+    expect(footer?.getAttribute("data-summary")).toBe("Inventory updated:2");
+    expect((footer as HTMLElement | null)?.style.width).toBe("24px");
     expect(fixture.executions()).toBe(executionsAfterMount);
     expect(commits).toBe(commitsAfterMount);
   });
@@ -470,6 +604,8 @@ describe("compiler-owned mixed conditional and keyed ranges runtime", () => {
 
     await act(async () => {
       fixture.setModel(() => ({
+        title: "Recovered",
+        accent: true,
         loading: true,
         error: true,
         items: [{ id: "safe", label: "Safe", visible: true, tags: [] }],
@@ -508,6 +644,30 @@ describe("compiler-owned mixed conditional and keyed ranges runtime", () => {
     expect(container.querySelector("[data-error]")?.textContent).toBe("mixed range binding failed");
   });
 
+  it("routes static-sibling binding failures through React error boundaries", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const fixture = createMixedFixture();
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () =>
+      root.render(
+        <Boundary>
+          <fixture.View />
+        </Boundary>,
+      ),
+    );
+
+    await act(async () => {
+      fixture.setModel((value) => ({ ...(value as Model), staticFail: true }));
+      await flushCompilerUpdates();
+    });
+    expect(container.querySelector("[data-error]")?.textContent).toBe(
+      "static sibling binding failed",
+    );
+  });
+
   it("matches normal React through 3,000 deterministic mixed updates", async () => {
     const fixture = createMixedFixture();
     let updateNormal: React.Dispatch<React.SetStateAction<Model>> = () => undefined;
@@ -529,7 +689,7 @@ describe("compiler-owned mixed conditional and keyed ranges runtime", () => {
     });
 
     const transition = (model: Model, step: number): Model => {
-      const action = step % 8;
+      const action = step % 10;
       if (action === 0) return { ...model, loading: !model.loading };
       if (action === 1) return { ...model, error: !model.error };
       if (action === 2) return { ...model, items: [...model.items].reverse() };
@@ -553,6 +713,8 @@ describe("compiler-owned mixed conditional and keyed ranges runtime", () => {
       if (action === 5 && model.items.length > 1) {
         return { ...model, items: model.items.slice(1) };
       }
+      if (action === 8) return { ...model, title: `Inventory ${step}` };
+      if (action === 9) return { ...model, accent: !model.accent };
       if (model.items.length === 0) return model;
       const index = step % model.items.length;
       return {

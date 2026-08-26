@@ -426,7 +426,7 @@ const testSource = String.raw`
   let mixedRangeExecutions = 0;
   const MixedRanges = createCompiledComponent({
     displayName: "CompatibilityMixedRanges",
-    initialize: () => [{ loading: false, error: false, items: [{ id: "a", label: "Alpha" }, { id: "b", label: "Beta" }] }],
+    initialize: () => [{ title: "Header", accent: false, loading: false, error: false, items: [{ id: "a", label: "Alpha" }, { id: "b", label: "Beta" }] }],
     render(_props, state, blocks) {
       mixedRangeExecutions += 1;
       const model = () => state[0].get();
@@ -468,6 +468,14 @@ const testSource = String.raw`
           { kind: "conditional", before: 0, test: () => model().error, truthy: errorBranch, falsy: readyBranch },
         ],
         trailing: 1,
+        bindings: [
+          { kind: "text", segment: 0, sibling: 0, path: [], read: () => model().title },
+          { kind: "attribute", segment: 0, sibling: 0, path: [], name: "className", read: () => model().accent ? "accent" : "plain" },
+          { kind: "text", segment: 1, sibling: 0, path: [], read: () => ["Rows ", model().items.length] },
+          { kind: "attribute", segment: 1, sibling: 0, path: [], name: "data-count", read: () => model().items.length },
+          { kind: "text", segment: 3, sibling: 0, path: [], read: () => model().error ? "Blocked" : "Ready" },
+          { kind: "style", segment: 3, sibling: 0, path: [], name: "width", read: () => model().accent ? 24 : 12 },
+        ],
       });
       const create = () => ({
         kind: "element",
@@ -475,12 +483,12 @@ const testSource = String.raw`
         attributes: [{ name: "data-mixed-ranges", value: true }],
         styles: [],
         children: [
-          { kind: "element", tag: "header", attributes: [], styles: [], children: ["Header"] },
+          { kind: "element", tag: "header", attributes: [{ name: "className", value: model().accent ? "accent" : "plain" }], styles: [], children: [model().title] },
           ...(model().loading ? [loadingBranch.create()] : []),
-          { kind: "element", tag: "i", attributes: [], styles: [], children: ["Rows"] },
+          { kind: "element", tag: "i", attributes: [{ name: "data-count", value: model().items.length }], styles: [], children: ["Rows ", model().items.length] },
           ...model().items.map(rowDescriptor),
           model().error ? errorBranch.create() : readyBranch.create(),
-          { kind: "element", tag: "footer", attributes: [], styles: [], children: ["Footer"] },
+          { kind: "element", tag: "footer", attributes: [], styles: [{ name: "width", value: model().accent ? 24 : 12 }], children: [model().error ? "Blocked" : "Ready"] },
         ],
         block: mixedBlock(),
       });
@@ -490,6 +498,8 @@ const testSource = String.raw`
         React.createElement("button", {
           "data-mixed-update": true,
           onClick: () => state[0].set((current) => ({
+            title: "Updated header",
+            accent: true,
             loading: true,
             error: true,
             items: [{ ...current.items[1], label: "Beta updated" }, current.items[0]],
@@ -501,14 +511,14 @@ const testSource = String.raw`
           render: () => React.createElement(
             "div",
             { "data-mixed-ranges": true },
-            React.createElement("header", null, "Header"),
+            React.createElement("header", { className: model().accent ? "accent" : "plain" }, model().title),
             model().loading ? React.createElement("p", { "data-loading": true }, "Loading") : null,
-            React.createElement("i", null, "Rows"),
+            React.createElement("i", { "data-count": model().items.length }, "Rows ", model().items.length),
             ...model().items.map((item, index) => React.createElement("article", { key: item.id, "data-mixed-key": item.id, "data-index": index }, item.label)),
             model().error
               ? React.createElement("strong", { "data-status": "error" }, "Error")
               : React.createElement("span", { "data-status": "ready" }, "Ready"),
-            React.createElement("footer", null, "Footer"),
+            React.createElement("footer", { style: { width: model().accent ? 24 : 12 } }, model().error ? "Blocked" : "Ready"),
           ),
         }),
       );
@@ -531,6 +541,12 @@ const testSource = String.raw`
   );
   assert.equal(mixedRangeContainer.querySelector('[data-mixed-key="a"]'), originalMixedA);
   assert.equal(mixedRangeContainer.querySelector("header"), originalMixedHeader);
+  assert.equal(originalMixedHeader.textContent, "Updated header");
+  assert.equal(originalMixedHeader.getAttribute("class"), "accent");
+  assert.equal(mixedRangeContainer.querySelector("i").textContent, "Rows 2");
+  assert.equal(mixedRangeContainer.querySelector("i").getAttribute("data-count"), "2");
+  assert.equal(mixedRangeContainer.querySelector("footer").textContent, "Blocked");
+  assert.equal(mixedRangeContainer.querySelector("footer").style.width, "24px");
   assert.equal(mixedRangeContainer.querySelector('[data-mixed-key="b"]').textContent, "Beta updated");
   assert.equal(mixedRangeContainer.querySelector("[data-loading]").textContent, "Loading");
   assert.equal(mixedRangeContainer.querySelector('[data-status="error"]').textContent, "Error");

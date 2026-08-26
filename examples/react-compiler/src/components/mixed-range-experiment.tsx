@@ -27,12 +27,16 @@ const initialItems: MixedItem[] = Array.from({ length: 32 }, (_, itemIndex) => (
 let mixedRangeOwnerExecutions = 0;
 
 export function MixedRangeExperiment() {
+  const [title, setTitle] = useState("MIXED INVENTORY");
+  const [accent, setAccent] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
   const [items, setItems] = useState(initialItems);
   const [updates, setUpdates] = useState(0);
 
   function reconcileMixedRanges() {
+    setTitle("MIXED INVENTORY · UPDATED");
+    setAccent(true);
     setLoading(true);
     setError((value) => !value);
     setItems((current) => {
@@ -56,6 +60,8 @@ export function MixedRangeExperiment() {
   }
 
   function replaceOneRow() {
+    setTitle("MIXED INVENTORY · REPLACED");
+    setAccent(false);
     setLoading(false);
     setItems((current) => [
       ...current.filter((item) => item.id !== "mixed-item-1"),
@@ -84,7 +90,7 @@ export function MixedRangeExperiment() {
 
       <p className="heavy-copy">
         One compiler controller owns interleaved conditional and keyed ranges. It patches branches,
-        applies LIS moves, and recursively updates each safe row while preserving static siblings.
+        applies LIS moves, and patches stateful static siblings without replacing their DOM nodes.
       </p>
 
       <dl className="heavy-metrics" aria-live="polite">
@@ -122,15 +128,30 @@ export function MixedRangeExperiment() {
       </div>
 
       <div className="keyed-host-row-list" data-mixed-range-list>
-        <header data-mixed-static="header">MIXED INVENTORY</header>
+        <header
+          className={accent ? "mixed-static-accent" : ""}
+          data-mixed-static="header"
+          data-mixed-title={title}
+          style={{ opacity: accent ? 1 : 0.72 }}
+        >
+          {title}
+        </header>
         {loading && <p data-mixed-loading>Loading inventory…</p>}
-        <i data-mixed-static="rows-before">ROWS</i>
+        <i data-count={items.length} data-mixed-static="rows-before">
+          ROWS · {items.length}
+        </i>
         {items.map((item, itemIndex) => (
           <article data-mixed-item={item.id} data-item-index={itemIndex} key={item.id}>
             <h3>{item.label}</h3>
             <div data-mixed-tag-list={item.id}>
               {item.visible && <strong data-mixed-visible={item.id}>Visible</strong>}
-              <i data-mixed-static="tags-before">TAGS</i>
+              <i
+                className={item.visible ? "mixed-tags-visible" : "mixed-tags-hidden"}
+                data-mixed-static="tags-before"
+                data-tag-count={item.tags.length}
+              >
+                TAGS · {item.tags.length}
+              </i>
               {item.tags.map((tag, tagIndex) => (
                 <em data-mixed-tag={tag.id} data-tag-index={tagIndex} key={tag.id}>
                   {tag.label}
@@ -140,7 +161,13 @@ export function MixedRangeExperiment() {
           </article>
         ))}
         {error ? <strong data-mixed-status="error">Error</strong> : <span data-mixed-status="ready">Ready</span>}
-        <footer data-mixed-static="footer">END MIXED INVENTORY</footer>
+        <footer
+          data-mixed-static="footer"
+          data-summary={`${title}:${items.length}`}
+          style={{ width: accent ? 240 : 180 }}
+        >
+          {error ? "BLOCKED" : "READY"}
+        </footer>
       </div>
     </section>
   );

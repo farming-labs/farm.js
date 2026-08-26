@@ -171,19 +171,31 @@ describe("compiled recursive host-block runtime", () => {
           create: () => ({
             ...host("section", [
               {
-                ...host("div", [state[1].get() ? nested.create() : null]),
+                ...host("div", [
+                  host("header", [state[1].get() ? "On" : "Off"]),
+                  state[1].get() ? nested.create() : null,
+                ]),
                 block: {
                   kind: "conditional-ranges",
                   id: 1,
                   ranges: [
                     {
-                      before: 0,
+                      before: 1,
                       test: () => state[1].get(),
                       logical: true,
                       truthy: nested,
                     },
                   ],
                   trailing: 0,
+                  bindings: [
+                    {
+                      kind: "text",
+                      segment: 0,
+                      sibling: 0,
+                      path: [],
+                      read: () => (state[1].get() ? "On" : "Off"),
+                    },
+                  ],
                 },
               },
             ]),
@@ -199,7 +211,10 @@ describe("compiled recursive host-block runtime", () => {
                 <button data-action="inner" onClick={() => state[1].set((value) => !value)} />
                 {state[0].get() ? (
                   <section>
-                    <div>{state[1].get() ? <strong>Ready</strong> : null}</div>
+                    <div>
+                      <header>{state[1].get() ? "On" : "Off"}</header>
+                      {state[1].get() ? <strong>Ready</strong> : null}
+                    </div>
                   </section>
                 ) : (
                   <aside>Closed</aside>
@@ -231,11 +246,14 @@ describe("compiled recursive host-block runtime", () => {
     await act(async () => root.render(<Panel />));
     const rendersAfterMount = ownerRenders;
     const section = container.querySelector("section");
+    const staticHeader = container.querySelector("header");
     await act(async () => {
       click(container, "inner");
       await flushCompilerUpdates();
     });
     expect(container.querySelector("strong")?.textContent).toBe("Ready");
+    expect(container.querySelector("header")).toBe(staticHeader);
+    expect(staticHeader?.textContent).toBe("On");
     expect(container.querySelector("section")).toBe(section);
     expect(ownerRenders).toBe(rendersAfterMount);
   });

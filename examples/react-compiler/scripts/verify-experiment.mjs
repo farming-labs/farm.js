@@ -1485,6 +1485,9 @@ try {
     window.__farmMixedHeader = document.querySelector('[data-mixed-static="header"]');
     window.__farmMixedRowsBefore = document.querySelector('[data-mixed-static="rows-before"]');
     window.__farmMixedFooter = document.querySelector('[data-mixed-static="footer"]');
+    window.__farmMixedTagsBefore = document.querySelector(
+      '[data-mixed-item="mixed-item-0"] [data-mixed-static="tags-before"]',
+    );
     window.__farmMixedRowMoves = 0;
     window.__farmMixedTagMoves = 0;
     const rows = document.querySelector("[data-mixed-range-list]");
@@ -1509,6 +1512,47 @@ try {
   await assertText(page, `${mixedRanges} [data-metric="mixed-range-updates"]`, "1");
   await assertText(page, `${mixedRanges} [data-metric="mixed-range-loading"]`, "shown");
   await assertText(page, `${mixedRanges} [data-metric="mixed-range-status"]`, "error");
+  await assertText(
+    page,
+    `${mixedRanges} [data-mixed-static="header"]`,
+    "MIXED INVENTORY · UPDATED",
+  );
+  assert.equal(
+    await page.locator(`${mixedRanges} [data-mixed-static="header"]`).getAttribute("class"),
+    "mixed-static-accent",
+  );
+  assert.equal(
+    await page.locator(`${mixedRanges} [data-mixed-static="header"]`).getAttribute(
+      "data-mixed-title",
+    ),
+    "MIXED INVENTORY · UPDATED",
+  );
+  assert.equal(
+    await page.locator(`${mixedRanges} [data-mixed-static="header"]`).evaluate(
+      (element) => element.style.opacity,
+    ),
+    "1",
+  );
+  await assertText(page, `${mixedRanges} [data-mixed-static="rows-before"]`, "ROWS · 32");
+  assert.equal(
+    await page.locator(`${mixedRanges} [data-mixed-static="rows-before"]`).getAttribute(
+      "data-count",
+    ),
+    "32",
+  );
+  await assertText(page, `${mixedRanges} [data-mixed-static="footer"]`, "BLOCKED");
+  assert.equal(
+    await page.locator(`${mixedRanges} [data-mixed-static="footer"]`).getAttribute(
+      "data-summary",
+    ),
+    "MIXED INVENTORY · UPDATED:32",
+  );
+  assert.equal(
+    await page.locator(`${mixedRanges} [data-mixed-static="footer"]`).evaluate(
+      (element) => element.style.width,
+    ),
+    "240px",
+  );
   assert.equal(await page.locator(`${mixedRanges} [data-mixed-loading]`).count(), 1);
   assert.equal(
     await page.locator(`${mixedRanges} [data-mixed-item]`).first().getAttribute("data-mixed-item"),
@@ -1525,6 +1569,19 @@ try {
       .evaluateAll((tags) => tags.map((tag) => tag.getAttribute("data-mixed-tag"))),
     ["mixed-tag-0-2", "mixed-tag-0-0", "mixed-tag-0-1"],
   );
+  await assertText(
+    page,
+    `${mixedRanges} [data-mixed-item="mixed-item-0"] [data-mixed-static="tags-before"]`,
+    "TAGS · 3",
+  );
+  assert.equal(
+    await page
+      .locator(
+        `${mixedRanges} [data-mixed-item="mixed-item-0"] [data-mixed-static="tags-before"]`,
+      )
+      .getAttribute("class"),
+    "mixed-tags-hidden",
+  );
   assert.equal(await page.evaluate(() => window.__farmMixedRowMoves), 1);
   assert.equal(await page.evaluate(() => window.__farmMixedTagMoves), 1);
   assert.equal(
@@ -1535,7 +1592,11 @@ try {
         window.__farmMixedHeader === document.querySelector('[data-mixed-static="header"]') &&
         window.__farmMixedRowsBefore ===
           document.querySelector('[data-mixed-static="rows-before"]') &&
-        window.__farmMixedFooter === document.querySelector('[data-mixed-static="footer"]'),
+        window.__farmMixedFooter === document.querySelector('[data-mixed-static="footer"]') &&
+        window.__farmMixedTagsBefore ===
+          document.querySelector(
+            '[data-mixed-item="mixed-item-0"] [data-mixed-static="tags-before"]',
+          ),
     ),
     true,
     "mixed range reconciliation replaced a surviving row, nested tag, or static sibling",
@@ -1544,6 +1605,23 @@ try {
   await page.locator(`${mixedRanges} [data-action="mixed-range-replace"]`).click();
   await assertText(page, `${mixedRanges} [data-metric="mixed-range-updates"]`, "2");
   await assertText(page, `${mixedRanges} [data-metric="mixed-range-rows"]`, "32");
+  await assertText(
+    page,
+    `${mixedRanges} [data-mixed-static="header"]`,
+    "MIXED INVENTORY · REPLACED",
+  );
+  assert.equal(
+    await page.locator(`${mixedRanges} [data-mixed-static="header"]`).evaluate(
+      (element) => element.style.opacity,
+    ),
+    "0.72",
+  );
+  assert.equal(
+    await page.locator(`${mixedRanges} [data-mixed-static="footer"]`).evaluate(
+      (element) => element.style.width,
+    ),
+    "180px",
+  );
   assert.equal(
     await page.locator(`${mixedRanges} [data-mixed-item="mixed-item-1"]`).count(),
     0,
@@ -1807,6 +1885,8 @@ try {
             simultaneousConditionalUpdates: 2,
             recursivelyNestedRanges: true,
             staticSiblingIdentityPreserved: true,
+            staticSiblingBindingsPatched: true,
+            recursiveRowStaticBindingsPatched: true,
             removedAndInserted: true,
             ownerUpdateExecutions:
               mixedRangeOwnerFinalExecutions - mixedRangeOwnerInitialExecutions,

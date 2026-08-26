@@ -19,16 +19,17 @@ describe("React AOT mixed conditional and keyed ranges", () => {
         const [loading, setLoading] = useState(false);
         const [items, setItems] = useState([{ id: "a", label: "Alpha" }]);
         const [error, setError] = useState(false);
+        const [title, setTitle] = useState("Inventory");
         return (
           <main>
             <button onClick={() => setLoading((value) => !value)}>Loading</button>
             <section data-dashboard>
-              <header>Inventory</header>
+              <header className={loading ? "busy" : "ready"}>{title}</header>
               {loading && <p data-loading>Loading…</p>}
-              <i>Rows</i>
+              <i data-count={items.length}>Rows: {items.length}</i>
               {items.map((item, index) => <article key={item.id} data-index={index}>{item.label}</article>)}
               {error ? <strong>Error</strong> : <span>Ready</span>}
-              <footer>End</footer>
+              <footer style={{ opacity: error ? 0.5 : 1 }}>{title}: {items.length}</footer>
             </section>
           </main>
         );
@@ -41,7 +42,13 @@ describe("React AOT mixed conditional and keyed ranges", () => {
     expect(result.code).toContain('kind: "mixed-ranges"');
     expect(result.code.match(/kind: "conditional"/g)).toHaveLength(2);
     expect(result.code.match(/kind: "keyed"/g)).toHaveLength(1);
-    expect(result.code).toContain("dependencies: [0, 1, 2]");
+    expect(result.code).toContain("dependencies: [0, 1, 2, 3]");
+    expect(result.code).toContain("segment: 0");
+    expect(result.code).toContain("segment: 1");
+    expect(result.code).toContain("segment: 3");
+    expect(result.code).toContain('name: "className"');
+    expect(result.code).toContain('name: "data-count"');
+    expect(result.code).toContain('name: "opacity"');
     expect(result.code).not.toContain("farmBlocks.ConditionalRanges");
     expect(result.code).not.toContain("farmBlocks.KeyedRanges");
     await expect(
