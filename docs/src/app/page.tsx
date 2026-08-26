@@ -2126,6 +2126,85 @@ function AgentFeatureGrid() {
   );
 }
 
+function VibyCallout() {
+  return (
+    <section className="farm-wide-rule grid w-full lg:grid-cols-[14rem_minmax(0,1fr)]">
+      <div className="flex items-start border-b border-white/12 p-6 text-white/36 sm:px-6 sm:py-8 lg:border-b-0 lg:border-r">
+        <IndexedLabel icon={Terminal} index="04" label="Built with Farm.js" />
+      </div>
+
+      <div className="grid min-w-0 items-center gap-8 overflow-hidden bg-black px-6 py-10 sm:px-10 sm:py-12 md:grid-cols-[minmax(0,1fr)_minmax(17rem,24rem)] lg:min-h-[360px] lg:gap-10 lg:px-12">
+        <div className="max-w-lg">
+          <p className="font-mono text-[10px] font-normal uppercase tracking-normal text-white/38">
+            Farm.js in the wild
+          </p>
+          <h2 className="mt-4 text-balance text-3xl font-medium leading-[1.06] tracking-normal text-white sm:text-4xl">
+            Vibe coding, powered by Farm.js
+          </h2>
+          <p className="mt-5 text-sm leading-6 text-white/48 sm:text-base sm:leading-7">
+            Viby is open-source infrastructure for persistent, skill-guided vibe coding products,
+            built and shipped with Farm.js.
+          </p>
+          <div className="mt-8 flex items-center">
+            <ButtonLink
+              href="https://viby.farming-labs.dev"
+              icon={<Terminal aria-hidden className="size-4" strokeWidth={1.5} />}
+            >
+              Explore Viby
+            </ButtonLink>
+          </div>
+        </div>
+
+        <a
+          aria-label="Explore Viby, a vibe coding product built with Farm.js"
+          className="group block min-w-0 border border-white/12 bg-white/[0.025] transition-[background-color,border-color,transform] duration-150 hover:-translate-y-0.5 hover:border-white/24 hover:bg-white/[0.045] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
+          href="https://viby.farming-labs.dev"
+        >
+          <div className="flex h-11 items-center justify-between border-b border-white/10 px-4 font-mono text-[10px] tracking-normal">
+            <span className="flex items-center gap-2 text-white/88">
+              <span aria-hidden className="text-white/46">
+                &rsaquo;_
+              </span>
+              <span>viby</span>
+            </span>
+            <span className="text-[8px] uppercase text-white/34">Farm.js / live</span>
+          </div>
+
+          <div aria-hidden className="p-4 sm:p-5">
+            <span className="font-mono text-[8px] uppercase tracking-normal text-white/30">
+              Prompt
+            </span>
+            <p className="mt-2 border-l border-white/20 pl-3 font-mono text-[11px] leading-5 text-white/72">
+              Build a polished analytics dashboard with filters
+            </p>
+
+            <div className="mt-5 grid gap-2 font-mono text-[9px] tracking-normal">
+              {["src/app/page.tsx", "src/components/chart.tsx", "src/styles.css"].map((file) => (
+                <div
+                  key={file}
+                  className="flex min-w-0 items-center justify-between gap-3 border-t border-white/8 pt-2"
+                >
+                  <span className="truncate text-white/48">{file}</span>
+                  <span className="shrink-0 uppercase text-white/76">generated</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex h-10 items-center justify-between border-t border-white/10 px-4 font-mono text-[8px] uppercase tracking-normal text-white/36">
+            <span className="flex items-center gap-2">
+              <span className="size-1.5 bg-white/72" /> Preview ready
+            </span>
+            <span className="flex items-center gap-1.5 text-white/58 transition-colors duration-150 group-hover:text-white">
+              Open Viby <ArrowUpRight aria-hidden className="size-3" strokeWidth={1.5} />
+            </span>
+          </div>
+        </a>
+      </div>
+    </section>
+  );
+}
+
 function IntegrationsSection() {
   return (
     <section
@@ -2374,6 +2453,7 @@ export default function HomePage(_props: PageProps) {
             <FoundationGrid />
             <AgentSectionIntro />
             <AgentFeatureGrid />
+            <VibyCallout />
             <FinalCta />
           </main>
           <Footer />
