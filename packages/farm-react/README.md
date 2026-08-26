@@ -371,7 +371,11 @@ containers. Each nested range receives its own dependency entry and updates with
 replacing the outer branch. When conditionals and keyed maps/`List` ranges are direct siblings in
 one safe host container, the compiler emits one ordered mixed-range controller. It mounts or removes
 conditional branches, applies independent LIS reconciliation to each keyed range, and preserves
-static siblings in place. The same mixed layout may recurse inside safe branches and keyed rows.
+static siblings in place. Stateful leaf text, attributes, `className`, and individual inline style
+properties on those siblings are compiled into stable segment/sibling/path bindings. Their address
+does not shift when a nearby condition mounts or a keyed range inserts, removes, or reorders rows,
+so the same controller patches them from the current state snapshot without replacing the sibling
+or rerunning the owner. The same mixed layout may recurse inside safe branches and keyed rows.
 Keys on branches, custom components, fragments, refs, SVG, attribute spreads,
 `dangerouslySetInnerHTML`, branch events, interactive rows, and unsupported mixed children keep
 React ownership. An empty ternary branch may be `null` or `false`. The
@@ -421,8 +425,10 @@ unsupported conditional roots, effects, and more advanced hook support intention
 in this release. Compiler-owned keyed rows support either one dedicated host-only map/`List` or
 one or more non-interactive ranges in a nested or component-root host container. A dedicated
 non-interactive row may also contain multiple recursive logical or ternary host branches beside
-static host siblings, plus recursively nested non-interactive keyed ranges scoped by every stable
-parent key. Inline synchronous row events continue to use the hybrid React-owned row path. Branch
+stateful static host siblings, plus recursively nested non-interactive keyed ranges scoped by every
+stable parent key. Static sibling bindings support safe leaf text, attributes, `className`, and
+individual style properties; lifecycle-sensitive shapes continue to fall back. Inline synchronous
+row events continue to use the hybrid React-owned row path. Branch
 or nested-row events, interactive ranges beside siblings, non-inline or async row handlers,
 unsupported form shapes, custom components, fragments, refs, SVG, and duplicate runtime keys keep
 or switch to React ownership.

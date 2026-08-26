@@ -124,6 +124,45 @@ function defineRangeBoard(
       const ranges = (
         <KeyedRanges
           id={0}
+          bindings={[
+            {
+              kind: "text",
+              segment: 0,
+              sibling: 0,
+              path: [],
+              read: () => [props.title || "Primary", " ", model().primary.length],
+            },
+            {
+              kind: "attribute",
+              segment: 0,
+              sibling: 0,
+              path: [],
+              name: "className",
+              read: () => (model().primary.length > 2 ? "many" : "few"),
+            },
+            {
+              kind: "text",
+              segment: 1,
+              sibling: 0,
+              path: [],
+              read: () => ["Secondary ", model().secondary.length],
+            },
+            {
+              kind: "text",
+              segment: 2,
+              sibling: 0,
+              path: [],
+              read: () => [model().primary.length + model().secondary.length, " total"],
+            },
+            {
+              kind: "style",
+              segment: 2,
+              sibling: 0,
+              path: [],
+              name: "width",
+              read: () => model().primary.length + model().secondary.length,
+            },
+          ]}
           ranges={[
             rangeDescriptor(1, () => model().primary),
             rangeDescriptor(1, () => model().secondary),
@@ -135,19 +174,24 @@ function defineRangeBoard(
                 data-board="ranges"
                 data-count={model().primary.length + model().secondary.length}
               >
-                <li data-static="header">{props.title || "Primary"}</li>
+                <li className={model().primary.length > 2 ? "many" : "few"} data-static="header">
+                  {props.title || "Primary"} {model().primary.length}
+                </li>
                 {model().primary.map((item, index) => (
                   <li data-index={index} data-key={item.id} key={item.id}>
                     {index}:{item.label}
                   </li>
                 ))}
-                <li data-static="divider">Secondary</li>
+                <li data-static="divider">Secondary {model().secondary.length}</li>
                 {model().secondary.map((item, index) => (
                   <li data-index={index} data-key={item.id} key={item.id}>
                     {index}:{item.label}
                   </li>
                 ))}
-                <li data-static="footer" ref={blocks.target(0)}>
+                <li
+                  data-static="footer"
+                  style={{ width: model().primary.length + model().secondary.length }}
+                >
                   {model().primary.length + model().secondary.length} total
                 </li>
               </ul>
@@ -166,16 +210,6 @@ function defineRangeBoard(
       );
     },
     bindings: [
-      {
-        kind: "text",
-        path: [1, 2],
-        target: 0,
-        dependencies: [0],
-        read: (_props, state) => {
-          const model = state[0].get() as RangeModel;
-          return [model.primary.length + model.secondary.length, " total"];
-        },
-      },
       ...(rootOwned
         ? [
             {
@@ -244,7 +278,11 @@ describe("compiled keyed DOM ranges", () => {
 
     expect(container.firstElementChild).toBe(list);
     expect(list.dataset.count).toBe("7");
+    expect(header.textContent).toBe("Primary 4");
+    expect(header.getAttribute("class")).toBe("many");
+    expect(divider.textContent).toBe("Secondary 3");
     expect(footer.textContent).toBe("7 total");
+    expect((footer as HTMLElement).style.width).toBe("7px");
     expect(list.querySelector('[data-static="header"]')).toBe(header);
     expect(list.querySelector('[data-static="divider"]')).toBe(divider);
     expect(list.querySelector('[data-static="footer"]')).toBe(footer);
@@ -541,7 +579,7 @@ describe("compiled keyed DOM ranges", () => {
       });
 
       if (!rootOwned) expect(container.querySelector("h1")?.textContent).toBe("Second");
-      expect(container.querySelector('[data-static="header"]')?.textContent).toBe("Second");
+      expect(container.querySelector('[data-static="header"]')?.textContent).toBe("Second 4");
       expect(container.querySelector("ul")).not.toBe(originalList);
       expect(metrics.rangeRenders).toBe(2);
     },
@@ -564,19 +602,26 @@ describe("compiled keyed DOM ranges", () => {
         setNormal = setModel;
         return (
           <ul>
-            <li data-static="header">Primary</li>
+            <li className={model.primary.length > 2 ? "many" : "few"} data-static="header">
+              Primary {model.primary.length}
+            </li>
             {model.primary.map((item, index) => (
               <li data-index={index} data-key={item.id} key={item.id}>
                 {index}:{item.label}
               </li>
             ))}
-            <li data-static="divider">Secondary</li>
+            <li data-static="divider">Secondary {model.secondary.length}</li>
             {model.secondary.map((item, index) => (
               <li data-index={index} data-key={item.id} key={item.id}>
                 {index}:{item.label}
               </li>
             ))}
-            <li data-static="footer">{model.primary.length + model.secondary.length} total</li>
+            <li
+              data-static="footer"
+              style={{ width: model.primary.length + model.secondary.length }}
+            >
+              {model.primary.length + model.secondary.length} total
+            </li>
           </ul>
         );
       }

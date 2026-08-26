@@ -126,21 +126,60 @@ function defineConditionalBoard(
       const rangeRoot = (
         <ConditionalRanges
           id={0}
+          bindings={[
+            {
+              kind: "text",
+              segment: 0,
+              sibling: 0,
+              path: [],
+              read: () => [props.title || "Dashboard", " ", model().count],
+            },
+            {
+              kind: "attribute",
+              segment: 0,
+              sibling: 0,
+              path: [],
+              name: "className",
+              read: () => (model().enabled ? "enabled" : "disabled"),
+            },
+            {
+              kind: "text",
+              segment: 1,
+              sibling: 0,
+              path: [],
+              read: () => ["Stable ", model().count],
+            },
+            {
+              kind: "text",
+              segment: 2,
+              sibling: 0,
+              path: [],
+              read: () => ["Footer ", model().count],
+            },
+            {
+              kind: "style",
+              segment: 2,
+              sibling: 0,
+              path: [],
+              name: "opacity",
+              read: () => (model().loading ? 0.5 : 1),
+            },
+          ]}
           ranges={ranges}
           rootRef={rootOwned ? undefined : blocks.target(1)}
           render={() => {
             metrics.rangeRenders += 1;
             return (
               <article data-board="conditions" data-count={model().count}>
-                <header data-static="header">{props.title || "Dashboard"}</header>
+                <header className={model().enabled ? "enabled" : "disabled"} data-static="header">
+                  {props.title || "Dashboard"} {model().count}
+                </header>
                 {model().loading && (
                   <p data-count={model().count} data-slot="loading">
                     Loading {model().count}
                   </p>
                 )}
-                <section data-static="content" ref={blocks.target(0)}>
-                  Stable {model().count}
-                </section>
+                <section data-static="content">Stable {model().count}</section>
                 {model().enabled ? (
                   <strong data-count={model().count} data-slot="status">
                     Enabled {model().count}
@@ -150,7 +189,9 @@ function defineConditionalBoard(
                     Disabled {model().count}
                   </span>
                 )}
-                <footer data-static="footer">Footer</footer>
+                <footer data-static="footer" style={{ opacity: model().loading ? 0.5 : 1 }}>
+                  Footer {model().count}
+                </footer>
               </article>
             );
           }}
@@ -167,13 +208,6 @@ function defineConditionalBoard(
       );
     },
     bindings: [
-      {
-        kind: "text",
-        path: [1, 1],
-        target: 0,
-        dependencies: [0],
-        read: (_props, state) => ["Stable ", (state[0].get() as ConditionalModel).count],
-      },
       {
         kind: "attribute" as const,
         path: rootOwned ? [] : [1],
@@ -237,6 +271,9 @@ describe("compiled conditional DOM ranges", () => {
     expect(article.querySelector('[data-slot="status"]')).toBe(enabled);
     expect(enabled.textContent).toBe("Enabled 2");
     expect(content.textContent).toBe("Stable 2");
+    expect(header.textContent).toBe("Dashboard 2");
+    expect(header.getAttribute("class")).toBe("enabled");
+    expect(footer.textContent).toBe("Footer 2");
 
     await act(async () => {
       board.updateModel({ count: 3, enabled: false, loading: true });
@@ -252,6 +289,9 @@ describe("compiled conditional DOM ranges", () => {
     ]);
     expect(article.querySelector('[data-slot="loading"]')?.textContent).toBe("Loading 3");
     expect(article.querySelector('[data-slot="status"]')?.textContent).toBe("Disabled 3");
+    expect(header.getAttribute("class")).toBe("disabled");
+    expect(footer.textContent).toBe("Footer 3");
+    expect((footer as HTMLElement).style.opacity).toBe("0.5");
     expect(enabled.isConnected).toBe(false);
     expect(metrics.executions).toBe(initialExecutions);
     expect(metrics.rangeRenders).toBe(initialRangeRenders);
@@ -651,7 +691,7 @@ describe("compiled conditional DOM ranges", () => {
       });
 
       expect(container.querySelector<HTMLElement>("[data-board='conditions']")).not.toBe(original);
-      expect(container.querySelector('[data-static="header"]')?.textContent).toBe("Second");
+      expect(container.querySelector('[data-static="header"]')?.textContent).toBe("Second 7");
       expect(container.querySelector('[data-slot="loading"]')?.textContent).toBe("Loading 7");
     },
   );
@@ -673,7 +713,9 @@ describe("compiled conditional DOM ranges", () => {
         setNormal = setModel;
         return (
           <article data-board="conditions" data-count={model.count}>
-            <header data-static="header">Dashboard</header>
+            <header className={model.enabled ? "enabled" : "disabled"} data-static="header">
+              Dashboard {model.count}
+            </header>
             {model.loading && (
               <p data-count={model.count} data-slot="loading">
                 Loading {model.count}
@@ -689,7 +731,9 @@ describe("compiled conditional DOM ranges", () => {
                 Disabled {model.count}
               </span>
             )}
-            <footer data-static="footer">Footer</footer>
+            <footer data-static="footer" style={{ opacity: model.loading ? 0.5 : 1 }}>
+              Footer {model.count}
+            </footer>
           </article>
         );
       }

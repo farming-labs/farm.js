@@ -52,8 +52,16 @@ describe("React AOT recursive host-block compiler", () => {
               {open ? (
                 <section>
                   <header>Inbox</header>
-                  <div>{loading && <p>Loading…</p>}</div>
+                  <div>
+                    <header className={loading ? "busy" : "idle"}>
+                      Messages: {messages.length}
+                    </header>
+                    {loading && <p>Loading…</p>}
+                  </div>
                   <ul>
+                    <li data-summary style={{ opacity: loading ? 0.5 : 1 }}>
+                      Total: {messages.length}
+                    </li>
                     {messages.map((message) => <li key={message.id}>{message.title}</li>)}
                   </ul>
                 </section>
@@ -71,8 +79,11 @@ describe("React AOT recursive host-block compiler", () => {
     expect(result.code).toContain('kind: "keyed-ranges"');
     expect(result.code).toContain("parent: 0");
     expect(result.code).toContain("dependencies: [0]");
-    expect(result.code).toContain("dependencies: [1]");
-    expect(result.code).toContain("dependencies: [2]");
+    expect(result.code.match(/dependencies: \[1, 2\]/g)).toHaveLength(2);
+    expect(result.code).toContain("segment: 0");
+    expect(result.code).toContain('name: "className"');
+    expect(result.code).toContain('name: "data-summary"');
+    expect(result.code).toContain('name: "opacity"');
     await expect(
       transformWithEsbuild(result.code, "/app/RecursiveHostBlocks.tsx", {
         loader: "tsx",

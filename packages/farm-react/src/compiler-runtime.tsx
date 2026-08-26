@@ -106,6 +106,18 @@ export interface CompilerHostConditionalBinding {
   read(): unknown;
 }
 
+export interface CompilerStaticRangeBinding {
+  kind: "text" | "attribute" | "style";
+  /** Static segment before range N, or the trailing segment at ranges.length. */
+  segment: number;
+  /** Direct host sibling inside that static segment. */
+  sibling: number;
+  /** Host-element path relative to the selected static sibling. */
+  path: readonly number[];
+  name?: string;
+  read(): unknown;
+}
+
 export interface CompilerHostConditionalBranch {
   create(): CompilerHostElement;
   bindings: readonly CompilerHostConditionalBinding[];
@@ -116,6 +128,7 @@ export interface CompilerHostConditionalRanges {
   id: number;
   ranges: readonly CompilerConditionalRange[];
   trailing: number;
+  bindings?: readonly CompilerStaticRangeBinding[];
 }
 
 export interface CompilerHostKeyedRanges {
@@ -123,6 +136,7 @@ export interface CompilerHostKeyedRanges {
   id: number;
   ranges: readonly CompilerKeyedRange[];
   trailing: number;
+  bindings?: readonly CompilerStaticRangeBinding[];
   /** Compiler output may store only static direct children and materialize rows from the ranges. */
   staticChildrenOnly?: boolean;
 }
@@ -132,6 +146,7 @@ export interface CompilerHostMixedRanges {
   id: number;
   ranges: readonly CompilerMixedRange[];
   trailing: number;
+  bindings?: readonly CompilerStaticRangeBinding[];
 }
 
 export type CompilerHostBlock =
@@ -166,6 +181,7 @@ export interface CompilerConditionalRangesBlockProps {
   ranges: readonly CompilerConditionalRange[];
   /** Number of static direct host siblings after the final conditional slot. */
   trailing: number;
+  bindings?: readonly CompilerStaticRangeBinding[];
 }
 
 export interface CompilerKeyedRowBinding {
@@ -227,6 +243,7 @@ export interface CompilerKeyedRangesBlockProps {
   ranges: readonly CompilerKeyedRange[];
   /** Number of static direct host siblings after the final keyed range. */
   trailing: number;
+  bindings?: readonly CompilerStaticRangeBinding[];
 }
 
 export interface CompilerComponentBlockProps {
@@ -716,6 +733,56 @@ function findCompilerHostTarget(root: Element, path: readonly number[]): Element
   return current;
 }
 
+const UNSET_STATIC_RANGE_BINDING = Symbol("unset static range binding");
+
+function normalizedStaticRangeBindingValue(
+  binding: CompilerStaticRangeBinding,
+  value: unknown,
+): unknown {
+  return binding.kind === "text" ? renderTextValue(value) : value;
+}
+
+function applyStaticRangeBindings(
+  bindings: readonly CompilerStaticRangeBinding[] | undefined,
+  segments: readonly (readonly Element[])[],
+  values: unknown[],
+): boolean {
+  const activeBindings = bindings || [];
+  if (values.length === 0 && activeBindings.length > 0) {
+    values.push(...activeBindings.map(() => UNSET_STATIC_RANGE_BINDING));
+  }
+  if (values.length !== activeBindings.length) return false;
+
+  for (let index = 0; index < activeBindings.length; index += 1) {
+    const binding = activeBindings[index];
+    if (
+      !Number.isSafeInteger(binding.segment) ||
+      binding.segment < 0 ||
+      !Number.isSafeInteger(binding.sibling) ||
+      binding.sibling < 0
+    ) {
+      return false;
+    }
+    const sibling = segments[binding.segment]?.[binding.sibling];
+    const target = sibling && findCompilerHostTarget(sibling, binding.path);
+    if (!target) return false;
+    const rawValue = binding.read();
+    const value = normalizedStaticRangeBindingValue(binding, rawValue);
+    if (Object.is(values[index], value)) continue;
+    values[index] = value;
+    if (binding.kind === "text") {
+      target.textContent = value as string;
+    } else if (binding.kind === "style" && binding.name) {
+      updateStyle(target, binding.name, rawValue);
+    } else if (binding.kind === "attribute" && binding.name) {
+      updateAttribute(target, binding.name, rawValue);
+    } else {
+      return false;
+    }
+  }
+  return true;
+}
+
 interface CompilerKeyedRowInstance extends CompilerHostInstance {
   key: string;
   item: unknown;
@@ -999,6 +1066,7 @@ class CompilerNestedConditionalRanges implements CompilerHostTreeScope {
   private readonly instances: Array<NestedConditionalRangeInstance | null> = [];
   private readonly staticSegments: Element[][] = [];
   private readonly staticScopes: CompilerHostTreeScope[] = [];
+  private readonly staticValues: unknown[] = [];
   private unsubscribe: (() => void) | undefined;
   private active = true;
 
@@ -1099,6 +1167,10 @@ class CompilerNestedConditionalRanges implements CompilerHostTreeScope {
       return false;
     }
     this.staticSegments.push(elements.slice(cursor));
+    if (!applyStaticRangeBindings(this.block.bindings, this.staticSegments, this.staticValues)) {
+      this.cleanup();
+      return false;
+    }
     this.unsubscribe = this.owner.subscribe(this.block.id, this.refresh);
     return true;
   }
@@ -1159,6 +1231,11 @@ class CompilerNestedConditionalRanges implements CompilerHostTreeScope {
       afterCommit?.();
       return;
     }
+    if (!applyStaticRangeBindings(this.block.bindings, this.staticSegments, this.staticValues)) {
+      this.onFallback();
+      afterCommit?.();
+      return;
+    }
     for (let index = this.instances.length - 1; index >= 0; index -= 1) {
       if (!this.reconcileRange(index, selections[index])) {
         this.onFallback();
@@ -1208,7 +1285,13 @@ class CompilerNestedConditionalRanges implements CompilerHostTreeScope {
     this.host = descriptor;
     this.block = block;
     const selections = this.readSelections();
-    if (!selections || !this.updateStaticScopes(descriptor, selections)) return false;
+    if (
+      !selections ||
+      !this.updateStaticScopes(descriptor, selections) ||
+      !applyStaticRangeBindings(this.block.bindings, this.staticSegments, this.staticValues)
+    ) {
+      return false;
+    }
     for (let index = this.instances.length - 1; index >= 0; index -= 1) {
       if (!this.reconcileRange(index, selections[index])) return false;
     }
@@ -1224,6 +1307,7 @@ class CompilerNestedConditionalRanges implements CompilerHostTreeScope {
     this.instances.length = 0;
     this.staticSegments.length = 0;
     this.staticScopes.length = 0;
+    this.staticValues.length = 0;
   }
 }
 
@@ -1236,6 +1320,7 @@ class CompilerNestedKeyedRanges implements CompilerHostTreeScope {
   private readonly instances: Array<Map<string, CompilerKeyedRowInstance>> = [];
   private readonly staticSegments: Element[][] = [];
   private readonly staticScopes: CompilerHostTreeScope[] = [];
+  private readonly staticValues: unknown[] = [];
   private unsubscribe: (() => void) | undefined;
   private active = true;
 
@@ -1346,6 +1431,10 @@ class CompilerNestedKeyedRanges implements CompilerHostTreeScope {
       return false;
     }
     this.staticSegments.push(elements.slice(cursor));
+    if (!applyStaticRangeBindings(this.block.bindings, this.staticSegments, this.staticValues)) {
+      this.cleanup();
+      return false;
+    }
     this.unsubscribe = this.owner.subscribe(this.block.id, this.refresh);
     return true;
   }
@@ -1428,6 +1517,11 @@ class CompilerNestedKeyedRanges implements CompilerHostTreeScope {
       afterCommit?.();
       return;
     }
+    if (!applyStaticRangeBindings(this.block.bindings, this.staticSegments, this.staticValues)) {
+      this.onFallback();
+      afterCommit?.();
+      return;
+    }
     const activeElement = this.root.ownerDocument.activeElement;
     const restoreFocus = Boolean(activeElement && this.root.contains(activeElement));
     for (let index = rowsByRange.length - 1; index >= 0; index -= 1) {
@@ -1490,7 +1584,8 @@ class CompilerNestedKeyedRanges implements CompilerHostTreeScope {
     if (
       !rowsByRange ||
       rowsByRange.length !== this.instances.length ||
-      !this.updateStaticScopes(descriptor, rowsByRange)
+      !this.updateStaticScopes(descriptor, rowsByRange) ||
+      !applyStaticRangeBindings(this.block.bindings, this.staticSegments, this.staticValues)
     ) {
       return false;
     }
@@ -1511,6 +1606,7 @@ class CompilerNestedKeyedRanges implements CompilerHostTreeScope {
     this.instances.length = 0;
     this.staticSegments.length = 0;
     this.staticScopes.length = 0;
+    this.staticValues.length = 0;
   }
 }
 
@@ -1526,6 +1622,7 @@ class CompilerNestedMixedRanges implements CompilerHostTreeScope {
   private readonly instances: NestedMixedRangeInstance[] = [];
   private readonly staticSegments: Element[][] = [];
   private readonly staticScopes: CompilerHostTreeScope[] = [];
+  private readonly staticValues: unknown[] = [];
   private unsubscribe: (() => void) | undefined;
   private active = true;
 
@@ -1677,6 +1774,10 @@ class CompilerNestedMixedRanges implements CompilerHostTreeScope {
       return false;
     }
     this.staticSegments.push(elements.slice(cursor));
+    if (!applyStaticRangeBindings(this.block.bindings, this.staticSegments, this.staticValues)) {
+      this.cleanup();
+      return false;
+    }
     this.unsubscribe = this.owner.subscribe(this.block.id, this.refresh);
     return true;
   }
@@ -1823,6 +1924,11 @@ class CompilerNestedMixedRanges implements CompilerHostTreeScope {
       afterCommit?.();
       return;
     }
+    if (!applyStaticRangeBindings(this.block.bindings, this.staticSegments, this.staticValues)) {
+      this.onFallback();
+      afterCommit?.();
+      return;
+    }
     const activeElement = this.root.ownerDocument.activeElement;
     const restoreFocus = Boolean(activeElement && this.root.contains(activeElement));
     for (let index = snapshots.length - 1; index >= 0; index -= 1) {
@@ -1894,7 +2000,8 @@ class CompilerNestedMixedRanges implements CompilerHostTreeScope {
     if (
       !snapshots ||
       snapshots.length !== this.instances.length ||
-      !this.updateStaticScopes(descriptor, snapshots)
+      !this.updateStaticScopes(descriptor, snapshots) ||
+      !applyStaticRangeBindings(this.block.bindings, this.staticSegments, this.staticValues)
     ) {
       return false;
     }
@@ -1919,6 +2026,7 @@ class CompilerNestedMixedRanges implements CompilerHostTreeScope {
     this.instances.length = 0;
     this.staticSegments.length = 0;
     this.staticScopes.length = 0;
+    this.staticValues.length = 0;
   }
 }
 
@@ -2171,6 +2279,7 @@ function createConditionalRangesBlockComponent(
     private fallbackUnsubscribers: Array<() => void> = [];
     private rangeInstances: Array<ConditionalRangeInstance | null> = [];
     private staticSegments: Element[][] = [];
+    private readonly staticValues: unknown[] = [];
 
     private requestNestedFallback = () => {
       for (const instance of this.rangeInstances) instance?.host.scope?.cleanup();
@@ -2279,6 +2388,12 @@ function createConditionalRangesBlockComponent(
       staticSegments.push(elements.slice(cursor));
       this.staticSegments = staticSegments;
       this.rangeInstances = instances;
+      if (!applyStaticRangeBindings(props.bindings, this.staticSegments, this.staticValues)) {
+        cleanupInstances();
+        this.rangeInstances = [];
+        this.staticSegments = [];
+        return false;
+      }
       return true;
     }
 
@@ -2364,6 +2479,16 @@ function createConditionalRangesBlockComponent(
         this.activateFallback(afterCommit);
         return;
       }
+      if (
+        !applyStaticRangeBindings(
+          this.currentProps.bindings,
+          this.staticSegments,
+          this.staticValues,
+        )
+      ) {
+        this.activateFallback(afterCommit);
+        return;
+      }
 
       for (let rangeIndex = this.rangeInstances.length - 1; rangeIndex >= 0; rangeIndex -= 1) {
         if (!this.reconcileRange(rangeIndex, selections[rangeIndex])) {
@@ -2423,6 +2548,7 @@ function createConditionalRangesBlockComponent(
       this.root = null;
       this.rangeInstances = [];
       this.staticSegments = [];
+      this.staticValues.length = 0;
     }
 
     render(): React.ReactNode {
@@ -3056,6 +3182,7 @@ function createKeyedRangesBlockComponent(
     private unsubscribe: (() => void) | undefined;
     private rangeInstances: Array<Map<string, CompilerKeyedRowInstance>> = [];
     private staticSegments: Element[][] = [];
+    private readonly staticValues: unknown[] = [];
 
     private captureRoot = (root: Element | null) => {
       this.root = root;
@@ -3123,6 +3250,11 @@ function createKeyedRangesBlockComponent(
       staticSegments.push(elements.slice(cursor));
       this.staticSegments = staticSegments;
       this.rangeInstances = instancesByRange;
+      if (!applyStaticRangeBindings(props.bindings, this.staticSegments, this.staticValues)) {
+        this.rangeInstances = [];
+        this.staticSegments = [];
+        return false;
+      }
       return true;
     }
 
@@ -3204,6 +3336,16 @@ function createKeyedRangesBlockComponent(
         this.activateFallback(afterCommit);
         return;
       }
+      if (
+        !applyStaticRangeBindings(
+          this.currentProps.bindings,
+          this.staticSegments,
+          this.staticValues,
+        )
+      ) {
+        this.activateFallback(afterCommit);
+        return;
+      }
 
       const activeElement = this.root.ownerDocument.activeElement;
       const restoreFocus = Boolean(activeElement && this.root.contains(activeElement));
@@ -3265,6 +3407,7 @@ function createKeyedRangesBlockComponent(
       this.root = null;
       this.rangeInstances = [];
       this.staticSegments = [];
+      this.staticValues.length = 0;
     }
 
     render(): React.ReactNode {

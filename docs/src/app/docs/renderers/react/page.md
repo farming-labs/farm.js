@@ -337,6 +337,7 @@ satisfy all of these rules:
 | Events              | Inline handlers and synchronous `const` or function-declaration handlers, including inline synchronous events in eligible host-only keyed rows. |
 | Conditional blocks  | Logical/ternary host branches in dedicated containers or direct ranges among static host siblings, including the component root.                |
 | Keyed lists         | Item-keyed maps and imported `List`, including safe collection pipelines; eligible rows use direct bindings and recursive host-only conditions. |
+| Range siblings      | Stable host siblings beside ranges may patch leaf text, attributes, `className`, and individual inline style properties.                        |
 | Component islands   | Stable imported or module-level component identifiers with explicit compiler-safe props and no JSX children, spread, `ref`, or `key`.           |
 
 This component is eligible:
@@ -537,11 +538,35 @@ independently. Reconciliation proceeds from right to left, preserving the exact 
 ranges become empty, grow, or change together. Static header, divider, and footer nodes are never
 used as synthetic markers and retain their DOM identity.
 
+Those structurally stable siblings may still contain stateful values:
+
+```tsx
+<section>
+  <header className={loading ? "busy" : "ready"}>{title}</header>
+  {loading && <p>Loading…</p>}
+  <i data-count={items.length}>Rows: {items.length}</i>
+  {items.map((item) => (
+    <article key={item.id}>{item.label}</article>
+  ))}
+  <footer style={{ opacity: enabled ? 1 : 0.5 }}>{summary}</footer>
+</section>
+```
+
+The build records each sibling binding by static segment, sibling position inside that segment,
+and nested host path. Unlike a live `children[index]` address, that coordinate does not shift when
+an earlier condition mounts or when an earlier keyed range inserts, removes, or reorders rows. One
+compiler flush can therefore patch the header, divider, and footer while also reconciling every
+dynamic range, without rerunning the owner or replacing those siblings. Supported bindings are
+safe leaf text, ordinary attributes, `className`, and individual properties in one inline style
+object.
+
 Safe host-only conditionals and keyed ranges may recurse inside a mixed branch or row. Every syntax
 site still receives one globally unique block ID and a parent link, so an affected outer mixed block
 suppresses redundant descendant refreshes. Removing a branch or keyed row cleans its nested mixed
 subscriptions before removing DOM. Recreating it reads current state, preventing hidden or removed
-work from becoming stale.
+work from becoming stale. Stateful static-sibling bindings use the same mechanism inside recursively
+compiled branches and keyed rows; row-local bindings close over the current row descriptor and are
+rebound when a surviving keyed row receives a new item value.
 
 This path requires at least one conditional and one keyed `.map(...)` or `List` range in the same
 lowercase host container. Every dynamic branch and row must have a statically known host tree and a
@@ -549,7 +574,9 @@ stable item-derived key. Hooks, custom components, events inside branches or row
 refs, SVG, fragments, spreads, dangerous HTML, duplicate runtime keys, numeric logical output, or an
 invalid hydration/adoption shape keep or transfer that complete container to React. Parent prop and
 Fast Refresh changes also remount the container through React so the compiler never retains stale
-closures or static markup.
+closures or static markup. Static siblings remain plain lowercase host trees; lifecycle-sensitive
+components, Hooks, refs, controlled forms, events requiring compiler DOM ownership, or unproven
+expressions retain the existing React fallback.
 
 The existing React-owned conditional boundary remains the fallback for supported complex shapes.
 It can contain event handlers, nested host conditionals, keyed lists, and component islands while
@@ -969,8 +996,9 @@ the range block partitions its direct element children into static segments and 
 the build-time shape and current collection lengths. Static header, divider, and footer elements
 retain their DOM identity. Each range keeps its own key-to-row table and LIS calculation, so an
 update in one range cannot reorder another range or its surrounding static elements. Stateful text,
-attributes, and styles inside the static host siblings continue to use the outer component's direct
-bindings.
+attributes, `className`, and individual inline styles inside the static host siblings are attached
+to the range controller through stable segment addresses, so they patch in the same flush as the
+keyed rows without replacing the sibling.
 
 The `ul` above may be the component's returned root. The generated root range block forwards that
 physical `ul` to the outer binding runtime, so stateful root attributes and styles still patch the
@@ -1250,6 +1278,9 @@ The package and example test suites verify more than generated code:
 - conditional DOM ranges preserve an exact component root and every static sibling, mount adjacent
   empty slots in source order without marker nodes, and commit simultaneous range changes from one
   state snapshot;
+- stateful static siblings patch text, classes, attributes, and individual styles through stable
+  segment/sibling/path addresses while conditional mounts and keyed LIS moves change nearby child
+  indexes; their DOM identity survives every update;
 - 3,000 deterministic nested-range updates and 3,000 component-root-range updates match normal
   React while unchanged branches, static siblings, and the compiled owner keep their identity;
 - recursive host scopes preserve an outer branch and static siblings while independently updating
