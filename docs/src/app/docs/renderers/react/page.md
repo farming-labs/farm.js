@@ -456,8 +456,8 @@ The compiler-owned path is deliberately narrow:
 - Every non-empty branch has one lowercase HTML root and a statically known host-only descendant
   tree. Text, attributes, and individual inline style properties may use supported expressions.
 - Branch events, `key`, custom components, fragments, refs, SVG, `dangerouslySetInnerHTML`, JSX
-  spreads, interactive keyed rows, mixed dynamic block kinds in one direct-child range, and dynamic
-  text mixed beside nested elements require React ownership.
+  spreads, interactive keyed rows, unsupported direct-child structures, and dynamic text mixed
+  beside nested elements require React ownership.
 - A ternary may use `null` or `false` for an empty branch. For logical `&&`, a numeric falsy value
   such as `0` can be visible React output, so the runtime remounts that container through React
   instead of incorrectly treating it as empty.
@@ -507,11 +507,49 @@ from current compiler cells, so updates made while closed cannot become stale wo
 This recursive path is intentionally host-only. Nested conditional ranges may recurse again, and a
 nested container may own one or more non-interactive keyed ranges separated by static host
 siblings. Hooks, custom components, branch events, refs, SVG, fragments, dangerous HTML,
-interactive rows, unsupported structure inside an inner keyed row, or conditionals and lists mixed
-as direct siblings in the same range keep React ownership. React still renders the initial
+interactive rows, or unsupported structure inside an inner keyed row keep React ownership. React still renders the initial
 client/SSR tree, hydrates it, reports recoverable mismatches, and handles every fallback. Duplicate
 runtime keys or invalid adopted DOM remount the affected outer container through React; descendant
 dependencies remain live after that handoff.
+
+### Mixed conditional and keyed ranges
+
+A safe host container may interleave both range kinds in their original order:
+
+```tsx
+<section>
+  <header>Inventory</header>
+  {loading && <p>Loading…</p>}
+  <i>Rows</i>
+  {items.map((item) => (
+    <article key={item.id}>{item.label}</article>
+  ))}
+  {error ? <strong>Error</strong> : <span>Ready</span>}
+  <footer>End</footer>
+</section>
+```
+
+The compiler emits one mixed-range descriptor rather than competing conditional and list
+controllers. Each slot records its kind and the number of static host siblings before it. On an
+update, every condition and collection is read from one compiler-cell snapshot. Conditional slots
+mount, replace, or remove one host branch; keyed slots reuse their per-key instances and run LIS
+independently. Reconciliation proceeds from right to left, preserving the exact order when adjacent
+ranges become empty, grow, or change together. Static header, divider, and footer nodes are never
+used as synthetic markers and retain their DOM identity.
+
+Safe host-only conditionals and keyed ranges may recurse inside a mixed branch or row. Every syntax
+site still receives one globally unique block ID and a parent link, so an affected outer mixed block
+suppresses redundant descendant refreshes. Removing a branch or keyed row cleans its nested mixed
+subscriptions before removing DOM. Recreating it reads current state, preventing hidden or removed
+work from becoming stale.
+
+This path requires at least one conditional and one keyed `.map(...)` or `List` range in the same
+lowercase host container. Every dynamic branch and row must have a statically known host tree and a
+stable item-derived key. Hooks, custom components, events inside branches or rows, controlled forms,
+refs, SVG, fragments, spreads, dangerous HTML, duplicate runtime keys, numeric logical output, or an
+invalid hydration/adoption shape keep or transfer that complete container to React. Parent prop and
+Fast Refresh changes also remount the container through React so the compiler never retains stale
+closures or static markup.
 
 The existing React-owned conditional boundary remains the fallback for supported complex shapes.
 It can contain event handlers, nested host conditionals, keyed lists, and component islands while
@@ -1259,6 +1297,10 @@ The package and example test suites verify more than generated code:
   normal React while the compiled owner remains at one execution, with additional Strict Mode,
   parent/local, deepest-duplicate-key, error-boundary, Fast Refresh, queued-unmount, SSR, and
   hydration coverage;
+- mixed conditional/keyed containers match normal React across 3,000 deterministic branch, reorder,
+  insertion, removal, binding, and recursively nested list transitions, with additional Strict Mode,
+  simultaneous parent/local, duplicate-key fallback, error-boundary, queued-unmount, SSR, and
+  recoverable-hydration coverage;
 - component islands update only dependent children, preserve child-local state and context, route
   failures through React error boundaries, hydrate in Strict Mode, and safely drop queued updates
   after unmount;

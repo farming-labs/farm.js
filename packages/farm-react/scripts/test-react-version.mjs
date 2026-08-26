@@ -423,6 +423,120 @@ const testSource = String.raw`
   assert.equal(recursiveHostExecutions, initialRecursiveHostExecutions);
   flushSync(() => recursiveHostRoot.unmount());
 
+  let mixedRangeExecutions = 0;
+  const MixedRanges = createCompiledComponent({
+    displayName: "CompatibilityMixedRanges",
+    initialize: () => [{ loading: false, error: false, items: [{ id: "a", label: "Alpha" }, { id: "b", label: "Beta" }] }],
+    render(_props, state, blocks) {
+      mixedRangeExecutions += 1;
+      const model = () => state[0].get();
+      const loadingBranch = {
+        create: () => ({ kind: "element", tag: "p", attributes: [{ name: "data-loading", value: true }], styles: [], children: ["Loading"] }),
+        bindings: [],
+      };
+      const errorBranch = {
+        create: () => ({ kind: "element", tag: "strong", attributes: [{ name: "data-status", value: "error" }], styles: [], children: ["Error"] }),
+        bindings: [],
+      };
+      const readyBranch = {
+        create: () => ({ kind: "element", tag: "span", attributes: [{ name: "data-status", value: "ready" }], styles: [], children: ["Ready"] }),
+        bindings: [],
+      };
+      const rowDescriptor = (item, index) => ({
+        kind: "element",
+        tag: "article",
+        attributes: [{ name: "data-mixed-key", value: item.id }, { name: "data-index", value: index }],
+        styles: [],
+        children: [item.label],
+      });
+      const mixedBlock = () => ({
+        kind: "mixed-ranges",
+        id: 0,
+        ranges: [
+          { kind: "conditional", before: 1, test: () => model().loading, logical: true, truthy: loadingBranch },
+          {
+            kind: "keyed",
+            before: 1,
+            items: () => model().items,
+            rowKey: (item) => item.id,
+            create: rowDescriptor,
+            bindings: [
+              { kind: "attribute", path: [], name: "data-index", read: (_item, index) => index },
+              { kind: "text", path: [], read: (item) => item.label },
+            ],
+          },
+          { kind: "conditional", before: 0, test: () => model().error, truthy: errorBranch, falsy: readyBranch },
+        ],
+        trailing: 1,
+      });
+      const create = () => ({
+        kind: "element",
+        tag: "div",
+        attributes: [{ name: "data-mixed-ranges", value: true }],
+        styles: [],
+        children: [
+          { kind: "element", tag: "header", attributes: [], styles: [], children: ["Header"] },
+          ...(model().loading ? [loadingBranch.create()] : []),
+          { kind: "element", tag: "i", attributes: [], styles: [], children: ["Rows"] },
+          ...model().items.map(rowDescriptor),
+          model().error ? errorBranch.create() : readyBranch.create(),
+          { kind: "element", tag: "footer", attributes: [], styles: [], children: ["Footer"] },
+        ],
+        block: mixedBlock(),
+      });
+      return React.createElement(
+        "section",
+        null,
+        React.createElement("button", {
+          "data-mixed-update": true,
+          onClick: () => state[0].set((current) => ({
+            loading: true,
+            error: true,
+            items: [{ ...current.items[1], label: "Beta updated" }, current.items[0]],
+          })),
+        }, "Update mixed ranges"),
+        React.createElement(blocks.MixedRanges, {
+          id: 0,
+          create,
+          render: () => React.createElement(
+            "div",
+            { "data-mixed-ranges": true },
+            React.createElement("header", null, "Header"),
+            model().loading ? React.createElement("p", { "data-loading": true }, "Loading") : null,
+            React.createElement("i", null, "Rows"),
+            ...model().items.map((item, index) => React.createElement("article", { key: item.id, "data-mixed-key": item.id, "data-index": index }, item.label)),
+            model().error
+              ? React.createElement("strong", { "data-status": "error" }, "Error")
+              : React.createElement("span", { "data-status": "ready" }, "Ready"),
+            React.createElement("footer", null, "Footer"),
+          ),
+        }),
+      );
+    },
+    bindings: [{ kind: "block", id: 0, dependencies: [0] }],
+  });
+  const mixedRangeContainer = document.createElement("div");
+  document.body.append(mixedRangeContainer);
+  const mixedRangeRoot = createRoot(mixedRangeContainer);
+  flushSync(() => mixedRangeRoot.render(React.createElement(MixedRanges)));
+  const initialMixedRangeExecutions = mixedRangeExecutions;
+  const originalMixedA = mixedRangeContainer.querySelector('[data-mixed-key="a"]');
+  const originalMixedHeader = mixedRangeContainer.querySelector("header");
+  mixedRangeContainer.querySelector("[data-mixed-update]").click();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(
+    [...mixedRangeContainer.querySelectorAll("[data-mixed-key]")].map((row) => row.getAttribute("data-mixed-key")),
+    ["b", "a"],
+  );
+  assert.equal(mixedRangeContainer.querySelector('[data-mixed-key="a"]'), originalMixedA);
+  assert.equal(mixedRangeContainer.querySelector("header"), originalMixedHeader);
+  assert.equal(mixedRangeContainer.querySelector('[data-mixed-key="b"]').textContent, "Beta updated");
+  assert.equal(mixedRangeContainer.querySelector("[data-loading]").textContent, "Loading");
+  assert.equal(mixedRangeContainer.querySelector('[data-status="error"]').textContent, "Error");
+  assert.equal(mixedRangeExecutions, initialMixedRangeExecutions);
+  flushSync(() => mixedRangeRoot.unmount());
+
   let conditionalRangeExecutions = 0;
   const ConditionalRanges = createCompiledComponent({
     displayName: "CompatibilityConditionalRanges",

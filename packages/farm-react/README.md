@@ -368,9 +368,13 @@ boundary. The more general React-owned conditional path accepts supported events
 conditionals, keyed lists, and component islands. A compiler-owned host branch may now recursively
 contain eligible host-only conditional ranges and non-interactive keyed ranges in nested host
 containers. Each nested range receives its own dependency entry and updates without rerunning or
-replacing the outer branch. Keys on branches, custom components, fragments, refs, SVG, attribute
-spreads, `dangerouslySetInnerHTML`, branch events, interactive rows, and mixed dynamic kinds in one
-direct-child range keep React ownership. An empty ternary branch may be `null` or `false`. The
+replacing the outer branch. When conditionals and keyed maps/`List` ranges are direct siblings in
+one safe host container, the compiler emits one ordered mixed-range controller. It mounts or removes
+conditional branches, applies independent LIS reconciliation to each keyed range, and preserves
+static siblings in place. The same mixed layout may recurse inside safe branches and keyed rows.
+Keys on branches, custom components, fragments, refs, SVG, attribute spreads,
+`dangerouslySetInnerHTML`, branch events, interactive rows, and unsupported mixed children keep
+React ownership. An empty ternary branch may be `null` or `false`. The
 inactive branch is described at build time but is never pre-mounted or cached. If a logical `&&`
 evaluates to a number such as `0`,
 or adopted DOM no longer matches its descriptor, the affected container remounts through React so

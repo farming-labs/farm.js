@@ -202,6 +202,16 @@ Hooks, custom components, row, branch, or inner-row events, refs, SVG, fragments
 controlled inputs inside a condition, and unproven expressions stay on React. Safe host-only keyed
 levels recurse; duplicate keys at any level switch the mounted outer list to React.
 
+The `13` card interleaves logical and ternary branches with a keyed row range in one host container.
+Each row recursively owns another condition and keyed tag range. One action changes both outer
+branches, rotates all 32 rows with one LIS move, changes a row-local condition, and rotates its tags
+with one nested LIS move. The browser assertion preserves the selected row, tag, header, divider,
+and footer, then removes and inserts one row while recording zero owner update executions.
+
+Mixed ownership remains host-only. Branch or row events, Hooks, custom components, controlled
+forms, refs, SVG, fragments, spreads, dangerous HTML, duplicate keys, or an invalid adopted shape
+use the complete React-owned container.
+
 ## Heavy compiler-on/off benchmark
 
 The page contains two measured workloads:
