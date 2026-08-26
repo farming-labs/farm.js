@@ -220,8 +220,15 @@ task scope; reordering one task list touches only that project. Surviving projec
 sibling elements keep their DOM identity, and removing an outer row cleans its inner scope. The
 initial contract accepts non-interactive lowercase inner rows from `.map(...)` or inline `List`,
 including multiple ranges separated by static host siblings. Inner events or forms, Hooks, custom
-components, fragments, refs, SVG, spreads, dangerous HTML, index keys, and a deeper keyed level keep
-the complete outer row on React's fallback.
+components, fragments, refs, SVG, spreads, dangerous HTML, and index keys keep the complete outer
+row on React's fallback. Additional keyed levels that satisfy the same host-only contract are
+analyzed recursively instead of using a fixed nesting limit.
+
+For example, `boards → columns → cards → tags` becomes a tree of keyed scopes. Each stable parent
+key owns its child key table and LIS pass. Moving a board carries its column, card, and tag scopes;
+reordering cards reconciles only the selected column. Block IDs stay globally unique while runtime
+instances are isolated by their complete parent-key path. Removing any parent cleans every
+descendant subscription before its DOM leaves the document.
 
 A keyed collection may use derived locals or an inline chain of `filter`, `slice`, `toSorted`, and
 `toReversed`:
@@ -410,8 +417,8 @@ unsupported conditional roots, effects, and more advanced hook support intention
 in this release. Compiler-owned keyed rows support either one dedicated host-only map/`List` or
 one or more non-interactive ranges in a nested or component-root host container. A dedicated
 non-interactive row may also contain multiple recursive logical or ternary host branches beside
-static host siblings, plus one or more nested non-interactive keyed ranges scoped by the outer row
-key. Inline synchronous row events continue to use the hybrid React-owned row path. Branch or
-inner-row events, deeper keyed levels, interactive ranges beside siblings, non-inline or async row
-handlers, unsupported form shapes, custom components, fragments, refs, SVG, and duplicate runtime
-keys keep or switch to React ownership.
+static host siblings, plus recursively nested non-interactive keyed ranges scoped by every stable
+parent key. Inline synchronous row events continue to use the hybrid React-owned row path. Branch
+or nested-row events, interactive ranges beside siblings, non-inline or async row handlers,
+unsupported form shapes, custom components, fragments, refs, SVG, and duplicate runtime keys keep
+or switch to React ownership.

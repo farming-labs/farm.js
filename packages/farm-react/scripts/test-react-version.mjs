@@ -809,18 +809,53 @@ const testSource = String.raw`
   const NestedKeyedRows = createCompiledComponent({
     displayName: "CompatibilityNestedKeyedRows",
     initialize: () => [[
-      { id: "a", name: "Alpha", tasks: [{ id: "a1", title: "Design" }, { id: "a2", title: "Build" }] },
-      { id: "b", name: "Beta", tasks: [{ id: "b1", title: "Test" }, { id: "b2", title: "Ship" }] },
+      { id: "a", name: "Alpha", tasks: [{ id: "a1", title: "Design", tags: [{ id: "a1x", label: "Idea" }] }, { id: "a2", title: "Build", tags: [{ id: "a2x", label: "Ready" }] }] },
+      { id: "b", name: "Beta", tasks: [{ id: "b1", title: "Test", tags: [{ id: "b1x", label: "Check" }] }, { id: "b2", title: "Ship", tags: [{ id: "b2x", label: "Next" }, { id: "b2y", label: "Now" }] }] },
     ]],
     render(_props, state, blocks) {
       nestedKeyedExecutions += 1;
       const projects = () => state[0].get();
+      const tagDescriptor = (tag, index) => ({
+        kind: "element",
+        tag: "li",
+        attributes: [{ name: "data-tag", value: tag.id }, { name: "data-index", value: index }],
+        styles: [],
+        children: [tag.label],
+      });
       const taskDescriptor = (task, index) => ({
         kind: "element",
         tag: "li",
         attributes: [{ name: "data-task", value: task.id }, { name: "data-index", value: index }],
         styles: [],
-        children: [task.title],
+        children: [
+          { kind: "element", tag: "span", attributes: [], styles: [], children: [task.title] },
+          {
+            kind: "element",
+            tag: "ul",
+            attributes: [],
+            styles: [],
+            children: [
+              { kind: "element", tag: "i", attributes: [], styles: [], children: ["Tags"] },
+              ...task.tags.map(tagDescriptor),
+              { kind: "element", tag: "b", attributes: [], styles: [], children: ["End tags"] },
+            ],
+            block: {
+              kind: "keyed-ranges",
+              id: 2,
+              ranges: [{
+                before: 1,
+                items: () => task.tags,
+                rowKey: (tag) => tag.id,
+                create: tagDescriptor,
+                bindings: [
+                  { kind: "attribute", path: [], name: "data-index", read: (_tag, tagIndex) => tagIndex },
+                  { kind: "text", path: [], read: (tag) => [tag.label] },
+                ],
+              }],
+              trailing: 1,
+            },
+          },
+        ],
       });
       const projectDescriptor = (project, index) => ({
         kind: "element",
@@ -849,7 +884,7 @@ const testSource = String.raw`
                 create: taskDescriptor,
                 bindings: [
                   { kind: "attribute", path: [], name: "data-index", read: (_task, taskIndex) => taskIndex },
-                  { kind: "text", path: [], read: (task) => [task.title] },
+                  { kind: "text", path: [0], read: (task) => [task.title] },
                 ],
               }],
               trailing: 1,
@@ -866,7 +901,20 @@ const testSource = String.raw`
           null,
           React.createElement("i", null, "Tasks"),
           ...project.tasks.map((task, taskIndex) =>
-            React.createElement("li", { key: task.id, "data-task": task.id, "data-index": taskIndex }, task.title),
+            React.createElement(
+              "li",
+              { key: task.id, "data-task": task.id, "data-index": taskIndex },
+              React.createElement("span", null, task.title),
+              React.createElement(
+                "ul",
+                null,
+                React.createElement("i", null, "Tags"),
+                ...task.tags.map((tag, tagIndex) =>
+                  React.createElement("li", { key: tag.id, "data-tag": tag.id, "data-index": tagIndex }, tag.label),
+                ),
+                React.createElement("b", null, "End tags"),
+              ),
+            ),
           ),
           React.createElement("b", null, "End"),
         ),
@@ -879,7 +927,7 @@ const testSource = String.raw`
           onClick: () => state[0].set((current) => {
             const [a, b] = current;
             return [
-              { ...b, name: "Beta newest", tasks: [{ ...b.tasks[1], title: "Ship now" }, b.tasks[0]] },
+              { ...b, name: "Beta newest", tasks: [{ ...b.tasks[1], title: "Ship now", tags: [{ ...b.tasks[1].tags[1], label: "Now updated" }, b.tasks[1].tags[0]] }, b.tasks[0]] },
               a,
             ];
           }),
@@ -901,6 +949,7 @@ const testSource = String.raw`
     bindings: [
       { kind: "block", id: 0, dependencies: [0] },
       { kind: "block", id: 1, parent: 0, dependencies: [] },
+      { kind: "block", id: 2, parent: 1, dependencies: [] },
     ],
   });
   const nestedKeyedContainer = document.createElement("div");
@@ -911,6 +960,8 @@ const testSource = String.raw`
   const originalProjectB = nestedKeyedContainer.querySelector('[data-project="b"]');
   const originalTaskB1 = nestedKeyedContainer.querySelector('[data-task="b1"]');
   const originalTaskB2 = nestedKeyedContainer.querySelector('[data-task="b2"]');
+  const originalTagB2X = nestedKeyedContainer.querySelector('[data-tag="b2x"]');
+  const originalTagB2Y = nestedKeyedContainer.querySelector('[data-tag="b2y"]');
   const originalNestedStatic = originalProjectB.querySelector("ul > i");
   nestedKeyedContainer.querySelector("[data-nested-keyed-update]").click();
   await Promise.resolve();
@@ -926,8 +977,15 @@ const testSource = String.raw`
   assert.equal(nestedKeyedContainer.querySelector('[data-project="b"]'), originalProjectB);
   assert.equal(nestedKeyedContainer.querySelector('[data-task="b1"]'), originalTaskB1);
   assert.equal(nestedKeyedContainer.querySelector('[data-task="b2"]'), originalTaskB2);
+  assert.equal(nestedKeyedContainer.querySelector('[data-tag="b2x"]'), originalTagB2X);
+  assert.equal(nestedKeyedContainer.querySelector('[data-tag="b2y"]'), originalTagB2Y);
+  assert.deepEqual(
+    [...originalTaskB2.querySelectorAll("[data-tag]")].map((row) => row.dataset.tag),
+    ["b2y", "b2x"],
+  );
   assert.equal(originalProjectB.querySelector("ul > i"), originalNestedStatic);
-  assert.equal(originalTaskB2.textContent, "Ship now");
+  assert.equal(originalTaskB2.querySelector(":scope > span").textContent, "Ship now");
+  assert.equal(originalTagB2Y.textContent, "Now updated");
   assert.equal(nestedKeyedExecutions, initialNestedKeyedExecutions);
   flushSync(() => nestedKeyedRoot.unmount());
 

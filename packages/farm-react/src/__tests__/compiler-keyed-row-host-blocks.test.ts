@@ -255,6 +255,159 @@ describe("React AOT compiler-owned keyed-row host blocks", () => {
     expect(result.code).not.toContain("farmBlocks.KeyedList");
   });
 
+  it("recursively prepares map and List keyed scopes at every safe host level", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      import { List } from "@farm.js/react/list";
+      export function Workspace() {
+        const [boards, setBoards] = useState([{ id: "b", name: "Board", columns: [{ id: "c", name: "Column", cards: [{ id: "r", title: "Card", tags: [{ id: "t", label: "Ready" }] }] }] }]);
+        return (
+          <main>
+            <button onClick={() => setBoards((rows) => [...rows])}>Refresh</button>
+            <div>
+              {boards.map((board, boardIndex) => (
+                <section key={board.id} data-board-index={boardIndex}>
+                  <h2>{board.name}</h2>
+                  <div>
+                    <i>Columns</i>
+                    <List each={board.columns} by={(column) => column.id}>
+                      {(column, columnIndex) => (
+                        <article data-column-index={columnIndex}>
+                          <h3>{column.name}</h3>
+                          <ul>
+                            {column.cards.map((card, cardIndex) => (
+                              <li key={card.id} data-card-index={cardIndex}>
+                                <span>{card.title}</span>
+                                <ol>
+                                  <List each={card.tags} by={(tag) => tag.id}>
+                                    {(tag, tagIndex) => <li data-tag-index={tagIndex}>{tag.label}</li>}
+                                  </List>
+                                </ol>
+                              </li>
+                            ))}
+                          </ul>
+                        </article>
+                      )}
+                    </List>
+                    <b>End</b>
+                  </div>
+                </section>
+              ))}
+            </div>
+          </main>
+        );
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Workspace"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.code).toContain("hostBlocks={true}");
+    expect(result.code.match(/kind: "keyed-ranges"/g)).toHaveLength(3);
+    expect(result.code.match(/staticChildrenOnly: true/g)).toHaveLength(3);
+    expect(result.code).toContain("parent: 0");
+    expect(result.code).toContain("parent: 1");
+    expect(result.code).toContain("parent: 2");
+    expect(result.code).not.toContain("farmBlocks.KeyedList");
+    expect(result.code).toContain("card.tags");
+    await expect(
+      transformWithEsbuild(result.code, "/app/KeyedRowHostBlocks.tsx", {
+        loader: "tsx",
+        jsx: "automatic",
+      }),
+    ).resolves.toMatchObject({ code: expect.stringContaining("hostBlocks") });
+  });
+
+  it("keeps descriptor output linear without a fixed keyed nesting limit", async () => {
+    const depth = 10;
+    let row = `<li key={node${depth - 1}.id}>{node${depth - 1}.label}</li>`;
+    for (let level = depth - 2; level >= 0; level -= 1) {
+      row = `
+        <section key={node${level}.id}>
+          <h2>{node${level}.label}</h2>
+          <div>
+            {node${level}.children.map((node${level + 1}) => (${row}))}
+          </div>
+        </section>
+      `;
+    }
+
+    const result = await compile(`
+      import { useState } from "react";
+      export function DeepTree() {
+        const [tree, setTree] = useState([]);
+        return (
+          <main>
+            <button onClick={() => setTree((value) => [...value])}>Refresh</button>
+            <div>{tree.map((node0) => (${row}))}</div>
+          </main>
+        );
+      }
+    `);
+
+    expect(result.compiled).toEqual(["DeepTree"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.code).toContain("hostBlocks={true}");
+    expect(result.code.match(/kind: "keyed-ranges"/g)).toHaveLength(depth - 1);
+    expect(result.code.match(/staticChildrenOnly: true/g)).toHaveLength(depth - 1);
+    expect(result.code).toContain(`parent: ${depth - 2}`);
+    await expect(
+      transformWithEsbuild(result.code, "/app/DeepRecursiveKeyedTree.tsx", {
+        loader: "tsx",
+        jsx: "automatic",
+      }),
+    ).resolves.toMatchObject({ code: expect.stringContaining("hostBlocks") });
+  });
+
+  it.each([
+    {
+      name: "an event",
+      row: "<li key={card.id}><button onClick={() => setBoards([])}>{card.title}</button></li>",
+    },
+    {
+      name: "a custom component",
+      row: "<CardRow key={card.id} card={card} />",
+      declaration: "function CardRow({ card }) { return <li>{card.title}</li>; }",
+    },
+    {
+      name: "a fragment",
+      row: "<><li key={card.id}>{card.title}</li></>",
+    },
+    {
+      name: "an index key",
+      row: "<li key={cardIndex}>{card.title}</li>",
+    },
+  ])("keeps a deepest keyed row with $name on React", async ({ row, declaration = "" }) => {
+    const result = await compile(`
+      import { useState } from "react";
+      ${declaration}
+      export function Workspace() {
+        const [boards, setBoards] = useState([{ id: "b", columns: [{ id: "c", cards: [{ id: "r", title: "Card" }] }] }]);
+        return (
+          <main>
+            <button onClick={() => setBoards((rows) => [...rows])}>Refresh</button>
+            <div>
+              {boards.map((board) => (
+                <section key={board.id}>
+                  <div>
+                    {board.columns.map((column) => (
+                      <article key={column.id}>
+                        <ul>{column.cards.map((card, cardIndex) => ${row})}</ul>
+                      </article>
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </div>
+          </main>
+        );
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Workspace"]);
+    expect(result.code).not.toContain("hostBlocks={true}");
+    expect(result.code).toContain("column.cards.map");
+  });
+
   it.each([
     {
       name: "an interactive inner row",

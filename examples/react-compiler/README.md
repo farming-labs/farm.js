@@ -52,6 +52,7 @@ assertions, checks for console/runtime errors and horizontal overflow, saves scr
 | Composable nested blocks   | two lists, nested conditions, and one component island  | —                                              | One block graph mounts, updates, and cleans up nested subscriptions.    |
 | Keyed row host blocks      | 1,000 rows, one LIS move, nested branch patches, executions `0` | —                                      | Each key owns its safe recursive host conditions without React commits. |
 | Nested keyed rows          | 256 projects, 2,048 tasks, one LIS move per level, executions `0` | —                                    | Every outer key owns an isolated inner key table and LIS scope.         |
+| Recursive keyed scopes     | 48 boards, 288 columns, 2,304 cards, one LIS move per level, executions `0` | —                         | Keyed scope analysis continues through every safe host-row depth.       |
 
 The package runtime test also measures one equivalent update under a React `Profiler`:
 
@@ -191,9 +192,15 @@ preserving the project, surviving task, and static heading/footer nodes. A secon
 inserts only one inner task. The production assertion covers 2,048 task rows and records zero owner
 update executions.
 
+The `12` card continues the same ownership model through boards, columns, and cards. One action
+rotates all 48 boards, the six columns inside one board, and the eight cards inside one column. The
+browser assertion observes exactly one LIS move at every level, preserves the selected board,
+column, cards, and static siblings, then removes and inserts one deepest card. It covers 2,304 card
+rows and records zero owner update executions.
+
 Hooks, custom components, row, branch, or inner-row events, refs, SVG, fragments, dangerous HTML,
-controlled inputs inside a condition, deeper keyed levels, and unproven expressions stay on React.
-Duplicate keys at either level also switch the mounted outer list to React.
+controlled inputs inside a condition, and unproven expressions stay on React. Safe host-only keyed
+levels recurse; duplicate keys at any level switch the mounted outer list to React.
 
 ## Heavy compiler-on/off benchmark
 

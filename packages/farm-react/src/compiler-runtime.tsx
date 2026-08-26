@@ -123,6 +123,8 @@ export interface CompilerHostKeyedRanges {
   id: number;
   ranges: readonly CompilerKeyedRange[];
   trailing: number;
+  /** Compiler output may store only static direct children and materialize rows from the ranges. */
+  staticChildrenOnly?: boolean;
 }
 
 export type CompilerHostBlock = CompilerHostConditionalRanges | CompilerHostKeyedRanges;
@@ -595,7 +597,7 @@ function createCompilerHostElement(document: Document, descriptor: CompilerHostE
     const text = renderTextValue(child);
     if (text) element.append(document.createTextNode(text));
   };
-  for (const child of descriptor.children) appendChild(child);
+  for (const child of materializeCompilerHostChildren(descriptor)) appendChild(child);
   // Select options and textarea text must exist before their controlled value
   // is finalized. Reapplying is harmless for other attributes and avoids a
   // transient/default selection becoming the compiled branch's final state.
@@ -635,6 +637,25 @@ function flattenCompilerHostElements(children: readonly unknown[]): CompilerHost
   return elements;
 }
 
+function materializeCompilerHostChildren(descriptor: CompilerHostElement): readonly unknown[] {
+  const block = descriptor.block;
+  if (block?.kind !== "keyed-ranges" || !block.staticChildrenOnly) {
+    return descriptor.children;
+  }
+  const staticChildren = flattenCompilerHostElements(descriptor.children);
+  const children: CompilerHostElement[] = [];
+  let cursor = 0;
+  for (const range of block.ranges) {
+    children.push(...staticChildren.slice(cursor, cursor + range.before));
+    cursor += range.before;
+    const source = range.items();
+    const items = source ? Array.from(source) : [];
+    children.push(...items.map((item, index) => range.create(item, index)));
+  }
+  children.push(...staticChildren.slice(cursor, cursor + block.trailing));
+  return children;
+}
+
 function collectCompilerHostBlockIds(descriptor: CompilerHostElement, ids: Set<number>): void {
   for (const child of flattenCompilerHostElements(descriptor.children)) {
     collectCompilerHostBlockIds(child, ids);
@@ -646,6 +667,12 @@ function collectCompilerHostBlockIds(descriptor: CompilerHostElement, ids: Set<n
     for (const range of block.ranges) {
       if (range.truthy) collectCompilerHostBlockIds(range.truthy.create(), ids);
       if (range.falsy) collectCompilerHostBlockIds(range.falsy.create(), ids);
+    }
+  } else {
+    for (const range of block.ranges) {
+      const source = range.items();
+      const first = source ? Array.from(source)[0] : undefined;
+      if (first !== undefined) collectCompilerHostBlockIds(range.create(first, 0), ids);
     }
   }
 }
@@ -1210,7 +1237,7 @@ class CompilerNestedKeyedRanges implements CompilerHostTreeScope {
     const rowsByRange = this.readRanges();
     if (!rowsByRange) return false;
     const elements = [...this.root.children];
-    const descriptors = flattenCompilerHostElements(this.host.children);
+    const descriptors = flattenCompilerHostElements(materializeCompilerHostChildren(this.host));
     if (elements.length !== descriptors.length) return false;
     let cursor = 0;
 
@@ -1375,7 +1402,7 @@ class CompilerNestedKeyedRanges implements CompilerHostTreeScope {
     descriptor: CompilerHostElement,
     rowsByRange: readonly NestedReadKeyedRange[],
   ): boolean {
-    const descriptors = flattenCompilerHostElements(descriptor.children);
+    const descriptors = flattenCompilerHostElements(materializeCompilerHostChildren(descriptor));
     let descriptorIndex = 0;
     let scopeIndex = 0;
     for (let rangeIndex = 0; rangeIndex < this.block.ranges.length; rangeIndex += 1) {

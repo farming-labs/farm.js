@@ -1854,25 +1854,14 @@ function analyzeRecursiveHostTree(
       return undefined;
     }
 
-    const keyedRanges: KeyedRangePlan[] = [];
+    const keyedRows: Array<{ before: number; range: KeyedRowChildShape }> = [];
     let keyedContainer = children.length > 0;
     let staticBefore = 0;
-    const keyedDependencies = new Set<number>();
     const staticChildren: t.JSXElement[] = [];
     for (const child of children) {
-      const range = analyzeKeyedRowChild(child, statesByValue, safeGlobals, listNames);
-      if (range && range.events.length === 0 && range.conditionals.length === 0) {
-        keyedRanges.push({
-          before: staticBefore,
-          source: range.source,
-          collection: range.collection,
-          keyCallback: range.keyCallback,
-          renderCallback: range.renderCallback,
-          row: range.row,
-          bindings: range.bindings,
-          syntax: range.syntax,
-        });
-        for (const dependency of range.dependencies) keyedDependencies.add(dependency);
+      const range = analyzeKeyedRowChild(child, statesByValue, safeGlobals, listNames, true);
+      if (range) {
+        keyedRows.push({ before: staticBefore, range });
         staticBefore = 0;
       } else if (t.isJSXElement(child) && isHostElement(child)) {
         staticChildren.push(child);
@@ -1883,8 +1872,43 @@ function analyzeRecursiveHostTree(
       }
     }
 
-    if (keyedContainer && keyedRanges.length > 0) {
+    if (keyedContainer && keyedRows.length > 0) {
       const id = allocateId();
+      const keyedRanges: KeyedRangePlan[] = [];
+      const keyedDependencies = new Set<number>();
+      for (const { before, range } of keyedRows) {
+        if (range.events.length > 0) {
+          return "recursive compiler-owned keyed rows cannot contain events";
+        }
+        const row = t.cloneNode(range.row, true);
+        row.openingElement.attributes = row.openingElement.attributes.filter(
+          (attribute) => !t.isJSXAttribute(attribute) || jsxAttributeName(attribute) !== "key",
+        );
+        const rowAnalysis = analyzeRecursiveHostTree(
+          row,
+          statesByValue,
+          safeGlobals,
+          listNames,
+          id,
+          allocateId,
+        );
+        if (rowAnalysis.reason) return rowAnalysis.reason;
+        plans.push(...rowAnalysis.plans);
+        for (const [nestedElement, nestedPlan] of rowAnalysis.blocks) {
+          blocks.set(nestedElement, nestedPlan);
+        }
+        keyedRanges.push({
+          before,
+          source: range.source,
+          collection: range.collection,
+          keyCallback: range.keyCallback,
+          renderCallback: range.renderCallback,
+          row,
+          bindings: rowAnalysis.bindings,
+          syntax: range.syntax,
+        });
+        for (const dependency of range.dependencies) keyedDependencies.add(dependency);
+      }
       for (const child of staticChildren) {
         const beforeBindings = bindings.length;
         const nested = analyzeRecursiveHostTree(
@@ -2293,7 +2317,9 @@ function hostElementDescriptor(
     } else if (t.isJSXElement(child)) {
       const keyedRange = keyedBySource.get(child);
       if (keyedRange) {
-        children.push(keyedRangeDescriptorChildren(keyedRange, descriptorBlocks));
+        if (block?.kind !== "nested-host-keyed-ranges") {
+          children.push(keyedRangeDescriptorChildren(keyedRange, descriptorBlocks));
+        }
       } else {
         children.push(hostElementDescriptor(child, descriptorBlocks));
       }
@@ -2303,7 +2329,9 @@ function hostElementDescriptor(
       if (conditionalRange) {
         children.push(conditionalRangeDescriptorChild(conditionalRange, descriptorBlocks));
       } else if (keyedRange) {
-        children.push(keyedRangeDescriptorChildren(keyedRange, descriptorBlocks));
+        if (block?.kind !== "nested-host-keyed-ranges") {
+          children.push(keyedRangeDescriptorChildren(keyedRange, descriptorBlocks));
+        }
       } else {
         children.push(cloneExpression(child.expression));
       }
@@ -2910,6 +2938,9 @@ function nestedHostBlockObject(
       ),
     ),
     t.objectProperty(t.identifier("trailing"), t.numericLiteral(plan.trailing)),
+    ...(plan.kind === "nested-host-keyed-ranges"
+      ? [t.objectProperty(t.identifier("staticChildrenOnly"), t.booleanLiteral(true))]
+      : []),
   ]);
 }
 

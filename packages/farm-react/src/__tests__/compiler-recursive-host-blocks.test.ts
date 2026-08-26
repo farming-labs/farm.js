@@ -146,7 +146,8 @@ describe("React AOT recursive host-block compiler", () => {
 
     expect(result.diagnostics).toEqual([]);
     expect(result.code).toContain('kind: "keyed-ranges"');
-    expect(result.code).toContain("Array.from");
+    expect(result.code).toContain("staticChildrenOnly: true");
+    expect(result.code).not.toContain("Array.from");
   });
 
   it("retains React ownership for lifecycle-sensitive nested structures", async () => {
