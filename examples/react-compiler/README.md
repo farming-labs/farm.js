@@ -51,6 +51,7 @@ assertions, checks for console/runtime errors and horizontal overflow, saves scr
 | Root conditional ranges    | exact card root, two ranges, stable static siblings; executions `0` | —                                  | Direct branches reconcile without wrappers or marker nodes.            |
 | Composable nested blocks   | two lists, nested conditions, and one component island  | —                                              | One block graph mounts, updates, and cleans up nested subscriptions.    |
 | Keyed row host blocks      | 1,000 rows, one LIS move, nested branch patches, executions `0` | —                                      | Each key owns its safe recursive host conditions without React commits. |
+| Nested keyed rows          | 256 projects, 2,048 tasks, one LIS move per level, executions `0` | —                                    | Every outer key owns an isolated inner key table and LIS scope.         |
 
 The package runtime test also measures one equivalent update under a React `Profiler`:
 
@@ -184,9 +185,15 @@ surviving nested branch. The production assertion preserves the row, active bran
 siblings, then removes and inserts one row and verifies zero owner update executions. The same path
 is automatic for an eligible `.map(...)` or inline host row in `List`; it needs no new option.
 
-Hooks, custom components, row or branch events, refs, SVG, fragments, dangerous HTML, controlled
-inputs inside a condition, nested keyed lists, and unproven expressions stay on React. Duplicate
-runtime keys also switch the mounted list to React.
+The `11` card adds a separately keyed task list to every project row. One action rotates 256 outer
+projects and one project's eight tasks, producing exactly one measured LIS move at each level while
+preserving the project, surviving task, and static heading/footer nodes. A second action removes and
+inserts only one inner task. The production assertion covers 2,048 task rows and records zero owner
+update executions.
+
+Hooks, custom components, row, branch, or inner-row events, refs, SVG, fragments, dangerous HTML,
+controlled inputs inside a condition, deeper keyed levels, and unproven expressions stay on React.
+Duplicate keys at either level also switch the mounted outer list to React.
 
 ## Heavy compiler-on/off benchmark
 

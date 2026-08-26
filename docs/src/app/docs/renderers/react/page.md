@@ -507,11 +507,11 @@ from current compiler cells, so updates made while closed cannot become stale wo
 This recursive path is intentionally host-only. Nested conditional ranges may recurse again, and a
 nested container may own one or more non-interactive keyed ranges separated by static host
 siblings. Hooks, custom components, branch events, refs, SVG, fragments, dangerous HTML,
-interactive rows, nested structures inside a keyed row, or conditionals and lists mixed as direct
-siblings in the same range keep React ownership. React still renders the initial client/SSR tree,
-hydrates it, reports recoverable mismatches, and handles every fallback. Duplicate runtime keys or
-invalid adopted DOM remount the affected outer container through React; descendant dependencies
-remain live after that handoff.
+interactive rows, unsupported structure inside an inner keyed row, or conditionals and lists mixed
+as direct siblings in the same range keep React ownership. React still renders the initial
+client/SSR tree, hydrates it, reports recoverable mismatches, and handles every fallback. Duplicate
+runtime keys or invalid adopted DOM remount the affected outer container through React; descendant
+dependencies remain live after that handoff.
 
 The existing React-owned conditional boundary remains the fallback for supported complex shapes.
 It can contain event handlers, nested host conditionals, keyed lists, and component islands while
@@ -719,11 +719,53 @@ and safe text, attribute, or inline-style expressions. It applies to automatic k
 syntax and inline host rows rendered by `List`.
 
 Hooks, custom components, events inside a compiler-owned branch, refs, SVG, fragments, JSX spreads,
-dangerous HTML, controlled inputs inside a conditional, nested keyed lists, and any unproven shape
-stay on React. Existing interactive keyed rows keep their React-owned conditional-slot behavior:
-Farm compares row snapshots and asks React to refresh a changed slot, while React retains event,
-Fiber, hydration, and structural-list ownership. Duplicate runtime keys or an invalid adopted shape
-also switch the complete mounted list to React.
+dangerous HTML, controlled inputs inside a conditional, and any unproven shape stay on React.
+Existing interactive keyed rows keep their React-owned conditional-slot behavior: Farm compares row
+snapshots and asks React to refresh a changed slot, while React retains event, Fiber, hydration, and
+structural-list ownership. Duplicate runtime keys or an invalid adopted shape also switch the
+complete mounted list to React.
+
+#### Nested keyed lists inside keyed rows
+
+A non-interactive outer row may own one or more inner keyed ranges in known host containers:
+
+```tsx
+<div>
+  {projects.map((project) => (
+    <section key={project.id}>
+      <h2>{project.name}</h2>
+      <ul>
+        <li className="heading">Tasks</li>
+        {project.tasks.map((task, taskIndex) => (
+          <li key={task.id} data-index={taskIndex}>
+            {task.title}
+          </li>
+        ))}
+        <li className="footer">End</li>
+      </ul>
+    </section>
+  ))}
+</div>
+```
+
+The build emits one outer keyed-row descriptor and embeds an inner keyed-range descriptor in that
+row. At runtime every stable `project.id` owns a separate inner key table for its tasks. Reordering
+projects applies LIS to the outer list. Reordering one project's tasks applies a second LIS pass
+only inside that project. A surviving project, task, and every static sibling keep their DOM
+identity; updating the inner task does not rerun the component or either map callback.
+
+The inner scope moves with its outer key and is cleaned when that project is removed. React still
+renders or hydrates the original nested lists, after which the compiler adopts the existing DOM.
+An outer and inner update queued together are read from the same latest collection. Duplicate keys
+at either level, or DOM that cannot be adopted safely, transfer the complete mounted outer list to
+its original React render.
+
+The initial nested contract accepts automatic `.map(...)` and inline `List` ranges, multiple inner
+ranges separated by static host siblings, item-derived keys, and safe text, attribute, and inline
+style bindings. The outer row may also contain eligible host-only conditional blocks in other known
+locations. Inner rows remain lowercase, non-interactive host trees. Events, controlled fields,
+Hooks, custom components, fragments, refs, SVG, JSX spreads, dangerous HTML, index keys, and another
+keyed level inside an inner row keep the outer row on React's safe fallback.
 
 #### Derived collection pipelines
 
@@ -809,7 +851,8 @@ row component such as `InventoryRow`, never directly inside the `List` child fun
 The compiler uses four keyed-list tiers:
 
 1. A dedicated nested host container with one direct map or one `List`, returning a non-interactive
-   host-only row, becomes compiler-owned keyed row instances. Farm patches bindings and uses LIS.
+   host-only row, becomes compiler-owned keyed row instances. Farm patches bindings and uses LIS;
+   eligible outer rows may carry separately scoped nested keyed ranges.
 2. A nested or component-root host container with one or more non-interactive keyed host ranges
    becomes one compiler-owned range block. Farm preserves any static segments and applies the same
    row descriptors and LIS reconciliation independently inside each range.
@@ -877,10 +920,12 @@ The optimized host-row contract is deliberately narrow:
 - A dedicated non-interactive map/`List` may contain multiple logical or ternary host branches,
   including recursively nested branches and branches beside static host siblings. The compiler
   mounts, replaces, or removes only those host blocks within each keyed row instance.
-- Inline synchronous row events use the hybrid React-owned row path. Branch events, nested keyed
-  lists, non-inline or async handlers, file inputs, dynamic form control types or options, custom
-  components, fragments, refs, SVG, attribute spreads, dangerous HTML, and dynamic text mixed
-  beside nested elements stay React-owned.
+- A dedicated non-interactive outer row may contain one or more nested keyed map/`List` ranges in
+  known host containers. Each outer key receives an isolated inner key table and LIS pass.
+- Inline synchronous row events use the hybrid React-owned row path. Branch or inner-row events,
+  deeper keyed levels, non-inline or async handlers, file inputs, dynamic form control types or
+  options, custom components, fragments, refs, SVG, attribute spreads, dangerous HTML, and dynamic
+  text mixed beside nested elements stay React-owned.
 - Unsupported or mutating collection methods, spread children, Hooks in callbacks, and other
   unproven shapes fall back to normal React.
 
@@ -956,21 +1001,22 @@ React then unmounts or replaces the branch normally. Inner boundaries unsubscrib
 unmount, so later updates while the branch is hidden do not target stale components. If the branch
 appears again, each boundary subscribes again and renders from the latest compiler-cell values.
 
-Safe host-only conditions inside a non-interactive keyed row receive globally unique build-time
-block IDs, while the runtime creates a separate scope for each stable row key. The outer keyed
-block drives those scopes, so a row can update a nested branch without a component rerun or a
-separate global subscription for every row. The scope moves with the row through LIS reordering and
-is cleaned when its key disappears. Eligible inline events use the hybrid React-event path and
-retain React-owned row-local conditional Fibers. Component islands, Hooks, custom components,
-nested keyed lists, and other unproven dynamic structure remain on the complete React-owned row
-path; put Hooks inside a keyed row component.
+Safe host-only conditions and keyed ranges inside a non-interactive keyed row receive globally
+unique build-time block IDs, while the runtime creates a separate scope for each stable outer row
+key. The outer keyed block drives those scopes, so a row can update a nested branch or inner list
+without a component rerun or a separate global subscription for every row. Each inner list keeps
+its own key table and LIS pass. The scope moves with the outer row and is cleaned when its key
+disappears. Eligible inline events use the hybrid React-event path and retain React-owned row-local
+conditional Fibers. Component islands, Hooks, custom components, interactive or deeper nested
+lists, and other unproven dynamic structure remain on the complete React-owned row path; put Hooks
+inside a keyed row component.
 
 ### What falls back to React
 
 | Unsupported shape                                                                                                                     | Why React keeps ownership                                                          |
 | ------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
 | Unkeyed/index-keyed maps, unsupported or mutating collection pipelines, or element arrays                                             | Their structure, purity, or item identity is outside the keyed-list contract.      |
-| Unsupported row events/forms, components, fragments, refs, SVG, nested keyed lists, or unsafe conditional branches                    | Their event, lifecycle, or structure contract requires the React-owned row path.   |
+| Unsupported row events/forms, components, fragments, refs, SVG, interactive or deeper nested lists, or unsafe conditional branches    | Their event, lifecycle, or structure contract requires the React-owned row path.   |
 | Interactive ranges beside siblings or non-host range siblings                                                                         | The range owner requires a host container and non-interactive host rows.           |
 | Branch events, keys, components, fragments, refs, SVG, interactive rows, or unsupported nested blocks in a compiled conditional range | They require the React-owned conditional path rather than compiler-created hosts.  |
 | Dynamic/member component types, component spreads, refs, keys, or children                                                            | Their identity or ownership is outside the first component-island contract.        |
@@ -1158,6 +1204,11 @@ The package and example test suites verify more than generated code:
 - 2,000 deterministic compiler-owned row/branch/order transitions match normal React while the
   compiled owner remains at one execution, with additional Strict Mode, parent/local, error-boundary,
   duplicate-key, queued-unmount, SSR, and recoverable-hydration coverage;
+- nested keyed rows apply independent outer and inner LIS passes while preserving project, task,
+  and static-sibling DOM identity, including simultaneous updates at both levels;
+- 2,500 deterministic two-level reorder, insert, remove, binding, and boolean transitions match
+  normal React while the compiled owner remains at one execution, with additional Strict Mode,
+  parent/local, duplicate-inner-key, Fast Refresh, queued-unmount, SSR, and hydration coverage;
 - component islands update only dependent children, preserve child-local state and context, route
   failures through React error boundaries, hydrate in Strict Mode, and safely drop queued updates
   after unmount;

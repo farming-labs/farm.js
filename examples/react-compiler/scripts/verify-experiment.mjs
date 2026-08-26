@@ -40,6 +40,7 @@ for (const component of [
   "ComponentIslandExperiment",
   "ComposableBlockExperiment",
   "KeyedRowHostBlockExperiment",
+  "NestedKeyedRowExperiment",
 ]) {
   assert.ok(compiledComponents.has(component), `${component} was not compiled`);
 }
@@ -1170,6 +1171,112 @@ try {
   );
   assert.equal(keyedHostOwnerFinalExecutions - keyedHostOwnerInitialExecutions, 0);
 
+  const nestedKeyedRows = '[data-experiment="nested-keyed-rows"]';
+  const nestedKeyedOwnerInitialExecutions = await readNumber(
+    page,
+    `${nestedKeyedRows} [data-metric="nested-keyed-owner-executions"]`,
+  );
+  await assertText(page, `${nestedKeyedRows} [data-metric="nested-keyed-projects"]`, "256");
+  await assertText(page, `${nestedKeyedRows} [data-metric="nested-keyed-tasks"]`, "2048");
+  assert.equal(await page.locator(`${nestedKeyedRows} [data-nested-project]`).count(), 256);
+  assert.equal(await page.locator(`${nestedKeyedRows} [data-nested-task]`).count(), 2048);
+  await page.evaluate(() => {
+    const projectList = document.querySelector("[data-nested-project-list]");
+    const project = document.querySelector('[data-nested-project="project-12"]');
+    const taskList = project.querySelector('[data-nested-task-list="project-12"]');
+    window.__farmNestedProject12 = project;
+    window.__farmNestedTask120 = project.querySelector('[data-nested-task="task-12-0"]');
+    window.__farmNestedTask127 = project.querySelector('[data-nested-task="task-12-7"]');
+    window.__farmNestedStaticBefore = project.querySelector('[data-nested-static="before"]');
+    window.__farmNestedStaticAfter = project.querySelector('[data-nested-static="after"]');
+    window.__farmNestedOuterMoves = 0;
+    window.__farmNestedInnerMoves = 0;
+    const outerInsertBefore = projectList.insertBefore.bind(projectList);
+    projectList.insertBefore = (node, anchor) => {
+      if (node.parentNode === projectList && node.matches?.("[data-nested-project]")) {
+        window.__farmNestedOuterMoves += 1;
+      }
+      return outerInsertBefore(node, anchor);
+    };
+    const innerInsertBefore = taskList.insertBefore.bind(taskList);
+    taskList.insertBefore = (node, anchor) => {
+      if (node.parentNode === taskList && node.matches?.("[data-nested-task]")) {
+        window.__farmNestedInnerMoves += 1;
+      }
+      return innerInsertBefore(node, anchor);
+    };
+  });
+
+  await page.locator(`${nestedKeyedRows} [data-action="nested-keyed-reorder"]`).click();
+  await assertText(page, `${nestedKeyedRows} [data-metric="nested-keyed-updates"]`, "1");
+  assert.equal(
+    await page.locator(`${nestedKeyedRows} [data-nested-project]`).first().getAttribute(
+      "data-nested-project",
+    ),
+    "project-1",
+  );
+  assert.deepEqual(
+    await page
+      .locator(`${nestedKeyedRows} [data-nested-project="project-12"] [data-nested-task]`)
+      .evaluateAll((tasks) => tasks.map((task) => task.getAttribute("data-nested-task"))),
+    [
+      "task-12-7",
+      "task-12-0",
+      "task-12-1",
+      "task-12-2",
+      "task-12-3",
+      "task-12-4",
+      "task-12-5",
+      "task-12-6",
+    ],
+  );
+  await assertText(
+    page,
+    `${nestedKeyedRows} [data-nested-task="task-12-7"]`,
+    "Task 12.7 · moved",
+  );
+  assert.equal(await page.evaluate(() => window.__farmNestedOuterMoves), 1);
+  assert.equal(await page.evaluate(() => window.__farmNestedInnerMoves), 1);
+  assert.equal(
+    await page.evaluate(
+      () =>
+        window.__farmNestedProject12 ===
+          document.querySelector('[data-nested-project="project-12"]') &&
+        window.__farmNestedTask120 ===
+          document.querySelector('[data-nested-task="task-12-0"]') &&
+        window.__farmNestedTask127 ===
+          document.querySelector('[data-nested-task="task-12-7"]') &&
+        window.__farmNestedStaticBefore ===
+          document.querySelector(
+            '[data-nested-project="project-12"] [data-nested-static="before"]',
+          ) &&
+        window.__farmNestedStaticAfter ===
+          document.querySelector(
+            '[data-nested-project="project-12"] [data-nested-static="after"]',
+          ),
+    ),
+    true,
+    "nested keyed reconciliation replaced a surviving project, task, or static sibling",
+  );
+
+  await page.locator(`${nestedKeyedRows} [data-action="nested-keyed-replace"]`).click();
+  await assertText(page, `${nestedKeyedRows} [data-metric="nested-keyed-updates"]`, "2");
+  await assertText(page, `${nestedKeyedRows} [data-metric="nested-keyed-tasks"]`, "2048");
+  assert.equal(
+    await page.locator(`${nestedKeyedRows} [data-nested-task="task-12-1"]`).count(),
+    0,
+  );
+  await assertText(
+    page,
+    `${nestedKeyedRows} [data-nested-task="inserted-task-1"]`,
+    "Inserted after update 1",
+  );
+  const nestedKeyedOwnerFinalExecutions = await readNumber(
+    page,
+    `${nestedKeyedRows} [data-metric="nested-keyed-owner-executions"]`,
+  );
+  assert.equal(nestedKeyedOwnerFinalExecutions - nestedKeyedOwnerInitialExecutions, 0);
+
   await page.screenshot({ path: screenshotPath, fullPage: true });
 
   const mobilePage = await browser.newPage({
@@ -1387,6 +1494,17 @@ try {
             removedAndInserted: true,
             ownerUpdateExecutions:
               keyedHostOwnerFinalExecutions - keyedHostOwnerInitialExecutions,
+          },
+          nestedKeyedRows: {
+            projects: 256,
+            tasks: 2048,
+            outerLisMoves: 1,
+            innerLisMoves: 1,
+            outerIdentityPreserved: true,
+            innerIdentityPreserved: true,
+            staticSiblingIdentityPreserved: true,
+            ownerUpdateExecutions:
+              nestedKeyedOwnerFinalExecutions - nestedKeyedOwnerInitialExecutions,
           },
         },
       },

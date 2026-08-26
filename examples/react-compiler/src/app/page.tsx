@@ -6,6 +6,7 @@ import { ComponentIslandExperiment } from "../components/component-island-experi
 import { ConditionalBlockExperiment } from "../components/conditional-block-experiment";
 import { HeavyInteractionBenchmark } from "../components/heavy-interaction-benchmark";
 import { KeyedRowHostBlockExperiment } from "../components/keyed-row-host-block-experiment";
+import { NestedKeyedRowExperiment } from "../components/nested-keyed-row-experiment";
 import { RecursiveHostBlockExperiment } from "../components/recursive-host-block-experiment";
 import { StaticBindingExperiment } from "../components/static-binding-experiment";
 
@@ -80,6 +81,8 @@ export default function HomePage() {
       <RecursiveHostBlockExperiment />
 
       <KeyedRowHostBlockExperiment />
+
+      <NestedKeyedRowExperiment />
 
       <section
         className="benchmark-report"

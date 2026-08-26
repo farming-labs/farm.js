@@ -1988,11 +1988,7 @@ function analyzeCompilerOwnedKeyedRowHostBlocks(
     parent,
     allocateId,
   );
-  if (
-    analysis.reason ||
-    analysis.plans.length === 0 ||
-    analysis.plans.some((plan) => plan.kind !== "nested-host-conditional-ranges")
-  ) {
+  if (analysis.reason || analysis.plans.length === 0) {
     return undefined;
   }
   return {
