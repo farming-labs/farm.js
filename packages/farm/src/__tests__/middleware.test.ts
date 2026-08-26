@@ -1365,6 +1365,16 @@ describe("Header Management Advanced", () => {
 });
 
 describe("Cookie Management Advanced", () => {
+  it("should preserve Max-Age=0 when expiring a cookie", () => {
+    const req = createMockRequest("/test");
+    const res = createMockResponse();
+    const ctx = createContext(req, res);
+
+    ctx.cookies.set("preview", "", { maxAge: 0 });
+
+    expect(res.setHeader).toHaveBeenCalledWith("Set-Cookie", ["preview=; Max-Age=0; Path=/"]);
+  });
+
   it("should handle cookie expiration", () => {
     const req = createMockRequest("/test");
     const res = createMockResponse();

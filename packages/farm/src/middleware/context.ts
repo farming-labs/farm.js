@@ -41,7 +41,7 @@ function parseCookies(cookieHeader?: string): Record<string, string> {
 function serializeCookie(name: string, value: string, options: CookieOptions = {}): string {
   let cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}`;
 
-  if (options.maxAge) {
+  if (options.maxAge != null) {
     cookie += `; Max-Age=${options.maxAge}`;
   }
 
