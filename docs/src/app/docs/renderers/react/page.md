@@ -760,12 +760,56 @@ An outer and inner update queued together are read from the same latest collecti
 at either level, or DOM that cannot be adopted safely, transfer the complete mounted outer list to
 its original React render.
 
-The initial nested contract accepts automatic `.map(...)` and inline `List` ranges, multiple inner
-ranges separated by static host siblings, item-derived keys, and safe text, attribute, and inline
-style bindings. The outer row may also contain eligible host-only conditional blocks in other known
+The nested contract accepts automatic `.map(...)` and inline `List` ranges, multiple ranges
+separated by static host siblings, item-derived keys, and safe text, attribute, and inline style
+bindings. The outer row may also contain eligible host-only conditional blocks in other known
 locations. Inner rows remain lowercase, non-interactive host trees. Events, controlled fields,
-Hooks, custom components, fragments, refs, SVG, JSX spreads, dangerous HTML, index keys, and another
-keyed level inside an inner row keep the outer row on React's safe fallback.
+Hooks, custom components, fragments, refs, SVG, JSX spreads, dangerous HTML, and index keys keep the
+outer row on React's safe fallback.
+
+#### Recursive keyed scopes
+
+The same analysis continues through every safe keyed host row; there is no special two-level
+syntax:
+
+```tsx
+<div>
+  {boards.map((board) => (
+    <section key={board.id}>
+      <h2>{board.name}</h2>
+      <div>
+        {board.columns.map((column) => (
+          <article key={column.id}>
+            <h3>{column.name}</h3>
+            <ul>
+              {column.cards.map((card) => (
+                <li key={card.id}>{card.title}</li>
+              ))}
+            </ul>
+          </article>
+        ))}
+      </div>
+    </section>
+  ))}
+</div>
+```
+
+Build-time recursion assigns a globally unique block ID and parent relationship to every keyed
+container. At runtime the hierarchy is scoped by stable keys: a board instance owns its column
+controller, and each column instance owns its card controller. Every controller keeps an isolated
+key table and performs LIS only inside its own container. A simultaneous board, column, and card
+rotation therefore preserves all surviving DOM identities and runs one independent move plan at
+each affected depth without rerunning the component or map callbacks.
+
+Removing a parent recursively unsubscribes and removes all descendant scopes. Parent and local
+updates use the latest complete descriptor tree, and SSR or hydrated DOM is adopted from the
+outside inward. Duplicate keys or an invalid adopted shape at any level transfer the complete
+mounted outer keyed boundary to React, where subsequent updates remain live.
+
+Recursion does not widen the safety contract. Every optimized row must still be a non-interactive
+lowercase host tree with an explicit item-derived key. An event, controlled field, Hook, custom
+component, fragment, ref, SVG, spread, dangerous HTML, index key, or other unproven structure at
+the deepest level keeps the outer row on React rather than partially compiling an unsafe tree.
 
 #### Derived collection pipelines
 
@@ -920,12 +964,12 @@ The optimized host-row contract is deliberately narrow:
 - A dedicated non-interactive map/`List` may contain multiple logical or ternary host branches,
   including recursively nested branches and branches beside static host siblings. The compiler
   mounts, replaces, or removes only those host blocks within each keyed row instance.
-- A dedicated non-interactive outer row may contain one or more nested keyed map/`List` ranges in
-  known host containers. Each outer key receives an isolated inner key table and LIS pass.
+- A dedicated non-interactive row may recursively contain keyed map/`List` ranges in known host
+  containers. Each stable parent key receives an isolated child key table and LIS pass.
 - Inline synchronous row events use the hybrid React-owned row path. Branch or inner-row events,
-  deeper keyed levels, non-inline or async handlers, file inputs, dynamic form control types or
-  options, custom components, fragments, refs, SVG, attribute spreads, dangerous HTML, and dynamic
-  text mixed beside nested elements stay React-owned.
+  non-inline or async handlers, file inputs, dynamic form control types or options, custom
+  components, fragments, refs, SVG, attribute spreads, dangerous HTML, and dynamic text mixed
+  beside nested elements stay React-owned.
 - Unsupported or mutating collection methods, spread children, Hooks in callbacks, and other
   unproven shapes fall back to normal React.
 
@@ -1007,16 +1051,16 @@ key. The outer keyed block drives those scopes, so a row can update a nested bra
 without a component rerun or a separate global subscription for every row. Each inner list keeps
 its own key table and LIS pass. The scope moves with the outer row and is cleaned when its key
 disappears. Eligible inline events use the hybrid React-event path and retain React-owned row-local
-conditional Fibers. Component islands, Hooks, custom components, interactive or deeper nested
-lists, and other unproven dynamic structure remain on the complete React-owned row path; put Hooks
-inside a keyed row component.
+conditional Fibers. Component islands, Hooks, custom components, interactive or otherwise
+unsupported nested lists, and other unproven dynamic structure remain on the complete React-owned
+row path; put Hooks inside a keyed row component.
 
 ### What falls back to React
 
 | Unsupported shape                                                                                                                     | Why React keeps ownership                                                          |
 | ------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
 | Unkeyed/index-keyed maps, unsupported or mutating collection pipelines, or element arrays                                             | Their structure, purity, or item identity is outside the keyed-list contract.      |
-| Unsupported row events/forms, components, fragments, refs, SVG, interactive or deeper nested lists, or unsafe conditional branches    | Their event, lifecycle, or structure contract requires the React-owned row path.   |
+| Unsupported row events/forms, components, fragments, refs, SVG, interactive nested lists, or unsafe conditional branches              | Their event, lifecycle, or structure contract requires the React-owned row path.   |
 | Interactive ranges beside siblings or non-host range siblings                                                                         | The range owner requires a host container and non-interactive host rows.           |
 | Branch events, keys, components, fragments, refs, SVG, interactive rows, or unsupported nested blocks in a compiled conditional range | They require the React-owned conditional path rather than compiler-created hosts.  |
 | Dynamic/member component types, component spreads, refs, keys, or children                                                            | Their identity or ownership is outside the first component-island contract.        |
@@ -1209,6 +1253,12 @@ The package and example test suites verify more than generated code:
 - 2,500 deterministic two-level reorder, insert, remove, binding, and boolean transitions match
   normal React while the compiled owner remains at one execution, with additional Strict Mode,
   parent/local, duplicate-inner-key, Fast Refresh, queued-unmount, SSR, and hydration coverage;
+- recursive keyed scopes apply independent LIS passes at board, column, and card depth while
+  preserving every surviving row and static sibling;
+- 3,000 deterministic three-level reorder, insert, remove, binding, and boolean transitions match
+  normal React while the compiled owner remains at one execution, with additional Strict Mode,
+  parent/local, deepest-duplicate-key, error-boundary, Fast Refresh, queued-unmount, SSR, and
+  hydration coverage;
 - component islands update only dependent children, preserve child-local state and context, route
   failures through React error boundaries, hydrate in Strict Mode, and safely drop queued updates
   after unmount;

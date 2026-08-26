@@ -1258,6 +1258,68 @@ h1 span {
   font-size: 0.55rem;
 }
 
+[data-recursive-board-list] > li {
+  grid-template-columns: minmax(9rem, 0.25fr) minmax(80rem, 1.75fr);
+  min-width: 92rem;
+}
+
+[data-recursive-board-list] h3,
+[data-recursive-column-list] h4 {
+  overflow: hidden;
+  margin: 0;
+  color: #d8ff9f;
+  font-size: 0.7rem;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-recursive-column-list] {
+  display: grid;
+  grid-template-columns: auto repeat(6, minmax(12rem, 1fr)) auto;
+  gap: 0.4rem;
+  align-items: stretch;
+}
+
+[data-recursive-column] {
+  min-width: 0;
+  border: 1px solid #30302c;
+  padding: 0.45rem;
+}
+
+[data-recursive-column-list] h4 {
+  margin-bottom: 0.35rem;
+  font-size: 0.58rem;
+}
+
+[data-recursive-card-list] {
+  display: grid;
+  grid-template-columns: auto repeat(8, minmax(0, 1fr)) auto;
+  gap: 0.18rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+[data-recursive-card-list] > li {
+  overflow: hidden;
+  border: 1px solid #292925;
+  padding: 0.3rem;
+  font-size: 0.5rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-recursive-column-list] > [data-recursive-static],
+[data-recursive-card-list] > [data-recursive-static] {
+  align-self: center;
+  border-color: transparent;
+  color: #666660;
+  font-size: 0.48rem;
+  font-style: normal;
+  font-weight: 500;
+}
+
 .keyed-host-status {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;

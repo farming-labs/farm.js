@@ -41,6 +41,7 @@ for (const component of [
   "ComposableBlockExperiment",
   "KeyedRowHostBlockExperiment",
   "NestedKeyedRowExperiment",
+  "RecursiveKeyedScopeExperiment",
 ]) {
   assert.ok(compiledComponents.has(component), `${component} was not compiled`);
 }
@@ -1277,6 +1278,201 @@ try {
   );
   assert.equal(nestedKeyedOwnerFinalExecutions - nestedKeyedOwnerInitialExecutions, 0);
 
+  const recursiveKeyedScopes = '[data-experiment="recursive-keyed-scopes"]';
+  const recursiveKeyedOwnerInitialExecutions = await readNumber(
+    page,
+    `${recursiveKeyedScopes} [data-metric="recursive-keyed-owner-executions"]`,
+  );
+  await assertText(page, `${recursiveKeyedScopes} [data-metric="recursive-keyed-boards"]`, "48");
+  await assertText(
+    page,
+    `${recursiveKeyedScopes} [data-metric="recursive-keyed-columns"]`,
+    "288",
+  );
+  await assertText(
+    page,
+    `${recursiveKeyedScopes} [data-metric="recursive-keyed-cards"]`,
+    "2304",
+  );
+  assert.equal(await page.locator(`${recursiveKeyedScopes} [data-recursive-board]`).count(), 48);
+  assert.equal(
+    await page.locator(`${recursiveKeyedScopes} [data-recursive-column]`).count(),
+    288,
+  );
+  assert.equal(await page.locator(`${recursiveKeyedScopes} [data-recursive-card]`).count(), 2304);
+  await page.evaluate(() => {
+    const boardList = document.querySelector("[data-recursive-board-list]");
+    const board = document.querySelector('[data-recursive-board="recursive-board-12"]');
+    const columnList = board.querySelector(
+      '[data-recursive-column-list="recursive-board-12"]',
+    );
+    const column = board.querySelector(
+      '[data-recursive-column="recursive-column-12-3"]',
+    );
+    const cardList = column.querySelector(
+      '[data-recursive-card-list="recursive-column-12-3"]',
+    );
+    window.__farmRecursiveBoard12 = board;
+    window.__farmRecursiveColumn123 = column;
+    window.__farmRecursiveCard1230 = column.querySelector(
+      '[data-recursive-card="recursive-card-12-3-0"]',
+    );
+    window.__farmRecursiveCard1237 = column.querySelector(
+      '[data-recursive-card="recursive-card-12-3-7"]',
+    );
+    window.__farmRecursiveColumnsBefore = board.querySelector(
+      '[data-recursive-static="columns-before"]',
+    );
+    window.__farmRecursiveColumnsAfter = board.querySelector(
+      '[data-recursive-static="columns-after"]',
+    );
+    window.__farmRecursiveCardsBefore = column.querySelector(
+      '[data-recursive-static="cards-before"]',
+    );
+    window.__farmRecursiveCardsAfter = column.querySelector(
+      '[data-recursive-static="cards-after"]',
+    );
+    window.__farmRecursiveBoardMoves = 0;
+    window.__farmRecursiveColumnMoves = 0;
+    window.__farmRecursiveCardMoves = 0;
+    const boardInsertBefore = boardList.insertBefore.bind(boardList);
+    boardList.insertBefore = (node, anchor) => {
+      if (node.parentNode === boardList && node.matches?.("[data-recursive-board]")) {
+        window.__farmRecursiveBoardMoves += 1;
+      }
+      return boardInsertBefore(node, anchor);
+    };
+    const columnInsertBefore = columnList.insertBefore.bind(columnList);
+    columnList.insertBefore = (node, anchor) => {
+      if (node.parentNode === columnList && node.matches?.("[data-recursive-column]")) {
+        window.__farmRecursiveColumnMoves += 1;
+      }
+      return columnInsertBefore(node, anchor);
+    };
+    const cardInsertBefore = cardList.insertBefore.bind(cardList);
+    cardList.insertBefore = (node, anchor) => {
+      if (node.parentNode === cardList && node.matches?.("[data-recursive-card]")) {
+        window.__farmRecursiveCardMoves += 1;
+      }
+      return cardInsertBefore(node, anchor);
+    };
+  });
+
+  await page.locator(`${recursiveKeyedScopes} [data-action="recursive-keyed-reorder"]`).click();
+  await assertText(
+    page,
+    `${recursiveKeyedScopes} [data-metric="recursive-keyed-updates"]`,
+    "1",
+  );
+  assert.equal(
+    await page
+      .locator(`${recursiveKeyedScopes} [data-recursive-board]`)
+      .first()
+      .getAttribute("data-recursive-board"),
+    "recursive-board-1",
+  );
+  assert.deepEqual(
+    await page
+      .locator(
+        `${recursiveKeyedScopes} [data-recursive-board="recursive-board-12"] [data-recursive-column]`,
+      )
+      .evaluateAll((columns) => columns.map((column) => column.getAttribute("data-recursive-column"))),
+    [
+      "recursive-column-12-5",
+      "recursive-column-12-0",
+      "recursive-column-12-1",
+      "recursive-column-12-2",
+      "recursive-column-12-3",
+      "recursive-column-12-4",
+    ],
+  );
+  assert.deepEqual(
+    await page
+      .locator(
+        `${recursiveKeyedScopes} [data-recursive-column="recursive-column-12-3"] [data-recursive-card]`,
+      )
+      .evaluateAll((cards) => cards.map((card) => card.getAttribute("data-recursive-card"))),
+    [
+      "recursive-card-12-3-7",
+      "recursive-card-12-3-0",
+      "recursive-card-12-3-1",
+      "recursive-card-12-3-2",
+      "recursive-card-12-3-3",
+      "recursive-card-12-3-4",
+      "recursive-card-12-3-5",
+      "recursive-card-12-3-6",
+    ],
+  );
+  await assertText(
+    page,
+    `${recursiveKeyedScopes} [data-recursive-card="recursive-card-12-3-7"]`,
+    "Card 12.3.7 · moved",
+  );
+  assert.equal(await page.evaluate(() => window.__farmRecursiveBoardMoves), 1);
+  assert.equal(await page.evaluate(() => window.__farmRecursiveColumnMoves), 1);
+  assert.equal(await page.evaluate(() => window.__farmRecursiveCardMoves), 1);
+  assert.equal(
+    await page.evaluate(
+      () =>
+        window.__farmRecursiveBoard12 ===
+          document.querySelector('[data-recursive-board="recursive-board-12"]') &&
+        window.__farmRecursiveColumn123 ===
+          document.querySelector('[data-recursive-column="recursive-column-12-3"]') &&
+        window.__farmRecursiveCard1230 ===
+          document.querySelector('[data-recursive-card="recursive-card-12-3-0"]') &&
+        window.__farmRecursiveCard1237 ===
+          document.querySelector('[data-recursive-card="recursive-card-12-3-7"]') &&
+        window.__farmRecursiveColumnsBefore ===
+          document.querySelector(
+            '[data-recursive-board="recursive-board-12"] [data-recursive-static="columns-before"]',
+          ) &&
+        window.__farmRecursiveColumnsAfter ===
+          document.querySelector(
+            '[data-recursive-board="recursive-board-12"] [data-recursive-static="columns-after"]',
+          ) &&
+        window.__farmRecursiveCardsBefore ===
+          document.querySelector(
+            '[data-recursive-column="recursive-column-12-3"] [data-recursive-static="cards-before"]',
+          ) &&
+        window.__farmRecursiveCardsAfter ===
+          document.querySelector(
+            '[data-recursive-column="recursive-column-12-3"] [data-recursive-static="cards-after"]',
+          ),
+    ),
+    true,
+    "recursive keyed reconciliation replaced a surviving board, column, card, or static sibling",
+  );
+
+  await page.locator(`${recursiveKeyedScopes} [data-action="recursive-keyed-replace"]`).click();
+  await assertText(
+    page,
+    `${recursiveKeyedScopes} [data-metric="recursive-keyed-updates"]`,
+    "2",
+  );
+  await assertText(
+    page,
+    `${recursiveKeyedScopes} [data-metric="recursive-keyed-cards"]`,
+    "2304",
+  );
+  assert.equal(
+    await page
+      .locator(
+        `${recursiveKeyedScopes} [data-recursive-card="recursive-card-12-3-1"]`,
+      )
+      .count(),
+    0,
+  );
+  await assertText(
+    page,
+    `${recursiveKeyedScopes} [data-recursive-card="recursive-inserted-card-1"]`,
+    "Inserted after update 1",
+  );
+  const recursiveKeyedOwnerFinalExecutions = await readNumber(
+    page,
+    `${recursiveKeyedScopes} [data-metric="recursive-keyed-owner-executions"]`,
+  );
+  assert.equal(recursiveKeyedOwnerFinalExecutions - recursiveKeyedOwnerInitialExecutions, 0);
+
   await page.screenshot({ path: screenshotPath, fullPage: true });
 
   const mobilePage = await browser.newPage({
@@ -1505,6 +1701,18 @@ try {
             staticSiblingIdentityPreserved: true,
             ownerUpdateExecutions:
               nestedKeyedOwnerFinalExecutions - nestedKeyedOwnerInitialExecutions,
+          },
+          recursiveKeyedScopes: {
+            boards: 48,
+            columns: 288,
+            cards: 2304,
+            boardLisMoves: 1,
+            columnLisMoves: 1,
+            cardLisMoves: 1,
+            identityPreservedAtEveryLevel: true,
+            staticSiblingIdentityPreserved: true,
+            ownerUpdateExecutions:
+              recursiveKeyedOwnerFinalExecutions - recursiveKeyedOwnerInitialExecutions,
           },
         },
       },

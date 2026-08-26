@@ -8,6 +8,7 @@ import { HeavyInteractionBenchmark } from "../components/heavy-interaction-bench
 import { KeyedRowHostBlockExperiment } from "../components/keyed-row-host-block-experiment";
 import { NestedKeyedRowExperiment } from "../components/nested-keyed-row-experiment";
 import { RecursiveHostBlockExperiment } from "../components/recursive-host-block-experiment";
+import { RecursiveKeyedScopeExperiment } from "../components/recursive-keyed-scope-experiment";
 import { StaticBindingExperiment } from "../components/static-binding-experiment";
 
 export default function HomePage() {
@@ -83,6 +84,8 @@ export default function HomePage() {
       <KeyedRowHostBlockExperiment />
 
       <NestedKeyedRowExperiment />
+
+      <RecursiveKeyedScopeExperiment />
 
       <section
         className="benchmark-report"
