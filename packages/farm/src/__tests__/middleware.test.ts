@@ -1371,9 +1371,7 @@ describe("Cookie Management Advanced", () => {
 
     ctx.cookies.set("preview", "", { maxAge: 0 });
 
-    expect(res.setHeader).toHaveBeenCalledWith("Set-Cookie", [
-      "preview=; Max-Age=0; Path=/",
-    ]);
+    expect(res.setHeader).toHaveBeenCalledWith("Set-Cookie", ["preview=; Max-Age=0; Path=/"]);
   });
 
   it("should handle cookie expiration", () => {
