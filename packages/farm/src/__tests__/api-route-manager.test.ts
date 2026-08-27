@@ -64,6 +64,30 @@ describe("APIRouteManager", () => {
     await expect(response.text()).resolves.toBe("part-one\npart-two\n");
   });
 
+  it("can propagate endpoint errors to a framework lifecycle boundary", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-api-route-"));
+    tempDirs.push(root);
+
+    const routeDir = path.join(root, "api", "failure");
+    fs.mkdirSync(routeDir, { recursive: true });
+    const routeFile = path.join(routeDir, "route.js");
+    fs.writeFileSync(routeFile, "export {};\n");
+    const failure = new Error("API failure");
+
+    const manager = new APIRouteManager(root, {
+      ssrLoadModule: async () => ({
+        GET: async () => {
+          throw failure;
+        },
+      }),
+    } as any);
+
+    await manager.discoverRoutes();
+    const handler = manager.getHandler({ throwOnError: true });
+
+    await expect(handler!(new Request("http://example.com/api/failure"))).rejects.toBe(failure);
+  });
+
   it("passes raw request bodies to Next-style route handlers", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-api-route-"));
     tempDirs.push(root);

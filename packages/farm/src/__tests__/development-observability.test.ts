@@ -66,7 +66,7 @@ describe("development OpenTelemetry tracing", () => {
         path.join(root, "node_modules", "react-dom"),
         "junction",
       );
-      await fs.mkdir(path.join(root, "src", "app"), { recursive: true });
+      await fs.mkdir(path.join(root, "src", "app", "api", "failure"), { recursive: true });
       await fs.writeFile(
         path.join(root, "package.json"),
         JSON.stringify({ private: true, type: "module" }, null, 2),
@@ -79,6 +79,10 @@ describe("development OpenTelemetry tracing", () => {
       await fs.writeFile(
         path.join(root, "src", "app", "page.tsx"),
         `import React from "react"; export default function Page() { return <main data-instrumentation={globalThis.__farmDevelopmentInstrumentation}>development tracing</main>; }`,
+      );
+      await fs.writeFile(
+        path.join(root, "src", "app", "api", "failure", "route.ts"),
+        `export async function GET() { throw new Error("development API failure"); }`,
       );
       await fs.writeFile(
         path.join(root, "src", "instrumentation.ts"),
@@ -156,6 +160,10 @@ await server.listen(Number(process.env.PORT));
       }
       expect(body).toContain('data-instrumentation="development:nodejs"');
 
+      const apiResponse = await fetch(`http://localhost:${port}/api/failure`);
+      expect(apiResponse.status).toBe(500);
+      await expect(apiResponse.json()).resolves.toEqual({ error: "Internal server error" });
+
       developmentServer.kill("SIGTERM");
       await new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(
@@ -188,6 +196,16 @@ await server.listen(Number(process.env.PORT));
       expect(requestSpan.events).toEqual(
         expect.arrayContaining(["request.start", "route.matched", "request.complete"]),
       );
+      const failedApiRequestSpan = spans.find((span) => span.name === "GET /api/failure");
+      expect(failedApiRequestSpan).toMatchObject({
+        attributes: {
+          "http.request.method": "GET",
+          "http.response.status_code": 500,
+          "http.route": "/api/failure",
+        },
+      });
+      expect(failedApiRequestSpan.events).toContain("api.error");
+      expect(failedApiRequestSpan.events).not.toContain("api.request.complete");
     } finally {
       if (developmentServer && developmentServer.exitCode === null) {
         developmentServer.kill("SIGKILL");
