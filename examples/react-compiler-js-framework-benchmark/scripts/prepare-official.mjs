@@ -34,14 +34,14 @@ const variants = [
   {
     directory: "farm-react-static",
     script: "build:static",
-    version: "0.1.0-beta.3-static-react-19.2.0",
+    version: "0.1.0-beta.4-static-react-19.2.0",
     compiled: true,
     reactivity: "static",
   },
   {
     directory: "farm-react-hybrid",
     script: "build:hybrid",
-    version: "0.1.0-beta.3-hybrid-react-19.2.0",
+    version: "0.1.0-beta.4-hybrid-react-19.2.0",
     compiled: true,
     reactivity: "hybrid",
   },

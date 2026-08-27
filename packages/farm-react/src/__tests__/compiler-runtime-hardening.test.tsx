@@ -3,7 +3,12 @@ import { act } from "react";
 import { createRoot, hydrateRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createCompiledComponent, type CompiledComponentDefinition } from "../compiler-runtime";
+import {
+  conditionalRuntimeFeature,
+  createCompiledComponent,
+  createCompiledComponentWithFeatures,
+  type CompiledComponentDefinition,
+} from "../compiler-runtime";
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean;
@@ -61,6 +66,49 @@ function counterDefinition(
 }
 
 describe("compiled React runtime hardening", () => {
+  it("runs direct bindings with the structural runtime completely omitted", async () => {
+    let renders = 0;
+    const definition = counterDefinition("CoreOnlyCounter");
+    const Counter = createCompiledComponentWithFeatures(
+      {
+        ...definition,
+        render(props, state) {
+          renders += 1;
+          return definition.render(props, state);
+        },
+      },
+      [],
+    );
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = trackRoot(createRoot(container));
+
+    await act(async () => root.render(<Counter />));
+    await act(async () => {
+      container.querySelector("button")!.click();
+      await flushCompilerUpdates();
+    });
+
+    expect(container.textContent).toBe("Count: 1");
+    expect(renders).toBe(1);
+  });
+
+  it("uses runtime capabilities as part of Fast Refresh compatibility", () => {
+    const hmrId = `runtime-feature-refresh-${Math.random()}`;
+    const definition = {
+      ...counterDefinition("RuntimeFeatureRefresh"),
+      hmrId,
+      stateSignature: "1",
+    };
+
+    const Initial = createCompiledComponentWithFeatures(definition, []);
+    const Compatible = createCompiledComponentWithFeatures(definition, []);
+    const Structural = createCompiledComponentWithFeatures(definition, [conditionalRuntimeFeature]);
+
+    expect(Compatible).toBe(Initial);
+    expect(Structural).not.toBe(Initial);
+  });
+
   it("survives the StrictMode development mount cycle without rerendering on a local update", async () => {
     let renders = 0;
     const definition = counterDefinition("StrictCounter");

@@ -38,6 +38,9 @@ describe("React AOT mixed conditional and keyed ranges", () => {
 
     expect(result.compiled).toEqual(["Dashboard"]);
     expect(result.diagnostics).toEqual([]);
+    expect(result.code).toContain("mixedRangesRuntimeFeature");
+    expect(result.code).not.toContain("conditionalRangesRuntimeFeature");
+    expect(result.code).not.toContain("keyedRangesRuntimeFeature");
     expect(result.code.match(/farmBlocks\.MixedRanges/g)).toHaveLength(1);
     expect(result.code).toContain('kind: "mixed-ranges"');
     expect(result.code.match(/kind: "conditional"/g)).toHaveLength(2);

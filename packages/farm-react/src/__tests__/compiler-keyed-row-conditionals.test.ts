@@ -45,6 +45,9 @@ describe("React AOT keyed-row conditional compiler", () => {
     expect(result.compiled).toEqual(["Tasks"]);
     expect(result.diagnostics).toEqual([]);
     expect(result.code).toContain("farmBlocks.KeyedRows");
+    expect(result.code).toContain("keyedRowsHostRuntimeFeature");
+    expect(result.code).not.toContain("keyedRowsConditionalRuntimeFeature");
+    expect(result.code).not.toContain("keyedRowsCompleteRuntimeFeature");
     expect(result.code).toContain("hostBlocks={true}");
     expect(result.code).toContain('kind: "conditional-ranges"');
     expect(result.code).toContain("parent: 0");
@@ -87,6 +90,9 @@ describe("React AOT keyed-row conditional compiler", () => {
     expect(result.compiled).toEqual(["Tasks"]);
     expect(result.diagnostics).toEqual([]);
     expect(result.code).toContain("farmBlocks.KeyedRows");
+    expect(result.code).toContain("keyedRowsConditionalRuntimeFeature");
+    expect(result.code).not.toContain("keyedRowsHostRuntimeFeature");
+    expect(result.code).not.toContain("keyedRowsCompleteRuntimeFeature");
     expect(result.code).toContain("_farmRowEvent(item, 0, 0)");
     expect(result.code).toContain("_farmRowConditional(item, 0, 0");
     expect(result.code).toContain('name: "onClick"');

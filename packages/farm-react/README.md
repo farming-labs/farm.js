@@ -32,6 +32,19 @@ binding. The runtime uses direct subscription indexes rather than proxies or a c
 scan. Use `compiler: { reactivity: "static" }` to retain only the complete build-time dependency
 lists for comparison or diagnosis.
 
+Compiler output also selects its runtime capabilities at build time. A direct counter imports only
+the cell scheduler and direct-binding core; conditionals, keyed rows and LIS, nested host ranges,
+and component islands are retained only when a compiled component in that module needs them. Plain
+keyed rows omit the larger recursive-host and row-conditional extensions. This selection is
+automatic and does not add a configuration option or asynchronous runtime loading. The legacy
+`createCompiledComponent` export remains a complete compatibility entry for hand-authored
+definitions, while generated code uses the tree-shakable feature entry.
+
+The persisted production-size fixtures and regression gate live in
+[`RUNTIME_SIZE_RESULTS.md`](./RUNTIME_SIZE_RESULTS.md). The recorded direct-only runtime premium is
+73.6% smaller than the complete compatibility runtime premium; the feature-heavy keyed benchmark
+application removes 6,185 gzip bytes from its previous compiler-on build.
+
 For selective adoption, use annotation mode:
 
 ```ts

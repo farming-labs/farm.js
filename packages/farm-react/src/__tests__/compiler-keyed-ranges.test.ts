@@ -50,6 +50,8 @@ describe("React AOT keyed-range compiler", () => {
 
     expect(result.compiled).toEqual(["Board"]);
     expect(result.diagnostics).toEqual([]);
+    expect(result.code).toContain("keyedRangesRuntimeFeature");
+    expect(result.code).not.toContain("mixedRangesRuntimeFeature");
     expect(result.code).toContain("farmBlocks.KeyedRanges");
     expect(result.code).toContain("ranges={[");
     expect(result.code.match(/before: 1/g)).toHaveLength(2);

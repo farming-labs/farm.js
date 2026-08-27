@@ -34,6 +34,8 @@ describe("React AOT conditional-range compiler", () => {
 
     expect(result.diagnostics).toEqual([]);
     expect(result.compiled).toEqual(["Dashboard"]);
+    expect(result.code).toContain("conditionalRangesRuntimeFeature");
+    expect(result.code).not.toContain("keyedRangesRuntimeFeature");
     expect(result.code.match(/farmBlocks\.ConditionalRanges/g)).toHaveLength(1);
     expect(result.code.match(/farmBlocks\.Conditional(?!Ranges)/g)).toBeNull();
     expect(result.code.match(/before: 1/g)).toHaveLength(2);

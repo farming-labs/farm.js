@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "compression": "gzip level 9 and Node Brotli defaults",
+  "fixtures": {
+    "direct": {
+      "compilerOff": {
+        "raw": 192789,
+        "gzip": 60043,
+        "brotli": 51805
+      },
+      "compilerOn": {
+        "raw": 205422,
+        "gzip": 63721,
+        "brotli": 55001
+      },
+      "compilerPremium": {
+        "raw": 12633,
+        "gzip": 3678,
+        "brotli": 3196
+      }
+    },
+    "keyed": {
+      "compilerOff": {
+        "raw": 192934,
+        "gzip": 60107,
+        "brotli": 51830
+      },
+      "compilerOn": {
+        "raw": 220985,
+        "gzip": 68700,
+        "brotli": 58929
+      },
+      "compilerPremium": {
+        "raw": 28051,
+        "gzip": 8593,
+        "brotli": 7099
+      }
+    },
+    "isolatedRuntime": {
+      "control": {
+        "raw": 192643,
+        "gzip": 59919,
+        "brotli": 51666
+      },
+      "full": {
+        "raw": 258777,
+        "gzip": 74199,
+        "brotli": 63977
+      },
+      "coreOnly": {
+        "raw": 204922,
+        "gzip": 63685,
+        "brotli": 54902
+      },
+      "fullRuntimePremiumGzip": 14280,
+      "coreRuntimePremiumGzip": 3766,
+      "gzipReductionPercent": 73.6
+    }
+  }
+}

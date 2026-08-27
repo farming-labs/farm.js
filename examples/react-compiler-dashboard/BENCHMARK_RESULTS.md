@@ -91,12 +91,15 @@ as expected for validating keys and maintaining row indices.
 
 | Build                   | Page chunk raw | Page chunk gzip |
 | ----------------------- | -------------: | --------------: |
-| React baseline          |       18,567 B |         4,307 B |
-| Static compiler         |       94,603 B |        17,934 B |
-| Hybrid compiler         |       94,603 B |        17,935 B |
+| React baseline          |       18,567 B |         4,306 B |
+| Static compiler         |       71,688 B |        14,783 B |
+| Hybrid compiler         |       71,688 B |        14,785 B |
 
-This deliberately broad page pays a 13,628-byte gzip premium for the compiler runtime. Runtime
-splitting remains the main unresolved optimization opportunity.
+This deliberately broad page now pays a 10,479-byte gzip premium for the compiler runtime. Static
+capability selection removes 22,915 raw bytes and 3,150 gzip bytes from the previous hybrid page
+chunk while preserving every benchmark scenario. Smaller direct-only applications retain less of
+the runtime; the package-level fixtures and persisted size gate are documented in
+`packages/farm-react/RUNTIME_SIZE_RESULTS.md`.
 
 ## Conclusion
 
