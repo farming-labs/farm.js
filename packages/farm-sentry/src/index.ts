@@ -115,7 +115,7 @@ export function claimError(error: unknown): boolean {
 }
 
 const MISSING_SDK_MESSAGE =
-  "@farm.js/plugin-sentry needs @sentry/node. Install it with `pnpm add @sentry/node`, " +
+  "@farm.js/sentry needs @sentry/node. Install it with `pnpm add @sentry/node`, " +
   "or pass an SDK through the `sdk` option.";
 
 export async function resolveSentrySdk(

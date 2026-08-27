@@ -22,7 +22,7 @@ export default defineConfig({
     "packages/farm-integration-utils/package.json",
     "packages/farm-integrations/package.json",
     "packages/farm-jobs/package.json",
-    "packages/farm-plugin-sentry/package.json",
+    "packages/farm-sentry/package.json",
     "packages/farm-polar/package.json",
     "packages/farm-preview-gateway/package.json",
     "packages/farm-stripe/package.json",

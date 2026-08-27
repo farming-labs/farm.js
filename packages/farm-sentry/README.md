@@ -1,4 +1,4 @@
-# @farm.js/plugin-sentry
+# @farm.js/sentry
 
 Sentry error reporting and tracing for Farm.js applications. It maps Farm's request, render and
 build lifecycles onto Sentry, so errors arrive with route context and requests are traced.
@@ -8,7 +8,7 @@ Farm.js is currently in beta.
 ## Install
 
 ```bash
-pnpm add @farm.js/plugin-sentry @sentry/node
+pnpm add @farm.js/sentry @sentry/node
 ```
 
 `@sentry/node` is an optional peer dependency. If a `dsn` is configured and it is not installed,
@@ -18,7 +18,7 @@ the plugin fails with a clear error rather than quietly reporting nothing.
 
 ```ts
 import { defineConfig } from "@farm.js/core";
-import { sentryPlugin } from "@farm.js/plugin-sentry";
+import { sentryPlugin } from "@farm.js/sentry";
 
 export default defineConfig({
   plugins: [
@@ -38,7 +38,7 @@ application. Add an instrumentation file for that:
 
 ```ts
 // src/instrumentation.ts
-import { registerSentry } from "@farm.js/plugin-sentry";
+import { registerSentry } from "@farm.js/sentry";
 
 export const register = registerSentry({
   dsn: process.env.SENTRY_DSN,
