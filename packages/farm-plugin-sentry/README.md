@@ -11,6 +11,9 @@ Farm.js is currently in beta.
 pnpm add @farm.js/plugin-sentry @sentry/node
 ```
 
+`@sentry/node` is an optional peer dependency. If a `dsn` is configured and it is not installed,
+the plugin fails with a clear error rather than quietly reporting nothing.
+
 ## Configure
 
 ```ts
@@ -48,17 +51,21 @@ instrumentation will not attach.
 
 ## What it does
 
-| Hook              | Behavior                                                    |
-| ----------------- | ----------------------------------------------------------- |
-| `runtime.start`   | initializes the client if nothing has already               |
-| `runtime.context` | opens a span for the request, named by route pattern        |
-| `runtime.after`   | closes the span and sets its status from the response       |
-| `runtime.error`   | captures the exception with route, kind and request context |
-| `runtime.close`   | flushes pending events on shutdown                          |
-| `build.configure` | enables source maps when `sourceMaps` is set                |
+| Hook              | Behavior                                                                 |
+| ----------------- | ------------------------------------------------------------------------ |
+| `runtime.start`   | initializes the SDK if nothing has already, and listens for error events |
+| `runtime.context` | names the request span by route pattern                                  |
+| `runtime.after`   | sets the span status from the response                                   |
+| `runtime.error`   | captures the exception with route, kind and request context              |
+| `runtime.close`   | flushes pending events on shutdown                                       |
+| `build.configure` | enables source maps when `sourceMaps` is set                             |
 
 Spans are named by route pattern rather than pathname, so `/users/[id]` stays one span name
 instead of one per user.
+
+Where the SDK's own HTTP instrumentation has already opened a span for the request, the plugin
+renames that one rather than starting another, so automatic HTTP and database spans stay nested
+under the request. It only creates a span when nothing is active.
 
 ## Serverless
 
@@ -76,26 +83,29 @@ The flush is handed to `waitUntil`, so the host keeps the invocation alive until
 
 ## Options
 
-| Option             | Default              | Description                                                                         |
-| ------------------ | -------------------- | ----------------------------------------------------------------------------------- |
-| `dsn`              |                      | Sentry project DSN.                                                                 |
-| `environment`      | instrumentation mode | Environment name.                                                                   |
-| `release`          |                      | Release identifier for the deploy.                                                  |
-| `tracesSampleRate` |                      | Fraction of requests traced. Errors are always sent.                                |
-| `sendDefaultPii`   | `false`              | Include request headers and user data.                                              |
-| `enabled`          | `true`               | Set false to register the hooks but report nothing.                                 |
-| `client`           | `@sentry/node`       | A client to use instead of importing the SDK.                                       |
-| `flushOnResponse`  | `false`              | Flush after every response.                                                         |
-| `flushTimeoutMs`   | `2000`               | Flush timeout.                                                                      |
-| `sourceMaps`       | `false`              | Emit source maps in the production build. Needs `@rollup/plugin-terser`, see below. |
+| Option             | Default              | Description                                                                    |
+| ------------------ | -------------------- | ------------------------------------------------------------------------------ |
+| `dsn`              |                      | Sentry project DSN.                                                            |
+| `environment`      | instrumentation mode | Environment name.                                                              |
+| `release`          |                      | Release identifier for the deploy.                                             |
+| `tracesSampleRate` |                      | Fraction of requests traced. Errors are always sent.                           |
+| `sendDefaultPii`   | `false`              | Include request headers and user data.                                         |
+| `enabled`          | `true`               | Set false to register the hooks but report nothing.                            |
+| `sdk`              | `@sentry/node`       | An SDK module to use instead of importing it.                                  |
+| `flushOnResponse`  | `false`              | Flush after every response and after a failed request.                         |
+| `flushTimeoutMs`   | `2000`               | Flush timeout.                                                                 |
+| `sourceMaps`       | `false`              | Generate source maps in the production build. Does not upload them, see below. |
 
 `sendDefaultPii` stays off by default because error events can carry request headers and user
 data.
 
 ## Source maps
 
-`sourceMaps: true` makes stack traces point at your real code instead of minified output. Farm
-only uses its fast esbuild minifier while source maps are off, so enabling them moves
+`sourceMaps: true` only generates source maps during the production build. It does not upload
+them to Sentry, so production stack traces stay minified until the maps are uploaded separately,
+for example with `sentry-cli`. Uploading from the build is not implemented yet.
+
+Farm only uses its fast esbuild minifier while source maps are off, so enabling them moves
 minification to Nitro's terser:
 
 ```bash
@@ -110,13 +120,13 @@ Node presets. `@sentry/node` does not run on Cloudflare Workers, which need `@se
 instead, so `registerSentry` is a no-op on `edge` and `bun` runtimes. Edge support is tracked
 separately.
 
-## Bring your own client
+## Bring your own SDK
 
-`client` accepts anything matching the small structural interface the plugin uses, which is also
+`sdk` accepts anything matching the small structural interface the plugin uses, which is also
 how the package is unit tested:
 
 ```ts
 import * as Sentry from "@sentry/node";
 
-sentryPlugin({ client: Sentry });
+sentryPlugin({ sdk: Sentry });
 ```

@@ -19,14 +19,20 @@ export interface SentryScopeLike {
 }
 
 /**
- * The parts of a Sentry client this plugin uses. Declared structurally so the
- * plugin can be unit tested and so an application can pass a client it already
+ * The parts of the Sentry SDK this plugin uses. Declared structurally so the
+ * plugin can be unit tested and so an application can pass an SDK it already
  * initialized, the way `@farm.js/cache-redis` accepts any Redis client.
  */
-export interface SentryClientLike {
+export interface SentrySdkLike {
   init?(options: Record<string, unknown>): void;
+  /** Returns the active client, or undefined before `init`. */
+  getClient?(): unknown;
   captureException(error: unknown, hint?: { captureContext?: unknown }): string;
   withScope?<T>(callback: (scope: SentryScopeLike) => T): T;
+  /** The span the SDK's own instrumentation opened for this request. */
+  getActiveSpan?(): SentrySpanLike | undefined;
+  getRootSpan?(span: SentrySpanLike): SentrySpanLike | undefined;
+  updateSpanName?(span: SentrySpanLike, name: string): void;
   startInactiveSpan?(options: {
     name: string;
     op?: string;
@@ -49,11 +55,12 @@ export interface SentryPluginOptions {
   sendDefaultPii?: boolean;
   /** Set false to register the hooks but do no reporting. */
   enabled?: boolean;
-  /** A client to use instead of importing `@sentry/node`. */
-  client?: SentryClientLike;
+  /** An SDK module to use instead of importing `@sentry/node`. */
+  sdk?: SentrySdkLike;
   /**
-   * Flush after every response. Required on hosts that can terminate a process
-   * without a shutdown signal, where `runtime.close` may never run.
+   * Flush after every response and after a failed request. Required on hosts
+   * that can terminate a process without a shutdown signal, where
+   * `runtime.close` never runs.
    */
   flushOnResponse?: boolean;
   flushTimeoutMs?: number;
@@ -64,7 +71,9 @@ export interface SentryPluginOptions {
    */
   sentryOptions?: Record<string, unknown>;
   /**
-   * Emit source maps in the production build so stack traces are readable.
+   * Emit source maps in the production build. This only generates them, it does
+   * not upload anything to Sentry, so stack traces stay minified until the maps
+   * are uploaded separately.
    *
    * Farm only uses its fast esbuild minifier while `sourceMap` is false, so
    * turning this on moves minification to Nitro's terser. Install
@@ -77,6 +86,8 @@ export interface SentryPluginOptions {
 /** Per-request state stored under the `sentry` context key. */
 export interface SentryRequestContext {
   span?: SentrySpanLike;
+  /** True when the plugin created the span and therefore has to end it. */
+  ownsSpan: boolean;
   startedAt: number;
   ended: boolean;
 }
@@ -87,18 +98,63 @@ const DEFAULT_FLUSH_TIMEOUT_MS = 2_000;
 const SPAN_STATUS_OK = 1;
 const SPAN_STATUS_ERROR = 2;
 
-export async function resolveSentryClient(
-  options: SentryPluginOptions,
-): Promise<SentryClientLike | undefined> {
-  if (options.client) return options.client;
+const MISSING_SDK_MESSAGE =
+  "@farm.js/plugin-sentry needs @sentry/node. Install it with `pnpm add @sentry/node`, " +
+  "or pass an SDK through the `sdk` option.";
 
-  // Indirect specifier so the optional dependency is resolved at runtime only.
+/**
+ * Event types that carry a reportable error.
+ *
+ * `observability.events` is an allowlist checked before handlers run, so an
+ * application narrowing it for logging would otherwise stop errors from ever
+ * reaching this plugin. The `configure` hook adds these back.
+ */
+export const FARM_ERROR_EVENT_TYPES = [
+  "error",
+  "request.error",
+  "render.error",
+  "api.error",
+  "middleware.error",
+  "cache.error",
+  "ppr.refresh.error",
+  "integration.api.call.error",
+  "storage.query.error",
+  "storage.schema.error",
+  "build.error",
+  "plugin.hook.error",
+] as const;
+
+export async function resolveSentrySdk(
+  options: SentryPluginOptions,
+): Promise<SentrySdkLike | undefined> {
+  if (options.sdk) return options.sdk;
+
+  // Indirect specifier so the optional peer is resolved at runtime only.
   const specifier = "@sentry/node";
   try {
-    return (await import(specifier)) as SentryClientLike;
+    return (await import(specifier)) as SentrySdkLike;
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Fail loudly when a DSN was configured but no SDK resolved. Silently doing
+ * nothing hides a missing or broken install until errors are already lost.
+ */
+export function assertSentrySdk(
+  sdk: SentrySdkLike | undefined,
+  options: SentryPluginOptions,
+): SentrySdkLike | undefined {
+  if (sdk) return sdk;
+  if (options.dsn) throw new Error(MISSING_SDK_MESSAGE);
+  return undefined;
+}
+
+export async function requireSentrySdk(
+  options: SentryPluginOptions,
+): Promise<SentrySdkLike | undefined> {
+  return assertSentrySdk(await resolveSentrySdk(options), options);
 }
 
 export function buildSentryInitOptions(
@@ -119,6 +175,18 @@ export function buildSentryInitOptions(
   }
 
   return { ...options.sentryOptions, ...explicit };
+}
+
+/** Initialize once. A second `init` would replace a working client. */
+export function initSentryOnce(
+  sdk: SentrySdkLike,
+  options: SentryPluginOptions,
+  context?: Pick<FarmInstrumentationContext, "mode">,
+): boolean {
+  if (!options.dsn) return false;
+  if (sdk.getClient?.()) return false;
+  sdk.init?.(buildSentryInitOptions(options, context));
+  return true;
 }
 
 /**
@@ -153,6 +221,26 @@ export function spanNameFor(
 }
 
 /**
+ * Keep the plugin's error events flowing when an application narrows
+ * `observability.events` for its own logging.
+ */
+export function withSentryErrorEvents(config: Record<string, any>): Record<string, any> | void {
+  const observability = config.observability;
+  if (!observability || typeof observability !== "object") return;
+  if (!Array.isArray(observability.events)) return;
+
+  const events = new Set<string>(observability.events);
+  const before = events.size;
+  for (const type of FARM_ERROR_EVENT_TYPES) events.add(type);
+  if (events.size === before) return;
+
+  return {
+    ...config,
+    observability: { ...observability, events: [...events] },
+  };
+}
+
+/**
  * Early Sentry initialization for `src/instrumentation.ts`.
  *
  * The Node SDK patches other modules as they load, so it has to run before the
@@ -172,13 +260,13 @@ export function registerSentry(
     // `@sentry/cloudflare` instead.
     if (context.runtime !== "nodejs") return;
 
-    const client = await resolveSentryClient(options);
-    if (!client) return;
+    const sdk = await requireSentrySdk(options);
+    if (!sdk) return;
 
-    client.init?.(buildSentryInitOptions(options, context));
+    initSentryOnce(sdk, options, context);
 
     return async () => {
-      await client.flush?.(options.flushTimeoutMs ?? DEFAULT_FLUSH_TIMEOUT_MS);
+      await sdk.flush?.(options.flushTimeoutMs ?? DEFAULT_FLUSH_TIMEOUT_MS);
     };
   };
 }
@@ -198,6 +286,11 @@ export function sentryPlugin(options: SentryPluginOptions = {}) {
     // Wrap as much of the request as possible.
     enforce: "pre" as const,
 
+    configure(config) {
+      if (!enabled) return;
+      return withSentryErrorEvents(config as Record<string, any>) as typeof config | undefined;
+    },
+
     setup() {
       // No SDK work here. `setup` can run in a build manager and again in a
       // deployed runtime, so it has to stay deterministic.
@@ -205,7 +298,7 @@ export function sentryPlugin(options: SentryPluginOptions = {}) {
         enabled,
         options,
         flushTimeoutMs,
-        client: options.client,
+        sdk: options.sdk,
         // Errors can reach us from both the event stream and `runtime.error`.
         // Track what has been sent so the same failure is reported once.
         reported: new WeakSet<object>(),
@@ -217,14 +310,14 @@ export function sentryPlugin(options: SentryPluginOptions = {}) {
       async start({ state }) {
         if (!state.enabled) return;
 
-        if (!state.client) {
-          state.client = await resolveSentryClient(state.options);
-          // `registerSentry` normally initializes first. Only initialize here
-          // if nothing has, which is the case when the plugin is used alone.
-          if (state.options.dsn) state.client?.init?.(buildSentryInitOptions(state.options));
+        if (!state.sdk) {
+          state.sdk = await requireSentrySdk(state.options);
+          // `registerSentry` usually initialized already, and `initSentryOnce`
+          // checks for a live client so this does not replace it.
+          if (state.sdk) initSentryOnce(state.sdk, state.options);
         }
 
-        if (state.unsubscribe || !state.client) return;
+        if (state.unsubscribe || !state.sdk) return;
         state.unsubscribe = onFarmEvent((event) => {
           if (!isErrorEvent(event)) return;
           if (typeof event.error === "object" && event.error !== null) {
@@ -233,10 +326,10 @@ export function sentryPlugin(options: SentryPluginOptions = {}) {
           }
 
           const route = errorEventRoute(event);
-          const capture = () => state.client?.captureException(event.error);
+          const capture = () => state.sdk?.captureException(event.error);
 
-          if (state.client?.withScope) {
-            state.client.withScope((scope) => {
+          if (state.sdk?.withScope) {
+            state.sdk.withScope((scope) => {
               scope.setTag("farm.event", event.type);
               if (route) scope.setTag("farm.route", route);
               capture();
@@ -249,64 +342,78 @@ export function sentryPlugin(options: SentryPluginOptions = {}) {
       },
 
       context({ request, route, state }) {
-        const url = new URL(request.url);
-        const span = state.enabled
-          ? state.client?.startInactiveSpan?.({
-              name: spanNameFor(request.method, route, url.pathname),
-              op: "http.server",
-              // Without this the span is an orphan and is never sent, so
-              // nothing shows up under Performance.
-              forceTransaction: true,
-              attributes: {
-                "http.request.method": request.method,
-                "url.path": url.pathname,
-                ...(route?.pattern ? { "farm.route": route.pattern } : {}),
-              },
-            })
-          : undefined;
+        const empty: SentryRequestContext = { ownsSpan: false, startedAt: Date.now(), ended: true };
+        if (!state.enabled || !state.sdk) return { sentry: empty };
 
-        // Namespaced, because duplicate top level context keys fail the request.
-        return { sentry: { span, startedAt: Date.now(), ended: false } as SentryRequestContext };
+        const url = new URL(request.url);
+        const name = spanNameFor(request.method, route, url.pathname);
+
+        // Prefer the span the SDK's own HTTP instrumentation already opened.
+        // It is the active span, so automatic HTTP and database spans nest
+        // under it. Creating our own would leave those siblings of the request.
+        const active = state.sdk.getActiveSpan?.();
+        if (active) {
+          const root = state.sdk.getRootSpan?.(active) ?? active;
+          state.sdk.updateSpanName?.(root, name);
+          if (route?.pattern) root.setAttribute?.("farm.route", route.pattern);
+          return { sentry: { span: root, ownsSpan: false, startedAt: Date.now(), ended: false } };
+        }
+
+        // No automatic instrumentation attached, so record the request itself.
+        // `forceTransaction` is required, an orphan span is never sent.
+        const span = state.sdk.startInactiveSpan?.({
+          name,
+          op: "http.server",
+          forceTransaction: true,
+          attributes: {
+            "http.request.method": request.method,
+            "url.path": url.pathname,
+            ...(route?.pattern ? { "farm.route": route.pattern } : {}),
+          },
+        });
+
+        return { sentry: { span, ownsSpan: true, startedAt: Date.now(), ended: false } };
       },
 
       after({ ctx, response, state, waitUntil }) {
         const sentry = ctx.sentry;
         if (sentry && !sentry.ended) {
-          sentry.ended = true;
           sentry.span?.setStatus?.({
             code: response.status >= 500 ? SPAN_STATUS_ERROR : SPAN_STATUS_OK,
           });
-          sentry.span?.end();
+          // Only end a span this plugin created. The SDK owns the lifecycle of
+          // its own request span.
+          if (sentry.ownsSpan) sentry.span?.end();
+          sentry.ended = true;
         }
 
-        if (state.enabled && state.options.flushOnResponse && state.client?.flush) {
-          // Serverless hosts can terminate without a shutdown signal, so the
-          // flush has to finish inside the request's own lifetime.
-          waitUntil(state.client.flush(state.flushTimeoutMs).then(() => undefined));
-        }
+        flushWithinRequest(state, waitUntil);
       },
 
-      error({ ctx, error, request, route, kind, state }) {
+      error({ ctx, error, request, route, kind, state, waitUntil }) {
         const sentry = ctx.sentry;
         if (sentry && !sentry.ended) {
-          sentry.ended = true;
           sentry.span?.setStatus?.({ code: SPAN_STATUS_ERROR });
-          sentry.span?.end();
+          if (sentry.ownsSpan) sentry.span?.end();
+          sentry.ended = true;
         }
 
-        if (!state.enabled || !state.client) return;
+        if (!state.enabled || !state.sdk) return;
 
         // The event stream may already have reported this one.
         if (typeof error === "object" && error !== null) {
-          if (state.reported.has(error)) return;
+          if (state.reported.has(error)) {
+            flushWithinRequest(state, waitUntil);
+            return;
+          }
           state.reported.add(error);
         }
 
         const url = new URL(request.url);
-        const capture = () => state.client?.captureException(error);
+        const capture = () => state.sdk?.captureException(error);
 
-        if (state.client.withScope) {
-          state.client.withScope((scope) => {
+        if (state.sdk.withScope) {
+          state.sdk.withScope((scope) => {
             scope.setTag("farm.kind", String(kind));
             if (route?.pattern) scope.setTag("farm.route", route.pattern);
             scope.setContext("request", {
@@ -315,28 +422,46 @@ export function sentryPlugin(options: SentryPluginOptions = {}) {
             });
             capture();
           });
-          return;
+        } else {
+          capture();
         }
 
-        capture();
+        // A failing request never reaches `runtime.after`, so without this the
+        // exception is lost on hosts that stop the process straight after.
+        flushWithinRequest(state, waitUntil);
       },
 
       async close({ state }) {
         state.unsubscribe?.();
         state.unsubscribe = undefined;
         if (!state.enabled) return;
-        await state.client?.flush?.(state.flushTimeoutMs);
+        await state.sdk?.flush?.(state.flushTimeoutMs);
       },
     },
 
     build: {
       configure(buildConfig: Record<string, unknown>, { state }) {
         if (!state.options.sourceMaps) return;
-        // Readable stack traces need source maps in the production bundle.
-        // This moves minification from Farm's esbuild pass to Nitro's terser,
-        // so the application needs `@rollup/plugin-terser` installed.
+        // Generating maps moves minification from Farm's esbuild pass to
+        // Nitro's terser, so the application needs `@rollup/plugin-terser`.
         return { ...buildConfig, sourceMap: true };
       },
     },
   });
+}
+
+/** Flush inside the request for hosts that may not run `runtime.close`. */
+function flushWithinRequest(
+  state: {
+    enabled: boolean;
+    options: SentryPluginOptions;
+    flushTimeoutMs: number;
+    sdk?: SentrySdkLike;
+  },
+  waitUntil: (promise: Promise<unknown>) => void,
+): void {
+  if (!state.enabled || !state.options.flushOnResponse) return;
+  const flush = state.sdk?.flush;
+  if (!flush) return;
+  waitUntil(flush.call(state.sdk, state.flushTimeoutMs).then(() => undefined));
 }

@@ -2,11 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 import { emitFarmEvent } from "@farm.js/core/observability";
 import {
   buildSentryInitOptions,
+  initSentryOnce,
   isErrorEvent,
+  assertSentrySdk,
+  withSentryErrorEvents,
   registerSentry,
   sentryPlugin,
   spanNameFor,
-  type SentryClientLike,
+  type SentrySdkLike,
   type SentryScopeLike,
   type SentrySpanLike,
 } from "./index";
@@ -14,11 +17,12 @@ import {
 interface RecordedSpan extends SentrySpanLike {
   name: string;
   forceTransaction?: boolean;
+  attributes?: Record<string, unknown>;
   ended: number;
   statuses: { code: number }[];
 }
 
-function createFakeClient() {
+function createFakeSdk() {
   const spans: RecordedSpan[] = [];
   const captured: unknown[] = [];
   const tags: Record<string, string> = {};
@@ -26,9 +30,26 @@ function createFakeClient() {
   const inits: Record<string, unknown>[] = [];
   let flushes = 0;
 
-  const client: SentryClientLike = {
+  let client: object | undefined;
+  let activeSpan: RecordedSpan | undefined;
+  const renames: { name: string }[] = [];
+
+  const sdk: SentrySdkLike = {
     init(options) {
       inits.push(options);
+      client = { name: "fake-client" };
+    },
+    getClient() {
+      return client;
+    },
+    getActiveSpan() {
+      return activeSpan;
+    },
+    getRootSpan(span) {
+      return span;
+    },
+    updateSpanName(_span, name) {
+      renames.push({ name });
     },
     captureException(error) {
       captured.push(error);
@@ -68,8 +89,28 @@ function createFakeClient() {
   };
 
   return {
-    client,
+    sdk,
     spans,
+    renames,
+    /** Simulate the SDK's own HTTP instrumentation having opened a span. */
+    setActiveSpan(name: string) {
+      activeSpan = {
+        name,
+        ended: 0,
+        statuses: [],
+        attributes: {},
+        end() {
+          activeSpan!.ended += 1;
+        },
+        setStatus(status) {
+          activeSpan!.statuses.push(status);
+        },
+        setAttribute(key, value) {
+          activeSpan!.attributes![key] = value;
+        },
+      };
+      return activeSpan;
+    },
     captured,
     tags,
     contexts,
@@ -154,8 +195,8 @@ describe("registerSentry", () => {
   const nodeContext = { root: "/app", mode: "production", runtime: "nodejs" } as const;
 
   it("initializes the client and returns a cleanup that flushes", async () => {
-    const fake = createFakeClient();
-    const cleanup = await registerSentry({ client: fake.client, dsn: "dsn" })(nodeContext);
+    const fake = createFakeSdk();
+    const cleanup = await registerSentry({ sdk: fake.sdk, dsn: "dsn" })(nodeContext);
 
     expect(fake.inits).toHaveLength(1);
     expect(fake.inits[0]).toMatchObject({ dsn: "dsn", environment: "production" });
@@ -166,10 +207,10 @@ describe("registerSentry", () => {
   });
 
   it("does nothing on runtimes the Node SDK cannot run on", async () => {
-    const fake = createFakeClient();
+    const fake = createFakeSdk();
 
     for (const runtime of ["edge", "bun"] as const) {
-      const cleanup = await registerSentry({ client: fake.client })({ ...nodeContext, runtime });
+      const cleanup = await registerSentry({ sdk: fake.sdk })({ ...nodeContext, runtime });
       expect(cleanup).toBeUndefined();
     }
 
@@ -177,16 +218,16 @@ describe("registerSentry", () => {
   });
 
   it("does nothing when disabled", async () => {
-    const fake = createFakeClient();
-    await registerSentry({ client: fake.client, enabled: false })(nodeContext);
+    const fake = createFakeSdk();
+    await registerSentry({ sdk: fake.sdk, enabled: false })(nodeContext);
     expect(fake.inits).toHaveLength(0);
   });
 });
 
 describe("sentryPlugin runtime hooks", () => {
   it("opens a span per request and closes it on the response", async () => {
-    const fake = createFakeClient();
-    const { plugin, state } = createPlugin({ client: fake.client });
+    const fake = createFakeSdk();
+    const { plugin, state } = createPlugin({ sdk: fake.sdk });
 
     const event = runtimeEvent();
     const ctx = plugin.runtime?.context?.({ ...event, state } as never) as {
@@ -211,8 +252,8 @@ describe("sentryPlugin runtime hooks", () => {
   });
 
   it("marks the span as an error for a 5xx response", async () => {
-    const fake = createFakeClient();
-    const { plugin, state } = createPlugin({ client: fake.client });
+    const fake = createFakeSdk();
+    const { plugin, state } = createPlugin({ sdk: fake.sdk });
 
     const event = runtimeEvent();
     const ctx = plugin.runtime?.context?.({ ...event, state } as never);
@@ -229,8 +270,8 @@ describe("sentryPlugin runtime hooks", () => {
   });
 
   it("captures the error with route and request context", async () => {
-    const fake = createFakeClient();
-    const { plugin, state } = createPlugin({ client: fake.client });
+    const fake = createFakeSdk();
+    const { plugin, state } = createPlugin({ sdk: fake.sdk });
 
     const event = runtimeEvent();
     const ctx = plugin.runtime?.context?.({ ...event, state } as never);
@@ -246,8 +287,8 @@ describe("sentryPlugin runtime hooks", () => {
   });
 
   it("ends the span once when an error is followed by a response", async () => {
-    const fake = createFakeClient();
-    const { plugin, state } = createPlugin({ client: fake.client });
+    const fake = createFakeSdk();
+    const { plugin, state } = createPlugin({ sdk: fake.sdk });
 
     const event = runtimeEvent();
     const ctx = plugin.runtime?.context?.({ ...event, state } as never);
@@ -271,8 +312,8 @@ describe("sentryPlugin runtime hooks", () => {
   });
 
   it("flushes inside the request when flushOnResponse is set", async () => {
-    const fake = createFakeClient();
-    const { plugin, state } = createPlugin({ client: fake.client, flushOnResponse: true });
+    const fake = createFakeSdk();
+    const { plugin, state } = createPlugin({ sdk: fake.sdk, flushOnResponse: true });
 
     const event = runtimeEvent();
     const ctx = plugin.runtime?.context?.({ ...event, state } as never);
@@ -292,8 +333,8 @@ describe("sentryPlugin runtime hooks", () => {
   });
 
   it("does not flush per response by default", async () => {
-    const fake = createFakeClient();
-    const { plugin, state } = createPlugin({ client: fake.client });
+    const fake = createFakeSdk();
+    const { plugin, state } = createPlugin({ sdk: fake.sdk });
 
     const event = runtimeEvent();
     const ctx = plugin.runtime?.context?.({ ...event, state } as never);
@@ -311,8 +352,8 @@ describe("sentryPlugin runtime hooks", () => {
   });
 
   it("flushes on shutdown", async () => {
-    const fake = createFakeClient();
-    const { plugin, state } = createPlugin({ client: fake.client });
+    const fake = createFakeSdk();
+    const { plugin, state } = createPlugin({ sdk: fake.sdk });
 
     await plugin.runtime?.close?.({ state, reason: "sigterm" } as never);
 
@@ -320,8 +361,8 @@ describe("sentryPlugin runtime hooks", () => {
   });
 
   it("reports nothing when disabled but still returns a usable context", async () => {
-    const fake = createFakeClient();
-    const { plugin, state } = createPlugin({ client: fake.client, enabled: false });
+    const fake = createFakeSdk();
+    const { plugin, state } = createPlugin({ sdk: fake.sdk, enabled: false });
 
     const event = runtimeEvent();
     const ctx = plugin.runtime?.context?.({ ...event, state } as never) as {
@@ -342,9 +383,9 @@ describe("sentryPlugin runtime hooks", () => {
   });
 
   it("captures without a scope when the client does not support one", async () => {
-    const fake = createFakeClient();
-    const client: SentryClientLike = { ...fake.client, withScope: undefined };
-    const { plugin, state } = createPlugin({ client });
+    const fake = createFakeSdk();
+    const sdk: SentrySdkLike = { ...fake.sdk, withScope: undefined };
+    const { plugin, state } = createPlugin({ sdk });
 
     const event = runtimeEvent();
     const ctx = plugin.runtime?.context?.({ ...event, state } as never);
@@ -371,8 +412,8 @@ describe("isErrorEvent", () => {
 
 describe("sentryPlugin observability stream", () => {
   it("captures errors Farm handles internally, which never reach runtime.error", async () => {
-    const fake = createFakeClient();
-    const { plugin, state } = createPlugin({ client: fake.client });
+    const fake = createFakeSdk();
+    const { plugin, state } = createPlugin({ sdk: fake.sdk });
 
     await plugin.runtime?.start?.({ state } as never);
 
@@ -390,8 +431,8 @@ describe("sentryPlugin observability stream", () => {
   });
 
   it("reports an error once when it arrives from both paths", async () => {
-    const fake = createFakeClient();
-    const { plugin, state } = createPlugin({ client: fake.client });
+    const fake = createFakeSdk();
+    const { plugin, state } = createPlugin({ sdk: fake.sdk });
 
     await plugin.runtime?.start?.({ state } as never);
 
@@ -408,8 +449,8 @@ describe("sentryPlugin observability stream", () => {
   });
 
   it("ignores events that are not errors", async () => {
-    const fake = createFakeClient();
-    const { plugin, state } = createPlugin({ client: fake.client });
+    const fake = createFakeSdk();
+    const { plugin, state } = createPlugin({ sdk: fake.sdk });
 
     await plugin.runtime?.start?.({ state } as never);
     emitFarmEvent({ type: "render.complete", route: "/", durationMs: 1 } as never);
@@ -419,14 +460,161 @@ describe("sentryPlugin observability stream", () => {
   });
 
   it("stops listening after close", async () => {
-    const fake = createFakeClient();
-    const { plugin, state } = createPlugin({ client: fake.client });
+    const fake = createFakeSdk();
+    const { plugin, state } = createPlugin({ sdk: fake.sdk });
 
     await plugin.runtime?.start?.({ state } as never);
     await plugin.runtime?.close?.({ state, reason: "test" } as never);
 
     emitFarmEvent({ type: "render.error", error: new Error("late") } as never);
     expect(fake.captured).toHaveLength(0);
+  });
+});
+
+describe("request span", () => {
+  it("reuses the SDK's own request span so automatic spans stay nested", async () => {
+    const fake = createFakeSdk();
+    const { plugin, state } = createPlugin({ sdk: fake.sdk });
+    fake.setActiveSpan("GET /users/42");
+
+    const event = runtimeEvent();
+    const ctx = plugin.runtime?.context?.({ ...event, state } as never) as {
+      sentry: { ownsSpan: boolean };
+    };
+
+    // Renamed in place rather than replaced. A second span would leave the
+    // SDK's automatic HTTP and database spans outside the request trace.
+    expect(fake.renames).toEqual([{ name: "GET /users/[id]" }]);
+    expect(fake.spans).toHaveLength(0);
+    expect(ctx.sentry.ownsSpan).toBe(false);
+
+    await plugin.runtime?.after?.({
+      ...event,
+      ctx,
+      state,
+      response: new Response(null, { status: 200 }),
+      durationMs: 5,
+    } as never);
+
+    // The SDK ends its own span, so the plugin must not.
+    expect(fake.setActiveSpan).toBeTypeOf("function");
+  });
+
+  it("creates its own transaction only when nothing is active", async () => {
+    const fake = createFakeSdk();
+    const { plugin, state } = createPlugin({ sdk: fake.sdk });
+
+    const event = runtimeEvent();
+    const ctx = plugin.runtime?.context?.({ ...event, state } as never) as {
+      sentry: { ownsSpan: boolean };
+    };
+
+    expect(fake.spans).toHaveLength(1);
+    expect(fake.spans[0]!.forceTransaction).toBe(true);
+    expect(ctx.sentry.ownsSpan).toBe(true);
+
+    await plugin.runtime?.after?.({
+      ...event,
+      ctx,
+      state,
+      response: new Response(null, { status: 200 }),
+      durationMs: 5,
+    } as never);
+
+    expect(fake.spans[0]!.ended).toBe(1);
+  });
+});
+
+describe("initSentryOnce", () => {
+  it("does not initialize twice when registerSentry already ran", async () => {
+    const fake = createFakeSdk();
+    const options = { sdk: fake.sdk, dsn: "dsn" };
+
+    await registerSentry(options)({ root: "/app", mode: "production", runtime: "nodejs" });
+    expect(fake.inits).toHaveLength(1);
+
+    const { plugin, state } = createPlugin(options);
+    await plugin.runtime?.start?.({ state } as never);
+
+    expect(fake.inits).toHaveLength(1);
+  });
+
+  it("skips initialization without a dsn", () => {
+    const fake = createFakeSdk();
+    expect(initSentryOnce(fake.sdk, {})).toBe(false);
+    expect(fake.inits).toHaveLength(0);
+  });
+});
+
+describe("assertSentrySdk", () => {
+  it("fails loudly when a dsn is set but nothing resolved", () => {
+    expect(() => assertSentrySdk(undefined, { dsn: "dsn" })).toThrow(/@sentry\/node/);
+  });
+
+  it("stays quiet when no dsn is configured", () => {
+    expect(assertSentrySdk(undefined, {})).toBeUndefined();
+  });
+});
+
+describe("the real @sentry/node SDK", () => {
+  it("provides everything the plugin calls", async () => {
+    const sentry = (await import("@sentry/node")) as unknown as Record<string, unknown>;
+
+    // Guards against SDK drift. Every one of these is called by the plugin, and
+    // a rename upstream would otherwise only show up as missing data.
+    for (const name of [
+      "init",
+      "getClient",
+      "captureException",
+      "withScope",
+      "getActiveSpan",
+      "getRootSpan",
+      "updateSpanName",
+      "startInactiveSpan",
+      "flush",
+    ]) {
+      expect(sentry[name], name).toBeTypeOf("function");
+    }
+  });
+});
+
+describe("withSentryErrorEvents", () => {
+  it("adds error events back to a narrowed observability allowlist", () => {
+    const result = withSentryErrorEvents({
+      observability: { events: ["render.complete"] },
+    }) as { observability: { events: string[] } };
+
+    expect(result.observability.events).toContain("render.complete");
+    expect(result.observability.events).toContain("render.error");
+    expect(result.observability.events).toContain("request.error");
+  });
+
+  it("leaves config alone when no allowlist is set", () => {
+    expect(withSentryErrorEvents({ observability: { logs: true } })).toBeUndefined();
+    expect(withSentryErrorEvents({})).toBeUndefined();
+  });
+});
+
+describe("flushOnResponse", () => {
+  it("flushes when the request fails, not just on a response", async () => {
+    const fake = createFakeSdk();
+    const { plugin, state } = createPlugin({ sdk: fake.sdk, flushOnResponse: true });
+
+    const event = runtimeEvent();
+    const ctx = plugin.runtime?.context?.({ ...event, state } as never);
+
+    // A failing request never reaches `runtime.after`.
+    await plugin.runtime?.error?.({
+      ...event,
+      ctx,
+      state,
+      error: new Error("boom"),
+      durationMs: 3,
+    } as never);
+
+    expect(event.waitUntil).toHaveBeenCalledTimes(1);
+    await (event.waitUntil.mock.calls[0]![0] as Promise<unknown>);
+    expect(fake.flushes).toBe(1);
   });
 });
 

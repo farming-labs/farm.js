@@ -42,7 +42,16 @@
     "@farm.js/core": "workspace:*"
   },
   "devDependencies": {
+    "@sentry/node": "^10.71.0",
     "typescript": "^5.3.3",
     "vitest": "^3.2.7"
+  },
+  "peerDependencies": {
+    "@sentry/node": ">=8"
+  },
+  "peerDependenciesMeta": {
+    "@sentry/node": {
+      "optional": true
+    }
   }
 }
