@@ -62,6 +62,8 @@
     "type-check": "tsc --noEmit",
     "test": "vitest run",
     "benchmark:reactivity": "node scripts/benchmark-reactivity.mjs",
+    "benchmark:runtime-size": "pnpm build && node scripts/benchmark-runtime-size.mjs",
+    "test:runtime-size": "pnpm build && node scripts/benchmark-runtime-size.mjs --check",
     "test:compat": "pnpm build && node scripts/test-react-version.mjs 18.3.1 && node scripts/test-react-version.mjs 19.2.8",
     "clean": "rm -rf dist"
   },

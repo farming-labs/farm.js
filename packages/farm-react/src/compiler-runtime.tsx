@@ -321,6 +321,7 @@ interface CompilerHmrRegistryEntry {
   definition: CompiledDefinitionReference<unknown>;
   refreshListeners: Set<() => void>;
   stateSignature: string;
+  runtimeSignature: string;
 }
 
 type CompilerHmrRegistry = Map<string, CompilerHmrRegistryEntry>;
@@ -537,6 +538,17 @@ function updateAttribute(element: Element, name: string, value: unknown): void {
 }
 
 type CompilerBlockRefresh = (afterCommit?: () => void, dirtyState?: ReadonlySet<number>) => void;
+
+export interface CompilerRuntimeFeatureOwner {
+  setRoot(id: number, root: Element | null): void;
+  subscribe(id: number, refresh: CompilerBlockRefresh): () => void;
+}
+
+export interface CompilerRuntimeFeature {
+  /** Stable identity used by Fast Refresh compatibility checks. */
+  name: string;
+  create(owner: CompilerRuntimeFeatureOwner): Partial<CompilerBlockRuntime>;
+}
 
 interface ConditionalBlockOwner {
   setRoot(id: number, root: Element | null): void;
@@ -2645,39 +2657,52 @@ function longestIncreasingSubsequencePositions(sequence: readonly number[]): Set
   return positions;
 }
 
-function createKeyedRowsBlockComponent(
-  owner: Pick<ConditionalBlockOwner, "subscribe">,
-): React.ComponentType<CompilerKeyedRowsBlockProps> {
-  interface State {
-    fallback: boolean;
-  }
+type RowConditionalRefresh = (item: unknown, index: number, afterCommit?: () => void) => void;
 
-  const rowHostScopeOwner: Pick<ConditionalBlockOwner, "subscribe"> = {
-    subscribe: () => () => {},
-  };
+interface RowConditionalOwner {
+  subscribe(key: string, id: number, refresh: RowConditionalRefresh): () => void;
+}
 
-  type RowConditionalRefresh = (item: unknown, index: number, afterCommit?: () => void) => void;
+interface RowConditionalProps {
+  owner: RowConditionalOwner;
+  rowKey: string;
+  id: number;
+  renderVersion: number;
+  item: unknown;
+  index: number;
+  render(item: unknown, index: number): React.ReactNode;
+}
 
-  interface RowConditionalOwner {
-    subscribe(key: string, id: number, refresh: RowConditionalRefresh): () => void;
-  }
+interface RowConditionalState {
+  renderVersion: number;
+  item: unknown;
+  index: number;
+}
 
-  interface RowConditionalProps {
-    owner: RowConditionalOwner;
-    rowKey: string;
-    id: number;
-    renderVersion: number;
-    item: unknown;
-    index: number;
-    render(item: unknown, index: number): React.ReactNode;
-  }
+interface KeyedRowConditionalRuntime {
+  Component: React.ComponentType<RowConditionalProps>;
+  readValues(
+    props: Pick<CompilerKeyedRowsBlockProps, "conditionals">,
+    item: unknown,
+    index: number,
+  ): ReadonlyMap<number, readonly unknown[]>;
+  changed(previous: readonly unknown[] | undefined, next: readonly unknown[]): boolean;
+}
 
-  interface RowConditionalState {
-    renderVersion: number;
-    item: unknown;
-    index: number;
-  }
+interface KeyedRowHostRuntime {
+  mount(
+    element: Element,
+    descriptor: CompilerHostElement,
+    requestFallback: () => void,
+  ): CompilerHostTreeScope | null;
+}
 
+interface KeyedRowsRuntimeOptions {
+  conditionals?: KeyedRowConditionalRuntime;
+  hostBlocks?: KeyedRowHostRuntime;
+}
+
+function createKeyedRowConditionalRuntime(): KeyedRowConditionalRuntime {
   class FarmKeyedRowConditional extends React.Component<RowConditionalProps, RowConditionalState> {
     static displayName = "FarmCompiledKeyedRowConditional";
 
@@ -2731,6 +2756,31 @@ function createKeyedRowsBlockComponent(
     render(): React.ReactNode {
       return this.props.render(this.state.item, this.state.index);
     }
+  }
+
+  return {
+    Component: FarmKeyedRowConditional,
+    readValues: readKeyedRowConditionalValues,
+    changed: keyedRowConditionalChanged,
+  };
+}
+
+function createKeyedRowHostRuntime(): KeyedRowHostRuntime {
+  const owner: Pick<ConditionalBlockOwner, "subscribe"> = {
+    subscribe: () => () => {},
+  };
+  return {
+    mount: (element, descriptor, requestFallback) =>
+      mountCompilerHostTree(owner, element, descriptor, requestFallback),
+  };
+}
+
+function createKeyedRowsBlockComponent(
+  owner: Pick<ConditionalBlockOwner, "subscribe">,
+  options: KeyedRowsRuntimeOptions = {},
+): React.ComponentType<CompilerKeyedRowsBlockProps> {
+  interface State {
+    fallback: boolean;
   }
 
   class FarmKeyedRowsBlock extends React.Component<CompilerKeyedRowsBlockProps, State> {
@@ -2902,7 +2952,9 @@ function createKeyedRowsBlockComponent(
     ): React.ReactNode => {
       if (this.state.fallback) return render(item, index);
       const key = keyedRowIdentity(this.currentProps.rowKey(item, index));
-      return React.createElement(FarmKeyedRowConditional, {
+      const Conditional = options.conditionals?.Component;
+      if (!Conditional) return render(item, index);
+      return React.createElement(Conditional, {
         key: `${key}:${conditionalId}`,
         owner: this.conditionalOwner,
         rowKey: key,
@@ -2951,11 +3003,16 @@ function createKeyedRowsBlockComponent(
       props: CompilerKeyedRowsBlockProps = this.currentProps,
     ): CompilerHostTreeScope | null | undefined {
       if (!props.hostBlocks) return undefined;
-      return mountCompilerHostTree(
-        rowHostScopeOwner,
-        element,
-        descriptor,
-        this.requestHostScopeFallback,
+      return options.hostBlocks?.mount(element, descriptor, this.requestHostScopeFallback) || null;
+    }
+
+    private readConditionalValues(
+      props: CompilerKeyedRowsBlockProps,
+      item: unknown,
+      index: number,
+    ): ReadonlyMap<number, readonly unknown[]> {
+      return (
+        options.conditionals?.readValues(props, item, index) || EMPTY_KEYED_ROW_CONDITIONAL_VALUES
       );
     }
 
@@ -3005,7 +3062,7 @@ function createKeyedRowsBlockComponent(
             : readKeyedRowBindingValues(this.currentProps, rows.items[index], index),
           item: rows.items[index],
           index,
-          conditionalValues: readKeyedRowConditionalValues(
+          conditionalValues: this.readConditionalValues(
             this.currentProps,
             rows.items[index],
             index,
@@ -3167,13 +3224,13 @@ function createKeyedRowsBlockComponent(
           }
         }
         applyKeyedRowBindings(this.currentProps, existing, rows.items[index], index);
-        const conditionalValues = readKeyedRowConditionalValues(
+        const conditionalValues = this.readConditionalValues(
           this.currentProps,
           rows.items[index],
           index,
         );
         for (const [id, values] of conditionalValues) {
-          if (keyedRowConditionalChanged(existing.conditionalValues.get(id), values)) {
+          if (options.conditionals?.changed(existing.conditionalValues.get(id), values)) {
             conditionalChanges.push({ key, id, item: rows.items[index], index });
           }
         }
@@ -3223,13 +3280,13 @@ function createKeyedRowsBlockComponent(
           }
         }
         applyKeyedRowBindings(this.currentProps, existing, rows.items[index], index);
-        const conditionalValues = readKeyedRowConditionalValues(
+        const conditionalValues = this.readConditionalValues(
           this.currentProps,
           rows.items[index],
           index,
         );
         for (const [id, values] of conditionalValues) {
-          if (keyedRowConditionalChanged(existing.conditionalValues.get(id), values)) {
+          if (options.conditionals?.changed(existing.conditionalValues.get(id), values)) {
             conditionalChanges.push({ key, id, item: rows.items[index], index });
           }
         }
@@ -3339,13 +3396,13 @@ function createKeyedRowsBlockComponent(
             }
           }
           applyKeyedRowBindings(this.currentProps, existing, rows.items[index], index);
-          const conditionalValues = readKeyedRowConditionalValues(
+          const conditionalValues = this.readConditionalValues(
             this.currentProps,
             rows.items[index],
             index,
           );
           for (const [id, values] of conditionalValues) {
-            if (keyedRowConditionalChanged(existing.conditionalValues.get(id), values)) {
+            if (options.conditionals?.changed(existing.conditionalValues.get(id), values)) {
               conditionalChanges.push({ key, id, item: rows.items[index], index });
             }
           }
@@ -3372,7 +3429,7 @@ function createKeyedRowsBlockComponent(
           values: readKeyedRowBindingValues(this.currentProps, rows.items[index], index),
           item: rows.items[index],
           index,
-          conditionalValues: readKeyedRowConditionalValues(
+          conditionalValues: this.readConditionalValues(
             this.currentProps,
             rows.items[index],
             index,
@@ -3945,21 +4002,112 @@ function createComponentBlockComponent(
   return FarmComponentBlock;
 }
 
+export const conditionalRuntimeFeature: CompilerRuntimeFeature = {
+  name: "conditional",
+  create: (owner) => ({
+    Conditional: createConditionalBlockComponent(owner),
+  }),
+};
+
+export const hostConditionalRuntimeFeature: CompilerRuntimeFeature = {
+  name: "host-conditional",
+  create: (owner) => ({
+    HostConditional: createHostConditionalBlockComponent(owner),
+  }),
+};
+
+export const conditionalRangesRuntimeFeature: CompilerRuntimeFeature = {
+  name: "conditional-ranges",
+  create: (owner) => ({
+    ConditionalRanges: createConditionalRangesBlockComponent(owner),
+  }),
+};
+
+export const keyedListRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-list",
+  create: (owner) => ({
+    KeyedList: createKeyedListBlockComponent(owner),
+  }),
+};
+
+export const keyedRowsRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner),
+  }),
+};
+
+export const keyedRowsConditionalRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:conditional",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner, {
+      conditionals: createKeyedRowConditionalRuntime(),
+    }),
+  }),
+};
+
+export const keyedRowsHostRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:host",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner, {
+      hostBlocks: createKeyedRowHostRuntime(),
+    }),
+  }),
+};
+
+export const keyedRowsCompleteRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:complete",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner, {
+      conditionals: createKeyedRowConditionalRuntime(),
+      hostBlocks: createKeyedRowHostRuntime(),
+    }),
+  }),
+};
+
+export const keyedRangesRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-ranges",
+  create: (owner) => ({
+    KeyedRanges: createKeyedRangesBlockComponent(owner),
+  }),
+};
+
+export const mixedRangesRuntimeFeature: CompilerRuntimeFeature = {
+  name: "mixed-ranges",
+  create: (owner) => ({
+    MixedRanges: createMixedRangesBlockComponent(owner),
+  }),
+};
+
+export const componentRuntimeFeature: CompilerRuntimeFeature = {
+  name: "component",
+  create: (owner) => ({
+    Component: createComponentBlockComponent(owner),
+  }),
+};
+
 /**
- * Runtime target emitted by the AOT transform.
+ * Tree-shakable runtime target emitted by the AOT transform.
  *
  * React owns initial placement, SSR, hydration, props, and event semantics.
- * Compiler cells own local updates and precomputed DOM paths. A proven host-only
- * keyed container may transfer its child-row ownership after mount.
+ * Compiler cells own local updates and precomputed DOM paths. Structural
+ * helpers are installed only when the compiler emitted that boundary kind.
  */
-export function createCompiledComponent<Props>(
+export function createCompiledComponentWithFeatures<Props>(
   definition: CompiledComponentDefinition<Props>,
+  runtimeFeatures: readonly CompilerRuntimeFeature[],
 ): React.ComponentType<Props> {
   const stateSignature = definition.stateSignature || String(definition.initialize.length);
+  const runtimeSignature = [...new Set(runtimeFeatures.map((feature) => feature.name))]
+    .sort()
+    .join(",");
   if (definition.hmrId) {
     const registry = getCompilerHmrRegistry();
     const existing = registry.get(definition.hmrId);
-    if (existing?.stateSignature === stateSignature) {
+    if (
+      existing?.stateSignature === stateSignature &&
+      existing.runtimeSignature === runtimeSignature
+    ) {
       existing.definition.current = definition as CompiledComponentDefinition<unknown>;
       existing.component.displayName = `FarmCompiled(${definition.displayName})`;
       for (const refresh of existing.refreshListeners) refresh();
@@ -4034,34 +4182,17 @@ export function createCompiledComponent<Props>(
           },
         };
       });
-      this.blockRuntime = {
-        Conditional: createConditionalBlockComponent({
-          setRoot: (id, root) => this.setBlockRoot(id, root),
-          subscribe: (id, refresh) => this.subscribeToBlock(id, refresh),
-        }),
-        HostConditional: createHostConditionalBlockComponent({
-          subscribe: (id, refresh) => this.subscribeToBlock(id, refresh),
-        }),
-        ConditionalRanges: createConditionalRangesBlockComponent({
-          subscribe: (id, refresh) => this.subscribeToBlock(id, refresh),
-        }),
-        KeyedList: createKeyedListBlockComponent({
-          subscribe: (id, refresh) => this.subscribeToBlock(id, refresh),
-        }),
-        KeyedRows: createKeyedRowsBlockComponent({
-          subscribe: (id, refresh) => this.subscribeToBlock(id, refresh),
-        }),
-        KeyedRanges: createKeyedRangesBlockComponent({
-          subscribe: (id, refresh) => this.subscribeToBlock(id, refresh),
-        }),
-        MixedRanges: createMixedRangesBlockComponent({
-          subscribe: (id, refresh) => this.subscribeToBlock(id, refresh),
-        }),
-        Component: createComponentBlockComponent({
-          subscribe: (id, refresh) => this.subscribeToBlock(id, refresh),
-        }),
+      const featureOwner: CompilerRuntimeFeatureOwner = {
+        setRoot: (id, root) => this.setBlockRoot(id, root),
+        subscribe: (id, refresh) => this.subscribeToBlock(id, refresh),
+      };
+      const blockRuntime: Partial<CompilerBlockRuntime> = {
         target: (id) => this.bindingTarget(id),
       };
+      for (const feature of runtimeFeatures) {
+        Object.assign(blockRuntime, feature.create(featureOwner));
+      }
+      this.blockRuntime = blockRuntime as CompilerBlockRuntime;
     }
 
     private usesHybridReactivity(): boolean {
@@ -4502,8 +4633,31 @@ export function createCompiledComponent<Props>(
       definition: definitionReference as CompiledDefinitionReference<unknown>,
       refreshListeners,
       stateSignature,
+      runtimeSignature,
     });
   }
 
   return component;
+}
+
+const COMPLETE_RUNTIME_FEATURES: readonly CompilerRuntimeFeature[] = [
+  conditionalRuntimeFeature,
+  hostConditionalRuntimeFeature,
+  conditionalRangesRuntimeFeature,
+  keyedListRuntimeFeature,
+  keyedRowsCompleteRuntimeFeature,
+  keyedRangesRuntimeFeature,
+  mixedRangesRuntimeFeature,
+  componentRuntimeFeature,
+];
+
+/**
+ * Compatibility entry for hand-authored runtime definitions.
+ * Compiler output uses createCompiledComponentWithFeatures so unused structural
+ * runtimes can be removed from production bundles.
+ */
+export function createCompiledComponent<Props>(
+  definition: CompiledComponentDefinition<Props>,
+): React.ComponentType<Props> {
+  return createCompiledComponentWithFeatures(definition, COMPLETE_RUNTIME_FEATURES);
 }

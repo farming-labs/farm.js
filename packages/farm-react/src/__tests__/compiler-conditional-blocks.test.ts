@@ -31,6 +31,8 @@ describe("React AOT conditional block compiler", () => {
 
     expect(result.diagnostics).toEqual([]);
     expect(result.compiled).toEqual(["ConditionalPanel"]);
+    expect(result.code).toContain("conditionalRangesRuntimeFeature");
+    expect(result.code).not.toContain("mixedRangesRuntimeFeature");
     expect(result.code.match(/farmBlocks\.ConditionalRanges/g)).toHaveLength(1);
     expect(result.code.match(/farmBlocks\.Conditional(?!Ranges)/g)).toBeNull();
     expect(result.code).toContain('kind: "block"');
@@ -71,6 +73,8 @@ describe("React AOT conditional block compiler", () => {
 
     expect(result.diagnostics).toEqual([]);
     expect(result.compiled).toEqual(["InteractiveBranch"]);
+    expect(result.code).toContain("conditionalRuntimeFeature");
+    expect(result.code).not.toContain("hostConditionalRuntimeFeature");
     expect(result.code).toContain('kind: "block"');
     expect(result.code).toContain("dependencies: [0, 1]");
     expect(result.code).toMatch(/farmState\[1\]\.set/);
@@ -123,6 +127,8 @@ describe("React AOT conditional block compiler", () => {
 
     expect(result.diagnostics).toEqual([]);
     expect(result.compiled).toEqual(["PreparedStatus"]);
+    expect(result.code).toContain("hostConditionalRuntimeFeature");
+    expect(result.code).not.toContain("conditionalRuntimeFeature");
     expect(result.code.match(/farmBlocks\.HostConditional/g)).toHaveLength(1);
     expect(result.code).not.toContain("farmBlocks.Conditional");
     expect(result.code).toContain("truthy={{");

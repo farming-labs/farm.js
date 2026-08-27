@@ -32,6 +32,8 @@ describe("React AOT component island compiler", () => {
 
     expect(result.compiled).toEqual(["Dashboard"]);
     expect(result.diagnostics).toEqual([]);
+    expect(result.code).toContain("componentRuntimeFeature");
+    expect(result.code).not.toContain("keyedRowsRuntimeFeature");
     expect(result.code).toContain("farmBlocks.Component");
     expect(result.code).toContain("farmBlocks.target(");
     expect(result.code).toContain('kind: "block"');

@@ -330,6 +330,63 @@ type ComposableBlockPlan =
   | NestedHostMixedRangesPlan
   | ComponentIslandPlan;
 
+type CompilerRuntimeFeatureName =
+  | "conditional"
+  | "host-conditional"
+  | "conditional-ranges"
+  | "keyed-list"
+  | "keyed-rows"
+  | "keyed-rows-conditional"
+  | "keyed-rows-host"
+  | "keyed-rows-complete"
+  | "keyed-ranges"
+  | "mixed-ranges"
+  | "component";
+
+const COMPILER_RUNTIME_FEATURE_EXPORTS: Record<CompilerRuntimeFeatureName, string> = {
+  conditional: "conditionalRuntimeFeature",
+  "host-conditional": "hostConditionalRuntimeFeature",
+  "conditional-ranges": "conditionalRangesRuntimeFeature",
+  "keyed-list": "keyedListRuntimeFeature",
+  "keyed-rows": "keyedRowsRuntimeFeature",
+  "keyed-rows-conditional": "keyedRowsConditionalRuntimeFeature",
+  "keyed-rows-host": "keyedRowsHostRuntimeFeature",
+  "keyed-rows-complete": "keyedRowsCompleteRuntimeFeature",
+  "keyed-ranges": "keyedRangesRuntimeFeature",
+  "mixed-ranges": "mixedRangesRuntimeFeature",
+  component: "componentRuntimeFeature",
+};
+
+function runtimeFeaturesForPlans(
+  plans: readonly ComposableBlockPlan[],
+): CompilerRuntimeFeatureName[] {
+  const features = new Set<CompilerRuntimeFeatureName>();
+  let keyedRowsHaveConditionals = false;
+  let keyedRowsHaveHostBlocks = false;
+  for (const plan of plans) {
+    if (plan.kind === "keyed-rows") {
+      keyedRowsHaveConditionals ||= plan.conditionals.length > 0;
+      keyedRowsHaveHostBlocks ||= Boolean(plan.descriptorBlocks?.size);
+      continue;
+    }
+    if (plan.kind in COMPILER_RUNTIME_FEATURE_EXPORTS) {
+      features.add(plan.kind as CompilerRuntimeFeatureName);
+    }
+  }
+  if (plans.some((plan) => plan.kind === "keyed-rows")) {
+    features.add(
+      keyedRowsHaveConditionals && keyedRowsHaveHostBlocks
+        ? "keyed-rows-complete"
+        : keyedRowsHaveConditionals
+          ? "keyed-rows-conditional"
+          : keyedRowsHaveHostBlocks
+            ? "keyed-rows-host"
+            : "keyed-rows",
+    );
+  }
+  return [...features].sort();
+}
+
 interface Candidate {
   name: string;
   path: NodePath<t.FunctionDeclaration | t.FunctionExpression | t.ArrowFunctionExpression>;
@@ -4615,6 +4672,8 @@ function wrapperElement(definitionIdentifier: t.Identifier, props?: t.Expression
 function compileCandidate(
   candidate: Candidate,
   createComponentIdentifier: t.Identifier,
+  runtimeFeatureIdentifiers: ReadonlyMap<CompilerRuntimeFeatureName, t.Identifier>,
+  usedRuntimeFeatures: Set<CompilerRuntimeFeatureName>,
   useStateNames: ReadonlySet<string>,
   reactNames: ReadonlySet<string>,
   listNames: ReadonlySet<string>,
@@ -4855,6 +4914,7 @@ function compileCandidate(
   if (blockAnalysis.reason) return blockAnalysis.reason;
   if (analysis.reason) return analysis.reason;
   const blockPlans = blockAnalysis.plans || [];
+  const runtimeFeatures = runtimeFeaturesForPlans(blockPlans);
   markShortCircuitBindings(analysis.bindings || []);
   assignStableBindingTargets(analysis.bindings || []);
 
@@ -4965,6 +5025,9 @@ function compileCandidate(
         ),
       ),
     ]),
+    t.arrayExpression(
+      runtimeFeatures.map((feature) => t.cloneNode(runtimeFeatureIdentifiers.get(feature)!)),
+    ),
   ]);
 
   path
@@ -4977,6 +5040,7 @@ function compileCandidate(
   statementPath.insertAfter(
     t.variableDeclaration("const", [t.variableDeclarator(definitionIdentifier, definition)]),
   );
+  for (const feature of runtimeFeatures) usedRuntimeFeatures.add(feature);
   return undefined;
 }
 
@@ -5070,6 +5134,13 @@ export async function compileReactModule(
         const candidates = collectCandidates(programPath);
         const createComponentIdentifier =
           programPath.scope.generateUidIdentifier("createCompiledComponent");
+        const runtimeFeatureIdentifiers = new Map<CompilerRuntimeFeatureName, t.Identifier>(
+          Object.entries(COMPILER_RUNTIME_FEATURE_EXPORTS).map(([feature, exportName]) => [
+            feature as CompilerRuntimeFeatureName,
+            programPath.scope.generateUidIdentifier(exportName),
+          ]),
+        );
+        const usedRuntimeFeatures = new Set<CompilerRuntimeFeatureName>();
         for (const candidate of candidates) {
           const functionDirectives = new Set(
             t.isBlockStatement(candidate.path.node.body)
@@ -5084,6 +5155,8 @@ export async function compileReactModule(
           const reason = compileCandidate(
             candidate,
             createComponentIdentifier,
+            runtimeFeatureIdentifiers,
+            usedRuntimeFeatures,
             useStateNames,
             reactNames,
             listNames,
@@ -5108,8 +5181,16 @@ export async function compileReactModule(
               [
                 t.importSpecifier(
                   createComponentIdentifier,
-                  t.identifier("createCompiledComponent"),
+                  t.identifier("createCompiledComponentWithFeatures"),
                 ),
+                ...[...usedRuntimeFeatures]
+                  .sort()
+                  .map((feature) =>
+                    t.importSpecifier(
+                      t.cloneNode(runtimeFeatureIdentifiers.get(feature)!),
+                      t.identifier(COMPILER_RUNTIME_FEATURE_EXPORTS[feature]),
+                    ),
+                  ),
               ],
               t.stringLiteral("@farm.js/react/compiler-runtime"),
             ),

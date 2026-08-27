@@ -1223,25 +1223,37 @@ source maps with the transformed module.
 For each eligible component, the transform conceptually emits a definition like this:
 
 ```ts
-createCompiledComponent({
-  initialize: (props) => [props.initial],
-  readProps: (props) => [props.label],
-  render: (_props, state) => <button>{state[1].get()}: {state[0].get()}</button>,
-  bindings: [
-    {
-      kind: "text",
-      path: [],
-      target: 0,
-      dependencies: [0, 1],
-      read: (_props, state) => [state[1].get(), ": ", state[0].get()],
-    },
-  ],
-});
+createCompiledComponentWithFeatures(
+  {
+    initialize: (props) => [props.initial],
+    readProps: (props) => [props.label],
+    render: (_props, state) => <button>{state[1].get()}: {state[0].get()}</button>,
+    bindings: [
+      {
+        kind: "text",
+        path: [],
+        target: 0,
+        dependencies: [0, 1],
+        read: (_props, state) => [state[1].get(), ": ", state[0].get()],
+      },
+    ],
+  },
+  [],
+);
 ```
 
-The actual output imports `createCompiledComponent` from `@farm.js/react/compiler-runtime` only in
-modules where at least one component compiled. Unsupported modules keep their original source and
-do not receive the runtime import.
+The empty capability array means this component needs only direct bindings. A component with a
+conditional, keyed list, keyed row, range, or component island receives the matching statically
+imported feature. Plain keyed rows select a smaller implementation than rows with React-owned
+conditional slots or recursively compiler-owned host blocks. The selection uses ordinary build-time
+imports rather than loading code after an interaction, so SSR and hydration remain synchronous.
+
+The actual output imports `createCompiledComponentWithFeatures` and only its required feature
+exports from `@farm.js/react/compiler-runtime` in modules where at least one component compiled.
+Unused feature exports are tree-shaken from the production browser bundle. Unsupported modules keep
+their original source and do not receive the runtime import. Runtime features are also part of the
+Fast Refresh compatibility signature; changing a component into a new structural kind cannot reuse
+an instance that lacks the new runtime.
 
 ### Runtime behavior
 
@@ -1430,6 +1442,10 @@ The package and example test suites verify more than generated code:
   rerunning the owner component or corrupting the existing compiler experiments;
 - the package reactivity benchmark updates one prop across 2,048 bindings, requires identical
   first/last DOM output, and verifies one compiled render plan against 251 control render plans;
+- production-size fixtures verify that direct components omit every structural runtime, plain keyed
+  rows omit conditional-row support, and the core-only gzip premium remains at least 50% below the
+  complete compatibility runtime; the checked result is persisted in
+  `packages/farm-react/RUNTIME_SIZE_RESULTS.json`;
 - the production browser experiment also replaces and reorders interactive items, verifies current
   keyed DOM identity and capture/stop-propagation behavior, and observes zero owner update
   executions;

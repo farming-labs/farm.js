@@ -39,10 +39,12 @@ const testSource = String.raw`
   const { flushSync } = await import("react-dom");
   const { createRoot, hydrateRoot } = await import("react-dom/client");
   const { renderToString } = await import("react-dom/server");
-  const { createCompiledComponent } = await import("@farm.js/react/compiler-runtime");
+  const { createCompiledComponent, createCompiledComponentWithFeatures } = await import(
+    "@farm.js/react/compiler-runtime"
+  );
   const { List } = await import("@farm.js/react/list");
 
-  const Counter = createCompiledComponent({
+  const Counter = createCompiledComponentWithFeatures({
     displayName: "CompatibilityCounter",
     reactivity: "hybrid",
     initialize: () => [0],
@@ -63,7 +65,7 @@ const testSource = String.raw`
         read: (_props, state) => ["Count: ", state[0].get()],
       },
     ],
-  });
+  }, []);
 
   const container = document.createElement("div");
   document.body.append(container);
@@ -75,7 +77,7 @@ const testSource = String.raw`
   assert.equal(container.textContent, "Count: 1");
   flushSync(() => root.unmount());
 
-  const StaticBindings = createCompiledComponent({
+  const StaticBindings = createCompiledComponentWithFeatures({
     displayName: "CompatibilityStaticBindings",
     initialize: () => [8, "draft", "safe", true],
     render(_props, state) {
@@ -144,7 +146,7 @@ const testSource = String.raw`
         read: (_props, state) => state[3].get(),
       },
     ],
-  });
+  }, []);
 
   const staticContainer = document.createElement("div");
   document.body.append(staticContainer);

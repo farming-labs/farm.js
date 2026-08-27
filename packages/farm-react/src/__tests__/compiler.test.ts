@@ -29,7 +29,11 @@ describe("React AOT compiler", () => {
     expect(result.diagnostics).toEqual([]);
     expect(result.compiled).toEqual(["Counter"]);
     expect(result.code).toContain("@farm.js/react/compiler-runtime");
-    expect(result.code).toContain("createCompiledComponent");
+    expect(result.code).toContain("createCompiledComponentWithFeatures");
+    expect(result.code).toMatch(/_createCompiledComponent\([\s\S]+, \[\]\)/);
+    expect(result.code).not.toContain("conditionalRuntimeFeature");
+    expect(result.code).not.toContain("keyedRowsRuntimeFeature");
+    expect(result.code).not.toContain("componentRuntimeFeature");
     expect(result.code).toContain('reactivity: "hybrid"');
     expect(result.code).not.toContain('tracking: "dynamic"');
     expect(result.code).toContain('kind: "text"');

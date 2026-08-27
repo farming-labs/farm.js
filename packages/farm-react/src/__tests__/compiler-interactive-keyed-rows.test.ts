@@ -55,6 +55,9 @@ describe("React AOT interactive keyed-row compiler", () => {
 
     expect(result.compiled).toEqual(["Tasks"]);
     expect(result.diagnostics).toEqual([]);
+    expect(result.code).toContain("keyedRowsRuntimeFeature");
+    expect(result.code).not.toContain("keyedRowsConditionalRuntimeFeature");
+    expect(result.code).not.toContain("keyedRowsHostRuntimeFeature");
     expect(result.code).toContain("farmBlocks.KeyedRows");
     expect(result.code).toContain("structureDependencies={[0]}");
     expect(result.code).toMatch(

@@ -134,6 +134,10 @@ jobs:
       - name: Build React renderer
         run: pnpm --filter @farm.js/react build
 
+      - name: Verify compiler runtime size budget
+        if: matrix.react-version == '19.2.8'
+        run: pnpm --filter @farm.js/react test:runtime-size
+
       - name: Verify packaged renderer
         run: node packages/farm-react/scripts/test-react-version.mjs ${{ matrix.react-version }}
 

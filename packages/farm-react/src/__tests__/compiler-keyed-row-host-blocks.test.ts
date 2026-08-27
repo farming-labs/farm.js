@@ -12,6 +12,44 @@ async function compile(source: string) {
 }
 
 describe("React AOT compiler-owned keyed-row host blocks", () => {
+  it("selects the complete keyed-row runtime when sibling lists need both extensions", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function MixedRows() {
+        const [items, setItems] = useState([
+          { id: "a", label: "Alpha", visible: true },
+        ]);
+        return (
+          <main>
+            <ul>
+              {items.map((item) => (
+                <li key={item.id}>
+                  <div>{item.visible && <strong>{item.label}</strong>}</div>
+                </li>
+              ))}
+            </ul>
+            <ol>
+              {items.map((item) => (
+                <li key={item.id}>
+                  <button onClick={() => setItems((rows) => [...rows])}>Refresh</button>
+                  <div>
+                    {item.visible && <strong>{item.label}</strong>}
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </main>
+        );
+      }
+    `);
+
+    expect(result.compiled).toEqual(["MixedRows"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.code).toContain("keyedRowsCompleteRuntimeFeature");
+    expect(result.code).not.toContain("keyedRowsHostRuntimeFeature");
+    expect(result.code).not.toContain("keyedRowsConditionalRuntimeFeature");
+  });
+
   it("prepares multiple and recursively nested host conditionals for automatic map syntax", async () => {
     const result = await compile(`
       import { useState } from "react";
@@ -52,6 +90,8 @@ describe("React AOT compiler-owned keyed-row host blocks", () => {
     expect(result.compiled).toEqual(["Inbox"]);
     expect(result.diagnostics).toEqual([]);
     expect(result.code).toContain("farmBlocks.KeyedRows");
+    expect(result.code).toContain("keyedRowsHostRuntimeFeature");
+    expect(result.code).not.toContain("keyedRowsCompleteRuntimeFeature");
     expect(result.code).toContain("hostBlocks={true}");
     expect(result.code.match(/kind: "conditional-ranges"/g)).toHaveLength(4);
     expect(result.code).toContain("parent: 0");

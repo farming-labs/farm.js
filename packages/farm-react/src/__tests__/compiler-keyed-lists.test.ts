@@ -32,6 +32,9 @@ describe("React AOT keyed list compiler", () => {
 
     expect(result.compiled).toEqual(["Inventory"]);
     expect(result.diagnostics).toEqual([]);
+    expect(result.code).toContain("keyedRowsRuntimeFeature");
+    expect(result.code).not.toContain("keyedRowsConditionalRuntimeFeature");
+    expect(result.code).not.toContain("keyedRowsHostRuntimeFeature");
     expect(result.code).toContain("farmBlocks.KeyedRows");
     expect(result.code).toContain("rowKey={item => item.id}");
     expect(result.code).toContain('kind: "element"');
@@ -70,6 +73,8 @@ describe("React AOT keyed list compiler", () => {
 
     expect(result.compiled).toEqual(["Inventory"]);
     expect(result.diagnostics).toEqual([]);
+    expect(result.code).toContain("keyedListRuntimeFeature");
+    expect(result.code).not.toContain("keyedRowsRuntimeFeature");
     expect(result.code).toContain("farmBlocks.KeyedList");
     expect(result.code).toContain("<Keyed each=");
     expect(result.code).toContain("dependencies: [0]");
