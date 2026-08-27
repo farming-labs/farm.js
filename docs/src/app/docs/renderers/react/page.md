@@ -80,14 +80,16 @@ a few text or attribute values can change.
 
 For that safe subset, Farm prepares three things ahead of time:
 
-1. local state cells and their setters;
+1. local state cells plus read-only cells for eligible primitive props;
 2. the DOM path of every state-driven text or attribute binding; and
 3. the state-cell dependencies for each binding.
 
 After mount, an eligible local update flushes the changed cells and patches only the affected
-bindings. It does not schedule another React render or reconciliation pass for that update. React
-still owns initial rendering, component placement, parent-driven prop updates, events, SSR,
-hydration, and unmounting.
+bindings. A parent update still enters through React, but flat destructured `string`, `number`,
+`boolean`, `bigint`, `null`, or `undefined` props can reuse the mounted compiled render plan and
+patch the same dependency graph after commit. React still owns initial rendering, component
+placement, the parent update, events, SSR, hydration, and unmounting. Identity-bearing props and
+unsupported prop shapes keep the full React render path.
 
 ### Enable the compiler
 
@@ -351,7 +353,7 @@ satisfy all of these rules:
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | Component discovery | A top-level, capitalized function declaration, function expression, or arrow component in application `.tsx` or `.jsx`.                         |
 | Function shape      | Synchronous, non-generator, non-generic block body with zero parameters, one props identifier, or flat object props destructuring.              |
-| Props               | Flat object destructuring supports shorthand names, aliases, and defaults. Nested, computed, and rest patterns fall back.                       |
+| Props               | Flat object destructuring supports shorthand names, aliases, and defaults. Referenced primitive values join the dependency graph after mount.   |
 | Body                | Top-level `useState` declarations, optional compiler-safe derived values and synchronous named handlers, then one unconditional JSX return.     |
 | State               | `const [value, setValue] = useState(initial)`, including lazy initializers, multiple cells, and queued functional updates.                      |
 | Root                | Exactly one lowercase host JSX element such as `button`, `section`, `input`, or `div`.                                                          |
@@ -422,6 +424,41 @@ synchronous `const` function or function declaration. It is expanded when passed
 event or called from that event's inline function, including arguments such as
 `onClick={() => select(productId)}`. Calling it while producing the event prop, exposing it as a
 child, using it outside an event, or making it async/generic still falls back to React.
+
+#### Primitive prop cells
+
+Flat destructured props referenced by the compiled render are assigned read-only cells after the
+component's local state cells. The compiler includes those cell indexes in ordinary text,
+attribute, style, conditional, keyed-range, and component-island dependencies. For example:
+
+```tsx
+export function Total({ label, price, quantity, enabled }: TotalProps) {
+  const [discount, setDiscount] = useState(0);
+  const total = price * quantity - discount;
+
+  return (
+    <section data-enabled={enabled}>
+      <strong>
+        {label}: {total}
+      </strong>
+      {enabled && <span>Ready</span>}
+      <button onClick={() => setDiscount((value) => value + 1)}>Discount</button>
+    </section>
+  );
+}
+```
+
+When `label`, `price`, `quantity`, or `enabled` changes to another primitive, React commits the
+parent update, the compiled wrapper returns its already-mounted element, and the runtime commits
+the new prop cells. Only dependent targets or blocks refresh. `discount` and a prop change in the
+same turn share one coherent flush, so `total` observes both newest values.
+
+The optimization is deliberately runtime-guarded. If any tracked value is an object, array,
+function, symbol, React element, or `children`, the definition runs through normal React rendering
+and reconciliation for that update. Components using an identifier props parameter also retain
+the existing React prop path; flat destructuring is the current proof boundary. Props used only as
+`useState` initializers keep React's normal initialize-once semantics and are not turned into live
+state replacements. No extra option or annotation is required.
 
 Stateful styles use one inline object literal. The compiler creates a separate binding for each
 state-dependent camelCase property or CSS custom property, so changing `opacity` does not rewrite
@@ -1162,6 +1199,7 @@ row path; put Hooks inside a keyed row component.
 | Multiple/conditional returns or impure/control-flow statements                                                                        | The compiler only lowers a single, statically analyzable render path.              |
 | Derived calls, assignments, identity-bearing values, functions, or JSX                                                                | Their evaluation timing, side effects, or identity cannot yet be preserved safely. |
 | Nested, computed, or rest props destructuring                                                                                         | These patterns need additional parameter-shape and identity analysis.              |
+| Object, array, function, symbol, React-element, or `children` prop updates                                                            | Identity and child ownership stay on the full React render path.                   |
 | Async/generator/generic handlers or named handlers outside JSX events                                                                 | Their scheduling, identity, or closure semantics are outside the current lowering. |
 | Async/generator or generic components                                                                                                 | These function shapes are outside the current lowering.                            |
 | Setters called outside JSX event handlers                                                                                             | The compiler only controls and batches event-driven local updates.                 |
@@ -1187,14 +1225,15 @@ For each eligible component, the transform conceptually emits a definition like 
 ```ts
 createCompiledComponent({
   initialize: (props) => [props.initial],
-  render: (props, state) => <button>Count: {state[0].get()}</button>,
+  readProps: (props) => [props.label],
+  render: (_props, state) => <button>{state[1].get()}: {state[0].get()}</button>,
   bindings: [
     {
       kind: "text",
       path: [],
       target: 0,
-      dependencies: [0],
-      read: (_props, state) => ["Count: ", state[0].get()],
+      dependencies: [0, 1],
+      read: (_props, state) => [state[1].get(), ": ", state[0].get()],
     },
   ],
 });
@@ -1213,13 +1252,14 @@ follows:
 | --------------------------------------------------------- | ---------------------------------------------------------------------------- |
 | Initial element creation, SSR markup, and hydration       | Local compiler-cell values                                                   |
 | JSX event registration and dispatch, including row events | Queuing local setter calls into one microtask                                |
-| Parent-driven prop updates                                | Comparing flushed values and selecting dependent bindings                    |
+| Parent update scheduling and commit                       | Primitive prop cells and their dependency-indexed patches                    |
+| Identity-bearing and unsupported prop reconciliation      | Reusing the mounted render plan for compiler-safe primitive prop updates     |
 | Unsupported trees, hooks, refs, handlers, and lifecycles  | Patching stable ref-owned text, attribute, and style targets                 |
 | Complex conditional branches, events, and nested blocks   | Host-only conditional identity, range placement, bindings, and replacement   |
 | Interactive or conditional-row structure and reorders     | Same-key row bindings, latest-item events, and changed conditional snapshots |
 | React-owned custom or structurally complex keyed rows     | Non-interactive host-row identity, bindings, insertion, removal, and LIS     |
 | Component render, Hooks, context, and lifecycle           | Refreshing only a dependent React component-island boundary                  |
-| Unmounting and the surrounding component tree             | Reapplying bindings after a parent-driven React update                       |
+| Unmounting and the surrounding component tree             | Committing prop and local cells together after a parent-driven update        |
 
 Queued functional setters preserve the event's state snapshot. Two calls such as
 `setCount(value => value + 1)` are applied in order during the same microtask flush, while reads
@@ -1274,9 +1314,13 @@ can move safely with the existing LIS path.
 Unsupported dynamic component types, refs, effects, and other unproven shapes keep React ownership;
 fallback is the optimization's correctness mechanism.
 
-Parent-driven prop updates also remain React updates. After React reconciles the new props, the
-runtime reapplies compiler-owned bindings from the current local cells so prop changes and local
-state remain coherent.
+Parent-driven updates remain React updates, but not every update needs a new compiled element tree.
+For compiler-emitted flat primitive prop cells, render-phase reads use a pending snapshot without
+mutating committed cells. React can abandon that render safely. After a successful commit, the
+runtime publishes the cells and refreshes their indexed bindings and blocks. Identity-bearing
+values skip this reuse path and receive normal React reconciliation. This split keeps prop changes
+and local state coherent without moving an imperative DOM write into React's abortable render
+phase.
 
 ### Verification and benchmark scope
 
@@ -1292,6 +1336,13 @@ The package and example test suites verify more than generated code:
 - Strict Mode mounting, queued-unmount cleanup, bubbled events, controlled input selection, and
   composition events preserve their React behavior;
 - simultaneous parent-prop and compiled-local updates remain coherent;
+- flat primitive prop transitions patch direct bindings and host conditionals without rebuilding
+  the compiled render plan, preserve focused selection and DOM identity, and match React across
+  deterministic string, number, boolean, and nullish transitions;
+- object and function prop identities retain the full React render path, while SSR hydration and
+  Strict Mode preserve the primitive prop optimization afterward;
+- nested fallback blocks read one coherent render snapshot, and an abandoned concurrent render
+  cannot publish prop cells or replace the last committed compiled element;
 - compatible Fast Refresh preserves state, while binding errors reach React error boundaries;
 - hydration mismatches follow React's recoverable-error path and remain interactive;
 - compiler-owned conditionals preserve a same-branch DOM instance, patch nested text, attributes,
@@ -1377,6 +1428,8 @@ The package and example test suites verify more than generated code:
   compiled owner remains at one execution;
 - the production browser experiment derives a keyed window from 2,048 source rows without
   rerunning the owner component or corrupting the existing compiler experiments;
+- the package reactivity benchmark updates one prop across 2,048 bindings, requires identical
+  first/last DOM output, and verifies one compiled render plan against 251 control render plans;
 - the production browser experiment also replaces and reorders interactive items, verifies current
   keyed DOM identity and capture/stop-propagation behavior, and observes zero owner update
   executions;
@@ -1417,8 +1470,9 @@ React commit, while a dependent component island still performs its required chi
 
 The [`examples/react-compiler`](https://github.com/farming-labs/farm.js/tree/main/examples/react-compiler)
 app contains batching, multiple-binding, common-syntax, calculated-style, controlled-form,
-automatic and explicit keyed-list, component-island, compiler-on/off, and heavy-interaction
-experiments. The standalone starter intentionally keeps the first experience focused.
+primitive-prop, automatic and explicit keyed-list, component-island, compiler-on/off, and
+heavy-interaction experiments. The standalone starter intentionally keeps the first experience
+focused.
 
 ## React-specific FARMJS APIs
 

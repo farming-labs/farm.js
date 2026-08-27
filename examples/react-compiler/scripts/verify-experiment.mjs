@@ -43,6 +43,7 @@ for (const component of [
   "NestedKeyedRowExperiment",
   "RecursiveKeyedScopeExperiment",
   "MixedRangeExperiment",
+  "PrimitivePropPanel",
 ]) {
   assert.ok(compiledComponents.has(component), `${component} was not compiled`);
 }
@@ -159,6 +160,37 @@ try {
   }
   assert.equal(batchExecutions["batch-compiled"].added, 0);
   assert.equal(batchExecutions["batch-react"].added, 1);
+
+  const primitiveProps = '[data-experiment="primitive-props"]';
+  const primitivePropsRoot = await page.locator(primitiveProps).elementHandle();
+  assert(primitivePropsRoot);
+  const primitiveInitialExecutions = await readNumber(
+    page,
+    `${primitiveProps} [data-metric="executions"]`,
+  );
+  await assertText(page, `${primitiveProps} h3`, "Compiled props A");
+  await assertText(page, `${primitiveProps} [data-metric="step"]`, "1");
+  await page.locator('[data-action="update-primitive-props"]').click();
+  await assertText(page, `${primitiveProps} h3`, "Compiled props B");
+  await assertText(page, `${primitiveProps} [data-metric="step"]`, "5");
+  await assertText(page, `${primitiveProps} [data-slot="status"]`, "Compiled props B is active");
+  assert.equal(await page.locator(primitiveProps).getAttribute("data-active"), "true");
+  assert(
+    await primitivePropsRoot.evaluate((element) =>
+      element.isSameNode(document.querySelector('[data-experiment="primitive-props"]')),
+    ),
+  );
+  await page.locator(`${primitiveProps} [data-action="local-prop-step"]`).click();
+  await assertText(page, `${primitiveProps} [data-metric="count"]`, "5");
+  await page.locator('[data-action="update-primitive-props"]').click();
+  await assertText(page, `${primitiveProps} h3`, "Compiled props A");
+  await page.locator(`${primitiveProps} [data-action="local-prop-step"]`).click();
+  await assertText(page, `${primitiveProps} [data-metric="count"]`, "6");
+  const primitiveFinalExecutions = await readNumber(
+    page,
+    `${primitiveProps} [data-metric="executions"]`,
+  );
+  assert.equal(primitiveFinalExecutions - primitiveInitialExecutions, 0);
 
   const multiple = '[data-experiment="multiple-bindings"]';
   const multipleInitialExecutions = await readNumber(
@@ -1703,6 +1735,14 @@ try {
             input: "value-1",
             updateExecutions:
               multipleFinalExecutions - multipleInitialExecutions,
+          },
+          primitiveProps: {
+            label: "Compiled props A",
+            localCount: 6,
+            currentStep: 1,
+            ownerDomIdentityPreserved: true,
+            renderPlanExecutions:
+              primitiveFinalExecutions - primitiveInitialExecutions,
           },
           commonSyntax: {
             count: 4,

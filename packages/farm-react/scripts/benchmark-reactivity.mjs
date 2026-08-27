@@ -181,12 +181,103 @@ async function measureIndexedScheduling(reactivity) {
   }
 }
 
+function mountPrimitivePropFanout(compiled) {
+  let renderPlans = 0;
+  let bindingReads = 0;
+  let value = 0;
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  let View;
+
+  if (compiled) {
+    const bindings = Array.from({ length: bindingCount }, (_, index) => ({
+      kind: "text",
+      path: [index],
+      target: index,
+      dependencies: [1],
+      read(_props, state) {
+        bindingReads += 1;
+        return state[1].get();
+      },
+    }));
+    View = createCompiledComponent({
+      displayName: "PrimitivePropFanout",
+      reactivity: "hybrid",
+      initialize: () => [0],
+      readProps: (props) => [props.value],
+      render(_props, state, blocks) {
+        renderPlans += 1;
+        return React.createElement(
+          "div",
+          null,
+          ...bindings.map((binding, index) =>
+            React.createElement(
+              "span",
+              { key: index, ref: blocks.target(binding.target) },
+              state[1].get(),
+            ),
+          ),
+        );
+      },
+      bindings,
+    });
+  } else {
+    View = function ReactPrimitivePropFanout(props) {
+      renderPlans += 1;
+      return React.createElement(
+        "div",
+        null,
+        ...Array.from({ length: bindingCount }, (_, index) =>
+          React.createElement("span", { key: index }, props.value),
+        ),
+      );
+    };
+  }
+
+  flushSync(() => root.render(React.createElement(View, { value })));
+  return {
+    bindingReads: () => bindingReads,
+    container,
+    renderPlans: () => renderPlans,
+    update() {
+      value += 1;
+      flushSync(() => root.render(React.createElement(View, { value })));
+    },
+    value: () => value,
+    unmount() {
+      flushSync(() => root.unmount());
+      container.remove();
+    },
+  };
+}
+
+async function measurePrimitiveProps(compiled) {
+  const fixture = mountPrimitivePropFanout(compiled);
+  try {
+    const timing = await measure(async () => fixture.update());
+    const first = fixture.container.querySelector("span")?.textContent;
+    const last = fixture.container.querySelector("span:last-child")?.textContent;
+    return {
+      ...timing,
+      bindingReads: fixture.bindingReads(),
+      finalValue: fixture.value(),
+      outputCorrect: first === String(fixture.value()) && last === String(fixture.value()),
+      renderPlans: fixture.renderPlans(),
+    };
+  } finally {
+    fixture.unmount();
+  }
+}
+
 const staticCold = await measureBranchAction("static", 2);
 const hybridCold = await measureBranchAction("hybrid", 2);
 const staticActive = await measureBranchAction("static", 1);
 const hybridActive = await measureBranchAction("hybrid", 1);
 const staticIndexed = await measureIndexedScheduling("static");
 const hybridIndexed = await measureIndexedScheduling("hybrid");
+const reactPrimitiveProps = await measurePrimitiveProps(false);
+const compiledPrimitiveProps = await measurePrimitiveProps(true);
 
 const totalMeasuredUpdates = measuredSamples * updatesPerSample;
 const report = {
@@ -211,6 +302,11 @@ const report = {
     static: staticIndexed,
     hybrid: hybridIndexed,
   },
+  primitiveProps: {
+    react: reactPrimitiveProps,
+    compiled: compiledPrimitiveProps,
+    speedup: reactPrimitiveProps.medianMs / compiledPrimitiveProps.medianMs,
+  },
 };
 
 console.log(JSON.stringify(report, null, 2));
@@ -229,4 +325,21 @@ if (staticIndexed.bindingReads !== (warmupSamples + measuredSamples) * updatesPe
 }
 if (hybridIndexed.bindingReads !== (warmupSamples + measuredSamples) * updatesPerSample) {
   throw new Error("Hybrid dependency indexing evaluated unrelated bindings.");
+}
+if (!reactPrimitiveProps.outputCorrect || !compiledPrimitiveProps.outputCorrect) {
+  throw new Error("Primitive prop benchmark did not converge on the expected DOM output.");
+}
+if (compiledPrimitiveProps.renderPlans !== 1) {
+  throw new Error(
+    `Compiled primitive prop updates rebuilt ${compiledPrimitiveProps.renderPlans} render plans.`,
+  );
+}
+if (reactPrimitiveProps.renderPlans !== 1 + (warmupSamples + measuredSamples) * updatesPerSample) {
+  throw new Error("React primitive prop control did not rerender once per measured update.");
+}
+if (
+  compiledPrimitiveProps.bindingReads !==
+  bindingCount * (warmupSamples + measuredSamples) * updatesPerSample
+) {
+  throw new Error("Compiled primitive prop updates did not patch every declared binding.");
 }

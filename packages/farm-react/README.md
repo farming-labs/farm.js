@@ -64,6 +64,7 @@ The current compiler handles components that it can prove have:
 - one host-element root and a statically known host-element tree around supported conditional,
   keyed-list, and React component-island boundaries;
 - an identifier props parameter or flat object destructuring with aliases and defaults;
+- build-time dependency cells for referenced flat primitive props, with runtime identity guards;
 - top-level `useState` declarations;
 - optional compiler-safe derived `const` values declared after state and in source order;
 - whitelisted `Boolean`, `Number`, `String`, and deterministic `Math` calculations;
@@ -81,9 +82,12 @@ The current compiler handles components that it can prove have:
 - React-managed event handlers; and
 - no refs, effects, or unsupported dynamic child structures.
 
-The generated component preserves React ownership of initial placement, props, events, SSR, and
-hydration. Local state cells batch updates into a microtask, use dependency-indexed subscriptions,
-skip unchanged binding output, and patch only compiler-known DOM targets. Proven host containers
+The generated component preserves React ownership of initial placement, parent update commits,
+identity-bearing props, events, SSR, and hydration. Local state cells batch updates into a
+microtask; eligible flat destructured primitive props join the same dependency index after React
+commits their parent update. The runtime skips unchanged binding output and patches only
+compiler-known DOM targets. Objects, arrays, functions, symbols, React elements, `children`, and
+identifier props retain the normal React prop-render path. Proven host containers
 can transfer child ownership after mount for host-only conditional
 branches and ranges, plus non-interactive host-only keyed rows and their recursively nested host
 conditions. An interactive row uses a hybrid boundary instead: React retains its events,

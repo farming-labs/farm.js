@@ -12,7 +12,12 @@ export interface CompilerCell {
 
 interface RuntimeCell extends CompilerCell {
   flush(): boolean;
+  replace(next: unknown): void;
 }
+
+type PendingCellUpdate =
+  | { kind: "state"; update: CompilerStateUpdater }
+  | { kind: "value"; value: unknown };
 
 type SelectableTextControl = HTMLInputElement | HTMLTextAreaElement;
 
@@ -294,6 +299,11 @@ export interface CompiledComponentDefinition<Props> {
   /** Changes when the compiler-owned state layout is no longer refresh-compatible. */
   stateSignature?: string;
   initialize(props: Props): readonly unknown[];
+  /**
+   * Compiler-emitted flat prop reads. Primitive values can share the local
+   * dependency graph; identity-bearing values retain normal React rendering.
+   */
+  readProps?(props: Props): readonly unknown[];
   render(
     props: Props,
     state: readonly CompilerCell[],
@@ -330,6 +340,18 @@ function renderTextValue(value: unknown): string {
   if (Array.isArray(value)) return value.map(renderTextValue).join("");
   if (value === null || value === undefined || typeof value === "boolean") return "";
   return String(value);
+}
+
+function isCompilerPrimitive(value: unknown): boolean {
+  if (value === null) return true;
+  const kind = typeof value;
+  return (
+    kind === "string" ||
+    kind === "number" ||
+    kind === "boolean" ||
+    kind === "bigint" ||
+    kind === "undefined"
+  );
 }
 
 function findBindingTarget(
@@ -3948,7 +3970,7 @@ export function createCompiledComponent<Props>(
   const definitionReference: CompiledDefinitionReference<Props> = { current: definition };
   const refreshListeners = new Set<() => void>();
 
-  class FarmCompiledComponent extends React.Component<Props> {
+  class FarmCompiledComponent extends React.Component<Props, Record<string, never>, boolean> {
     private root: Element | null = null;
     private mounted = false;
     private flushQueued = false;
@@ -3966,6 +3988,9 @@ export function createCompiledComponent<Props>(
     private activeBinding: CompilerBinding<Props> | null = null;
     private activeDependencies: Set<number> | null = null;
     private readonly cells: RuntimeCell[];
+    private readonly propCellOffset: number;
+    private renderedDefinition: CompiledComponentDefinition<Props> | null = null;
+    private renderedElement: React.ReactElement | null = null;
     private readonly blockRefreshListeners = new Map<number, CompilerBlockRefresh>();
     private readonly blockRoots = new Map<number, Element>();
     private readonly blockRootElements = new Set<Element>();
@@ -3975,9 +4000,12 @@ export function createCompiledComponent<Props>(
 
     constructor(props: Props) {
       super(props);
-      this.cells = definitionReference.current.initialize(props).map((initialValue, index) => {
+      const initialState = definitionReference.current.initialize(props);
+      const initialProps = definitionReference.current.readProps?.(props) || [];
+      this.propCellOffset = initialState.length;
+      this.cells = [...initialState, ...initialProps].map((initialValue, index) => {
         let value = initialValue;
-        const pending: CompilerStateUpdater[] = [];
+        const pending: PendingCellUpdate[] = [];
         return {
           get: () => {
             if (this.activeBinding && this.activeDependencies) {
@@ -3986,14 +4014,21 @@ export function createCompiledComponent<Props>(
             return value;
           },
           set: (next) => {
-            pending.push(next);
+            pending.push({ kind: "state", update: next });
             this.scheduleBindingFlush(index);
+          },
+          replace: (next) => {
+            pending.push({ kind: "value", value: next });
           },
           flush: () => {
             if (pending.length === 0) return false;
             const previous = value;
             for (const next of pending.splice(0)) {
-              value = typeof next === "function" ? next(value) : next;
+              if (next.kind === "value") {
+                value = next.value;
+              } else {
+                value = typeof next.update === "function" ? next.update(value) : next.update;
+              }
             }
             return !Object.is(previous, value);
           },
@@ -4031,6 +4066,46 @@ export function createCompiledComponent<Props>(
 
     private usesHybridReactivity(): boolean {
       return definitionReference.current.reactivity === "hybrid";
+    }
+
+    private canReuseRenderedElement(
+      currentDefinition: CompiledComponentDefinition<Props>,
+      propValues: readonly unknown[] | null,
+    ): boolean {
+      return Boolean(
+        this.mounted &&
+        propValues &&
+        propValues.every(isCompilerPrimitive) &&
+        this.renderedDefinition === currentDefinition &&
+        this.renderedElement,
+      );
+    }
+
+    private renderCellsForProps(propValues: readonly unknown[] | null): {
+      cells: readonly CompilerCell[];
+      commit(): void;
+    } {
+      if (!propValues) return { cells: this.cells, commit: () => undefined };
+      // A full React render must see its own prop snapshot, including inside
+      // nested block render callbacks. The view switches to committed cells
+      // only when its root ref is attached, so an abandoned render cannot
+      // publish values or replace the reusable element.
+      let committed = false;
+      const cells: CompilerCell[] = this.cells.slice(0, this.propCellOffset);
+      for (let propIndex = 0; propIndex < propValues.length; propIndex += 1) {
+        const cell = this.cells[this.propCellOffset + propIndex];
+        if (!cell) continue;
+        cells.push({
+          get: () => (committed ? cell.get() : propValues[propIndex]),
+          set: (next) => cell.set(next),
+        });
+      }
+      return {
+        cells,
+        commit: () => {
+          committed = true;
+        },
+      };
     }
 
     private tracksBinding(
@@ -4199,75 +4274,75 @@ export function createCompiledComponent<Props>(
       this.flushQueued = true;
       queueMicrotask(() => {
         this.flushQueued = false;
-        const inputSelection = this.inputSelection;
-        this.inputSelection = null;
-        if (!this.mounted) return;
-        const dirty = new Set<number>();
-        for (const index of this.dirtyState) {
-          if (this.cells[index]?.flush()) dirty.add(index);
-        }
-        this.dirtyState.clear();
-        if (dirty.size === 0) return;
-        try {
-          this.ensureBindingIndex();
-          const affectedBlockIds = new Set<number>();
-          const affectedBindings = new Set<CompilerBinding<Props>>();
+        this.flushBindingUpdates();
+      });
+    }
 
-          for (const dependency of dirty) {
-            for (const binding of this.blockBindingsByDependency[dependency] || []) {
-              affectedBlockIds.add(binding.id);
-            }
-            for (const binding of this.staticBindingsByDependency[dependency] || []) {
+    private flushBindingUpdates(): void {
+      const inputSelection = this.inputSelection;
+      this.inputSelection = null;
+      if (!this.mounted) return;
+      const dirty = new Set<number>();
+      for (const index of this.dirtyState) {
+        if (this.cells[index]?.flush()) dirty.add(index);
+      }
+      this.dirtyState.clear();
+      if (dirty.size === 0) return;
+      try {
+        this.ensureBindingIndex();
+        const affectedBlockIds = new Set<number>();
+        const affectedBindings = new Set<CompilerBinding<Props>>();
+
+        for (const dependency of dirty) {
+          for (const binding of this.blockBindingsByDependency[dependency] || []) {
+            affectedBlockIds.add(binding.id);
+          }
+          for (const binding of this.staticBindingsByDependency[dependency] || []) {
+            affectedBindings.add(binding);
+          }
+          if (this.usesHybridReactivity()) {
+            for (const binding of this.trackedBindingsByDependency[dependency] || []) {
               affectedBindings.add(binding);
             }
-            if (this.usesHybridReactivity()) {
-              for (const binding of this.trackedBindingsByDependency[dependency] || []) {
-                affectedBindings.add(binding);
-              }
-            }
           }
-
-          const hasAffectedMountedAncestor = (
-            binding: CompilerConditionalBlockBinding,
-          ): boolean => {
-            let parent = binding.parent;
-            while (parent !== undefined) {
-              if (affectedBlockIds.has(parent) && this.blockRefreshListeners.has(parent)) {
-                return true;
-              }
-              parent = this.blockBindings.get(parent)?.parent;
-            }
-            return false;
-          };
-
-          const blockRefreshes = [...affectedBlockIds]
-            .map((id) => {
-              const binding = this.blockBindings.get(id);
-              const refresh = this.blockRefreshListeners.get(id);
-              return binding && refresh && !hasAffectedMountedAncestor(binding)
-                ? refresh
-                : undefined;
-            })
-            .filter((refresh): refresh is CompilerBlockRefresh => refresh !== undefined);
-
-          for (const binding of affectedBindings) {
-            if (binding.kind !== "block") this.applyBinding(binding);
-          }
-
-          let pendingBlockCommits = blockRefreshes.length;
-          for (const refresh of blockRefreshes) {
-            refresh(() => {
-              pendingBlockCommits -= 1;
-              if (pendingBlockCommits === 0) this.restoreInputSelection(inputSelection);
-            }, dirty);
-          }
-          if (blockRefreshes.length === 0) this.restoreInputSelection(inputSelection);
-        } catch (error) {
-          this.bindingError = error;
-          this.hasBindingError = true;
-          this.forceUpdate();
         }
-      });
+
+        const hasAffectedMountedAncestor = (binding: CompilerConditionalBlockBinding): boolean => {
+          let parent = binding.parent;
+          while (parent !== undefined) {
+            if (affectedBlockIds.has(parent) && this.blockRefreshListeners.has(parent)) {
+              return true;
+            }
+            parent = this.blockBindings.get(parent)?.parent;
+          }
+          return false;
+        };
+
+        const blockRefreshes = [...affectedBlockIds]
+          .map((id) => {
+            const binding = this.blockBindings.get(id);
+            const refresh = this.blockRefreshListeners.get(id);
+            return binding && refresh && !hasAffectedMountedAncestor(binding) ? refresh : undefined;
+          })
+          .filter((refresh): refresh is CompilerBlockRefresh => refresh !== undefined);
+
+        for (const binding of affectedBindings) {
+          if (binding.kind !== "block") this.applyBinding(binding);
+        }
+
+        let pendingBlockCommits = blockRefreshes.length;
+        for (const refresh of blockRefreshes) {
+          refresh(() => {
+            pendingBlockCommits -= 1;
+            if (pendingBlockCommits === 0) this.restoreInputSelection(inputSelection);
+          }, dirty);
+        }
+        if (blockRefreshes.length === 0) this.restoreInputSelection(inputSelection);
+      } catch (error) {
+        this.bindingError = error;
+        this.hasBindingError = true;
+        this.forceUpdate();
+      }
     }
 
     private applyBinding(binding: CompilerBinding<Props>, force = false): void {
@@ -4301,10 +4376,39 @@ export function createCompiledComponent<Props>(
       this.primeHybridBindings();
     }
 
-    componentDidUpdate(): void {
-      // React has reconciled a parent-driven prop update. Reapply compiled
-      // bindings from the current cells so React and the imperative state stay
-      // coherent even when both change in the same turn.
+    getSnapshotBeforeUpdate(): boolean {
+      const currentDefinition = definitionReference.current;
+      const propValues = currentDefinition.readProps?.(this.props) || null;
+      return this.canReuseRenderedElement(currentDefinition, propValues);
+    }
+
+    componentDidUpdate(
+      _previousProps: Readonly<Props>,
+      _previousState: Readonly<Record<string, never>>,
+      reusedRenderedElement = false,
+    ): void {
+      const propValues = definitionReference.current.readProps?.(this.props) || null;
+      if (propValues) {
+        if (reusedRenderedElement) this.captureInputSelection();
+        for (let propIndex = 0; propIndex < propValues.length; propIndex += 1) {
+          const cellIndex = this.propCellOffset + propIndex;
+          const cell = this.cells[cellIndex];
+          if (!cell) continue;
+          cell.replace(propValues[propIndex]);
+          if (reusedRenderedElement) {
+            this.dirtyState.add(cellIndex);
+          } else {
+            // React already reconciled a full render using the pending prop
+            // snapshot. Commit the cell without scheduling duplicate work.
+            cell.flush();
+          }
+        }
+        this.flushBindingUpdates();
+        return;
+      }
+
+      // Hand-authored definitions without prop cells retain the original
+      // React-owned prop reconciliation behavior.
       this.ensureBindingIndex();
       for (const binding of definitionReference.current.bindings) {
         if (binding.kind !== "block") this.applyBinding(binding, true);
@@ -4336,36 +4440,55 @@ export function createCompiledComponent<Props>(
     render(): React.ReactNode {
       if (this.hasBindingError) throw this.bindingError;
       const currentDefinition = definitionReference.current;
-      const element = currentDefinition.render(this.props, this.cells, this.blockRuntime);
+      const propValues = currentDefinition.readProps?.(this.props) || null;
+      if (this.canReuseRenderedElement(currentDefinition, propValues)) {
+        return this.renderedElement;
+      }
+
+      const renderCells = this.renderCellsForProps(propValues);
+      const element = currentDefinition.render(this.props, renderCells.cells, this.blockRuntime);
       if (!React.isValidElement(element)) {
         throw new TypeError(
           `Compiled component ${currentDefinition.displayName} must return one host element.`,
         );
       }
+      let renderedElement: React.ReactElement;
+      const captureCommittedRoot = (root: Element | null) => {
+        this.captureRoot(root);
+        if (!root) return;
+        renderCells.commit();
+        this.renderedDefinition = currentDefinition;
+        this.renderedElement = renderedElement;
+      };
       if (element.type === this.blockRuntime.KeyedRanges) {
-        return React.cloneElement(element as React.ReactElement<CompilerKeyedRangesBlockProps>, {
-          rootRef: this.captureRoot,
-        });
-      }
-      if (element.type === this.blockRuntime.ConditionalRanges) {
-        return React.cloneElement(
-          element as React.ReactElement<CompilerConditionalRangesBlockProps>,
-          { rootRef: this.captureRoot },
+        renderedElement = React.cloneElement(
+          element as React.ReactElement<CompilerKeyedRangesBlockProps>,
+          {
+            rootRef: captureCommittedRoot,
+          },
         );
-      }
-      if (element.type === this.blockRuntime.MixedRanges) {
-        return React.cloneElement(element as React.ReactElement<CompilerMixedRangesBlockProps>, {
-          rootRef: this.captureRoot,
-        });
-      }
-      if (typeof element.type !== "string") {
+      } else if (element.type === this.blockRuntime.ConditionalRanges) {
+        renderedElement = React.cloneElement(
+          element as React.ReactElement<CompilerConditionalRangesBlockProps>,
+          { rootRef: captureCommittedRoot },
+        );
+      } else if (element.type === this.blockRuntime.MixedRanges) {
+        renderedElement = React.cloneElement(
+          element as React.ReactElement<CompilerMixedRangesBlockProps>,
+          {
+            rootRef: captureCommittedRoot,
+          },
+        );
+      } else if (typeof element.type !== "string") {
         throw new TypeError(
           `Compiled component ${currentDefinition.displayName} must return one host element.`,
         );
+      } else {
+        renderedElement = React.cloneElement(element, {
+          ref: captureCommittedRoot,
+        } as React.Attributes);
       }
-      return React.cloneElement(element, {
-        ref: this.captureRoot,
-      } as React.Attributes);
+      return renderedElement;
     }
   }
 

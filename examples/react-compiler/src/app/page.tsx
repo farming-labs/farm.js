@@ -8,6 +8,7 @@ import { HeavyInteractionBenchmark } from "../components/heavy-interaction-bench
 import { KeyedRowHostBlockExperiment } from "../components/keyed-row-host-block-experiment";
 import { MixedRangeExperiment } from "../components/mixed-range-experiment";
 import { NestedKeyedRowExperiment } from "../components/nested-keyed-row-experiment";
+import { PrimitivePropExperiment } from "../components/primitive-prop-experiment";
 import { RecursiveHostBlockExperiment } from "../components/recursive-host-block-experiment";
 import { RecursiveKeyedScopeExperiment } from "../components/recursive-keyed-scope-experiment";
 import { StaticBindingExperiment } from "../components/static-binding-experiment";
@@ -59,14 +60,16 @@ export default function HomePage() {
             <span>03 / FALL BACK</span>
             <h3>Keep React semantics</h3>
             <p>
-              React still owns SSR, hydration, events, props, placement, and
-              every structure the compiler cannot prove safe.
+              React still owns SSR, hydration, events, placement, parent
+              commits, and every value or structure the compiler cannot prove safe.
             </p>
           </article>
         </div>
       </section>
 
       <CompilerEdgeLab />
+
+      <PrimitivePropExperiment />
 
       <CommonSyntaxExperiment />
 
