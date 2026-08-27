@@ -1,8 +1,9 @@
 # js-framework-benchmark results
 
-Result: **PASS.** Farm hybrid is 1.465x faster than the official React Hooks entry across the
-nine CPU operations by pairwise geometric mean and wins eight of nine individual operations. It
-is 1.755x faster than the exact same component source with the compiler disabled.
+Harness and correctness result: **PASS.** Farm hybrid records a 1.286x speedup over the official
+React Hooks entry by the benchmark's official-weighted geometric mean across the nine CPU
+operations. Its median is lower in eight of nine operations. Against the exact same component
+source with the compiler disabled, the official-weighted speedup is 1.454x.
 
 These are local measurements from the official benchmark harness, not an official leaderboard
 submission.
@@ -23,6 +24,7 @@ submission.
 - Memory samples: 3
 - Short-operation CPU slowdown: unchanged from the official harness
 - Statistic below: median total timeline duration, including scripting and rendering/paint
+- Aggregate: the benchmark's official CPU weights applied to the pairwise median ratios
 
 The Farm off/static/hybrid builds use the exact same component source. The separate `react-hooks`
 column is the benchmark repository's optimized React implementation using `memo(Row)`.
@@ -47,18 +49,23 @@ Lower time is better. Speedup is official React median divided by hybrid median.
 | Append 1,000 rows   |     42.6 ms |      45.6 ms |  41.3 ms |  41.0 ms |     3.9% faster |
 | Clear rows          |     23.1 ms |      22.0 ms |  12.6 ms |  12.8 ms |    1.80x faster |
 
-Pairwise geometric-mean results:
+Official-weighted pairwise geometric-mean results:
 
-| Comparison                                | Speedup | Geometric-mean time reduction |
-| ----------------------------------------- | ------: | ----------------------------: |
-| Hybrid vs official React Hooks            |  1.465x |                         31.8% |
-| Static vs official React Hooks            |  1.461x |                         31.6% |
-| Hybrid vs exact same source, compiler off |  1.755x |                         43.0% |
+| Comparison                                | Speedup | Weighted time reduction |
+| ----------------------------------------- | ------: | ----------------------: |
+| Hybrid vs official React Hooks            |  1.286x |                   22.3% |
+| Static vs official React Hooks            |  1.281x |                   22.0% |
+| Hybrid vs exact same source, compiler off |  1.454x |                   31.2% |
 
-Hybrid wins eight of nine operations. Removal is the only measured loss and is effectively tied:
-the total median differs by 0.25 ms (17.55 vs 17.30 ms), while scripting differs by 0.15 ms (1.55
-vs 1.40 ms). Browser rendering noise is larger than that margin, so this report does not claim an
-all-nine win.
+For transparency, the corresponding unweighted geometric means are 1.465x, 1.461x, and 1.755x.
+They are retained in the raw JSON as diagnostics, but are not the headline because the upstream
+benchmark uses fixed CPU weights for its overall score.
+
+Hybrid has a lower median in eight of nine operations. Update every 10th is only 2.5% lower and
+varies around parity across samples. Removal is the only higher median and is also effectively
+tied: the total median differs by 0.25 ms (17.55 vs 17.30 ms), while scripting differs by 0.15 ms
+(1.55 vs 1.40 ms). This report does not treat either near-tie as a statistically decisive win or
+loss.
 
 The compiler optimization is generic rather than tied to benchmark field names or values:
 
@@ -104,7 +111,7 @@ order-sensitive in this local run (React 379.8 ms, compiler off 370.5 ms, static
 
 ## Conclusion
 
-The dependency-indexed compiled path removes the former update and selection losses without
-special-case equality descriptors or benchmark-specific behavior. It also reduces removal time
-and populated-table memory. The remaining measured tradeoffs are the near-tie on removal and the
-11.3 KiB compressed runtime delta.
+The dependency-indexed compiled path removes the former selection loss and brings update to parity
+without special-case equality descriptors or benchmark-specific behavior. It also reduces removal
+time relative to compiler-off and lowers populated-table memory. The remaining measured tradeoffs
+are the near-ties on update and removal and the 11.3 KiB compressed runtime delta.

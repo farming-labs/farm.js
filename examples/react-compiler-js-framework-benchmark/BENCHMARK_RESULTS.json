@@ -9,6 +9,11 @@
     "release": "25.2.0"
   },
   "harness": {
+    "officialCpuWeights": [
+      0.64280248137063, 0.5607178150466176, 0.5643800750716564, 0.1925635870170522,
+      0.13200612879341714, 0.5277091212292658, 0.5644449600965534, 0.5508359820582848,
+      0.4225836631419211
+    ],
     "repository": "https://github.com/krausest/js-framework-benchmark",
     "revision": "afe7c118dd217ccae4c10813613ac0d7566b1ef1",
     "runner": "playwright",
@@ -16,9 +21,12 @@
     "requestedMemorySamples": 3
   },
   "aggregate": {
-    "hybridVsOffGeometricMeanSpeedup": 1.755208845392792,
-    "hybridVsReactGeometricMeanSpeedup": 1.4652662024246361,
-    "staticVsReactGeometricMeanSpeedup": 1.4613244517032402
+    "hybridVsOffOfficialWeightedSpeedup": 1.4541005366693889,
+    "hybridVsReactOfficialWeightedSpeedup": 1.2863318207151628,
+    "staticVsReactOfficialWeightedSpeedup": 1.2813648100206176,
+    "hybridVsOffUnweightedSpeedup": 1.755208845392792,
+    "hybridVsReactUnweightedSpeedup": 1.4652662024246361,
+    "staticVsReactUnweightedSpeedup": 1.4613244517032402
   },
   "results": {
     "hybrid": {

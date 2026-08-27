@@ -27,7 +27,7 @@ identity before measuring:
 cd /absolute/path/to/js-framework-benchmark/webdriver-ts
 npm run isKeyed -- --headless \
   --chromeBinary "/absolute/path/to/chrome" \
-  --framework keyed/farm-react-off keyed/farm-react-static keyed/farm-react-hybrid
+  --framework keyed/react-hooks keyed/farm-react-off keyed/farm-react-static keyed/farm-react-hybrid
 ```
 
 Run the CPU suite with the official Playwright timeline runner:
@@ -54,9 +54,22 @@ Copy the official JSON results into a machine-readable consolidated report:
 pnpm summarize:official /absolute/path/to/js-framework-benchmark
 ```
 
+The summarizer requires exactly one result file per framework and operation, rejects stale
+duplicates, verifies keyed/type metadata, recomputes every median from its raw samples, validates
+the documented sample counts, and reads the current official CPU weights from the checked-out
+harness. For a deliberately reduced rerun, pass the actual counts explicitly, for example:
+
+```bash
+FARM_BENCHMARK_CPU_SAMPLES=3 \
+FARM_BENCHMARK_MEMORY_SAMPLES=3 \
+FARM_BENCHMARK_OUTPUT=/tmp/farm-benchmark-audit.json \
+pnpm summarize:official /absolute/path/to/js-framework-benchmark
+```
+
 See [BENCHMARK_RESULTS.md](./BENCHMARK_RESULTS.md) for the checked-in interpretation and
 `BENCHMARK_RESULTS.json` for raw sample arrays and medians from the recorded run.
 
 These are local results produced by the official harness, not an official leaderboard submission.
 Browser, operating-system, runner, framework versions, harness revision, and sample counts must be
-reported with comparisons.
+reported with comparisons. Overall CPU comparisons should use the official-weighted geometric
+mean; the unweighted geometric mean may be included only as a separately labeled diagnostic.
