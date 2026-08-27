@@ -202,7 +202,7 @@ describe("interactive compiled keyed-row runtime", () => {
     expect(calls).toEqual(["capture", "stop:Beta newest"]);
   });
 
-  it("asks React to reconcile structural changes, then resumes direct patches", async () => {
+  it("delegates events while reconciling structural changes without React", async () => {
     let executions = 0;
     let listRenders = 0;
     let updateItems: (next: CompilerStateUpdater) => void = () => undefined;
@@ -240,9 +240,11 @@ describe("interactive compiled keyed-row runtime", () => {
               events={[
                 {
                   name: "onClick",
+                  path: [1],
                   invoke: (item, index) => selected.push(`${(item as Item).label}:${index}`),
                 },
               ]}
+              delegateEvents
               id={0}
               items={items}
               render={(rowEvent) => {
@@ -291,11 +293,14 @@ describe("interactive compiled keyed-row runtime", () => {
     expect(rows.map((row) => row.dataset.key)).toEqual(["c", "b", "a"]);
     expect(rows[1]).toBe(original.get("b"));
     expect(rows[2]).toBe(original.get("a"));
-    expect(listRenders).toBe(2);
+    expect(listRenders).toBe(1);
     expect(executions).toBe(1);
 
     await act(async () => rows[1].querySelector("button")!.click());
     expect(selected).toEqual(["Beta moved:1"]);
+
+    await act(async () => rows[0].querySelector("button")!.click());
+    expect(selected).toEqual(["Beta moved:1", "Gamma:0"]);
 
     await act(async () => {
       updateItems((current) =>
@@ -306,10 +311,10 @@ describe("interactive compiled keyed-row runtime", () => {
       await flushCompilerUpdates();
     });
     expect(rows[1].querySelector("span")?.textContent).toBe("Beta patched");
-    expect(listRenders).toBe(2);
+    expect(listRenders).toBe(1);
 
     await act(async () => rows[1].querySelector("button")!.click());
-    expect(selected).toEqual(["Beta moved:1", "Beta patched:1"]);
+    expect(selected).toEqual(["Beta moved:1", "Gamma:0", "Beta patched:1"]);
   });
 
   it("uses per-render event closures after duplicate keys switch the rows to React fallback", async () => {
@@ -342,9 +347,11 @@ describe("interactive compiled keyed-row runtime", () => {
               events={[
                 {
                   name: "onClick",
+                  path: [1],
                   invoke: (item, index) => observed.push(`${(item as Item).label}:${index}`),
                 },
               ]}
+              delegateEvents
               id={0}
               items={items}
               render={(rowEvent) => (
@@ -1170,4 +1177,134 @@ describe("interactive compiled keyed-row runtime", () => {
     expect(compiledExecutions).toBe(1);
     expect(compiledListRenders).toBeLessThanOrEqual(201);
   }, 30_000);
+
+  it("skips structure and unrelated row bindings for non-structural state", async () => {
+    let updateItems: (next: CompilerStateUpdater) => void = () => undefined;
+    let updateSelected: (next: CompilerStateUpdater) => void = () => undefined;
+    let keyReads = 0;
+    let labelReads = 0;
+    let selectedReads = 0;
+    const Tasks = createCompiledComponent({
+      displayName: "SparseInteractiveTasks",
+      initialize: () => [
+        [
+          { id: "a", label: "Alpha" },
+          { id: "b", label: "Beta" },
+        ],
+        "a",
+      ],
+      render(_props: Record<string, never>, state, blocks) {
+        updateItems = (next) => state[0].set(next);
+        updateSelected = (next) => state[1].set(next);
+        const items = () => state[0].get() as Item[];
+        const selected = () => state[1].get() as string;
+        const KeyedRows = blocks.KeyedRows;
+        return (
+          <main>
+            <KeyedRows
+              bindings={[
+                {
+                  dependencies: [1],
+                  kind: "attribute",
+                  name: "data-selected",
+                  path: [],
+                  read: (item) => {
+                    selectedReads += 1;
+                    return selected() === (item as Item).id;
+                  },
+                },
+                {
+                  dependencies: [],
+                  kind: "text",
+                  path: [0],
+                  read: (item) => {
+                    labelReads += 1;
+                    return (item as Item).label;
+                  },
+                },
+              ]}
+              create={(item) => ({
+                kind: "element",
+                tag: "li",
+                attributes: [
+                  { name: "data-key", value: (item as Item).id },
+                  { name: "data-selected", value: selected() === (item as Item).id },
+                ],
+                styles: [],
+                children: [
+                  {
+                    kind: "element",
+                    tag: "span",
+                    attributes: [],
+                    styles: [],
+                    children: [(item as Item).label],
+                  },
+                ],
+              })}
+              id={0}
+              items={items}
+              render={() => (
+                <ul>
+                  {items().map((item) => (
+                    <li data-key={item.id} data-selected={selected() === item.id} key={item.id}>
+                      <span>{item.label}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              rowKey={(item) => {
+                keyReads += 1;
+                return (item as Item).id;
+              }}
+              structureDependencies={[0]}
+            />
+          </main>
+        );
+      },
+      bindings: [{ kind: "block", id: 0, dependencies: [0, 1] }],
+    });
+
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<Tasks />));
+
+    keyReads = 0;
+    labelReads = 0;
+    selectedReads = 0;
+    await act(async () => {
+      updateSelected("b");
+      await flushCompilerUpdates();
+    });
+    expect(keyReads).toBe(0);
+    expect(labelReads).toBe(0);
+    expect(selectedReads).toBe(2);
+    expect(container.querySelector<HTMLElement>('[data-key="b"]')?.dataset.selected).toBe("true");
+
+    keyReads = 0;
+    labelReads = 0;
+    selectedReads = 0;
+    await act(async () => {
+      updateItems((current) =>
+        (current as Item[]).map((item) =>
+          item.id === "b" ? { ...item, label: "Beta newest" } : item,
+        ),
+      );
+      await flushCompilerUpdates();
+    });
+    expect(keyReads).toBe(2);
+    expect(labelReads).toBe(2);
+    expect(selectedReads).toBe(2);
+    expect(container.querySelector('[data-key="b"] span')?.textContent).toBe("Beta newest");
+
+    keyReads = 0;
+    await act(async () => {
+      updateItems((current) => (current as Item[]).filter((item) => item.id !== "a"));
+      await flushCompilerUpdates();
+    });
+    expect(keyReads).toBe(1);
+    expect(container.querySelectorAll("li")).toHaveLength(1);
+    expect(container.querySelector('[data-key="b"] span')?.textContent).toBe("Beta newest");
+  });
 });

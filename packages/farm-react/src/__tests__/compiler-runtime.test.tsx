@@ -175,6 +175,106 @@ describe("compiled React runtime", () => {
     expect(container.textContent).toBe("2");
   });
 
+  it("tracks only the active short-circuit branch and resubscribes when it changes", async () => {
+    let bindingReads = 0;
+    const ConditionalValue = createCompiledComponent({
+      displayName: "ConditionalValue",
+      reactivity: "hybrid",
+      initialize: () => [true, "active-0", "inactive-0"],
+      render(_props: Record<string, never>, state) {
+        return (
+          <div>
+            <button onClick={() => state[1].set("active-1")}>active</button>
+            <button onClick={() => state[2].set("inactive-1")}>inactive</button>
+            <button onClick={() => state[0].set((value) => !value)}>toggle</button>
+            <span>{state[0].get() ? state[1].get() : state[2].get()}</span>
+          </div>
+        );
+      },
+      bindings: [
+        {
+          kind: "text",
+          tracking: "dynamic",
+          path: [3],
+          dependencies: [0, 1, 2],
+          read: (_props, state) => {
+            bindingReads += 1;
+            return state[0].get() ? state[1].get() : state[2].get();
+          },
+        },
+      ],
+    });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<ConditionalValue />));
+
+    expect(bindingReads).toBe(1);
+    const buttons = container.querySelectorAll("button");
+    await act(async () => {
+      buttons[1].click();
+      await Promise.resolve();
+    });
+    expect(bindingReads).toBe(1);
+    expect(container.querySelector("span")?.textContent).toBe("active-0");
+
+    await act(async () => {
+      buttons[2].click();
+      await Promise.resolve();
+    });
+    expect(bindingReads).toBe(2);
+    expect(container.querySelector("span")?.textContent).toBe("inactive-1");
+
+    await act(async () => {
+      buttons[0].click();
+      await Promise.resolve();
+    });
+    expect(bindingReads).toBe(2);
+  });
+
+  it("indexes a thousand static bindings without evaluating unrelated readers", async () => {
+    const bindingCount = 1_024;
+    const reads = Array.from({ length: bindingCount }, () => 0);
+    let cells: readonly { get(): unknown; set(next: unknown): void }[] = [];
+    const IndexedBindings = createCompiledComponent({
+      displayName: "IndexedBindings",
+      reactivity: "static",
+      initialize: () => Array.from({ length: bindingCount }, () => 0),
+      render(_props: Record<string, never>, state) {
+        cells = state;
+        return React.createElement(
+          "div",
+          null,
+          ...state.map((cell, index) => React.createElement("span", { key: index }, cell.get())),
+        );
+      },
+      bindings: Array.from({ length: bindingCount }, (_, index) => ({
+        kind: "text" as const,
+        path: [index],
+        dependencies: [index],
+        read: (_props: Record<string, never>, state: readonly { get(): unknown }[]) => {
+          reads[index] += 1;
+          return state[index].get();
+        },
+      })),
+    });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<IndexedBindings />));
+
+    await act(async () => {
+      cells[737].set(1);
+      await Promise.resolve();
+    });
+
+    expect(reads.reduce((total, count) => total + count, 0)).toBe(1);
+    expect(reads[737]).toBe(1);
+    expect(container.querySelectorAll("span")[737].textContent).toBe("1");
+  });
+
   it("stringifies boolean data and ARIA bindings like React", async () => {
     const Toggle = createCompiledComponent({
       displayName: "BooleanAttributes",

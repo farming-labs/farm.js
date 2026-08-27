@@ -30,6 +30,8 @@ describe("React AOT compiler", () => {
     expect(result.compiled).toEqual(["Counter"]);
     expect(result.code).toContain("@farm.js/react/compiler-runtime");
     expect(result.code).toContain("createCompiledComponent");
+    expect(result.code).toContain('reactivity: "hybrid"');
+    expect(result.code).not.toContain('tracking: "dynamic"');
     expect(result.code).toContain('kind: "text"');
     expect(result.code).toContain('kind: "attribute"');
     expect(result.code).toContain("import.meta.hot");
@@ -45,6 +47,43 @@ describe("React AOT compiler", () => {
     ).resolves.toMatchObject({
       code: expect.stringContaining("createCompiledComponent"),
     });
+  });
+
+  it("emits the configured static scheduler into compiled definitions", async () => {
+    const result = await compileReactModule(
+      `
+        import { useState } from "react";
+        export function StaticCounter() {
+          const [count, setCount] = useState(0);
+          return <button onClick={() => setCount(count + 1)}>{count}</button>;
+        }
+      `,
+      "/app/StaticCounter.tsx",
+      normalizeReactCompilerOptions({ reactivity: "static" }),
+    );
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.code).toContain('reactivity: "static"');
+  });
+
+  it("marks only multi-state short-circuit readers for dynamic tracking", async () => {
+    const result = await compileReactModule(
+      `
+        import { useState } from "react";
+        export function BranchValue() {
+          const [enabled, setEnabled] = useState(true);
+          const [active, setActive] = useState("active");
+          const [inactive, setInactive] = useState("inactive");
+          return <button onClick={() => setEnabled(!enabled)}>{enabled ? active : inactive}</button>;
+        }
+      `,
+      "/app/BranchValue.tsx",
+      infer,
+    );
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.code).toContain('tracking: "dynamic"');
+    expect(result.code).toContain("dependencies: [0, 1, 2]");
   });
 
   it("compiles state-driven derived local values in source order", async () => {

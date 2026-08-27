@@ -15,6 +15,7 @@ const updatesPerSample = Number(
 const basePort = Number(process.env.FARM_HEAVY_PORT || 4340);
 const reportPath =
   process.env.FARM_HEAVY_REPORT || "/tmp/farm-react-heavy-benchmark.json";
+const browserExecutablePath = process.env.FARM_EXPERIMENT_BROWSER_PATH;
 const serverEntry = path.resolve(".farm/.output/server/index.mjs");
 const publicChunks = path.resolve(".farm/.output/public/chunks");
 
@@ -55,7 +56,8 @@ async function runCommand(command, args, env) {
   });
 }
 
-async function inspectBundle(compilerEnabled) {
+async function inspectBundle(compilerMode) {
+  const compilerEnabled = compilerMode !== "off";
   const files = (await readdir(publicChunks)).filter(
     (file) => file.startsWith("page-") && file.endsWith(".js"),
   );
@@ -68,6 +70,12 @@ async function inspectBundle(compilerEnabled) {
     /displayName:[`"]HeavyInteractionBenchmark[`"]/.test(source);
   const componentIslandCompiled =
     /displayName:[`"]ComponentIslandExperiment[`"]/.test(source);
+  const configuredReactivity = compilerEnabled
+    ? source.includes(`reactivity:"${compilerMode}"`) ||
+      source.includes(`reactivity: "${compilerMode}"`) ||
+      source.includes(`reactivity:\`${compilerMode}\``) ||
+      source.includes(`reactivity: \`${compilerMode}\``)
+    : false;
 
   assert.equal(
     heavyComponentCompiled,
@@ -79,6 +87,11 @@ async function inspectBundle(compilerEnabled) {
     compilerEnabled,
     `ComponentIslandExperiment compiler marker did not match compiler=${compilerEnabled}.`,
   );
+  assert.equal(
+    configuredReactivity,
+    compilerEnabled,
+    `Compiler output did not contain reactivity=${compilerMode}.`,
+  );
 
   return {
     files,
@@ -86,6 +99,7 @@ async function inspectBundle(compilerEnabled) {
     gzipBytes: gzipSync(source).byteLength,
     heavyComponentCompiled,
     componentIslandCompiled,
+    configuredReactivity,
   };
 }
 
@@ -115,14 +129,16 @@ async function stopServer(server) {
   if (server.exitCode === null) server.kill("SIGKILL");
 }
 
-async function measureTrial(browser, trial, compilerEnabled, port) {
-  const mode = compilerEnabled ? "on" : "off";
+async function measureTrial(browser, trial, compilerMode, port) {
+  const compilerEnabled = compilerMode !== "off";
+  const mode = compilerMode;
   process.stdout.write(`[heavy] building compiler ${mode} (${trial})...\n`);
   await rm(path.resolve(".farm"), { force: true, recursive: true });
   await runCommand("pnpm", ["run", "build"], {
     FARM_REACT_COMPILER: String(compilerEnabled),
+    FARM_REACTIVITY: compilerEnabled ? compilerMode : "hybrid",
   });
-  const bundle = await inspectBundle(compilerEnabled);
+  const bundle = await inspectBundle(compilerMode);
 
   let serverOutput = "";
   const server = spawn(process.execPath, [serverEntry], {
@@ -284,6 +300,7 @@ async function measureTrial(browser, trial, compilerEnabled, port) {
 
     return {
       compilerEnabled,
+      compilerMode,
       trial,
       bundle,
       browserErrors,
@@ -307,53 +324,56 @@ async function measureTrial(browser, trial, compilerEnabled, port) {
   }
 }
 
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({
+  headless: true,
+  ...(browserExecutablePath ? { executablePath: browserExecutablePath } : {}),
+});
 const browserVersion = browser.version();
 let trials;
 try {
   trials = [
-    await measureTrial(browser, "baseline-a", false, basePort),
-    await measureTrial(browser, "compiled", true, basePort + 1),
-    await measureTrial(browser, "baseline-b", false, basePort + 2),
+    await measureTrial(browser, "baseline-a", "off", basePort),
+    await measureTrial(browser, "static", "static", basePort + 1),
+    await measureTrial(browser, "hybrid", "hybrid", basePort + 2),
+    await measureTrial(browser, "baseline-b", "off", basePort + 3),
   ];
 } finally {
   await browser.close();
 }
 
-const compiled = trials.find((trial) => trial.compilerEnabled);
+const staticCompiled = trials.find((trial) => trial.compilerMode === "static");
+const hybridCompiled = trials.find((trial) => trial.compilerMode === "hybrid");
 const baselines = trials.filter((trial) => !trial.compilerEnabled);
-assert(compiled);
+assert(staticCompiled);
+assert(hybridCompiled);
 assert.equal(baselines.length, 2);
 
 const baselineTiming = timingSummary(
   baselines.flatMap((trial) => trial.samples),
 );
-const compiledTiming = timingSummary(compiled.samples);
-const speedup = baselineTiming.medianMs / compiledTiming.medianMs;
-const medianReductionPercent =
-  ((baselineTiming.medianMs - compiledTiming.medianMs) /
-    baselineTiming.medianMs) *
-  100;
-const p95ReductionPercent =
-  ((baselineTiming.p95Ms - compiledTiming.p95Ms) / baselineTiming.p95Ms) * 100;
+const staticTiming = timingSummary(staticCompiled.samples);
+const hybridTiming = timingSummary(hybridCompiled.samples);
 const baselineComponentIslandTiming = timingSummary(
   baselines.flatMap((trial) => trial.componentIslandSamples),
 );
-const compiledComponentIslandTiming = timingSummary(compiled.componentIslandSamples);
-const componentIslandSpeedup =
-  baselineComponentIslandTiming.medianMs / compiledComponentIslandTiming.medianMs;
-const componentIslandMedianReductionPercent =
-  ((baselineComponentIslandTiming.medianMs - compiledComponentIslandTiming.medianMs) /
-    baselineComponentIslandTiming.medianMs) *
-  100;
-const componentIslandP95ReductionPercent =
-  ((baselineComponentIslandTiming.p95Ms - compiledComponentIslandTiming.p95Ms) /
-    baselineComponentIslandTiming.p95Ms) *
-  100;
+const staticComponentIslandTiming = timingSummary(staticCompiled.componentIslandSamples);
+const hybridComponentIslandTiming = timingSummary(hybridCompiled.componentIslandSamples);
+
+function compareTiming(baseline, candidate) {
+  return {
+    medianReductionPercent:
+      ((baseline.medianMs - candidate.medianMs) / baseline.medianMs) * 100,
+    p95ReductionPercent: ((baseline.p95Ms - candidate.p95Ms) / baseline.p95Ms) * 100,
+    speedup: baseline.medianMs / candidate.medianMs,
+  };
+}
 
 const report = {
   result:
-    compiledTiming.medianMs < baselineTiming.medianMs ? "PASS" : "REGRESSION",
+    staticTiming.medianMs < baselineTiming.medianMs &&
+    hybridTiming.medianMs < baselineTiming.medianMs
+      ? "PASS"
+      : "REGRESSION",
   methodology: {
     baselineTrials: 2,
     measuredSamplesPerTrial: measuredSamples,
@@ -376,14 +396,19 @@ const report = {
       executionsAddedPerTrial: baselines.map((trial) => trial.executionsAdded),
       timing: baselineTiming,
     },
-    compiler: {
-      bundle: compiled.bundle,
-      executionsAdded: compiled.executionsAdded,
-      timing: compiledTiming,
+    static: {
+      bundle: staticCompiled.bundle,
+      executionsAdded: staticCompiled.executionsAdded,
+      timing: staticTiming,
     },
-    medianReductionPercent,
-    p95ReductionPercent,
-    speedup,
+    hybrid: {
+      bundle: hybridCompiled.bundle,
+      executionsAdded: hybridCompiled.executionsAdded,
+      timing: hybridTiming,
+    },
+    staticVsBaseline: compareTiming(baselineTiming, staticTiming),
+    hybridVsBaseline: compareTiming(baselineTiming, hybridTiming),
+    hybridVsStatic: compareTiming(staticTiming, hybridTiming),
   },
   componentIslands: {
     baseline: {
@@ -395,14 +420,19 @@ const report = {
       ),
       timing: baselineComponentIslandTiming,
     },
-    compiler: {
-      executionsAdded: compiled.componentIslandExecutionsAdded,
-      staticComponentExecutionsAdded: compiled.staticComponentExecutionsAdded,
-      timing: compiledComponentIslandTiming,
+    static: {
+      executionsAdded: staticCompiled.componentIslandExecutionsAdded,
+      staticComponentExecutionsAdded: staticCompiled.staticComponentExecutionsAdded,
+      timing: staticComponentIslandTiming,
     },
-    medianReductionPercent: componentIslandMedianReductionPercent,
-    p95ReductionPercent: componentIslandP95ReductionPercent,
-    speedup: componentIslandSpeedup,
+    hybrid: {
+      executionsAdded: hybridCompiled.componentIslandExecutionsAdded,
+      staticComponentExecutionsAdded: hybridCompiled.staticComponentExecutionsAdded,
+      timing: hybridComponentIslandTiming,
+    },
+    staticVsBaseline: compareTiming(baselineComponentIslandTiming, staticComponentIslandTiming),
+    hybridVsBaseline: compareTiming(baselineComponentIslandTiming, hybridComponentIslandTiming),
+    hybridVsStatic: compareTiming(staticComponentIslandTiming, hybridComponentIslandTiming),
   },
   screenshots: trials.map((trial) => trial.screenshot),
 };
@@ -411,10 +441,18 @@ await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`);
 console.log(JSON.stringify({ ...report, reportPath }, null, 2));
 
 assert(
-  compiledTiming.medianMs < baselineTiming.medianMs,
-  `Compiler median ${compiledTiming.medianMs.toFixed(3)}ms did not beat baseline ${baselineTiming.medianMs.toFixed(3)}ms.`,
+  staticTiming.medianMs < baselineTiming.medianMs,
+  `Static compiler median ${staticTiming.medianMs.toFixed(3)}ms did not beat baseline ${baselineTiming.medianMs.toFixed(3)}ms.`,
 );
 assert(
-  compiledComponentIslandTiming.medianMs < baselineComponentIslandTiming.medianMs,
-  `Component-island compiler median ${compiledComponentIslandTiming.medianMs.toFixed(3)}ms did not beat baseline ${baselineComponentIslandTiming.medianMs.toFixed(3)}ms.`,
+  hybridTiming.medianMs < baselineTiming.medianMs,
+  `Hybrid compiler median ${hybridTiming.medianMs.toFixed(3)}ms did not beat baseline ${baselineTiming.medianMs.toFixed(3)}ms.`,
+);
+assert(
+  staticComponentIslandTiming.medianMs < baselineComponentIslandTiming.medianMs,
+  `Static component-island median ${staticComponentIslandTiming.medianMs.toFixed(3)}ms did not beat baseline ${baselineComponentIslandTiming.medianMs.toFixed(3)}ms.`,
+);
+assert(
+  hybridComponentIslandTiming.medianMs < baselineComponentIslandTiming.medianMs,
+  `Hybrid component-island median ${hybridComponentIslandTiming.medianMs.toFixed(3)}ms did not beat baseline ${baselineComponentIslandTiming.medianMs.toFixed(3)}ms.`,
 );

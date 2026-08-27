@@ -23,7 +23,14 @@ export default defineConfig({
 ```
 
 `compiler: true` uses inference: every application TSX/JSX component is considered, eligible
-components are compiled, and everything else keeps the normal React path.
+components are compiled with hybrid reactivity, and everything else keeps the normal React path.
+
+Hybrid reactivity starts from the compiler's proven state-to-binding dependency lists, then marks
+only multi-state short-circuit bindings for runtime read tracking. For
+`enabled ? activeValue : inactiveValue`, an update to the inactive value does not schedule the
+binding. The runtime uses direct subscription indexes rather than proxies or a component-wide
+scan. Use `compiler: { reactivity: "static" }` to retain only the complete build-time dependency
+lists for comparison or diagnosis.
 
 For selective adoption, use annotation mode:
 
@@ -34,6 +41,7 @@ renderer: react({
       mode: "annotation",
       directive: "use compiler",
       onUnsupported: "warn",
+      reactivity: "hybrid",
     },
   },
 }),
@@ -74,8 +82,9 @@ The current compiler handles components that it can prove have:
 - no refs, effects, or unsupported dynamic child structures.
 
 The generated component preserves React ownership of initial placement, props, events, SSR, and
-hydration. Local state cells batch updates into a microtask and patch only compiler-known DOM
-targets. Proven host containers can transfer child ownership after mount for host-only conditional
+hydration. Local state cells batch updates into a microtask, use dependency-indexed subscriptions,
+skip unchanged binding output, and patch only compiler-known DOM targets. Proven host containers
+can transfer child ownership after mount for host-only conditional
 branches and ranges, plus non-interactive host-only keyed rows and their recursively nested host
 conditions. An interactive row uses a hybrid boundary instead: React retains its events,
 conditional Fibers, and structural reconciliation, while Farm patches same-key bindings and

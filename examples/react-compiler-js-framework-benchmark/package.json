@@ -1,0 +1,27 @@
+{
+  "name": "farm-react-compiler-js-framework-benchmark",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "build:off": "FARM_REACT_COMPILER=false vite build",
+    "build:static": "FARM_REACTIVITY=static vite build",
+    "build:hybrid": "FARM_REACTIVITY=hybrid vite build",
+    "prepare:official": "node scripts/prepare-official.mjs",
+    "summarize:official": "node scripts/summarize-official.mjs",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@farm.js/core": "workspace:*",
+    "@farm.js/react": "workspace:*",
+    "react": "19.2.0",
+    "react-dom": "19.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.10"
+  }
+}

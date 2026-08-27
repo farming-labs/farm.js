@@ -3,6 +3,7 @@ import { flushSync } from "react-dom";
 import { materializeIterable } from "./iterable";
 
 export type CompilerStateUpdater = unknown | ((previous: unknown) => unknown);
+export type CompilerRuntimeReactivity = "static" | "hybrid";
 
 export interface CompilerCell {
   get(): unknown;
@@ -24,6 +25,8 @@ interface InputSelectionSnapshot {
 
 export interface CompilerTextBinding<Props> {
   kind: "text";
+  /** Runtime tracking is useful only for compiler-proven short-circuiting readers. */
+  tracking?: "dynamic";
   path: readonly number[];
   /** Stable ref target emitted by newer compiler versions. */
   target?: number;
@@ -33,6 +36,8 @@ export interface CompilerTextBinding<Props> {
 
 export interface CompilerAttributeBinding<Props> {
   kind: "attribute";
+  /** Runtime tracking is useful only for compiler-proven short-circuiting readers. */
+  tracking?: "dynamic";
   path: readonly number[];
   /** Stable ref target emitted by newer compiler versions. */
   target?: number;
@@ -43,6 +48,8 @@ export interface CompilerAttributeBinding<Props> {
 
 export interface CompilerStyleBinding<Props> {
   kind: "style";
+  /** Runtime tracking is useful only for compiler-proven short-circuiting readers. */
+  tracking?: "dynamic";
   path: readonly number[];
   /** Stable ref target emitted by newer compiler versions. */
   target?: number;
@@ -83,6 +90,8 @@ export type CompilerKeyedRowElement = CompilerHostElement;
 
 export interface CompilerKeyedRowEvent {
   name: string;
+  /** Host-element path relative to the keyed row root. */
+  path?: readonly number[];
   invoke(item: unknown, index: number, event: React.SyntheticEvent): unknown;
 }
 
@@ -189,6 +198,8 @@ export interface CompilerKeyedRowBinding {
   kind: "text" | "attribute" | "style";
   path: readonly number[];
   name?: string;
+  /** Component state cells read by this binding, when emitted by the compiler. */
+  dependencies?: readonly number[];
   read(item: unknown, index: number): unknown;
 }
 
@@ -208,10 +219,14 @@ export interface CompilerKeyedRowsBlockProps {
     ) => React.ReactNode,
   ): React.ReactElement;
   items(): Iterable<unknown> | null | undefined;
+  /** State cells that can change the row collection or its key projection. */
+  structureDependencies?: readonly number[];
   rowKey(item: unknown, index: number): React.Key;
   create(item: unknown, index: number): CompilerKeyedRowElement;
   bindings: readonly CompilerKeyedRowBinding[];
   events?: readonly CompilerKeyedRowEvent[];
+  /** Route compiler-proven bubbling row events through the stable React container. */
+  delegateEvents?: boolean;
   conditionals?: readonly CompilerKeyedRowConditional[];
   /** Row descriptors contain compiler-owned nested host scopes. */
   hostBlocks?: boolean;
@@ -272,6 +287,8 @@ export type CompilerBinding<Props> =
 
 export interface CompiledComponentDefinition<Props> {
   displayName: string;
+  /** Scheduler selected by the compiler. Hand-authored definitions default to `static`. */
+  reactivity?: CompilerRuntimeReactivity;
   /** Stable development-only identity used to preserve state across compatible refreshes. */
   hmrId?: string;
   /** Changes when the compiler-owned state layout is no longer refresh-compatible. */
@@ -497,9 +514,11 @@ function updateAttribute(element: Element, name: string, value: unknown): void {
   }
 }
 
+type CompilerBlockRefresh = (afterCommit?: () => void, dirtyState?: ReadonlySet<number>) => void;
+
 interface ConditionalBlockOwner {
   setRoot(id: number, root: Element | null): void;
-  subscribe(id: number, refresh: (afterCommit?: () => void) => void): () => void;
+  subscribe(id: number, refresh: CompilerBlockRefresh): () => void;
 }
 
 function createConditionalBlockComponent(
@@ -785,7 +804,7 @@ interface CompilerKeyedRowInstance extends CompilerHostInstance {
   key: string;
   item: unknown;
   index: number;
-  conditionalValues: Map<number, readonly unknown[]>;
+  conditionalValues: ReadonlyMap<number, readonly unknown[]>;
 }
 
 const UNSET_KEYED_ROW_BINDING = Symbol("unset interactive keyed-row binding");
@@ -817,20 +836,30 @@ function applyKeyedRowBindings(
   index: number,
 ): void {
   for (let bindingIndex = 0; bindingIndex < props.bindings.length; bindingIndex += 1) {
-    const binding = props.bindings[bindingIndex];
-    const rawValue = binding.read(item, index);
-    const value = normalizedKeyedRowBindingValue(binding, rawValue);
-    if (Object.is(instance.values[bindingIndex], value)) continue;
-    instance.values[bindingIndex] = value;
-    const target = findCompilerHostTarget(instance.element, binding.path);
-    if (!target) continue;
-    if (binding.kind === "text") {
-      target.textContent = value as string;
-    } else if (binding.kind === "style" && binding.name) {
-      updateStyle(target, binding.name, rawValue);
-    } else if (binding.kind === "attribute" && binding.name) {
-      updateAttribute(target, binding.name, rawValue);
-    }
+    applyKeyedRowBinding(props, instance, item, index, bindingIndex);
+  }
+}
+
+function applyKeyedRowBinding(
+  props: CompilerKeyedRowBindingSource,
+  instance: CompilerKeyedRowInstance,
+  item: unknown,
+  index: number,
+  bindingIndex: number,
+): void {
+  const binding = props.bindings[bindingIndex];
+  const rawValue = binding.read(item, index);
+  const value = normalizedKeyedRowBindingValue(binding, rawValue);
+  if (Object.is(instance.values[bindingIndex], value)) return;
+  instance.values[bindingIndex] = value;
+  const target = findCompilerHostTarget(instance.element, binding.path);
+  if (!target) return;
+  if (binding.kind === "text") {
+    target.textContent = value as string;
+  } else if (binding.kind === "style" && binding.name) {
+    updateStyle(target, binding.name, rawValue);
+  } else if (binding.kind === "attribute" && binding.name) {
+    updateAttribute(target, binding.name, rawValue);
   }
 }
 
@@ -858,14 +887,17 @@ function readKeyedRowConditionalValues(
   props: CompilerKeyedRowsBlockProps,
   item: unknown,
   index: number,
-): Map<number, readonly unknown[]> {
+): ReadonlyMap<number, readonly unknown[]> {
+  if (!props.conditionals?.length) return EMPTY_KEYED_ROW_CONDITIONAL_VALUES;
   return new Map(
-    (props.conditionals || []).map((conditional) => [
+    props.conditionals.map((conditional) => [
       conditional.id,
       keyedRowConditionalSnapshot(conditional, item, index),
     ]),
   );
 }
+
+const EMPTY_KEYED_ROW_CONDITIONAL_VALUES: ReadonlyMap<number, readonly unknown[]> = new Map();
 
 function keyedRowConditionalChanged(
   previous: readonly unknown[] | undefined,
@@ -2698,6 +2730,7 @@ function createKeyedRowsBlockComponent(
       Map<number, React.EventHandler<React.SyntheticEvent>>
     >();
     private readonly conditionalListeners = new Map<string, Map<number, RowConditionalRefresh>>();
+    private instancesByElement = new WeakMap<Element, CompilerKeyedRowInstance>();
     private readonly conditionalOwner: RowConditionalOwner = {
       subscribe: (key, id, refresh) => this.subscribeToRowConditional(key, id, refresh),
     };
@@ -2727,6 +2760,9 @@ function createKeyedRowsBlockComponent(
       if (this.state.fallback) {
         return (event) => this.currentProps.events?.[eventId]?.invoke(item, index, event);
       }
+      if (this.usesDelegatedEvents()) {
+        return undefined as unknown as React.EventHandler<React.SyntheticEvent>;
+      }
       const key = keyedRowIdentity(this.currentProps.rowKey(item, index));
       let handlers = this.eventHandlers.get(key);
       if (!handlers) {
@@ -2744,6 +2780,97 @@ function createKeyedRowsBlockComponent(
       handlers.set(eventId, handler);
       return handler;
     };
+
+    private usesDelegatedEvents(props: CompilerKeyedRowsBlockProps = this.currentProps): boolean {
+      return Boolean(
+        props.delegateEvents &&
+        props.events?.length &&
+        props.events.every((event) => event.path !== undefined),
+      );
+    }
+
+    private rebuildElementIndex(instances: ReadonlyMap<string, CompilerKeyedRowInstance>): void {
+      this.instancesByElement = new WeakMap();
+      for (const instance of instances.values()) {
+        this.instancesByElement.set(instance.element, instance);
+      }
+    }
+
+    private eventRowInstance(event: React.SyntheticEvent): CompilerKeyedRowInstance | undefined {
+      if (!this.root) return undefined;
+      const target = event.target as Node | null;
+      if (!target) return undefined;
+      let element =
+        target.nodeType === 1 ? (target as Element) : (target.parentElement as Element | null);
+      while (element && element.parentElement !== this.root) element = element.parentElement;
+      return element?.parentElement === this.root
+        ? this.instancesByElement.get(element)
+        : undefined;
+    }
+
+    private invokeDelegatedEvent(
+      descriptor: CompilerKeyedRowEvent,
+      instance: CompilerKeyedRowInstance,
+      event: React.SyntheticEvent,
+      currentTarget: Element,
+    ): void {
+      const ownCurrentTarget = Object.getOwnPropertyDescriptor(event, "currentTarget");
+      try {
+        Object.defineProperty(event, "currentTarget", {
+          configurable: true,
+          value: currentTarget,
+        });
+        descriptor.invoke(instance.item, instance.index, event);
+      } finally {
+        if (ownCurrentTarget) Object.defineProperty(event, "currentTarget", ownCurrentTarget);
+        else Reflect.deleteProperty(event, "currentTarget");
+      }
+    }
+
+    private dispatchDelegatedEvent = (name: string, event: React.SyntheticEvent): void => {
+      const instance = this.eventRowInstance(event);
+      const eventTarget = event.target as Node | null;
+      if (!instance || !eventTarget) return;
+      const capture = name.endsWith("Capture");
+      const matches = (this.currentProps.events || [])
+        .filter((descriptor) => descriptor.name === name && descriptor.path !== undefined)
+        .map((descriptor) => ({
+          descriptor,
+          target: findCompilerHostTarget(instance.element, descriptor.path || []),
+        }))
+        .filter((match): match is { descriptor: CompilerKeyedRowEvent; target: Element } =>
+          Boolean(
+            match.target && (match.target === eventTarget || match.target.contains(eventTarget)),
+          ),
+        )
+        .sort((left, right) =>
+          capture
+            ? (left.descriptor.path?.length || 0) - (right.descriptor.path?.length || 0)
+            : (right.descriptor.path?.length || 0) - (left.descriptor.path?.length || 0),
+        );
+
+      for (const match of matches) {
+        this.invokeDelegatedEvent(match.descriptor, instance, event, match.target);
+        if (event.isPropagationStopped()) break;
+      }
+    };
+
+    private delegatedContainerProps(container: React.ReactElement): Record<string, unknown> {
+      if (this.state.fallback || !this.usesDelegatedEvents()) return {};
+      const props = container.props as Record<string, unknown>;
+      return Object.fromEntries(
+        [...new Set((this.currentProps.events || []).map((event) => event.name))].map((name) => {
+          const existing = props[name] as React.EventHandler<React.SyntheticEvent> | undefined;
+          const capture = name.endsWith("Capture");
+          const handler: React.EventHandler<React.SyntheticEvent> = (event) => {
+            if (capture) existing?.(event);
+            if (!event.isPropagationStopped()) this.dispatchDelegatedEvent(name, event);
+            if (!capture && !event.isPropagationStopped()) existing?.(event);
+          };
+          return [name, handler];
+        }),
+      );
+    }
 
     private rowConditional = (
       item: unknown,
@@ -2785,7 +2912,9 @@ function createKeyedRowsBlockComponent(
     }
 
     private hasReactOwnedRows(props: CompilerKeyedRowsBlockProps = this.currentProps): boolean {
-      return Boolean(props.events?.length || props.conditionals?.length);
+      return Boolean(
+        props.conditionals?.length || (props.events?.length && !this.usesDelegatedEvents(props)),
+      );
     }
 
     private cleanupHostScopes(
@@ -2871,6 +3000,7 @@ function createKeyedRowsBlockComponent(
       }
       this.cleanupHostScopes();
       this.instances = instances;
+      this.rebuildElementIndex(instances);
       this.pruneEventHandlers(rows.keys);
       this.pruneConditionalListeners(rows.keys);
       return true;
@@ -2942,6 +3072,159 @@ function createKeyedRowsBlockComponent(
       });
     }
 
+    private refreshDirtyBindings(
+      dirtyState: ReadonlySet<number>,
+      afterCommit?: () => void,
+    ): boolean {
+      if (
+        !this.mounted ||
+        !this.root ||
+        this.state.fallback ||
+        this.hasReactOwnedRows() ||
+        this.currentProps.hostBlocks ||
+        !this.currentProps.structureDependencies ||
+        this.currentProps.structureDependencies.some((dependency) => dirtyState.has(dependency)) ||
+        this.currentProps.bindings.some((binding) => binding.dependencies === undefined)
+      ) {
+        return false;
+      }
+
+      const affectedBindingIndices: number[] = [];
+      for (
+        let bindingIndex = 0;
+        bindingIndex < this.currentProps.bindings.length;
+        bindingIndex += 1
+      ) {
+        const dependencies = this.currentProps.bindings[bindingIndex].dependencies || [];
+        if (dependencies.some((dependency) => dirtyState.has(dependency))) {
+          affectedBindingIndices.push(bindingIndex);
+        }
+      }
+
+      for (const instance of this.instances.values()) {
+        for (const bindingIndex of affectedBindingIndices) {
+          applyKeyedRowBinding(
+            this.currentProps,
+            instance,
+            instance.item,
+            instance.index,
+            bindingIndex,
+          );
+        }
+      }
+      afterCommit?.();
+      return true;
+    }
+
+    private reconcileStableRows(
+      rows: { items: unknown[]; keys: string[] },
+      afterCommit?: () => void,
+    ): boolean {
+      if (rows.keys.length !== this.instances.size) return false;
+      let index = 0;
+      for (const key of this.instances.keys()) {
+        if (rows.keys[index] !== key) return false;
+        index += 1;
+      }
+
+      const conditionalChanges: Array<{
+        key: string;
+        id: number;
+        item: unknown;
+        index: number;
+      }> = [];
+      for (index = 0; index < rows.items.length; index += 1) {
+        const key = rows.keys[index];
+        const existing = this.instances.get(key);
+        if (!existing) return false;
+        if (this.currentProps.hostBlocks) {
+          const descriptor = this.currentProps.create(rows.items[index], index);
+          if (!existing.scope?.update(descriptor)) {
+            this.activateFallback(afterCommit);
+            return true;
+          }
+        }
+        applyKeyedRowBindings(this.currentProps, existing, rows.items[index], index);
+        const conditionalValues = readKeyedRowConditionalValues(
+          this.currentProps,
+          rows.items[index],
+          index,
+        );
+        for (const [id, values] of conditionalValues) {
+          if (keyedRowConditionalChanged(existing.conditionalValues.get(id), values)) {
+            conditionalChanges.push({ key, id, item: rows.items[index], index });
+          }
+        }
+        existing.conditionalValues = conditionalValues;
+        existing.item = rows.items[index];
+        existing.index = index;
+      }
+      this.notifyConditionalChanges(conditionalChanges, afterCommit);
+      return true;
+    }
+
+    private reconcileSingleRemoval(
+      rows: { items: unknown[]; keys: string[] },
+      afterCommit?: () => void,
+    ): boolean {
+      if (this.hasReactOwnedRows() || rows.keys.length + 1 !== this.instances.size) return false;
+      const previousKeys = [...this.instances.keys()];
+      let removedIndex = 0;
+      while (
+        removedIndex < rows.keys.length &&
+        previousKeys[removedIndex] === rows.keys[removedIndex]
+      ) {
+        removedIndex += 1;
+      }
+      for (let index = removedIndex; index < rows.keys.length; index += 1) {
+        if (previousKeys[index + 1] !== rows.keys[index]) return false;
+      }
+
+      const removedKey = previousKeys[removedIndex];
+      const removed = this.instances.get(removedKey);
+      if (!removed) return false;
+      const conditionalChanges: Array<{
+        key: string;
+        id: number;
+        item: unknown;
+        index: number;
+      }> = [];
+      for (let index = 0; index < rows.items.length; index += 1) {
+        const key = rows.keys[index];
+        const existing = this.instances.get(key);
+        if (!existing) return false;
+        if (this.currentProps.hostBlocks) {
+          const descriptor = this.currentProps.create(rows.items[index], index);
+          if (!existing.scope?.update(descriptor)) {
+            this.activateFallback(afterCommit);
+            return true;
+          }
+        }
+        applyKeyedRowBindings(this.currentProps, existing, rows.items[index], index);
+        const conditionalValues = readKeyedRowConditionalValues(
+          this.currentProps,
+          rows.items[index],
+          index,
+        );
+        for (const [id, values] of conditionalValues) {
+          if (keyedRowConditionalChanged(existing.conditionalValues.get(id), values)) {
+            conditionalChanges.push({ key, id, item: rows.items[index], index });
+          }
+        }
+        existing.conditionalValues = conditionalValues;
+        existing.item = rows.items[index];
+        existing.index = index;
+      }
+
+      removed.scope?.cleanup();
+      removed.element.remove();
+      this.instances.delete(removedKey);
+      this.eventHandlers.delete(removedKey);
+      this.conditionalListeners.delete(removedKey);
+      this.notifyConditionalChanges(conditionalChanges, afterCommit);
+      return true;
+    }
+
     private reconcile(afterCommit?: () => void): void {
       if (!this.mounted || !this.root) {
         afterCommit?.();
@@ -2969,30 +3252,52 @@ function createKeyedRowsBlockComponent(
         return;
       }
 
-      const previousKeys = [...this.instances.keys()];
-      if (
-        this.hasReactOwnedRows() &&
-        (rows.keys.length !== previousKeys.length ||
-          rows.keys.some((key, index) => key !== previousKeys[index]))
-      ) {
-        this.synchronizeReactOwnedRows(afterCommit);
-        return;
-      }
-
-      const oldIndices = new Map<string, number>();
-      const activeElement = this.root.ownerDocument.activeElement;
-      const restoreFocus = Boolean(activeElement && this.root.contains(activeElement));
-      [...this.instances].forEach(([key], index) => oldIndices.set(key, index));
-      const nextKeys = new Set(rows.keys);
-      for (const [key, instance] of this.instances) {
-        if (!nextKeys.has(key)) {
-          instance.scope?.cleanup();
-          instance.element.remove();
+      if (this.hasReactOwnedRows()) {
+        const previousKeys = [...this.instances.keys()];
+        if (
+          rows.keys.length !== previousKeys.length ||
+          rows.keys.some((key, index) => key !== previousKeys[index])
+        ) {
+          this.synchronizeReactOwnedRows(afterCommit);
+          return;
         }
       }
 
-      const sequence = rows.keys.map((key) => oldIndices.get(key) ?? -1);
-      const stablePositions = longestIncreasingSubsequencePositions(sequence);
+      if (rows.items.length === 0) {
+        this.cleanupHostScopes();
+        this.root.replaceChildren();
+        this.instances = new Map();
+        this.instancesByElement = new WeakMap();
+        this.eventHandlers.clear();
+        this.conditionalListeners.clear();
+        afterCommit?.();
+        return;
+      }
+
+      if (this.reconcileStableRows(rows, afterCommit)) return;
+      if (this.reconcileSingleRemoval(rows, afterCommit)) return;
+
+      const activeElement = this.root.ownerDocument.activeElement;
+      const restoreFocus = Boolean(activeElement && this.root.contains(activeElement));
+      const nextKeys = new Set(rows.keys);
+      const hasSurvivingRows = rows.keys.some((key) => this.instances.has(key));
+      const oldIndices = new Map<string, number>();
+      if (hasSurvivingRows) {
+        [...this.instances].forEach(([key], index) => oldIndices.set(key, index));
+      }
+      for (const [key, instance] of this.instances) {
+        if (!nextKeys.has(key)) {
+          instance.scope?.cleanup();
+          if (hasSurvivingRows) instance.element.remove();
+        }
+      }
+
+      const sequence = hasSurvivingRows
+        ? rows.keys.map((key) => oldIndices.get(key) ?? -1)
+        : rows.keys.map(() => -1);
+      const stablePositions = hasSurvivingRows
+        ? longestIncreasingSubsequencePositions(sequence)
+        : new Set<number>();
       const nextInstances: CompilerKeyedRowInstance[] = [];
       const conditionalChanges: Array<{
         key: string;
@@ -3053,17 +3358,34 @@ function createKeyedRowsBlockComponent(
         });
       }
 
-      let anchor: ChildNode | null = null;
-      for (let index = nextInstances.length - 1; index >= 0; index -= 1) {
-        const instance = nextInstances[index];
-        if (sequence[index] < 0) {
-          this.root.insertBefore(instance.element, anchor);
-        } else if (!stablePositions.has(index) && instance.element.nextSibling !== anchor) {
-          this.root.insertBefore(instance.element, anchor);
+      if (!hasSurvivingRows) {
+        const fragment = this.root.ownerDocument.createDocumentFragment();
+        for (const instance of nextInstances) fragment.append(instance.element);
+        this.root.replaceChildren(fragment);
+      } else {
+        let anchor: ChildNode | null = null;
+        for (let index = nextInstances.length - 1; index >= 0; index -= 1) {
+          const instance = nextInstances[index];
+          if (sequence[index] < 0) {
+            let start = index;
+            while (start > 0 && sequence[start - 1] < 0) start -= 1;
+            const fragment = this.root.ownerDocument.createDocumentFragment();
+            for (let itemIndex = start; itemIndex <= index; itemIndex += 1) {
+              fragment.append(nextInstances[itemIndex].element);
+            }
+            this.root.insertBefore(fragment, anchor);
+            anchor = nextInstances[start].element;
+            index = start;
+          } else {
+            if (!stablePositions.has(index) && instance.element.nextSibling !== anchor) {
+              this.root.insertBefore(instance.element, anchor);
+            }
+            anchor = instance.element;
+          }
         }
-        anchor = instance.element;
       }
       this.instances = new Map(nextInstances.map((instance) => [instance.key, instance]));
+      this.rebuildElementIndex(this.instances);
       this.pruneEventHandlers(rows.keys);
       this.pruneConditionalListeners(rows.keys);
       if (
@@ -3077,7 +3399,8 @@ function createKeyedRowsBlockComponent(
       this.notifyConditionalChanges(conditionalChanges, afterCommit);
     }
 
-    private refresh = (afterCommit?: () => void) => {
+    private refresh: CompilerBlockRefresh = (afterCommit, dirtyState) => {
+      if (dirtyState && this.refreshDirtyBindings(dirtyState, afterCommit)) return;
       this.reconcile(afterCommit);
     };
 
@@ -3130,6 +3453,7 @@ function createKeyedRowsBlockComponent(
       this.root = null;
       this.cleanupHostScopes();
       this.instances.clear();
+      this.instancesByElement = new WeakMap();
       this.eventHandlers.clear();
       this.conditionalListeners.clear();
     }
@@ -3143,6 +3467,7 @@ function createKeyedRowsBlockComponent(
         );
       }
       return React.cloneElement(container, {
+        ...this.delegatedContainerProps(container),
         key: this.state.fallback ? `react-${this.fallbackVersion}` : "compiled",
         ref: this.captureRoot,
       } as React.Attributes);
@@ -3631,8 +3956,17 @@ export function createCompiledComponent<Props>(
     private hasBindingError = false;
     private inputSelection: InputSelectionSnapshot | null = null;
     private readonly dirtyState = new Set<number>();
+    private indexedDefinition: CompiledComponentDefinition<Props> | null = null;
+    private staticBindingsByDependency: CompilerBinding<Props>[][] = [];
+    private blockBindingsByDependency: CompilerConditionalBlockBinding[][] = [];
+    private readonly blockBindings = new Map<number, CompilerConditionalBlockBinding>();
+    private trackedBindingsByDependency: Set<CompilerBinding<Props>>[] = [];
+    private readonly trackedDependenciesByBinding = new Map<CompilerBinding<Props>, Set<number>>();
+    private readonly bindingValues = new Map<CompilerBinding<Props>, unknown>();
+    private activeBinding: CompilerBinding<Props> | null = null;
+    private activeDependencies: Set<number> | null = null;
     private readonly cells: RuntimeCell[];
-    private readonly blockRefreshListeners = new Map<number, (afterCommit?: () => void) => void>();
+    private readonly blockRefreshListeners = new Map<number, CompilerBlockRefresh>();
     private readonly blockRoots = new Map<number, Element>();
     private readonly blockRootElements = new Set<Element>();
     private readonly bindingTargets = new Map<number, Element>();
@@ -3645,7 +3979,12 @@ export function createCompiledComponent<Props>(
         let value = initialValue;
         const pending: CompilerStateUpdater[] = [];
         return {
-          get: () => value,
+          get: () => {
+            if (this.activeBinding && this.activeDependencies) {
+              this.activeDependencies.add(index);
+            }
+            return value;
+          },
           set: (next) => {
             pending.push(next);
             this.scheduleBindingFlush(index);
@@ -3688,6 +4027,98 @@ export function createCompiledComponent<Props>(
         }),
         target: (id) => this.bindingTarget(id),
       };
+    }
+
+    private usesHybridReactivity(): boolean {
+      return definitionReference.current.reactivity === "hybrid";
+    }
+
+    private tracksBinding(
+      binding: Exclude<CompilerBinding<Props>, CompilerConditionalBlockBinding>,
+    ): boolean {
+      return this.usesHybridReactivity() && binding.tracking === "dynamic";
+    }
+
+    private ensureBindingIndex(): void {
+      const currentDefinition = definitionReference.current;
+      if (this.indexedDefinition === currentDefinition) return;
+
+      this.indexedDefinition = currentDefinition;
+      this.staticBindingsByDependency = Array.from({ length: this.cells.length }, () => []);
+      this.blockBindingsByDependency = Array.from({ length: this.cells.length }, () => []);
+      this.trackedBindingsByDependency = Array.from(
+        { length: this.cells.length },
+        () => new Set<CompilerBinding<Props>>(),
+      );
+      this.blockBindings.clear();
+      this.trackedDependenciesByBinding.clear();
+      this.bindingValues.clear();
+
+      for (const binding of currentDefinition.bindings) {
+        if (binding.kind === "block") this.blockBindings.set(binding.id, binding);
+        for (const dependency of binding.dependencies) {
+          if (dependency < 0 || dependency >= this.cells.length) continue;
+          if (binding.kind === "block") {
+            this.blockBindingsByDependency[dependency].push(binding);
+          } else if (!this.tracksBinding(binding)) {
+            this.staticBindingsByDependency[dependency].push(binding);
+          }
+        }
+      }
+    }
+
+    private updateTrackedDependencies(
+      binding: CompilerBinding<Props>,
+      nextDependencies: Set<number>,
+    ): void {
+      const previousDependencies = this.trackedDependenciesByBinding.get(binding);
+      if (previousDependencies) {
+        for (const dependency of previousDependencies) {
+          if (!nextDependencies.has(dependency)) {
+            this.trackedBindingsByDependency[dependency]?.delete(binding);
+          }
+        }
+      }
+      for (const dependency of nextDependencies) {
+        if (!previousDependencies?.has(dependency)) {
+          this.trackedBindingsByDependency[dependency]?.add(binding);
+        }
+      }
+      this.trackedDependenciesByBinding.set(binding, nextDependencies);
+    }
+
+    private readBinding(binding: Exclude<CompilerBinding<Props>, CompilerConditionalBlockBinding>) {
+      if (!this.tracksBinding(binding)) return binding.read(this.props, this.cells);
+
+      const previousBinding = this.activeBinding;
+      const previousDependencies = this.activeDependencies;
+      const nextDependencies = new Set<number>();
+      this.activeBinding = binding;
+      this.activeDependencies = nextDependencies;
+      try {
+        return binding.read(this.props, this.cells);
+      } finally {
+        this.activeBinding = previousBinding;
+        this.activeDependencies = previousDependencies;
+        this.updateTrackedDependencies(binding, nextDependencies);
+      }
+    }
+
+    private bindingValue(
+      binding: Exclude<CompilerBinding<Props>, CompilerConditionalBlockBinding>,
+      value: unknown,
+    ): unknown {
+      return binding.kind === "text" ? renderTextValue(value) : value;
+    }
+
+    private primeHybridBindings(): void {
+      if (!this.usesHybridReactivity()) return;
+      for (const binding of definitionReference.current.bindings) {
+        if (binding.kind === "block") continue;
+        if (!this.tracksBinding(binding)) continue;
+        const value = this.readBinding(binding);
+        this.bindingValues.set(binding, this.bindingValue(binding, value));
+      }
     }
 
     private captureRoot = (root: Element | null) => {
@@ -3752,7 +4183,7 @@ export function createCompiledComponent<Props>(
       }
     }
 
-    private subscribeToBlock(id: number, refresh: (afterCommit?: () => void) => void): () => void {
+    private subscribeToBlock(id: number, refresh: CompilerBlockRefresh): () => void {
       this.blockRefreshListeners.set(id, refresh);
       return () => {
         if (this.blockRefreshListeners.get(id) === refresh) {
@@ -3778,15 +4209,21 @@ export function createCompiledComponent<Props>(
         this.dirtyState.clear();
         if (dirty.size === 0) return;
         try {
-          const bindings = definitionReference.current.bindings;
-          const blockBindings = new Map<number, CompilerConditionalBlockBinding>();
+          this.ensureBindingIndex();
           const affectedBlockIds = new Set<number>();
+          const affectedBindings = new Set<CompilerBinding<Props>>();
 
-          for (const binding of bindings) {
-            if (binding.kind !== "block") continue;
-            blockBindings.set(binding.id, binding);
-            if (binding.dependencies.some((dependency) => dirty.has(dependency))) {
+          for (const dependency of dirty) {
+            for (const binding of this.blockBindingsByDependency[dependency] || []) {
               affectedBlockIds.add(binding.id);
+            }
+            for (const binding of this.staticBindingsByDependency[dependency] || []) {
+              affectedBindings.add(binding);
+            }
+            if (this.usesHybridReactivity()) {
+              for (const binding of this.trackedBindingsByDependency[dependency] || []) {
+                affectedBindings.add(binding);
+              }
             }
           }
 
@@ -3798,30 +4235,23 @@ export function createCompiledComponent<Props>(
               if (affectedBlockIds.has(parent) && this.blockRefreshListeners.has(parent)) {
                 return true;
               }
-              parent = blockBindings.get(parent)?.parent;
+              parent = this.blockBindings.get(parent)?.parent;
             }
             return false;
           };
 
           const blockRefreshes = [...affectedBlockIds]
             .map((id) => {
-              const binding = blockBindings.get(id);
+              const binding = this.blockBindings.get(id);
               const refresh = this.blockRefreshListeners.get(id);
               return binding && refresh && !hasAffectedMountedAncestor(binding)
                 ? refresh
                 : undefined;
             })
-            .filter(
-              (refresh): refresh is (afterCommit?: () => void) => void => refresh !== undefined,
-            );
+            .filter((refresh): refresh is CompilerBlockRefresh => refresh !== undefined);
 
-          for (const binding of bindings) {
-            if (
-              binding.kind !== "block" &&
-              binding.dependencies.some((dependency) => dirty.has(dependency))
-            ) {
-              this.applyBinding(binding);
-            }
+          for (const binding of affectedBindings) {
+            if (binding.kind !== "block") this.applyBinding(binding);
           }
 
           let pendingBlockCommits = blockRefreshes.length;
@@ -3829,7 +4259,7 @@ export function createCompiledComponent<Props>(
             refresh(() => {
               pendingBlockCommits -= 1;
               if (pendingBlockCommits === 0) this.restoreInputSelection(inputSelection);
-            });
+            }, dirty);
           }
           if (blockRefreshes.length === 0) this.restoreInputSelection(inputSelection);
         } catch (error) {
@@ -3840,7 +4270,7 @@ export function createCompiledComponent<Props>(
       });
     }
 
-    private applyBinding(binding: CompilerBinding<Props>): void {
+    private applyBinding(binding: CompilerBinding<Props>, force = false): void {
       if (!this.root || binding.kind === "block") return;
       const target =
         binding.target === undefined
@@ -3849,27 +4279,35 @@ export function createCompiledComponent<Props>(
             ? this.root
             : this.bindingTargets.get(binding.target) || null;
       if (!target) return;
-      const value = binding.read(this.props, this.cells);
+      const value = this.readBinding(binding);
+      const comparableValue = this.bindingValue(binding, value);
+      if (!force && this.bindingValues.has(binding)) {
+        if (Object.is(this.bindingValues.get(binding), comparableValue)) return;
+      }
       if (binding.kind === "text") {
-        target.textContent = renderTextValue(value);
+        target.textContent = comparableValue as string;
       } else if (binding.kind === "style") {
         updateStyle(target, binding.name, value);
       } else {
         updateAttribute(target, binding.name, value);
       }
+      this.bindingValues.set(binding, comparableValue);
     }
 
     componentDidMount(): void {
       this.mounted = true;
       refreshListeners.add(this.refreshDefinition);
+      this.ensureBindingIndex();
+      this.primeHybridBindings();
     }
 
     componentDidUpdate(): void {
       // React has reconciled a parent-driven prop update. Reapply compiled
       // bindings from the current cells so React and the imperative state stay
       // coherent even when both change in the same turn.
+      this.ensureBindingIndex();
       for (const binding of definitionReference.current.bindings) {
-        if (binding.kind !== "block") this.applyBinding(binding);
+        if (binding.kind !== "block") this.applyBinding(binding, true);
       }
     }
 
@@ -3883,6 +4321,15 @@ export function createCompiledComponent<Props>(
       this.blockRootElements.clear();
       this.bindingTargets.clear();
       this.bindingTargetRefs.clear();
+      this.indexedDefinition = null;
+      this.staticBindingsByDependency = [];
+      this.blockBindingsByDependency = [];
+      this.blockBindings.clear();
+      this.trackedBindingsByDependency = [];
+      this.trackedDependenciesByBinding.clear();
+      this.bindingValues.clear();
+      this.activeBinding = null;
+      this.activeDependencies = null;
       refreshListeners.delete(this.refreshDefinition);
     }
 

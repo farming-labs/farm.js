@@ -127,6 +127,7 @@ inference with safe React fallback:
 compiler: {
   mode: "infer",
   onUnsupported: "fallback",
+  reactivity: "hybrid",
 }
 ```
 
@@ -136,12 +137,14 @@ Omitting `experimental.compiler` or setting it to `false` disables the transform
 
 ```ts
 type ReactCompilerMode = "infer" | "annotation";
+type ReactCompilerReactivity = "static" | "hybrid";
 type UnsupportedCompilerBehavior = "fallback" | "warn" | "error";
 
 interface ReactCompilerOptions {
   mode?: ReactCompilerMode;
   directive?: string;
   onUnsupported?: UnsupportedCompilerBehavior;
+  reactivity?: ReactCompilerReactivity;
   report?: boolean;
   reportFile?: string;
 }
@@ -153,12 +156,33 @@ interface ReactCompilerOptions {
 | `mode`          | `"infer"`, `"annotation"`             | `"infer"`                   | Selects components automatically or only through an explicit directive.  |
 | `directive`     | non-empty string                      | `"use compiler"`            | Names the module/function directive used by annotation mode.             |
 | `onUnsupported` | `"fallback"`, `"warn"`, `"error"`     | `"fallback"`                | Controls what happens outside the current supported subset.              |
+| `reactivity`    | `"static"`, `"hybrid"`                | `"hybrid"`                  | Selects complete static dependencies or runtime-narrowed subscriptions.  |
 | `report`        | boolean                               | `false`                     | Writes a compiler coverage report after a successful production build.   |
 | `reportFile`    | project-relative path                 | `.farm/react-compiler.json` | Changes the report path and enables reporting when provided.             |
 
-`directive` is valid only when `mode` is `"annotation"`. Invalid modes, invalid unsupported
-behaviors, and directives configured in inference mode throw a configuration error instead of
-silently changing behavior.
+`directive` is valid only when `mode` is `"annotation"`. Invalid compiler, reactivity, or
+unsupported-component modes and directives configured in inference mode throw a configuration
+error instead of silently changing behavior.
+
+### Static and hybrid reactivity
+
+Both modes keep the compiler's complete state dependency list as the correctness boundary. They
+also build a reverse dependency index once, so a state update goes directly to its candidate
+bindings instead of scanning every binding in the component.
+
+`"hybrid"` additionally marks compiler-proven, multi-state short-circuit expressions and observes
+the `CompilerCell.get()` calls made by those direct text, attribute, and style readers after mount.
+Ordinary bindings stay entirely on the static index. A reader such as
+`enabled ? activeValue : inactiveValue` subscribes to `enabled` and only the selected value. When
+`enabled` changes, the reader runs and replaces its subscriptions. The generated binding carries
+the internal `tracking: "dynamic"` marker; application code never manages it. Structural block
+dependencies remain compiler-defined, and unsupported expressions still fall back to React; this
+option does not add a Proxy or make arbitrary JavaScript compiler-safe.
+
+`"static"` uses the full dependency list for every update. It is useful as a deterministic
+comparison and diagnostic mode. `"hybrid"` is the default because it can avoid inactive work while
+preserving the compiler's safe fallback and React ownership boundaries. Both modes cache the last
+committed direct-binding value and skip an identical DOM write.
 
 ### Component selection
 

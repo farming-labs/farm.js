@@ -10,7 +10,9 @@ This production-browser experiment answers two questions:
    Effects, refs, unsupported shapes, and other unproven structures stay on React.
 
 The default `compiler: true` configuration automatically considers components. No annotation is
-needed. A component can explicitly opt out with `"use no compiler"`.
+needed. It uses hybrid reactivity; set `FARM_REACTIVITY=static` when running the example to compare
+the complete build-time dependency scheduler. A component can explicitly opt out with
+`"use no compiler"`.
 
 ## Run the automated experiment
 
@@ -29,6 +31,11 @@ uses a managed browser installation instead of Playwright's downloaded browser.
 The command creates a production build, starts it on a local port, runs desktop and mobile Chromium
 assertions, checks for console/runtime errors and horizontal overflow, saves screenshots under
 `/tmp/farm-react-aot-edge-lab*`, and prints a JSON report.
+
+`pnpm experiment:heavy` builds and measures four production trials: React twice to bracket machine
+noise, the static compiler scheduler, and hybrid reactivity. It verifies the compiler marker and
+configured reactivity in each browser bundle before measuring the 768-host-node workload and the
+component-island workload.
 
 ## Expected report
 
