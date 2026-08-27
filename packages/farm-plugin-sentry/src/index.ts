@@ -98,6 +98,24 @@ const DEFAULT_FLUSH_TIMEOUT_MS = 2_000;
 const SPAN_STATUS_OK = 1;
 const SPAN_STATUS_ERROR = 2;
 
+/**
+ * Errors already sent, shared across plugin instances.
+ *
+ * Sentry's client is process wide, so the record of what has been reported has
+ * to be too. Each error can reach the plugin from both the event stream and
+ * `runtime.error`, and `setup` can run more than once in a process, so a
+ * per instance set would report the same failure several times.
+ */
+const reportedErrors = new WeakSet<object>();
+
+/** Returns false when this error has already been sent. */
+export function claimError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return true;
+  if (reportedErrors.has(error)) return false;
+  reportedErrors.add(error);
+  return true;
+}
+
 const MISSING_SDK_MESSAGE =
   "@farm.js/plugin-sentry needs @sentry/node. Install it with `pnpm add @sentry/node`, " +
   "or pass an SDK through the `sdk` option.";
@@ -299,9 +317,6 @@ export function sentryPlugin(options: SentryPluginOptions = {}) {
         options,
         flushTimeoutMs,
         sdk: options.sdk,
-        // Errors can reach us from both the event stream and `runtime.error`.
-        // Track what has been sent so the same failure is reported once.
-        reported: new WeakSet<object>(),
         unsubscribe: undefined as (() => void) | undefined,
       };
     },
@@ -320,10 +335,7 @@ export function sentryPlugin(options: SentryPluginOptions = {}) {
         if (state.unsubscribe || !state.sdk) return;
         state.unsubscribe = onFarmEvent((event) => {
           if (!isErrorEvent(event)) return;
-          if (typeof event.error === "object" && event.error !== null) {
-            if (state.reported.has(event.error)) return;
-            state.reported.add(event.error);
-          }
+          if (!claimError(event.error)) return;
 
           const route = errorEventRoute(event);
           const capture = () => state.sdk?.captureException(event.error);
@@ -401,12 +413,9 @@ export function sentryPlugin(options: SentryPluginOptions = {}) {
         if (!state.enabled || !state.sdk) return;
 
         // The event stream may already have reported this one.
-        if (typeof error === "object" && error !== null) {
-          if (state.reported.has(error)) {
-            flushWithinRequest(state, waitUntil);
-            return;
-          }
-          state.reported.add(error);
+        if (!claimError(error)) {
+          flushWithinRequest(state, waitUntil);
+          return;
         }
 
         const url = new URL(request.url);

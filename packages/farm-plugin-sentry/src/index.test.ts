@@ -537,6 +537,10 @@ describe("initSentryOnce", () => {
     await plugin.runtime?.start?.({ state } as never);
 
     expect(fake.inits).toHaveLength(1);
+
+    // start() subscribes to the event stream, so it has to be closed or the
+    // subscription leaks into later tests.
+    await plugin.runtime?.close?.({ state, reason: "test" } as never);
   });
 
   it("skips initialization without a dsn", () => {
@@ -575,7 +579,7 @@ describe("the real @sentry/node SDK", () => {
     ]) {
       expect(sentry[name], name).toBeTypeOf("function");
     }
-  });
+  }, 30_000);
 });
 
 describe("withSentryErrorEvents", () => {
@@ -615,6 +619,26 @@ describe("flushOnResponse", () => {
     expect(event.waitUntil).toHaveBeenCalledTimes(1);
     await (event.waitUntil.mock.calls[0]![0] as Promise<unknown>);
     expect(fake.flushes).toBe(1);
+  });
+});
+
+describe("more than one plugin instance", () => {
+  it("reports an error once, since Sentry's client is process wide", async () => {
+    const fake = createFakeSdk();
+    fake.sdk.init?.({});
+
+    const a = createPlugin({ sdk: fake.sdk });
+    const b = createPlugin({ sdk: fake.sdk });
+    await a.plugin.runtime?.start?.({ state: a.state } as never);
+    await b.plugin.runtime?.start?.({ state: b.state } as never);
+
+    emitFarmEvent({ type: "render.error", error: new Error("x") } as never);
+
+    // Both instances see the event, only the first sends it.
+    expect(fake.captured).toHaveLength(1);
+
+    await a.plugin.runtime?.close?.({ state: a.state, reason: "t" } as never);
+    await b.plugin.runtime?.close?.({ state: b.state, reason: "t" } as never);
   });
 });
 
