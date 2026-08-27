@@ -102,15 +102,32 @@ const SPAN_STATUS_ERROR = 2;
 const recentlyReportedErrors = new WeakSet<object>();
 
 /**
+ * Thrown primitives reported during the current event-loop turn.
+ *
+ * A WeakSet cannot hold a string or a number, so these are tracked separately.
+ * The claim is by value rather than identity, so two requests throwing the
+ * identical primitive within one turn report once. That is the better trade
+ * against reporting every primitive twice, since a value carries no stack and
+ * Sentry groups the events together regardless.
+ */
+const recentlyReportedValues = new Set<unknown>();
+
+/**
  * Returns false when the same error is already being delivered through another
- * Farm error path. The claim expires so reusing an Error in a later request is
+ * Farm error path. The claim expires so reusing an error in a later request is
  * still reported.
  */
 export function claimError(error: unknown): boolean {
-  if (typeof error !== "object" || error === null) return true;
-  if (recentlyReportedErrors.has(error)) return false;
-  recentlyReportedErrors.add(error);
-  setTimeout(() => recentlyReportedErrors.delete(error), 0);
+  if (typeof error === "object" && error !== null) {
+    if (recentlyReportedErrors.has(error)) return false;
+    recentlyReportedErrors.add(error);
+    setTimeout(() => recentlyReportedErrors.delete(error), 0);
+    return true;
+  }
+
+  if (recentlyReportedValues.has(error)) return false;
+  recentlyReportedValues.add(error);
+  setTimeout(() => recentlyReportedValues.delete(error), 0);
   return true;
 }
 

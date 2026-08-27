@@ -783,6 +783,82 @@ describe("more than one plugin instance", () => {
   });
 });
 
+describe("a thrown value that is not an Error", () => {
+  /** One request whose handler throws, with Farm also emitting an event for
+   *  it, which is how a single failure can reach the plugin twice. */
+  async function captureCount(thrown: unknown): Promise<number> {
+    const captured: unknown[] = [];
+    const sdk: SentrySdkLike = {
+      getClient: () => ({}),
+      captureException: (error) => {
+        captured.push(error);
+        return "id";
+      },
+    };
+
+    const manager = new PluginManager({ config: {}, isDev: false, isProd: true });
+    manager.addPlugin(sentryPlugin({ sdk }) as never);
+    // The first request runs start(), which subscribes to the event stream.
+    await manager.runRuntimeRequest(
+      new Request("http://localhost/warm"),
+      () => new Response("ok"),
+      { kind: "page" },
+    );
+
+    emitFarmEvent({ type: "render.error", route: "/boom", error: thrown } as never);
+    await manager
+      .runRuntimeRequest(
+        new Request("http://localhost/boom"),
+        () => {
+          throw thrown;
+        },
+        { kind: "page" },
+      )
+      .catch(() => {});
+
+    await manager.closeRuntime("test");
+    return captured.length;
+  }
+
+  it("is reported once, like an Error object", async () => {
+    // A WeakSet cannot hold a primitive, so these took a separate path and
+    // were reported twice while Error objects were reported once.
+    await expect(captureCount(new Error("object failure"))).resolves.toBe(1);
+    await expect(captureCount("string failure")).resolves.toBe(1);
+    await expect(captureCount(42)).resolves.toBe(1);
+  });
+
+  it("reports the same value again once the claim expires", async () => {
+    await expect(captureCount("recurring failure")).resolves.toBe(1);
+
+    // The claim is released on a timer, and awaiting only drains microtasks,
+    // so the turn has to actually end before the value is reportable again.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    await expect(captureCount("recurring failure")).resolves.toBe(1);
+  });
+
+  it("drops a repeat within the same turn, which is the cost of value keying", async () => {
+    const captured: unknown[] = [];
+    const sdk: SentrySdkLike = {
+      getClient: () => ({}),
+      captureException: (error) => {
+        captured.push(error);
+        return "id";
+      },
+    };
+    const { plugin, state } = createPlugin({ sdk });
+    await plugin.runtime?.start?.({ state } as never);
+
+    // Two separate failures that happen to share a value, in one turn.
+    emitFarmEvent({ type: "render.error", route: "/a", error: "Unauthorized" } as never);
+    emitFarmEvent({ type: "render.error", route: "/b", error: "Unauthorized" } as never);
+
+    expect(captured).toHaveLength(1);
+    await plugin.runtime?.close?.({ state, reason: "test" } as never);
+  });
+});
+
 describe("a failing flush never reaches the host", () => {
   function failingFlushSdk(): SentrySdkLike {
     return {
