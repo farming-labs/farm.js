@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/react",
-  "version": "0.1.0-beta.4",
+  "version": "0.1.0-beta.5",
   "description": "React renderer and experimental AOT compiler for FARMJS applications",
   "keywords": [
     "aot",
