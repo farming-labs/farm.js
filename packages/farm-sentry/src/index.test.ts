@@ -590,12 +590,91 @@ describe("initSentryOnce", () => {
 });
 
 describe("assertSentrySdk", () => {
-  it("fails loudly when a dsn is set but nothing resolved", () => {
-    expect(() => assertSentrySdk(undefined, { dsn: "dsn" })).toThrow(/@sentry\/node/);
+  function captureConsoleError<T>(run: () => T): { result: T; errors: string[] } {
+    const errors: string[] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]) => errors.push(args.join(" "));
+    try {
+      return { result: run(), errors };
+    } finally {
+      console.error = original;
+    }
+  }
+
+  it("reports loudly when a dsn is set but nothing resolved, without throwing", () => {
+    // Throwing here would run during instrumentation and stop the application
+    // from booting, which is worse than losing telemetry.
+    const { result, errors } = captureConsoleError(() =>
+      assertSentrySdk(undefined, { dsn: "dsn" }),
+    );
+
+    expect(result).toBeUndefined();
+    expect(errors.join(" ")).toMatch(/@sentry\/node/);
   });
 
   it("stays quiet when no dsn is configured", () => {
-    expect(assertSentrySdk(undefined, {})).toBeUndefined();
+    const { result, errors } = captureConsoleError(() => assertSentrySdk(undefined, {}));
+
+    expect(result).toBeUndefined();
+    expect(errors).toHaveLength(0);
+  });
+});
+
+describe("initialization failures never reach the application", () => {
+  /** An SDK whose init blows up, standing in for a broken or partial install. */
+  function brokenSdk(): SentrySdkLike {
+    return {
+      init() {
+        throw new Error("sentry init exploded");
+      },
+      getClient: () => undefined,
+      captureException: () => "id",
+    };
+  }
+
+  function silenceConsoleError() {
+    const errors: string[] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]) => errors.push(args.join(" "));
+    return {
+      errors,
+      restore: () => {
+        console.error = original;
+      },
+    };
+  }
+
+  it("registerSentry resolves instead of throwing", async () => {
+    const spy = silenceConsoleError();
+    try {
+      // This runs in src/instrumentation.ts, before the application loads. A
+      // throw here stops the process booting and every route returns 500.
+      await expect(
+        registerSentry({ sdk: brokenSdk(), dsn: "dsn" })({
+          root: "/app",
+          mode: "production",
+          runtime: "nodejs",
+        }),
+      ).resolves.toBeUndefined();
+    } finally {
+      spy.restore();
+    }
+
+    expect(spy.errors.join(" ")).toMatch(/failed to initialize/);
+  });
+
+  it("runtime.start resolves instead of throwing", async () => {
+    const spy = silenceConsoleError();
+    const { plugin, state } = createPlugin({ sdk: brokenSdk(), dsn: "dsn" });
+    try {
+      // Server startup must survive reporting being unavailable.
+      await expect(plugin.runtime?.start?.({ state } as never)).resolves.toBeUndefined();
+    } finally {
+      spy.restore();
+    }
+
+    expect(spy.errors.join(" ")).toMatch(/failed to initialize/);
+    await plugin.runtime?.close?.({ state, reason: "test" } as never);
   });
 });
 

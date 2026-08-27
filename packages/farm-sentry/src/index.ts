@@ -133,15 +133,19 @@ export async function resolveSentrySdk(
 }
 
 /**
- * Fail loudly when a DSN was configured but no SDK resolved. Silently doing
+ * Report loudly when a DSN was configured but no SDK resolved. Silently doing
  * nothing hides a missing or broken install until errors are already lost.
+ *
+ * This logs rather than throws. It runs during instrumentation, before the
+ * application loads, so throwing takes the whole process down. Monitoring must
+ * never do that to the application it observes.
  */
 export function assertSentrySdk(
   sdk: SentrySdkLike | undefined,
   options: SentryPluginOptions,
 ): SentrySdkLike | undefined {
   if (sdk) return sdk;
-  if (options.dsn) throw new Error(MISSING_SDK_MESSAGE);
+  if (options.dsn) console.error(`[farm:sentry] ${MISSING_SDK_MESSAGE}`);
   return undefined;
 }
 
@@ -234,14 +238,22 @@ export function registerSentry(
     // `@sentry/cloudflare` instead.
     if (context.runtime !== "nodejs") return;
 
-    const sdk = await requireSentrySdk(options);
-    if (!sdk) return;
+    // Instrumentation runs before the application loads, so anything thrown
+    // here stops the process from booting. Losing telemetry is acceptable,
+    // taking the application down with it is not.
+    try {
+      const sdk = await requireSentrySdk(options);
+      if (!sdk) return;
 
-    initSentryOnce(sdk, options, context);
+      initSentryOnce(sdk, options, context);
 
-    return async () => {
-      await sdk.flush?.(options.flushTimeoutMs ?? DEFAULT_FLUSH_TIMEOUT_MS);
-    };
+      return async () => {
+        await sdk.flush?.(options.flushTimeoutMs ?? DEFAULT_FLUSH_TIMEOUT_MS);
+      };
+    } catch (error) {
+      console.error("[farm:sentry] failed to initialize, continuing without it:", error);
+      return;
+    }
   };
 }
 
@@ -276,10 +288,16 @@ export function sentryPlugin(options: SentryPluginOptions = {}) {
       async start({ state }) {
         if (!state.enabled) return;
 
-        state.sdk ??= await requireSentrySdk(state.options);
-        // `registerSentry` usually initialized already, and `initSentryOnce`
-        // checks for a live client so this does not replace it.
-        if (state.sdk) initSentryOnce(state.sdk, state.options);
+        try {
+          state.sdk ??= await requireSentrySdk(state.options);
+          // `registerSentry` usually initialized already, and `initSentryOnce`
+          // checks for a live client so this does not replace it.
+          if (state.sdk) initSentryOnce(state.sdk, state.options);
+        } catch (error) {
+          // Server startup must not fail because reporting could not start.
+          console.error("[farm:sentry] failed to initialize, continuing without it:", error);
+          return;
+        }
 
         if (state.unsubscribe || !state.sdk) return;
         state.unsubscribe = onFarmEvent(
