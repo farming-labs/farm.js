@@ -299,7 +299,13 @@ export interface FarmResolvedObservabilityConfig {
   tracing: FarmResolvedTracingConfig;
 }
 
+export interface FarmEventSubscriptionOptions {
+  /** Receive events even when they are excluded by `observability.events`. */
+  unfiltered?: boolean;
+}
+
 const runtimeHandlers = new Set<FarmEventHandler>();
+const unfilteredRuntimeHandlers = new Set<FarmEventHandler>();
 let observabilityState: FarmResolvedObservabilityConfig = {
   logs: false,
   handlers: [],
@@ -336,15 +342,20 @@ export function normalizeFarmObservabilityConfig(
   };
 }
 
-export function onFarmEvent(handler: FarmEventHandler): () => void {
-  runtimeHandlers.add(handler);
+export function onFarmEvent(
+  handler: FarmEventHandler,
+  options: FarmEventSubscriptionOptions = {},
+): () => void {
+  const handlers = options.unfiltered ? unfilteredRuntimeHandlers : runtimeHandlers;
+  handlers.add(handler);
   return () => {
-    runtimeHandlers.delete(handler);
+    handlers.delete(handler);
   };
 }
 
 export function resetFarmObservability(): void {
   runtimeHandlers.clear();
+  unfilteredRuntimeHandlers.clear();
   observabilityState = {
     logs: false,
     handlers: [],
@@ -367,15 +378,21 @@ export function emitFarmEvent(input: FarmEventInput): FarmEvent {
     event.traceSampled = traceContext.traceSampled;
   }
 
-  if (!shouldEmitFarmEvent(event)) {
-    return event;
-  }
+  notifyFarmEventHandlers(event, unfilteredRuntimeHandlers);
+
+  if (!shouldEmitFarmEvent(event)) return event;
 
   if (observabilityState.logs) {
     logFarmEvent(event);
   }
 
-  for (const handler of [...observabilityState.handlers, ...runtimeHandlers]) {
+  notifyFarmEventHandlers(event, [...observabilityState.handlers, ...runtimeHandlers]);
+
+  return event;
+}
+
+function notifyFarmEventHandlers(event: FarmEvent, handlers: Iterable<FarmEventHandler>): void {
+  for (const handler of handlers) {
     try {
       Promise.resolve(handler(event)).catch((error) => {
         console.warn(`[farm:observability] event handler failed: ${formatError(error)}`);
@@ -384,8 +401,6 @@ export function emitFarmEvent(input: FarmEventInput): FarmEvent {
       console.warn(`[farm:observability] event handler failed: ${formatError(error)}`);
     }
   }
-
-  return event;
 }
 
 export async function runWithFarmRequestSpan<T>(

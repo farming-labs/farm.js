@@ -1,11 +1,16 @@
-import { describe, expect, it, vi } from "vitest";
-import { emitFarmEvent } from "@farm.js/core/observability";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  configureFarmObservability,
+  emitFarmEvent,
+  resetFarmObservability,
+  type FarmEvent,
+} from "@farm.js/core/observability";
 import {
   buildSentryInitOptions,
+  claimError,
   initSentryOnce,
   isErrorEvent,
   assertSentrySdk,
-  withSentryErrorEvents,
   registerSentry,
   sentryPlugin,
   spanNameFor,
@@ -13,6 +18,11 @@ import {
   type SentryScopeLike,
   type SentrySpanLike,
 } from "./index";
+
+afterEach(() => {
+  resetFarmObservability();
+  vi.useRealTimers();
+});
 
 interface RecordedSpan extends SentrySpanLike {
   name: string;
@@ -411,6 +421,25 @@ describe("isErrorEvent", () => {
 });
 
 describe("sentryPlugin observability stream", () => {
+  it("receives errors excluded from the user observability allowlist", async () => {
+    const fake = createFakeSdk();
+    const delivered: FarmEvent[] = [];
+    const { plugin, state } = createPlugin({ sdk: fake.sdk });
+
+    configureFarmObservability({
+      events: ["cache.hit"],
+      onEvent: (event) => delivered.push(event),
+    });
+    await plugin.runtime?.start?.({ state } as never);
+
+    emitFarmEvent({ type: "render.error", error: new Error("hidden from user delivery") });
+
+    expect(delivered).toEqual([]);
+    expect(fake.captured).toHaveLength(1);
+
+    await plugin.runtime?.close?.({ state, reason: "test" } as never);
+  });
+
   it("captures errors Farm handles internally, which never reach runtime.error", async () => {
     const fake = createFakeSdk();
     const { plugin, state } = createPlugin({ sdk: fake.sdk });
@@ -526,6 +555,16 @@ describe("request span", () => {
 });
 
 describe("initSentryOnce", () => {
+  it("initializes an injected SDK when the plugin is used alone", async () => {
+    const fake = createFakeSdk();
+    const { plugin, state } = createPlugin({ sdk: fake.sdk, dsn: "dsn" });
+
+    await plugin.runtime?.start?.({ state } as never);
+
+    expect(fake.inits).toHaveLength(1);
+    await plugin.runtime?.close?.({ state, reason: "test" } as never);
+  });
+
   it("does not initialize twice when registerSentry already ran", async () => {
     const fake = createFakeSdk();
     const options = { sdk: fake.sdk, dsn: "dsn" };
@@ -582,20 +621,21 @@ describe("the real @sentry/node SDK", () => {
   }, 30_000);
 });
 
-describe("withSentryErrorEvents", () => {
-  it("adds error events back to a narrowed observability allowlist", () => {
-    const result = withSentryErrorEvents({
-      observability: { events: ["render.complete"] },
-    }) as { observability: { events: string[] } };
+describe("claimError", () => {
+  it("deduplicates concurrent delivery but allows the same error later", async () => {
+    vi.useFakeTimers();
+    try {
+      const error = new Error("shared");
 
-    expect(result.observability.events).toContain("render.complete");
-    expect(result.observability.events).toContain("render.error");
-    expect(result.observability.events).toContain("request.error");
-  });
+      expect(claimError(error)).toBe(true);
+      expect(claimError(error)).toBe(false);
 
-  it("leaves config alone when no allowlist is set", () => {
-    expect(withSentryErrorEvents({ observability: { logs: true } })).toBeUndefined();
-    expect(withSentryErrorEvents({})).toBeUndefined();
+      await vi.runAllTimersAsync();
+      expect(claimError(error)).toBe(true);
+      await vi.runAllTimersAsync();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

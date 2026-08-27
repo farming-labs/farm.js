@@ -66,6 +66,25 @@ describe("observability", () => {
     });
   });
 
+  it("allows internal subscribers to receive filtered events without changing user delivery", () => {
+    const configEvents: FarmEvent[] = [];
+    const runtimeEvents: FarmEvent[] = [];
+    const unfilteredEvents: FarmEvent[] = [];
+
+    configureFarmObservability({
+      events: ["cache.hit"],
+      onEvent: (event) => configEvents.push(event),
+    });
+    onFarmEvent((event) => runtimeEvents.push(event));
+    onFarmEvent((event) => unfilteredEvents.push(event), { unfiltered: true });
+
+    emitFarmEvent({ type: "render.error", error: new Error("render failed") });
+
+    expect(configEvents).toEqual([]);
+    expect(runtimeEvents).toEqual([]);
+    expect(unfilteredEvents.map((event) => event.type)).toEqual(["render.error"]);
+  });
+
   it("writes compact logs when observability logs are enabled", () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
 

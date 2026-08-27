@@ -98,49 +98,25 @@ const DEFAULT_FLUSH_TIMEOUT_MS = 2_000;
 const SPAN_STATUS_OK = 1;
 const SPAN_STATUS_ERROR = 2;
 
-/**
- * Errors already sent, shared across plugin instances.
- *
- * Sentry's client is process wide, so the record of what has been reported has
- * to be too. Each error can reach the plugin from both the event stream and
- * `runtime.error`, and `setup` can run more than once in a process, so a
- * per instance set would report the same failure several times.
- */
-const reportedErrors = new WeakSet<object>();
+/** Errors reported during the current event-loop turn. */
+const recentlyReportedErrors = new WeakSet<object>();
 
-/** Returns false when this error has already been sent. */
+/**
+ * Returns false when the same error is already being delivered through another
+ * Farm error path. The claim expires so reusing an Error in a later request is
+ * still reported.
+ */
 export function claimError(error: unknown): boolean {
   if (typeof error !== "object" || error === null) return true;
-  if (reportedErrors.has(error)) return false;
-  reportedErrors.add(error);
+  if (recentlyReportedErrors.has(error)) return false;
+  recentlyReportedErrors.add(error);
+  setTimeout(() => recentlyReportedErrors.delete(error), 0);
   return true;
 }
 
 const MISSING_SDK_MESSAGE =
   "@farm.js/plugin-sentry needs @sentry/node. Install it with `pnpm add @sentry/node`, " +
   "or pass an SDK through the `sdk` option.";
-
-/**
- * Event types that carry a reportable error.
- *
- * `observability.events` is an allowlist checked before handlers run, so an
- * application narrowing it for logging would otherwise stop errors from ever
- * reaching this plugin. The `configure` hook adds these back.
- */
-export const FARM_ERROR_EVENT_TYPES = [
-  "error",
-  "request.error",
-  "render.error",
-  "api.error",
-  "middleware.error",
-  "cache.error",
-  "ppr.refresh.error",
-  "integration.api.call.error",
-  "storage.query.error",
-  "storage.schema.error",
-  "build.error",
-  "plugin.hook.error",
-] as const;
 
 export async function resolveSentrySdk(
   options: SentryPluginOptions,
@@ -239,26 +215,6 @@ export function spanNameFor(
 }
 
 /**
- * Keep the plugin's error events flowing when an application narrows
- * `observability.events` for its own logging.
- */
-export function withSentryErrorEvents(config: Record<string, any>): Record<string, any> | void {
-  const observability = config.observability;
-  if (!observability || typeof observability !== "object") return;
-  if (!Array.isArray(observability.events)) return;
-
-  const events = new Set<string>(observability.events);
-  const before = events.size;
-  for (const type of FARM_ERROR_EVENT_TYPES) events.add(type);
-  if (events.size === before) return;
-
-  return {
-    ...config,
-    observability: { ...observability, events: [...events] },
-  };
-}
-
-/**
  * Early Sentry initialization for `src/instrumentation.ts`.
  *
  * The Node SDK patches other modules as they load, so it has to run before the
@@ -304,11 +260,6 @@ export function sentryPlugin(options: SentryPluginOptions = {}) {
     // Wrap as much of the request as possible.
     enforce: "pre" as const,
 
-    configure(config) {
-      if (!enabled) return;
-      return withSentryErrorEvents(config as Record<string, any>) as typeof config | undefined;
-    },
-
     setup() {
       // No SDK work here. `setup` can run in a build manager and again in a
       // deployed runtime, so it has to stay deterministic.
@@ -325,32 +276,33 @@ export function sentryPlugin(options: SentryPluginOptions = {}) {
       async start({ state }) {
         if (!state.enabled) return;
 
-        if (!state.sdk) {
-          state.sdk = await requireSentrySdk(state.options);
-          // `registerSentry` usually initialized already, and `initSentryOnce`
-          // checks for a live client so this does not replace it.
-          if (state.sdk) initSentryOnce(state.sdk, state.options);
-        }
+        state.sdk ??= await requireSentrySdk(state.options);
+        // `registerSentry` usually initialized already, and `initSentryOnce`
+        // checks for a live client so this does not replace it.
+        if (state.sdk) initSentryOnce(state.sdk, state.options);
 
         if (state.unsubscribe || !state.sdk) return;
-        state.unsubscribe = onFarmEvent((event) => {
-          if (!isErrorEvent(event)) return;
-          if (!claimError(event.error)) return;
+        state.unsubscribe = onFarmEvent(
+          (event) => {
+            if (!isErrorEvent(event)) return;
+            if (!claimError(event.error)) return;
 
-          const route = errorEventRoute(event);
-          const capture = () => state.sdk?.captureException(event.error);
+            const route = errorEventRoute(event);
+            const capture = () => state.sdk?.captureException(event.error);
 
-          if (state.sdk?.withScope) {
-            state.sdk.withScope((scope) => {
-              scope.setTag("farm.event", event.type);
-              if (route) scope.setTag("farm.route", route);
-              capture();
-            });
-            return;
-          }
+            if (state.sdk?.withScope) {
+              state.sdk.withScope((scope) => {
+                scope.setTag("farm.event", event.type);
+                if (route) scope.setTag("farm.route", route);
+                capture();
+              });
+              return;
+            }
 
-          capture();
-        });
+            capture();
+          },
+          { unfiltered: true },
+        );
       },
 
       context({ request, route, state }) {
