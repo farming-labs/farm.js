@@ -40,6 +40,7 @@ interface PropsPlan {
 
 interface PendingDomBinding {
   kind: "text" | "attribute" | "style";
+  tracking?: "dynamic";
   path: number[];
   target?: number;
   dependencies: number[];
@@ -77,6 +78,7 @@ interface PendingKeyedRowBinding {
   kind: "text" | "attribute" | "style";
   path: number[];
   name?: string;
+  dependencies?: number[];
   value: t.Expression;
 }
 
@@ -151,6 +153,7 @@ interface KeyedRowsPlan {
   dependencies: number[];
   source: t.JSXElement;
   collection: t.Expression;
+  structureDependencies: number[];
   keyCallback: t.ArrowFunctionExpression | t.FunctionExpression;
   renderCallback: t.ArrowFunctionExpression | t.FunctionExpression;
   row: t.JSXElement;
@@ -159,6 +162,69 @@ interface KeyedRowsPlan {
   conditionals: PendingKeyedRowConditional[];
   descriptorBlocks?: ReadonlyMap<t.JSXElement, HostDescriptorBlockPlan>;
   syntax: "map" | "list";
+}
+
+const DELEGATABLE_KEYED_ROW_EVENTS = new Set([
+  "onBeforeInput",
+  "onBlur",
+  "onChange",
+  "onClick",
+  "onCompositionEnd",
+  "onCompositionStart",
+  "onCompositionUpdate",
+  "onContextMenu",
+  "onCopy",
+  "onCut",
+  "onDoubleClick",
+  "onDrag",
+  "onDragEnd",
+  "onDragEnter",
+  "onDragExit",
+  "onDragLeave",
+  "onDragOver",
+  "onDragStart",
+  "onDrop",
+  "onFocus",
+  "onInput",
+  "onKeyDown",
+  "onKeyPress",
+  "onKeyUp",
+  "onMouseDown",
+  "onMouseMove",
+  "onMouseOut",
+  "onMouseOver",
+  "onMouseUp",
+  "onPaste",
+  "onPointerCancel",
+  "onPointerDown",
+  "onPointerMove",
+  "onPointerOut",
+  "onPointerOver",
+  "onPointerUp",
+  "onReset",
+  "onSubmit",
+  "onTouchCancel",
+  "onTouchEnd",
+  "onTouchMove",
+  "onTouchStart",
+  "onWheel",
+]);
+
+function canDelegateKeyedRowEvents(plan: KeyedRowsPlan): boolean {
+  if (plan.events.length === 0 || plan.conditionals.length > 0) return false;
+  if (
+    plan.source.openingElement.attributes.some(
+      (attribute) =>
+        t.isJSXAttribute(attribute) &&
+        t.isJSXIdentifier(attribute.name) &&
+        /^on[A-Z]/.test(attribute.name.name),
+    )
+  ) {
+    return false;
+  }
+  return plan.events.every((event) =>
+    DELEGATABLE_KEYED_ROW_EVENTS.has(event.name.replace(/Capture$/, "")),
+  );
 }
 
 interface KeyedRangePlan {
@@ -969,6 +1035,7 @@ function analyzePublicList(
 
 interface KeyedRowsShape {
   collection: t.Expression;
+  structureDependencies: number[];
   keyCallback: t.ArrowFunctionExpression | t.FunctionExpression;
   renderCallback: t.ArrowFunctionExpression | t.FunctionExpression;
   row: t.JSXElement;
@@ -1436,14 +1503,25 @@ function analyzeKeyedRowChild(
     new Set([...statesByValue.values()].map((state) => state.setterName)),
   );
   if (rowAnalysis.reason && !acceptUnsupportedRow) return undefined;
+  const keyExpression = returnedExpression(keyCallback);
+  const structureDependencies = new Set(collectStateDependencies(collection, statesByValue));
+  if (keyExpression) {
+    for (const dependency of collectStateDependencies(keyExpression, statesByValue)) {
+      structureDependencies.add(dependency);
+    }
+  }
   return {
     source,
     collection,
+    structureDependencies: [...structureDependencies].sort((left, right) => left - right),
     keyCallback,
     renderCallback,
     row,
     dependencies,
-    bindings: rowAnalysis.bindings || [],
+    bindings: (rowAnalysis.bindings || []).map((binding) => ({
+      ...binding,
+      dependencies: collectStateDependencies(binding.value, statesByValue),
+    })),
     events: rowAnalysis.events || [],
     conditionals: rowAnalysis.conditionals || [],
     rowReason: rowAnalysis.reason,
@@ -2709,6 +2787,12 @@ function keyedRowBindingObject(
       t.identifier("path"),
       t.arrayExpression(binding.path.map((part) => t.numericLiteral(part))),
     ),
+    t.objectProperty(
+      t.identifier("dependencies"),
+      t.arrayExpression(
+        (binding.dependencies || []).map((dependency) => t.numericLiteral(dependency)),
+      ),
+    ),
   ];
   if (binding.name) {
     properties.push(t.objectProperty(t.identifier("name"), t.stringLiteral(binding.name)));
@@ -2895,6 +2979,10 @@ function keyedRowEventObject(
   return t.objectExpression([
     t.objectProperty(t.identifier("name"), t.stringLiteral(event.name)),
     t.objectProperty(
+      t.identifier("path"),
+      t.arrayExpression(event.path.map((part) => t.numericLiteral(part))),
+    ),
+    t.objectProperty(
       t.identifier("invoke"),
       t.arrowFunctionExpression(
         parameters,
@@ -2972,6 +3060,7 @@ function keyedRowsBoundary(blockRuntime: t.Identifier, plan: KeyedRowsPlan): t.J
     plan.source,
     ...plan.conditionals.map((conditional) => conditional.test),
   ]);
+  const delegatedEvents = canDelegateKeyedRowEvents(plan);
   const renderSource = keyedRowsRenderSource(plan, eventFactory, conditionalFactory);
   const renderFactoryParameters =
     plan.conditionals.length > 0
@@ -2993,6 +3082,14 @@ function keyedRowsBoundary(blockRuntime: t.Identifier, plan: KeyedRowsPlan): t.J
         t.jsxAttribute(
           t.jsxIdentifier("items"),
           t.jsxExpressionContainer(t.arrowFunctionExpression([], cloneExpression(plan.collection))),
+        ),
+        t.jsxAttribute(
+          t.jsxIdentifier("structureDependencies"),
+          t.jsxExpressionContainer(
+            t.arrayExpression(
+              plan.structureDependencies.map((dependency) => t.numericLiteral(dependency)),
+            ),
+          ),
         ),
         t.jsxAttribute(
           t.jsxIdentifier("rowKey"),
@@ -3025,6 +3122,14 @@ function keyedRowsBoundary(blockRuntime: t.Identifier, plan: KeyedRowsPlan): t.J
                   ),
                 ),
               ),
+              ...(delegatedEvents
+                ? [
+                    t.jsxAttribute(
+                      t.jsxIdentifier("delegateEvents"),
+                      t.jsxExpressionContainer(t.booleanLiteral(true)),
+                    ),
+                  ]
+                : []),
             ]
           : []),
         ...(plan.conditionals.length > 0
@@ -3736,6 +3841,7 @@ function analyzeComposableBlocks(
               dependencies: keyedRows.dependencies,
               source: child,
               collection: keyedRows.collection,
+              structureDependencies: keyedRows.structureDependencies,
               keyCallback: keyedRows.keyCallback,
               renderCallback: keyedRows.renderCallback,
               row: hostBlocks?.row || keyedRows.row,
@@ -4076,6 +4182,32 @@ function assignStableBindingTargets(bindings: readonly PendingBinding[]): void {
   }
 }
 
+function markShortCircuitBindings(bindings: readonly PendingBinding[]): void {
+  for (const binding of bindings) {
+    if (binding.kind === "block" || binding.dependencies.length < 2) continue;
+    let shortCircuits = false;
+    traverse(expressionFile(t.cloneNode(binding.value, true)), {
+      ConditionalExpression(path) {
+        shortCircuits = true;
+        path.stop();
+      },
+      LogicalExpression(path) {
+        shortCircuits = true;
+        path.stop();
+      },
+      OptionalCallExpression(path) {
+        shortCircuits = true;
+        path.stop();
+      },
+      OptionalMemberExpression(path) {
+        shortCircuits = true;
+        path.stop();
+      },
+    });
+    if (shortCircuits) binding.tracking = "dynamic";
+  }
+}
+
 function lowerStableBindingTargets(
   root: t.JSXElement,
   bindings: readonly PendingBinding[],
@@ -4401,6 +4533,9 @@ function bindingObject(
       t.objectProperty(t.identifier("target"), t.numericLiteral(binding.target)),
     );
   }
+  if (binding.tracking) {
+    properties.push(t.objectProperty(t.identifier("tracking"), t.stringLiteral(binding.tracking)));
+  }
   if (binding.name)
     properties.push(t.objectProperty(t.identifier("name"), t.stringLiteral(binding.name)));
   properties.push(
@@ -4428,6 +4563,7 @@ function compileCandidate(
   reactNames: ReadonlySet<string>,
   listNames: ReadonlySet<string>,
   moduleId: string,
+  reactivity: NormalizedReactCompilerOptions["reactivity"],
 ): string | undefined {
   const { path, name, statementPath } = candidate;
   if (path.node.async || path.node.generator)
@@ -4606,6 +4742,7 @@ function compileCandidate(
     blockAnalysis.componentElements || new Set<t.JSXElement>(),
   );
   if (analysis.reason) return analysis.reason;
+  markShortCircuitBindings(analysis.bindings || []);
   assignStableBindingTargets(analysis.bindings || []);
 
   const stateParameter = path.scope.generateUidIdentifier("farmState");
@@ -4633,6 +4770,7 @@ function compileCandidate(
   const definition = t.callExpression(t.cloneNode(createComponentIdentifier), [
     t.objectExpression([
       t.objectProperty(t.identifier("displayName"), t.stringLiteral(name)),
+      t.objectProperty(t.identifier("reactivity"), t.stringLiteral(reactivity)),
       t.spreadElement(
         t.conditionalExpression(
           t.memberExpression(
@@ -4815,6 +4953,7 @@ export async function compileReactModule(
             reactNames,
             listNames,
             id,
+            options.reactivity,
           );
           if (reason) {
             diagnostics.push({

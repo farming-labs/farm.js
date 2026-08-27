@@ -25,6 +25,7 @@ function readCompilerOptions(
   if (
     (normalized.mode === "infer" || normalized.mode === "annotation") &&
     typeof normalized.directive === "string" &&
+    (normalized.reactivity === "static" || normalized.reactivity === "hybrid") &&
     (normalized.onUnsupported === "fallback" ||
       normalized.onUnsupported === "warn" ||
       normalized.onUnsupported === "error")

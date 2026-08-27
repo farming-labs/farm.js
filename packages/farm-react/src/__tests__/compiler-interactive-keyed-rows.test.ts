@@ -12,7 +12,7 @@ async function compile(source: string) {
 }
 
 describe("React AOT interactive keyed-row compiler", () => {
-  it("keeps row events in React while compiling row bindings", async () => {
+  it("delegates compiler-proven row events through the stable React container", async () => {
     const result = await compile(`
       import { useState } from "react";
       export function Tasks() {
@@ -56,9 +56,16 @@ describe("React AOT interactive keyed-row compiler", () => {
     expect(result.compiled).toEqual(["Tasks"]);
     expect(result.diagnostics).toEqual([]);
     expect(result.code).toContain("farmBlocks.KeyedRows");
+    expect(result.code).toContain("structureDependencies={[0]}");
+    expect(result.code).toMatch(
+      /kind: "attribute",\s*path: \[\],\s*dependencies: \[1\],\s*name: "aria-selected"/,
+    );
     expect(result.code).toContain('name: "onClickCapture"');
     expect(result.code).toContain('name: "onClick"');
+    expect(result.code).toContain("path: []");
+    expect(result.code).toContain("path: [1]");
     expect(result.code).toContain("events={[");
+    expect(result.code).toContain("delegateEvents={true}");
     expect(result.code).toMatch(/onClickCapture=\{_farmRowEvent\(item, index, 0\)\}/);
     expect(result.code).toMatch(/onClick=\{_farmRowEvent\(item, index, 1\)\}/);
     expect(result.code).toContain("farmState[1].set");
@@ -99,6 +106,7 @@ describe("React AOT interactive keyed-row compiler", () => {
     expect(result.compiled).toEqual(["Tasks"]);
     expect(result.diagnostics).toEqual([]);
     expect(result.code).toContain("farmBlocks.KeyedRows");
+    expect(result.code).toContain("delegateEvents={true}");
     expect(result.code).toContain("_farmRowEvent(item, index, 0)");
     expect(result.code).toContain('name: "onClick"');
   });
@@ -223,7 +231,25 @@ describe("React AOT interactive keyed-row compiler", () => {
     expect(result.compiled).toEqual(["Tasks"]);
     expect(result.diagnostics).toEqual([]);
     expect(result.code).toContain("farmBlocks.KeyedRows");
+    expect(result.code).toContain("delegateEvents={true}");
     expect(result.code).toContain("_farmRowEvent(item, 0, 0)");
+  });
+
+  it("keeps non-bubbling enter events on the React-owned row path", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Tasks() {
+        const [items, setItems] = useState([{ id: "a", label: "Alpha" }]);
+        return <ul>{items.map((item) => (
+          <li key={item.id} onMouseEnter={() => setItems([])}>{item.label}</li>
+        ))}</ul>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Tasks"]);
+    expect(result.code).toContain("farmBlocks.KeyedList");
+    expect(result.code).not.toContain("farmBlocks.KeyedRows");
+    expect(result.code).not.toContain("delegateEvents={true}");
   });
 
   it.each([

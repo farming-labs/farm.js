@@ -44,6 +44,7 @@ const testSource = String.raw`
 
   const Counter = createCompiledComponent({
     displayName: "CompatibilityCounter",
+    reactivity: "hybrid",
     initialize: () => [0],
     render(_props, state) {
       return React.createElement(
@@ -56,6 +57,7 @@ const testSource = String.raw`
     bindings: [
       {
         kind: "text",
+        tracking: "dynamic",
         path: [],
         dependencies: [0],
         read: (_props, state) => ["Count: ", state[0].get()],
@@ -1499,13 +1501,16 @@ const testSource = String.raw`
           events: [
             {
               name: "onInput",
+              path: [0],
               invoke: (item, _index, event) => update(item.id, { label: event.currentTarget.value }),
             },
             {
               name: "onChange",
+              path: [1],
               invoke: (item, _index, event) => update(item.id, { done: event.currentTarget.checked }),
             },
           ],
+          delegateEvents: true,
         }),
       );
     },
@@ -1544,7 +1549,7 @@ const testSource = String.raw`
   assert.equal(editableContainer.querySelector("[data-key='a']"), editableAlpha);
   assert.equal(editableContainer.querySelector("[aria-label='Label a']"), editableInput);
   assert.equal(editableAlpha.querySelector("output").textContent, "1:AlXpha:done");
-  assert.equal(editableListRenders, initialEditableRenders + 1);
+  assert.equal(editableListRenders, initialEditableRenders);
   flushSync(() => editableRoot.unmount());
 
   const interactiveHydrationContainer = document.createElement("div");

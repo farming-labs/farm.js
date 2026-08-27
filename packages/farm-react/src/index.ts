@@ -1,6 +1,7 @@
 import type { FarmRenderer } from "@farm.js/core/renderer";
 
 export type ReactCompilerMode = "infer" | "annotation";
+export type ReactCompilerReactivity = "static" | "hybrid";
 export type UnsupportedCompilerBehavior = "fallback" | "warn" | "error";
 
 export interface ReactCompilerOptions {
@@ -10,6 +11,11 @@ export interface ReactCompilerOptions {
   directive?: string;
   /** What to do when a selected component is outside the safe subset. */
   onUnsupported?: UnsupportedCompilerBehavior;
+  /**
+   * How compiled bindings subscribe to state. `hybrid` keeps compiler-proven
+   * dependencies and narrows short-circuited reads at runtime.
+   */
+  reactivity?: ReactCompilerReactivity;
   /** Write a machine-readable compiler coverage report after a production build. */
   report?: boolean;
   /** Project-relative report location. Providing it also enables reporting. */
@@ -27,6 +33,7 @@ export interface NormalizedReactCompilerOptions {
   mode: ReactCompilerMode;
   directive: string;
   onUnsupported: UnsupportedCompilerBehavior;
+  reactivity: ReactCompilerReactivity;
   report: boolean;
   reportFile: string;
 }
@@ -70,6 +77,11 @@ export function normalizeReactCompilerOptions(
     throw new TypeError(`Unknown unsupported-component behavior: ${String(onUnsupported)}`);
   }
 
+  const reactivity = options.reactivity || "hybrid";
+  if (reactivity !== "static" && reactivity !== "hybrid") {
+    throw new TypeError(`Unknown React compiler reactivity mode: ${String(reactivity)}`);
+  }
+
   if (options.report !== undefined && typeof options.report !== "boolean") {
     throw new TypeError("The React compiler report option must be a boolean.");
   }
@@ -81,7 +93,7 @@ export function normalizeReactCompilerOptions(
   const reportFile = normalizeCompilerReportFile(options.reportFile);
   const report = options.report === true || options.reportFile !== undefined;
 
-  return { mode, directive, onUnsupported, report, reportFile };
+  return { mode, directive, onUnsupported, reactivity, report, reportFile };
 }
 
 const REACT_RENDERER: Readonly<FarmRenderer> = Object.freeze({

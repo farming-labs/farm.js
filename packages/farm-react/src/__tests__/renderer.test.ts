@@ -20,6 +20,7 @@ describe("React renderer compiler options", () => {
           mode: "infer",
           directive: DEFAULT_COMPILER_DIRECTIVE,
           onUnsupported: "fallback",
+          reactivity: "hybrid",
           report: false,
           reportFile: DEFAULT_COMPILER_REPORT_FILE,
         },
@@ -40,6 +41,7 @@ describe("React renderer compiler options", () => {
           mode: "annotation",
           directive: "use fast component",
           onUnsupported: "fallback",
+          reactivity: "hybrid",
           report: false,
           reportFile: DEFAULT_COMPILER_REPORT_FILE,
         },
@@ -66,11 +68,19 @@ describe("React renderer compiler options", () => {
       mode: "infer",
       directive: DEFAULT_COMPILER_DIRECTIVE,
       onUnsupported: "fallback",
+      reactivity: "hybrid",
       report: true,
       reportFile: "reports/react-compiler.json",
     });
     expect(normalizeReactCompilerOptions({ reportFile: "coverage/compiler.json" }).report).toBe(
       true,
+    );
+  });
+
+  it("supports static scheduling and rejects unknown reactivity modes", () => {
+    expect(normalizeReactCompilerOptions({ reactivity: "static" }).reactivity).toBe("static");
+    expect(() => normalizeReactCompilerOptions({ reactivity: "signals" as "hybrid" })).toThrow(
+      /reactivity mode/i,
     );
   });
 
