@@ -935,6 +935,23 @@ describe("a failing flush never reaches the host", () => {
       restore();
     }
   });
+
+  it("lets instrumentation cleanup finish when its final flush fails", async () => {
+    const restore = silenceConsoleError();
+
+    try {
+      const cleanup = await registerSentry({ sdk: failingFlushSdk() })({
+        root: "/app",
+        mode: "production",
+        runtime: "nodejs",
+      });
+
+      expect(cleanup).toBeTypeOf("function");
+      await expect((cleanup as () => Promise<void>)()).resolves.toBeUndefined();
+    } finally {
+      restore();
+    }
+  });
 });
 
 describe("sentryPlugin build hooks", () => {

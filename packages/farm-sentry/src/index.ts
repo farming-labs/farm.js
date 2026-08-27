@@ -266,9 +266,12 @@ export function registerSentry(
 
       initSentryOnce(sdk, options, context);
 
-      return async () => {
-        await sdk.flush?.(options.flushTimeoutMs ?? DEFAULT_FLUSH_TIMEOUT_MS);
-      };
+      return () =>
+        flushSentrySafely(
+          sdk,
+          options.flushTimeoutMs ?? DEFAULT_FLUSH_TIMEOUT_MS,
+          "[farm:sentry] instrumentation flush failed:",
+        );
     } catch (error) {
       console.error("[farm:sentry] failed to initialize, continuing without it:", error);
       return;
@@ -433,12 +436,11 @@ export function sentryPlugin(options: SentryPluginOptions = {}) {
         state.unsubscribe?.();
         state.unsubscribe = undefined;
         if (!state.enabled) return;
-        try {
-          await state.sdk?.flush?.(state.flushTimeoutMs);
-        } catch (error) {
-          // Losing the last events is not a reason to fail the shutdown.
-          console.error("[farm:sentry] flush on shutdown failed:", error);
-        }
+        await flushSentrySafely(
+          state.sdk,
+          state.flushTimeoutMs,
+          "[farm:sentry] flush on shutdown failed:",
+        );
       },
     },
 
@@ -453,6 +455,19 @@ export function sentryPlugin(options: SentryPluginOptions = {}) {
   });
 }
 
+/** Monitoring failures must never escape into the application lifecycle. */
+async function flushSentrySafely(
+  sdk: SentrySdkLike | undefined,
+  timeoutMs: number,
+  failureMessage: string,
+): Promise<void> {
+  try {
+    await sdk?.flush?.(timeoutMs);
+  } catch (error) {
+    console.error(failureMessage, error);
+  }
+}
+
 /** Flush inside the request for hosts that may not run `runtime.close`. */
 function flushWithinRequest(
   state: {
@@ -464,17 +479,9 @@ function flushWithinRequest(
   waitUntil: (promise: Promise<unknown>) => void,
 ): void {
   if (!state.enabled || !state.options.flushOnResponse) return;
-  const flush = state.sdk?.flush;
-  if (!flush) return;
+  if (!state.sdk?.flush) return;
   // The host owns this promise once handed over, and Farm passes it through
   // untouched when the host supplies waitUntil. An unhandled rejection there
   // can terminate the process, so a failed flush has to stay contained.
-  waitUntil(
-    flush.call(state.sdk, state.flushTimeoutMs).then(
-      () => undefined,
-      (error: unknown) => {
-        console.error("[farm:sentry] flush failed:", error);
-      },
-    ),
-  );
+  waitUntil(flushSentrySafely(state.sdk, state.flushTimeoutMs, "[farm:sentry] flush failed:"));
 }
