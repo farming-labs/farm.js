@@ -416,7 +416,12 @@ export function sentryPlugin(options: SentryPluginOptions = {}) {
         state.unsubscribe?.();
         state.unsubscribe = undefined;
         if (!state.enabled) return;
-        await state.sdk?.flush?.(state.flushTimeoutMs);
+        try {
+          await state.sdk?.flush?.(state.flushTimeoutMs);
+        } catch (error) {
+          // Losing the last events is not a reason to fail the shutdown.
+          console.error("[farm:sentry] flush on shutdown failed:", error);
+        }
       },
     },
 
@@ -444,5 +449,15 @@ function flushWithinRequest(
   if (!state.enabled || !state.options.flushOnResponse) return;
   const flush = state.sdk?.flush;
   if (!flush) return;
-  waitUntil(flush.call(state.sdk, state.flushTimeoutMs).then(() => undefined));
+  // The host owns this promise once handed over, and Farm passes it through
+  // untouched when the host supplies waitUntil. An unhandled rejection there
+  // can terminate the process, so a failed flush has to stay contained.
+  waitUntil(
+    flush.call(state.sdk, state.flushTimeoutMs).then(
+      () => undefined,
+      (error: unknown) => {
+        console.error("[farm:sentry] flush failed:", error);
+      },
+    ),
+  );
 }

@@ -5,6 +5,7 @@ import {
   resetFarmObservability,
   type FarmEvent,
 } from "@farm.js/core/observability";
+import { PluginManager } from "@farm.js/core/plugin";
 import {
   buildSentryInitOptions,
   claimError,
@@ -779,6 +780,84 @@ describe("more than one plugin instance", () => {
 
     await a.plugin.runtime?.close?.({ state: a.state, reason: "t" } as never);
     await b.plugin.runtime?.close?.({ state: b.state, reason: "t" } as never);
+  });
+});
+
+describe("a failing flush never reaches the host", () => {
+  function failingFlushSdk(): SentrySdkLike {
+    return {
+      getClient: () => ({}),
+      captureException: () => "id",
+      flush: () => Promise.reject(new Error("sentry flush failed")),
+    };
+  }
+
+  function silenceConsoleError() {
+    const original = console.error;
+    console.error = () => {};
+    return () => {
+      console.error = original;
+    };
+  }
+
+  it("hands waitUntil a promise that settles rather than rejects", async () => {
+    const restore = silenceConsoleError();
+    const manager = new PluginManager({ config: {}, isDev: false, isProd: true });
+    manager.addPlugin(sentryPlugin({ sdk: failingFlushSdk(), flushOnResponse: true }) as never);
+
+    const background: Promise<unknown>[] = [];
+    try {
+      await manager.runRuntimeRequest(
+        new Request("http://localhost/products"),
+        () => new Response("ok"),
+        { kind: "page", waitUntil: (p: Promise<unknown>) => background.push(p) },
+      );
+
+      // Farm passes this straight to the host when one supplies waitUntil, and
+      // an unhandled rejection there can terminate the process.
+      expect(background).toHaveLength(1);
+      await expect(background[0]).resolves.toBeUndefined();
+    } finally {
+      restore();
+    }
+  });
+
+  it("raises no unhandledRejection when the host fires and forgets", async () => {
+    const restore = silenceConsoleError();
+    const manager = new PluginManager({ config: {}, isDev: false, isProd: true });
+    manager.addPlugin(sentryPlugin({ sdk: failingFlushSdk(), flushOnResponse: true }) as never);
+
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      await manager.runRuntimeRequest(
+        new Request("http://localhost/products"),
+        () => new Response("ok"),
+        { kind: "page", waitUntil: () => {} },
+      );
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+      restore();
+    }
+
+    expect(unhandled).toEqual([]);
+  });
+
+  it("lets the runtime shut down even when the final flush fails", async () => {
+    const restore = silenceConsoleError();
+    const manager = new PluginManager({ config: {}, isDev: false, isProd: true });
+    manager.addPlugin(sentryPlugin({ sdk: failingFlushSdk() }) as never);
+
+    try {
+      await manager.runRuntimeRequest(new Request("http://localhost/"), () => new Response("ok"), {
+        kind: "page",
+      });
+      await expect(manager.closeRuntime("sigterm")).resolves.toBeUndefined();
+    } finally {
+      restore();
+    }
   });
 });
 
