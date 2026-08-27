@@ -1562,7 +1562,9 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               return;
             }
 
-            const apiHandler = apiRouteManager.getHandler();
+            // Let this request boundary observe endpoint failures before it
+            // converts them into the development 500 response below.
+            const apiHandler = apiRouteManager.getHandler({ throwOnError: true });
             const hasExplicitAPIRoute =
               hasMatchedApiRoute || Boolean(apiRouteManager.matchRoute(pathname));
             if (apiHandler && hasExplicitAPIRoute) {

@@ -26,6 +26,11 @@ export interface APIRouteManagerOptions {
   bodySizeLimit?: number;
 }
 
+export interface APIRouteHandlerOptions {
+  /** Let a framework request boundary report the original endpoint error. */
+  throwOnError?: boolean;
+}
+
 export const API_ROUTE_METHODS = [
   "GET",
   "HEAD",
@@ -287,7 +292,7 @@ export class APIRouteManager {
   /**
    * Get the handler that directly invokes endpoint handlers
    */
-  getHandler(): ((req: Request) => Promise<Response>) | null {
+  getHandler(options: APIRouteHandlerOptions = {}): ((req: Request) => Promise<Response>) | null {
     if (this.routes.size === 0) {
       return null;
     }
@@ -323,6 +328,7 @@ export class APIRouteManager {
         try {
           return await invokeAPIRouteEndpoint(endpoint, request, params, this.bodySizeLimit);
         } catch (error: any) {
+          if (options.throwOnError) throw error;
           console.error(`[API Error] ${pathname}:`, error);
           return new Response(JSON.stringify({ error: "Internal Server Error" }), {
             status: 500,
