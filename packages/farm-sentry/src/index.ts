@@ -123,10 +123,12 @@ export async function resolveSentrySdk(
 ): Promise<SentrySdkLike | undefined> {
   if (options.sdk) return options.sdk;
 
-  // Indirect specifier so the optional peer is resolved at runtime only.
-  const specifier = "@sentry/node";
   try {
-    return (await import(specifier)) as SentrySdkLike;
+    // The specifier has to be a literal. A variable is invisible to bundlers,
+    // so the dependency is never traced into serverless output and the import
+    // fails at runtime. That is what happened on Vercel, where the plugin
+    // reported a missing SDK even though the package was installed.
+    return (await import("@sentry/node")) as unknown as SentrySdkLike;
   } catch {
     return undefined;
   }

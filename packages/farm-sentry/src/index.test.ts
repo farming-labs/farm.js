@@ -11,6 +11,7 @@ import {
   initSentryOnce,
   isErrorEvent,
   assertSentrySdk,
+  resolveSentrySdk,
   registerSentry,
   sentryPlugin,
   spanNameFor,
@@ -675,6 +676,26 @@ describe("initialization failures never reach the application", () => {
 
     expect(spy.errors.join(" ")).toMatch(/failed to initialize/);
     await plugin.runtime?.close?.({ state, reason: "test" } as never);
+  });
+});
+
+describe("SDK resolution", () => {
+  it("imports @sentry/node with a literal specifier so bundlers trace it", async () => {
+    const fs = await import("node:fs");
+    const url = await import("node:url");
+    const source = fs.readFileSync(
+      url.fileURLToPath(new URL("./index.ts", import.meta.url)),
+      "utf8",
+    );
+
+    // A variable specifier is invisible to the bundler, so the dependency is
+    // left out of serverless output and the import fails at runtime.
+    expect(source).toContain('await import("@sentry/node")');
+    expect(source).not.toMatch(/await import\(\s*specifier\s*\)/);
+  });
+
+  it("resolves the real SDK when nothing is injected", async () => {
+    await expect(resolveSentrySdk({})).resolves.toBeDefined();
   });
 });
 
