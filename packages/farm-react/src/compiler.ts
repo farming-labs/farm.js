@@ -38,6 +38,12 @@ interface PropsPlan {
   destructuredNames: ReadonlySet<string>;
 }
 
+interface PropBinding {
+  localName: string;
+  valueName: string;
+  index: number;
+}
+
 interface PendingDomBinding {
   kind: "text" | "attribute" | "style";
   tracking?: "dynamic";
@@ -440,6 +446,56 @@ function rewriteDestructuredPropAccess<T extends t.Expression>(
       path.replaceWith(
         t.memberExpression(t.cloneNode(propsParameter), t.identifier(path.node.name)),
       );
+      path.skip();
+    },
+  });
+  return (file.program.body[0] as t.ExpressionStatement).expression as T;
+}
+
+function collectDestructuredPropNames(
+  expression: t.Expression,
+  names: ReadonlySet<string>,
+  propsParameter: t.Identifier,
+): Set<string> {
+  const referenced = new Set<string>();
+  if (names.size === 0) return referenced;
+  traverse(expressionFile(cloneExpression(expression)), {
+    MemberExpression(path) {
+      const { object, property, computed } = path.node;
+      if (
+        computed ||
+        !t.isIdentifier(object, { name: propsParameter.name }) ||
+        !t.isIdentifier(property) ||
+        !names.has(property.name)
+      ) {
+        return;
+      }
+      referenced.add(property.name);
+    },
+  });
+  return referenced;
+}
+
+function rewriteTrackedPropAccess<T extends t.Expression>(
+  expression: T,
+  propsParameter: t.Identifier,
+  bindingsByName: ReadonlyMap<string, PropBinding>,
+): T {
+  if (bindingsByName.size === 0) return cloneExpression(expression);
+  const file = expressionFile(cloneExpression(expression));
+  traverse(file, {
+    MemberExpression(path) {
+      const { object, property, computed } = path.node;
+      if (
+        computed ||
+        !t.isIdentifier(object, { name: propsParameter.name }) ||
+        !t.isIdentifier(property)
+      ) {
+        return;
+      }
+      const binding = bindingsByName.get(property.name);
+      if (!binding) return;
+      path.replaceWith(t.identifier(binding.valueName));
       path.skip();
     },
   });
@@ -4702,8 +4758,41 @@ function compileCandidate(
   );
   const setterReason = validateSetterUsage(expandedRoot, statesBySetter);
   if (setterReason) return setterReason;
+  const referencedPropNames = collectDestructuredPropNames(
+    expandedRoot,
+    propsPlan.destructuredNames,
+    propsPlan.definitionParameter,
+  );
+  // React children and identity-bearing values remain on React's normal prop
+  // reconciliation path. Other flat destructured props get runtime-validated
+  // primitive cells so the compiled render plan can stay mounted.
+  let propBindings = referencedPropNames.has("children")
+    ? []
+    : [...propsPlan.destructuredNames]
+        .filter((propName) => referencedPropNames.has(propName))
+        .map(
+          (localName, propIndex): PropBinding => ({
+            localName,
+            valueName: path.scope.generateUidIdentifier(`farmProp${propIndex}`).name,
+            index: states.length + propIndex,
+          }),
+        );
+  const propBindingsByName = new Map(propBindings.map((binding) => [binding.localName, binding]));
+  let reactiveByValue = new Map(statesByValue);
+  for (const binding of propBindings) {
+    reactiveByValue.set(binding.valueName, {
+      valueName: binding.valueName,
+      setterName: "",
+      index: binding.index,
+    });
+  }
+  let expandedReactiveRoot = rewriteTrackedPropAccess(
+    expandedRoot,
+    propsPlan.definitionParameter,
+    propBindingsByName,
+  ) as t.JSXElement;
   const referencedComponentNames = new Set<string>();
-  traverse(expressionFile(t.cloneNode(expandedRoot, true)), {
+  traverse(expressionFile(t.cloneNode(expandedReactiveRoot, true)), {
     JSXOpeningElement(componentPath) {
       const componentName = componentPath.node.name;
       if (t.isJSXIdentifier(componentName) && isComponentName(componentName.name)) {
@@ -4723,25 +4812,49 @@ function compileCandidate(
       );
     }),
   );
-  const blockAnalysis = analyzeComposableBlocks(
-    expandedRoot,
-    statesByValue,
+  let blockAnalysis = analyzeComposableBlocks(
+    expandedReactiveRoot,
+    reactiveByValue,
     safeGlobals,
     listNames,
     allowedComponentNames,
   );
-  if (blockAnalysis.reason) return blockAnalysis.reason;
-  const blockPlans = blockAnalysis.plans || [];
-  const analysis = analyzeHostTree(
-    expandedRoot,
-    statesByValue,
+  let analysis = analyzeHostTree(
+    expandedReactiveRoot,
+    reactiveByValue,
     safeGlobals,
     blockAnalysis.conditionalExpressions || new Set<t.Expression>(),
     blockAnalysis.keyedExpressions || new Set<t.Expression>(),
     blockAnalysis.ownedElements || new Set<t.JSXElement>(),
     blockAnalysis.componentElements || new Set<t.JSXElement>(),
   );
+  if (propBindings.length > 0 && (blockAnalysis.reason || analysis.reason)) {
+    // Prop reactivity is optional inside an already eligible local-state
+    // component. Preserve the established React prop path when the added prop
+    // dependency makes a shape exceed the narrower prop-cell proof.
+    propBindings = [];
+    reactiveByValue = new Map(statesByValue);
+    expandedReactiveRoot = t.cloneNode(expandedRoot, true);
+    blockAnalysis = analyzeComposableBlocks(
+      expandedReactiveRoot,
+      reactiveByValue,
+      safeGlobals,
+      listNames,
+      allowedComponentNames,
+    );
+    analysis = analyzeHostTree(
+      expandedReactiveRoot,
+      reactiveByValue,
+      safeGlobals,
+      blockAnalysis.conditionalExpressions || new Set<t.Expression>(),
+      blockAnalysis.keyedExpressions || new Set<t.Expression>(),
+      blockAnalysis.ownedElements || new Set<t.JSXElement>(),
+      blockAnalysis.componentElements || new Set<t.JSXElement>(),
+    );
+  }
+  if (blockAnalysis.reason) return blockAnalysis.reason;
   if (analysis.reason) return analysis.reason;
+  const blockPlans = blockAnalysis.plans || [];
   markShortCircuitBindings(analysis.bindings || []);
   assignStableBindingTargets(analysis.bindings || []);
 
@@ -4750,7 +4863,7 @@ function compileCandidate(
   const definitionIdentifier = path.scope.generateUidIdentifier(`${name}Compiled`);
   const propsParameter = propsPlan.definitionParameter;
   const rootWithTargets = lowerStableBindingTargets(
-    expandedRoot,
+    expandedReactiveRoot,
     analysis.bindings || [],
     blockParameter,
     blockAnalysis.ownedElements || new Set<t.JSXElement>(),
@@ -4764,7 +4877,7 @@ function compileCandidate(
   const rewrittenRoot = rewriteStateAccess(
     rootWithBlocks,
     stateParameter,
-    statesByValue,
+    reactiveByValue,
     statesBySetter,
   ) as t.JSXElement;
   const definition = t.callExpression(t.cloneNode(createComponentIdentifier), [
@@ -4781,7 +4894,11 @@ function compileCandidate(
             t.objectProperty(t.identifier("hmrId"), t.stringLiteral(`${moduleId}#${name}`)),
             t.objectProperty(
               t.identifier("stateSignature"),
-              t.stringLiteral(String(states.length)),
+              t.stringLiteral(
+                propBindings.length === 0
+                  ? String(states.length)
+                  : `${states.length}:${propBindings.map((binding) => binding.localName).join(",")}`,
+              ),
             ),
           ]),
           t.objectExpression([]),
@@ -4806,6 +4923,24 @@ function compileCandidate(
           ),
         ),
       ),
+      ...(propBindings.length > 0
+        ? [
+            t.objectProperty(
+              t.identifier("readProps"),
+              t.arrowFunctionExpression(
+                [t.cloneNode(propsParameter)],
+                t.arrayExpression(
+                  propBindings.map((binding) =>
+                    t.memberExpression(
+                      t.cloneNode(propsParameter),
+                      t.identifier(binding.localName),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ]
+        : []),
       t.objectProperty(
         t.identifier("render"),
         t.arrowFunctionExpression(
@@ -4825,7 +4960,7 @@ function compileCandidate(
               dependencies: block.dependencies,
             })),
           ].map((binding) =>
-            bindingObject(binding, propsParameter, stateParameter, statesByValue, statesBySetter),
+            bindingObject(binding, propsParameter, stateParameter, reactiveByValue, statesBySetter),
           ),
         ),
       ),

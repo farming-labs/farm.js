@@ -123,8 +123,9 @@ describe("React AOT compiler-owned keyed-row host blocks", () => {
 
     expect(result.compiled).toEqual(["Inbox"]);
     expect(result.code).toContain("hostBlocks={true}");
-    expect(result.code).toMatch(/dependencies: \[0, 1\]/);
-    expect(result.code).toContain("_props.suffix");
+    expect(result.code).toMatch(/dependencies: \[0, 1, 2\]/);
+    expect(result.code).toContain("readProps: _props => [_props.suffix]");
+    expect(result.code).toContain("_farmState[2].get()");
   });
 
   it.each([

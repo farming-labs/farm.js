@@ -123,6 +123,106 @@ describe("React AOT compiler", () => {
     });
   });
 
+  it("adds flat render props to the compiled dependency graph", async () => {
+    const result = await compileReactModule(
+      `
+        import { useState } from "react";
+        export function PropCounter({
+          initial = 1,
+          label: title,
+          multiplier,
+          active,
+        }: {
+          initial?: number;
+          label: string;
+          multiplier: number;
+          active: boolean;
+        }) {
+          const [count, setCount] = useState(initial);
+          const total = count * multiplier;
+          return (
+            <button
+              className={active ? "active" : "idle"}
+              onClick={() => setCount((value) => value + 1)}
+            >{title}: {total}</button>
+          );
+        }
+      `,
+      "/app/PropCounter.tsx",
+      infer,
+    );
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.code).toContain("readProps:");
+    expect(result.code).toContain('stateSignature: "1:title,multiplier,active"');
+    expect(result.code).toMatch(
+      /readProps: _props => \[_props\.title, _props\.multiplier, _props\.active\]/,
+    );
+    expect(result.code).toContain("dependencies: [0, 1, 2]");
+    expect(result.code).toContain("dependencies: [3]");
+    expect(result.code).toMatch(/farmState\[1\]\.get/);
+    expect(result.code).toMatch(/farmState\[2\]\.get/);
+    expect(result.code).toMatch(/farmState\[3\]\.get/);
+    expect(result.code).not.toMatch(/readProps: props => \[[^\]]*props\.initial/);
+  });
+
+  it("keeps children and identifier props on React's normal prop path", async () => {
+    const [childrenResult, identifierResult] = await Promise.all([
+      compileReactModule(
+        `
+          import { useState } from "react";
+          export function ChildBoundary({ children }: { children: React.ReactNode }) {
+            const [active, setActive] = useState(false);
+            return <button onClick={() => setActive(!active)}>{active ? children : "empty"}</button>;
+          }
+        `,
+        "/app/ChildBoundary.tsx",
+        infer,
+      ),
+      compileReactModule(
+        `
+          import { useState } from "react";
+          export function IdentifierProps(props: { label: string }) {
+            const [count, setCount] = useState(0);
+            return <button onClick={() => setCount(count + 1)}>{props.label}: {count}</button>;
+          }
+        `,
+        "/app/IdentifierProps.tsx",
+        infer,
+      ),
+    ]);
+
+    expect(childrenResult.diagnostics).toEqual([]);
+    expect(identifierResult.diagnostics).toEqual([]);
+    expect(childrenResult.code).not.toContain("readProps:");
+    expect(identifierResult.code).not.toContain("readProps:");
+  });
+
+  it("keeps the existing compiled component when a prop-cell shape is not yet supported", async () => {
+    const result = await compileReactModule(
+      `
+        import { useState } from "react";
+        export function ControlledLabel({ label = "Name" }: { label?: string }) {
+          const [value, setValue] = useState("");
+          return (
+            <label>
+              {label}
+              <input value={value} onInput={(event) => setValue(event.currentTarget.value)} />
+            </label>
+          );
+        }
+      `,
+      "/app/ControlledLabel.tsx",
+      infer,
+    );
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.compiled).toEqual(["ControlledLabel"]);
+    expect(result.code).not.toContain("readProps:");
+    expect(result.code).toContain("_props.label");
+    expect(result.code).toMatch(/dependencies: \[0\]/);
+  });
+
   it("compiles destructured props and named synchronous event handlers", async () => {
     const result = await compileReactModule(
       `

@@ -482,6 +482,43 @@ h1 span {
   background: rgb(184 255 91 / 0.08);
 }
 
+.primitive-prop-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem clamp(1.25rem, 3vw, 2rem);
+  border-bottom: 1px solid #33332f;
+  background: #0d0d0c;
+}
+
+.primitive-prop-toolbar > span {
+  color: #777771;
+  font-family: "Geist Mono Variable", ui-monospace, monospace;
+  font-size: 0.62rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.primitive-prop-toolbar button {
+  min-height: 2.5rem;
+  border: 1px solid #b8ff5b;
+  padding: 0.65rem 0.9rem;
+  background: #b8ff5b;
+  color: #0a0a09;
+  cursor: pointer;
+  font-family: "Geist Mono Variable", ui-monospace, monospace;
+  font-size: 0.68rem;
+  font-weight: 600;
+  transition:
+    background 160ms ease,
+    color 160ms ease;
+}
+
+.primitive-prop-toolbar button:hover {
+  background: #d8ff9f;
+}
+
 .button-row {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1631,6 +1668,11 @@ code {
 
   .heavy-heading {
     align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .primitive-prop-toolbar {
+    align-items: stretch;
     flex-direction: column;
   }
 
