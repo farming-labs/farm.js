@@ -52,6 +52,17 @@ browser. That duplicates module execution and can expose server-only dependencie
 graph. PR #564 makes failures in this path visible; it intentionally does not change the ownership
 of the hydration root.
 
+## Why an RFC comes before the runtime change
+
+This is not only a bundling optimization. The current route-wide root also defines observable React
+semantics: which components share context, which error and Suspense boundaries own work, which state
+survives navigation, and when roots are disposed. Splitting it into independent roots without first
+agreeing on those rules could make a smaller bundle that is behaviorally incorrect.
+
+The RFC does not prevent implementation experiments. It gives the gated implementation PRs a
+reviewable pass/fail contract and prevents a partial experiment from silently becoming the default.
+The feature should graduate only when it is both correct and a measured net performance gain.
+
 ## Goals
 
 - Keep a server layout out of the browser graph when it only renders supported client leaves.
@@ -238,6 +249,100 @@ These cases continue to use the existing route-wide path:
 
 This makes the rollout additive and provides an escape hatch while component islands mature.
 
+## Safety invariants
+
+The experimental implementation and every later stable version must preserve these invariants:
+
+1. **Server graph isolation is verified.** A client build must fail its regression fixture if the
+   owning layout, its server-only dependency, or a server sentinel appears in a browser chunk.
+2. **SSR is the fail-closed state.** An import, manifest, serialization, or hydration error keeps the
+   server-rendered DOM visible. Farm must not clear the container or mount an empty replacement root.
+3. **Serialization is allowlisted.** The transport accepts plain, explicitly supported data only.
+   It rejects functions, symbols, React elements, objects with custom prototypes, request objects,
+   and other executable or ambient server state.
+4. **Only explicit props cross the boundary.** Farm never serializes module scope, closures,
+   environment variables, integration secrets, or the layout's complete props as a convenience.
+5. **The payload is HTML-safe and non-executable.** JSON escapes `<`, `>`, `&`, and line separators,
+   is read from `textContent`, and is parsed without `eval` or generated script execution.
+6. **Ownership is exact.** One marker has at most one React root. Client-to-client imports do not
+   create nested markers, and removed navigation subtrees are unmounted before DOM removal.
+7. **Unsupported semantics are explicit.** Context spanning roots, React-element children,
+   parser-sensitive containers, and integrations without isolated-root support select the existing
+   route-wide path or preserve inert SSR with a clear runtime diagnostic.
+8. **Resource use is bounded.** Boundary count, serialized bytes, roots, and queued interactions are
+   observable and guarded. Exceeding an implementation limit cannot cause unbounded roots or payload
+   growth; Farm chooses the safe route-wide plan when it can do so before streaming begins.
+9. **The flag is off by default.** Development, SSR, SSG, and navigation use the same compiled plan,
+   so production cannot unexpectedly select a less-tested ownership model.
+
+These invariants are required tests, not documentation-only promises.
+
+## Performance and cost model
+
+Isolated hydration is expected to win when a relatively large server layout owns a small number of
+interactive leaves. It is not automatically cheaper for every route.
+
+### Expected gains
+
+- The layout and its transitive server-oriented modules are removed from client transfer,
+  parse/compile, and evaluation work.
+- React hydrates the interactive leaves instead of reconstructing the complete layout and page
+  tree.
+- Shared layout boundaries keep their roots and state during navigation rather than rerendering the
+  whole route owner.
+- `interaction`, `visible`, and `idle` strategies defer module loading and hydration per boundary
+  instead of delaying or activating one large route root.
+
+### Added costs
+
+- A shared boundary loader, manifest, DOM scan, and root registry add client runtime bytes.
+- Every marker and serialized prop record adds HTML and server serialization work.
+- Many small boundaries can create extra chunks and requests.
+- Every independent React root has scheduler and memory overhead.
+- Navigation must discover, hydrate, and dispose several roots instead of updating one root.
+
+Therefore boundary count alone is not a success metric. The same fixture must be measured with the
+existing route-wide plan and the isolated plan, using the same React version, bundler, minification,
+and browser conditions.
+
+### Required measurements
+
+Implementation PRs must report at least:
+
+- compressed and uncompressed initial client JavaScript;
+- browser module and request counts;
+- server HTML bytes, including markers and serialized props;
+- server render/serialization time;
+- client parse/evaluation and hydration time;
+- time until the tested boundary handles its first interaction;
+- post-hydration heap use and React root count;
+- warm SPA navigation time and retained-layout state.
+
+The benchmark suite needs three shapes: one small interactive leaf in a large server layout,
+several normal sibling boundaries, and a many-boundary stress case. The stress case establishes the
+crossover point where independent-root overhead outweighs the saved layout work.
+
+### Graduation gates
+
+The feature cannot become the default unless all of the following are true:
+
+1. The representative layout fixture transfers and executes strictly less client JavaScript than
+   route-wide hydration, and the server owner is absent from the client graph.
+2. Median hydration CPU and first-interaction latency do not regress beyond the benchmark's measured
+   confidence interval or 5%, whichever is larger. At least one representative fixture must show a
+   statistically meaningful improvement rather than only parity.
+3. Added HTML, SSR time, request count, and heap use are reported. Any material regression must be
+   removed, justified by a larger measured user-facing win, or routed through the old plan.
+4. The many-boundary benchmark has a documented crossover point. Before stable rollout, Farm must
+   use a deterministic graph/boundary cost guard or retain route-wide hydration for shapes beyond
+   that point.
+5. Development and production select equivalent ownership. A production-only size heuristic cannot
+   silently choose different React semantics.
+
+In short: if Farm cannot demonstrate a net win for a route shape, it keeps the current route-wide
+hydration path. Smaller client ownership is the mechanism; measured user-facing performance is the
+goal.
+
 ## Configuration and rollout
 
 The first implementation is opt-in:
@@ -282,6 +387,9 @@ prebuilt production runtime where applicable.
 | Area                          | Required assertion                                                                   |
 | ----------------------------- | ------------------------------------------------------------------------------------ |
 | Browser graph                 | A server layout sentinel and server-only dependency are absent from client chunks    |
+| Client cost                   | Initial compressed JS, executed modules, and hydration CPU beat the route-wide case  |
+| Server cost                   | Marker bytes and serialization time stay within the recorded performance budget      |
+| Root overhead                 | Normal and stress fixtures report heap, root, request, and chunk counts              |
 | Basic boundary                | A counter in a server layout hydrates and updates without importing the layout       |
 | Multiple boundaries           | Independent sibling counters retain independent state                                |
 | Nested client graph           | A client component importing another client component creates one root               |
@@ -304,11 +412,12 @@ regression that appears correct only after client rendering.
 
 ## Implementation phases
 
-1. Add boundary metadata and server import proxies behind the experimental flag.
-2. Add the marker/props protocol and isolated-root runtime for initial documents.
-3. Integrate root ownership with fragment navigation, click replay, HMR, and client plugins.
-4. Add production chunk assertions and the complete acceptance fixture.
-5. Document supported compositions and evaluate making the option stable.
+1. Capture route-wide correctness and performance baselines for the three benchmark shapes.
+2. Add boundary metadata and server import proxies behind the experimental flag.
+3. Add the marker/props protocol and isolated-root runtime for initial documents.
+4. Integrate root ownership with fragment navigation, click replay, HMR, and client plugins.
+5. Add production graph assertions, resource guards, and the complete acceptance fixture.
+6. Publish the before/after report, document the crossover point, and evaluate stability.
 
 Each phase must preserve the existing route-wide path. The flag should not ship as stable until all
 phases are present; partial phases are suitable only for internal fixtures.
@@ -339,5 +448,6 @@ known at render time.
 
 ## Decision requested
 
-Approve the boundary protocol, ownership rules, and opt-in rollout as the contract for #565. Runtime
-implementation can then land incrementally without changing the semantics described here.
+Approve the boundary protocol, safety invariants, performance gates, ownership rules, and opt-in
+rollout as the contract for #565. Runtime implementation can then land incrementally without
+changing the semantics described here or claiming a win that the benchmarks do not show.
