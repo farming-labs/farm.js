@@ -84,6 +84,7 @@ Docs runtime, markdown mirrors, and OpenAPI.
 Plugin system and lifecycle hooks.
 
 - [Plugin Ecosystem](/docs/plugins): Extend server and browser behavior across config, requests, routing, rendering, hydration, navigation, builds, and HMR.
+- [PWA Plugin](/docs/plugins/pwa): Generate a route-aware service worker with offline navigation, update prompts, and concise SWR image caching.
 - [Sentry Plugin](/docs/plugins/sentry): Report server errors with route context and trace Farm requests with `@sentry/node`.
 - [Create a Plugin](/docs/plugins/create-plugin): Build a plugin with definePlugin when app behavior belongs in reusable framework lifecycle hooks.
 - [Client Plugin API](/docs/plugins/client): Attach typed hydration, navigation, error, performance, and cleanup hooks to a plugin through a browser-safe module.
