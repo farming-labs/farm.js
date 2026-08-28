@@ -55,6 +55,8 @@ const [
   keyedOn,
   keyedAppendOff,
   keyedAppendOn,
+  keyedFilterOff,
+  keyedFilterOn,
   runtimeControl,
   runtimeCore,
   runtimeFull,
@@ -65,6 +67,8 @@ const [
   bundle("keyed.tsx", true),
   bundle("keyed-append.tsx", false),
   bundle("keyed-append.tsx", true),
+  bundle("keyed-filter.tsx", false),
+  bundle("keyed-filter.tsx", true),
   bundle("runtime-control.tsx", false),
   bundle("runtime-core.tsx", false),
   bundle("runtime-full.tsx", false),
@@ -112,6 +116,13 @@ if (
   !keyedAppendOn.code.includes("keyed-rows:hinted")
 ) {
   throw new Error("Keyed append fixture did not retain its optional hinted runtime.");
+}
+if (
+  !keyedFilterOn.code.includes("FarmCompiledKeyedRows") ||
+  !keyedFilterOn.code.includes("keyed-rows:filter-hinted") ||
+  !keyedFilterOn.code.includes("filterIndexIndependent")
+) {
+  throw new Error("Keyed filter fixture did not retain its optional filter-hint runtime.");
 }
 
 const fullRuntimePremium = runtimeFull.gzip - runtimeControl.gzip;
@@ -162,6 +173,23 @@ const results = {
         brotli: keyedAppendOn.brotli - keyedAppendOff.brotli,
       },
     },
+    keyedFilter: {
+      compilerOff: {
+        raw: keyedFilterOff.raw,
+        gzip: keyedFilterOff.gzip,
+        brotli: keyedFilterOff.brotli,
+      },
+      compilerOn: {
+        raw: keyedFilterOn.raw,
+        gzip: keyedFilterOn.gzip,
+        brotli: keyedFilterOn.brotli,
+      },
+      compilerPremium: {
+        raw: keyedFilterOn.raw - keyedFilterOff.raw,
+        gzip: keyedFilterOn.gzip - keyedFilterOff.gzip,
+        brotli: keyedFilterOn.brotli - keyedFilterOff.brotli,
+      },
+    },
     isolatedRuntime: {
       control: {
         raw: runtimeControl.raw,
@@ -194,6 +222,11 @@ if (checkOnly) {
       name: "keyed append compiler premium",
       current: results.fixtures.keyedAppend.compilerPremium.gzip,
       maximum: reference.fixtures.keyedAppend.compilerPremium.gzip + 256,
+    },
+    {
+      name: "keyed filter compiler premium",
+      current: results.fixtures.keyedFilter.compilerPremium.gzip,
+      maximum: (reference.fixtures.keyedFilter?.compilerPremium.gzip ?? 12_000) + 256,
     },
     {
       name: "core runtime premium",

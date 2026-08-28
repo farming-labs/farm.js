@@ -43,6 +43,7 @@ const testSource = String.raw`
     createCompiledComponent,
     createCompiledComponentWithFeatures,
     createCompilerKeyedArrayAppend,
+    createCompilerKeyedArrayFilter,
     createCompilerKeyedMapUpdate,
   } = await import(
     "@farm.js/react/compiler-runtime"
@@ -1479,6 +1480,89 @@ const testSource = String.raw`
   assert.equal(appendContainer.querySelector("[data-key='a']"), appendAlpha);
   assert.equal(appendKeyReads, 2);
   flushSync(() => appendRoot.unmount());
+
+  let filterRows = () => undefined;
+  let filterKeyReads = 0;
+  let filterBindingReads = 0;
+  const FilterRows = createCompiledComponent({
+    displayName: "CompatibilityFilterRows",
+    initialize: () => [[
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+      { id: "c", label: "Gamma" },
+      { id: "d", label: "Delta" },
+    ]],
+    render(_props, state, blocks) {
+      const items = () => state[0].get();
+      filterRows = (removedId) =>
+        state[0].set((previous) =>
+          createCompilerKeyedArrayFilter(
+            previous,
+            previous.filter,
+            (item) => item.id !== removedId,
+          ),
+        );
+      return React.createElement(
+        "section",
+        null,
+        React.createElement(blocks.KeyedRows, {
+          collectionDependency: 0,
+          dependencies: [0],
+          filterIndexIndependent: true,
+          id: 0,
+          items,
+          structureDependencies: [0],
+          render: () =>
+            React.createElement(
+              "ul",
+              null,
+              items().map((item) =>
+                React.createElement("li", { "data-key": item.id, key: item.id }, item.label),
+              ),
+            ),
+          rowKey: (item) => {
+            filterKeyReads += 1;
+            return item.id;
+          },
+          create: (item) => ({
+            kind: "element",
+            tag: "li",
+            attributes: [{ name: "data-key", value: item.id }],
+            styles: [],
+            children: [item.label],
+          }),
+          bindings: [{
+            kind: "text",
+            path: [],
+            dependencies: [],
+            read: (item) => {
+              filterBindingReads += 1;
+              return [item.label];
+            },
+          }],
+        }),
+      );
+    },
+    bindings: [{ kind: "block", id: 0, dependencies: [0] }],
+  });
+  const filterContainer = document.createElement("div");
+  document.body.append(filterContainer);
+  const filterRoot = createRoot(filterContainer);
+  flushSync(() => filterRoot.render(React.createElement(FilterRows)));
+  const filterAlpha = filterContainer.querySelector("[data-key='a']");
+  const filterGamma = filterContainer.querySelector("[data-key='c']");
+  filterKeyReads = 0;
+  filterBindingReads = 0;
+  filterRows("b");
+  filterRows("d");
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(filterContainer.textContent, "AlphaGamma");
+  assert.equal(filterContainer.querySelector("[data-key='a']"), filterAlpha);
+  assert.equal(filterContainer.querySelector("[data-key='c']"), filterGamma);
+  assert.equal(filterKeyReads, 2);
+  assert.equal(filterBindingReads, 0);
+  flushSync(() => filterRoot.unmount());
 
   let editableRowExecutions = 0;
   let editableListRenders = 0;

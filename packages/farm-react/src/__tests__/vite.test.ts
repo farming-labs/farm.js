@@ -86,6 +86,7 @@ describe("React renderer Vite integration", () => {
       compiled: 2,
       fallback: 0,
       keyedArrayAppendHints: 0,
+      keyedArrayFilterHints: 0,
       keyedCollectionUpdateHints: 0,
       keyedIdentityTargets: 0,
       keyedMapLookupTargets: 0,

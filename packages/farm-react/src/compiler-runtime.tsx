@@ -18,6 +18,14 @@ interface CompilerKeyedArrayAppendHint {
   readonly previous?: CompilerKeyedArrayAppendHint;
 }
 
+interface CompilerKeyedArrayFilterHint {
+  readonly sourceToken: object;
+  readonly sourceLength: number;
+  readonly resultLength: number;
+  readonly removedIndices: readonly number[];
+  readonly previous?: CompilerKeyedArrayFilterHint;
+}
+
 type CompilerKeyedCollectionKind = "set" | "map";
 type CompilerKeyedCollectionMutation = "set-add" | "set-delete" | "map-set" | "map-delete";
 
@@ -42,6 +50,10 @@ const COMPILER_KEYED_ARRAY_APPENDS = /* @__PURE__ */ new WeakMap<
   object,
   CompilerKeyedArrayAppendHint
 >();
+const COMPILER_KEYED_ARRAY_FILTERS = /* @__PURE__ */ new WeakMap<
+  object,
+  CompilerKeyedArrayFilterHint
+>();
 const COMPILER_KEYED_COLLECTION_DRAFTS = /* @__PURE__ */ new WeakMap<
   object,
   CompilerKeyedCollectionDraft
@@ -53,6 +65,7 @@ const COMPILER_KEYED_COLLECTION_UPDATES = /* @__PURE__ */ new WeakMap<
 const COMPILER_KEYED_COMMITTED_COLLECTIONS = /* @__PURE__ */ new WeakSet<object>();
 const NATIVE_ARRAY_PROTOTYPE = Array.prototype;
 const NATIVE_ARRAY_ITERATOR = Array.prototype[Symbol.iterator];
+const NATIVE_ARRAY_FILTER = Array.prototype.filter;
 const NATIVE_REFLECT_APPLY = Reflect.apply;
 
 function compilerObject(value: unknown): object | undefined {
@@ -123,6 +136,42 @@ function compilerKeyedArrayAppendStart(
     length = current.resultLength;
   }
   return length === value.length ? expectedStart : undefined;
+}
+
+function compilerKeyedArrayFilterSurvivors(
+  value: unknown,
+  sourceToken: object | undefined,
+  expectedLength: number,
+): readonly number[] | undefined {
+  const target = compilerObject(value);
+  if (!target || !sourceToken || !Array.isArray(value)) return undefined;
+  const update = COMPILER_KEYED_ARRAY_FILTERS.get(target);
+  if (!update || update.sourceToken !== sourceToken) return undefined;
+  const updates: CompilerKeyedArrayFilterHint[] = [];
+  for (
+    let current: CompilerKeyedArrayFilterHint | undefined = update;
+    current;
+    current = current.previous
+  ) {
+    if (current.sourceToken !== sourceToken) return undefined;
+    updates.push(current);
+  }
+
+  let survivors = Array.from({ length: expectedLength }, (_, index) => index);
+  for (let updateIndex = updates.length - 1; updateIndex >= 0; updateIndex -= 1) {
+    const current = updates[updateIndex];
+    if (current.sourceLength !== survivors.length) return undefined;
+    const removed = new Set<number>();
+    for (const index of current.removedIndices) {
+      if (!Number.isSafeInteger(index) || index < 0 || index >= current.sourceLength) {
+        return undefined;
+      }
+      removed.add(index);
+    }
+    if (current.resultLength !== current.sourceLength - removed.size) return undefined;
+    survivors = survivors.filter((_sourceIndex, index) => !removed.has(index));
+  }
+  return survivors.length === value.length ? survivors : undefined;
 }
 
 function compilerKeyedCollectionChangedKeys(
@@ -203,6 +252,81 @@ export function createCompilerKeyedArrayAppend(previous: unknown, value: unknown
     // Metadata must never change the behavior of an otherwise valid update.
     return value;
   }
+}
+
+/** @internal Executes Array.filter while recording compiler-proven removal positions. */
+export function createCompilerKeyedArrayFilter(
+  previous: unknown,
+  method: unknown,
+  predicate: unknown,
+): unknown {
+  let canHint = false;
+  let sourceLength = 0;
+  try {
+    canHint =
+      Array.isArray(previous) &&
+      Object.getPrototypeOf(previous) === NATIVE_ARRAY_PROTOTYPE &&
+      method === NATIVE_ARRAY_FILTER &&
+      typeof predicate === "function";
+    if (canHint) sourceLength = (previous as unknown[]).length;
+  } catch {
+    canHint = false;
+  }
+
+  if (!canHint) {
+    return NATIVE_REFLECT_APPLY(method as (...args: unknown[]) => unknown, previous, [predicate]);
+  }
+
+  const removedIndices: number[] = [];
+  let visited = 0;
+  const wrappedPredicate = function (
+    this: unknown,
+    item: unknown,
+    index: number,
+    collection: unknown[],
+  ): unknown {
+    visited += 1;
+    const keep = NATIVE_REFLECT_APPLY(predicate as (...args: unknown[]) => unknown, this, [
+      item,
+      index,
+      collection,
+    ]);
+    if (!keep) removedIndices.push(index);
+    return keep;
+  };
+  const value = NATIVE_REFLECT_APPLY(method as (...args: unknown[]) => unknown, previous, [
+    wrappedPredicate,
+  ]);
+
+  try {
+    const previousTarget = compilerObject(previous);
+    const valueTarget = compilerObject(value);
+    if (
+      !previousTarget ||
+      !valueTarget ||
+      !Array.isArray(value) ||
+      Object.getPrototypeOf(value) !== NATIVE_ARRAY_PROTOTYPE ||
+      visited !== sourceLength ||
+      value.length !== sourceLength - removedIndices.length
+    ) {
+      return value;
+    }
+    const sourceToken = compilerKeyedCollectionToken(previousTarget);
+    if (!sourceToken) return value;
+    const previousUpdate = !COMPILER_KEYED_COMMITTED_COLLECTIONS.has(previousTarget)
+      ? COMPILER_KEYED_ARRAY_FILTERS.get(previousTarget)
+      : undefined;
+    COMPILER_KEYED_ARRAY_FILTERS.set(valueTarget, {
+      sourceToken: previousUpdate?.sourceToken || sourceToken,
+      sourceLength,
+      resultLength: value.length,
+      removedIndices,
+      ...(previousUpdate ? { previous: previousUpdate } : {}),
+    });
+  } catch {
+    // Metadata must never change the result of a successful native filter.
+  }
+  return value;
 }
 
 /** @internal Preserves a proven native collection mutation while recording its executed key. */
@@ -505,6 +629,8 @@ export interface CompilerKeyedRowsBlockProps {
   structureDependencies?: readonly number[];
   /** Direct state cell supplying items, eligible for compiler-emitted update hints. */
   collectionDependency?: number;
+  /** Compiler proof that shifted row indexes are not observed by this boundary. */
+  filterIndexIndependent?: boolean;
   rowKey(item: unknown, index: number): React.Key;
   create(item: unknown, index: number): CompilerKeyedRowElement;
   bindings: readonly CompilerKeyedRowBinding[];
@@ -1352,7 +1478,10 @@ function keyedMapLookupSnapshotValue(
     if (changed) return changed;
     if (current.values) {
       const present = NATIVE_MAP_HAS.call(current.values, key);
-      return { present, ...(present ? { value: NATIVE_MAP_GET.call(current.values, key) } : {}) };
+      return {
+        present,
+        ...(present ? { value: NATIVE_MAP_GET.call(current.values, key) } : {}),
+      };
     }
   }
   return undefined;
@@ -1566,7 +1695,11 @@ function keyedRowConditionalChanged(
 }
 
 type CompilerHostConditionalSelection =
-  | { kind: "branch"; key: "truthy" | "falsy"; branch: CompilerHostConditionalBranch }
+  | {
+      kind: "branch";
+      key: "truthy" | "falsy";
+      branch: CompilerHostConditionalBranch;
+    }
   | { kind: "empty" }
   | { kind: "fallback" };
 type CompilerHostConditionalPreparedSelection = Exclude<
@@ -3328,6 +3461,13 @@ interface KeyedUpdateRuntime {
     root: Element,
     reactOwnedRows: boolean,
   ): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined;
+  filter?(
+    props: CompilerKeyedRowsBlockProps,
+    dirtyState: ReadonlySet<number>,
+    collectionToken: object | undefined,
+    instances: ReadonlyMap<string, CompilerKeyedRowInstance>,
+    reactOwnedRows: boolean,
+  ): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined;
   reconcile(
     props: CompilerKeyedRowsBlockProps,
     dirtyState: ReadonlySet<number>,
@@ -3352,6 +3492,11 @@ const keyedUpdateRuntime: KeyedUpdateRuntime = {
   append: reconcileCompilerKeyedArrayAppend,
   commit: commitCompilerKeyedCollection,
   reconcile: reconcileCompilerKeyedMapUpdate,
+};
+
+const keyedFilterUpdateRuntime: KeyedUpdateRuntime = {
+  ...keyedUpdateRuntime,
+  filter: reconcileCompilerKeyedArrayFilter,
 };
 
 interface KeyedRowsRuntimeOptions {
@@ -3399,7 +3544,12 @@ function reconcileCompilerKeyedMapUpdate(
     return undefined;
   }
 
-  const conditionalChanges: Array<{ key: string; id: number; item: unknown; index: number }> = [];
+  const conditionalChanges: Array<{
+    key: string;
+    id: number;
+    item: unknown;
+    index: number;
+  }> = [];
   for (const { key, item, index, instance } of updates) {
     if (props.hostBlocks) {
       const descriptor = props.create(item, index);
@@ -3487,6 +3637,72 @@ function reconcileCompilerKeyedArrayAppend(
     root.append(fragment);
   }
   return nextInstances;
+}
+
+function reconcileCompilerKeyedArrayFilter(
+  props: CompilerKeyedRowsBlockProps,
+  dirtyState: ReadonlySet<number>,
+  collectionToken: object | undefined,
+  instances: ReadonlyMap<string, CompilerKeyedRowInstance>,
+  reactOwnedRows: boolean,
+): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined {
+  if (
+    reactOwnedRows ||
+    props.hostBlocks ||
+    (props.conditionals?.length || 0) > 0 ||
+    !props.filterIndexIndependent ||
+    props.collectionDependency === undefined
+  ) {
+    return undefined;
+  }
+  const collectionDependency = props.collectionDependency;
+  if (props.bindings.some((binding) => binding.dependencies?.includes(collectionDependency))) {
+    return undefined;
+  }
+  const dependencies = props.dependencies || props.structureDependencies;
+  const relevantDirty = (dependencies || []).filter((index) => dirtyState.has(index));
+  if (relevantDirty.length !== 1 || relevantDirty[0] !== collectionDependency) {
+    return undefined;
+  }
+
+  const finalValue = props.items();
+  const survivorIndices = compilerKeyedArrayFilterSurvivors(
+    finalValue,
+    collectionToken,
+    instances.size,
+  );
+  if (!survivorIndices || !Array.isArray(finalValue)) return undefined;
+  const previousInstances = [...instances.values()];
+  const survivors: CompilerKeyedRowInstance[] = [];
+  try {
+    for (let index = 0; index < survivorIndices.length; index += 1) {
+      const sourceIndex = survivorIndices[index];
+      const instance = previousInstances[sourceIndex];
+      const item = finalValue[index];
+      if (
+        !instance ||
+        instance.index !== sourceIndex ||
+        !Object.is(instance.item, item) ||
+        keyedRowIdentity(props.rowKey(item, index)) !== instance.key
+      ) {
+        return undefined;
+      }
+      survivors.push(instance);
+    }
+  } catch {
+    return undefined;
+  }
+
+  const survivorSet = new Set(survivorIndices);
+  for (let index = 0; index < previousInstances.length; index += 1) {
+    if (survivorSet.has(index)) continue;
+    previousInstances[index].scope?.cleanup();
+    previousInstances[index].element.remove();
+  }
+  for (let index = 0; index < survivors.length; index += 1) {
+    survivors[index].index = index;
+  }
+  return new Map(survivors.map((instance) => [instance.key, instance]));
 }
 
 function createKeyedRowConditionalRuntime(): KeyedRowConditionalRuntime {
@@ -4221,7 +4437,12 @@ function createKeyedRowsBlockComponent(
         );
         for (const [id, values] of conditionalValues) {
           if (options.conditionals?.changed(existing.conditionalValues.get(id), values)) {
-            conditionalChanges.push({ key, id, item: rows.items[index], index });
+            conditionalChanges.push({
+              key,
+              id,
+              item: rows.items[index],
+              index,
+            });
           }
         }
         existing.conditionalValues = conditionalValues;
@@ -4279,7 +4500,12 @@ function createKeyedRowsBlockComponent(
         );
         for (const [id, values] of conditionalValues) {
           if (options.conditionals?.changed(existing.conditionalValues.get(id), values)) {
-            conditionalChanges.push({ key, id, item: rows.items[index], index });
+            conditionalChanges.push({
+              key,
+              id,
+              item: rows.items[index],
+              index,
+            });
           }
         }
         existing.conditionalValues = conditionalValues;
@@ -4407,7 +4633,12 @@ function createKeyedRowsBlockComponent(
           );
           for (const [id, values] of conditionalValues) {
             if (options.conditionals?.changed(existing.conditionalValues.get(id), values)) {
-              conditionalChanges.push({ key, id, item: rows.items[index], index });
+              conditionalChanges.push({
+                key,
+                id,
+                item: rows.items[index],
+                index,
+              });
             }
           }
           existing.conditionalValues = conditionalValues;
@@ -4511,6 +4742,23 @@ function createKeyedRowsBlockComponent(
         if (appendedInstances) {
           this.instances = new Map(appendedInstances);
           this.rebuildElementIndex(this.instances);
+          this.commitCurrentCollection(dirtyState);
+          afterCommit?.();
+          return;
+        }
+        const filteredInstances = options.keyedUpdates.filter?.(
+          this.currentProps,
+          dirtyState,
+          this.collectionToken,
+          this.instances,
+          this.hasReactOwnedRows(),
+        );
+        if (filteredInstances) {
+          this.instances = new Map(filteredInstances);
+          this.rebuildElementIndex(this.instances);
+          const keys = [...this.instances.keys()];
+          this.pruneEventHandlers(keys);
+          this.pruneConditionalListeners(keys);
           this.commitCurrentCollection(dirtyState);
           afterCommit?.();
           return;
@@ -5080,7 +5328,18 @@ export const keyedRowsRuntimeFeature: CompilerRuntimeFeature = {
 export const keyedRowsHintedRuntimeFeature: CompilerRuntimeFeature = {
   name: "keyed-rows:hinted",
   create: (owner) => ({
-    KeyedRows: createKeyedRowsBlockComponent(owner, { keyedUpdates: keyedUpdateRuntime }),
+    KeyedRows: createKeyedRowsBlockComponent(owner, {
+      keyedUpdates: keyedUpdateRuntime,
+    }),
+  }),
+};
+
+export const keyedRowsFilterHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:filter-hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner, {
+      keyedUpdates: keyedFilterUpdateRuntime,
+    }),
   }),
 };
 
@@ -5099,6 +5358,16 @@ export const keyedRowsConditionalHintedRuntimeFeature: CompilerRuntimeFeature = 
     KeyedRows: createKeyedRowsBlockComponent(owner, {
       conditionals: createKeyedRowConditionalRuntime(),
       keyedUpdates: keyedUpdateRuntime,
+    }),
+  }),
+};
+
+export const keyedRowsConditionalFilterHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:conditional:filter-hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner, {
+      conditionals: createKeyedRowConditionalRuntime(),
+      keyedUpdates: keyedFilterUpdateRuntime,
     }),
   }),
 };
@@ -5122,6 +5391,16 @@ export const keyedRowsHostHintedRuntimeFeature: CompilerRuntimeFeature = {
   }),
 };
 
+export const keyedRowsHostFilterHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:host:filter-hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner, {
+      hostBlocks: createKeyedRowHostRuntime(),
+      keyedUpdates: keyedFilterUpdateRuntime,
+    }),
+  }),
+};
+
 export const keyedRowsCompleteRuntimeFeature: CompilerRuntimeFeature = {
   name: "keyed-rows:complete",
   create: (owner) => ({
@@ -5139,6 +5418,17 @@ export const keyedRowsCompleteHintedRuntimeFeature: CompilerRuntimeFeature = {
       conditionals: createKeyedRowConditionalRuntime(),
       hostBlocks: createKeyedRowHostRuntime(),
       keyedUpdates: keyedUpdateRuntime,
+    }),
+  }),
+};
+
+export const keyedRowsCompleteFilterHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:complete:filter-hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner, {
+      conditionals: createKeyedRowConditionalRuntime(),
+      hostBlocks: createKeyedRowHostRuntime(),
+      keyedUpdates: keyedFilterUpdateRuntime,
     }),
   }),
 };
@@ -5193,7 +5483,9 @@ export function createCompiledComponentWithFeatures<Props>(
     }
   }
 
-  const definitionReference: CompiledDefinitionReference<Props> = { current: definition };
+  const definitionReference: CompiledDefinitionReference<Props> = {
+    current: definition,
+  };
   const refreshListeners = new Set<() => void>();
 
   class FarmCompiledComponent extends React.Component<Props, Record<string, never>, boolean> {
@@ -5723,7 +6015,7 @@ const COMPLETE_RUNTIME_FEATURES: readonly CompilerRuntimeFeature[] = [
   hostConditionalRuntimeFeature,
   conditionalRangesRuntimeFeature,
   keyedListRuntimeFeature,
-  keyedRowsCompleteHintedRuntimeFeature,
+  keyedRowsCompleteFilterHintedRuntimeFeature,
   keyedRangesRuntimeFeature,
   mixedRangesRuntimeFeature,
   componentRuntimeFeature,

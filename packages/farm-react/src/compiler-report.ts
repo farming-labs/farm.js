@@ -19,6 +19,7 @@ export interface ReactCompilerReport {
     compiled: number;
     fallback: number;
     keyedArrayAppendHints: number;
+    keyedArrayFilterHints: number;
     keyedCollectionUpdateHints: number;
     keyedIdentityTargets: number;
     keyedMapLookupTargets: number;
@@ -34,6 +35,7 @@ export interface ReactCompilerReport {
     compiled: readonly string[];
     optimizations: {
       keyedArrayAppendHints: number;
+      keyedArrayFilterHints: number;
       keyedCollectionUpdateHints: number;
       keyedIdentityTargets: number;
       keyedMapLookupTargets: number;
@@ -57,6 +59,7 @@ export function createReactCompilerReport(
   let compiled = 0;
   let fallback = 0;
   let keyedArrayAppendHints = 0;
+  let keyedArrayFilterHints = 0;
   let keyedCollectionUpdateHints = 0;
   let keyedIdentityTargets = 0;
   let keyedMapLookupTargets = 0;
@@ -69,6 +72,7 @@ export function createReactCompilerReport(
       compiled += result.compiled.length;
       fallback += result.diagnostics.length;
       keyedArrayAppendHints += result.optimizations.keyedArrayAppendHints || 0;
+      keyedArrayFilterHints += result.optimizations.keyedArrayFilterHints || 0;
       keyedCollectionUpdateHints += result.optimizations.keyedCollectionUpdateHints || 0;
       keyedIdentityTargets += result.optimizations.keyedIdentityTargets || 0;
       keyedMapLookupTargets += result.optimizations.keyedMapLookupTargets || 0;
@@ -100,6 +104,7 @@ export function createReactCompilerReport(
       compiled,
       fallback,
       keyedArrayAppendHints,
+      keyedArrayFilterHints,
       keyedCollectionUpdateHints,
       keyedIdentityTargets,
       keyedMapLookupTargets,
