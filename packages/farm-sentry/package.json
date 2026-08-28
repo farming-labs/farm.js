@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/sentry",
-  "version": "0.1.0-beta.68",
+  "version": "0.1.0-beta.69",
   "description": "Sentry error reporting and tracing for Farm.js",
   "keywords": [
     "error-tracking",
