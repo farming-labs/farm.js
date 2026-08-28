@@ -11,12 +11,36 @@ interface CompilerKeyedMapUpdateHint {
   readonly previous?: CompilerKeyedMapUpdateHint;
 }
 
+type CompilerKeyedCollectionKind = "set" | "map";
+type CompilerKeyedCollectionMutation = "set-add" | "set-delete" | "map-set" | "map-delete";
+
+interface CompilerKeyedCollectionDraft {
+  readonly kind: CompilerKeyedCollectionKind;
+  readonly changedKeys: unknown[];
+}
+
+interface CompilerKeyedCollectionUpdateHint {
+  readonly kind: CompilerKeyedCollectionKind;
+  readonly sourceToken: object;
+  readonly changedKeys: readonly unknown[];
+  readonly previous?: CompilerKeyedCollectionUpdateHint;
+}
+
 const COMPILER_KEYED_COLLECTION_TOKENS = /* @__PURE__ */ new WeakMap<object, object>();
 const COMPILER_KEYED_MAP_UPDATES = /* @__PURE__ */ new WeakMap<
   object,
   CompilerKeyedMapUpdateHint
 >();
+const COMPILER_KEYED_COLLECTION_DRAFTS = /* @__PURE__ */ new WeakMap<
+  object,
+  CompilerKeyedCollectionDraft
+>();
+const COMPILER_KEYED_COLLECTION_UPDATES = /* @__PURE__ */ new WeakMap<
+  object,
+  CompilerKeyedCollectionUpdateHint
+>();
 const COMPILER_KEYED_COMMITTED_COLLECTIONS = /* @__PURE__ */ new WeakSet<object>();
+const NATIVE_REFLECT_APPLY = Reflect.apply;
 
 function compilerObject(value: unknown): object | undefined {
   return (typeof value === "object" && value !== null) || typeof value === "function"
@@ -61,6 +85,27 @@ function compilerKeyedMapChangedIndices(
   return changedIndices;
 }
 
+function compilerKeyedCollectionChangedKeys(
+  value: unknown,
+  sourceToken: object | undefined,
+  kind: CompilerKeyedCollectionKind,
+): readonly unknown[] | undefined {
+  const target = compilerObject(value);
+  if (!target || !sourceToken) return undefined;
+  const update = COMPILER_KEYED_COLLECTION_UPDATES.get(target);
+  if (!update || update.kind !== kind || update.sourceToken !== sourceToken) return undefined;
+  const changedKeys: unknown[] = [];
+  for (
+    let current: CompilerKeyedCollectionUpdateHint | undefined = update;
+    current;
+    current = current.previous
+  ) {
+    if (current.kind !== kind || current.sourceToken !== sourceToken) return undefined;
+    changedKeys.push(...current.changedKeys);
+  }
+  return changedKeys;
+}
+
 /** @internal Records compiler-proven same-order Array.map metadata and returns the Array. */
 export function createCompilerKeyedMapUpdate(
   previous: unknown,
@@ -81,6 +126,66 @@ export function createCompilerKeyedMapUpdate(
       ...(previousUpdate ? { previous: previousUpdate } : {}),
     });
   }
+  return value;
+}
+
+/** @internal Preserves a proven native collection mutation while recording its executed key. */
+export function applyCompilerKeyedCollectionMutation(
+  collection: unknown,
+  method: unknown,
+  operation: CompilerKeyedCollectionMutation,
+  key: unknown,
+  value?: unknown,
+): unknown {
+  const args = operation === "map-set" ? [key, value] : [key];
+  const result = NATIVE_REFLECT_APPLY(method as (...args: unknown[]) => unknown, collection, args);
+  const target = compilerObject(collection);
+  if (!target) return result;
+
+  const kind: CompilerKeyedCollectionKind = operation.startsWith("set-") ? "set" : "map";
+  const nativeMethod =
+    operation === "set-add"
+      ? NATIVE_SET_ADD
+      : operation === "set-delete"
+        ? NATIVE_SET_DELETE
+        : operation === "map-set"
+          ? NATIVE_MAP_SET
+          : NATIVE_MAP_DELETE;
+  const nativePrototype = kind === "set" ? NATIVE_SET_PROTOTYPE : NATIVE_MAP_PROTOTYPE;
+  if (method !== nativeMethod || Object.getPrototypeOf(collection) !== nativePrototype) {
+    return result;
+  }
+
+  const existing = COMPILER_KEYED_COLLECTION_DRAFTS.get(target);
+  if (existing && existing.kind !== kind) return result;
+  if (existing) existing.changedKeys.push(key);
+  else COMPILER_KEYED_COLLECTION_DRAFTS.set(target, { kind, changedKeys: [key] });
+  return result;
+}
+
+/** @internal Connects compiler-owned immutable Set/Map mutations to their committed source. */
+export function createCompilerKeyedCollectionUpdate(
+  previous: unknown,
+  value: unknown,
+  kind: CompilerKeyedCollectionKind,
+): unknown {
+  const previousTarget = compilerObject(previous);
+  const valueTarget = compilerObject(value);
+  if (!previousTarget || !valueTarget || previousTarget === valueTarget) return value;
+  const draft = COMPILER_KEYED_COLLECTION_DRAFTS.get(valueTarget);
+  if (!draft || draft.kind !== kind || draft.changedKeys.length === 0) return value;
+
+  const sourceToken = compilerKeyedCollectionToken(previousTarget);
+  if (!sourceToken) return value;
+  const previousUpdate = !COMPILER_KEYED_COMMITTED_COLLECTIONS.has(previousTarget)
+    ? COMPILER_KEYED_COLLECTION_UPDATES.get(previousTarget)
+    : undefined;
+  COMPILER_KEYED_COLLECTION_UPDATES.set(valueTarget, {
+    kind,
+    sourceToken: previousUpdate?.sourceToken || sourceToken,
+    changedKeys: [...draft.changedKeys],
+    ...(previousUpdate ? { previous: previousUpdate } : {}),
+  });
   return value;
 }
 
@@ -947,11 +1052,26 @@ interface CompilerKeyedIdentityTargetSnapshot {
 interface CompilerKeyedMembershipTargetSnapshot {
   eligible: boolean;
   values?: ReadonlySet<unknown>;
+  previous?: CompilerKeyedMembershipTargetSnapshot;
+  changes?: ReadonlyMap<unknown, boolean>;
+  sourceToken?: object;
+  targetedKeys?: ReadonlySet<string>;
+  depth?: number;
 }
 
 interface CompilerKeyedMapLookupTargetSnapshot {
   eligible: boolean;
   values?: ReadonlyMap<unknown, unknown>;
+  previous?: CompilerKeyedMapLookupTargetSnapshot;
+  changes?: ReadonlyMap<unknown, CompilerKeyedMapLookupValue>;
+  sourceToken?: object;
+  targetedKeys?: ReadonlySet<string>;
+  depth?: number;
+}
+
+interface CompilerKeyedMapLookupValue {
+  present: boolean;
+  value?: unknown;
 }
 
 const UNSET_KEYED_ROW_BINDING = Symbol("unset interactive keyed-row binding");
@@ -973,10 +1093,93 @@ function keyedIdentityTargetSnapshot(value: unknown): CompilerKeyedIdentityTarge
 
 const NATIVE_SET_PROTOTYPE = Set.prototype;
 const NATIVE_SET_ADD = Set.prototype.add;
+const NATIVE_SET_DELETE = Set.prototype.delete;
 const NATIVE_SET_HAS = Set.prototype.has;
 const NATIVE_SET_VALUES = Set.prototype.values;
+const KEYED_COLLECTION_SNAPSHOT_MAX_DEPTH = 64;
 
-function keyedMembershipTargetSnapshot(value: unknown): CompilerKeyedMembershipTargetSnapshot {
+function materializeKeyedMembershipSnapshot(
+  snapshot: CompilerKeyedMembershipTargetSnapshot,
+): Set<unknown> | undefined {
+  if (!snapshot.eligible) return undefined;
+  if (snapshot.values) return new Set(snapshot.values);
+  if (!snapshot.previous || !snapshot.changes) return undefined;
+  const values = materializeKeyedMembershipSnapshot(snapshot.previous);
+  if (!values) return undefined;
+  for (const [key, present] of snapshot.changes) {
+    if (present) NATIVE_SET_ADD.call(values, key);
+    else NATIVE_SET_DELETE.call(values, key);
+  }
+  return values;
+}
+
+function keyedMembershipSnapshotHas(
+  snapshot: CompilerKeyedMembershipTargetSnapshot,
+  key: unknown,
+): boolean | undefined {
+  for (
+    let current: CompilerKeyedMembershipTargetSnapshot | undefined = snapshot;
+    current;
+    current = current.previous
+  ) {
+    if (!current.eligible) return undefined;
+    if (current.changes?.has(key)) return current.changes.get(key);
+    if (current.values) return NATIVE_SET_HAS.call(current.values, key);
+  }
+  return undefined;
+}
+
+function keyedMembershipDeltaSnapshot(
+  value: unknown,
+  previous: CompilerKeyedMembershipTargetSnapshot,
+): CompilerKeyedMembershipTargetSnapshot | undefined {
+  if (!previous.eligible || !previous.sourceToken) return undefined;
+  const target = compilerObject(value);
+  if (!target) return undefined;
+  const changedKeys = compilerKeyedCollectionChangedKeys(value, previous.sourceToken, "set");
+  if (!changedKeys) return undefined;
+  if (
+    Object.getPrototypeOf(value) !== NATIVE_SET_PROTOTYPE ||
+    Object.prototype.hasOwnProperty.call(value, "has") ||
+    (value as Set<unknown>).has !== NATIVE_SET_HAS
+  ) {
+    return undefined;
+  }
+
+  const changes = new Map<unknown, boolean>();
+  const targetedKeys = new Set<string>();
+  try {
+    for (const key of changedKeys) {
+      if (!keyedIdentityTargetSnapshot(key).eligible) return undefined;
+      const present = NATIVE_SET_HAS.call(value as Set<unknown>, key);
+      const before = keyedMembershipSnapshotHas(previous, key);
+      if (before === undefined) return undefined;
+      changes.set(key, present);
+      if (before !== present) NATIVE_SET_ADD.call(targetedKeys, String(key));
+    }
+  } catch {
+    return undefined;
+  }
+  const depth = (previous.depth || 0) + 1;
+  if (depth > KEYED_COLLECTION_SNAPSHOT_MAX_DEPTH) return undefined;
+  return {
+    eligible: true,
+    previous,
+    changes,
+    sourceToken: commitCompilerKeyedCollection(value),
+    targetedKeys,
+    depth,
+  };
+}
+
+function keyedMembershipTargetSnapshot(
+  value: unknown,
+  previous?: CompilerKeyedMembershipTargetSnapshot,
+): CompilerKeyedMembershipTargetSnapshot {
+  if (previous) {
+    const delta = keyedMembershipDeltaSnapshot(value, previous);
+    if (delta) return delta;
+  }
   if (typeof value !== "object" || value === null) return { eligible: false };
   let iterator: SetIterator<unknown>;
   try {
@@ -1000,14 +1203,23 @@ function keyedMembershipTargetSnapshot(value: unknown): CompilerKeyedMembershipT
   } catch {
     return { eligible: false };
   }
-  return { eligible: true, values };
+  return {
+    eligible: true,
+    values,
+    sourceToken: commitCompilerKeyedCollection(value),
+    depth: 0,
+  };
 }
 
 function keyedMembershipChangedKeys(
-  previous: ReadonlySet<unknown>,
-  next: ReadonlySet<unknown>,
+  previousSnapshot: CompilerKeyedMembershipTargetSnapshot,
+  nextSnapshot: CompilerKeyedMembershipTargetSnapshot,
 ): Set<string> {
+  if (nextSnapshot.targetedKeys) return new Set(nextSnapshot.targetedKeys);
+  const previous = materializeKeyedMembershipSnapshot(previousSnapshot);
+  const next = materializeKeyedMembershipSnapshot(nextSnapshot);
   const keys = new Set<string>();
+  if (!previous || !next) return keys;
   for (const value of previous) {
     if (!NATIVE_SET_HAS.call(next, value)) NATIVE_SET_ADD.call(keys, String(value));
   }
@@ -1019,7 +1231,9 @@ function keyedMembershipChangedKeys(
 
 const NATIVE_MAP_PROTOTYPE = Map.prototype;
 const NATIVE_MAP_GET = Map.prototype.get;
+const NATIVE_MAP_HAS = Map.prototype.has;
 const NATIVE_MAP_SET = Map.prototype.set;
+const NATIVE_MAP_DELETE = Map.prototype.delete;
 const NATIVE_MAP_ENTRIES = Map.prototype.entries;
 
 function isSafeKeyedMapLookupValue(value: unknown): boolean {
@@ -1033,7 +1247,96 @@ function isSafeKeyedMapLookupValue(value: unknown): boolean {
   );
 }
 
-function keyedMapLookupTargetSnapshot(value: unknown): CompilerKeyedMapLookupTargetSnapshot {
+function materializeKeyedMapLookupSnapshot(
+  snapshot: CompilerKeyedMapLookupTargetSnapshot,
+): Map<unknown, unknown> | undefined {
+  if (!snapshot.eligible) return undefined;
+  if (snapshot.values) return new Map(snapshot.values);
+  if (!snapshot.previous || !snapshot.changes) return undefined;
+  const values = materializeKeyedMapLookupSnapshot(snapshot.previous);
+  if (!values) return undefined;
+  for (const [key, entry] of snapshot.changes) {
+    if (entry.present) NATIVE_MAP_SET.call(values, key, entry.value);
+    else NATIVE_MAP_DELETE.call(values, key);
+  }
+  return values;
+}
+
+function keyedMapLookupSnapshotValue(
+  snapshot: CompilerKeyedMapLookupTargetSnapshot,
+  key: unknown,
+): CompilerKeyedMapLookupValue | undefined {
+  for (
+    let current: CompilerKeyedMapLookupTargetSnapshot | undefined = snapshot;
+    current;
+    current = current.previous
+  ) {
+    if (!current.eligible) return undefined;
+    const changed = current.changes?.get(key);
+    if (changed) return changed;
+    if (current.values) {
+      const present = NATIVE_MAP_HAS.call(current.values, key);
+      return { present, ...(present ? { value: NATIVE_MAP_GET.call(current.values, key) } : {}) };
+    }
+  }
+  return undefined;
+}
+
+function keyedMapLookupDeltaSnapshot(
+  value: unknown,
+  previous: CompilerKeyedMapLookupTargetSnapshot,
+): CompilerKeyedMapLookupTargetSnapshot | undefined {
+  if (!previous.eligible || !previous.sourceToken) return undefined;
+  const target = compilerObject(value);
+  if (!target) return undefined;
+  const changedKeys = compilerKeyedCollectionChangedKeys(value, previous.sourceToken, "map");
+  if (!changedKeys) return undefined;
+  if (
+    Object.getPrototypeOf(value) !== NATIVE_MAP_PROTOTYPE ||
+    Object.prototype.hasOwnProperty.call(value, "get") ||
+    (value as Map<unknown, unknown>).get !== NATIVE_MAP_GET
+  ) {
+    return undefined;
+  }
+
+  const changes = new Map<unknown, CompilerKeyedMapLookupValue>();
+  const targetedKeys = new Set<string>();
+  try {
+    for (const key of changedKeys) {
+      if (!keyedIdentityTargetSnapshot(key).eligible) return undefined;
+      const present = NATIVE_MAP_HAS.call(value as Map<unknown, unknown>, key);
+      const entry = present ? NATIVE_MAP_GET.call(value as Map<unknown, unknown>, key) : undefined;
+      if (present && !isSafeKeyedMapLookupValue(entry)) return undefined;
+      const before = keyedMapLookupSnapshotValue(previous, key);
+      if (!before) return undefined;
+      changes.set(key, { present, ...(present ? { value: entry } : {}) });
+      if (before.present !== present || !Object.is(before.value, entry)) {
+        NATIVE_SET_ADD.call(targetedKeys, String(key));
+      }
+    }
+  } catch {
+    return undefined;
+  }
+  const depth = (previous.depth || 0) + 1;
+  if (depth > KEYED_COLLECTION_SNAPSHOT_MAX_DEPTH) return undefined;
+  return {
+    eligible: true,
+    previous,
+    changes,
+    sourceToken: commitCompilerKeyedCollection(value),
+    targetedKeys,
+    depth,
+  };
+}
+
+function keyedMapLookupTargetSnapshot(
+  value: unknown,
+  previous?: CompilerKeyedMapLookupTargetSnapshot,
+): CompilerKeyedMapLookupTargetSnapshot {
+  if (previous) {
+    const delta = keyedMapLookupDeltaSnapshot(value, previous);
+    if (delta) return delta;
+  }
   if (typeof value !== "object" || value === null) return { eligible: false };
   let iterator: MapIterator<[unknown, unknown]>;
   try {
@@ -1059,14 +1362,23 @@ function keyedMapLookupTargetSnapshot(value: unknown): CompilerKeyedMapLookupTar
   } catch {
     return { eligible: false };
   }
-  return { eligible: true, values };
+  return {
+    eligible: true,
+    values,
+    sourceToken: commitCompilerKeyedCollection(value),
+    depth: 0,
+  };
 }
 
 function keyedMapLookupChangedKeys(
-  previous: ReadonlyMap<unknown, unknown>,
-  next: ReadonlyMap<unknown, unknown>,
+  previousSnapshot: CompilerKeyedMapLookupTargetSnapshot,
+  nextSnapshot: CompilerKeyedMapLookupTargetSnapshot,
 ): Set<string> {
+  if (nextSnapshot.targetedKeys) return new Set(nextSnapshot.targetedKeys);
+  const previous = materializeKeyedMapLookupSnapshot(previousSnapshot);
+  const next = materializeKeyedMapLookupSnapshot(nextSnapshot);
   const keys = new Set<string>();
+  if (!previous || !next) return keys;
   for (const [key, value] of previous) {
     if (!Object.is(value, NATIVE_MAP_GET.call(next, key))) {
       NATIVE_SET_ADD.call(keys, String(key));
@@ -3591,7 +3903,10 @@ function createKeyedRowsBlockComponent(
           );
         }
         if (binding.membershipTarget) {
-          const snapshot = keyedMembershipTargetSnapshot(binding.membershipTarget.read());
+          const snapshot = keyedMembershipTargetSnapshot(
+            binding.membershipTarget.read(),
+            this.membershipTargets.get(bindingIndex),
+          );
           if (!snapshot.eligible) {
             this.activateFallback(afterCommit);
             return true;
@@ -3599,7 +3914,10 @@ function createKeyedRowsBlockComponent(
           nextMembershipTargets.set(bindingIndex, snapshot);
         }
         if (binding.mapLookupTarget) {
-          const snapshot = keyedMapLookupTargetSnapshot(binding.mapLookupTarget.read());
+          const snapshot = keyedMapLookupTargetSnapshot(
+            binding.mapLookupTarget.read(),
+            this.mapLookupTargets.get(bindingIndex),
+          );
           if (!snapshot.eligible) {
             this.activateFallback(afterCommit);
             return true;
@@ -3630,9 +3948,7 @@ function createKeyedRowsBlockComponent(
           binding.dependencies[0] === membershipTarget.dependency &&
           dirtyState.has(membershipTarget.dependency) &&
           previousMembershipTarget?.eligible &&
-          previousMembershipTarget.values &&
-          nextMembershipTarget?.eligible &&
-          nextMembershipTarget.values,
+          nextMembershipTarget?.eligible,
         );
         const mapLookupTarget = binding.mapLookupTarget;
         const previousMapLookupTarget = this.mapLookupTargets.get(bindingIndex);
@@ -3643,16 +3959,11 @@ function createKeyedRowsBlockComponent(
           binding.dependencies[0] === mapLookupTarget.dependency &&
           dirtyState.has(mapLookupTarget.dependency) &&
           previousMapLookupTarget?.eligible &&
-          previousMapLookupTarget.values &&
-          nextMapLookupTarget?.eligible &&
-          nextMapLookupTarget.values,
+          nextMapLookupTarget?.eligible,
         );
 
-        if (canTargetMapLookup && previousMapLookupTarget?.values && nextMapLookupTarget?.values) {
-          const keys = keyedMapLookupChangedKeys(
-            previousMapLookupTarget.values,
-            nextMapLookupTarget.values,
-          );
+        if (canTargetMapLookup && previousMapLookupTarget && nextMapLookupTarget) {
+          const keys = keyedMapLookupChangedKeys(previousMapLookupTarget, nextMapLookupTarget);
           for (const key of keys) {
             const instance = this.instances.get(key);
             if (instance) {
@@ -3665,15 +3976,8 @@ function createKeyedRowsBlockComponent(
               );
             }
           }
-        } else if (
-          canTargetMembership &&
-          previousMembershipTarget?.values &&
-          nextMembershipTarget?.values
-        ) {
-          const keys = keyedMembershipChangedKeys(
-            previousMembershipTarget.values,
-            nextMembershipTarget.values,
-          );
+        } else if (canTargetMembership && previousMembershipTarget && nextMembershipTarget) {
+          const keys = keyedMembershipChangedKeys(previousMembershipTarget, nextMembershipTarget);
           for (const key of keys) {
             const instance = this.instances.get(key);
             if (instance) {

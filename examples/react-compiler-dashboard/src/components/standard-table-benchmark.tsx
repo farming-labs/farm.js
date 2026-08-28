@@ -45,6 +45,8 @@ export function StandardTableBenchmark() {
   const [selected, setSelected] = useState(0);
   const [markedIds, setMarkedIds] = useState(() => new Set<number>());
   const [queueById, setQueueById] = useState(() => new Map<number, string>());
+  const [snapshotMarkedIds, setSnapshotMarkedIds] = useState(() => new Set<number>());
+  const [snapshotQueueById, setSnapshotQueueById] = useState(() => new Map<number, string>());
   const [operation, setOperation] = useState("initial 100 rows");
   const [revision, setRevision] = useState(0);
 
@@ -97,6 +99,8 @@ export function StandardTableBenchmark() {
             setSelected(0);
             setMarkedIds(new Set());
             setQueueById(new Map());
+            setSnapshotMarkedIds(new Set());
+            setSnapshotQueueById(new Map());
             setOperation("create 1,000");
             setRevision((value) => value + 1);
           }}
@@ -114,6 +118,8 @@ export function StandardTableBenchmark() {
             setSelected(0);
             setMarkedIds(new Set());
             setQueueById(new Map());
+            setSnapshotMarkedIds(new Set());
+            setSnapshotQueueById(new Map());
             setOperation("create 10,000");
             setRevision((value) => value + 1);
           }}
@@ -144,6 +150,8 @@ export function StandardTableBenchmark() {
             setSelected(0);
             setMarkedIds(new Set());
             setQueueById(new Map());
+            setSnapshotMarkedIds(new Set());
+            setSnapshotQueueById(new Map());
             setOperation("replace 1,000");
             setRevision((value) => value + 1);
           }}
@@ -174,10 +182,29 @@ export function StandardTableBenchmark() {
               const middle = Math.floor(rows.length / 2);
               const first = rows[middle]?.id;
               const second = rows[middle + 1]?.id;
-              if (first === undefined || second === undefined) return current;
-              return current.has(first)
-                ? new Set([rows[middle + 2]?.id ?? first, rows[middle + 3]?.id ?? second])
-                : new Set([first, second]);
+              const third = rows[middle + 2]?.id;
+              const fourth = rows[middle + 3]?.id;
+              if (
+                first === undefined ||
+                second === undefined ||
+                third === undefined ||
+                fourth === undefined
+              ) {
+                return current;
+              }
+              const next = new Set(current);
+              if (next.has(first)) {
+                next.delete(first);
+                next.delete(second);
+                next.add(third);
+                next.add(fourth);
+              } else {
+                next.delete(third);
+                next.delete(fourth);
+                next.add(first);
+                next.add(second);
+              }
+              return next;
             });
             setOperation("mark two rows");
             setRevision((value) => value + 1);
@@ -193,22 +220,115 @@ export function StandardTableBenchmark() {
               const middle = Math.floor(rows.length / 2);
               const first = rows[middle]?.id;
               const second = rows[middle + 1]?.id;
-              if (first === undefined || second === undefined) return current;
-              return current.has(first)
-                ? new Map([
-                    [rows[middle + 2]?.id ?? first, "expedite"],
-                    [rows[middle + 3]?.id ?? second, "hold"],
-                  ])
-                : new Map([
-                    [first, "expedite"],
-                    [second, "hold"],
-                  ]);
+              const third = rows[middle + 2]?.id;
+              const fourth = rows[middle + 3]?.id;
+              if (
+                first === undefined ||
+                second === undefined ||
+                third === undefined ||
+                fourth === undefined
+              ) {
+                return current;
+              }
+              const next = new Map(current);
+              if (next.has(first)) {
+                next.delete(first);
+                next.delete(second);
+                next.set(third, "expedite");
+                next.set(fourth, "hold");
+              } else {
+                next.delete(third);
+                next.delete(fourth);
+                next.set(first, "expedite");
+                next.set(second, "hold");
+              }
+              return next;
             });
             setOperation("queue two rows");
             setRevision((value) => value + 1);
           }}
         >
           Queue two rows
+        </button>
+        <button
+          data-action="table-seed-dense-targets"
+          type="button"
+          onClick={() => {
+            setMarkedIds(new Set(rows.map((row) => row.id)));
+            setQueueById(new Map(rows.map((row) => [row.id, "dense"])));
+            setSnapshotMarkedIds(new Set(rows.map((row) => row.id)));
+            setSnapshotQueueById(new Map(rows.map((row) => [row.id, "dense"])));
+            setOperation("seed dense row targets");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Seed dense targets
+        </button>
+        <button
+          data-action="table-toggle-dense-mark"
+          type="button"
+          onClick={() => {
+            setMarkedIds((current) => {
+              const target = rows[Math.floor(rows.length / 2)]?.id;
+              if (target === undefined) return current;
+              const next = new Set(current);
+              if (next.has(target)) next.delete(target);
+              else next.add(target);
+              return next;
+            });
+            setOperation("toggle one dense mark");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Toggle one dense mark
+        </button>
+        <button
+          data-action="table-update-dense-queue"
+          type="button"
+          onClick={() => {
+            setQueueById((current) => {
+              const target = rows[Math.floor(rows.length / 2)]?.id;
+              if (target === undefined) return current;
+              const next = new Map(current);
+              next.set(target, next.get(target) === "priority" ? "dense" : "priority");
+              return next;
+            });
+            setOperation("update one dense queue value");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Update one dense queue value
+        </button>
+        <button
+          data-action="table-toggle-snapshot-mark"
+          type="button"
+          onClick={() => {
+            const target = rows[Math.floor(rows.length / 2)]?.id;
+            if (target === undefined) return;
+            const next = new Set(snapshotMarkedIds);
+            if (next.has(target)) next.delete(target);
+            else next.add(target);
+            setSnapshotMarkedIds(next);
+            setOperation("toggle one snapshot mark");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Toggle one snapshot mark
+        </button>
+        <button
+          data-action="table-update-snapshot-queue"
+          type="button"
+          onClick={() => {
+            const target = rows[Math.floor(rows.length / 2)]?.id;
+            if (target === undefined) return;
+            const next = new Map(snapshotQueueById);
+            next.set(target, next.get(target) === "priority" ? "dense" : "priority");
+            setSnapshotQueueById(next);
+            setOperation("update one snapshot queue value");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Update one snapshot queue value
         </button>
         <button
           data-action="table-swap"
@@ -242,6 +362,8 @@ export function StandardTableBenchmark() {
             setSelected(0);
             setMarkedIds(new Set());
             setQueueById(new Map());
+            setSnapshotMarkedIds(new Set());
+            setSnapshotQueueById(new Map());
             setOperation("clear");
             setRevision((value) => value + 1);
           }}
@@ -270,6 +392,8 @@ export function StandardTableBenchmark() {
                 className={selected === row.id ? "table-row--selected" : ""}
                 data-marked={markedIds.has(row.id)}
                 data-queue={queueById.get(row.id) ?? "none"}
+                data-snapshot-marked={snapshotMarkedIds.has(row.id)}
+                data-snapshot-queue={snapshotQueueById.get(row.id) ?? "none"}
                 data-row-id={row.id}
                 data-selected={selected === row.id}
                 key={row.id}

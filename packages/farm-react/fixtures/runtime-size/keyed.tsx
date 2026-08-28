@@ -25,8 +25,8 @@ export function KeyedTable() {
             key={row.id}
             onClick={() => {
               setSelected(row.id);
-              setMarked(new Set([row.id]));
-              setQueueById(new Map([[row.id, "ready"]]));
+              setMarked((current) => new Set(current).add(row.id));
+              setQueueById((current) => new Map(current).set(row.id, "ready"));
             }}
           >
             {row.label}

@@ -24,18 +24,18 @@ is enforced on every pull request instead of serving only as a manually recorded
 | Fixture                                           | Compiler off gzip | Compiler on gzip | Compiler premium |
 | ------------------------------------------------- | ----------------: | ---------------: | ---------------: |
 | Direct text, attribute, style, and event bindings |          60,043 B |         63,721 B |          3,678 B |
-| Keyed rows, LIS, scalar, Set, and Map targeting   |          60,176 B |         70,211 B |         10,035 B |
+| Keyed rows, LIS, scalar, Set, and Map targeting   |          60,179 B |         71,136 B |         10,957 B |
 
-The isolated compatibility runtime contributes 15,988 B gzip over the React control. The
-compiler-selected core contributes 3,766 B, a **76.4% reduction**. This comparison uses the same
+The isolated compatibility runtime contributes 16,484 B gzip over the React control. The
+compiler-selected core contributes 3,766 B, a **77.2% reduction**. This comparison uses the same
 hand-authored compiled definition and changes only the runtime entry used to create it.
 
 The keyed fixture retains `FarmCompiledKeyedRows` plus compiler-emitted `identityTarget`,
-`membershipTarget`, and `mapLookupTarget` metadata, but rejects the optional row-conditional and
-keyed-map-hint runtimes. Map lookup targeting adds 414 B gzip to the keyed fixture's compiler
-premium. The direct compiler premium and isolated core runtime remain byte-for-byte unchanged. The
-direct fixture rejects every structural runtime marker. The checked machine-readable result is
-[`RUNTIME_SIZE_RESULTS.json`](./RUNTIME_SIZE_RESULTS.json).
+`membershipTarget`, and `mapLookupTarget` metadata, plus Set/Map producer-delta helpers. It rejects
+the optional row-conditional and keyed-map-hint runtimes. The collection-delta fixture raises the
+keyed compiler premium by 922 B gzip while keeping the direct compiler premium and isolated core
+runtime byte-for-byte unchanged. The direct fixture rejects every structural runtime marker. The
+checked machine-readable result is [`RUNTIME_SIZE_RESULTS.json`](./RUNTIME_SIZE_RESULTS.json).
 
 ## Existing production benchmark audit
 

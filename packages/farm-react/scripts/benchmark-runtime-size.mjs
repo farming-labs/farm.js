@@ -67,6 +67,8 @@ const forbiddenDirectMarkers = [
   "FarmCompiledKeyedRangesBlock",
   "FarmCompiledMixedRangesBlock",
   "FarmCompiledComponentBlock",
+  '"set-add"',
+  '"map-set"',
 ];
 for (const marker of forbiddenDirectMarkers) {
   if (directOn.code.includes(marker) || runtimeCore.code.includes(marker)) {
@@ -90,6 +92,9 @@ if (!keyedOn.code.includes("membershipTarget")) {
 }
 if (!keyedOn.code.includes("mapLookupTarget")) {
   throw new Error("Keyed selection fixture did not retain its Map-lookup binding target.");
+}
+if (!keyedOn.code.includes('"set-add"') || !keyedOn.code.includes('"map-set"')) {
+  throw new Error("Keyed selection fixture did not retain its Set/Map collection-delta helpers.");
 }
 
 const fullRuntimePremium = runtimeFull.gzip - runtimeControl.gzip;

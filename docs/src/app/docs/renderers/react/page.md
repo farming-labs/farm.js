@@ -302,6 +302,7 @@ After a successful build, Farm writes `.farm/react-compiler.json`:
     "componentsConsidered": 4,
     "compiled": 2,
     "fallback": 2,
+    "keyedCollectionUpdateHints": 3,
     "keyedIdentityTargets": 2,
     "keyedMapLookupTargets": 1,
     "keyedMembershipTargets": 1,
@@ -318,6 +319,7 @@ After a successful build, Farm writes `.farm/react-compiler.json`:
       "id": "src/Products.tsx",
       "compiled": ["ProductRow"],
       "optimizations": {
+        "keyedCollectionUpdateHints": 3,
         "keyedIdentityTargets": 2,
         "keyedMapLookupTargets": 1,
         "keyedMembershipTargets": 1,
@@ -343,6 +345,8 @@ row bindings that can update by looking up the previous and next key directly.
 local native `Map`.
 `keyedMembershipTargets` counts row bindings that can update from the changed members of a local
 native `Set`.
+`keyedCollectionUpdateHints` counts proven native Set/Map mutation sites that can carry their
+executed keys to the runtime.
 `keyedMapUpdateHints` counts setter sites where the compiler proved that a direct keyed collection
 can report its changed row indexes while an immutable `map()` runs. The same counts appear per
 module. `selected` is `true` when an annotation explicitly requested compilation. Module paths are
@@ -793,6 +797,45 @@ dependencies, React-owned rows, nested blocks, and structural key dependencies d
 path. A failed runtime guard returns that keyed boundary to React before compiled bindings run.
 No option or component primitive is required. The report exposes the emitted binding count as
 `keyedMapLookupTargets`.
+
+#### Producer-side Set and Map deltas
+
+The Set-membership and Map-lookup paths above normally compare complete previous and next
+snapshots to discover which keys changed. Farm can remove that second collection scan when it can
+prove a compiler-owned immutable functional update:
+
+```tsx
+setMarkedIds((current) => {
+  const next = new Set(current);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  return next;
+});
+
+setStatusById((current) => new Map(current).set(id, "ready"));
+```
+
+The JavaScript written by the application still creates and mutates its fresh collection, so
+`new Set(current)` and `new Map(current)` retain their normal cost and semantics. At build time,
+the compiler wraps only proven native `Set.add`, `Set.delete`, `Map.set`, and `Map.delete` calls.
+The generated metadata contains the keys whose mutations actually executed. At commit, the
+runtime validates those keys against the previous collection and updates only matching keyed-row
+bindings instead of walking every old and new entry to rediscover the delta.
+
+Concise `new Set(current).add(key)` and `new Map(current).set(key, value)` updaters are supported.
+A block updater may clone `current` once into a `const`, read `has`, `get`, or `size`, perform native
+mutations, and return `current`, that clone, or a fresh same-kind collection. Queued functional
+updates compose. Runtime snapshots use persistent change overlays and compact after a bounded
+chain, so repeated updates do not build an unlimited lookup history.
+
+The proof requires a native collection created by the same local `useState` declaration. Every
+setter use for that state must be either a fresh same-kind replacement or a proven updater. Direct
+state mutation, unknown setter results, state or draft escape, draft aliases, shadowed
+constructors, collection subclasses/proxies, object keys, and object Map values disable the delta
+path. A failed proof keeps the existing full snapshot comparison; a failed runtime safety check
+returns the boundary to React before compiled binding reads. This is an internal optimization and
+adds no component, directive, or configuration. Reports expose the number of wrapped native
+mutation sites as `keyedCollectionUpdateHints`.
 
 #### Mutation-aware same-order updates
 
@@ -1535,6 +1578,11 @@ The package and example test suites verify more than generated code:
 - mutation-aware keyed `map()` updates patch only compiler-reported same-key row indexes, compose
   queued hints across multiple keyed boundaries, ignore unrelated state in the same flush, and
   reject key changes or mixed unhinted collection updates into the complete reconciliation path;
+- compiler-proven immutable Set/Map updaters carry exact native mutation keys across queued
+  updates, compact long persistent snapshot chains, and fall back before binding reads for unsafe
+  keys, values, collections, or ownership;
+- 2,000 deterministic hinted Set mutations and 2,000 deterministic hinted Map mutations match
+  normal React while evaluating only changed present-row keys;
 - a 2,048-row instrumentation test changes one item with one key read and one binding read, while
   2,000 deterministic queued updates match normal React with one compiled owner execution;
 - keyed DOM ranges preserve static siblings around multiple lists, support adjacent empty ranges
@@ -1605,10 +1653,12 @@ The package and example test suites verify more than generated code:
   updates outer and nested row conditions, preserves surviving row and branch identity, removes and
   inserts a row, and observes zero owner update executions;
 - the production 10,000/20,000-row benchmark requires nonzero `keyedIdentityTargets`,
-  `keyedMapLookupTargets`, `keyedMembershipTargets`, and `keyedMapUpdateHints` report counts,
+  `keyedMapLookupTargets`, `keyedMembershipTargets`, `keyedCollectionUpdateHints`, and
+  `keyedMapUpdateHints` report counts,
   preserves the keyed-update speedup floor, checks that scalar selection, Set membership, and Map
-  lookups remain key-directed at scale, and passes DOM correctness, React-relative regression, and
-  normalized scalability gates;
+  lookups remain key-directed at scale, compares dense hinted Set/Map updates with equivalent
+  compiled snapshot controls, and passes DOM correctness, React-relative regression, direct-delta,
+  and normalized scalability gates;
 - the public `List` renders iterable and nullish collections correctly with the compiler off;
 - the packaged runtime, including a keyed-range component root, editable and interactive keyed-row
   events, row-local conditions, reorders, identity, selection, and hydration, is exercised

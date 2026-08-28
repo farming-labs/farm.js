@@ -3,7 +3,12 @@ import { act } from "react";
 import { createRoot, hydrateRoot } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createCompiledComponent, type CompilerStateUpdater } from "../compiler-runtime";
+import {
+  applyCompilerKeyedCollectionMutation,
+  createCompiledComponent,
+  createCompilerKeyedCollectionUpdate,
+  type CompilerStateUpdater,
+} from "../compiler-runtime";
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean;
@@ -47,6 +52,25 @@ function items(count: number): Item[] {
 
 function displayLookupValue(value: unknown): unknown {
   return value ?? "none";
+}
+
+function hintedMapSet(
+  previous: unknown,
+  key: unknown,
+  value: unknown,
+): ReturnType<typeof createCompilerKeyedCollectionUpdate> {
+  const next = new Map(previous as Map<unknown, unknown>);
+  applyCompilerKeyedCollectionMutation(next, next.set, "map-set", key, value);
+  return createCompilerKeyedCollectionUpdate(previous, next, "map");
+}
+
+function hintedMapDelete(
+  previous: unknown,
+  key: unknown,
+): ReturnType<typeof createCompilerKeyedCollectionUpdate> {
+  const next = new Map(previous as Map<unknown, unknown>);
+  applyCompilerKeyedCollectionMutation(next, next.delete, "map-delete", key);
+  return createCompilerKeyedCollectionUpdate(previous, next, "map");
 }
 
 function createMapLookupHarness(initialItems: Item[], initialLookup: Map<unknown, unknown>) {
@@ -141,6 +165,89 @@ function lookupSnapshot(container: Element): Array<[string | null, string | null
 }
 
 describe("compiled keyed Map lookup targets", () => {
+  it("consumes compiler-proven Map deltas across queued setters", async () => {
+    const initial = items(2_000);
+    const initialLookup = new Map<unknown, unknown>(
+      initial.map((item, index) => [item.id, `status-${index}`]),
+    );
+    const harness = createMapLookupHarness(initial, initialLookup);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Rows />));
+
+    harness.counters.bindingReads = 0;
+    harness.counters.targetReads = 0;
+    await act(async () => {
+      harness.setLookup((current) => hintedMapSet(current, "row-1500", "urgent"));
+      harness.setLookup((current) => hintedMapDelete(current, "row-10"));
+      harness.setLookup((current) => hintedMapSet(current, "missing", "ignored"));
+      await flushCompilerUpdates();
+    });
+
+    expect(harness.counters.bindingReads).toBe(2);
+    expect(harness.counters.targetReads).toBe(1);
+    expect(container.querySelector('[data-key="row-10"]')?.getAttribute("data-status")).toBe(
+      "none",
+    );
+    expect(container.querySelector('[data-key="row-1500"]')?.getAttribute("data-status")).toBe(
+      "urgent",
+    );
+    expect(harness.counters.executions).toBe(1);
+  });
+
+  it("keeps hinted Map snapshots correct across compaction and ordinary replacements", async () => {
+    const initial = items(96);
+    const harness = createMapLookupHarness(initial, new Map());
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Rows />));
+
+    for (let index = 0; index < 80; index += 1) {
+      await act(async () => {
+        harness.setLookup((current) =>
+          hintedMapSet(current, `row-${index % initial.length}`, `value-${index}`),
+        );
+        await flushCompilerUpdates();
+      });
+    }
+    await act(async () => {
+      harness.setLookup(new Map([["row-90", "replacement"]]));
+      await flushCompilerUpdates();
+    });
+
+    expect(container.querySelector('[data-key="row-79"]')?.getAttribute("data-status")).toBe(
+      "none",
+    );
+    expect(container.querySelector('[data-key="row-90"]')?.getAttribute("data-status")).toBe(
+      "replacement",
+    );
+    expect(harness.counters.executions).toBe(1);
+  });
+
+  it("rejects unsafe hinted Map values before compiled binding reads", async () => {
+    const harness = createMapLookupHarness(items(16), new Map());
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Rows />));
+
+    harness.counters.bindingReads = 0;
+    await act(async () => {
+      harness.setLookup((current) => hintedMapSet(current, "row-8", { unsafe: true }));
+      await flushCompilerUpdates();
+    });
+
+    expect(harness.counters.bindingReads).toBe(0);
+    expect(container.querySelector('[data-key="row-8"]')?.getAttribute("data-status")).toBe(
+      "[object Object]",
+    );
+  });
+
   it("evaluates only row keys whose mapped value changed", async () => {
     const initial = items(2_000);
     const harness = createMapLookupHarness(initial, new Map([["row-10", "ready"]]));
@@ -414,6 +521,82 @@ describe("compiled keyed Map lookup targets", () => {
     }
   });
 
+  it("matches React across 2,000 randomized compiler-hinted Map mutations", async () => {
+    const initial = items(128);
+    const harness = createMapLookupHarness(initial, new Map());
+    let reactSet: React.Dispatch<React.SetStateAction<Map<unknown, unknown>>> = () => undefined;
+    function Normal() {
+      const [lookup, setLookup] = useState<Map<unknown, unknown>>(new Map());
+      reactSet = setLookup;
+      return (
+        <ul>
+          {initial.map((item) => (
+            <li
+              data-key={String(item.id)}
+              data-status={displayLookupValue(lookup.get(item.id)) as string}
+              key={String(item.id)}
+            >
+              {item.label}
+            </li>
+          ))}
+        </ul>
+      );
+    }
+
+    const compiledContainer = document.createElement("div");
+    const reactContainer = document.createElement("div");
+    document.body.append(compiledContainer, reactContainer);
+    const compiledRoot = createRoot(compiledContainer);
+    const reactRoot = createRoot(reactContainer);
+    roots.push(compiledRoot, reactRoot);
+    await act(async () => {
+      compiledRoot.render(<harness.Rows />);
+      reactRoot.render(<Normal />);
+    });
+
+    let random = 0x6d617044;
+    const nextRandom = () => (random = (Math.imul(random, 1_664_525) + 1_013_904_223) >>> 0);
+    let committed = new Map<unknown, unknown>();
+    for (let batch = 0; batch < 100; batch += 1) {
+      const final = new Map(committed);
+      harness.counters.bindingReads = 0;
+      await act(async () => {
+        for (let update = 0; update < 20; update += 1) {
+          const value = nextRandom();
+          const key = value % 13 === 0 ? `missing-${value}` : `row-${value % initial.length}`;
+          if (value % 5 === 0) {
+            final.delete(key);
+            harness.setLookup((current) => hintedMapDelete(current, key));
+            reactSet((current) => {
+              const next = new Map(current);
+              next.delete(key);
+              return next;
+            });
+          } else {
+            const status = `status-${nextRandom() % 11}`;
+            final.set(key, status);
+            harness.setLookup((current) => hintedMapSet(current, key, status));
+            reactSet((current) => new Map(current).set(key, status));
+          }
+        }
+        await flushCompilerUpdates();
+      });
+      const keys = new Set([...committed.keys(), ...final.keys()]);
+      const changedRows = [...keys].filter(
+        (key) =>
+          (committed.has(key) !== final.has(key) ||
+            !Object.is(committed.get(key), final.get(key))) &&
+          initial.some((item) => Object.is(item.id, key)),
+      ).length;
+      expect(harness.counters.bindingReads, `hinted reads in batch ${batch}`).toBe(changedRows);
+      expect(lookupSnapshot(compiledContainer), `hinted DOM after batch ${batch}`).toEqual(
+        lookupSnapshot(reactContainer),
+      );
+      committed = final;
+    }
+    expect(harness.counters.executions).toBe(1);
+  });
+
   it("is StrictMode-safe and drops a queued Map update after unmount", async () => {
     const harness = createMapLookupHarness(items(16), new Map());
     const container = document.createElement("div");
@@ -430,7 +613,7 @@ describe("compiled keyed Map lookup targets", () => {
 
     harness.counters.bindingReads = 0;
     await act(async () => {
-      harness.setLookup(new Map([["row-8", "done"]]));
+      harness.setLookup((current) => hintedMapSet(current, "row-8", "done"));
       root.unmount();
       roots.splice(roots.indexOf(root), 1);
       await flushCompilerUpdates();
@@ -453,7 +636,8 @@ describe("compiled keyed Map lookup targets", () => {
 
     harness.counters.bindingReads = 0;
     await act(async () => {
-      harness.setLookup(new Map([["row-20", "done"]]));
+      harness.setLookup((current) => hintedMapDelete(current, "row-1"));
+      harness.setLookup((current) => hintedMapSet(current, "row-20", "done"));
       await flushCompilerUpdates();
     });
 

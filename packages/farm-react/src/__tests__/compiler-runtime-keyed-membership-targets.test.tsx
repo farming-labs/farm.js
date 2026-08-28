@@ -2,7 +2,12 @@ import React, { StrictMode, useState } from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createCompiledComponent, type CompilerStateUpdater } from "../compiler-runtime";
+import {
+  applyCompilerKeyedCollectionMutation,
+  createCompiledComponent,
+  createCompilerKeyedCollectionUpdate,
+  type CompilerStateUpdater,
+} from "../compiler-runtime";
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean;
@@ -42,6 +47,17 @@ function items(count: number): Item[] {
     id: `row-${index}`,
     label: `Row ${index}`,
   }));
+}
+
+function hintedSetMutation(
+  previous: unknown,
+  operation: "set-add" | "set-delete",
+  key: unknown,
+): ReturnType<typeof createCompilerKeyedCollectionUpdate> {
+  const next = new Set(previous as Set<unknown>);
+  const method = operation === "set-add" ? next.add : next.delete;
+  applyCompilerKeyedCollectionMutation(next, method, operation, key);
+  return createCompilerKeyedCollectionUpdate(previous, next, "set");
 }
 
 function createMembershipHarness(initialItems: Item[], initialMembership: Set<unknown>) {
@@ -133,6 +149,87 @@ function membershipSnapshot(container: Element): Array<[string | null, string | 
 }
 
 describe("compiled keyed membership targets", () => {
+  it("consumes compiler-proven Set deltas across queued setters", async () => {
+    const initial = items(2_000);
+    const harness = createMembershipHarness(
+      initial,
+      new Set(initial.slice(0, 1_000).map((item) => item.id)),
+    );
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Rows />));
+
+    harness.counters.bindingReads = 0;
+    harness.counters.targetReads = 0;
+    await act(async () => {
+      harness.setMembership((current) => hintedSetMutation(current, "set-delete", "row-10"));
+      harness.setMembership((current) => hintedSetMutation(current, "set-add", "row-1500"));
+      harness.setMembership((current) => hintedSetMutation(current, "set-add", "missing"));
+      await flushCompilerUpdates();
+    });
+
+    expect(harness.counters.bindingReads).toBe(2);
+    expect(harness.counters.targetReads).toBe(1);
+    expect(container.querySelector('[data-key="row-10"]')?.getAttribute("data-marked")).toBe(
+      "false",
+    );
+    expect(container.querySelector('[data-key="row-1500"]')?.getAttribute("data-marked")).toBe(
+      "true",
+    );
+    expect(harness.counters.executions).toBe(1);
+  });
+
+  it("keeps hinted Set snapshots correct across compaction and ordinary replacements", async () => {
+    const initial = items(96);
+    const harness = createMembershipHarness(initial, new Set());
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Rows />));
+
+    for (let index = 0; index < 80; index += 1) {
+      await act(async () => {
+        harness.setMembership((current) =>
+          hintedSetMutation(current, "set-add", `row-${index % initial.length}`),
+        );
+        await flushCompilerUpdates();
+      });
+    }
+    await act(async () => {
+      harness.setMembership(new Set(["row-90"]));
+      await flushCompilerUpdates();
+    });
+
+    expect(container.querySelector('[data-key="row-79"]')?.getAttribute("data-marked")).toBe(
+      "false",
+    );
+    expect(container.querySelector('[data-key="row-90"]')?.getAttribute("data-marked")).toBe(
+      "true",
+    );
+    expect(harness.counters.executions).toBe(1);
+  });
+
+  it("rejects unsafe hinted Set keys before compiled binding reads", async () => {
+    const harness = createMembershipHarness(items(16), new Set());
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Rows />));
+
+    harness.counters.bindingReads = 0;
+    await act(async () => {
+      harness.setMembership((current) => hintedSetMutation(current, "set-add", { unsafe: true }));
+      await flushCompilerUpdates();
+    });
+
+    expect(harness.counters.bindingReads).toBe(0);
+    expect(harness.counters.executions).toBe(1);
+  });
+
   it("evaluates only keys in the Set symmetric difference", async () => {
     const initial = items(2_000);
     const harness = createMembershipHarness(initial, new Set(["row-10"]));
@@ -344,6 +441,75 @@ describe("compiled keyed membership targets", () => {
     }
   });
 
+  it("matches React across 2,000 randomized compiler-hinted Set mutations", async () => {
+    const initial = items(128);
+    const harness = createMembershipHarness(initial, new Set());
+    let reactSet: React.Dispatch<React.SetStateAction<Set<unknown>>> = () => undefined;
+    function Normal() {
+      const [membership, setMembership] = useState<Set<unknown>>(new Set());
+      reactSet = setMembership;
+      return (
+        <ul>
+          {initial.map((item) => (
+            <li
+              data-key={String(item.id)}
+              data-marked={membership.has(item.id)}
+              key={String(item.id)}
+            >
+              {item.label}
+            </li>
+          ))}
+        </ul>
+      );
+    }
+
+    const compiledContainer = document.createElement("div");
+    const reactContainer = document.createElement("div");
+    document.body.append(compiledContainer, reactContainer);
+    const compiledRoot = createRoot(compiledContainer);
+    const reactRoot = createRoot(reactContainer);
+    roots.push(compiledRoot, reactRoot);
+    await act(async () => {
+      compiledRoot.render(<harness.Rows />);
+      reactRoot.render(<Normal />);
+    });
+
+    let random = 0x5e7a1144;
+    const nextRandom = () => (random = (Math.imul(random, 1_664_525) + 1_013_904_223) >>> 0);
+    let committed = new Set<unknown>();
+    for (let batch = 0; batch < 100; batch += 1) {
+      const final = new Set(committed);
+      harness.counters.bindingReads = 0;
+      await act(async () => {
+        for (let update = 0; update < 20; update += 1) {
+          const value = nextRandom();
+          const key = value % 13 === 0 ? `missing-${value}` : `row-${value % initial.length}`;
+          const operation = value % 3 === 0 ? "set-delete" : "set-add";
+          if (operation === "set-delete") final.delete(key);
+          else final.add(key);
+          harness.setMembership((current) => hintedSetMutation(current, operation, key));
+          reactSet((current) => {
+            const next = new Set(current);
+            if (operation === "set-delete") next.delete(key);
+            else next.add(key);
+            return next;
+          });
+        }
+        await flushCompilerUpdates();
+      });
+      const changedRows = [...new Set([...committed, ...final])].filter(
+        (key) =>
+          committed.has(key) !== final.has(key) && initial.some((item) => Object.is(item.id, key)),
+      ).length;
+      expect(harness.counters.bindingReads, `hinted reads in batch ${batch}`).toBe(changedRows);
+      expect(membershipSnapshot(compiledContainer), `hinted DOM after batch ${batch}`).toEqual(
+        membershipSnapshot(reactContainer),
+      );
+      committed = final;
+    }
+    expect(harness.counters.executions).toBe(1);
+  });
+
   it("is StrictMode-safe and drops a queued membership update after unmount", async () => {
     const harness = createMembershipHarness(items(16), new Set());
     const container = document.createElement("div");
@@ -360,7 +526,7 @@ describe("compiled keyed membership targets", () => {
 
     harness.counters.bindingReads = 0;
     await act(async () => {
-      harness.setMembership(new Set(["row-8"]));
+      harness.setMembership((current) => hintedSetMutation(current, "set-add", "row-8"));
       root.unmount();
       roots.splice(roots.indexOf(root), 1);
       await flushCompilerUpdates();

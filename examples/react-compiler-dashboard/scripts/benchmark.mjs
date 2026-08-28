@@ -130,6 +130,10 @@ async function inspectBuild(compilerMode) {
       compilerReport.summary.keyedMapUpdateHints > 0,
       "The compiler build did not emit a mutation-aware keyed-map update hint.",
     );
+    assert(
+      compilerReport.summary.keyedCollectionUpdateHints > 0,
+      "The compiler build did not emit a keyed Set/Map collection-delta hint.",
+    );
   }
 
   return {
@@ -404,6 +408,21 @@ async function measureTrial(browser, trial, compilerMode, port) {
           }
           return timings;
         };
+        const seedDenseTargets = async () => {
+          const expected = rowCount();
+          const middle = table.querySelectorAll("tbody tr")[Math.floor(expected / 2)];
+          if (!middle) throw new Error("Dense-target row is missing.");
+          await runTableAction(
+            () => tableButton("table-seed-dense-targets").click(),
+            () =>
+              Number(table.dataset.markedCount) === expected &&
+              Number(table.dataset.queueCount) === expected &&
+              middle.getAttribute("data-marked") === "true" &&
+              middle.getAttribute("data-queue") === "dense" &&
+              middle.getAttribute("data-snapshot-marked") === "true" &&
+              middle.getAttribute("data-snapshot-queue") === "dense",
+          );
+        };
 
         const tableCreate = await measureTable(
           async () => {
@@ -511,6 +530,70 @@ async function measureTrial(browser, trial, compilerMode, port) {
           },
         );
 
+        const tableDenseMembership = await measureTable(
+          async () => {
+            await ensure1000();
+            await seedDenseTargets();
+          },
+          async () => {
+            const row = table.querySelectorAll("tbody tr")[500];
+            const previous = row?.getAttribute("data-marked");
+            if (!row) throw new Error("Dense membership target row is missing.");
+            await runTableAction(
+              () => tableButton("table-toggle-dense-mark").click(),
+              () => row.getAttribute("data-marked") !== previous,
+            );
+          },
+        );
+
+        const tableDenseMapLookup = await measureTable(
+          async () => {
+            await ensure1000();
+            await seedDenseTargets();
+          },
+          async () => {
+            const row = table.querySelectorAll("tbody tr")[500];
+            const previous = row?.getAttribute("data-queue");
+            if (!row) throw new Error("Dense Map target row is missing.");
+            await runTableAction(
+              () => tableButton("table-update-dense-queue").click(),
+              () => row.getAttribute("data-queue") !== previous,
+            );
+          },
+        );
+
+        const tableSnapshotMembership = await measureTable(
+          async () => {
+            await ensure1000();
+            await seedDenseTargets();
+          },
+          async () => {
+            const row = table.querySelectorAll("tbody tr")[500];
+            const previous = row?.getAttribute("data-snapshot-marked");
+            if (!row) throw new Error("Snapshot membership target row is missing.");
+            await runTableAction(
+              () => tableButton("table-toggle-snapshot-mark").click(),
+              () => row.getAttribute("data-snapshot-marked") !== previous,
+            );
+          },
+        );
+
+        const tableSnapshotMapLookup = await measureTable(
+          async () => {
+            await ensure1000();
+            await seedDenseTargets();
+          },
+          async () => {
+            const row = table.querySelectorAll("tbody tr")[500];
+            const previous = row?.getAttribute("data-snapshot-queue");
+            if (!row) throw new Error("Snapshot Map target row is missing.");
+            await runTableAction(
+              () => tableButton("table-update-snapshot-queue").click(),
+              () => row.getAttribute("data-snapshot-queue") !== previous,
+            );
+          },
+        );
+
         const tableRemove = await measureTable(
           async () => {
             if (rowCount() !== 1_000) await create1000();
@@ -538,10 +621,14 @@ async function measureTrial(browser, trial, compilerMode, port) {
           appendTo20k: [],
           clear20k: [],
           create10k: [],
+          denseMapLookup20k: [],
+          denseMembership20k: [],
           mapLookup20k: [],
           membership20k: [],
           remove20k: [],
           select20k: [],
+          snapshotMapLookup20k: [],
+          snapshotMembership20k: [],
           swap20k: [],
           updateEvery10th20k: [],
         };
@@ -607,6 +694,43 @@ async function measureTrial(browser, trial, compilerMode, port) {
           );
           scale.mapLookup20k.push(performance.now() - mapLookupStartedAt);
 
+          await seedDenseTargets();
+          const denseTarget = table.querySelectorAll("tbody tr")[10_000];
+          if (!denseTarget) throw new Error("20,000-row dense target is missing.");
+
+          const previousDenseMembership = denseTarget.getAttribute("data-marked");
+          const denseMembershipStartedAt = performance.now();
+          await runTableAction(
+            () => tableButton("table-toggle-dense-mark").click(),
+            () => denseTarget.getAttribute("data-marked") !== previousDenseMembership,
+          );
+          scale.denseMembership20k.push(performance.now() - denseMembershipStartedAt);
+
+          const previousDenseMapLookup = denseTarget.getAttribute("data-queue");
+          const denseMapLookupStartedAt = performance.now();
+          await runTableAction(
+            () => tableButton("table-update-dense-queue").click(),
+            () => denseTarget.getAttribute("data-queue") !== previousDenseMapLookup,
+          );
+          scale.denseMapLookup20k.push(performance.now() - denseMapLookupStartedAt);
+
+          const previousSnapshotMembership = denseTarget.getAttribute("data-snapshot-marked");
+          const snapshotMembershipStartedAt = performance.now();
+          await runTableAction(
+            () => tableButton("table-toggle-snapshot-mark").click(),
+            () =>
+              denseTarget.getAttribute("data-snapshot-marked") !== previousSnapshotMembership,
+          );
+          scale.snapshotMembership20k.push(performance.now() - snapshotMembershipStartedAt);
+
+          const previousSnapshotMapLookup = denseTarget.getAttribute("data-snapshot-queue");
+          const snapshotMapLookupStartedAt = performance.now();
+          await runTableAction(
+            () => tableButton("table-update-snapshot-queue").click(),
+            () => denseTarget.getAttribute("data-snapshot-queue") !== previousSnapshotMapLookup,
+          );
+          scale.snapshotMapLookup20k.push(performance.now() - snapshotMapLookupStartedAt);
+
           const rowsBeforeSwap = table.querySelectorAll("tbody tr");
           const second = rowsBeforeSwap[1]?.getAttribute("data-row-id");
           const penultimate = rowsBeforeSwap[998]?.getAttribute("data-row-id");
@@ -662,12 +786,16 @@ async function measureTrial(browser, trial, compilerMode, port) {
             clear: tableClear,
             create: tableCreate,
             createMany: tableCreateMany,
+            denseMapLookup: tableDenseMapLookup,
+            denseMembership: tableDenseMembership,
             executionsAdded: Number(tableExecutions.textContent) - initialTableExecutions,
             mapLookup: tableMapLookup,
             membership: tableMembership,
             remove: tableRemove,
             replace: tableReplace,
             select: tableSelect,
+            snapshotMapLookup: tableSnapshotMapLookup,
+            snapshotMembership: tableSnapshotMembership,
             swap: tableSwap,
             updateEvery10th: tableUpdate,
           },
@@ -718,10 +846,14 @@ async function measureTrial(browser, trial, compilerMode, port) {
         appendTo20k: timingSummary(result.scale.appendTo20k),
         clear20k: timingSummary(result.scale.clear20k),
         create10k: timingSummary(result.scale.create10k),
+        denseMapLookup20k: timingSummary(result.scale.denseMapLookup20k),
+        denseMembership20k: timingSummary(result.scale.denseMembership20k),
         mapLookup20k: timingSummary(result.scale.mapLookup20k),
         membership20k: timingSummary(result.scale.membership20k),
         remove20k: timingSummary(result.scale.remove20k),
         select20k: timingSummary(result.scale.select20k),
+        snapshotMapLookup20k: timingSummary(result.scale.snapshotMapLookup20k),
+        snapshotMembership20k: timingSummary(result.scale.snapshotMembership20k),
         swap20k: timingSummary(result.scale.swap20k),
         updateEvery10th20k: timingSummary(result.scale.updateEvery10th20k),
       },
@@ -730,12 +862,16 @@ async function measureTrial(browser, trial, compilerMode, port) {
         clear: timingSummary(result.table.clear),
         create: timingSummary(result.table.create),
         createMany: timingSummary(result.table.createMany),
+        denseMapLookup: timingSummary(result.table.denseMapLookup),
+        denseMembership: timingSummary(result.table.denseMembership),
         executionsAdded: result.table.executionsAdded,
         mapLookup: timingSummary(result.table.mapLookup),
         membership: timingSummary(result.table.membership),
         remove: timingSummary(result.table.remove),
         replace: timingSummary(result.table.replace),
         select: timingSummary(result.table.select),
+        snapshotMapLookup: timingSummary(result.table.snapshotMapLookup),
+        snapshotMembership: timingSummary(result.table.snapshotMembership),
         swap: timingSummary(result.table.swap),
         updateEvery10th: timingSummary(result.table.updateEvery10th),
       },
@@ -809,6 +945,10 @@ const tableMetrics = [
   "select",
   "membership",
   "mapLookup",
+  "denseMembership",
+  "denseMapLookup",
+  "snapshotMembership",
+  "snapshotMapLookup",
   "swap",
   "remove",
   "clear",
@@ -820,6 +960,10 @@ const scaleMetrics = [
   "select20k",
   "membership20k",
   "mapLookup20k",
+  "denseMembership20k",
+  "denseMapLookup20k",
+  "snapshotMembership20k",
+  "snapshotMapLookup20k",
   "swap20k",
   "remove20k",
   "clear20k",
@@ -853,6 +997,10 @@ const scalabilityCases = [
   ["select20k", "select", 20],
   ["membership20k", "membership", 20],
   ["mapLookup20k", "mapLookup", 20],
+  ["denseMembership20k", "denseMembership", 20],
+  ["denseMapLookup20k", "denseMapLookup", 20],
+  ["snapshotMembership20k", "snapshotMembership", 20],
+  ["snapshotMapLookup20k", "snapshotMapLookup", 20],
   ["swap20k", "swap", 20],
   ["remove20k", "remove", 20],
   ["clear20k", "clear", 2],
@@ -996,13 +1144,51 @@ const keyedMapLookupRegressions = keyedMapLookupResults.filter(
     !Number.isFinite(normalizedGrowth) ||
     normalizedGrowth > keyedMapLookupMaximumNormalizedGrowth,
 );
+// Dense Set/Map operations still pay the application's immutable collection clone, but a proven
+// updater carries its executed keys to the runtime. This gate ensures that a 20,000-entry
+// collection does not restore the removed second snapshot scan or the full keyed-row scan.
+const keyedCollectionDeltaMinimumSpeedup = 2;
+const keyedCollectionDeltaMinimumSnapshotSpeedup = 1.5;
+const keyedCollectionDeltaMaximumNormalizedGrowth = 2;
+const keyedCollectionDeltaResults = [
+  ["set", "denseMembership", "denseMembership20k", "snapshotMembership20k"],
+  ["map", "denseMapLookup", "denseMapLookup20k", "snapshotMapLookup20k"],
+].flatMap(([kind, tableMetric, scaleMetric, snapshotScaleMetric]) =>
+  ["static", "hybrid"].map((mode) => {
+    const tableMedianMs = comparisons.table[tableMetric][mode].medianMs;
+    const scaleMedianMs = comparisons.scale[scaleMetric][mode].medianMs;
+    const snapshotScaleMedianMs = comparisons.scale[snapshotScaleMetric][mode].medianMs;
+    const growth = scaleMedianMs / Math.max(tableMedianMs, timingResolutionFloorMs);
+    return {
+      growth,
+      kind,
+      mode,
+      normalizedGrowth: growth / 20,
+      scaleMedianMs,
+      snapshotScaleMedianMs,
+      snapshotSpeedup: snapshotScaleMedianMs / scaleMedianMs,
+      speedup: comparisons.scale[scaleMetric][`${mode}VsBaseline`].speedup,
+      tableMedianMs,
+    };
+  }),
+);
+const keyedCollectionDeltaRegressions = keyedCollectionDeltaResults.filter(
+  ({ normalizedGrowth, snapshotSpeedup, speedup }) =>
+    !Number.isFinite(speedup) ||
+    speedup < keyedCollectionDeltaMinimumSpeedup ||
+    !Number.isFinite(snapshotSpeedup) ||
+    snapshotSpeedup < keyedCollectionDeltaMinimumSnapshotSpeedup ||
+    !Number.isFinite(normalizedGrowth) ||
+    normalizedGrowth > keyedCollectionDeltaMaximumNormalizedGrowth,
+);
 const passed =
   performanceRegressions.length === 0 &&
   scalabilityRegressions.length === 0 &&
   keyedUpdateRegressions.length === 0 &&
   keyedIdentityRegressions.length === 0 &&
   keyedMembershipRegressions.length === 0 &&
-  keyedMapLookupRegressions.length === 0;
+  keyedMapLookupRegressions.length === 0 &&
+  keyedCollectionDeltaRegressions.length === 0;
 
 const report = {
   result: passed ? "PASS" : "CORRECTNESS_PASS_PERFORMANCE_REGRESSION",
@@ -1039,6 +1225,14 @@ const report = {
     regressions: keyedMapLookupRegressions,
     results: keyedMapLookupResults,
     status: keyedMapLookupRegressions.length === 0 ? "PASS" : "FAIL",
+  },
+  keyedCollectionDeltaGate: {
+    maximumNormalizedGrowth: keyedCollectionDeltaMaximumNormalizedGrowth,
+    minimumSpeedup: keyedCollectionDeltaMinimumSpeedup,
+    minimumSnapshotSpeedup: keyedCollectionDeltaMinimumSnapshotSpeedup,
+    regressions: keyedCollectionDeltaRegressions,
+    results: keyedCollectionDeltaResults,
+    status: keyedCollectionDeltaRegressions.length === 0 ? "PASS" : "FAIL",
   },
   scalabilityGate: {
     metrics: scalability,
