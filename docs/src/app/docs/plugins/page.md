@@ -12,12 +12,15 @@ Use an [integration](/docs/integrations) for a product or service such as authen
 
 ## Official plugins
 
-| Plugin                                 | Purpose                                                                                        |
-| -------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| [Sentry](/docs/plugins/sentry)         | Report server errors with Farm event and route context, trace requests, and flush on shutdown. |
-| [Client plugins](/docs/plugins/client) | Add typed browser hydration, navigation, error, performance, and cleanup lifecycle hooks.      |
+| Plugin                         | Purpose                                                                                        |
+| ------------------------------ | ---------------------------------------------------------------------------------------------- |
+| [Sentry](/docs/plugins/sentry) | Report server errors with Farm event and route context, trace requests, and flush on shutdown. |
 
 Each published plugin has its own setup page in this section. Use [Create a Plugin](/docs/plugins/create-plugin) when the behavior is specific to your application or package.
+
+## Plugin authoring
+
+Start with [Create a Plugin](/docs/plugins/create-plugin) for the server and build lifecycle. Add the [Client Plugin API](/docs/plugins/client) only when the plugin also needs browser hydration, navigation, error, performance, or cleanup hooks. Client plugins are an authoring capability, not a separately installed package.
 
 ## What framework-focused means
 

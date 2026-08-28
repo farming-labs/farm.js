@@ -319,9 +319,19 @@ const sidebar = [
     icon: "plug",
     children: [
       { label: "Overview", slug: "plugins", icon: "plug" },
-      { label: "Sentry", slug: "plugins/sentry", icon: "brand-sentry" },
-      { label: "Client Plugins", slug: "plugins/client", icon: "monitor" },
-      { label: "Create a Plugin", slug: "plugins/create-plugin", icon: "wrench" },
+      {
+        label: "Official Plugins",
+        icon: "plug",
+        children: [{ label: "Sentry", slug: "plugins/sentry", icon: "brand-sentry" }],
+      },
+      {
+        label: "Plugin Authoring",
+        icon: "wrench",
+        children: [
+          { label: "Create a Plugin", slug: "plugins/create-plugin", icon: "wrench" },
+          { label: "Client Plugin API", slug: "plugins/client", icon: "monitor" },
+        ],
+      },
     ],
   },
   {
