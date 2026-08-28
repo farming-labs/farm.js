@@ -8,6 +8,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { notifyHistoryChange, subscribeHistoryChange } from "../client/history-sync";
+import { _resolveCurrentRequest } from "../server/request-bridge";
 import { emitter } from "./sync";
 export { parseRouteParams, loadRouteParams, type RouteParamsInput } from "./params";
 
@@ -38,8 +39,18 @@ export interface Options {
 }
 
 const getCurrentSearchParams = (): URLSearchParams => {
-  if (typeof window === "undefined") return new URLSearchParams();
-  return new URLSearchParams(window.location.search);
+  if (typeof window !== "undefined") return new URLSearchParams(window.location.search);
+
+  // Server rendering used to see an empty query string here, so a hook read one
+  // value on the server and another in the browser. React reports that as a
+  // hydration mismatch and discards the server rendered markup for the branch.
+  const request = _resolveCurrentRequest();
+  if (!request) return new URLSearchParams();
+  try {
+    return new URL(request.url).searchParams;
+  } catch {
+    return new URLSearchParams();
+  }
 };
 
 const throttleTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -150,7 +161,6 @@ export function useQueryState<TParser extends Parser<any>>(
 ] {
   type T = NonNullable<ReturnType<TParser["parse"]>>;
   const [state, setState] = useState<T | null>(() => {
-    if (typeof window === "undefined") return parser.parse("");
     const searchParams = getCurrentSearchParams();
     const value = searchParams.get(key);
     const parsed = parser.parse(value ?? "");
@@ -247,8 +257,7 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
   const watchKeys = keys.join("&");
 
   const [state, setState] = useState<{ [K in keyof T]: ReturnType<T[K]["parse"]> }>(() => {
-    const searchParams =
-      typeof window === "undefined" ? new URLSearchParams() : getCurrentSearchParams();
+    const searchParams = getCurrentSearchParams();
     const result = {} as { [K in keyof T]: ReturnType<T[K]["parse"]> };
 
     Object.entries(parsers).forEach(([key, parser]) => {

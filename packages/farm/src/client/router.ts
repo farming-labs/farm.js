@@ -9,6 +9,7 @@ import {
 } from "./spa-router";
 import { notifyHistoryChange, subscribeHistoryChange } from "./history-sync";
 import { getFarmI18nClientState } from "../i18n/client-runtime";
+import { _resolveCurrentRequest } from "../server/request-bridge";
 import { stripFarmLocaleFromPathname } from "../i18n/routing";
 
 interface RouterState {
@@ -204,7 +205,8 @@ export function useScrollRestoration<TElement extends HTMLElement = HTMLElement>
 }
 
 function readRouterState(basePath: string, routeMatcher: FarmRouter | null): RouterState {
-  if (typeof window === "undefined") {
+  const url = readCurrentUrl();
+  if (!url) {
     return {
       pathname: "/",
       searchParams: new URLSearchParams(),
@@ -213,7 +215,6 @@ function readRouterState(basePath: string, routeMatcher: FarmRouter | null): Rou
     };
   }
 
-  const url = new URL(window.location.href);
   const pathname = normalizeClientPathname(url.pathname, basePath);
   const i18n = getFarmI18nClientState();
   const routePathname = i18n ? stripFarmLocaleFromPathname(pathname, i18n) : pathname;
@@ -221,8 +222,34 @@ function readRouterState(basePath: string, routeMatcher: FarmRouter | null): Rou
     pathname,
     searchParams: url.searchParams,
     params: routeMatcher?.match(routePathname)?.params || {},
-    pageState: readPageState(),
+    pageState: typeof window === "undefined" ? null : readPageState(),
   };
+}
+
+/**
+ * The URL being rendered, on either side of hydration.
+ *
+ * On the server this came back as `/` with no search params, so a component
+ * reading the path or the query string rendered one thing on the server and
+ * another in the browser, which React reports as a hydration mismatch and
+ * leaves the route without useful server rendered markup.
+ */
+function readCurrentUrl(): URL | undefined {
+  if (typeof window !== "undefined") {
+    try {
+      return new URL(window.location.href);
+    } catch {
+      return undefined;
+    }
+  }
+
+  const request = _resolveCurrentRequest();
+  if (!request) return undefined;
+  try {
+    return new URL(request.url);
+  } catch {
+    return undefined;
+  }
 }
 
 function normalizeClientPathname(pathname: string, basePath: string) {
