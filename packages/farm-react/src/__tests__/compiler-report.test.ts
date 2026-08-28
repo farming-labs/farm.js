@@ -27,7 +27,7 @@ function observations(projectRoot: string): ReactCompilerModuleObservation[] {
       result: {
         compiled: ["Counter"],
         diagnostics: [],
-        optimizations: { keyedMapUpdateHints: 0 },
+        optimizations: { keyedIdentityTargets: 0, keyedMapUpdateHints: 0 },
       },
     },
     {
@@ -46,7 +46,7 @@ function observations(projectRoot: string): ReactCompilerModuleObservation[] {
             selected: true,
           },
         ],
-        optimizations: { keyedMapUpdateHints: 3 },
+        optimizations: { keyedIdentityTargets: 4, keyedMapUpdateHints: 3 },
       },
     },
   ];
@@ -62,6 +62,7 @@ describe("React compiler coverage report", () => {
       componentsConsidered: 4,
       compiled: 2,
       fallback: 2,
+      keyedIdentityTargets: 4,
       keyedMapUpdateHints: 3,
     });
     expect(report.fallbackReasons).toEqual([
@@ -77,7 +78,10 @@ describe("React compiler coverage report", () => {
       reason: "dynamic child structures require React reconciliation",
       selected: true,
     });
-    expect(report.modules[1]?.optimizations).toEqual({ keyedMapUpdateHints: 3 });
+    expect(report.modules[1]?.optimizations).toEqual({
+      keyedIdentityTargets: 4,
+      keyedMapUpdateHints: 3,
+    });
   });
 
   it("writes formatted JSON to the configured project-relative file", async () => {

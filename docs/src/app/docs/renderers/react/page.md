@@ -302,6 +302,7 @@ After a successful build, Farm writes `.farm/react-compiler.json`:
     "componentsConsidered": 4,
     "compiled": 2,
     "fallback": 2,
+    "keyedIdentityTargets": 2,
     "keyedMapUpdateHints": 1
   },
   "fallbackReasons": [
@@ -315,6 +316,7 @@ After a successful build, Farm writes `.farm/react-compiler.json`:
       "id": "src/Products.tsx",
       "compiled": ["ProductRow"],
       "optimizations": {
+        "keyedIdentityTargets": 2,
         "keyedMapUpdateHints": 1
       },
       "fallbacks": [
@@ -331,12 +333,13 @@ After a successful build, Farm writes `.farm/react-compiler.json`:
 ```
 
 `componentsConsidered` counts candidates selected by the active mode. `compiled` counts components
-using the AOT runtime, and `fallback` counts candidates left on React. `keyedMapUpdateHints` counts
-setter sites where the compiler proved that a direct keyed collection can report its changed row
-indexes while an immutable `map()` runs. The same count appears per module. `selected` is `true`
-when an annotation explicitly requested compilation. Module paths are relative to the project root,
-and the output is sorted and contains no timestamp, so CI can compare reports without
-machine-specific noise.
+using the AOT runtime, and `fallback` counts candidates left on React. `keyedIdentityTargets` counts
+row bindings that can update by looking up the previous and next key directly.
+`keyedMapUpdateHints` counts setter sites where the compiler proved that a direct keyed collection
+can report its changed row indexes while an immutable `map()` runs. The same counts appear per
+module. `selected` is `true` when an annotation explicitly requested compilation. Module paths are
+relative to the project root, and the output is sorted and contains no timestamp, so CI can compare
+reports without machine-specific noise.
 
 Use a different project-relative output path when CI collects artifacts elsewhere:
 
@@ -682,6 +685,42 @@ row, and new keys create only their prepared host tree. During a reorder, Farm c
 longest increasing subsequence (LIS) of the old row positions. Rows in that subsequence stay in
 place; only the other surviving rows move. LIS is a runtime move planner over compiler-prepared
 rows, not a claim that the future contents of an array are known at build time.
+
+#### Key-directed selection updates
+
+A separate state or primitive prop often identifies one active row while the collection itself
+does not change:
+
+```tsx
+const [selectedId, setSelectedId] = useState<string | null>(null);
+
+<tbody>
+  {rows.map((row) => (
+    <tr
+      aria-selected={row.id === selectedId}
+      className={row.id === selectedId ? "selected" : ""}
+      key={row.id}
+    >
+      <td>{row.label}</td>
+    </tr>
+  ))}
+</tbody>;
+```
+
+For an exact `===` or `!==` comparison against the same expression used by `key`, the compiler
+records which state or primitive-prop cell supplies the target. After mount, changing `selectedId`
+looks up the previously selected key and the next selected key in the existing row-instance map.
+Only those rows evaluate the affected class, attribute, style, or leaf-text binding. A 20,000-row
+selection therefore performs at most two row-binding evaluations instead of scanning all 20,000
+rows. The component and its `map()` callback still do not rerun.
+
+This proof is intentionally narrow. The target must be read only as an operand of strict key
+comparisons, the binding must have no second reactive dependency, and the target must not also
+change the collection or its key projection. The runtime accepts only string, number, bigint, or
+nullish targets. Object, array, boolean, ambiguous, mixed structural, React-owned, nested-block, and
+unsupported expressions use the existing complete evaluation or React fallback. Missing keys are
+safe and simply patch no next row. No option or component primitive is required. The compiler
+report exposes the number of emitted row-binding proofs as `keyedIdentityTargets`.
 
 #### Mutation-aware same-order updates
 
@@ -1493,9 +1532,10 @@ The package and example test suites verify more than generated code:
 - the production browser experiment rotates 1,000 compiler-owned host rows with one LIS move,
   updates outer and nested row conditions, preserves surviving row and branch identity, removes and
   inserts a row, and observes zero owner update executions;
-- the production 10,000/20,000-row benchmark requires a nonzero `keyedMapUpdateHints` report count,
-  at least an 8x keyed-update speedup in both compiler modes, and passes DOM correctness,
-  React-relative regression, and normalized scalability gates;
+- the production 10,000/20,000-row benchmark requires nonzero `keyedIdentityTargets` and
+  `keyedMapUpdateHints` report counts, preserves the keyed-update speedup floor, checks that
+  selection remains key-directed at scale, and passes DOM correctness, React-relative regression,
+  and normalized scalability gates;
 - the public `List` renders iterable and nullish collections correctly with the compiler off;
 - the packaged runtime, including a keyed-range component root, editable and interactive keyed-row
   events, row-local conditions, reorders, identity, selection, and hydration, is exercised

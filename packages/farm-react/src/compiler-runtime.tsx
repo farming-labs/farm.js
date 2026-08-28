@@ -284,6 +284,11 @@ export interface CompilerKeyedRowBinding {
   name?: string;
   /** Component state cells read by this binding, when emitted by the compiler. */
   dependencies?: readonly number[];
+  /** A compiler-proven primitive value compared strictly with this row's key. */
+  identityTarget?: {
+    dependency: number;
+    read(): unknown;
+  };
   read(item: unknown, index: number): unknown;
 }
 
@@ -924,10 +929,26 @@ interface CompilerKeyedRowInstance extends CompilerHostInstance {
   conditionalValues: ReadonlyMap<number, readonly unknown[]>;
 }
 
+interface CompilerKeyedIdentityTargetSnapshot {
+  eligible: boolean;
+  key?: string;
+}
+
 const UNSET_KEYED_ROW_BINDING = Symbol("unset interactive keyed-row binding");
 
 function keyedRowIdentity(key: React.Key): string {
   return String(key);
+}
+
+function keyedIdentityTargetSnapshot(value: unknown): CompilerKeyedIdentityTargetSnapshot {
+  const kind = typeof value;
+  return value === null ||
+    value === undefined ||
+    kind === "string" ||
+    kind === "number" ||
+    kind === "bigint"
+    ? { eligible: true, key: String(value) }
+    : { eligible: false };
 }
 
 function normalizedKeyedRowBindingValue(binding: CompilerKeyedRowBinding, value: unknown): unknown {
@@ -2972,6 +2993,7 @@ function createKeyedRowsBlockComponent(
     private currentProps = this.props;
     private unsubscribe: (() => void) | undefined;
     private instances = new Map<string, CompilerKeyedRowInstance>();
+    private identityTargets = new Map<number, CompilerKeyedIdentityTargetSnapshot>();
     private collectionToken: object | undefined;
     private renderVersion = 0;
     private readonly eventHandlers = new Map<
@@ -3207,8 +3229,26 @@ function createKeyedRowsBlockComponent(
       }
     }
 
-    private commitCurrentCollection(): void {
+    private commitCurrentCollection(dirtyState?: ReadonlySet<number>): void {
       this.collectionToken = options.keyedMapUpdates?.commit(this.currentProps.items());
+      this.commitIdentityTargets(dirtyState);
+    }
+
+    private commitIdentityTargets(dirtyState?: ReadonlySet<number>): void {
+      if (!dirtyState) this.identityTargets.clear();
+      for (
+        let bindingIndex = 0;
+        bindingIndex < this.currentProps.bindings.length;
+        bindingIndex += 1
+      ) {
+        const target = this.currentProps.bindings[bindingIndex].identityTarget;
+        if (!target) {
+          this.identityTargets.delete(bindingIndex);
+          continue;
+        }
+        if (dirtyState && !dirtyState.has(target.dependency)) continue;
+        this.identityTargets.set(bindingIndex, keyedIdentityTargetSnapshot(target.read()));
+      }
     }
 
     private adopt(): boolean {
@@ -3362,16 +3402,50 @@ function createKeyedRowsBlockComponent(
         }
       }
 
-      for (const instance of this.instances.values()) {
-        for (const bindingIndex of affectedBindingIndices) {
-          applyKeyedRowBinding(
-            this.currentProps,
-            instance,
-            instance.item,
-            instance.index,
-            bindingIndex,
-          );
+      for (const bindingIndex of affectedBindingIndices) {
+        const binding = this.currentProps.bindings[bindingIndex];
+        const target = binding.identityTarget;
+        const previousTarget = this.identityTargets.get(bindingIndex);
+        const nextTarget = target ? keyedIdentityTargetSnapshot(target.read()) : undefined;
+        const canTarget = Boolean(
+          target &&
+          binding.dependencies?.length === 1 &&
+          binding.dependencies[0] === target.dependency &&
+          dirtyState.has(target.dependency) &&
+          previousTarget?.eligible &&
+          nextTarget?.eligible,
+        );
+
+        if (canTarget && previousTarget && nextTarget) {
+          const keys = new Set<string>();
+          if (previousTarget.key !== undefined) keys.add(previousTarget.key);
+          if (nextTarget.key !== undefined) keys.add(nextTarget.key);
+          for (const key of keys) {
+            const instance = this.instances.get(key);
+            if (instance) {
+              applyKeyedRowBinding(
+                this.currentProps,
+                instance,
+                instance.item,
+                instance.index,
+                bindingIndex,
+              );
+            }
+          }
+        } else {
+          for (const instance of this.instances.values()) {
+            applyKeyedRowBinding(
+              this.currentProps,
+              instance,
+              instance.item,
+              instance.index,
+              bindingIndex,
+            );
+          }
         }
+
+        if (nextTarget) this.identityTargets.set(bindingIndex, nextTarget);
+        else this.identityTargets.delete(bindingIndex);
       }
       afterCommit?.();
       return true;
@@ -3380,6 +3454,7 @@ function createKeyedRowsBlockComponent(
     private reconcileStableRows(
       rows: { items: unknown[]; keys: string[] },
       afterCommit?: () => void,
+      dirtyState?: ReadonlySet<number>,
     ): boolean {
       if (rows.keys.length !== this.instances.size) return false;
       let index = 0;
@@ -3420,7 +3495,7 @@ function createKeyedRowsBlockComponent(
         existing.item = rows.items[index];
         existing.index = index;
       }
-      this.commitCurrentCollection();
+      this.commitCurrentCollection(dirtyState);
       this.notifyConditionalChanges(conditionalChanges, afterCommit);
       return true;
     }
@@ -3428,6 +3503,7 @@ function createKeyedRowsBlockComponent(
     private reconcileSingleRemoval(
       rows: { items: unknown[]; keys: string[] },
       afterCommit?: () => void,
+      dirtyState?: ReadonlySet<number>,
     ): boolean {
       if (this.hasReactOwnedRows() || rows.keys.length + 1 !== this.instances.size) return false;
       const previousKeys = [...this.instances.keys()];
@@ -3483,12 +3559,12 @@ function createKeyedRowsBlockComponent(
       this.instances.delete(removedKey);
       this.eventHandlers.delete(removedKey);
       this.conditionalListeners.delete(removedKey);
-      this.commitCurrentCollection();
+      this.commitCurrentCollection(dirtyState);
       this.notifyConditionalChanges(conditionalChanges, afterCommit);
       return true;
     }
 
-    private reconcile(afterCommit?: () => void): void {
+    private reconcile(afterCommit?: () => void, dirtyState?: ReadonlySet<number>): void {
       if (!this.mounted || !this.root) {
         afterCommit?.();
         return;
@@ -3533,13 +3609,13 @@ function createKeyedRowsBlockComponent(
         this.instancesByElement = new WeakMap();
         this.eventHandlers.clear();
         this.conditionalListeners.clear();
-        this.commitCurrentCollection();
+        this.commitCurrentCollection(dirtyState);
         afterCommit?.();
         return;
       }
 
-      if (this.reconcileStableRows(rows, afterCommit)) return;
-      if (this.reconcileSingleRemoval(rows, afterCommit)) return;
+      if (this.reconcileStableRows(rows, afterCommit, dirtyState)) return;
+      if (this.reconcileSingleRemoval(rows, afterCommit, dirtyState)) return;
 
       const activeElement = this.root.ownerDocument.activeElement;
       const restoreFocus = Boolean(activeElement && this.root.contains(activeElement));
@@ -3660,7 +3736,7 @@ function createKeyedRowsBlockComponent(
       ) {
         (activeElement as HTMLElement).focus({ preventScroll: true });
       }
-      this.commitCurrentCollection();
+      this.commitCurrentCollection(dirtyState);
       this.notifyConditionalChanges(conditionalChanges, afterCommit);
     }
 
@@ -3689,7 +3765,7 @@ function createKeyedRowsBlockComponent(
         }
       }
       if (dirtyState && this.refreshDirtyBindings(dirtyState, afterCommit)) return;
-      this.reconcile(afterCommit);
+      this.reconcile(afterCommit, dirtyState);
     };
 
     private schedulePropSync(): void {
@@ -3741,6 +3817,7 @@ function createKeyedRowsBlockComponent(
       this.root = null;
       this.cleanupHostScopes();
       this.instances.clear();
+      this.identityTargets.clear();
       this.instancesByElement = new WeakMap();
       this.eventHandlers.clear();
       this.conditionalListeners.clear();
