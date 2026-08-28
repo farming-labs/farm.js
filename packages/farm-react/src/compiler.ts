@@ -13,6 +13,7 @@ export interface CompileReactModuleResult {
   compiled: readonly string[];
   diagnostics: readonly CompilerDiagnostic[];
   optimizations: {
+    keyedCollectionUpdateHints: number;
     keyedIdentityTargets: number;
     keyedMapLookupTargets: number;
     keyedMembershipTargets: number;
@@ -1128,6 +1129,450 @@ function rewriteKeyedMapUpdateHints(
       path.skip();
     },
   });
+  return {
+    root: (file.program.body[0] as t.ExpressionStatement).expression as t.JSXElement,
+    count,
+  };
+}
+
+type KeyedCollectionTargetKind = "set" | "map";
+
+interface PreparedKeyedCollectionUpdater {
+  updater: t.ArrowFunctionExpression | t.FunctionExpression;
+  mutations: number;
+}
+
+function collectionConstructorName(kind: KeyedCollectionTargetKind): "Set" | "Map" {
+  return kind === "set" ? "Set" : "Map";
+}
+
+function isCollectionConstruction(
+  expression: t.Expression | null | undefined,
+  kind: KeyedCollectionTargetKind,
+  previous?: t.Identifier,
+): expression is t.NewExpression {
+  if (
+    !t.isNewExpression(expression) ||
+    !t.isIdentifier(expression.callee, { name: collectionConstructorName(kind) })
+  ) {
+    return false;
+  }
+  if (!previous) return true;
+  return (
+    expression.arguments.length === 1 &&
+    t.isIdentifier(expression.arguments[0], { name: previous.name })
+  );
+}
+
+function collectionStateInitializerIsOwned(
+  initialValue: t.Expression | undefined,
+  kind: KeyedCollectionTargetKind,
+  constructorIsGlobal: boolean,
+): boolean {
+  if (!initialValue || !constructorIsGlobal) return false;
+  if (isCollectionConstruction(initialValue, kind)) return true;
+  if (!t.isArrowFunctionExpression(initialValue) && !t.isFunctionExpression(initialValue)) {
+    return false;
+  }
+  if (t.isBlockStatement(initialValue.body) && initialValue.body.body.length !== 1) return false;
+  const value = returnedExpression(initialValue);
+  return Boolean(value && isCollectionConstruction(value, kind));
+}
+
+function collectionStateHasOnlyOwnedReads(
+  root: t.JSXElement,
+  state: StateBinding,
+  kind: KeyedCollectionTargetKind,
+): boolean {
+  const file = expressionFile(t.cloneNode(root, true));
+  let valid = true;
+  const readMethods = kind === "set" ? new Set(["has"]) : new Set(["get", "has"]);
+  traverse(file, {
+    ReferencedIdentifier(path) {
+      if (
+        !valid ||
+        !t.isIdentifier(path.node) ||
+        path.node.name !== state.valueName ||
+        path.scope.hasBinding(path.node.name)
+      ) {
+        return;
+      }
+      const parent = path.parentPath;
+      if (
+        parent.isNewExpression() &&
+        t.isIdentifier(parent.node.callee, { name: collectionConstructorName(kind) }) &&
+        parent.node.arguments.length === 1 &&
+        parent.node.arguments[0] === path.node
+      ) {
+        return;
+      }
+      if (
+        !parent.isMemberExpression() ||
+        parent.node.object !== path.node ||
+        parent.node.computed ||
+        !t.isIdentifier(parent.node.property)
+      ) {
+        valid = false;
+        path.stop();
+        return;
+      }
+      const property = parent.node.property.name;
+      if (property === "size") return;
+      const call = parent.parentPath;
+      if (
+        !readMethods.has(property) ||
+        !call?.isCallExpression() ||
+        call.node.callee !== parent.node
+      ) {
+        valid = false;
+        path.stop();
+      }
+    },
+  });
+  return valid;
+}
+
+function collectionMutationOperation(
+  kind: KeyedCollectionTargetKind,
+  method: string,
+): "set-add" | "set-delete" | "map-set" | "map-delete" | undefined {
+  if (kind === "set" && method === "add") return "set-add";
+  if (kind === "set" && method === "delete") return "set-delete";
+  if (kind === "map" && method === "set") return "map-set";
+  if (kind === "map" && method === "delete") return "map-delete";
+  return undefined;
+}
+
+function collectionMutationArgumentsAreValid(
+  operation: ReturnType<typeof collectionMutationOperation>,
+  args: readonly (t.Expression | t.JSXNamespacedName | t.ArgumentPlaceholder | t.SpreadElement)[],
+): args is readonly t.Expression[] {
+  if (!operation || args.some((argument) => !t.isExpression(argument))) return false;
+  return operation === "map-set" ? args.length === 2 : args.length === 1;
+}
+
+function prepareKeyedCollectionUpdater(
+  updater: t.ArrowFunctionExpression | t.FunctionExpression,
+  kind: KeyedCollectionTargetKind,
+  updateHelper: t.Identifier,
+  mutationHelper: t.Identifier,
+): PreparedKeyedCollectionUpdater | undefined {
+  if (
+    updater.async ||
+    updater.generator ||
+    updater.params.length !== 1 ||
+    !t.isIdentifier(updater.params[0])
+  ) {
+    return undefined;
+  }
+  const previous = updater.params[0];
+
+  if (t.isExpression(updater.body)) {
+    if (
+      !t.isCallExpression(updater.body) ||
+      !t.isMemberExpression(updater.body.callee) ||
+      updater.body.callee.computed ||
+      !t.isIdentifier(updater.body.callee.property)
+    ) {
+      return undefined;
+    }
+    const operation = collectionMutationOperation(kind, updater.body.callee.property.name);
+    if (
+      (operation !== "set-add" && operation !== "map-set") ||
+      !collectionMutationArgumentsAreValid(operation, updater.body.arguments) ||
+      !isCollectionConstruction(updater.body.callee.object, kind, previous)
+    ) {
+      return undefined;
+    }
+    const collection = uniqueLocalIdentifier("_farmCollection", [updater]);
+    const body = t.blockStatement([
+      t.variableDeclaration("const", [
+        t.variableDeclarator(
+          t.cloneNode(collection),
+          t.cloneNode(updater.body.callee.object, true),
+        ),
+      ]),
+      t.returnStatement(
+        t.callExpression(t.cloneNode(updateHelper), [
+          t.cloneNode(previous),
+          t.callExpression(t.cloneNode(mutationHelper), [
+            t.cloneNode(collection),
+            t.memberExpression(t.cloneNode(collection), t.cloneNode(updater.body.callee.property)),
+            t.stringLiteral(operation),
+            ...updater.body.arguments.map(
+              (argument) => t.cloneNode(argument, true) as t.Expression,
+            ),
+          ]),
+          t.stringLiteral(kind),
+        ]),
+      ),
+    ]);
+    return {
+      updater: t.arrowFunctionExpression([t.cloneNode(previous)], body),
+      mutations: 1,
+    };
+  }
+
+  const cloned = t.cloneNode(updater, true);
+  const file = expressionFile(cloned);
+  let functionPath: NodePath<t.ArrowFunctionExpression | t.FunctionExpression> | undefined;
+  traverse(file, {
+    Function(path) {
+      if (functionPath) return;
+      if (path.isArrowFunctionExpression() || path.isFunctionExpression()) {
+        functionPath = path;
+      }
+    },
+  });
+  if (!functionPath || !t.isBlockStatement(functionPath.node.body)) return undefined;
+  const clonedPrevious = functionPath.node.params[0];
+  if (!t.isIdentifier(clonedPrevious)) return undefined;
+
+  let collectionDeclaration: NodePath<t.VariableDeclarator> | undefined;
+  const updaterBody = functionPath.get("body");
+  if (!updaterBody.isBlockStatement()) return undefined;
+  for (const statement of updaterBody.get("body")) {
+    if (!statement.isVariableDeclaration({ kind: "const" })) continue;
+    for (const declaration of statement.get("declarations")) {
+      if (
+        declaration.isVariableDeclarator() &&
+        t.isIdentifier(declaration.node.id) &&
+        t.isExpression(declaration.node.init) &&
+        isCollectionConstruction(declaration.node.init, kind, clonedPrevious)
+      ) {
+        if (collectionDeclaration) return undefined;
+        collectionDeclaration = declaration;
+      }
+    }
+  }
+  if (!collectionDeclaration || !t.isIdentifier(collectionDeclaration.node.id)) return undefined;
+  if (collectionDeclaration.scope.getBinding(collectionConstructorName(kind))) return undefined;
+  const collectionName = collectionDeclaration.node.id.name;
+  const collectionBinding = collectionDeclaration.scope.getBinding(collectionName);
+  const previousBinding = functionPath.scope.getBinding(clonedPrevious.name);
+  if (!collectionBinding || !previousBinding) return undefined;
+
+  let valid = true;
+  let mutations = 0;
+  traverse(file, {
+    ReferencedIdentifier(path) {
+      if (!valid) return;
+      const binding = path.scope.getBinding(path.node.name);
+      const belongsToUpdater = path.getFunctionParent()?.node === functionPath?.node;
+      if (binding === collectionBinding) {
+        if (!belongsToUpdater) {
+          valid = false;
+          path.stop();
+          return;
+        }
+        const parent = path.parentPath;
+        if (parent.isReturnStatement() && parent.node.argument === path.node) return;
+        if (
+          !parent.isMemberExpression() ||
+          parent.node.object !== path.node ||
+          parent.node.computed ||
+          !t.isIdentifier(parent.node.property)
+        ) {
+          valid = false;
+          path.stop();
+          return;
+        }
+        const method = parent.node.property.name;
+        if (method === "size") return;
+        const call = parent.parentPath;
+        if (!call?.isCallExpression() || call.node.callee !== parent.node) {
+          valid = false;
+          path.stop();
+          return;
+        }
+        const operation = collectionMutationOperation(kind, method);
+        const read = kind === "set" ? method === "has" : method === "get" || method === "has";
+        if (read) return;
+        if (
+          !collectionMutationArgumentsAreValid(operation, call.node.arguments) ||
+          (call.parentPath.isMemberExpression() && call.parentPath.node.object === call.node)
+        ) {
+          valid = false;
+          path.stop();
+          return;
+        }
+        mutations += 1;
+        return;
+      }
+      if (binding === previousBinding) {
+        if (!belongsToUpdater) {
+          valid = false;
+          path.stop();
+          return;
+        }
+        const parent = path.parentPath;
+        if (parent.isReturnStatement() && parent.node.argument === path.node) return;
+        if (
+          parent.isNewExpression() &&
+          parent.node.arguments.length === 1 &&
+          parent.node.arguments[0] === path.node &&
+          t.isIdentifier(parent.node.callee, { name: collectionConstructorName(kind) })
+        ) {
+          return;
+        }
+        if (
+          parent.isMemberExpression() &&
+          parent.node.object === path.node &&
+          !parent.node.computed &&
+          t.isIdentifier(parent.node.property)
+        ) {
+          const method = parent.node.property.name;
+          const call = parent.parentPath;
+          if (
+            method === "size" ||
+            ((kind === "set" ? method === "has" : method === "get" || method === "has") &&
+              call?.isCallExpression() &&
+              call.node.callee === parent.node)
+          ) {
+            return;
+          }
+        }
+        valid = false;
+        path.stop();
+      }
+    },
+    ReturnStatement(path) {
+      if (!valid || path.getFunctionParent()?.node !== functionPath?.node || !path.node.argument) {
+        return;
+      }
+      const value = path.node.argument;
+      const returnsOwnedCollection =
+        (t.isIdentifier(value) &&
+          (path.scope.getBinding(value.name) === collectionBinding ||
+            path.scope.getBinding(value.name) === previousBinding)) ||
+        isCollectionConstruction(value, kind);
+      if (!returnsOwnedCollection) {
+        valid = false;
+        path.stop();
+      }
+    },
+  });
+  if (!valid || mutations === 0) return undefined;
+
+  traverse(file, {
+    CallExpression(path) {
+      if (path.getFunctionParent()?.node !== functionPath?.node) return;
+      const callee = path.node.callee;
+      if (
+        !t.isMemberExpression(callee) ||
+        callee.computed ||
+        !t.isIdentifier(callee.object, { name: collectionName }) ||
+        path.scope.getBinding(collectionName) !== collectionBinding ||
+        !t.isIdentifier(callee.property)
+      ) {
+        return;
+      }
+      const operation = collectionMutationOperation(kind, callee.property.name);
+      if (!collectionMutationArgumentsAreValid(operation, path.node.arguments)) return;
+      path.replaceWith(
+        t.callExpression(t.cloneNode(mutationHelper), [
+          t.cloneNode(callee.object),
+          t.memberExpression(t.cloneNode(callee.object), t.cloneNode(callee.property)),
+          t.stringLiteral(operation!),
+          ...path.node.arguments.map((argument) => t.cloneNode(argument, true) as t.Expression),
+        ]),
+      );
+      path.skip();
+    },
+    ReturnStatement(path) {
+      if (path.getFunctionParent()?.node !== functionPath?.node || !path.node.argument) return;
+      path.node.argument = t.callExpression(t.cloneNode(updateHelper), [
+        t.cloneNode(clonedPrevious),
+        t.cloneNode(path.node.argument, true),
+        t.stringLiteral(kind),
+      ]);
+    },
+  });
+  const prepared = (file.program.body[0] as t.ExpressionStatement).expression;
+  return t.isArrowFunctionExpression(prepared) || t.isFunctionExpression(prepared)
+    ? { updater: prepared, mutations }
+    : undefined;
+}
+
+function rewriteKeyedCollectionUpdateHints(
+  root: t.JSXElement,
+  targetKinds: ReadonlyMap<number, KeyedCollectionTargetKind>,
+  states: readonly StateBinding[],
+  statesBySetter: ReadonlyMap<string, StateBinding>,
+  updateHelper: t.Identifier,
+  mutationHelper: t.Identifier,
+  globalCollections: ReadonlySet<string>,
+): { root: t.JSXElement; count: number } {
+  if (targetKinds.size === 0) return { root: t.cloneNode(root, true), count: 0 };
+  const file = expressionFile(t.cloneNode(root, true));
+  let count = 0;
+
+  for (const [stateIndex, kind] of targetKinds) {
+    const state = states[stateIndex];
+    if (
+      !state ||
+      !collectionStateInitializerIsOwned(
+        state.initialValue,
+        kind,
+        globalCollections.has(collectionConstructorName(kind)),
+      ) ||
+      !collectionStateHasOnlyOwnedReads(root, state, kind)
+    ) {
+      continue;
+    }
+
+    const replacements = new Map<t.CallExpression, PreparedKeyedCollectionUpdater>();
+    let valid = true;
+    traverse(file, {
+      CallExpression(path) {
+        if (!valid) return;
+        const callee = path.get("callee");
+        if (
+          !callee.isIdentifier({ name: state.setterName }) ||
+          callee.scope.hasBinding(callee.node.name) ||
+          statesBySetter.get(callee.node.name)?.index !== stateIndex
+        ) {
+          return;
+        }
+        if (path.node.arguments.length !== 1 || !t.isExpression(path.node.arguments[0])) {
+          valid = false;
+          path.stop();
+          return;
+        }
+        const update = path.node.arguments[0];
+        if (path.scope.getBinding(collectionConstructorName(kind))) {
+          valid = false;
+          path.stop();
+          return;
+        }
+        if (isCollectionConstruction(update, kind)) return;
+        if (!t.isArrowFunctionExpression(update) && !t.isFunctionExpression(update)) {
+          valid = false;
+          path.stop();
+          return;
+        }
+        const prepared = prepareKeyedCollectionUpdater(update, kind, updateHelper, mutationHelper);
+        if (!prepared) {
+          valid = false;
+          path.stop();
+          return;
+        }
+        replacements.set(path.node, prepared);
+      },
+    });
+    if (!valid || replacements.size === 0) continue;
+
+    traverse(file, {
+      CallExpression(path) {
+        const prepared = replacements.get(path.node);
+        if (!prepared) return;
+        path.node.arguments[0] = t.cloneNode(prepared.updater, true);
+        count += prepared.mutations;
+        path.skip();
+      },
+    });
+  }
+
   return {
     root: (file.program.body[0] as t.ExpressionStatement).expression as t.JSXElement,
     count,
@@ -5288,9 +5733,12 @@ function compileCandidate(
   candidate: Candidate,
   createComponentIdentifier: t.Identifier,
   keyedMapUpdateIdentifier: t.Identifier,
+  keyedCollectionUpdateIdentifier: t.Identifier,
+  keyedCollectionMutationIdentifier: t.Identifier,
   runtimeFeatureIdentifiers: ReadonlyMap<CompilerRuntimeFeatureName, t.Identifier>,
   usedRuntimeFeatures: Set<CompilerRuntimeFeatureName>,
   optimizationCounts: {
+    keyedCollectionUpdateHints: number;
     keyedIdentityTargets: number;
     keyedMapLookupTargets: number;
     keyedMembershipTargets: number;
@@ -5313,6 +5761,7 @@ function compileCandidate(
   const safeGlobals = new Set(
     [...SAFE_GLOBAL_CALLS, "Math"].filter((name) => !path.scope.getBinding(name)),
   );
+  const globalCollections = new Set(["Set", "Map"].filter((name) => !path.scope.getBinding(name)));
 
   const states: StateBinding[] = [];
   const locals: LocalBinding[] = [];
@@ -5576,6 +6025,58 @@ function compileCandidate(
       optimizationCounts.keyedMapUpdateHints += hintedRoot.count;
     }
   }
+  const keyedCollectionTargetKinds = new Map<number, KeyedCollectionTargetKind>();
+  const conflictingKeyedCollectionTargets = new Set<number>();
+  for (const plan of blockAnalysis.plans || []) {
+    if (plan.kind !== "keyed-rows") continue;
+    for (const binding of plan.bindings) {
+      const target = binding.membershipTarget || binding.mapLookupTarget;
+      if (!target) continue;
+      const kind: KeyedCollectionTargetKind = binding.membershipTarget ? "set" : "map";
+      const previousKind = keyedCollectionTargetKinds.get(target.dependency);
+      if (previousKind && previousKind !== kind) {
+        conflictingKeyedCollectionTargets.add(target.dependency);
+      } else {
+        keyedCollectionTargetKinds.set(target.dependency, kind);
+      }
+    }
+  }
+  for (const dependency of conflictingKeyedCollectionTargets) {
+    keyedCollectionTargetKinds.delete(dependency);
+  }
+  const keyedCollectionHintedRoot = rewriteKeyedCollectionUpdateHints(
+    expandedReactiveRoot,
+    keyedCollectionTargetKinds,
+    states,
+    statesBySetter,
+    keyedCollectionUpdateIdentifier,
+    keyedCollectionMutationIdentifier,
+    globalCollections,
+  );
+  if (keyedCollectionHintedRoot.count > 0) {
+    const hintedBlockAnalysis = analyzeComposableBlocks(
+      keyedCollectionHintedRoot.root,
+      reactiveByValue,
+      safeGlobals,
+      listNames,
+      allowedComponentNames,
+    );
+    const hintedAnalysis = analyzeHostTree(
+      keyedCollectionHintedRoot.root,
+      reactiveByValue,
+      safeGlobals,
+      hintedBlockAnalysis.conditionalExpressions || new Set<t.Expression>(),
+      hintedBlockAnalysis.keyedExpressions || new Set<t.Expression>(),
+      hintedBlockAnalysis.ownedElements || new Set<t.JSXElement>(),
+      hintedBlockAnalysis.componentElements || new Set<t.JSXElement>(),
+    );
+    if (!hintedBlockAnalysis.reason && !hintedAnalysis.reason) {
+      expandedReactiveRoot = keyedCollectionHintedRoot.root;
+      blockAnalysis = hintedBlockAnalysis;
+      analysis = hintedAnalysis;
+      optimizationCounts.keyedCollectionUpdateHints += keyedCollectionHintedRoot.count;
+    }
+  }
   const blockPlans = blockAnalysis.plans || [];
   optimizationCounts.keyedIdentityTargets += blockPlans.reduce(
     (count, plan) =>
@@ -5786,6 +6287,7 @@ export async function compileReactModule(
   const compiled: string[] = [];
   const diagnostics: CompilerDiagnostic[] = [];
   const optimizationCounts = {
+    keyedCollectionUpdateHints: 0,
     keyedIdentityTargets: 0,
     keyedMapLookupTargets: 0,
     keyedMembershipTargets: 0,
@@ -5831,6 +6333,12 @@ export async function compileReactModule(
         const keyedMapUpdateIdentifier = programPath.scope.generateUidIdentifier(
           "createCompilerKeyedMapUpdate",
         );
+        const keyedCollectionUpdateIdentifier = programPath.scope.generateUidIdentifier(
+          "createCompilerKeyedCollectionUpdate",
+        );
+        const keyedCollectionMutationIdentifier = programPath.scope.generateUidIdentifier(
+          "applyCompilerKeyedCollectionMutation",
+        );
         const runtimeFeatureIdentifiers = new Map<CompilerRuntimeFeatureName, t.Identifier>(
           Object.entries(COMPILER_RUNTIME_FEATURE_EXPORTS).map(([feature, exportName]) => [
             feature as CompilerRuntimeFeatureName,
@@ -5853,6 +6361,8 @@ export async function compileReactModule(
             candidate,
             createComponentIdentifier,
             keyedMapUpdateIdentifier,
+            keyedCollectionUpdateIdentifier,
+            keyedCollectionMutationIdentifier,
             runtimeFeatureIdentifiers,
             usedRuntimeFeatures,
             optimizationCounts,
@@ -5887,6 +6397,18 @@ export async function compileReactModule(
                       t.importSpecifier(
                         keyedMapUpdateIdentifier,
                         t.identifier("createCompilerKeyedMapUpdate"),
+                      ),
+                    ]
+                  : []),
+                ...(optimizationCounts.keyedCollectionUpdateHints > 0
+                  ? [
+                      t.importSpecifier(
+                        keyedCollectionUpdateIdentifier,
+                        t.identifier("createCompilerKeyedCollectionUpdate"),
+                      ),
+                      t.importSpecifier(
+                        keyedCollectionMutationIdentifier,
+                        t.identifier("applyCompilerKeyedCollectionMutation"),
                       ),
                     ]
                   : []),

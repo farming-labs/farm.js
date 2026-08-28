@@ -18,6 +18,7 @@ export interface ReactCompilerReport {
     componentsConsidered: number;
     compiled: number;
     fallback: number;
+    keyedCollectionUpdateHints: number;
     keyedIdentityTargets: number;
     keyedMapLookupTargets: number;
     keyedMembershipTargets: number;
@@ -31,6 +32,7 @@ export interface ReactCompilerReport {
     id: string;
     compiled: readonly string[];
     optimizations: {
+      keyedCollectionUpdateHints: number;
       keyedIdentityTargets: number;
       keyedMapLookupTargets: number;
       keyedMembershipTargets: number;
@@ -52,6 +54,7 @@ export function createReactCompilerReport(
   let componentsConsidered = 0;
   let compiled = 0;
   let fallback = 0;
+  let keyedCollectionUpdateHints = 0;
   let keyedIdentityTargets = 0;
   let keyedMapLookupTargets = 0;
   let keyedMembershipTargets = 0;
@@ -62,6 +65,7 @@ export function createReactCompilerReport(
       componentsConsidered += result.compiled.length + result.diagnostics.length;
       compiled += result.compiled.length;
       fallback += result.diagnostics.length;
+      keyedCollectionUpdateHints += result.optimizations.keyedCollectionUpdateHints || 0;
       keyedIdentityTargets += result.optimizations.keyedIdentityTargets || 0;
       keyedMapLookupTargets += result.optimizations.keyedMapLookupTargets || 0;
       keyedMembershipTargets += result.optimizations.keyedMembershipTargets || 0;
@@ -91,6 +95,7 @@ export function createReactCompilerReport(
       componentsConsidered,
       compiled,
       fallback,
+      keyedCollectionUpdateHints,
       keyedIdentityTargets,
       keyedMapLookupTargets,
       keyedMembershipTargets,

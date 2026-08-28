@@ -40,6 +40,7 @@ describe("React AOT keyed update hints", () => {
     expect(result.compiled).toEqual(["Inventory"]);
     expect(result.diagnostics).toEqual([]);
     expect(result.optimizations).toEqual({
+      keyedCollectionUpdateHints: 0,
       keyedIdentityTargets: 0,
       keyedMapLookupTargets: 0,
       keyedMembershipTargets: 0,

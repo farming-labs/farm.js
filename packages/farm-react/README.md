@@ -187,6 +187,34 @@ subclasses or proxies, object values, customized `get` behavior, React-owned row
 and structural dependencies keep the existing complete or React-owned paths. The compiler report
 exposes this count as `keyedMapLookupTargets`.
 
+When a targeted Set or Map is compiler-owned, Farm can also carry the exact mutated keys from a
+proven immutable functional update:
+
+```tsx
+setMarkedIds((current) => {
+  const next = new Set(current);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  return next;
+});
+
+setStatusById((current) => new Map(current).set(id, "ready"));
+```
+
+The application still creates its normal immutable collection. The generated update records only
+the native `add`, `delete`, or `set` calls that execute, and the runtime validates those keys
+against the previous committed collection. It can then update the relevant keyed rows without
+iterating every old and new Set member or Map entry first. Queued functional updates compose, and
+the runtime periodically compacts its persistent snapshot so a long update chain stays bounded.
+
+This proof is deliberately conservative. The state must start from a compiler-owned native
+`Set`/`Map`; every setter use must be a fresh same-kind replacement or a recognized immutable
+updater; and the collection, updater parameter, and cloned draft must not escape or be mutated
+through unknown code. Shadowed constructors, custom collections, object keys, object Map values,
+direct state mutation, aliased drafts, or a failed runtime check use the existing snapshot or
+React-owned path before compiled bindings run. No option or syntax is added. The compiler report
+counts emitted native mutation sites as `keyedCollectionUpdateHints`.
+
 For a direct keyed `useState` collection, the compiler also recognizes conservative same-order
 updates such as:
 
@@ -485,7 +513,8 @@ contains project-relative module paths, compiled component names, fallback detai
 reasons aggregated by count. Its summary and per-module `optimizations` also report
 `keyedIdentityTargets`, the number of scalar key-directed row bindings;
 `keyedMapLookupTargets`, the number of native-Map keyed lookup bindings;
-`keyedMembershipTargets`, the number of native-Set membership bindings; and
+`keyedMembershipTargets`, the number of native-Set membership bindings;
+`keyedCollectionUpdateHints`, the number of compiler-proven native Set/Map mutation sites; and
 `keyedMapUpdateHints`, the number of compiler-proven direct keyed `map()` update sites. A custom
 project-relative `reportFile` also enables reporting.
 

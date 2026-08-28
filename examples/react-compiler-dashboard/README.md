@@ -77,6 +77,14 @@ than React at 20,000 rows, normalized growth may not exceed 2x, and the compiler
 a nonzero `keyedMapLookupTargets` count. Differential unit tests require binding reads to equal the
 present row keys whose mapped primitive values changed.
 
+Dense Set and Map operations isolate producer-side collection deltas from those binding
+optimizations. Each compiler build runs a proven immutable functional updater and an equivalent
+unhinted snapshot control over the same dense collection. The hinted path must be at least 2x
+faster than React, at least 1.5x faster than the compiled snapshot control, and stay within 2x
+normalized growth at 20,000 entries. The report must contain a nonzero
+`keyedCollectionUpdateHints` count. Deterministic unit tests separately compare 2,000 randomized
+hinted Set mutations and 2,000 randomized hinted Map mutations with normal React.
+
 Set `FARM_EXPERIMENT_BROWSER_PATH` to an installed Chrome/Chromium executable when Playwright's
 bundled browser is unavailable. Sample counts are configurable:
 
@@ -103,6 +111,9 @@ The default JSON report is `/tmp/farm-react-dashboard-benchmark.json`; change it
   disappear.
 - The scale profile compares 20,000-row medians with their 1,000- or 10,000-row references and
   records both raw growth and growth normalized by the row-count increase.
+- The dense collection controls show only the incremental delta benefit: both compiler paths keep
+  the application's immutable collection copy, while the hinted path avoids the runtime's second
+  complete entry scan.
 - This is an operation-compatible local benchmark, not an official `js-framework-benchmark`
   submission or a score comparable to its published result table. This app has richer rows and
   measures event dispatch through an asserted DOM result without CPU throttling.
