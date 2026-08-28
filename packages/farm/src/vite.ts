@@ -3961,7 +3961,7 @@ async function buildClientHydrationElement(
       }
     } catch (error) {
       console.error(
-        '[Farm.js] Loading boundary failed to load and was skipped: ' + loading.modulePath,
+        '[Farm.js] Loading boundary failed to load and was skipped: ' + loadingModulePath,
         error,
       );
     }
