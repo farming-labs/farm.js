@@ -39,7 +39,11 @@ const testSource = String.raw`
   const { flushSync } = await import("react-dom");
   const { createRoot, hydrateRoot } = await import("react-dom/client");
   const { renderToString } = await import("react-dom/server");
-  const { createCompiledComponent, createCompiledComponentWithFeatures } = await import(
+  const {
+    createCompiledComponent,
+    createCompiledComponentWithFeatures,
+    createCompilerKeyedMapUpdate,
+  } = await import(
     "@farm.js/react/compiler-runtime"
   );
   const { List } = await import("@farm.js/react/list");
@@ -744,6 +748,9 @@ const testSource = String.raw`
         ),
         React.createElement(blocks.KeyedRows, {
           id: 0,
+          collectionDependency: 0,
+          dependencies: [0],
+          structureDependencies: [0],
           render: () =>
             React.createElement(
               "ol",
@@ -1254,6 +1261,9 @@ const testSource = String.raw`
         null,
         React.createElement(blocks.KeyedRows, {
           id: 0,
+          collectionDependency: 0,
+          dependencies: [0],
+          structureDependencies: [0],
           render: (rowEvent, rowConditional) => {
             interactiveListRenders += 1;
             return React.createElement(
@@ -1343,13 +1353,17 @@ const testSource = String.raw`
               name: "onClick",
               invoke: (item, index, event) => {
                 interactiveCalls.push(item.label + ":" + index + ":" + event.currentTarget.dataset.index);
-                state[0].set((current) =>
-                  current.map((row) =>
-                    row.id === item.id
+                state[0].set((current) => {
+                  const changedIndices = [];
+                  const next = current.map((row, rowIndex) => {
+                    const mapped = row.id === item.id
                       ? { ...row, label: item.label + "!", done: !item.done }
-                      : row,
-                  ),
-                );
+                      : row;
+                    if (mapped !== row) changedIndices.push(rowIndex);
+                    return mapped;
+                  });
+                  return createCompilerKeyedMapUpdate(current, next, changedIndices);
+                });
               },
             },
           ],

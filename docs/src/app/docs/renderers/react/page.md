@@ -301,7 +301,8 @@ After a successful build, Farm writes `.farm/react-compiler.json`:
     "modules": 2,
     "componentsConsidered": 4,
     "compiled": 2,
-    "fallback": 2
+    "fallback": 2,
+    "keyedMapUpdateHints": 1
   },
   "fallbackReasons": [
     {
@@ -313,6 +314,9 @@ After a successful build, Farm writes `.farm/react-compiler.json`:
     {
       "id": "src/Products.tsx",
       "compiled": ["ProductRow"],
+      "optimizations": {
+        "keyedMapUpdateHints": 1
+      },
       "fallbacks": [
         {
           "module": "src/Products.tsx",
@@ -327,10 +331,12 @@ After a successful build, Farm writes `.farm/react-compiler.json`:
 ```
 
 `componentsConsidered` counts candidates selected by the active mode. `compiled` counts components
-using the AOT runtime, and `fallback` counts candidates left on React. `selected` is `true` when an
-annotation explicitly requested compilation. Module paths are relative to the project root, and
-the output is sorted and contains no timestamp, so CI can compare reports without machine-specific
-noise.
+using the AOT runtime, and `fallback` counts candidates left on React. `keyedMapUpdateHints` counts
+setter sites where the compiler proved that a direct keyed collection can report its changed row
+indexes while an immutable `map()` runs. The same count appears per module. `selected` is `true`
+when an annotation explicitly requested compilation. Module paths are relative to the project root,
+and the output is sorted and contains no timestamp, so CI can compare reports without
+machine-specific noise.
 
 Use a different project-relative output path when CI collects artifacts elsewhere:
 
@@ -670,12 +676,42 @@ prepare the row's host descriptor, key reader, and exact text, attribute, and st
 build time. React still creates the initial elements during client render or hydration. After the
 component mounts, Farm adopts those elements as keyed row instances.
 
-Updating `items` then does not execute `Inventory` or its map callback. Surviving rows are found by
-key and their prepared bindings are patched directly. Missing keys remove only their row, and new
-keys create only their prepared host tree. During a reorder, Farm calculates the longest increasing
-subsequence (LIS) of the old row positions. Rows in that subsequence stay in place; only the other
-surviving rows move. LIS is a runtime move planner over compiler-prepared rows, not a claim that the
-future contents of an array are known at build time.
+Updating `items` then does not execute `Inventory` or its JSX row-render callback. Surviving rows
+are found by key and their prepared bindings are patched directly. Missing keys remove only their
+row, and new keys create only their prepared host tree. During a reorder, Farm calculates the
+longest increasing subsequence (LIS) of the old row positions. Rows in that subsequence stay in
+place; only the other surviving rows move. LIS is a runtime move planner over compiler-prepared
+rows, not a claim that the future contents of an array are known at build time.
+
+#### Mutation-aware same-order updates
+
+The compiler can remove the runtime's second full-row scan for a common immutable update:
+
+```tsx
+setItems((current) =>
+  current.map((item) => (item.id === targetId ? { ...item, selected: !item.selected } : item)),
+);
+```
+
+This needs no option or component primitive. At build time, Farm recognizes a functional setter on
+the direct `useState` collection used by a compiled keyed map or `List`. The mapper must be a concise
+arrow expression with a conditional result: one branch returns the original item and the other
+returns a new object that spreads that item. The condition and replacement values must use the
+compiler's safe expression subset. The hint runtime is retained only in modules where at least one
+such site is emitted; direct-only and ordinary keyed builds do not import that capability.
+
+The generated mapper records an index only when the returned item has a different identity. The
+user's `map()` still runs and is still O(n); the optimization avoids reading every key and every row
+binding again after it finishes. Farm validates that the array length and each reported row's key
+and index are unchanged, then patches only those row instances. Multiple hinted functional updates
+queued in one compiler flush are combined.
+
+If a key changes, an insert, removal, or reorder occurs, a relevant second dependency changes, or a
+runtime check fails, Farm discards the hint and runs the existing complete keyed reconciliation and
+LIS path. Derived collections, non-functional setters, block-bodied mappers, mutating replacements,
+and other unproven shapes also keep that existing path. This is an optimization hint, not a new
+correctness contract or a way to bypass React fallback behavior. The compiler report exposes the
+number of emitted sites as `keyedMapUpdateHints`.
 
 #### Interactive host rows
 
@@ -1385,6 +1421,11 @@ The package and example test suites verify more than generated code:
 - compiler-owned host rows patch text, attributes, and styles in place, preserve focus and text
   selection, use the LIS minimum for measured rotations and reversals, and remount through React
   when runtime keys are duplicated;
+- mutation-aware keyed `map()` updates patch only compiler-reported same-key row indexes, compose
+  queued hints across multiple keyed boundaries, ignore unrelated state in the same flush, and
+  reject key changes or mixed unhinted collection updates into the complete reconciliation path;
+- a 2,048-row instrumentation test changes one item with one key read and one binding read, while
+  2,000 deterministic queued updates match normal React with one compiled owner execution;
 - keyed DOM ranges preserve static siblings around multiple lists, support adjacent empty ranges
   and exact component roots, apply LIS independently per range, and remount the complete container
   through React when keys or parent-driven static markup invalidate adoption;
@@ -1452,6 +1493,9 @@ The package and example test suites verify more than generated code:
 - the production browser experiment rotates 1,000 compiler-owned host rows with one LIS move,
   updates outer and nested row conditions, preserves surviving row and branch identity, removes and
   inserts a row, and observes zero owner update executions;
+- the production 10,000/20,000-row benchmark requires a nonzero `keyedMapUpdateHints` report count,
+  at least an 8x keyed-update speedup in both compiler modes, and passes DOM correctness,
+  React-relative regression, and normalized scalability gates;
 - the public `List` renders iterable and nullish collections correctly with the compiler off;
 - the packaged runtime, including a keyed-range component root, editable and interactive keyed-row
   events, row-local conditions, reorders, identity, selection, and hydration, is exercised

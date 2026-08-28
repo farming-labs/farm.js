@@ -114,6 +114,10 @@ async function inspectBuild(compilerMode) {
     const compiled = new Set(compilerReport.modules.flatMap((module) => module.compiled));
     assert(compiled.has("OperationsDashboard"));
     assert(compiled.has("StandardTableBenchmark"));
+    assert(
+      compilerReport.summary.keyedMapUpdateHints > 0,
+      "The compiler build did not emit a mutation-aware keyed-map update hint.",
+    );
   }
 
   return {
@@ -819,7 +823,30 @@ const performanceRegressions = Object.entries(comparisons).flatMap(([group, metr
       speedup: comparison.hybridVsBaseline.speedup,
     })),
 );
-const passed = performanceRegressions.length === 0 && scalabilityRegressions.length === 0;
+// The general regression gate above only proves that compiled output is not slower than React.
+// Keep a separate floor for the mutation-aware keyed update this benchmark is designed to protect:
+// without the hint, the older compiled reconciliation path is still faster than React and would
+// otherwise pass despite losing most of the optimization.
+const keyedUpdateMinimumSpeedup = 8;
+const keyedUpdateCases = [
+  ["table", "updateEvery10th"],
+  ["scale", "updateEvery10th20k"],
+];
+const keyedUpdateSpeedups = keyedUpdateCases.flatMap(([group, metric]) =>
+  ["static", "hybrid"].map((mode) => ({
+    group,
+    metric,
+    mode,
+    speedup: comparisons[group][metric][`${mode}VsBaseline`].speedup,
+  })),
+);
+const keyedUpdateRegressions = keyedUpdateSpeedups.filter(
+  ({ speedup }) => !Number.isFinite(speedup) || speedup < keyedUpdateMinimumSpeedup,
+);
+const passed =
+  performanceRegressions.length === 0 &&
+  scalabilityRegressions.length === 0 &&
+  keyedUpdateRegressions.length === 0;
 
 const report = {
   result: passed ? "PASS" : "CORRECTNESS_PASS_PERFORMANCE_REGRESSION",
@@ -829,6 +856,12 @@ const report = {
     status: performanceRegressions.length === 0 ? "PASS" : "FAIL",
     toleranceMs: performanceToleranceMs,
     thresholdPercent: performanceThresholdPercent,
+  },
+  optimizationPersistenceGate: {
+    minimumSpeedup: keyedUpdateMinimumSpeedup,
+    regressions: keyedUpdateRegressions,
+    speedups: keyedUpdateSpeedups,
+    status: keyedUpdateRegressions.length === 0 ? "PASS" : "FAIL",
   },
   scalabilityGate: {
     metrics: scalability,
@@ -872,3 +905,4 @@ const report = {
 
 await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`);
 console.log(JSON.stringify({ ...report, reportPath }, null, 2));
+if (!passed) process.exitCode = 1;

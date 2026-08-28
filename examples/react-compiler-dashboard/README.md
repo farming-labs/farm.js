@@ -55,6 +55,12 @@ still failing the performance gate when its median is both more than 10% and mor
 slower than the bracketed React baseline. The absolute tolerance keeps sub-millisecond browser timer
 noise from failing the run while retaining the relative gate for meaningful operations.
 
+The targeted keyed-update optimization has an additional persistence gate. Both compiler modes must
+remain at least 8x faster than bracketed React for update-every-10th at 10,000 and 20,000 rows. This
+is intentionally below the measured 16x-17x result for machine headroom, but above the older roughly
+5x full-reconciliation path. A failed performance, scalability, or persistence gate writes the JSON
+report and exits with a nonzero status.
+
 Set `FARM_EXPERIMENT_BROWSER_PATH` to an installed Chrome/Chromium executable when Playwright's
 bundled browser is unavailable. Sample counts are configurable:
 

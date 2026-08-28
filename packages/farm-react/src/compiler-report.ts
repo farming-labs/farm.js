@@ -4,7 +4,7 @@ import type { CompileReactModuleResult, CompilerDiagnostic } from "./compiler";
 
 export interface ReactCompilerModuleObservation {
   id: string;
-  result: Pick<CompileReactModuleResult, "compiled" | "diagnostics">;
+  result: Pick<CompileReactModuleResult, "compiled" | "diagnostics" | "optimizations">;
 }
 
 export interface ReactCompilerReportFallback extends CompilerDiagnostic {
@@ -18,6 +18,7 @@ export interface ReactCompilerReport {
     componentsConsidered: number;
     compiled: number;
     fallback: number;
+    keyedMapUpdateHints: number;
   };
   fallbackReasons: Array<{
     count: number;
@@ -26,6 +27,9 @@ export interface ReactCompilerReport {
   modules: Array<{
     id: string;
     compiled: readonly string[];
+    optimizations: {
+      keyedMapUpdateHints: number;
+    };
     fallbacks: ReactCompilerReportFallback[];
   }>;
 }
@@ -42,12 +46,14 @@ export function createReactCompilerReport(
   let componentsConsidered = 0;
   let compiled = 0;
   let fallback = 0;
+  let keyedMapUpdateHints = 0;
 
   const modules = [...observations]
     .map(({ id, result }) => {
       componentsConsidered += result.compiled.length + result.diagnostics.length;
       compiled += result.compiled.length;
       fallback += result.diagnostics.length;
+      keyedMapUpdateHints += result.optimizations.keyedMapUpdateHints;
       const moduleId = projectRelativeId(projectRoot, id);
       const fallbacks = result.diagnostics.map((diagnostic) => {
         reasonCounts.set(diagnostic.reason, (reasonCounts.get(diagnostic.reason) || 0) + 1);
@@ -56,6 +62,7 @@ export function createReactCompilerReport(
       return {
         id: moduleId,
         compiled: [...result.compiled].sort(),
+        optimizations: result.optimizations,
         fallbacks,
       };
     })
@@ -72,6 +79,7 @@ export function createReactCompilerReport(
       componentsConsidered,
       compiled,
       fallback,
+      keyedMapUpdateHints,
     },
     fallbackReasons,
     modules,
