@@ -568,6 +568,32 @@ export function Chart() {}
     );
   });
 
+  it("reports a layout that fails to load, rather than dropping it quietly", () => {
+    const source = fs.readFileSync(path.join(process.cwd(), "src", "vite.ts"), "utf-8");
+
+    // Skipping a layout makes the client tree differ from the server's, so React
+    // discards the server rendered markup for that branch. A warning is too quiet
+    // for something that deletes visible UI.
+    expect(source).not.toContain("console.warn('[Farm.js] Could not load layout:");
+    expect(source).toContain("[Farm.js] Layout failed to load and was skipped: ");
+    expect(source).toContain("server rendered markup for this route");
+
+    // The same applies to a loading boundary that cannot be loaded.
+    expect(source).not.toContain("console.warn('[Farm.js] Could not load loading boundary");
+    expect(source).toContain("[Farm.js] Loading boundary failed to load and was skipped: ");
+  });
+
+  it("keeps the emitted diagnostics free of escapes the template literal would consume", () => {
+    const source = fs.readFileSync(path.join(process.cwd(), "src", "vite.ts"), "utf-8");
+    const start = source.indexOf("Layout failed to load and was skipped");
+    expect(start).toBeGreaterThan(-1);
+
+    // A backslash-n inside the surrounding template literal becomes a real
+    // newline in the emitted client runtime, which breaks the JS string literal.
+    const message = source.slice(start, start + 400);
+    expect(message.includes(String.fromCharCode(92) + "n")).toBe(false);
+  });
+
   it("composes every applicable layout in the development hydration runtime", () => {
     const source = fs.readFileSync(path.join(process.cwd(), "src", "vite.ts"), "utf-8");
 

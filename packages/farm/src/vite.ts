@@ -3960,7 +3960,10 @@ async function buildClientHydrationElement(
         element = React.createElement(React.Suspense, { fallback: loadingFallback }, element);
       }
     } catch (error) {
-      console.warn('[Farm.js] Could not load loading boundary for hydration:', error);
+      console.error(
+        '[Farm.js] Loading boundary failed to load and was skipped: ' + loading.modulePath,
+        error,
+      );
     }
   }
 
@@ -3983,7 +3986,15 @@ async function loadLayoutComponents(layouts = []) {
       }
       if (LayoutComponent) loadedLayouts.push({ ...layout, Component: LayoutComponent });
     } catch (error) {
-      console.warn('[Farm.js] Could not load layout:', layout.modulePath, error);
+      // Skipping the layout leaves the client tree different from the server's,
+      // so React discards the server rendered markup for this branch, including
+      // whatever the layout drew. Losing visible UI deserves more than a warning.
+      console.error(
+        '[Farm.js] Layout failed to load and was skipped: ' + layout.modulePath +
+          '. The client tree no longer matches the server, so React will discard the ' +
+          'server rendered markup for this route, including anything this layout renders.',
+        error,
+      );
     }
   }
 
