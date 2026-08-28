@@ -2,11 +2,11 @@
 
 Date: 2026-08-28
 
-Result: **PASS.** Correctness, the React-relative performance gate, keyed-update, scalar selection,
-Set-membership, Map-lookup, collection-delta, and normalized scalability gates all pass. The
-production run compares two bracketing React baselines with static and hybrid compiler builds from
-the exact same component source. Dense Set/Map operations also compare the new delta handoff with
-an unhinted snapshot control inside each compiler build.
+Result: **PASS.** Correctness, React-relative performance, keyed update, keyed append, scalar
+selection, Set-membership, Map-lookup, collection-delta, and normalized scalability gates all pass.
+The production run compares two bracketing React baselines with static and hybrid compiler builds
+from the exact same component source. Append and dense Set/Map operations also compare each new
+handoff with an unhinted compiled snapshot control.
 
 ## Environment and method
 
@@ -20,6 +20,8 @@ an unhinted snapshot control inside each compiler build.
 - Baseline values average the medians from the two bracketing React trials
 - Performance gate: more than 10% and 0.25 ms slower than the bracketed baseline
 - Keyed-update persistence gate: at least 8x faster than React at both 10,000 and 20,000 rows
+- Keyed-append persistence gate: at least 4x faster than React at both 10,000 and up to 20,000 rows,
+  and at least 1.25x faster than the equivalent compiled snapshot path
 - Key-directed selection gate: at least 10x faster than React at 20,000 rows and no more than 2x
   normalized growth
 - Key-directed Set-membership gate: at least 10x faster than React at 20,000 rows and no more than
@@ -33,8 +35,9 @@ an unhinted snapshot control inside each compiler build.
 Every trial passed DOM assertions and browser-error checks. The compiler report proved that both
 workloads compiled, delegated keyed rows were present only in compiler builds, exactly two scalar
 key-directed bindings, two Set-membership bindings, two Map-lookup bindings, 19 Set/Map mutation
-sites, and one mutation-aware keyed-map update site were emitted. Hybrid/static added zero owner
-executions. The two React baselines added 1,430 dashboard and 432 table owner executions each.
+sites, one mutation-aware keyed-map update site, and one keyed-array append site were emitted.
+Hybrid/static added zero owner executions. The two React baselines added 1,430 dashboard and 462
+table owner executions each.
 
 ## Complex dashboard
 
@@ -43,32 +46,40 @@ bindings.
 
 | Interaction                 | React median | Hybrid median | Hybrid vs React |
 | --------------------------- | -----------: | ------------: | --------------: |
-| Active live pulse           |      0.10 ms |       0.08 ms |    1.25x faster |
-| Inactive branch update      |     0.065 ms |       0.02 ms |    3.25x faster |
+| Active live pulse           |      0.10 ms |       0.10 ms |          parity |
+| Inactive branch update      |      0.08 ms |       0.02 ms |    3.75x faster |
 | Switch live/snapshot branch |     0.100 ms |      0.100 ms |          parity |
 
 ## Standard table operations
 
-| Operation         |             Rows | React median | Hybrid median | Hybrid vs React |
-| ----------------- | ---------------: | -----------: | ------------: | --------------: |
-| Create            |            1,000 |     12.60 ms |      11.50 ms |    1.10x faster |
-| Replace all       |            1,000 |     16.60 ms |      12.30 ms |    1.35x faster |
-| Create many       |           10,000 |    270.60 ms |     123.60 ms |    2.19x faster |
-| Append            | 10,000 -> 11,000 |     71.15 ms |      27.40 ms |    2.60x faster |
-| Update every 10th |           10,000 |     43.65 ms |       2.60 ms |   16.79x faster |
-| Select            |            1,000 |      3.90 ms |       0.10 ms |   39.00x faster |
-| Mark two rows     |            1,000 |      3.75 ms |       0.10 ms |   37.50x faster |
-| Queue two rows    |            1,000 |      3.70 ms |       0.10 ms |   37.00x faster |
-| Dense Set delta   |            1,000 |      3.75 ms |       0.10 ms |   37.50x faster |
-| Dense Map delta   |            1,000 |      3.75 ms |       0.10 ms |   37.50x faster |
-| Swap rows 2 / 999 |            1,000 |      7.80 ms |       1.30 ms |    6.00x faster |
-| Remove one row    |            1,000 |      4.60 ms |       2.00 ms |    2.30x faster |
-| Clear             |           10,000 |     58.00 ms |       9.40 ms |    6.17x faster |
+| Operation               |             Rows | React median | Hybrid median | Hybrid vs React |
+| ----------------------- | ---------------: | -----------: | ------------: | --------------: |
+| Create                  |            1,000 |     12.50 ms |      11.40 ms |    1.10x faster |
+| Replace all             |            1,000 |     18.45 ms |      11.90 ms |    1.55x faster |
+| Create many             |           10,000 |    284.00 ms |     157.20 ms |    1.81x faster |
+| Append                  | 10,000 -> 11,000 |     71.55 ms |      13.30 ms |    5.38x faster |
+| Append snapshot control | 10,000 -> 11,000 |     82.55 ms |      25.60 ms |    3.22x faster |
+| Update every 10th       |           10,000 |     58.60 ms |       2.60 ms |   22.54x faster |
+| Select                  |            1,000 |      3.75 ms |       0.10 ms |   37.50x faster |
+| Mark two rows           |            1,000 |      3.85 ms |       0.10 ms |   38.50x faster |
+| Queue two rows          |            1,000 |      4.15 ms |       0.10 ms |   41.50x faster |
+| Dense Set delta         |            1,000 |      4.00 ms |       0.10 ms |   40.00x faster |
+| Dense Map delta         |            1,000 |      4.20 ms |       0.10 ms |   42.00x faster |
+| Swap rows 2 / 999       |            1,000 |      7.90 ms |       1.20 ms |    6.58x faster |
+| Remove one row          |            1,000 |      4.70 ms |       2.10 ms |    2.24x faster |
+| Clear                   |           10,000 |     48.00 ms |       9.10 ms |    5.27x faster |
+
+`Append` is the new keyed-array suffix path. The application still allocates the next array and
+creates 1,000 required DOM rows, but the generated hint lets Farm skip all 10,000 existing keys and
+bindings. Hybrid measured `13.30 ms`, **5.38x faster than React** and **1.92x faster than the
+equivalent `25.60 ms` compiled snapshot control**. Repeated batches through 20,000 rows remained
+7.09x faster than React. The gate requires at least 4x versus React and 1.25x versus the control in
+both compiler modes.
 
 `Update every 10th` is the targeted mutation-aware path. The application still executes its native
 immutable `map()` over 10,000 items and creates 1,000 replacement objects. The generated hint lets
 the keyed runtime validate and patch those 1,000 rows without a second scan of all 10,000 keys and
-bindings. The 8x persistence floor leaves substantial headroom below this run's 14.45x-16.18x
+bindings. The 8x persistence floor leaves substantial headroom below this run's 13.38x-22.54x
 result across compiler modes and row counts while still rejecting a silent return to the older
 roughly 5x full-reconciliation path.
 
@@ -94,8 +105,8 @@ primitive entries and immutably clone the collection, so the application's requi
 `new Map()` work remains in both paths. A proven updater records only the native mutation keys that
 actually execute. The runtime validates those keys and extends a bounded persistent snapshot,
 instead of iterating every previous and next entry again. At 20,000 entries, the Set delta measured
-`0.30 ms` versus `2.00 ms` for the equivalent compiled snapshot control (**6.67x faster**); the Map
-delta measured `0.90 ms` versus `4.90 ms` (**5.44x faster**) in hybrid mode. These direct
+`0.30 ms` versus `2.10 ms` for the equivalent compiled snapshot control (**7.00x faster**); the Map
+delta measured `1.00 ms` versus `4.80 ms` (**4.80x faster**) in hybrid mode. These direct
 compiler-to-compiler comparisons are the evidence for this PR's incremental win.
 
 ## Repeated 20,000-row scale profile
@@ -106,19 +117,19 @@ values, swaps rows, removes a middle row, and clears. Lower time is better.
 
 | Operation at scale       | React median | React p95 | Hybrid median | Hybrid p95 | Speedup |
 | ------------------------ | -----------: | --------: | ------------: | ---------: | ------: |
-| Create initial 10,000    |    331.25 ms | 352.75 ms |     124.50 ms |  124.90 ms |    2.66x |
-| Append a 1,000-row batch |     90.10 ms | 119.40 ms |      30.50 ms |   36.20 ms |    2.95x |
-| Update every 10th at 20k |    102.25 ms | 114.35 ms |       6.20 ms |    6.30 ms |   16.49x |
-| Select at 20k            |    100.20 ms | 116.00 ms |       3.00 ms |    4.30 ms |   33.40x |
-| Mark two rows at 20k     |    107.60 ms | 119.20 ms |       0.10 ms |    0.20 ms | 1076.00x |
-| Queue two rows at 20k    |    100.20 ms | 116.60 ms |       0.20 ms |    0.20 ms |  501.00x |
-| Dense Set delta at 20k   |    117.15 ms | 134.35 ms |       0.30 ms |    0.30 ms |  390.50x |
-| Dense Set snapshot       |    115.05 ms | 116.45 ms |       2.00 ms |    2.20 ms |   57.53x |
-| Dense Map delta at 20k   |    102.60 ms | 142.25 ms |       0.90 ms |    1.00 ms |  114.00x |
-| Dense Map snapshot       |    111.85 ms | 134.20 ms |       4.90 ms |    4.90 ms |   22.83x |
-| Swap at 20k              |    123.45 ms | 156.35 ms |      28.20 ms |   28.30 ms |    4.38x |
-| Remove middle row at 20k |    124.05 ms | 138.40 ms |      41.50 ms |   42.30 ms |    2.99x |
-| Clear 20k                |    171.85 ms | 281.50 ms |      20.40 ms |   20.80 ms |    8.42x |
+| Create initial 10,000    |    315.00 ms | 436.25 ms |     122.90 ms |  126.50 ms |    2.56x |
+| Append a 1,000-row batch |     93.55 ms | 134.15 ms |      13.20 ms |   18.80 ms |    7.09x |
+| Update every 10th at 20k |    108.35 ms | 140.25 ms |       8.10 ms |   19.80 ms |   13.38x |
+| Select at 20k            |    100.45 ms | 145.10 ms |       3.40 ms |    6.50 ms |   29.54x |
+| Mark two rows at 20k     |    117.05 ms | 123.80 ms |       0.20 ms |    0.20 ms |  585.25x |
+| Queue two rows at 20k    |    104.20 ms | 112.15 ms |       0.20 ms |    0.30 ms |  521.00x |
+| Dense Set delta at 20k   |    102.90 ms | 153.10 ms |       0.30 ms |    0.40 ms |  343.00x |
+| Dense Set snapshot       |    117.70 ms | 122.45 ms |       2.10 ms |    2.20 ms |   56.05x |
+| Dense Map delta at 20k   |    103.90 ms | 118.00 ms |       1.00 ms |    1.00 ms |  103.90x |
+| Dense Map snapshot       |    103.30 ms | 111.50 ms |       4.80 ms |    4.80 ms |   21.52x |
+| Swap at 20k              |    115.85 ms | 120.05 ms |      34.30 ms |   36.00 ms |    3.38x |
+| Remove middle row at 20k |    114.00 ms | 127.80 ms |      41.70 ms |   41.70 ms |    2.73x |
+| Clear 20k                |    200.00 ms | 234.05 ms |      20.00 ms |   20.80 ms |   10.00x |
 
 ## Scalability gate
 
@@ -127,22 +138,22 @@ The gate divides observed timing growth by row-count growth. A value near 1 mean
 
 | Path               | Row growth | Timing growth | Normalized growth |
 | ------------------ | ---------: | ------------: | ----------------: |
-| Create 10k repeat    |      1.00x |         1.01x |             1.01x |
-| Update 10k -> 20k    |      2.00x |         2.38x |             1.19x |
-| Select 1k -> 20k     |     20.00x |        12.00x |             0.60x |
-| Mark Set 1k -> 20k   |     20.00x |         0.40x |             0.02x |
+| Create 10k repeat    |      1.00x |         0.78x |             0.78x |
+| Update 10k -> 20k    |      2.00x |         3.12x |             1.56x |
+| Select 1k -> 20k     |     20.00x |        13.60x |             0.68x |
+| Mark Set 1k -> 20k   |     20.00x |         0.80x |             0.04x |
 | Read Map 1k -> 20k   |     20.00x |         0.80x |             0.04x |
 | Dense Set delta      |     20.00x |         1.20x |             0.06x |
-| Dense Map delta      |     20.00x |         3.60x |             0.18x |
-| Dense Set snapshot   |     20.00x |         8.00x |             0.40x |
-| Dense Map snapshot   |     20.00x |        16.33x |             0.82x |
-| Swap 1k -> 20k       |     20.00x |        21.69x |             1.08x |
-| Remove 1k -> 20k     |     20.00x |        20.75x |             1.04x |
-| Clear 10k -> 20k     |      2.00x |         2.17x |             1.09x |
+| Dense Map delta      |     20.00x |         4.00x |             0.20x |
+| Dense Set snapshot   |     20.00x |         8.40x |             0.42x |
+| Dense Map snapshot   |     20.00x |        16.00x |             0.80x |
+| Swap 1k -> 20k       |     20.00x |        28.58x |             1.43x |
+| Remove 1k -> 20k     |     20.00x |        19.86x |             0.99x |
+| Clear 10k -> 20k     |      2.00x |         2.20x |             1.10x |
 
 This demonstrates approximately linear rather than quadratic end-to-end growth. Key-directed
 scalar selection performs constant row-binding work—at most the previous and next keyed
-instances—while its complete event-to-DOM timing remains 33.40x faster than React at 20,000 rows.
+instances—while its complete event-to-DOM timing remains 29.54x faster than React at 20,000 rows.
 Set membership and Map lookup evaluate bindings only for changed keys. Their 0.10-0.20 ms medians
 are near browser timer resolution, so deterministic exact-read gates remain the primary complexity
 evidence. The dense delta-versus-snapshot controls remain above that floor and independently prove
@@ -153,13 +164,13 @@ keys and maintaining row indices.
 
 | Build           | Page chunk raw | Page chunk gzip |
 | --------------- | -------------: | --------------: |
-| React baseline  |       21,650 B |         4,959 B |
-| Static compiler |       87,011 B |        18,259 B |
-| Hybrid compiler |       87,011 B |        18,257 B |
+| React baseline  |       21,888 B |         4,999 B |
+| Static compiler |       89,156 B |        18,732 B |
+| Hybrid compiler |       89,156 B |        18,731 B |
 
-This deliberately broad page now pays a 13,298-byte hybrid gzip premium for the compiler runtime,
-including the mutation-aware, scalar key-directed, Set-membership, Map-lookup, and collection-delta
-paths. Smaller
+This deliberately broad page now pays a 13,732-byte hybrid gzip premium for the compiler runtime,
+including keyed append, mutation-aware map, scalar key-directed, Set-membership, Map-lookup, and
+collection-delta paths. Smaller
 direct-only applications retain less of the runtime; the package-level fixtures and persisted size
 gate are documented in `packages/farm-react/RUNTIME_SIZE_RESULTS.md`.
 
@@ -167,12 +178,13 @@ gate are documented in `packages/farm-react/RUNTIME_SIZE_RESULTS.md`.
 
 The compiled path scales successfully through the tested 20,000-row mixed workload: all DOM and
 event assertions pass, there are no browser errors or owner rerenders, every scale operation beats
-the bracketed React baseline, and normalized growth stays at or below 1.19x for the primary
+the bracketed React baseline, and normalized growth stays at or below 1.43x for the measured
 workload. Scalar selection performs at most two row-binding reads, while Set membership and Map
 lookup evaluate only changed keys that map to rows. For dense collections, producer deltas were
-6.67x faster for Set and 5.44x faster for Map than equivalent compiled snapshot scans. The evidence
-claims only measured end-to-end behavior within this range—not unlimited constant-time browser
-work.
+7.00x faster for Set and 4.80x faster for Map than equivalent compiled snapshot scans. Keyed append
+was 1.92x faster than its compiled snapshot control and 7.09x faster than React while scaling to
+20,000 rows. The evidence claims only measured end-to-end behavior within this range—not unlimited
+constant-time browser work.
 
 The machine-readable output is `/tmp/farm-react-dashboard-benchmark.json`. Re-run
 `pnpm --filter farm-react-compiler-dashboard-example benchmark` to reproduce it.

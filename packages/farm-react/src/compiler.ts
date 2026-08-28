@@ -13,6 +13,7 @@ export interface CompileReactModuleResult {
   compiled: readonly string[];
   diagnostics: readonly CompilerDiagnostic[];
   optimizations: {
+    keyedArrayAppendHints: number;
     keyedCollectionUpdateHints: number;
     keyedIdentityTargets: number;
     keyedMapLookupTargets: number;
@@ -1121,6 +1122,99 @@ function rewriteKeyedMapUpdateHints(
               t.cloneNode(previous),
               t.cloneNode(nextValue),
               t.cloneNode(changedIndices),
+            ]),
+          ),
+        ]),
+      );
+      count += 1;
+      path.skip();
+    },
+  });
+  return {
+    root: (file.program.body[0] as t.ExpressionStatement).expression as t.JSXElement,
+    count,
+  };
+}
+
+function rewriteKeyedArrayAppendHints(
+  root: t.JSXElement,
+  hintedStateIndices: ReadonlySet<number>,
+  statesBySetter: ReadonlyMap<string, StateBinding>,
+  helperIdentifier: t.Identifier,
+  safeGlobals: ReadonlySet<string>,
+): { root: t.JSXElement; count: number } {
+  if (hintedStateIndices.size === 0) return { root: t.cloneNode(root, true), count: 0 };
+  const file = expressionFile(t.cloneNode(root, true));
+  let count = 0;
+  traverse(file, {
+    CallExpression(path) {
+      const callee = path.get("callee");
+      if (!callee.isIdentifier() || callee.scope.hasBinding(callee.node.name)) return;
+      const state = statesBySetter.get(callee.node.name);
+      if (!state || !hintedStateIndices.has(state.index) || path.node.arguments.length !== 1) {
+        return;
+      }
+      const updater = path.node.arguments[0];
+      if (
+        !t.isArrowFunctionExpression(updater) ||
+        updater.async ||
+        updater.generator ||
+        updater.params.length !== 1 ||
+        !t.isIdentifier(updater.params[0]) ||
+        !t.isArrayExpression(updater.body) ||
+        updater.body.elements.length < 2 ||
+        updater.body.elements.some((element) => element === null) ||
+        !t.isSpreadElement(updater.body.elements[0]) ||
+        !t.isIdentifier(updater.body.elements[0].argument, { name: updater.params[0].name })
+      ) {
+        return;
+      }
+      const safeAppendValue = (value: t.Expression): boolean => {
+        if (t.isArrayExpression(value)) {
+          return value.elements.every(
+            (element) =>
+              element !== null &&
+              !t.isJSXNamespacedName(element) &&
+              !t.isArgumentPlaceholder(element) &&
+              safeAppendValue(t.isSpreadElement(element) ? element.argument : element),
+          );
+        }
+        if (t.isObjectExpression(value)) {
+          return value.properties.every((property) => {
+            if (t.isSpreadElement(property)) return safeAppendValue(property.argument);
+            if (!t.isObjectProperty(property) || !t.isExpression(property.value)) return false;
+            return (
+              (!property.computed ||
+                (t.isExpression(property.key) && safeAppendValue(property.key))) &&
+              safeAppendValue(property.value)
+            );
+          });
+        }
+        return validateDerivedExpression(value, safeGlobals) === undefined;
+      };
+      if (
+        updater.body.elements.slice(1).some((element) => {
+          if (!element || t.isJSXNamespacedName(element) || t.isArgumentPlaceholder(element)) {
+            return true;
+          }
+          return !safeAppendValue(t.isSpreadElement(element) ? element.argument : element);
+        })
+      ) {
+        return;
+      }
+
+      const previous = t.cloneNode(updater.params[0]);
+      const nextValue = path.scope.generateUidIdentifier("farmNextItems");
+      path.node.arguments[0] = t.arrowFunctionExpression(
+        [t.cloneNode(previous)],
+        t.blockStatement([
+          t.variableDeclaration("const", [
+            t.variableDeclarator(t.cloneNode(nextValue), t.cloneNode(updater.body, true)),
+          ]),
+          t.returnStatement(
+            t.callExpression(t.cloneNode(helperIdentifier), [
+              t.cloneNode(previous),
+              t.cloneNode(nextValue),
             ]),
           ),
         ]),
@@ -5733,11 +5827,13 @@ function compileCandidate(
   candidate: Candidate,
   createComponentIdentifier: t.Identifier,
   keyedMapUpdateIdentifier: t.Identifier,
+  keyedArrayAppendIdentifier: t.Identifier,
   keyedCollectionUpdateIdentifier: t.Identifier,
   keyedCollectionMutationIdentifier: t.Identifier,
   runtimeFeatureIdentifiers: ReadonlyMap<CompilerRuntimeFeatureName, t.Identifier>,
   usedRuntimeFeatures: Set<CompilerRuntimeFeatureName>,
   optimizationCounts: {
+    keyedArrayAppendHints: number;
     keyedCollectionUpdateHints: number;
     keyedIdentityTargets: number;
     keyedMapLookupTargets: number;
@@ -6025,6 +6121,52 @@ function compileCandidate(
       optimizationCounts.keyedMapUpdateHints += hintedRoot.count;
     }
   }
+  const appendHintedStateIndices = new Set(hintedStateIndices);
+  for (const plan of blockAnalysis.plans || []) {
+    if (plan.kind !== "keyed-rows" || plan.collectionDependency === undefined) continue;
+    const keyExpression = returnedExpression(plan.keyCallback);
+    if (
+      !keyExpression ||
+      collectStateDependencies(keyExpression, reactiveByValue).includes(plan.collectionDependency)
+    ) {
+      // Appending changes collection-derived keys on every existing row. Do not
+      // emit a suffix-only hint for any boundary that consumes this state.
+      appendHintedStateIndices.delete(plan.collectionDependency);
+    }
+  }
+  const appendHintedRoot = rewriteKeyedArrayAppendHints(
+    expandedReactiveRoot,
+    appendHintedStateIndices,
+    statesBySetter,
+    keyedArrayAppendIdentifier,
+    safeGlobals,
+  );
+  let appliedKeyedArrayAppendHints = 0;
+  if (appendHintedRoot.count > 0) {
+    const hintedBlockAnalysis = analyzeComposableBlocks(
+      appendHintedRoot.root,
+      reactiveByValue,
+      safeGlobals,
+      listNames,
+      allowedComponentNames,
+    );
+    const hintedAnalysis = analyzeHostTree(
+      appendHintedRoot.root,
+      reactiveByValue,
+      safeGlobals,
+      hintedBlockAnalysis.conditionalExpressions || new Set<t.Expression>(),
+      hintedBlockAnalysis.keyedExpressions || new Set<t.Expression>(),
+      hintedBlockAnalysis.ownedElements || new Set<t.JSXElement>(),
+      hintedBlockAnalysis.componentElements || new Set<t.JSXElement>(),
+    );
+    if (!hintedBlockAnalysis.reason && !hintedAnalysis.reason) {
+      expandedReactiveRoot = appendHintedRoot.root;
+      blockAnalysis = hintedBlockAnalysis;
+      analysis = hintedAnalysis;
+      appliedKeyedArrayAppendHints = appendHintedRoot.count;
+      optimizationCounts.keyedArrayAppendHints += appendHintedRoot.count;
+    }
+  }
   const keyedCollectionTargetKinds = new Map<number, KeyedCollectionTargetKind>();
   const conflictingKeyedCollectionTargets = new Set<number>();
   for (const plan of blockAnalysis.plans || []) {
@@ -6102,7 +6244,8 @@ function compileCandidate(
         : 0),
     0,
   );
-  const runtimeFeatures = runtimeFeaturesForPlans(blockPlans, appliedKeyedMapUpdateHints > 0);
+  const hasKeyedUpdateHints = appliedKeyedMapUpdateHints > 0 || appliedKeyedArrayAppendHints > 0;
+  const runtimeFeatures = runtimeFeaturesForPlans(blockPlans, hasKeyedUpdateHints);
   markShortCircuitBindings(analysis.bindings || []);
   assignStableBindingTargets(analysis.bindings || []);
 
@@ -6121,7 +6264,7 @@ function compileCandidate(
     blockPlans,
     blockParameter,
     listNames,
-    appliedKeyedMapUpdateHints > 0,
+    hasKeyedUpdateHints,
   );
   const rewrittenRoot = rewriteStateAccess(
     rootWithBlocks,
@@ -6287,6 +6430,7 @@ export async function compileReactModule(
   const compiled: string[] = [];
   const diagnostics: CompilerDiagnostic[] = [];
   const optimizationCounts = {
+    keyedArrayAppendHints: 0,
     keyedCollectionUpdateHints: 0,
     keyedIdentityTargets: 0,
     keyedMapLookupTargets: 0,
@@ -6333,6 +6477,9 @@ export async function compileReactModule(
         const keyedMapUpdateIdentifier = programPath.scope.generateUidIdentifier(
           "createCompilerKeyedMapUpdate",
         );
+        const keyedArrayAppendIdentifier = programPath.scope.generateUidIdentifier(
+          "createCompilerKeyedArrayAppend",
+        );
         const keyedCollectionUpdateIdentifier = programPath.scope.generateUidIdentifier(
           "createCompilerKeyedCollectionUpdate",
         );
@@ -6361,6 +6508,7 @@ export async function compileReactModule(
             candidate,
             createComponentIdentifier,
             keyedMapUpdateIdentifier,
+            keyedArrayAppendIdentifier,
             keyedCollectionUpdateIdentifier,
             keyedCollectionMutationIdentifier,
             runtimeFeatureIdentifiers,
@@ -6397,6 +6545,14 @@ export async function compileReactModule(
                       t.importSpecifier(
                         keyedMapUpdateIdentifier,
                         t.identifier("createCompilerKeyedMapUpdate"),
+                      ),
+                    ]
+                  : []),
+                ...(optimizationCounts.keyedArrayAppendHints > 0
+                  ? [
+                      t.importSpecifier(
+                        keyedArrayAppendIdentifier,
+                        t.identifier("createCompilerKeyedArrayAppend"),
                       ),
                     ]
                   : []),

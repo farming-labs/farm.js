@@ -234,6 +234,22 @@ new option is required. A compiler report exposes the emitted-site count as
 `keyedMapUpdateHints`. The separate hint runtime capability is imported only when that count is
 nonzero, so direct-only and ordinary keyed builds do not retain it.
 
+The same optional runtime recognizes conservative immutable appends on a direct keyed array:
+
+```tsx
+setItems((current) => [...current, nextItem]);
+setItems((current) => [...current, ...nextItems]);
+```
+
+Because every existing item keeps its key and index, Farm validates the committed source and the
+queued append chain, reads keys and descriptors only for the appended suffix, and mounts that
+suffix in one fragment. Existing row DOM is left untouched. The concise functional updater and
+native arrays are required; prepend, middle insertion, removal, direct replacement, duplicate
+keys, rows that read the collection itself, and failed runtime checks use complete keyed
+reconciliation. A key that reads the collection prevents hint emission entirely. The compiler
+report exposes the emitted-site count as
+`keyedArrayAppendHints`.
+
 An otherwise eligible host row may also contain an inline synchronous React event:
 
 ```tsx
@@ -515,7 +531,8 @@ reasons aggregated by count. Its summary and per-module `optimizations` also rep
 `keyedMapLookupTargets`, the number of native-Map keyed lookup bindings;
 `keyedMembershipTargets`, the number of native-Set membership bindings;
 `keyedCollectionUpdateHints`, the number of compiler-proven native Set/Map mutation sites; and
-`keyedMapUpdateHints`, the number of compiler-proven direct keyed `map()` update sites. A custom
+`keyedMapUpdateHints`, the number of compiler-proven direct keyed `map()` update sites; and
+`keyedArrayAppendHints`, the number of compiler-proven direct keyed-array append sites. A custom
 project-relative `reportFile` also enables reporting.
 
 The runtime test compares the same counter interaction on both paths: ordinary React performs a

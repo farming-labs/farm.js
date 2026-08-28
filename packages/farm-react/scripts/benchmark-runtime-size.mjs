@@ -48,16 +48,27 @@ async function bundle(entry, compiler) {
   };
 }
 
-const [directOff, directOn, keyedOff, keyedOn, runtimeControl, runtimeCore, runtimeFull] =
-  await Promise.all([
-    bundle("direct.tsx", false),
-    bundle("direct.tsx", true),
-    bundle("keyed.tsx", false),
-    bundle("keyed.tsx", true),
-    bundle("runtime-control.tsx", false),
-    bundle("runtime-core.tsx", false),
-    bundle("runtime-full.tsx", false),
-  ]);
+const [
+  directOff,
+  directOn,
+  keyedOff,
+  keyedOn,
+  keyedAppendOff,
+  keyedAppendOn,
+  runtimeControl,
+  runtimeCore,
+  runtimeFull,
+] = await Promise.all([
+  bundle("direct.tsx", false),
+  bundle("direct.tsx", true),
+  bundle("keyed.tsx", false),
+  bundle("keyed.tsx", true),
+  bundle("keyed-append.tsx", false),
+  bundle("keyed-append.tsx", true),
+  bundle("runtime-control.tsx", false),
+  bundle("runtime-core.tsx", false),
+  bundle("runtime-full.tsx", false),
+]);
 
 const forbiddenDirectMarkers = [
   "FarmCompiledConditionalBlock",
@@ -96,6 +107,12 @@ if (!keyedOn.code.includes("mapLookupTarget")) {
 if (!keyedOn.code.includes('"set-add"') || !keyedOn.code.includes('"map-set"')) {
   throw new Error("Keyed selection fixture did not retain its Set/Map collection-delta helpers.");
 }
+if (
+  !keyedAppendOn.code.includes("FarmCompiledKeyedRows") ||
+  !keyedAppendOn.code.includes("keyed-rows:hinted")
+) {
+  throw new Error("Keyed append fixture did not retain its optional hinted runtime.");
+}
 
 const fullRuntimePremium = runtimeFull.gzip - runtimeControl.gzip;
 const coreRuntimePremium = runtimeCore.gzip - runtimeControl.gzip;
@@ -128,6 +145,23 @@ const results = {
         brotli: keyedOn.brotli - keyedOff.brotli,
       },
     },
+    keyedAppend: {
+      compilerOff: {
+        raw: keyedAppendOff.raw,
+        gzip: keyedAppendOff.gzip,
+        brotli: keyedAppendOff.brotli,
+      },
+      compilerOn: {
+        raw: keyedAppendOn.raw,
+        gzip: keyedAppendOn.gzip,
+        brotli: keyedAppendOn.brotli,
+      },
+      compilerPremium: {
+        raw: keyedAppendOn.raw - keyedAppendOff.raw,
+        gzip: keyedAppendOn.gzip - keyedAppendOff.gzip,
+        brotli: keyedAppendOn.brotli - keyedAppendOff.brotli,
+      },
+    },
     isolatedRuntime: {
       control: {
         raw: runtimeControl.raw,
@@ -155,6 +189,11 @@ if (checkOnly) {
       name: "keyed compiler premium",
       current: results.fixtures.keyed.compilerPremium.gzip,
       maximum: reference.fixtures.keyed.compilerPremium.gzip + 256,
+    },
+    {
+      name: "keyed append compiler premium",
+      current: results.fixtures.keyedAppend.compilerPremium.gzip,
+      maximum: reference.fixtures.keyedAppend.compilerPremium.gzip + 256,
     },
     {
       name: "core runtime premium",

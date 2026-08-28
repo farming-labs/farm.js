@@ -132,13 +132,30 @@ export function StandardTableBenchmark() {
           type="button"
           onClick={() => {
             const nextSeed = seed + 1;
+            const additions = buildRows(1_000, nextSeed);
             setSeed(nextSeed);
-            setRows((current) => [...current, ...buildRows(1_000, nextSeed)]);
+            setRows((current) => [...current, ...additions]);
             setOperation("append 1,000");
             setRevision((value) => value + 1);
           }}
         >
           Append 1,000
+        </button>
+        <button
+          data-action="table-append-snapshot"
+          type="button"
+          onClick={() => {
+            const nextSeed = seed + 1;
+            setSeed(nextSeed);
+            setRows((current) => {
+              const additions = buildRows(1_000, nextSeed);
+              return [...current, ...additions];
+            });
+            setOperation("append 1,000 (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Append 1,000 (snapshot control)
         </button>
         <button
           data-action="table-replace"

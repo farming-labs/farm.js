@@ -42,6 +42,7 @@ const testSource = String.raw`
   const {
     createCompiledComponent,
     createCompiledComponentWithFeatures,
+    createCompilerKeyedArrayAppend,
     createCompilerKeyedMapUpdate,
   } = await import(
     "@farm.js/react/compiler-runtime"
@@ -1415,6 +1416,69 @@ const testSource = String.raw`
   assert.equal(interactiveAlpha.querySelector("[data-status]").textContent, "Alpha!!! done");
   assert.deepEqual(interactiveCalls, ["Alpha:0:0", "Alpha!:0:0", "Alpha!!:1:1"]);
   flushSync(() => interactiveRoot.unmount());
+
+  let appendRows = () => undefined;
+  let appendKeyReads = 0;
+  const AppendRows = createCompiledComponent({
+    displayName: "CompatibilityAppendRows",
+    initialize: () => [[{ id: "a", label: "Alpha" }]],
+    render(_props, state, blocks) {
+      const items = () => state[0].get();
+      appendRows = (addition) =>
+        state[0].set((previous) =>
+          createCompilerKeyedArrayAppend(
+            previous,
+            [...previous, addition],
+          ),
+        );
+      return React.createElement(
+        "section",
+        null,
+        React.createElement(blocks.KeyedRows, {
+          collectionDependency: 0,
+          dependencies: [0],
+          id: 0,
+          items,
+          structureDependencies: [0],
+          render: () =>
+            React.createElement(
+              "ul",
+              null,
+              items().map((item) =>
+                React.createElement("li", { "data-key": item.id, key: item.id }, item.label),
+              ),
+            ),
+          rowKey: (item) => {
+            appendKeyReads += 1;
+            return item.id;
+          },
+          create: (item) => ({
+            kind: "element",
+            tag: "li",
+            attributes: [{ name: "data-key", value: item.id }],
+            styles: [],
+            children: [item.label],
+          }),
+          bindings: [{ kind: "text", path: [], dependencies: [], read: (item) => [item.label] }],
+        }),
+      );
+    },
+    bindings: [{ kind: "block", id: 0, dependencies: [0] }],
+  });
+  const appendContainer = document.createElement("div");
+  document.body.append(appendContainer);
+  const appendRoot = createRoot(appendContainer);
+  flushSync(() => appendRoot.render(React.createElement(AppendRows)));
+  const appendAlpha = appendContainer.querySelector("[data-key='a']");
+  appendKeyReads = 0;
+  appendRows({ id: "b", label: "Beta" });
+  appendRows({ id: "c", label: "Gamma" });
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(appendContainer.textContent, "AlphaBetaGamma");
+  assert.equal(appendContainer.querySelector("[data-key='a']"), appendAlpha);
+  assert.equal(appendKeyReads, 2);
+  flushSync(() => appendRoot.unmount());
 
   let editableRowExecutions = 0;
   let editableListRenders = 0;

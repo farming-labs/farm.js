@@ -24,18 +24,20 @@ is enforced on every pull request instead of serving only as a manually recorded
 | Fixture                                           | Compiler off gzip | Compiler on gzip | Compiler premium |
 | ------------------------------------------------- | ----------------: | ---------------: | ---------------: |
 | Direct text, attribute, style, and event bindings |          60,043 B |         63,721 B |          3,678 B |
-| Keyed rows, LIS, scalar, Set, and Map targeting   |          60,179 B |         71,136 B |         10,957 B |
+| Keyed rows, LIS, scalar, Set, and Map targeting   |          60,179 B |         71,162 B |         10,983 B |
+| Keyed rows with append hints                      |          60,085 B |         71,469 B |         11,384 B |
 
-The isolated compatibility runtime contributes 16,484 B gzip over the React control. The
-compiler-selected core contributes 3,766 B, a **77.2% reduction**. This comparison uses the same
+The isolated compatibility runtime contributes 16,941 B gzip over the React control. The
+compiler-selected core contributes 3,766 B, a **77.8% reduction**. This comparison uses the same
 hand-authored compiled definition and changes only the runtime entry used to create it.
 
 The keyed fixture retains `FarmCompiledKeyedRows` plus compiler-emitted `identityTarget`,
 `membershipTarget`, and `mapLookupTarget` metadata, plus Set/Map producer-delta helpers. It rejects
-the optional row-conditional and keyed-map-hint runtimes. The collection-delta fixture raises the
-keyed compiler premium by 922 B gzip while keeping the direct compiler premium and isolated core
-runtime byte-for-byte unchanged. The direct fixture rejects every structural runtime marker. The
-checked machine-readable result is [`RUNTIME_SIZE_RESULTS.json`](./RUNTIME_SIZE_RESULTS.json).
+the optional row-conditional and keyed-update runtimes. The append fixture separately proves that
+a recognized functional append retains the hinted runtime. The new capability keeps the direct
+compiler premium and isolated core runtime byte-for-byte unchanged; the ordinary keyed premium
+moves by only 26 B gzip. The direct fixture rejects every structural runtime marker. The checked
+machine-readable result is [`RUNTIME_SIZE_RESULTS.json`](./RUNTIME_SIZE_RESULTS.json).
 
 ## Existing production benchmark audit
 

@@ -302,6 +302,7 @@ After a successful build, Farm writes `.farm/react-compiler.json`:
     "componentsConsidered": 4,
     "compiled": 2,
     "fallback": 2,
+    "keyedArrayAppendHints": 1,
     "keyedCollectionUpdateHints": 3,
     "keyedIdentityTargets": 2,
     "keyedMapLookupTargets": 1,
@@ -319,6 +320,7 @@ After a successful build, Farm writes `.farm/react-compiler.json`:
       "id": "src/Products.tsx",
       "compiled": ["ProductRow"],
       "optimizations": {
+        "keyedArrayAppendHints": 1,
         "keyedCollectionUpdateHints": 3,
         "keyedIdentityTargets": 2,
         "keyedMapLookupTargets": 1,
@@ -349,9 +351,11 @@ native `Set`.
 executed keys to the runtime.
 `keyedMapUpdateHints` counts setter sites where the compiler proved that a direct keyed collection
 can report its changed row indexes while an immutable `map()` runs. The same counts appear per
-module. `selected` is `true` when an annotation explicitly requested compilation. Module paths are
-relative to the project root, and the output is sorted and contains no timestamp, so CI can compare
-reports without machine-specific noise.
+module.
+`keyedArrayAppendHints` counts setter sites where the compiler proved a direct keyed array append
+and can hand the appended suffix to the runtime. `selected` is `true` when an annotation explicitly
+requested compilation. Module paths are relative to the project root, and the output is sorted and
+contains no timestamp, so CI can compare reports without machine-specific noise.
 
 Use a different project-relative output path when CI collects artifacts elsewhere:
 
@@ -866,6 +870,36 @@ LIS path. Derived collections, non-functional setters, block-bodied mappers, mut
 and other unproven shapes also keep that existing path. This is an optimization hint, not a new
 correctness contract or a way to bypass React fallback behavior. The compiler report exposes the
 number of emitted sites as `keyedMapUpdateHints`.
+
+#### Keyed array append hints
+
+A direct keyed `useState` array can also avoid rescanning all existing rows for common immutable
+appends:
+
+```tsx
+setItems((current) => [...current, nextItem]);
+setItems((current) => [...current, ...nextItems]);
+```
+
+At build time, Farm recognizes a concise functional setter whose array literal starts with exactly
+`...current` and has at least one trailing item or spread. The application still creates its normal
+immutable array. Generated metadata connects that result to the last committed array and records
+where its appended suffix begins. Queued functional appends form one validated chain.
+
+At update time, existing keyed rows already have the same item, key, and index. Farm therefore
+reads keys, descriptors, and bindings only for the appended suffix, creates only those host rows,
+and inserts them together with a document fragment. It does not rerun the owner component or touch
+the existing row DOM.
+
+The proof is intentionally narrow. Both values must be native arrays. Prepend, middle insertion,
+removal, direct replacement, a copy with no appended entries, block-bodied updaters, duplicate
+keys, React-owned or nested host-block rows, row conditionals, and rows whose bindings read the
+collection itself keep complete keyed reconciliation. Keys that read the collection also prevent
+the compiler from emitting the hint. A preceding unhinted update, an unrelated
+dirty dependency, or any failed source/length check also discards the hint. These fallbacks preserve
+normal React behavior; the syntax does not opt the component into a different correctness model.
+The compiler report exposes emitted sites as `keyedArrayAppendHints`, and the hinted runtime is
+retained only when a module emits at least one append or same-order map hint.
 
 #### Interactive host rows
 
@@ -1638,6 +1672,9 @@ The package and example test suites verify more than generated code:
   textarea, checkbox, radio, and select properties while the compiled owner stays at one execution;
 - 2,000 deterministic row-conditional data and structural transitions match normal React while the
   compiled owner remains at one execution;
+- 2,000 deterministic keyed-array appends match normal React; targeted tests require key,
+  descriptor, and binding reads to equal only the appended suffix and cover queued updates,
+  multi-boundary sharing, StrictMode hydration/unmount, and conservative fallback;
 - the production browser experiment derives a keyed window from 2,048 source rows without
   rerunning the owner component or corrupting the existing compiler experiments;
 - the package reactivity benchmark updates one prop across 2,048 bindings, requires identical
@@ -1654,7 +1691,7 @@ The package and example test suites verify more than generated code:
   inserts a row, and observes zero owner update executions;
 - the production 10,000/20,000-row benchmark requires nonzero `keyedIdentityTargets`,
   `keyedMapLookupTargets`, `keyedMembershipTargets`, `keyedCollectionUpdateHints`, and
-  `keyedMapUpdateHints` report counts,
+  `keyedMapUpdateHints` and `keyedArrayAppendHints` report counts,
   preserves the keyed-update speedup floor, checks that scalar selection, Set membership, and Map
   lookups remain key-directed at scale, compares dense hinted Set/Map updates with equivalent
   compiled snapshot controls, and passes DOM correctness, React-relative regression, direct-delta,

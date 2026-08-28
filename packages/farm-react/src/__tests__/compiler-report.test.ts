@@ -28,6 +28,7 @@ function observations(projectRoot: string): ReactCompilerModuleObservation[] {
         compiled: ["Counter"],
         diagnostics: [],
         optimizations: {
+          keyedArrayAppendHints: 0,
           keyedCollectionUpdateHints: 0,
           keyedIdentityTargets: 0,
           keyedMapLookupTargets: 0,
@@ -53,6 +54,7 @@ function observations(projectRoot: string): ReactCompilerModuleObservation[] {
           },
         ],
         optimizations: {
+          keyedArrayAppendHints: 4,
           keyedCollectionUpdateHints: 6,
           keyedIdentityTargets: 4,
           keyedMapLookupTargets: 5,
@@ -74,6 +76,7 @@ describe("React compiler coverage report", () => {
       componentsConsidered: 4,
       compiled: 2,
       fallback: 2,
+      keyedArrayAppendHints: 4,
       keyedCollectionUpdateHints: 6,
       keyedIdentityTargets: 4,
       keyedMapLookupTargets: 5,
@@ -94,6 +97,7 @@ describe("React compiler coverage report", () => {
       selected: true,
     });
     expect(report.modules[1]?.optimizations).toEqual({
+      keyedArrayAppendHints: 4,
       keyedCollectionUpdateHints: 6,
       keyedIdentityTargets: 4,
       keyedMapLookupTargets: 5,
