@@ -135,6 +135,10 @@ async function inspectBuild(compilerMode) {
       "The compiler build did not emit a keyed-array append hint.",
     );
     assert(
+      compilerReport.summary.keyedArrayFilterHints > 0,
+      "The compiler build did not emit a keyed-array filter hint.",
+    );
+    assert(
       compilerReport.summary.keyedCollectionUpdateHints > 0,
       "The compiler build did not emit a keyed Set/Map collection-delta hint.",
     );
@@ -626,6 +630,21 @@ async function measureTrial(browser, trial, compilerMode, port) {
           },
         );
 
+        const tableRemoveSnapshot = await measureTable(
+          async () => {
+            if (rowCount() !== 1_000) await create1000();
+          },
+          async () => {
+            const row = table.querySelectorAll("tbody tr")[500];
+            const id = row?.getAttribute("data-row-id");
+            if (!id) throw new Error("Snapshot remove target is missing.");
+            await runTableAction(
+              () => tableButton("table-remove-snapshot").click(),
+              () => rowCount() === 999 && !table.querySelector(`[data-row-id="${id}"]`),
+            );
+          },
+        );
+
         const tableClear = await measureTable(
           async () => ensure10000(),
           async () => clearRows(),
@@ -807,6 +826,7 @@ async function measureTrial(browser, trial, compilerMode, port) {
             mapLookup: tableMapLookup,
             membership: tableMembership,
             remove: tableRemove,
+            removeSnapshot: tableRemoveSnapshot,
             replace: tableReplace,
             select: tableSelect,
             snapshotMapLookup: tableSnapshotMapLookup,
@@ -884,6 +904,7 @@ async function measureTrial(browser, trial, compilerMode, port) {
         mapLookup: timingSummary(result.table.mapLookup),
         membership: timingSummary(result.table.membership),
         remove: timingSummary(result.table.remove),
+        removeSnapshot: timingSummary(result.table.removeSnapshot),
         replace: timingSummary(result.table.replace),
         select: timingSummary(result.table.select),
         snapshotMapLookup: timingSummary(result.table.snapshotMapLookup),
@@ -968,6 +989,7 @@ const tableMetrics = [
   "snapshotMapLookup",
   "swap",
   "remove",
+  "removeSnapshot",
   "clear",
 ];
 const scaleMetrics = [
@@ -1111,6 +1133,32 @@ const keyedAppendRegressions = keyedAppendResults.filter(
     !Number.isFinite(snapshotSpeedup) ||
     snapshotSpeedup < keyedAppendMinimumSnapshotSpeedup,
 );
+// A concise native filter carries removal positions into the keyed-row runtime. Compare it with
+// React and an equivalent block-bodied compiled update that intentionally takes complete keyed
+// reconciliation, while also preserving the 20,000-row end-to-end speedup.
+const keyedFilterMinimumSpeedup = 3;
+const keyedFilterMinimumSnapshotSpeedup = 1.25;
+const keyedFilterResults = ["static", "hybrid"].map((mode) => {
+  const filterMedianMs = comparisons.table.remove[mode].medianMs;
+  const snapshotMedianMs = comparisons.table.removeSnapshot[mode].medianMs;
+  return {
+    filterMedianMs,
+    mode,
+    scaleSpeedup: comparisons.scale.remove20k[`${mode}VsBaseline`].speedup,
+    snapshotMedianMs,
+    snapshotSpeedup: snapshotMedianMs / filterMedianMs,
+    speedup: comparisons.table.remove[`${mode}VsBaseline`].speedup,
+  };
+});
+const keyedFilterRegressions = keyedFilterResults.filter(
+  ({ scaleSpeedup, snapshotSpeedup, speedup }) =>
+    !Number.isFinite(speedup) ||
+    speedup < keyedFilterMinimumSpeedup ||
+    !Number.isFinite(scaleSpeedup) ||
+    scaleSpeedup < keyedFilterMinimumSpeedup ||
+    !Number.isFinite(snapshotSpeedup) ||
+    snapshotSpeedup < keyedFilterMinimumSnapshotSpeedup,
+);
 // Selection is a separate-state update whose value is compared with the exact row key. The unit
 // suite deterministically requires at most two row-binding reads. This browser gate protects a
 // substantial end-to-end win and rejects growth beyond the same normalized 2x scalability ceiling
@@ -1230,6 +1278,7 @@ const passed =
   scalabilityRegressions.length === 0 &&
   keyedUpdateRegressions.length === 0 &&
   keyedAppendRegressions.length === 0 &&
+  keyedFilterRegressions.length === 0 &&
   keyedIdentityRegressions.length === 0 &&
   keyedMembershipRegressions.length === 0 &&
   keyedMapLookupRegressions.length === 0 &&
@@ -1256,6 +1305,13 @@ const report = {
     regressions: keyedAppendRegressions,
     results: keyedAppendResults,
     status: keyedAppendRegressions.length === 0 ? "PASS" : "FAIL",
+  },
+  keyedFilterHintGate: {
+    minimumSnapshotSpeedup: keyedFilterMinimumSnapshotSpeedup,
+    minimumSpeedup: keyedFilterMinimumSpeedup,
+    regressions: keyedFilterRegressions,
+    results: keyedFilterResults,
+    status: keyedFilterRegressions.length === 0 ? "PASS" : "FAIL",
   },
   keyedIdentityTargetGate: {
     maximumNormalizedGrowth: keyedIdentityMaximumNormalizedGrowth,

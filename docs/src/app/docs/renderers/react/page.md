@@ -303,6 +303,7 @@ After a successful build, Farm writes `.farm/react-compiler.json`:
     "compiled": 2,
     "fallback": 2,
     "keyedArrayAppendHints": 1,
+    "keyedArrayFilterHints": 1,
     "keyedCollectionUpdateHints": 3,
     "keyedIdentityTargets": 2,
     "keyedMapLookupTargets": 1,
@@ -321,6 +322,7 @@ After a successful build, Farm writes `.farm/react-compiler.json`:
       "compiled": ["ProductRow"],
       "optimizations": {
         "keyedArrayAppendHints": 1,
+        "keyedArrayFilterHints": 1,
         "keyedCollectionUpdateHints": 3,
         "keyedIdentityTargets": 2,
         "keyedMapLookupTargets": 1,
@@ -353,7 +355,8 @@ executed keys to the runtime.
 can report its changed row indexes while an immutable `map()` runs. The same counts appear per
 module.
 `keyedArrayAppendHints` counts setter sites where the compiler proved a direct keyed array append
-and can hand the appended suffix to the runtime. `selected` is `true` when an annotation explicitly
+and can hand the appended suffix to the runtime. `keyedArrayFilterHints` counts concise keyed-array
+filter sites that can report removed positions. `selected` is `true` when an annotation explicitly
 requested compilation. Module paths are relative to the project root, and the output is sorted and
 contains no timestamp, so CI can compare reports without machine-specific noise.
 
@@ -900,6 +903,34 @@ dirty dependency, or any failed source/length check also discards the hint. Thes
 normal React behavior; the syntax does not opt the component into a different correctness model.
 The compiler report exposes emitted sites as `keyedArrayAppendHints`, and the hinted runtime is
 retained only when a module emits at least one append or same-order map hint.
+
+#### Keyed array filter hints
+
+A concise immutable filter on a direct keyed `useState` array can remove rows without rebuilding
+every surviving row:
+
+```tsx
+setItems((current) => current.filter((item) => item.id !== removedId));
+```
+
+At build time, Farm recognizes the direct functional setter and a synchronous, one-parameter,
+expression-bodied predicate from the compiler's safe expression subset. The native `filter()`
+still runs normally. Its generated wrapper records rejected positions and links queued filters to
+the last committed array.
+
+At update time, Farm validates the native-array chain, result lengths, surviving item identities,
+and surviving keys before changing the DOM. It then removes only rejected row elements, updates
+the stored positions used by delegated row events, and keeps all surviving elements in place. Row
+descriptors and bindings are not recreated or reread, and the owner component does not rerun.
+
+The proof applies only to compiler-owned host rows whose render callback and key do not observe the
+row index. An index-aware row or predicate, collection-derived key, block-bodied updater or
+predicate, custom filter method, sparse or subclassed array, binding that reads the collection,
+React-owned row structure, nested host block, row conditional, unrelated dirty dependency, or
+failed runtime validation keeps complete keyed reconciliation. A filter queued after an unhinted
+update also falls back. These checks make the hint an internal optimization rather than a new
+behavior contract. Reports expose emitted sites as `keyedArrayFilterHints`; the optional hinted
+runtime is retained only when a module emits a supported update hint.
 
 #### Interactive host rows
 
@@ -1675,6 +1706,9 @@ The package and example test suites verify more than generated code:
 - 2,000 deterministic keyed-array appends match normal React; targeted tests require key,
   descriptor, and binding reads to equal only the appended suffix and cover queued updates,
   multi-boundary sharing, StrictMode hydration/unmount, and conservative fallback;
+- 2,000 deterministic randomized keyed-array removals match normal React; targeted tests require
+  zero surviving descriptor and binding reads, preserve DOM identity, and cover queued filters,
+  unhinted-chain fallback, collection-reading rows, StrictMode hydration, and unmount cleanup;
 - the production browser experiment derives a keyed window from 2,048 source rows without
   rerunning the owner component or corrupting the existing compiler experiments;
 - the package reactivity benchmark updates one prop across 2,048 bindings, requires identical
@@ -1691,7 +1725,7 @@ The package and example test suites verify more than generated code:
   inserts a row, and observes zero owner update executions;
 - the production 10,000/20,000-row benchmark requires nonzero `keyedIdentityTargets`,
   `keyedMapLookupTargets`, `keyedMembershipTargets`, `keyedCollectionUpdateHints`, and
-  `keyedMapUpdateHints` and `keyedArrayAppendHints` report counts,
+  `keyedMapUpdateHints`, `keyedArrayAppendHints`, and `keyedArrayFilterHints` report counts,
   preserves the keyed-update speedup floor, checks that scalar selection, Set membership, and Map
   lookups remain key-directed at scale, compares dense hinted Set/Map updates with equivalent
   compiled snapshot controls, and passes DOM correctness, React-relative regression, direct-delta,

@@ -250,6 +250,22 @@ reconciliation. A key that reads the collection prevents hint emission entirely.
 report exposes the emitted-site count as
 `keyedArrayAppendHints`.
 
+Concise immutable filters on a direct keyed array can carry removal positions into the same
+optional runtime:
+
+```tsx
+setItems((current) => current.filter((item) => item.id !== removedId));
+```
+
+For compiler-owned host rows whose render and key do not observe the row index, Farm validates the
+native filter chain, every surviving item identity, and every surviving key before removing only
+the rejected DOM rows. It does not recreate descriptors or reread bindings for unchanged rows,
+and queued filters compose before one compiler flush. Index-aware rows or predicates,
+block-bodied updates, custom filter methods, sparse or subclassed arrays, collection-reading
+bindings or keys, React-owned row structures, mixed dirty dependencies, and failed validation use
+complete keyed reconciliation. No option or new component is required. The compiler report exposes
+the emitted-site count as `keyedArrayFilterHints`.
+
 An otherwise eligible host row may also contain an inline synchronous React event:
 
 ```tsx
@@ -532,7 +548,8 @@ reasons aggregated by count. Its summary and per-module `optimizations` also rep
 `keyedMembershipTargets`, the number of native-Set membership bindings;
 `keyedCollectionUpdateHints`, the number of compiler-proven native Set/Map mutation sites; and
 `keyedMapUpdateHints`, the number of compiler-proven direct keyed `map()` update sites; and
-`keyedArrayAppendHints`, the number of compiler-proven direct keyed-array append sites. A custom
+`keyedArrayAppendHints`, the number of compiler-proven direct keyed-array append sites; and
+`keyedArrayFilterHints`, the number of compiler-proven direct keyed-array filter sites. A custom
 project-relative `reportFile` also enables reporting.
 
 The runtime test compares the same counter interaction on both paths: ordinary React performs a

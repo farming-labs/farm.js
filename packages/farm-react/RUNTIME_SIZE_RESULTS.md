@@ -24,19 +24,21 @@ is enforced on every pull request instead of serving only as a manually recorded
 | Fixture                                           | Compiler off gzip | Compiler on gzip | Compiler premium |
 | ------------------------------------------------- | ----------------: | ---------------: | ---------------: |
 | Direct text, attribute, style, and event bindings |          60,043 B |         63,721 B |          3,678 B |
-| Keyed rows, LIS, scalar, Set, and Map targeting   |          60,179 B |         71,162 B |         10,983 B |
-| Keyed rows with append hints                      |          60,085 B |         71,469 B |         11,384 B |
+| Keyed rows, LIS, scalar, Set, and Map targeting   |          60,179 B |         71,221 B |         11,042 B |
+| Keyed rows with append hints                      |          60,085 B |         71,532 B |         11,447 B |
+| Keyed rows with filter hints                      |          60,088 B |         71,978 B |         11,890 B |
 
-The isolated compatibility runtime contributes 16,941 B gzip over the React control. The
-compiler-selected core contributes 3,766 B, a **77.8% reduction**. This comparison uses the same
+The isolated compatibility runtime contributes 17,321 B gzip over the React control. The
+compiler-selected core contributes 3,766 B, a **78.3% reduction**. This comparison uses the same
 hand-authored compiled definition and changes only the runtime entry used to create it.
 
 The keyed fixture retains `FarmCompiledKeyedRows` plus compiler-emitted `identityTarget`,
 `membershipTarget`, and `mapLookupTarget` metadata, plus Set/Map producer-delta helpers. It rejects
-the optional row-conditional and keyed-update runtimes. The append fixture separately proves that
-a recognized functional append retains the hinted runtime. The new capability keeps the direct
-compiler premium and isolated core runtime byte-for-byte unchanged; the ordinary keyed premium
-moves by only 26 B gzip. The direct fixture rejects every structural runtime marker. The checked
+the optional row-conditional and keyed-update runtimes. Separate append and filter fixtures prove
+that recognized functional updates retain the matching hinted runtime. Filter support is selected
+only for modules with an emitted filter hint. The direct compiler premium and isolated core runtime
+remain byte-for-byte unchanged; the append fixture adds only 63 B gzip over its previous persisted
+result. The direct fixture rejects every structural runtime marker. The checked
 machine-readable result is [`RUNTIME_SIZE_RESULTS.json`](./RUNTIME_SIZE_RESULTS.json).
 
 ## Existing production benchmark audit

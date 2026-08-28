@@ -14,6 +14,7 @@ export interface CompileReactModuleResult {
   diagnostics: readonly CompilerDiagnostic[];
   optimizations: {
     keyedArrayAppendHints: number;
+    keyedArrayFilterHints: number;
     keyedCollectionUpdateHints: number;
     keyedIdentityTargets: number;
     keyedMapLookupTargets: number;
@@ -360,12 +361,16 @@ type CompilerRuntimeFeatureName =
   | "keyed-list"
   | "keyed-rows"
   | "keyed-rows-hinted"
+  | "keyed-rows-filter-hinted"
   | "keyed-rows-conditional"
   | "keyed-rows-conditional-hinted"
+  | "keyed-rows-conditional-filter-hinted"
   | "keyed-rows-host"
   | "keyed-rows-host-hinted"
+  | "keyed-rows-host-filter-hinted"
   | "keyed-rows-complete"
   | "keyed-rows-complete-hinted"
+  | "keyed-rows-complete-filter-hinted"
   | "keyed-ranges"
   | "mixed-ranges"
   | "component";
@@ -377,12 +382,16 @@ const COMPILER_RUNTIME_FEATURE_EXPORTS: Record<CompilerRuntimeFeatureName, strin
   "keyed-list": "keyedListRuntimeFeature",
   "keyed-rows": "keyedRowsRuntimeFeature",
   "keyed-rows-hinted": "keyedRowsHintedRuntimeFeature",
+  "keyed-rows-filter-hinted": "keyedRowsFilterHintedRuntimeFeature",
   "keyed-rows-conditional": "keyedRowsConditionalRuntimeFeature",
   "keyed-rows-conditional-hinted": "keyedRowsConditionalHintedRuntimeFeature",
+  "keyed-rows-conditional-filter-hinted": "keyedRowsConditionalFilterHintedRuntimeFeature",
   "keyed-rows-host": "keyedRowsHostRuntimeFeature",
   "keyed-rows-host-hinted": "keyedRowsHostHintedRuntimeFeature",
+  "keyed-rows-host-filter-hinted": "keyedRowsHostFilterHintedRuntimeFeature",
   "keyed-rows-complete": "keyedRowsCompleteRuntimeFeature",
   "keyed-rows-complete-hinted": "keyedRowsCompleteHintedRuntimeFeature",
+  "keyed-rows-complete-filter-hinted": "keyedRowsCompleteFilterHintedRuntimeFeature",
   "keyed-ranges": "keyedRangesRuntimeFeature",
   "mixed-ranges": "mixedRangesRuntimeFeature",
   component: "componentRuntimeFeature",
@@ -391,6 +400,7 @@ const COMPILER_RUNTIME_FEATURE_EXPORTS: Record<CompilerRuntimeFeatureName, strin
 function runtimeFeaturesForPlans(
   plans: readonly ComposableBlockPlan[],
   keyedMapUpdateHints: boolean,
+  keyedArrayFilterHints: boolean,
 ): CompilerRuntimeFeatureName[] {
   const features = new Set<CompilerRuntimeFeatureName>();
   let keyedRowsHaveConditionals = false;
@@ -415,9 +425,11 @@ function runtimeFeaturesForPlans(
             ? "keyed-rows-host"
             : "keyed-rows";
     features.add(
-      keyedMapUpdateHints
-        ? (`${keyedRowsFeature}-hinted` as CompilerRuntimeFeatureName)
-        : keyedRowsFeature,
+      keyedArrayFilterHints
+        ? (`${keyedRowsFeature}-filter-hinted` as CompilerRuntimeFeatureName)
+        : keyedMapUpdateHints
+          ? (`${keyedRowsFeature}-hinted` as CompilerRuntimeFeatureName)
+          : keyedRowsFeature,
     );
   }
   return [...features].sort();
@@ -906,7 +918,9 @@ function rewriteHandlerAccess(
   });
   return reason
     ? { reason }
-    : { root: (file.program.body[0] as t.ExpressionStatement).expression as t.JSXElement };
+    : {
+        root: (file.program.body[0] as t.ExpressionStatement).expression as t.JSXElement,
+      };
 }
 
 function isSafeCompilerCall(
@@ -1063,7 +1077,9 @@ function rewriteKeyedMapUpdateHints(
         !t.isCallExpression(updater.body) ||
         !t.isMemberExpression(updater.body.callee) ||
         updater.body.callee.computed ||
-        !t.isIdentifier(updater.body.callee.object, { name: updater.params[0].name }) ||
+        !t.isIdentifier(updater.body.callee.object, {
+          name: updater.params[0].name,
+        }) ||
         !t.isIdentifier(updater.body.callee.property, { name: "map" })
       ) {
         return;
@@ -1165,7 +1181,9 @@ function rewriteKeyedArrayAppendHints(
         updater.body.elements.length < 2 ||
         updater.body.elements.some((element) => element === null) ||
         !t.isSpreadElement(updater.body.elements[0]) ||
-        !t.isIdentifier(updater.body.elements[0].argument, { name: updater.params[0].name })
+        !t.isIdentifier(updater.body.elements[0].argument, {
+          name: updater.params[0].name,
+        })
       ) {
         return;
       }
@@ -1229,6 +1247,90 @@ function rewriteKeyedArrayAppendHints(
   };
 }
 
+function rewriteKeyedArrayFilterHints(
+  root: t.JSXElement,
+  hintedStateIndices: ReadonlySet<number>,
+  statesBySetter: ReadonlyMap<string, StateBinding>,
+  helperIdentifier: t.Identifier,
+  safeGlobals: ReadonlySet<string>,
+): { root: t.JSXElement; count: number; stateIndices: ReadonlySet<number> } {
+  if (hintedStateIndices.size === 0) {
+    return { root: t.cloneNode(root, true), count: 0, stateIndices: new Set() };
+  }
+  const file = expressionFile(t.cloneNode(root, true));
+  const stateIndices = new Set<number>();
+  let count = 0;
+  traverse(file, {
+    CallExpression(path) {
+      const callee = path.get("callee");
+      if (!callee.isIdentifier() || callee.scope.hasBinding(callee.node.name)) return;
+      const state = statesBySetter.get(callee.node.name);
+      if (!state || !hintedStateIndices.has(state.index) || path.node.arguments.length !== 1) {
+        return;
+      }
+      const updater = path.node.arguments[0];
+      if (
+        !t.isArrowFunctionExpression(updater) ||
+        updater.async ||
+        updater.generator ||
+        updater.params.length !== 1 ||
+        !t.isIdentifier(updater.params[0]) ||
+        !t.isCallExpression(updater.body) ||
+        updater.body.arguments.length !== 1 ||
+        !t.isMemberExpression(updater.body.callee) ||
+        updater.body.callee.computed ||
+        !t.isIdentifier(updater.body.callee.object, {
+          name: updater.params[0].name,
+        }) ||
+        !t.isIdentifier(updater.body.callee.property, { name: "filter" })
+      ) {
+        return;
+      }
+      const predicate = updater.body.arguments[0];
+      if (
+        !t.isArrowFunctionExpression(predicate) ||
+        predicate.async ||
+        predicate.generator ||
+        predicate.params.length !== 1 ||
+        !t.isIdentifier(predicate.params[0]) ||
+        !t.isExpression(predicate.body) ||
+        validateDerivedExpression(predicate.body, safeGlobals)
+      ) {
+        return;
+      }
+
+      const previous = t.cloneNode(updater.params[0]);
+      const filterMethod = path.scope.generateUidIdentifier("farmFilter");
+      path.node.arguments[0] = t.arrowFunctionExpression(
+        [t.cloneNode(previous)],
+        t.blockStatement([
+          t.variableDeclaration("const", [
+            t.variableDeclarator(
+              t.cloneNode(filterMethod),
+              t.memberExpression(t.cloneNode(previous), t.identifier("filter")),
+            ),
+          ]),
+          t.returnStatement(
+            t.callExpression(t.cloneNode(helperIdentifier), [
+              t.cloneNode(previous),
+              t.cloneNode(filterMethod),
+              t.cloneNode(predicate, true),
+            ]),
+          ),
+        ]),
+      );
+      count += 1;
+      stateIndices.add(state.index);
+      path.skip();
+    },
+  });
+  return {
+    root: (file.program.body[0] as t.ExpressionStatement).expression as t.JSXElement,
+    count,
+    stateIndices,
+  };
+}
+
 type KeyedCollectionTargetKind = "set" | "map";
 
 interface PreparedKeyedCollectionUpdater {
@@ -1247,7 +1349,9 @@ function isCollectionConstruction(
 ): expression is t.NewExpression {
   if (
     !t.isNewExpression(expression) ||
-    !t.isIdentifier(expression.callee, { name: collectionConstructorName(kind) })
+    !t.isIdentifier(expression.callee, {
+      name: collectionConstructorName(kind),
+    })
   ) {
     return false;
   }
@@ -1294,7 +1398,9 @@ function collectionStateHasOnlyOwnedReads(
       const parent = path.parentPath;
       if (
         parent.isNewExpression() &&
-        t.isIdentifier(parent.node.callee, { name: collectionConstructorName(kind) }) &&
+        t.isIdentifier(parent.node.callee, {
+          name: collectionConstructorName(kind),
+        }) &&
         parent.node.arguments.length === 1 &&
         parent.node.arguments[0] === path.node
       ) {
@@ -1505,7 +1611,9 @@ function prepareKeyedCollectionUpdater(
           parent.isNewExpression() &&
           parent.node.arguments.length === 1 &&
           parent.node.arguments[0] === path.node &&
-          t.isIdentifier(parent.node.callee, { name: collectionConstructorName(kind) })
+          t.isIdentifier(parent.node.callee, {
+            name: collectionConstructorName(kind),
+          })
         ) {
           return;
         }
@@ -2045,7 +2153,9 @@ function analyzeMapList(
   const collection = callee.object as t.Expression;
   const collectionUnsupported = validateCollectionPipeline(collection, safeGlobals);
   if (collectionUnsupported) {
-    return { reason: `keyed list collection cannot use ${collectionUnsupported}` };
+    return {
+      reason: `keyed list collection cannot use ${collectionUnsupported}`,
+    };
   }
   if (
     expression.arguments.length !== 1 ||
@@ -2056,14 +2166,19 @@ function analyzeMapList(
   }
   const callback = expression.arguments[0];
   if (containsDirectHookCall(callback)) {
-    return { reason: "Hooks cannot be called directly inside a keyed list callback" };
+    return {
+      reason: "Hooks cannot be called directly inside a keyed list callback",
+    };
   }
   const row = returnedExpression(callback);
   if (!row || !t.isJSXElement(row)) {
     return { reason: "keyed list map callbacks must return one React element" };
   }
   const key = jsxKeyExpression(row);
-  if (!key) return { reason: "automatically compiled lists require an explicit item key" };
+  if (!key)
+    return {
+      reason: "automatically compiled lists require an explicit item key",
+    };
   const keyReason = validateKeyFunction(callback, key, safeGlobals);
   if (keyReason) return { reason: keyReason };
   return { dependencies: collectStateDependencies(expression, statesByValue) };
@@ -2089,7 +2204,9 @@ function analyzePublicList(
   safeGlobals: ReadonlySet<string>,
 ): { dependencies?: number[]; reason?: string } {
   if (element.openingElement.attributes.some((attribute) => t.isJSXSpreadAttribute(attribute))) {
-    return { reason: "compiled List boundaries do not support JSX attribute spreads" };
+    return {
+      reason: "compiled List boundaries do not support JSX attribute spreads",
+    };
   }
   const each = listAttributeExpression(element, "each");
   const by = listAttributeExpression(element, "by");
@@ -2114,7 +2231,9 @@ function analyzePublicList(
     (!t.isArrowFunctionExpression(children[0].expression) &&
       !t.isFunctionExpression(children[0].expression))
   ) {
-    return { reason: "compiled List children must use one inline render function" };
+    return {
+      reason: "compiled List children must use one inline render function",
+    };
   }
   const render = children[0].expression;
   if (!returnedExpression(render)) {
@@ -2303,7 +2422,9 @@ function analyzeKeyedRowTree(
     !t.isIdentifier(renderCallback.params[0]) ||
     (renderCallback.params[1] !== undefined && !t.isIdentifier(renderCallback.params[1]))
   ) {
-    return { reason: "compiled keyed rows require item and optional index identifiers" };
+    return {
+      reason: "compiled keyed rows require item and optional index identifiers",
+    };
   }
 
   const bindings: PendingKeyedRowBinding[] = [];
@@ -2512,7 +2633,11 @@ function analyzeKeyedRowTree(
           parts.push(cloneExpression(child.expression));
         }
       }
-      bindings.push({ kind: "text", path: [...path], value: t.arrayExpression(parts) });
+      bindings.push({
+        kind: "text",
+        path: [...path],
+        value: t.arrayExpression(parts),
+      });
     }
 
     let elementIndex = 0;
@@ -2958,7 +3083,11 @@ function analyzeHostConditionalTree(
           parts.push(cloneExpression(child.expression));
         }
       }
-      bindings.push({ kind: "text", path: [...path], value: t.arrayExpression(parts) });
+      bindings.push({
+        kind: "text",
+        path: [...path],
+        value: t.arrayExpression(parts),
+      });
     }
 
     let elementIndex = 0;
@@ -3175,7 +3304,11 @@ function analyzeRecursiveHostTree(
               id,
               allocateId,
             )
-          : { bindings: [], plans: [], blocks: new Map<t.JSXElement, HostDescriptorBlockPlan>() };
+          : {
+              bindings: [],
+              plans: [],
+              blocks: new Map<t.JSXElement, HostDescriptorBlockPlan>(),
+            };
         const falsy = shape.falsy
           ? analyzeRecursiveHostTree(
               shape.falsy,
@@ -3185,7 +3318,11 @@ function analyzeRecursiveHostTree(
               id,
               allocateId,
             )
-          : { bindings: [], plans: [], blocks: new Map<t.JSXElement, HostDescriptorBlockPlan>() };
+          : {
+              bindings: [],
+              plans: [],
+              blocks: new Map<t.JSXElement, HostDescriptorBlockPlan>(),
+            };
         if (truthy.reason) return truthy.reason;
         if (falsy.reason) return falsy.reason;
         plans.push(...truthy.plans, ...falsy.plans);
@@ -3352,7 +3489,11 @@ function analyzeRecursiveHostTree(
           parts.push(cloneExpression(child.expression));
         }
       }
-      bindings.push({ kind: "text", path: [...path], value: t.arrayExpression(parts) });
+      bindings.push({
+        kind: "text",
+        path: [...path],
+        value: t.arrayExpression(parts),
+      });
     }
 
     let elementIndex = 0;
@@ -3468,7 +3609,11 @@ function analyzeHostConditionalContainer(
         parent,
         allocateId,
       )
-    : { bindings: [], plans: [], blocks: new Map<t.JSXElement, HostDescriptorBlockPlan>() };
+    : {
+        bindings: [],
+        plans: [],
+        blocks: new Map<t.JSXElement, HostDescriptorBlockPlan>(),
+      };
   const falsyAnalysis = shape.falsy
     ? analyzeRecursiveHostTree(
         shape.falsy,
@@ -3478,7 +3623,11 @@ function analyzeHostConditionalContainer(
         parent,
         allocateId,
       )
-    : { bindings: [], plans: [], blocks: new Map<t.JSXElement, HostDescriptorBlockPlan>() };
+    : {
+        bindings: [],
+        plans: [],
+        blocks: new Map<t.JSXElement, HostDescriptorBlockPlan>(),
+      };
   if (truthyAnalysis.reason || falsyAnalysis.reason) return undefined;
 
   const dependencies = new Set(collectStateDependencies(shape.test, statesByValue));
@@ -3556,7 +3705,11 @@ function analyzeConditionalRangesContainer(
               parent,
               allocateId,
             )
-          : { bindings: [], plans: [], blocks: new Map<t.JSXElement, HostDescriptorBlockPlan>() };
+          : {
+              bindings: [],
+              plans: [],
+              blocks: new Map<t.JSXElement, HostDescriptorBlockPlan>(),
+            };
         const falsyAnalysis = shape.falsy
           ? analyzeRecursiveHostTree(
               shape.falsy,
@@ -3566,7 +3719,11 @@ function analyzeConditionalRangesContainer(
               parent,
               allocateId,
             )
-          : { bindings: [], plans: [], blocks: new Map<t.JSXElement, HostDescriptorBlockPlan>() };
+          : {
+              bindings: [],
+              plans: [],
+              blocks: new Map<t.JSXElement, HostDescriptorBlockPlan>(),
+            };
         if (truthyAnalysis.reason || falsyAnalysis.reason) return undefined;
         nestedPlans.push(...truthyAnalysis.plans, ...falsyAnalysis.plans);
         for (const [element, plan] of truthyAnalysis.blocks) descriptorBlocks.set(element, plan);
@@ -3693,7 +3850,11 @@ function analyzeMixedRangesContainer(
               parent,
               allocateId,
             )
-          : { bindings: [], plans: [], blocks: new Map<t.JSXElement, HostDescriptorBlockPlan>() };
+          : {
+              bindings: [],
+              plans: [],
+              blocks: new Map<t.JSXElement, HostDescriptorBlockPlan>(),
+            };
         const falsyAnalysis = shape.falsy
           ? analyzeRecursiveHostTree(
               shape.falsy,
@@ -3703,7 +3864,11 @@ function analyzeMixedRangesContainer(
               parent,
               allocateId,
             )
-          : { bindings: [], plans: [], blocks: new Map<t.JSXElement, HostDescriptorBlockPlan>() };
+          : {
+              bindings: [],
+              plans: [],
+              blocks: new Map<t.JSXElement, HostDescriptorBlockPlan>(),
+            };
         if (!mergeAnalysis(truthyAnalysis) || !mergeAnalysis(falsyAnalysis)) return undefined;
         for (const dependency of collectStateDependencies(shape.test, statesByValue)) {
           dependencies.add(dependency);
@@ -4289,6 +4454,7 @@ function keyedRowsBoundary(
   blockRuntime: t.Identifier,
   plan: KeyedRowsPlan,
   keyedMapUpdateHints: boolean,
+  keyedArrayFilterHintedStateIndices: ReadonlySet<number>,
 ): t.JSXElement {
   const name = t.jsxMemberExpression(
     t.jsxIdentifier(blockRuntime.name),
@@ -4356,6 +4522,15 @@ function keyedRowsBoundary(
                 t.jsxExpressionContainer(t.numericLiteral(plan.collectionDependency)),
               ),
             ]),
+        ...(plan.collectionDependency !== undefined &&
+        keyedArrayFilterHintedStateIndices.has(plan.collectionDependency)
+          ? [
+              t.jsxAttribute(
+                t.jsxIdentifier("filterIndexIndependent"),
+                t.jsxExpressionContainer(t.booleanLiteral(true)),
+              ),
+            ]
+          : []),
         t.jsxAttribute(
           t.jsxIdentifier("rowKey"),
           t.jsxExpressionContainer(t.cloneNode(plan.keyCallback, true)),
@@ -4757,7 +4932,9 @@ function analyzeComponentIslandElement(
 ): { dependencies?: number[]; reason?: string } {
   const name = element.openingElement.name;
   if (!t.isJSXIdentifier(name) || !isComponentName(name.name)) {
-    return { reason: "component islands require a direct component identifier" };
+    return {
+      reason: "component islands require a direct component identifier",
+    };
   }
   if (!allowedComponentNames.has(name.name)) {
     return {
@@ -4765,20 +4942,28 @@ function analyzeComponentIslandElement(
     };
   }
   if (meaningfulJsxChildren(element).length > 0) {
-    return { reason: `component island ${name.name} does not support children yet` };
+    return {
+      reason: `component island ${name.name} does not support children yet`,
+    };
   }
 
   const dependencies = new Set<number>();
   for (const attribute of element.openingElement.attributes) {
     if (t.isJSXSpreadAttribute(attribute)) {
-      return { reason: `component island ${name.name} does not support JSX attribute spreads` };
+      return {
+        reason: `component island ${name.name} does not support JSX attribute spreads`,
+      };
     }
     const attributeName = jsxAttributeName(attribute);
     if (!attributeName) {
-      return { reason: `component island ${name.name} does not support namespaced JSX attributes` };
+      return {
+        reason: `component island ${name.name} does not support namespaced JSX attributes`,
+      };
     }
     if (attributeName === "ref" || attributeName === "key" || attributeName === "children") {
-      return { reason: `component island ${name.name} does not support ${attributeName} yet` };
+      return {
+        reason: `component island ${name.name} does not support ${attributeName} yet`,
+      };
     }
     if (
       !t.isJSXExpressionContainer(attribute.value) ||
@@ -4804,7 +4989,9 @@ function analyzeComponentIslandElement(
     );
   }
 
-  return { dependencies: [...dependencies].sort((left, right) => left - right) };
+  return {
+    dependencies: [...dependencies].sort((left, right) => left - right),
+  };
 }
 
 function componentIslandBoundary(
@@ -5371,6 +5558,7 @@ function lowerComposableBlocks(
   blockRuntime: t.Identifier,
   listNames: ReadonlySet<string>,
   keyedMapUpdateHints: boolean,
+  keyedArrayFilterHintedStateIndices: ReadonlySet<number>,
 ): t.JSXElement {
   const planBySource = new Map<t.Node, ComposableBlockPlan>(
     plans.map((plan) => [plan.source, plan]),
@@ -5397,7 +5585,12 @@ function lowerComposableBlocks(
           return mixedRangesBoundary(blockRuntime, plan);
         }
         if (plan?.kind === "keyed-rows") {
-          return keyedRowsBoundary(blockRuntime, plan, keyedMapUpdateHints);
+          return keyedRowsBoundary(
+            blockRuntime,
+            plan,
+            keyedMapUpdateHints,
+            keyedArrayFilterHintedStateIndices,
+          );
         }
         if (plan?.kind === "keyed-ranges") {
           return keyedRangesBoundary(blockRuntime, plan);
@@ -5828,12 +6021,14 @@ function compileCandidate(
   createComponentIdentifier: t.Identifier,
   keyedMapUpdateIdentifier: t.Identifier,
   keyedArrayAppendIdentifier: t.Identifier,
+  keyedArrayFilterIdentifier: t.Identifier,
   keyedCollectionUpdateIdentifier: t.Identifier,
   keyedCollectionMutationIdentifier: t.Identifier,
   runtimeFeatureIdentifiers: ReadonlyMap<CompilerRuntimeFeatureName, t.Identifier>,
   usedRuntimeFeatures: Set<CompilerRuntimeFeatureName>,
   optimizationCounts: {
     keyedArrayAppendHints: number;
+    keyedArrayFilterHints: number;
     keyedCollectionUpdateHints: number;
     keyedIdentityTargets: number;
     keyedMapLookupTargets: number;
@@ -5917,9 +6112,17 @@ function compileCandidate(
       if (declaration.init.async || declaration.init.generator) {
         return `event handler ${declaration.id.name} must be synchronous`;
       }
-      locals.push({ kind: "handler", name: declaration.id.name, value: declaration.init });
+      locals.push({
+        kind: "handler",
+        name: declaration.id.name,
+        value: declaration.init,
+      });
     } else {
-      locals.push({ kind: "derived", name: declaration.id.name, value: declaration.init });
+      locals.push({
+        kind: "derived",
+        name: declaration.id.name,
+        value: declaration.init,
+      });
     }
   }
 
@@ -6167,6 +6370,56 @@ function compileCandidate(
       optimizationCounts.keyedArrayAppendHints += appendHintedRoot.count;
     }
   }
+  const filterHintedStateIndices = new Set(hintedStateIndices);
+  for (const plan of blockAnalysis.plans || []) {
+    if (plan.kind !== "keyed-rows" || plan.collectionDependency === undefined) continue;
+    const keyExpression = returnedExpression(plan.keyCallback);
+    if (
+      plan.renderCallback.params.length > 1 ||
+      !keyExpression ||
+      collectStateDependencies(keyExpression, reactiveByValue).includes(plan.collectionDependency)
+    ) {
+      // Removing rows shifts later indexes. A row callback that accepts the
+      // index, or a key that reads the whole collection, must take the full
+      // reconciliation path so existing row state cannot become stale.
+      filterHintedStateIndices.delete(plan.collectionDependency);
+    }
+  }
+  const filterHintedRoot = rewriteKeyedArrayFilterHints(
+    expandedReactiveRoot,
+    filterHintedStateIndices,
+    statesBySetter,
+    keyedArrayFilterIdentifier,
+    safeGlobals,
+  );
+  let appliedKeyedArrayFilterHints = 0;
+  let appliedFilterHintedStateIndices: ReadonlySet<number> = new Set();
+  if (filterHintedRoot.count > 0) {
+    const hintedBlockAnalysis = analyzeComposableBlocks(
+      filterHintedRoot.root,
+      reactiveByValue,
+      safeGlobals,
+      listNames,
+      allowedComponentNames,
+    );
+    const hintedAnalysis = analyzeHostTree(
+      filterHintedRoot.root,
+      reactiveByValue,
+      safeGlobals,
+      hintedBlockAnalysis.conditionalExpressions || new Set<t.Expression>(),
+      hintedBlockAnalysis.keyedExpressions || new Set<t.Expression>(),
+      hintedBlockAnalysis.ownedElements || new Set<t.JSXElement>(),
+      hintedBlockAnalysis.componentElements || new Set<t.JSXElement>(),
+    );
+    if (!hintedBlockAnalysis.reason && !hintedAnalysis.reason) {
+      expandedReactiveRoot = filterHintedRoot.root;
+      blockAnalysis = hintedBlockAnalysis;
+      analysis = hintedAnalysis;
+      appliedKeyedArrayFilterHints = filterHintedRoot.count;
+      appliedFilterHintedStateIndices = filterHintedRoot.stateIndices;
+      optimizationCounts.keyedArrayFilterHints += filterHintedRoot.count;
+    }
+  }
   const keyedCollectionTargetKinds = new Map<number, KeyedCollectionTargetKind>();
   const conflictingKeyedCollectionTargets = new Set<number>();
   for (const plan of blockAnalysis.plans || []) {
@@ -6244,8 +6497,15 @@ function compileCandidate(
         : 0),
     0,
   );
-  const hasKeyedUpdateHints = appliedKeyedMapUpdateHints > 0 || appliedKeyedArrayAppendHints > 0;
-  const runtimeFeatures = runtimeFeaturesForPlans(blockPlans, hasKeyedUpdateHints);
+  const hasKeyedUpdateHints =
+    appliedKeyedMapUpdateHints > 0 ||
+    appliedKeyedArrayAppendHints > 0 ||
+    appliedKeyedArrayFilterHints > 0;
+  const runtimeFeatures = runtimeFeaturesForPlans(
+    blockPlans,
+    hasKeyedUpdateHints,
+    appliedKeyedArrayFilterHints > 0,
+  );
   markShortCircuitBindings(analysis.bindings || []);
   assignStableBindingTargets(analysis.bindings || []);
 
@@ -6265,6 +6525,7 @@ function compileCandidate(
     blockParameter,
     listNames,
     hasKeyedUpdateHints,
+    appliedFilterHintedStateIndices,
   );
   const rewrittenRoot = rewriteStateAccess(
     rootWithBlocks,
@@ -6431,6 +6692,7 @@ export async function compileReactModule(
   const diagnostics: CompilerDiagnostic[] = [];
   const optimizationCounts = {
     keyedArrayAppendHints: 0,
+    keyedArrayFilterHints: 0,
     keyedCollectionUpdateHints: 0,
     keyedIdentityTargets: 0,
     keyedMapLookupTargets: 0,
@@ -6480,6 +6742,9 @@ export async function compileReactModule(
         const keyedArrayAppendIdentifier = programPath.scope.generateUidIdentifier(
           "createCompilerKeyedArrayAppend",
         );
+        const keyedArrayFilterIdentifier = programPath.scope.generateUidIdentifier(
+          "createCompilerKeyedArrayFilter",
+        );
         const keyedCollectionUpdateIdentifier = programPath.scope.generateUidIdentifier(
           "createCompilerKeyedCollectionUpdate",
         );
@@ -6509,6 +6774,7 @@ export async function compileReactModule(
             createComponentIdentifier,
             keyedMapUpdateIdentifier,
             keyedArrayAppendIdentifier,
+            keyedArrayFilterIdentifier,
             keyedCollectionUpdateIdentifier,
             keyedCollectionMutationIdentifier,
             runtimeFeatureIdentifiers,
@@ -6553,6 +6819,14 @@ export async function compileReactModule(
                       t.importSpecifier(
                         keyedArrayAppendIdentifier,
                         t.identifier("createCompilerKeyedArrayAppend"),
+                      ),
+                    ]
+                  : []),
+                ...(optimizationCounts.keyedArrayFilterHints > 0
+                  ? [
+                      t.importSpecifier(
+                        keyedArrayFilterIdentifier,
+                        t.identifier("createCompilerKeyedArrayFilter"),
                       ),
                     ]
                   : []),

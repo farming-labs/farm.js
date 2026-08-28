@@ -176,6 +176,20 @@ export function StandardTableBenchmark() {
           Replace 1,000
         </button>
         <button
+          data-action="table-remove-snapshot"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              const target = current[Math.floor(current.length / 2)];
+              return target ? current.filter((item) => item.id !== target.id) : current;
+            });
+            setOperation("remove row (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Remove middle (snapshot control)
+        </button>
+        <button
           data-action="table-update"
           id="update"
           type="button"
@@ -404,7 +418,7 @@ export function StandardTableBenchmark() {
             </tr>
           </thead>
           <tbody data-table-body>
-            {rows.map((row, index) => (
+            {rows.map((row) => (
               <tr
                 className={selected === row.id ? "table-row--selected" : ""}
                 data-marked={markedIds.has(row.id)}
@@ -416,7 +430,7 @@ export function StandardTableBenchmark() {
                 key={row.id}
               >
                 <td>
-                  <span className="row-index">{index + 1}</span>
+                  <span className="row-index">{row.id}</span>
                   <code>ord_{row.id}</code>
                 </td>
                 <td>{row.label}</td>
