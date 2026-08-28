@@ -2,7 +2,7 @@ import { pathToFileURL } from "node:url";
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   getClientModuleMetadata,
   getIslandStrategyExport,
@@ -566,6 +566,82 @@ export function Chart() {}
     expect(source).toMatch(
       /return \{\s+\.\.\.\(existingProps \|\| \{\}\),\s+params: parsedParams,/,
     );
+  });
+
+  it("reports a layout that fails to load, rather than dropping it quietly", () => {
+    const source = fs.readFileSync(path.join(process.cwd(), "src", "vite.ts"), "utf-8");
+
+    // Skipping a layout makes the client tree differ from the server's, so React
+    // discards the server rendered markup for that branch. A warning is too quiet
+    // for something that deletes visible UI.
+    expect(source).not.toContain("console.warn('[Farm.js] Could not load layout:");
+    expect(source).toContain("[Farm.js] Layout failed to load and was skipped: ");
+    expect(source).toContain("server rendered markup for this route");
+
+    // The same applies to a loading boundary that cannot be loaded.
+    expect(source).not.toContain("console.warn('[Farm.js] Could not load loading boundary");
+    expect(source).toContain("[Farm.js] Loading boundary failed to load and was skipped: ");
+  });
+
+  it("reports the failing loading module without masking the original error", async () => {
+    const source = fs.readFileSync(path.join(process.cwd(), "src", "vite.ts"), "utf-8");
+    const start = source.indexOf("async function buildClientHydrationElement(");
+    const end = source.indexOf("\n\nasync function loadLayoutComponents", start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+
+    const emittedFunction = source.slice(start, end);
+    const testableFunction = emittedFunction.replace(
+      "import(/* @vite-ignore */ loadingModulePath)",
+      "loadModule(loadingModulePath)",
+    );
+    expect(testableFunction).not.toBe(emittedFunction);
+
+    const loadFailure = new Error("loading module failed");
+    const React = {
+      createElement(type: unknown, props: unknown, ...children: unknown[]) {
+        return { type, props, children };
+      },
+      Suspense: Symbol("Suspense"),
+    };
+    const buildClientHydrationElement = new Function(
+      "React",
+      "loadModule",
+      `return (${testableFunction});`,
+    )(React, async () => {
+      throw loadFailure;
+    }) as (
+      component: () => null,
+      props: Record<string, unknown>,
+      loadingModulePath: string,
+    ) => Promise<{ type: unknown }>;
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const Page = () => null;
+
+    try {
+      const element = await buildClientHydrationElement(Page, {}, "/src/app/loading.tsx");
+
+      expect(element.type).toBe(Page);
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          "Loading boundary failed to load and was skipped: /src/app/loading.tsx",
+        ),
+        loadFailure,
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it("keeps the emitted diagnostics free of escapes the template literal would consume", () => {
+    const source = fs.readFileSync(path.join(process.cwd(), "src", "vite.ts"), "utf-8");
+    const start = source.indexOf("Layout failed to load and was skipped");
+    expect(start).toBeGreaterThan(-1);
+
+    // A backslash-n inside the surrounding template literal becomes a real
+    // newline in the emitted client runtime, which breaks the JS string literal.
+    const message = source.slice(start, start + 400);
+    expect(message.includes(String.fromCharCode(92) + "n")).toBe(false);
   });
 
   it("composes every applicable layout in the development hydration runtime", () => {
