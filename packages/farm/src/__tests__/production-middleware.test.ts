@@ -33,9 +33,7 @@ function readInlineFarmProps(html: string): Record<string, any> {
 }
 
 describe("production middleware runtime", () => {
-  // Windows: image optimization stalls loading the WASM codec (#434).
-  it("runs farm.config middleware and app middleware in a production build", async (ctx) => {
-    if (process.platform === "win32") ctx.skip();
+  it("runs farm.config middleware and app middleware in a production build", async () => {
     const root = await createMiddlewareProductionFixture();
     const originalFetch = globalThis.fetch;
 

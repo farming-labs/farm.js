@@ -1,3 +1,4 @@
+import type { Dirent } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -5,8 +6,11 @@ import sharp from "sharp";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
+const FIXTURE_PREFIX = ".tmp-production-middleware-";
+
 export async function createMiddlewareProductionFixture(): Promise<string> {
-  const root = await fs.mkdtemp(path.join(packageRoot, ".tmp-production-middleware-"));
+  await removeStaleFixtures();
+  const root = await fs.mkdtemp(path.join(packageRoot, FIXTURE_PREFIX));
 
   await fs.mkdir(path.join(root, "node_modules", "@farm.js"), {
     recursive: true,
@@ -448,6 +452,70 @@ export default function userSitemap({ params, path }: any) {
 }
 
 export async function cleanupMiddlewareProductionFixture(root: string): Promise<void> {
-  // Windows keeps handles on spawned servers and loaded .node files briefly after exit.
-  await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  if (process.platform !== "win32") {
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    return;
+  }
+
+  // The build copies sharp's native binary into the output, and this process
+  // loads it while optimizing images. Windows refuses to unlink a loaded
+  // module, so that one file is undeletable until the process exits. A
+  // recursive remove retries it at every level on the way up and never
+  // finishes, which used to exhaust the whole test timeout. Remove what is not
+  // locked instead and leave the rest for the operating system.
+  await removeUnlockedEntries(root);
+}
+
+/**
+ * Sweep fixtures an earlier run could not finish removing.
+ *
+ * On Windows the locked native binary is released when that process exits, so
+ * the leftovers are deletable by the time the next run starts.
+ */
+async function removeStaleFixtures(): Promise<void> {
+  let entries: Dirent[];
+  try {
+    entries = await fs.readdir(packageRoot, { withFileTypes: true });
+  } catch {
+    return;
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !entry.name.startsWith(FIXTURE_PREFIX)) continue;
+    try {
+      await fs.rm(path.join(packageRoot, entry.name), {
+        recursive: true,
+        force: true,
+        maxRetries: 0,
+      });
+    } catch {
+      // Still held by a concurrent run, leave it.
+    }
+  }
+}
+
+/** Best effort removal that steps over entries Windows still holds. */
+async function removeUnlockedEntries(dir: string): Promise<void> {
+  let entries: Dirent[];
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory() && !entry.isSymbolicLink()) await removeUnlockedEntries(full);
+    try {
+      await fs.rm(full, { recursive: true, force: true, maxRetries: 0 });
+    } catch {
+      // Locked, leave it for the operating system to reclaim.
+    }
+  }
+
+  try {
+    await fs.rmdir(dir);
+  } catch {
+    // Still holds a locked child.
+  }
 }
