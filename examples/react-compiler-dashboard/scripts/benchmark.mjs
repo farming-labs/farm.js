@@ -131,6 +131,10 @@ async function inspectBuild(compilerMode) {
       "The compiler build did not emit a mutation-aware keyed-map update hint.",
     );
     assert(
+      compilerReport.summary.keyedArrayAppendHints > 0,
+      "The compiler build did not emit a keyed-array append hint.",
+    );
+    assert(
       compilerReport.summary.keyedCollectionUpdateHints > 0,
       "The compiler build did not emit a keyed Set/Map collection-delta hint.",
     );
@@ -451,6 +455,16 @@ async function measureTrial(browser, trial, compilerMode, port) {
           async () => {
             await runTableAction(
               () => tableButton("table-append").click(),
+              () => rowCount() === 11_000,
+            );
+          },
+        );
+
+        const tableAppendSnapshot = await measureTable(
+          async () => ensure10000(),
+          async () => {
+            await runTableAction(
+              () => tableButton("table-append-snapshot").click(),
               () => rowCount() === 11_000,
             );
           },
@@ -783,6 +797,7 @@ async function measureTrial(browser, trial, compilerMode, port) {
           },
           table: {
             append: tableAppend,
+            appendSnapshot: tableAppendSnapshot,
             clear: tableClear,
             create: tableCreate,
             createMany: tableCreateMany,
@@ -859,6 +874,7 @@ async function measureTrial(browser, trial, compilerMode, port) {
       },
       table: {
         append: timingSummary(result.table.append),
+        appendSnapshot: timingSummary(result.table.appendSnapshot),
         clear: timingSummary(result.table.clear),
         create: timingSummary(result.table.create),
         createMany: timingSummary(result.table.createMany),
@@ -941,6 +957,7 @@ const tableMetrics = [
   "replace",
   "createMany",
   "append",
+  "appendSnapshot",
   "updateEvery10th",
   "select",
   "membership",
@@ -1067,6 +1084,33 @@ const keyedUpdateSpeedups = keyedUpdateCases.flatMap(([group, metric]) =>
 const keyedUpdateRegressions = keyedUpdateSpeedups.filter(
   ({ speedup }) => !Number.isFinite(speedup) || speedup < keyedUpdateMinimumSpeedup,
 );
+// A compiler-proven functional append already creates the new array and DOM rows. The append hint
+// avoids rescanning every existing key and binding before mounting only the appended suffix. Compare
+// it with both React and an equivalent block-bodied compiled updater that intentionally stays on
+// complete keyed reconciliation.
+const keyedAppendMinimumSpeedup = 4;
+const keyedAppendMinimumSnapshotSpeedup = 1.25;
+const keyedAppendResults = ["static", "hybrid"].map((mode) => {
+  const appendMedianMs = comparisons.table.append[mode].medianMs;
+  const snapshotMedianMs = comparisons.table.appendSnapshot[mode].medianMs;
+  return {
+    appendMedianMs,
+    mode,
+    scaleSpeedup: comparisons.scale.appendTo20k[`${mode}VsBaseline`].speedup,
+    snapshotMedianMs,
+    snapshotSpeedup: snapshotMedianMs / appendMedianMs,
+    speedup: comparisons.table.append[`${mode}VsBaseline`].speedup,
+  };
+});
+const keyedAppendRegressions = keyedAppendResults.filter(
+  ({ scaleSpeedup, snapshotSpeedup, speedup }) =>
+    !Number.isFinite(speedup) ||
+    speedup < keyedAppendMinimumSpeedup ||
+    !Number.isFinite(scaleSpeedup) ||
+    scaleSpeedup < keyedAppendMinimumSpeedup ||
+    !Number.isFinite(snapshotSpeedup) ||
+    snapshotSpeedup < keyedAppendMinimumSnapshotSpeedup,
+);
 // Selection is a separate-state update whose value is compared with the exact row key. The unit
 // suite deterministically requires at most two row-binding reads. This browser gate protects a
 // substantial end-to-end win and rejects growth beyond the same normalized 2x scalability ceiling
@@ -1185,6 +1229,7 @@ const passed =
   performanceRegressions.length === 0 &&
   scalabilityRegressions.length === 0 &&
   keyedUpdateRegressions.length === 0 &&
+  keyedAppendRegressions.length === 0 &&
   keyedIdentityRegressions.length === 0 &&
   keyedMembershipRegressions.length === 0 &&
   keyedMapLookupRegressions.length === 0 &&
@@ -1204,6 +1249,13 @@ const report = {
     regressions: keyedUpdateRegressions,
     speedups: keyedUpdateSpeedups,
     status: keyedUpdateRegressions.length === 0 ? "PASS" : "FAIL",
+  },
+  keyedAppendHintGate: {
+    minimumSnapshotSpeedup: keyedAppendMinimumSnapshotSpeedup,
+    minimumSpeedup: keyedAppendMinimumSpeedup,
+    regressions: keyedAppendRegressions,
+    results: keyedAppendResults,
+    status: keyedAppendRegressions.length === 0 ? "PASS" : "FAIL",
   },
   keyedIdentityTargetGate: {
     maximumNormalizedGrowth: keyedIdentityMaximumNormalizedGrowth,

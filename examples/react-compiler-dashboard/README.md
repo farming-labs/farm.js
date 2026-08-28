@@ -65,6 +65,12 @@ row-binding reads, which is the deterministic guard against returning to a full 
 performance, scalability, or persistence gate writes the JSON report and exits with a nonzero
 status.
 
+Keyed array appends have a separate persistence gate. A concise functional append is measured
+against bracketed React and an equivalent block-bodied compiled snapshot control. Both compiler
+modes must remain at least 4x faster than React at 10,000 and up to 20,000 rows, and at least 1.25x
+faster than the compiled control. The report must contain a nonzero `keyedArrayAppendHints` count;
+deterministic package tests separately require work to equal only the appended suffix.
+
 Set membership has a separate operation and persistence gate. The table alternates two marked row
 keys with `markedIds.has(row.id)` at 1,000 and 20,000 rows. Both compiler modes must remain at least
 10x faster than React at 20,000 rows, normalized growth may not exceed 2x, and the compiler report
@@ -114,6 +120,8 @@ The default JSON report is `/tmp/farm-react-dashboard-benchmark.json`; change it
 - The dense collection controls show only the incremental delta benefit: both compiler paths keep
   the application's immutable collection copy, while the hinted path avoids the runtime's second
   complete entry scan.
+- The append snapshot control creates the same 1,000 array items and DOM rows but intentionally uses
+  an unsupported block-bodied updater, isolating the saved full key-and-binding scan.
 - This is an operation-compatible local benchmark, not an official `js-framework-benchmark`
   submission or a score comparable to its published result table. This app has richer rows and
   measures event dispatch through an asserted DOM result without CPU throttling.

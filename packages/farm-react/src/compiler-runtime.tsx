@@ -11,6 +11,13 @@ interface CompilerKeyedMapUpdateHint {
   readonly previous?: CompilerKeyedMapUpdateHint;
 }
 
+interface CompilerKeyedArrayAppendHint {
+  readonly sourceToken: object;
+  readonly startIndex: number;
+  readonly resultLength: number;
+  readonly previous?: CompilerKeyedArrayAppendHint;
+}
+
 type CompilerKeyedCollectionKind = "set" | "map";
 type CompilerKeyedCollectionMutation = "set-add" | "set-delete" | "map-set" | "map-delete";
 
@@ -31,6 +38,10 @@ const COMPILER_KEYED_MAP_UPDATES = /* @__PURE__ */ new WeakMap<
   object,
   CompilerKeyedMapUpdateHint
 >();
+const COMPILER_KEYED_ARRAY_APPENDS = /* @__PURE__ */ new WeakMap<
+  object,
+  CompilerKeyedArrayAppendHint
+>();
 const COMPILER_KEYED_COLLECTION_DRAFTS = /* @__PURE__ */ new WeakMap<
   object,
   CompilerKeyedCollectionDraft
@@ -40,6 +51,8 @@ const COMPILER_KEYED_COLLECTION_UPDATES = /* @__PURE__ */ new WeakMap<
   CompilerKeyedCollectionUpdateHint
 >();
 const COMPILER_KEYED_COMMITTED_COLLECTIONS = /* @__PURE__ */ new WeakSet<object>();
+const NATIVE_ARRAY_PROTOTYPE = Array.prototype;
+const NATIVE_ARRAY_ITERATOR = Array.prototype[Symbol.iterator];
 const NATIVE_REFLECT_APPLY = Reflect.apply;
 
 function compilerObject(value: unknown): object | undefined {
@@ -85,6 +98,33 @@ function compilerKeyedMapChangedIndices(
   return changedIndices;
 }
 
+function compilerKeyedArrayAppendStart(
+  value: unknown,
+  sourceToken: object | undefined,
+  expectedStart: number,
+): number | undefined {
+  const target = compilerObject(value);
+  if (!target || !sourceToken || !Array.isArray(value)) return undefined;
+  const update = COMPILER_KEYED_ARRAY_APPENDS.get(target);
+  if (!update || update.sourceToken !== sourceToken) return undefined;
+  const updates: CompilerKeyedArrayAppendHint[] = [];
+  for (
+    let current: CompilerKeyedArrayAppendHint | undefined = update;
+    current;
+    current = current.previous
+  ) {
+    if (current.sourceToken !== sourceToken) return undefined;
+    updates.push(current);
+  }
+  let length = expectedStart;
+  for (let index = updates.length - 1; index >= 0; index -= 1) {
+    const current = updates[index];
+    if (current.startIndex !== length || current.resultLength < length) return undefined;
+    length = current.resultLength;
+  }
+  return length === value.length ? expectedStart : undefined;
+}
+
 function compilerKeyedCollectionChangedKeys(
   value: unknown,
   sourceToken: object | undefined,
@@ -127,6 +167,42 @@ export function createCompilerKeyedMapUpdate(
     });
   }
   return value;
+}
+
+/** @internal Records a compiler-proven immutable keyed-array append and returns the Array. */
+export function createCompilerKeyedArrayAppend(previous: unknown, value: unknown): unknown {
+  try {
+    const previousTarget = compilerObject(previous);
+    const valueTarget = compilerObject(value);
+    if (
+      !previousTarget ||
+      !valueTarget ||
+      !Array.isArray(previous) ||
+      !Array.isArray(value) ||
+      Object.getPrototypeOf(previous) !== NATIVE_ARRAY_PROTOTYPE ||
+      Object.getPrototypeOf(value) !== NATIVE_ARRAY_PROTOTYPE ||
+      previous[Symbol.iterator] !== NATIVE_ARRAY_ITERATOR
+    ) {
+      return value;
+    }
+    const startIndex = previous.length;
+    if (value.length < startIndex) return value;
+    const sourceToken = compilerKeyedCollectionToken(previousTarget);
+    if (!sourceToken) return value;
+    const previousUpdate = !COMPILER_KEYED_COMMITTED_COLLECTIONS.has(previousTarget)
+      ? COMPILER_KEYED_ARRAY_APPENDS.get(previousTarget)
+      : undefined;
+    COMPILER_KEYED_ARRAY_APPENDS.set(valueTarget, {
+      sourceToken: previousUpdate?.sourceToken || sourceToken,
+      startIndex,
+      resultLength: value.length,
+      ...(previousUpdate ? { previous: previousUpdate } : {}),
+    });
+    return value;
+  } catch {
+    // Metadata must never change the behavior of an otherwise valid update.
+    return value;
+  }
 }
 
 /** @internal Preserves a proven native collection mutation while recording its executed key. */
@@ -3242,8 +3318,16 @@ interface KeyedRowHostRuntime {
   ): CompilerHostTreeScope | null;
 }
 
-interface KeyedMapUpdateRuntime {
+interface KeyedUpdateRuntime {
   commit(value: unknown): object | undefined;
+  append(
+    props: CompilerKeyedRowsBlockProps,
+    dirtyState: ReadonlySet<number>,
+    collectionToken: object | undefined,
+    instances: ReadonlyMap<string, CompilerKeyedRowInstance>,
+    root: Element,
+    reactOwnedRows: boolean,
+  ): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined;
   reconcile(
     props: CompilerKeyedRowsBlockProps,
     dirtyState: ReadonlySet<number>,
@@ -3264,7 +3348,8 @@ interface KeyedMapUpdateRuntime {
     | undefined;
 }
 
-const keyedMapUpdateRuntime: KeyedMapUpdateRuntime = {
+const keyedUpdateRuntime: KeyedUpdateRuntime = {
+  append: reconcileCompilerKeyedArrayAppend,
   commit: commitCompilerKeyedCollection,
   reconcile: reconcileCompilerKeyedMapUpdate,
 };
@@ -3272,7 +3357,7 @@ const keyedMapUpdateRuntime: KeyedMapUpdateRuntime = {
 interface KeyedRowsRuntimeOptions {
   conditionals?: KeyedRowConditionalRuntime;
   hostBlocks?: KeyedRowHostRuntime;
-  keyedMapUpdates?: KeyedMapUpdateRuntime;
+  keyedUpdates?: KeyedUpdateRuntime;
 }
 
 function reconcileCompilerKeyedMapUpdate(
@@ -3281,7 +3366,7 @@ function reconcileCompilerKeyedMapUpdate(
   collectionToken: object | undefined,
   instances: ReadonlyMap<string, CompilerKeyedRowInstance>,
   conditionals: KeyedRowConditionalRuntime | undefined,
-): ReturnType<KeyedMapUpdateRuntime["reconcile"]> {
+): ReturnType<KeyedUpdateRuntime["reconcile"]> {
   const dependency = props.collectionDependency;
   if (dependency === undefined) return undefined;
   const dependencies = props.dependencies || props.structureDependencies || [];
@@ -3338,6 +3423,70 @@ function reconcileCompilerKeyedMapUpdate(
     conditionalChanges,
     fallback: false,
   };
+}
+
+function reconcileCompilerKeyedArrayAppend(
+  props: CompilerKeyedRowsBlockProps,
+  dirtyState: ReadonlySet<number>,
+  collectionToken: object | undefined,
+  instances: ReadonlyMap<string, CompilerKeyedRowInstance>,
+  root: Element,
+  reactOwnedRows: boolean,
+): ReturnType<KeyedUpdateRuntime["append"]> {
+  if (
+    reactOwnedRows ||
+    props.hostBlocks ||
+    (props.conditionals?.length || 0) > 0 ||
+    props.collectionDependency === undefined
+  ) {
+    return undefined;
+  }
+  const collectionDependency = props.collectionDependency;
+  if (props.bindings.some((binding) => binding.dependencies?.includes(collectionDependency))) {
+    // Existing rows may read the collection itself (for example,
+    // `rows.length`). Appending would need to refresh those rows too, so keep
+    // the complete keyed reconciliation path for that shape.
+    return undefined;
+  }
+  const dependencies = props.dependencies || props.structureDependencies;
+  const relevantDirty = (dependencies || []).filter((index) => dirtyState.has(index));
+  if (relevantDirty.length !== 1 || relevantDirty[0] !== collectionDependency) {
+    return undefined;
+  }
+
+  const finalValue = props.items();
+  const startIndex = compilerKeyedArrayAppendStart(finalValue, collectionToken, instances.size);
+  if (startIndex === undefined || !Array.isArray(finalValue)) return undefined;
+
+  const nextInstances = new Map(instances);
+  const appended: CompilerKeyedRowInstance[] = [];
+  try {
+    for (let index = startIndex; index < finalValue.length; index += 1) {
+      const item = finalValue[index];
+      const key = keyedRowIdentity(props.rowKey(item, index));
+      if (nextInstances.has(key)) return undefined;
+      const descriptor = props.create(item, index);
+      const instance: CompilerKeyedRowInstance = {
+        key,
+        element: createCompilerHostElement(root.ownerDocument, descriptor),
+        values: readKeyedRowBindingValues(props, item, index),
+        item,
+        index,
+        conditionalValues: EMPTY_KEYED_ROW_CONDITIONAL_VALUES,
+      };
+      appended.push(instance);
+      nextInstances.set(key, instance);
+    }
+  } catch {
+    return undefined;
+  }
+
+  if (appended.length > 0) {
+    const fragment = root.ownerDocument.createDocumentFragment();
+    for (const instance of appended) fragment.append(instance.element);
+    root.append(fragment);
+  }
+  return nextInstances;
 }
 
 function createKeyedRowConditionalRuntime(): KeyedRowConditionalRuntime {
@@ -3673,7 +3822,7 @@ function createKeyedRowsBlockComponent(
     }
 
     private commitCurrentCollection(dirtyState?: ReadonlySet<number>): void {
-      this.collectionToken = options.keyedMapUpdates?.commit(this.currentProps.items());
+      this.collectionToken = options.keyedUpdates?.commit(this.currentProps.items());
       this.commitKeyedTargets(dirtyState);
     }
 
@@ -4335,14 +4484,8 @@ function createKeyedRowsBlockComponent(
     }
 
     private refresh: CompilerBlockRefresh = (afterCommit, dirtyState) => {
-      if (
-        dirtyState &&
-        options.keyedMapUpdates &&
-        this.mounted &&
-        this.root &&
-        !this.state.fallback
-      ) {
-        const result = options.keyedMapUpdates.reconcile(
+      if (dirtyState && options.keyedUpdates && this.mounted && this.root && !this.state.fallback) {
+        const result = options.keyedUpdates.reconcile(
           this.currentProps,
           dirtyState,
           this.collectionToken,
@@ -4355,6 +4498,21 @@ function createKeyedRowsBlockComponent(
             this.collectionToken = result.collectionToken;
             this.notifyConditionalChanges(result.conditionalChanges, afterCommit);
           }
+          return;
+        }
+        const appendedInstances = options.keyedUpdates.append(
+          this.currentProps,
+          dirtyState,
+          this.collectionToken,
+          this.instances,
+          this.root,
+          this.hasReactOwnedRows(),
+        );
+        if (appendedInstances) {
+          this.instances = new Map(appendedInstances);
+          this.rebuildElementIndex(this.instances);
+          this.commitCurrentCollection(dirtyState);
+          afterCommit?.();
           return;
         }
       }
@@ -4922,7 +5080,7 @@ export const keyedRowsRuntimeFeature: CompilerRuntimeFeature = {
 export const keyedRowsHintedRuntimeFeature: CompilerRuntimeFeature = {
   name: "keyed-rows:hinted",
   create: (owner) => ({
-    KeyedRows: createKeyedRowsBlockComponent(owner, { keyedMapUpdates: keyedMapUpdateRuntime }),
+    KeyedRows: createKeyedRowsBlockComponent(owner, { keyedUpdates: keyedUpdateRuntime }),
   }),
 };
 
@@ -4940,7 +5098,7 @@ export const keyedRowsConditionalHintedRuntimeFeature: CompilerRuntimeFeature = 
   create: (owner) => ({
     KeyedRows: createKeyedRowsBlockComponent(owner, {
       conditionals: createKeyedRowConditionalRuntime(),
-      keyedMapUpdates: keyedMapUpdateRuntime,
+      keyedUpdates: keyedUpdateRuntime,
     }),
   }),
 };
@@ -4959,7 +5117,7 @@ export const keyedRowsHostHintedRuntimeFeature: CompilerRuntimeFeature = {
   create: (owner) => ({
     KeyedRows: createKeyedRowsBlockComponent(owner, {
       hostBlocks: createKeyedRowHostRuntime(),
-      keyedMapUpdates: keyedMapUpdateRuntime,
+      keyedUpdates: keyedUpdateRuntime,
     }),
   }),
 };
@@ -4980,7 +5138,7 @@ export const keyedRowsCompleteHintedRuntimeFeature: CompilerRuntimeFeature = {
     KeyedRows: createKeyedRowsBlockComponent(owner, {
       conditionals: createKeyedRowConditionalRuntime(),
       hostBlocks: createKeyedRowHostRuntime(),
-      keyedMapUpdates: keyedMapUpdateRuntime,
+      keyedUpdates: keyedUpdateRuntime,
     }),
   }),
 };
