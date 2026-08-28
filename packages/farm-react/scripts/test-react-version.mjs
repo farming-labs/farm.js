@@ -44,6 +44,7 @@ const testSource = String.raw`
     createCompiledComponentWithFeatures,
     createCompilerKeyedArrayAppend,
     createCompilerKeyedArrayFilter,
+    createCompilerKeyedArrayPrepend,
     createCompilerKeyedMapUpdate,
   } = await import(
     "@farm.js/react/compiler-runtime"
@@ -1563,6 +1564,83 @@ const testSource = String.raw`
   assert.equal(filterKeyReads, 2);
   assert.equal(filterBindingReads, 0);
   flushSync(() => filterRoot.unmount());
+
+  let prependRows = () => undefined;
+  let prependKeyReads = 0;
+  let prependBindingReads = 0;
+  const PrependRows = createCompiledComponent({
+    displayName: "CompatibilityPrependRows",
+    initialize: () => [[
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+    ]],
+    render(_props, state, blocks) {
+      const items = () => state[0].get();
+      prependRows = (addition) =>
+        state[0].set((previous) =>
+          createCompilerKeyedArrayPrepend(previous, [addition, ...previous]),
+        );
+      return React.createElement(
+        "section",
+        null,
+        React.createElement(blocks.KeyedRows, {
+          collectionDependency: 0,
+          dependencies: [0],
+          prependIndexIndependent: true,
+          id: 0,
+          items,
+          structureDependencies: [0],
+          render: () =>
+            React.createElement(
+              "ul",
+              null,
+              items().map((item) =>
+                React.createElement("li", { "data-key": item.id, key: item.id }, item.label),
+              ),
+            ),
+          rowKey: (item) => {
+            prependKeyReads += 1;
+            return item.id;
+          },
+          create: (item) => ({
+            kind: "element",
+            tag: "li",
+            attributes: [{ name: "data-key", value: item.id }],
+            styles: [],
+            children: [item.label],
+          }),
+          bindings: [{
+            kind: "text",
+            path: [],
+            dependencies: [],
+            read: (item) => {
+              prependBindingReads += 1;
+              return [item.label];
+            },
+          }],
+        }),
+      );
+    },
+    bindings: [{ kind: "block", id: 0, dependencies: [0] }],
+  });
+  const prependContainer = document.createElement("div");
+  document.body.append(prependContainer);
+  const prependRoot = createRoot(prependContainer);
+  flushSync(() => prependRoot.render(React.createElement(PrependRows)));
+  const prependAlpha = prependContainer.querySelector("[data-key='a']");
+  const prependBeta = prependContainer.querySelector("[data-key='b']");
+  prependKeyReads = 0;
+  prependBindingReads = 0;
+  prependRows({ id: "c", label: "Gamma" });
+  prependRows({ id: "d", label: "Delta" });
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(prependContainer.textContent, "DeltaGammaAlphaBeta");
+  assert.equal(prependContainer.querySelector("[data-key='a']"), prependAlpha);
+  assert.equal(prependContainer.querySelector("[data-key='b']"), prependBeta);
+  assert.equal(prependKeyReads, 2);
+  assert.equal(prependBindingReads, 2);
+  flushSync(() => prependRoot.unmount());
 
   let editableRowExecutions = 0;
   let editableListRenders = 0;

@@ -42,6 +42,7 @@ describe("React AOT keyed update hints", () => {
     expect(result.optimizations).toEqual({
       keyedArrayAppendHints: 0,
       keyedArrayFilterHints: 0,
+      keyedArrayPrependHints: 0,
       keyedCollectionUpdateHints: 0,
       keyedIdentityTargets: 0,
       keyedMapLookupTargets: 0,

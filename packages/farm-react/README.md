@@ -244,11 +244,25 @@ setItems((current) => [...current, ...nextItems]);
 Because every existing item keeps its key and index, Farm validates the committed source and the
 queued append chain, reads keys and descriptors only for the appended suffix, and mounts that
 suffix in one fragment. Existing row DOM is left untouched. The concise functional updater and
-native arrays are required; prepend, middle insertion, removal, direct replacement, duplicate
+native arrays are required; middle insertion, removal, direct replacement, duplicate
 keys, rows that read the collection itself, and failed runtime checks use complete keyed
 reconciliation. A key that reads the collection prevents hint emission entirely. The compiler
 report exposes the emitted-site count as
 `keyedArrayAppendHints`.
+
+The mirror-image prepend form is supported when the keyed row and key do not read the row index:
+
+```tsx
+setItems((current) => [nextItem, ...current]);
+setItems((current) => [...nextItems, ...current]);
+```
+
+Farm validates the committed source and queued prepend chain, creates only the new prefix, inserts
+it before the first existing row, and shifts the stored indexes used by delegated row events.
+Existing row DOM and bindings stay in place. Index-aware rows, collection-reading bindings or
+keys, React-owned row structures, middle insertion, direct replacement, duplicate keys, custom or
+sparse arrays, and failed validation use complete keyed reconciliation. The compiler report
+exposes the emitted-site count as `keyedArrayPrependHints`.
 
 Concise immutable filters on a direct keyed array can carry removal positions into the same
 optional runtime:
@@ -549,7 +563,8 @@ reasons aggregated by count. Its summary and per-module `optimizations` also rep
 `keyedCollectionUpdateHints`, the number of compiler-proven native Set/Map mutation sites; and
 `keyedMapUpdateHints`, the number of compiler-proven direct keyed `map()` update sites; and
 `keyedArrayAppendHints`, the number of compiler-proven direct keyed-array append sites; and
-`keyedArrayFilterHints`, the number of compiler-proven direct keyed-array filter sites. A custom
+`keyedArrayFilterHints`, the number of compiler-proven direct keyed-array filter sites; and
+`keyedArrayPrependHints`, the number of compiler-proven direct keyed-array prepend sites. A custom
 project-relative `reportFile` also enables reporting.
 
 The runtime test compares the same counter interaction on both paths: ordinary React performs a

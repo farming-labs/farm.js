@@ -15,6 +15,7 @@ export interface CompileReactModuleResult {
   optimizations: {
     keyedArrayAppendHints: number;
     keyedArrayFilterHints: number;
+    keyedArrayPrependHints: number;
     keyedCollectionUpdateHints: number;
     keyedIdentityTargets: number;
     keyedMapLookupTargets: number;
@@ -362,15 +363,23 @@ type CompilerRuntimeFeatureName =
   | "keyed-rows"
   | "keyed-rows-hinted"
   | "keyed-rows-filter-hinted"
+  | "keyed-rows-prepend-hinted"
+  | "keyed-rows-filter-prepend-hinted"
   | "keyed-rows-conditional"
   | "keyed-rows-conditional-hinted"
   | "keyed-rows-conditional-filter-hinted"
+  | "keyed-rows-conditional-prepend-hinted"
+  | "keyed-rows-conditional-filter-prepend-hinted"
   | "keyed-rows-host"
   | "keyed-rows-host-hinted"
   | "keyed-rows-host-filter-hinted"
+  | "keyed-rows-host-prepend-hinted"
+  | "keyed-rows-host-filter-prepend-hinted"
   | "keyed-rows-complete"
   | "keyed-rows-complete-hinted"
   | "keyed-rows-complete-filter-hinted"
+  | "keyed-rows-complete-prepend-hinted"
+  | "keyed-rows-complete-filter-prepend-hinted"
   | "keyed-ranges"
   | "mixed-ranges"
   | "component";
@@ -383,15 +392,24 @@ const COMPILER_RUNTIME_FEATURE_EXPORTS: Record<CompilerRuntimeFeatureName, strin
   "keyed-rows": "keyedRowsRuntimeFeature",
   "keyed-rows-hinted": "keyedRowsHintedRuntimeFeature",
   "keyed-rows-filter-hinted": "keyedRowsFilterHintedRuntimeFeature",
+  "keyed-rows-prepend-hinted": "keyedRowsPrependHintedRuntimeFeature",
+  "keyed-rows-filter-prepend-hinted": "keyedRowsFilterPrependHintedRuntimeFeature",
   "keyed-rows-conditional": "keyedRowsConditionalRuntimeFeature",
   "keyed-rows-conditional-hinted": "keyedRowsConditionalHintedRuntimeFeature",
   "keyed-rows-conditional-filter-hinted": "keyedRowsConditionalFilterHintedRuntimeFeature",
+  "keyed-rows-conditional-prepend-hinted": "keyedRowsConditionalPrependHintedRuntimeFeature",
+  "keyed-rows-conditional-filter-prepend-hinted":
+    "keyedRowsConditionalFilterPrependHintedRuntimeFeature",
   "keyed-rows-host": "keyedRowsHostRuntimeFeature",
   "keyed-rows-host-hinted": "keyedRowsHostHintedRuntimeFeature",
   "keyed-rows-host-filter-hinted": "keyedRowsHostFilterHintedRuntimeFeature",
+  "keyed-rows-host-prepend-hinted": "keyedRowsHostPrependHintedRuntimeFeature",
+  "keyed-rows-host-filter-prepend-hinted": "keyedRowsHostFilterPrependHintedRuntimeFeature",
   "keyed-rows-complete": "keyedRowsCompleteRuntimeFeature",
   "keyed-rows-complete-hinted": "keyedRowsCompleteHintedRuntimeFeature",
   "keyed-rows-complete-filter-hinted": "keyedRowsCompleteFilterHintedRuntimeFeature",
+  "keyed-rows-complete-prepend-hinted": "keyedRowsCompletePrependHintedRuntimeFeature",
+  "keyed-rows-complete-filter-prepend-hinted": "keyedRowsCompleteFilterPrependHintedRuntimeFeature",
   "keyed-ranges": "keyedRangesRuntimeFeature",
   "mixed-ranges": "mixedRangesRuntimeFeature",
   component: "componentRuntimeFeature",
@@ -401,6 +419,7 @@ function runtimeFeaturesForPlans(
   plans: readonly ComposableBlockPlan[],
   keyedMapUpdateHints: boolean,
   keyedArrayFilterHints: boolean,
+  keyedArrayPrependHints: boolean,
 ): CompilerRuntimeFeatureName[] {
   const features = new Set<CompilerRuntimeFeatureName>();
   let keyedRowsHaveConditionals = false;
@@ -424,13 +443,17 @@ function runtimeFeaturesForPlans(
           : keyedRowsHaveHostBlocks
             ? "keyed-rows-host"
             : "keyed-rows";
-    features.add(
-      keyedArrayFilterHints
-        ? (`${keyedRowsFeature}-filter-hinted` as CompilerRuntimeFeatureName)
-        : keyedMapUpdateHints
-          ? (`${keyedRowsFeature}-hinted` as CompilerRuntimeFeatureName)
-          : keyedRowsFeature,
-    );
+    const hintSuffix =
+      keyedArrayFilterHints && keyedArrayPrependHints
+        ? "-filter-prepend-hinted"
+        : keyedArrayFilterHints
+          ? "-filter-hinted"
+          : keyedArrayPrependHints
+            ? "-prepend-hinted"
+            : keyedMapUpdateHints
+              ? "-hinted"
+              : "";
+    features.add(`${keyedRowsFeature}${hintSuffix}` as CompilerRuntimeFeatureName);
   }
   return [...features].sort();
 }
@@ -1244,6 +1267,109 @@ function rewriteKeyedArrayAppendHints(
   return {
     root: (file.program.body[0] as t.ExpressionStatement).expression as t.JSXElement,
     count,
+  };
+}
+
+function rewriteKeyedArrayPrependHints(
+  root: t.JSXElement,
+  hintedStateIndices: ReadonlySet<number>,
+  statesBySetter: ReadonlyMap<string, StateBinding>,
+  helperIdentifier: t.Identifier,
+  safeGlobals: ReadonlySet<string>,
+): { root: t.JSXElement; count: number; stateIndices: ReadonlySet<number> } {
+  if (hintedStateIndices.size === 0) {
+    return { root: t.cloneNode(root, true), count: 0, stateIndices: new Set() };
+  }
+  const file = expressionFile(t.cloneNode(root, true));
+  const stateIndices = new Set<number>();
+  let count = 0;
+  traverse(file, {
+    CallExpression(path) {
+      const callee = path.get("callee");
+      if (!callee.isIdentifier() || callee.scope.hasBinding(callee.node.name)) return;
+      const state = statesBySetter.get(callee.node.name);
+      if (!state || !hintedStateIndices.has(state.index) || path.node.arguments.length !== 1) {
+        return;
+      }
+      const updater = path.node.arguments[0];
+      if (
+        !t.isArrowFunctionExpression(updater) ||
+        updater.async ||
+        updater.generator ||
+        updater.params.length !== 1 ||
+        !t.isIdentifier(updater.params[0]) ||
+        !t.isArrayExpression(updater.body) ||
+        updater.body.elements.length < 2 ||
+        updater.body.elements.some((element) => element === null)
+      ) {
+        return;
+      }
+      const suffix = updater.body.elements[updater.body.elements.length - 1];
+      if (
+        !t.isSpreadElement(suffix) ||
+        !t.isIdentifier(suffix.argument, { name: updater.params[0].name })
+      ) {
+        return;
+      }
+      const safePrependValue = (value: t.Expression): boolean => {
+        if (t.isArrayExpression(value)) {
+          return value.elements.every(
+            (element) =>
+              element !== null &&
+              !t.isJSXNamespacedName(element) &&
+              !t.isArgumentPlaceholder(element) &&
+              safePrependValue(t.isSpreadElement(element) ? element.argument : element),
+          );
+        }
+        if (t.isObjectExpression(value)) {
+          return value.properties.every((property) => {
+            if (t.isSpreadElement(property)) return safePrependValue(property.argument);
+            if (!t.isObjectProperty(property) || !t.isExpression(property.value)) return false;
+            return (
+              (!property.computed ||
+                (t.isExpression(property.key) && safePrependValue(property.key))) &&
+              safePrependValue(property.value)
+            );
+          });
+        }
+        return validateDerivedExpression(value, safeGlobals) === undefined;
+      };
+      if (
+        updater.body.elements.slice(0, -1).some((element) => {
+          if (!element || t.isJSXNamespacedName(element) || t.isArgumentPlaceholder(element)) {
+            return true;
+          }
+          return !safePrependValue(t.isSpreadElement(element) ? element.argument : element);
+        })
+      ) {
+        return;
+      }
+
+      const previous = t.cloneNode(updater.params[0]);
+      const nextValue = path.scope.generateUidIdentifier("farmNextItems");
+      path.node.arguments[0] = t.arrowFunctionExpression(
+        [t.cloneNode(previous)],
+        t.blockStatement([
+          t.variableDeclaration("const", [
+            t.variableDeclarator(t.cloneNode(nextValue), t.cloneNode(updater.body, true)),
+          ]),
+          t.returnStatement(
+            t.callExpression(t.cloneNode(helperIdentifier), [
+              t.cloneNode(previous),
+              t.cloneNode(nextValue),
+            ]),
+          ),
+        ]),
+      );
+      count += 1;
+      stateIndices.add(state.index);
+      path.skip();
+    },
+  });
+  return {
+    root: (file.program.body[0] as t.ExpressionStatement).expression as t.JSXElement,
+    count,
+    stateIndices,
   };
 }
 
@@ -4455,6 +4581,7 @@ function keyedRowsBoundary(
   plan: KeyedRowsPlan,
   keyedMapUpdateHints: boolean,
   keyedArrayFilterHintedStateIndices: ReadonlySet<number>,
+  keyedArrayPrependHintedStateIndices: ReadonlySet<number>,
 ): t.JSXElement {
   const name = t.jsxMemberExpression(
     t.jsxIdentifier(blockRuntime.name),
@@ -4527,6 +4654,15 @@ function keyedRowsBoundary(
           ? [
               t.jsxAttribute(
                 t.jsxIdentifier("filterIndexIndependent"),
+                t.jsxExpressionContainer(t.booleanLiteral(true)),
+              ),
+            ]
+          : []),
+        ...(plan.collectionDependency !== undefined &&
+        keyedArrayPrependHintedStateIndices.has(plan.collectionDependency)
+          ? [
+              t.jsxAttribute(
+                t.jsxIdentifier("prependIndexIndependent"),
                 t.jsxExpressionContainer(t.booleanLiteral(true)),
               ),
             ]
@@ -5559,6 +5695,7 @@ function lowerComposableBlocks(
   listNames: ReadonlySet<string>,
   keyedMapUpdateHints: boolean,
   keyedArrayFilterHintedStateIndices: ReadonlySet<number>,
+  keyedArrayPrependHintedStateIndices: ReadonlySet<number>,
 ): t.JSXElement {
   const planBySource = new Map<t.Node, ComposableBlockPlan>(
     plans.map((plan) => [plan.source, plan]),
@@ -5590,6 +5727,7 @@ function lowerComposableBlocks(
             plan,
             keyedMapUpdateHints,
             keyedArrayFilterHintedStateIndices,
+            keyedArrayPrependHintedStateIndices,
           );
         }
         if (plan?.kind === "keyed-ranges") {
@@ -6022,6 +6160,7 @@ function compileCandidate(
   keyedMapUpdateIdentifier: t.Identifier,
   keyedArrayAppendIdentifier: t.Identifier,
   keyedArrayFilterIdentifier: t.Identifier,
+  keyedArrayPrependIdentifier: t.Identifier,
   keyedCollectionUpdateIdentifier: t.Identifier,
   keyedCollectionMutationIdentifier: t.Identifier,
   runtimeFeatureIdentifiers: ReadonlyMap<CompilerRuntimeFeatureName, t.Identifier>,
@@ -6029,6 +6168,7 @@ function compileCandidate(
   optimizationCounts: {
     keyedArrayAppendHints: number;
     keyedArrayFilterHints: number;
+    keyedArrayPrependHints: number;
     keyedCollectionUpdateHints: number;
     keyedIdentityTargets: number;
     keyedMapLookupTargets: number;
@@ -6370,7 +6510,7 @@ function compileCandidate(
       optimizationCounts.keyedArrayAppendHints += appendHintedRoot.count;
     }
   }
-  const filterHintedStateIndices = new Set(hintedStateIndices);
+  const shiftedIndexIndependentStateIndices = new Set(hintedStateIndices);
   for (const plan of blockAnalysis.plans || []) {
     if (plan.kind !== "keyed-rows" || plan.collectionDependency === undefined) continue;
     const keyExpression = returnedExpression(plan.keyCallback);
@@ -6379,15 +6519,50 @@ function compileCandidate(
       !keyExpression ||
       collectStateDependencies(keyExpression, reactiveByValue).includes(plan.collectionDependency)
     ) {
-      // Removing rows shifts later indexes. A row callback that accepts the
-      // index, or a key that reads the whole collection, must take the full
-      // reconciliation path so existing row state cannot become stale.
-      filterHintedStateIndices.delete(plan.collectionDependency);
+      // Removing or prepending rows shifts existing indexes. A row callback
+      // that accepts the index, or a key that reads the whole collection,
+      // must take the full reconciliation path so row state cannot go stale.
+      shiftedIndexIndependentStateIndices.delete(plan.collectionDependency);
+    }
+  }
+  const prependHintedRoot = rewriteKeyedArrayPrependHints(
+    expandedReactiveRoot,
+    shiftedIndexIndependentStateIndices,
+    statesBySetter,
+    keyedArrayPrependIdentifier,
+    safeGlobals,
+  );
+  let appliedKeyedArrayPrependHints = 0;
+  let appliedPrependHintedStateIndices: ReadonlySet<number> = new Set();
+  if (prependHintedRoot.count > 0) {
+    const hintedBlockAnalysis = analyzeComposableBlocks(
+      prependHintedRoot.root,
+      reactiveByValue,
+      safeGlobals,
+      listNames,
+      allowedComponentNames,
+    );
+    const hintedAnalysis = analyzeHostTree(
+      prependHintedRoot.root,
+      reactiveByValue,
+      safeGlobals,
+      hintedBlockAnalysis.conditionalExpressions || new Set<t.Expression>(),
+      hintedBlockAnalysis.keyedExpressions || new Set<t.Expression>(),
+      hintedBlockAnalysis.ownedElements || new Set<t.JSXElement>(),
+      hintedBlockAnalysis.componentElements || new Set<t.JSXElement>(),
+    );
+    if (!hintedBlockAnalysis.reason && !hintedAnalysis.reason) {
+      expandedReactiveRoot = prependHintedRoot.root;
+      blockAnalysis = hintedBlockAnalysis;
+      analysis = hintedAnalysis;
+      appliedKeyedArrayPrependHints = prependHintedRoot.count;
+      appliedPrependHintedStateIndices = prependHintedRoot.stateIndices;
+      optimizationCounts.keyedArrayPrependHints += prependHintedRoot.count;
     }
   }
   const filterHintedRoot = rewriteKeyedArrayFilterHints(
     expandedReactiveRoot,
-    filterHintedStateIndices,
+    shiftedIndexIndependentStateIndices,
     statesBySetter,
     keyedArrayFilterIdentifier,
     safeGlobals,
@@ -6500,11 +6675,13 @@ function compileCandidate(
   const hasKeyedUpdateHints =
     appliedKeyedMapUpdateHints > 0 ||
     appliedKeyedArrayAppendHints > 0 ||
-    appliedKeyedArrayFilterHints > 0;
+    appliedKeyedArrayFilterHints > 0 ||
+    appliedKeyedArrayPrependHints > 0;
   const runtimeFeatures = runtimeFeaturesForPlans(
     blockPlans,
     hasKeyedUpdateHints,
     appliedKeyedArrayFilterHints > 0,
+    appliedKeyedArrayPrependHints > 0,
   );
   markShortCircuitBindings(analysis.bindings || []);
   assignStableBindingTargets(analysis.bindings || []);
@@ -6526,6 +6703,7 @@ function compileCandidate(
     listNames,
     hasKeyedUpdateHints,
     appliedFilterHintedStateIndices,
+    appliedPrependHintedStateIndices,
   );
   const rewrittenRoot = rewriteStateAccess(
     rootWithBlocks,
@@ -6693,6 +6871,7 @@ export async function compileReactModule(
   const optimizationCounts = {
     keyedArrayAppendHints: 0,
     keyedArrayFilterHints: 0,
+    keyedArrayPrependHints: 0,
     keyedCollectionUpdateHints: 0,
     keyedIdentityTargets: 0,
     keyedMapLookupTargets: 0,
@@ -6745,6 +6924,9 @@ export async function compileReactModule(
         const keyedArrayFilterIdentifier = programPath.scope.generateUidIdentifier(
           "createCompilerKeyedArrayFilter",
         );
+        const keyedArrayPrependIdentifier = programPath.scope.generateUidIdentifier(
+          "createCompilerKeyedArrayPrepend",
+        );
         const keyedCollectionUpdateIdentifier = programPath.scope.generateUidIdentifier(
           "createCompilerKeyedCollectionUpdate",
         );
@@ -6775,6 +6957,7 @@ export async function compileReactModule(
             keyedMapUpdateIdentifier,
             keyedArrayAppendIdentifier,
             keyedArrayFilterIdentifier,
+            keyedArrayPrependIdentifier,
             keyedCollectionUpdateIdentifier,
             keyedCollectionMutationIdentifier,
             runtimeFeatureIdentifiers,
@@ -6827,6 +7010,14 @@ export async function compileReactModule(
                       t.importSpecifier(
                         keyedArrayFilterIdentifier,
                         t.identifier("createCompilerKeyedArrayFilter"),
+                      ),
+                    ]
+                  : []),
+                ...(optimizationCounts.keyedArrayPrependHints > 0
+                  ? [
+                      t.importSpecifier(
+                        keyedArrayPrependIdentifier,
+                        t.identifier("createCompilerKeyedArrayPrepend"),
                       ),
                     ]
                   : []),

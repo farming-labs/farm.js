@@ -139,6 +139,10 @@ async function inspectBuild(compilerMode) {
       "The compiler build did not emit a keyed-array filter hint.",
     );
     assert(
+      compilerReport.summary.keyedArrayPrependHints > 0,
+      "The compiler build did not emit a keyed-array prepend hint.",
+    );
+    assert(
       compilerReport.summary.keyedCollectionUpdateHints > 0,
       "The compiler build did not emit a keyed Set/Map collection-delta hint.",
     );
@@ -474,6 +478,36 @@ async function measureTrial(browser, trial, compilerMode, port) {
           },
         );
 
+        const tablePrepend = await measureTable(
+          async () => ensure10000(),
+          async () => {
+            const previousFirstRow = table.querySelector("tbody tr");
+            const previousFirst = previousFirstRow?.getAttribute("data-row-id");
+            await runTableAction(
+              () => tableButton("table-prepend").click(),
+              () =>
+                rowCount() === 11_000 &&
+                table.querySelector("tbody tr")?.getAttribute("data-row-id") !== previousFirst &&
+                table.querySelectorAll("tbody tr")[1_000] === previousFirstRow,
+            );
+          },
+        );
+
+        const tablePrependSnapshot = await measureTable(
+          async () => ensure10000(),
+          async () => {
+            const previousFirstRow = table.querySelector("tbody tr");
+            const previousFirst = previousFirstRow?.getAttribute("data-row-id");
+            await runTableAction(
+              () => tableButton("table-prepend-snapshot").click(),
+              () =>
+                rowCount() === 11_000 &&
+                table.querySelector("tbody tr")?.getAttribute("data-row-id") !== previousFirst &&
+                table.querySelectorAll("tbody tr")[1_000] === previousFirstRow,
+            );
+          },
+        );
+
         const tableUpdate = await measureTable(
           async () => ensure10000(),
           async () => {
@@ -658,6 +692,7 @@ async function measureTrial(browser, trial, compilerMode, port) {
           denseMembership20k: [],
           mapLookup20k: [],
           membership20k: [],
+          prependAt20k: [],
           remove20k: [],
           select20k: [],
           snapshotMapLookup20k: [],
@@ -681,6 +716,23 @@ async function measureTrial(browser, trial, compilerMode, port) {
             scale.appendTo20k.push(performance.now() - appendStartedAt);
             peakRows = Math.max(peakRows, rowCount());
           }
+
+          const previousFirstRow = table.querySelector("tbody tr");
+          const previousFirst = previousFirstRow?.getAttribute("data-row-id");
+          const prependStartedAt = performance.now();
+          await runTableAction(
+            () => tableButton("table-prepend").click(),
+            () =>
+              rowCount() === 21_000 &&
+              table.querySelector("tbody tr")?.getAttribute("data-row-id") !== previousFirst &&
+              table.querySelectorAll("tbody tr")[1_000] === previousFirstRow,
+          );
+          scale.prependAt20k.push(performance.now() - prependStartedAt);
+          peakRows = Math.max(peakRows, rowCount());
+          await runTableAction(
+            () => tableButton("table-drop-prefix").click(),
+            () => rowCount() === 20_000,
+          );
 
           const firstLabel = table.querySelector("tbody tr td:nth-child(2)")?.textContent || "";
           const updateStartedAt = performance.now();
@@ -825,6 +877,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
             executionsAdded: Number(tableExecutions.textContent) - initialTableExecutions,
             mapLookup: tableMapLookup,
             membership: tableMembership,
+            prepend: tablePrepend,
+            prependSnapshot: tablePrependSnapshot,
             remove: tableRemove,
             removeSnapshot: tableRemoveSnapshot,
             replace: tableReplace,
@@ -851,7 +905,7 @@ async function measureTrial(browser, trial, compilerMode, port) {
     assert.equal(result.correctness.finalMarkedCount, 0);
     assert.equal(result.correctness.finalQueueCount, 0);
     assert.equal(result.correctness.finalTableRows, 0);
-    assert.equal(result.correctness.scalePeakRows, 20_000);
+    assert.equal(result.correctness.scalePeakRows, 21_000);
     assert.equal(browserErrors.length, 0, browserErrors.join("\n"));
     if (compilerEnabled) {
       assert.equal(result.dashboard.executionsAdded, 0);
@@ -885,6 +939,7 @@ async function measureTrial(browser, trial, compilerMode, port) {
         denseMembership20k: timingSummary(result.scale.denseMembership20k),
         mapLookup20k: timingSummary(result.scale.mapLookup20k),
         membership20k: timingSummary(result.scale.membership20k),
+        prependAt20k: timingSummary(result.scale.prependAt20k),
         remove20k: timingSummary(result.scale.remove20k),
         select20k: timingSummary(result.scale.select20k),
         snapshotMapLookup20k: timingSummary(result.scale.snapshotMapLookup20k),
@@ -903,6 +958,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
         executionsAdded: result.table.executionsAdded,
         mapLookup: timingSummary(result.table.mapLookup),
         membership: timingSummary(result.table.membership),
+        prepend: timingSummary(result.table.prepend),
+        prependSnapshot: timingSummary(result.table.prependSnapshot),
         remove: timingSummary(result.table.remove),
         removeSnapshot: timingSummary(result.table.removeSnapshot),
         replace: timingSummary(result.table.replace),
@@ -979,6 +1036,8 @@ const tableMetrics = [
   "createMany",
   "append",
   "appendSnapshot",
+  "prepend",
+  "prependSnapshot",
   "updateEvery10th",
   "select",
   "membership",
@@ -995,6 +1054,7 @@ const tableMetrics = [
 const scaleMetrics = [
   "create10k",
   "appendTo20k",
+  "prependAt20k",
   "updateEvery10th20k",
   "select20k",
   "membership20k",
@@ -1032,6 +1092,7 @@ const scalabilityThresholdNormalizedGrowth = 2;
 const timingResolutionFloorMs = 0.25;
 const scalabilityCases = [
   ["create10k", "createMany", 1],
+  ["prependAt20k", "prepend", 2],
   ["updateEvery10th20k", "updateEvery10th", 2],
   ["select20k", "select", 20],
   ["membership20k", "membership", 20],
@@ -1132,6 +1193,32 @@ const keyedAppendRegressions = keyedAppendResults.filter(
     scaleSpeedup < keyedAppendMinimumSpeedup ||
     !Number.isFinite(snapshotSpeedup) ||
     snapshotSpeedup < keyedAppendMinimumSnapshotSpeedup,
+);
+// A compiler-proven prepend creates only the new prefix while preserving the existing keyed DOM
+// suffix. Compare it with React and an equivalent block-bodied compiled snapshot path, and keep a
+// separate 20,000-row floor so the optimization cannot silently collapse into a full row refresh.
+const keyedPrependMinimumSpeedup = 3;
+const keyedPrependMinimumSnapshotSpeedup = 1.25;
+const keyedPrependResults = ["static", "hybrid"].map((mode) => {
+  const prependMedianMs = comparisons.table.prepend[mode].medianMs;
+  const snapshotMedianMs = comparisons.table.prependSnapshot[mode].medianMs;
+  return {
+    mode,
+    prependMedianMs,
+    scaleSpeedup: comparisons.scale.prependAt20k[`${mode}VsBaseline`].speedup,
+    snapshotMedianMs,
+    snapshotSpeedup: snapshotMedianMs / prependMedianMs,
+    speedup: comparisons.table.prepend[`${mode}VsBaseline`].speedup,
+  };
+});
+const keyedPrependRegressions = keyedPrependResults.filter(
+  ({ scaleSpeedup, snapshotSpeedup, speedup }) =>
+    !Number.isFinite(speedup) ||
+    speedup < keyedPrependMinimumSpeedup ||
+    !Number.isFinite(scaleSpeedup) ||
+    scaleSpeedup < keyedPrependMinimumSpeedup ||
+    !Number.isFinite(snapshotSpeedup) ||
+    snapshotSpeedup < keyedPrependMinimumSnapshotSpeedup,
 );
 // A concise native filter carries removal positions into the keyed-row runtime. Compare it with
 // React and an equivalent block-bodied compiled update that intentionally takes complete keyed
@@ -1278,6 +1365,7 @@ const passed =
   scalabilityRegressions.length === 0 &&
   keyedUpdateRegressions.length === 0 &&
   keyedAppendRegressions.length === 0 &&
+  keyedPrependRegressions.length === 0 &&
   keyedFilterRegressions.length === 0 &&
   keyedIdentityRegressions.length === 0 &&
   keyedMembershipRegressions.length === 0 &&
@@ -1305,6 +1393,13 @@ const report = {
     regressions: keyedAppendRegressions,
     results: keyedAppendResults,
     status: keyedAppendRegressions.length === 0 ? "PASS" : "FAIL",
+  },
+  keyedPrependHintGate: {
+    minimumSnapshotSpeedup: keyedPrependMinimumSnapshotSpeedup,
+    minimumSpeedup: keyedPrependMinimumSpeedup,
+    regressions: keyedPrependRegressions,
+    results: keyedPrependResults,
+    status: keyedPrependRegressions.length === 0 ? "PASS" : "FAIL",
   },
   keyedFilterHintGate: {
     minimumSnapshotSpeedup: keyedFilterMinimumSnapshotSpeedup,
@@ -1357,8 +1452,8 @@ const report = {
     metric: "DOM event dispatch through asserted DOM mutation",
     standardReference: "https://github.com/krausest/js-framework-benchmark",
     scaleCycles,
-    scalePeakRows: 20_000,
-    tableRows: [1_000, 10_000, 11_000],
+    scalePeakRows: 21_000,
+    tableRows: [1_000, 10_000, 11_000, 20_000, 21_000],
     tableSamplesPerTrial: tableSamples,
     warmupSamples,
   },
