@@ -12,7 +12,8 @@ pnpm add @farm.js/sentry @sentry/node
 ```
 
 `@sentry/node` is an optional peer dependency. If a `dsn` is configured and it is not installed,
-the plugin fails with a clear error rather than quietly reporting nothing.
+the plugin logs a clear error and continues without reporting rather than preventing the
+application from starting.
 
 ## Configure
 
