@@ -86,6 +86,7 @@ describe("React renderer Vite integration", () => {
       compiled: 2,
       fallback: 0,
       keyedIdentityTargets: 0,
+      keyedMembershipTargets: 0,
       keyedMapUpdateHints: 1,
     });
     expect(report.modules[0].compiled).toEqual(["Counter", "List"]);

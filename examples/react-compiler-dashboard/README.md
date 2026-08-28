@@ -65,6 +65,12 @@ row-binding reads, which is the deterministic guard against returning to a full 
 performance, scalability, or persistence gate writes the JSON report and exits with a nonzero
 status.
 
+Set membership has a separate operation and persistence gate. The table alternates two marked row
+keys with `markedIds.has(row.id)` at 1,000 and 20,000 rows. Both compiler modes must remain at least
+10x faster than React at 20,000 rows, normalized growth may not exceed 2x, and the compiler report
+must contain a nonzero `keyedMembershipTargets` count. Differential unit tests separately require
+the exact number of binding reads to equal the primitive-key symmetric difference.
+
 Set `FARM_EXPERIMENT_BROWSER_PATH` to an installed Chrome/Chromium executable when Playwright's
 bundled browser is unavailable. Sample counts are configurable:
 
