@@ -26,14 +26,14 @@
         "brotli": 51897
       },
       "compilerOn": {
-        "raw": 231209,
-        "gzip": 71221,
-        "brotli": 60994
+        "raw": 231491,
+        "gzip": 71259,
+        "brotli": 61038
       },
       "compilerPremium": {
-        "raw": 38090,
-        "gzip": 11042,
-        "brotli": 9097
+        "raw": 38372,
+        "gzip": 11080,
+        "brotli": 9141
       }
     },
     "keyedAppend": {
@@ -43,14 +43,14 @@
         "brotli": 51772
       },
       "compilerOn": {
-        "raw": 232474,
-        "gzip": 71532,
-        "brotli": 61342
+        "raw": 232766,
+        "gzip": 71576,
+        "brotli": 61365
       },
       "compilerPremium": {
-        "raw": 39573,
-        "gzip": 11447,
-        "brotli": 9570
+        "raw": 39865,
+        "gzip": 11491,
+        "brotli": 9593
       }
     },
     "keyedFilter": {
@@ -60,14 +60,31 @@
         "brotli": 51833
       },
       "compilerOn": {
-        "raw": 234091,
-        "gzip": 71978,
-        "brotli": 61697
+        "raw": 234383,
+        "gzip": 72021,
+        "brotli": 61687
       },
       "compilerPremium": {
-        "raw": 41211,
-        "gzip": 11890,
-        "brotli": 9864
+        "raw": 41503,
+        "gzip": 11933,
+        "brotli": 9854
+      }
+    },
+    "keyedPrepend": {
+      "compilerOff": {
+        "raw": 192902,
+        "gzip": 60087,
+        "brotli": 51826
+      },
+      "compilerOn": {
+        "raw": 234316,
+        "gzip": 71984,
+        "brotli": 61665
+      },
+      "compilerPremium": {
+        "raw": 41414,
+        "gzip": 11897,
+        "brotli": 9839
       }
     },
     "isolatedRuntime": {
@@ -77,18 +94,18 @@
         "brotli": 51666
       },
       "full": {
-        "raw": 271299,
-        "gzip": 77240,
-        "brotli": 66527
+        "raw": 273099,
+        "gzip": 77561,
+        "brotli": 66731
       },
       "coreOnly": {
         "raw": 204922,
         "gzip": 63685,
         "brotli": 54902
       },
-      "fullRuntimePremiumGzip": 17321,
+      "fullRuntimePremiumGzip": 17642,
       "coreRuntimePremiumGzip": 3766,
-      "gzipReductionPercent": 78.3
+      "gzipReductionPercent": 78.7
     }
   }
 }

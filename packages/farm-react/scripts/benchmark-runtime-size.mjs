@@ -57,6 +57,8 @@ const [
   keyedAppendOn,
   keyedFilterOff,
   keyedFilterOn,
+  keyedPrependOff,
+  keyedPrependOn,
   runtimeControl,
   runtimeCore,
   runtimeFull,
@@ -69,6 +71,8 @@ const [
   bundle("keyed-append.tsx", true),
   bundle("keyed-filter.tsx", false),
   bundle("keyed-filter.tsx", true),
+  bundle("keyed-prepend.tsx", false),
+  bundle("keyed-prepend.tsx", true),
   bundle("runtime-control.tsx", false),
   bundle("runtime-core.tsx", false),
   bundle("runtime-full.tsx", false),
@@ -123,6 +127,30 @@ if (
   !keyedFilterOn.code.includes("filterIndexIndependent")
 ) {
   throw new Error("Keyed filter fixture did not retain its optional filter-hint runtime.");
+}
+if (
+  !keyedPrependOn.code.includes("FarmCompiledKeyedRows") ||
+  !keyedPrependOn.code.includes("keyed-rows:prepend-hinted") ||
+  !keyedPrependOn.code.includes("prependIndexIndependent")
+) {
+  throw new Error("Keyed prepend fixture did not retain its optional prepend-hint runtime.");
+}
+for (const [name, output] of [
+  ["direct", directOn],
+  ["plain keyed", keyedOn],
+  ["append-only", keyedAppendOn],
+  ["filter-only", keyedFilterOn],
+]) {
+  if (
+    output.code.includes("prependIndexIndependent") ||
+    output.code.includes("keyed-rows:prepend-hinted") ||
+    output.code.includes("keyed-rows:filter-prepend-hinted")
+  ) {
+    throw new Error(`${name} fixture retained the optional prepend-hint runtime.`);
+  }
+}
+if (keyedPrependOn.code.includes("filterIndexIndependent")) {
+  throw new Error("Prepend-only fixture retained the optional filter-hint runtime.");
 }
 
 const fullRuntimePremium = runtimeFull.gzip - runtimeControl.gzip;
@@ -190,6 +218,23 @@ const results = {
         brotli: keyedFilterOn.brotli - keyedFilterOff.brotli,
       },
     },
+    keyedPrepend: {
+      compilerOff: {
+        raw: keyedPrependOff.raw,
+        gzip: keyedPrependOff.gzip,
+        brotli: keyedPrependOff.brotli,
+      },
+      compilerOn: {
+        raw: keyedPrependOn.raw,
+        gzip: keyedPrependOn.gzip,
+        brotli: keyedPrependOn.brotli,
+      },
+      compilerPremium: {
+        raw: keyedPrependOn.raw - keyedPrependOff.raw,
+        gzip: keyedPrependOn.gzip - keyedPrependOff.gzip,
+        brotli: keyedPrependOn.brotli - keyedPrependOff.brotli,
+      },
+    },
     isolatedRuntime: {
       control: {
         raw: runtimeControl.raw,
@@ -227,6 +272,11 @@ if (checkOnly) {
       name: "keyed filter compiler premium",
       current: results.fixtures.keyedFilter.compilerPremium.gzip,
       maximum: (reference.fixtures.keyedFilter?.compilerPremium.gzip ?? 12_000) + 256,
+    },
+    {
+      name: "keyed prepend compiler premium",
+      current: results.fixtures.keyedPrepend.compilerPremium.gzip,
+      maximum: (reference.fixtures.keyedPrepend?.compilerPremium.gzip ?? 12_000) + 256,
     },
     {
       name: "core runtime premium",

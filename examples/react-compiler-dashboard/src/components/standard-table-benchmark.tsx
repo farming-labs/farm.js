@@ -158,6 +158,47 @@ export function StandardTableBenchmark() {
           Append 1,000 (snapshot control)
         </button>
         <button
+          data-action="table-prepend"
+          type="button"
+          onClick={() => {
+            const nextSeed = seed + 1;
+            const additions = buildRows(1_000, nextSeed);
+            setSeed(nextSeed);
+            setRows((current) => [...additions, ...current]);
+            setOperation("prepend 1,000");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Prepend 1,000
+        </button>
+        <button
+          data-action="table-prepend-snapshot"
+          type="button"
+          onClick={() => {
+            const nextSeed = seed + 1;
+            setSeed(nextSeed);
+            setRows((current) => {
+              const additions = buildRows(1_000, nextSeed);
+              return [...additions, ...current];
+            });
+            setOperation("prepend 1,000 (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Prepend 1,000 (snapshot control)
+        </button>
+        <button
+          data-action="table-drop-prefix"
+          type="button"
+          onClick={() => {
+            setRows((current) => current.slice(1_000));
+            setOperation("drop benchmark prefix");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Drop benchmark prefix
+        </button>
+        <button
           data-action="table-replace"
           type="button"
           onClick={() => {

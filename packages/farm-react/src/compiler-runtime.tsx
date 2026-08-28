@@ -26,6 +26,14 @@ interface CompilerKeyedArrayFilterHint {
   readonly previous?: CompilerKeyedArrayFilterHint;
 }
 
+interface CompilerKeyedArrayPrependHint {
+  readonly sourceToken: object;
+  readonly sourceLength: number;
+  readonly resultLength: number;
+  readonly prefixLength: number;
+  readonly previous?: CompilerKeyedArrayPrependHint;
+}
+
 type CompilerKeyedCollectionKind = "set" | "map";
 type CompilerKeyedCollectionMutation = "set-add" | "set-delete" | "map-set" | "map-delete";
 
@@ -53,6 +61,10 @@ const COMPILER_KEYED_ARRAY_APPENDS = /* @__PURE__ */ new WeakMap<
 const COMPILER_KEYED_ARRAY_FILTERS = /* @__PURE__ */ new WeakMap<
   object,
   CompilerKeyedArrayFilterHint
+>();
+const COMPILER_KEYED_ARRAY_PREPENDS = /* @__PURE__ */ new WeakMap<
+  object,
+  CompilerKeyedArrayPrependHint
 >();
 const COMPILER_KEYED_COLLECTION_DRAFTS = /* @__PURE__ */ new WeakMap<
   object,
@@ -174,6 +186,42 @@ function compilerKeyedArrayFilterSurvivors(
   return survivors.length === value.length ? survivors : undefined;
 }
 
+function compilerKeyedArrayPrependLength(
+  value: unknown,
+  sourceToken: object | undefined,
+  expectedLength: number,
+): number | undefined {
+  const target = compilerObject(value);
+  if (!target || !sourceToken || !Array.isArray(value)) return undefined;
+  const update = COMPILER_KEYED_ARRAY_PREPENDS.get(target);
+  if (!update || update.sourceToken !== sourceToken) return undefined;
+  const updates: CompilerKeyedArrayPrependHint[] = [];
+  for (
+    let current: CompilerKeyedArrayPrependHint | undefined = update;
+    current;
+    current = current.previous
+  ) {
+    if (current.sourceToken !== sourceToken) return undefined;
+    updates.push(current);
+  }
+
+  let length = expectedLength;
+  let prefixLength = 0;
+  for (let index = updates.length - 1; index >= 0; index -= 1) {
+    const current = updates[index];
+    if (
+      current.sourceLength !== length ||
+      current.prefixLength < 1 ||
+      current.resultLength !== current.sourceLength + current.prefixLength
+    ) {
+      return undefined;
+    }
+    length = current.resultLength;
+    prefixLength += current.prefixLength;
+  }
+  return length === value.length ? prefixLength : undefined;
+}
+
 function compilerKeyedCollectionChangedKeys(
   value: unknown,
   sourceToken: object | undefined,
@@ -245,6 +293,44 @@ export function createCompilerKeyedArrayAppend(previous: unknown, value: unknown
       sourceToken: previousUpdate?.sourceToken || sourceToken,
       startIndex,
       resultLength: value.length,
+      ...(previousUpdate ? { previous: previousUpdate } : {}),
+    });
+    return value;
+  } catch {
+    // Metadata must never change the behavior of an otherwise valid update.
+    return value;
+  }
+}
+
+/** @internal Records a compiler-proven immutable keyed-array prepend and returns the Array. */
+export function createCompilerKeyedArrayPrepend(previous: unknown, value: unknown): unknown {
+  try {
+    const previousTarget = compilerObject(previous);
+    const valueTarget = compilerObject(value);
+    if (
+      !previousTarget ||
+      !valueTarget ||
+      !Array.isArray(previous) ||
+      !Array.isArray(value) ||
+      Object.getPrototypeOf(previous) !== NATIVE_ARRAY_PROTOTYPE ||
+      Object.getPrototypeOf(value) !== NATIVE_ARRAY_PROTOTYPE ||
+      previous[Symbol.iterator] !== NATIVE_ARRAY_ITERATOR
+    ) {
+      return value;
+    }
+    const sourceLength = previous.length;
+    const prefixLength = value.length - sourceLength;
+    if (prefixLength < 1) return value;
+    const sourceToken = compilerKeyedCollectionToken(previousTarget);
+    if (!sourceToken) return value;
+    const previousUpdate = !COMPILER_KEYED_COMMITTED_COLLECTIONS.has(previousTarget)
+      ? COMPILER_KEYED_ARRAY_PREPENDS.get(previousTarget)
+      : undefined;
+    COMPILER_KEYED_ARRAY_PREPENDS.set(valueTarget, {
+      sourceToken: previousUpdate?.sourceToken || sourceToken,
+      sourceLength,
+      resultLength: value.length,
+      prefixLength,
       ...(previousUpdate ? { previous: previousUpdate } : {}),
     });
     return value;
@@ -631,6 +717,8 @@ export interface CompilerKeyedRowsBlockProps {
   collectionDependency?: number;
   /** Compiler proof that shifted row indexes are not observed by this boundary. */
   filterIndexIndependent?: boolean;
+  /** Compiler proof that prepending cannot expose shifted indexes to existing rows. */
+  prependIndexIndependent?: boolean;
   rowKey(item: unknown, index: number): React.Key;
   create(item: unknown, index: number): CompilerKeyedRowElement;
   bindings: readonly CompilerKeyedRowBinding[];
@@ -3468,6 +3556,14 @@ interface KeyedUpdateRuntime {
     instances: ReadonlyMap<string, CompilerKeyedRowInstance>,
     reactOwnedRows: boolean,
   ): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined;
+  prepend?(
+    props: CompilerKeyedRowsBlockProps,
+    dirtyState: ReadonlySet<number>,
+    collectionToken: object | undefined,
+    instances: ReadonlyMap<string, CompilerKeyedRowInstance>,
+    root: Element,
+    reactOwnedRows: boolean,
+  ): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined;
   reconcile(
     props: CompilerKeyedRowsBlockProps,
     dirtyState: ReadonlySet<number>,
@@ -3497,6 +3593,16 @@ const keyedUpdateRuntime: KeyedUpdateRuntime = {
 const keyedFilterUpdateRuntime: KeyedUpdateRuntime = {
   ...keyedUpdateRuntime,
   filter: reconcileCompilerKeyedArrayFilter,
+};
+
+const keyedPrependUpdateRuntime: KeyedUpdateRuntime = {
+  ...keyedUpdateRuntime,
+  prepend: reconcileCompilerKeyedArrayPrepend,
+};
+
+const keyedFilterPrependUpdateRuntime: KeyedUpdateRuntime = {
+  ...keyedFilterUpdateRuntime,
+  prepend: reconcileCompilerKeyedArrayPrepend,
 };
 
 interface KeyedRowsRuntimeOptions {
@@ -3637,6 +3743,77 @@ function reconcileCompilerKeyedArrayAppend(
     root.append(fragment);
   }
   return nextInstances;
+}
+
+function reconcileCompilerKeyedArrayPrepend(
+  props: CompilerKeyedRowsBlockProps,
+  dirtyState: ReadonlySet<number>,
+  collectionToken: object | undefined,
+  instances: ReadonlyMap<string, CompilerKeyedRowInstance>,
+  root: Element,
+  reactOwnedRows: boolean,
+): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined {
+  if (
+    reactOwnedRows ||
+    props.hostBlocks ||
+    (props.conditionals?.length || 0) > 0 ||
+    !props.prependIndexIndependent ||
+    props.collectionDependency === undefined
+  ) {
+    return undefined;
+  }
+  const collectionDependency = props.collectionDependency;
+  if (props.bindings.some((binding) => binding.dependencies?.includes(collectionDependency))) {
+    return undefined;
+  }
+  const dependencies = props.dependencies || props.structureDependencies;
+  const relevantDirty = (dependencies || []).filter((index) => dirtyState.has(index));
+  if (relevantDirty.length !== 1 || relevantDirty[0] !== collectionDependency) {
+    return undefined;
+  }
+
+  const finalValue = props.items();
+  const prefixLength = compilerKeyedArrayPrependLength(finalValue, collectionToken, instances.size);
+  if (prefixLength === undefined || !Array.isArray(finalValue)) return undefined;
+  const previousInstances = [...instances.values()];
+  for (let index = 0; index < previousInstances.length; index += 1) {
+    const instance = previousInstances[index];
+    if (instance.index !== index || !Object.is(instance.item, finalValue[prefixLength + index])) {
+      return undefined;
+    }
+  }
+
+  const knownKeys = new Set(instances.keys());
+  const prepended: CompilerKeyedRowInstance[] = [];
+  try {
+    for (let index = 0; index < prefixLength; index += 1) {
+      const item = finalValue[index];
+      const key = keyedRowIdentity(props.rowKey(item, index));
+      if (knownKeys.has(key)) return undefined;
+      knownKeys.add(key);
+      const descriptor = props.create(item, index);
+      prepended.push({
+        key,
+        element: createCompilerHostElement(root.ownerDocument, descriptor),
+        values: readKeyedRowBindingValues(props, item, index),
+        item,
+        index,
+        conditionalValues: EMPTY_KEYED_ROW_CONDITIONAL_VALUES,
+      });
+    }
+  } catch {
+    return undefined;
+  }
+
+  if (prepended.length > 0) {
+    const fragment = root.ownerDocument.createDocumentFragment();
+    for (const instance of prepended) fragment.append(instance.element);
+    root.insertBefore(fragment, root.firstChild);
+  }
+  for (let index = 0; index < previousInstances.length; index += 1) {
+    previousInstances[index].index = prefixLength + index;
+  }
+  return new Map([...prepended, ...previousInstances].map((instance) => [instance.key, instance]));
 }
 
 function reconcileCompilerKeyedArrayFilter(
@@ -4763,6 +4940,21 @@ function createKeyedRowsBlockComponent(
           afterCommit?.();
           return;
         }
+        const prependedInstances = options.keyedUpdates.prepend?.(
+          this.currentProps,
+          dirtyState,
+          this.collectionToken,
+          this.instances,
+          this.root,
+          this.hasReactOwnedRows(),
+        );
+        if (prependedInstances) {
+          this.instances = new Map(prependedInstances);
+          this.rebuildElementIndex(this.instances);
+          this.commitCurrentCollection(dirtyState);
+          afterCommit?.();
+          return;
+        }
       }
       if (dirtyState && this.refreshDirtyBindings(dirtyState, afterCommit)) return;
       this.reconcile(afterCommit, dirtyState);
@@ -5343,6 +5535,24 @@ export const keyedRowsFilterHintedRuntimeFeature: CompilerRuntimeFeature = {
   }),
 };
 
+export const keyedRowsPrependHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:prepend-hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner, {
+      keyedUpdates: keyedPrependUpdateRuntime,
+    }),
+  }),
+};
+
+export const keyedRowsFilterPrependHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:filter-prepend-hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner, {
+      keyedUpdates: keyedFilterPrependUpdateRuntime,
+    }),
+  }),
+};
+
 export const keyedRowsConditionalRuntimeFeature: CompilerRuntimeFeature = {
   name: "keyed-rows:conditional",
   create: (owner) => ({
@@ -5368,6 +5578,26 @@ export const keyedRowsConditionalFilterHintedRuntimeFeature: CompilerRuntimeFeat
     KeyedRows: createKeyedRowsBlockComponent(owner, {
       conditionals: createKeyedRowConditionalRuntime(),
       keyedUpdates: keyedFilterUpdateRuntime,
+    }),
+  }),
+};
+
+export const keyedRowsConditionalPrependHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:conditional:prepend-hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner, {
+      conditionals: createKeyedRowConditionalRuntime(),
+      keyedUpdates: keyedPrependUpdateRuntime,
+    }),
+  }),
+};
+
+export const keyedRowsConditionalFilterPrependHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:conditional:filter-prepend-hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner, {
+      conditionals: createKeyedRowConditionalRuntime(),
+      keyedUpdates: keyedFilterPrependUpdateRuntime,
     }),
   }),
 };
@@ -5401,6 +5631,26 @@ export const keyedRowsHostFilterHintedRuntimeFeature: CompilerRuntimeFeature = {
   }),
 };
 
+export const keyedRowsHostPrependHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:host:prepend-hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner, {
+      hostBlocks: createKeyedRowHostRuntime(),
+      keyedUpdates: keyedPrependUpdateRuntime,
+    }),
+  }),
+};
+
+export const keyedRowsHostFilterPrependHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:host:filter-prepend-hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner, {
+      hostBlocks: createKeyedRowHostRuntime(),
+      keyedUpdates: keyedFilterPrependUpdateRuntime,
+    }),
+  }),
+};
+
 export const keyedRowsCompleteRuntimeFeature: CompilerRuntimeFeature = {
   name: "keyed-rows:complete",
   create: (owner) => ({
@@ -5429,6 +5679,28 @@ export const keyedRowsCompleteFilterHintedRuntimeFeature: CompilerRuntimeFeature
       conditionals: createKeyedRowConditionalRuntime(),
       hostBlocks: createKeyedRowHostRuntime(),
       keyedUpdates: keyedFilterUpdateRuntime,
+    }),
+  }),
+};
+
+export const keyedRowsCompletePrependHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:complete:prepend-hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner, {
+      conditionals: createKeyedRowConditionalRuntime(),
+      hostBlocks: createKeyedRowHostRuntime(),
+      keyedUpdates: keyedPrependUpdateRuntime,
+    }),
+  }),
+};
+
+export const keyedRowsCompleteFilterPrependHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:complete:filter-prepend-hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner, {
+      conditionals: createKeyedRowConditionalRuntime(),
+      hostBlocks: createKeyedRowHostRuntime(),
+      keyedUpdates: keyedFilterPrependUpdateRuntime,
     }),
   }),
 };
@@ -6015,7 +6287,7 @@ const COMPLETE_RUNTIME_FEATURES: readonly CompilerRuntimeFeature[] = [
   hostConditionalRuntimeFeature,
   conditionalRangesRuntimeFeature,
   keyedListRuntimeFeature,
-  keyedRowsCompleteFilterHintedRuntimeFeature,
+  keyedRowsCompleteFilterPrependHintedRuntimeFeature,
   keyedRangesRuntimeFeature,
   mixedRangesRuntimeFeature,
   componentRuntimeFeature,

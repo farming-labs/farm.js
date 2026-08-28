@@ -304,6 +304,7 @@ After a successful build, Farm writes `.farm/react-compiler.json`:
     "fallback": 2,
     "keyedArrayAppendHints": 1,
     "keyedArrayFilterHints": 1,
+    "keyedArrayPrependHints": 1,
     "keyedCollectionUpdateHints": 3,
     "keyedIdentityTargets": 2,
     "keyedMapLookupTargets": 1,
@@ -323,6 +324,7 @@ After a successful build, Farm writes `.farm/react-compiler.json`:
       "optimizations": {
         "keyedArrayAppendHints": 1,
         "keyedArrayFilterHints": 1,
+        "keyedArrayPrependHints": 1,
         "keyedCollectionUpdateHints": 3,
         "keyedIdentityTargets": 2,
         "keyedMapLookupTargets": 1,
@@ -356,9 +358,11 @@ can report its changed row indexes while an immutable `map()` runs. The same cou
 module.
 `keyedArrayAppendHints` counts setter sites where the compiler proved a direct keyed array append
 and can hand the appended suffix to the runtime. `keyedArrayFilterHints` counts concise keyed-array
-filter sites that can report removed positions. `selected` is `true` when an annotation explicitly
-requested compilation. Module paths are relative to the project root, and the output is sorted and
-contains no timestamp, so CI can compare reports without machine-specific noise.
+filter sites that can report removed positions. `keyedArrayPrependHints` counts setter sites where
+the compiler proved a direct keyed array prepend and can hand the new prefix to the runtime.
+`selected` is `true` when an annotation explicitly requested compilation. Module paths are relative
+to the project root, and the output is sorted and contains no timestamp, so CI can compare reports
+without machine-specific noise.
 
 Use a different project-relative output path when CI collects artifacts elsewhere:
 
@@ -894,8 +898,8 @@ reads keys, descriptors, and bindings only for the appended suffix, creates only
 and inserts them together with a document fragment. It does not rerun the owner component or touch
 the existing row DOM.
 
-The proof is intentionally narrow. Both values must be native arrays. Prepend, middle insertion,
-removal, direct replacement, a copy with no appended entries, block-bodied updaters, duplicate
+The proof is intentionally narrow. Both values must be native arrays. Middle insertion, removal,
+direct replacement, a copy with no appended entries, block-bodied updaters, duplicate
 keys, React-owned or nested host-block rows, row conditionals, and rows whose bindings read the
 collection itself keep complete keyed reconciliation. Keys that read the collection also prevent
 the compiler from emitting the hint. A preceding unhinted update, an unrelated
@@ -903,6 +907,36 @@ dirty dependency, or any failed source/length check also discards the hint. Thes
 normal React behavior; the syntax does not opt the component into a different correctness model.
 The compiler report exposes emitted sites as `keyedArrayAppendHints`, and the hinted runtime is
 retained only when a module emits at least one append or same-order map hint.
+
+#### Keyed array prepend hints
+
+A direct keyed `useState` array can avoid rescanning every existing row when new items are inserted
+at the beginning:
+
+```tsx
+setItems((current) => [nextItem, ...current]);
+setItems((current) => [...nextItems, ...current]);
+```
+
+At build time, Farm recognizes a concise functional setter whose array literal ends with exactly
+`...current` and has at least one leading item or spread. The application still creates its normal
+immutable array. Generated metadata connects the result to the last committed array and records
+the prefix length. Multiple hinted prepends queued before one compiler flush form one validated
+chain.
+
+At update time, Farm verifies native arrays, source identity, lengths, and every existing suffix
+item before changing the DOM. It reads keys, descriptors, and bindings only for the new prefix,
+creates only those host rows, inserts them before the first existing row, and shifts the stored
+indexes used by delegated row events. Existing row DOM is neither recreated nor rebound.
+
+This proof requires compiler-owned host rows whose render callback and key do not read the row
+index. Index-aware rows, collection-derived keys, collection-reading bindings, React-owned or
+nested host-block rows, row conditionals, middle insertion, removal, direct replacement,
+block-bodied updaters, duplicate keys, custom, sparse, or subclassed arrays, an unrelated dirty
+dependency, or any failed runtime check keeps complete keyed reconciliation. A prepend queued
+after an unhinted update also falls back. Reports expose emitted sites as
+`keyedArrayPrependHints`; the optional runtime capability is retained only when a module emits the
+matching hint.
 
 #### Keyed array filter hints
 
@@ -1706,6 +1740,10 @@ The package and example test suites verify more than generated code:
 - 2,000 deterministic keyed-array appends match normal React; targeted tests require key,
   descriptor, and binding reads to equal only the appended suffix and cover queued updates,
   multi-boundary sharing, StrictMode hydration/unmount, and conservative fallback;
+- 2,000 deterministic keyed-array prepends match normal React; targeted tests require key,
+  descriptor, and binding reads to equal only the inserted prefix, preserve every existing DOM
+  row, update delegated event indexes, and cover queued updates, StrictMode hydration, unmount,
+  invalid metadata, custom arrays, and conservative fallback;
 - 2,000 deterministic randomized keyed-array removals match normal React; targeted tests require
   zero surviving descriptor and binding reads, preserve DOM identity, and cover queued filters,
   unhinted-chain fallback, collection-reading rows, StrictMode hydration, and unmount cleanup;
@@ -1725,7 +1763,8 @@ The package and example test suites verify more than generated code:
   inserts a row, and observes zero owner update executions;
 - the production 10,000/20,000-row benchmark requires nonzero `keyedIdentityTargets`,
   `keyedMapLookupTargets`, `keyedMembershipTargets`, `keyedCollectionUpdateHints`, and
-  `keyedMapUpdateHints`, `keyedArrayAppendHints`, and `keyedArrayFilterHints` report counts,
+  `keyedMapUpdateHints`, `keyedArrayAppendHints`, `keyedArrayPrependHints`, and
+  `keyedArrayFilterHints` report counts,
   preserves the keyed-update speedup floor, checks that scalar selection, Set membership, and Map
   lookups remain key-directed at scale, compares dense hinted Set/Map updates with equivalent
   compiled snapshot controls, and passes DOM correctness, React-relative regression, direct-delta,

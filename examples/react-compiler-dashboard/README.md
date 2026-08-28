@@ -5,7 +5,8 @@ update path in a realistic dashboard and a standard keyed-table workload.
 
 The table operation set is adapted from
 [`js-framework-benchmark`](https://github.com/krausest/js-framework-benchmark): create and replace
-1,000 rows, create 10,000, append 1,000, update every 10th row, select, swap, remove, and clear.
+1,000 rows, create 10,000, append or prepend 1,000, update every 10th row, select, swap, remove, and
+clear.
 
 The page contains two independently measured components:
 
@@ -13,12 +14,14 @@ The page contains two independently measured components:
   branch-sensitive chart bindings. Its inactive-branch action distinguishes static scheduling from
   default hybrid scheduling without changing the visible chart.
 - `StandardTableBenchmark`: the common 1,000/10,000-row create, replace, append, update-every-10th,
-  select, swap, remove, and clear operations used by browser framework benchmarks.
+  select, swap, remove, and clear operations used by browser framework benchmarks, plus an
+  equivalent 1,000-row prepend case.
 
 After the standard operation set, the production runner also performs three mixed scale cycles.
-Each cycle creates 10,000 rows, appends to 20,000, updates every 10th row, selects two distant rows,
-swaps, removes a middle row, and clears the table. A normalized-growth gate fails if the compiled
-paths grow more than 2x beyond the expected row-count growth, guarding against quadratic drift.
+Each cycle creates 10,000 rows, appends to 20,000, prepends 1,000 rows, restores the 20,000-row
+working set, updates every 10th row, selects two distant rows, swaps, removes a middle row, and
+clears the table. A normalized-growth gate fails if the compiled paths grow more than 2x beyond the
+expected row-count growth, guarding against quadratic drift.
 The calculation floors sub-millisecond reference timings at 0.25 ms to avoid browser timer
 quantization turning a one-tick difference into a false scalability failure.
 
@@ -71,6 +74,13 @@ modes must remain at least 4x faster than React at 10,000 and up to 20,000 rows,
 faster than the compiled control. The report must contain a nonzero `keyedArrayAppendHints` count;
 deterministic package tests separately require work to equal only the appended suffix.
 
+Keyed array prepends have the same independent comparison. A concise functional prepend is
+measured against bracketed React and an equivalent block-bodied compiled snapshot control. Both
+compiler modes must remain at least 3x faster than React at 10,000 and 20,000 existing rows, and at
+least 1.25x faster than the compiled control at 10,000 rows. The report must contain a nonzero
+`keyedArrayPrependHints` count; deterministic package tests separately require key, descriptor, and
+binding work to equal only the new prefix while preserving every existing DOM row.
+
 Set membership has a separate operation and persistence gate. The table alternates two marked row
 keys with `markedIds.has(row.id)` at 1,000 and 20,000 rows. Both compiler modes must remain at least
 10x faster than React at 20,000 rows, normalized growth may not exceed 2x, and the compiler report
@@ -122,6 +132,8 @@ The default JSON report is `/tmp/farm-react-dashboard-benchmark.json`; change it
   complete entry scan.
 - The append snapshot control creates the same 1,000 array items and DOM rows but intentionally uses
   an unsupported block-bodied updater, isolating the saved full key-and-binding scan.
+- The prepend snapshot control does the same work at the beginning of the array. It isolates the
+  saved suffix scan while the hinted path still creates and inserts every required new DOM row.
 - This is an operation-compatible local benchmark, not an official `js-framework-benchmark`
   submission or a score comparable to its published result table. This app has richer rows and
   measures event dispatch through an asserted DOM result without CPU throttling.
