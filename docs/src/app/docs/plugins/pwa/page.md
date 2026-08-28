@@ -8,7 +8,8 @@ section: "Plugin Ecosystem"
 
 `@farm.js/pwa` turns a production Farm build into an installable, offline-aware Progressive Web App.
 It generates a service worker from the final client output, maps emitted static routes to their HTML
-files, and registers the worker through Farm's browser lifecycle.
+files, and registers the worker through Farm's browser lifecycle. Advanced applications can replace
+the generated worker with a prebuilt JavaScript file while retaining that registration lifecycle.
 
 ## Install
 
@@ -26,22 +27,24 @@ export default defineConfig({
   plugins: [
     pwa({
       offline: "/offline",
-      cache: "recommended",
+      cache: "auto",
     }),
   ],
 });
 ```
 
-`recommended` means:
+The generated worker always precaches immutable build assets. `cache: "auto"` additionally means:
 
-- Precache hashed JavaScript, CSS, fonts, WebAssembly, and emitted web manifest files.
 - Precache every HTML page Farm emitted as a static route.
 - Cache public same-origin images with SWR.
 - Keep up to 100 image responses fresh for 30 days.
-- Prompt before activating a new deployment.
 
-The worker only intercepts `GET` requests and same-origin URLs. Dynamic pages, APIs, actions,
-integrations, and workflows remain network-owned.
+`auto` is the default, so you can omit `cache` for the same behavior. The previous `recommended`
+value remains available as a compatibility alias. Service worker updates separately default to
+`update: "prompt"`.
+
+The generated worker only intercepts `GET` requests and same-origin URLs. Dynamic pages, APIs,
+actions, integrations, and workflows remain network-owned.
 
 ## Add the offline page
 
@@ -89,7 +92,7 @@ export default function manifest(): MetadataRoute.Manifest {
 
 ## SWR in one line
 
-Use the explicit form when you do not want every recommended behavior:
+Use the explicit form when you want individual cache controls instead of the automatic preset:
 
 ```ts
 pwa({
@@ -129,6 +132,42 @@ pwa({
 `limit` is the maximum image count. `ttl` accepts milliseconds or `s`, `m`, `h`, `d`, and `w`
 durations such as `30s`, `5m`, `6h`, `30d`, or `2w`.
 
+## Bring your own service worker
+
+Use a custom worker when you need complete control over fetch routing, background sync, push
+notifications, or a caching strategy outside the generated worker's scope:
+
+```ts title="farm.config.ts"
+pwa({
+  serviceWorker: {
+    source: "src/service-worker.js",
+    type: "module",
+  },
+  update: "prompt",
+});
+```
+
+`source` is relative to the Farm project root. Farm copies it verbatim to the final `sw.js` path
+under `basePath`; it does not bundle or transform the file. Module imports must therefore resolve
+to files available in the production public output.
+
+The custom worker owns install, fetch, offline, and cache behavior, so `serviceWorker` cannot be
+combined with `offline` or `cache`. Farm still registers the worker and exposes its update events.
+To support `applyUpdate`, handle the message used by Farm's update lifecycle:
+
+```js title="src/service-worker.js"
+self.addEventListener("activate", (event) => {
+  event.waitUntil(self.clients.claim());
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "FARM_PWA_SKIP_WAITING") void self.skipWaiting();
+});
+```
+
+If you need to control registration and scope as well, leave out the PWA plugin and register the
+worker directly in application client code.
+
 ## Update behavior
 
 The default is `update: "prompt"`. When a new service worker finishes installing, the plugin
@@ -152,27 +191,31 @@ worker and reloads once the new worker controls the page.
 
 ## Options
 
-| Option    | Default         | Description                                                             |
-| --------- | --------------- | ----------------------------------------------------------------------- |
-| `enabled` | `true`          | Generate and register the worker.                                       |
-| `offline` | `false`         | Static route served after an offline navigation misses the cache.       |
-| `update`  | `"prompt"`      | Prompt or automatically activate and reload for a waiting worker.       |
-| `cache`   | `"recommended"` | Recommended caching, a custom object, or `false` for build assets only. |
+| Option          | Default    | Description                                                         |
+| --------------- | ---------- | ------------------------------------------------------------------- |
+| `enabled`       | `true`     | Generate or copy and then register the worker.                      |
+| `offline`       | `false`    | Static fallback route for the generated worker.                     |
+| `update`        | `"prompt"` | Prompt or automatically activate and reload for a waiting worker.   |
+| `cache`         | `"auto"`   | Generated-worker caching, a custom object, or build assets only.    |
+| `serviceWorker` | `false`    | Prebuilt worker source and optional `"classic"` or `"module"` type. |
 
-| Cache option   | Default under `recommended` | Description                                          |
-| -------------- | --------------------------- | ---------------------------------------------------- |
-| `staticRoutes` | `true`                      | Every emitted static page, a route list, or `false`. |
-| `images`       | `"swr"`                     | SWR options, `true`, `"swr"`, or `false`.            |
+| Cache option   | Default under `auto` | Description                                          |
+| -------------- | -------------------- | ---------------------------------------------------- |
+| `staticRoutes` | `true`               | Every emitted static page, a route list, or `false`. |
+| `images`       | `"swr"`              | SWR options, `true`, `"swr"`, or `false`.            |
 
 ## Production lifecycle
 
-During `farm build`, the plugin:
+During `farm build`, generated-worker mode:
 
 1. Finds the preset's final public output.
 2. Hashes precached files and caching options into a deployment-specific cache ID.
 3. Writes `sw.js` under Farm's configured `basePath`.
 4. Maps clean static route URLs to emitted HTML files.
 5. Fails if the configured offline page is missing.
+
+Custom-worker mode copies the configured source to the same deployment-aware `sw.js` location and
+leaves its contents untouched.
 
 In the browser, the plugin registers only for production builds. Service workers require HTTPS in
 production; browsers also permit localhost for development and local production testing.

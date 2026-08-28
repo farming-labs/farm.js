@@ -2,11 +2,12 @@ import { describe, expect, it } from "vitest";
 import { parsePwaDuration, resolvePwaOptions } from "./config";
 
 describe("resolvePwaOptions", () => {
-  it("uses the short recommended configuration by default", () => {
-    expect(resolvePwaOptions({ offline: "/offline" })).toEqual({
+  it("uses the automatic cache preset by default", () => {
+    const expected = {
       enabled: true,
       offline: "/offline",
       update: "prompt",
+      serviceWorker: false,
       cache: {
         staticRoutes: true,
         images: {
@@ -15,7 +16,36 @@ describe("resolvePwaOptions", () => {
           ttlMs: 30 * 24 * 60 * 60 * 1_000,
         },
       },
+    };
+
+    expect(resolvePwaOptions({ offline: "/offline" })).toEqual(expected);
+    expect(resolvePwaOptions({ offline: "/offline", cache: "auto" })).toEqual(expected);
+  });
+
+  it("keeps recommended as a compatibility alias for auto", () => {
+    expect(resolvePwaOptions({ cache: "recommended" })).toEqual(
+      resolvePwaOptions({ cache: "auto" }),
+    );
+  });
+
+  it("gives a custom service worker full ownership of offline and cache behavior", () => {
+    expect(
+      resolvePwaOptions({
+        serviceWorker: { source: "src/service-worker.js", type: "module" },
+      }),
+    ).toMatchObject({
+      offline: false,
+      serviceWorker: { source: "src/service-worker.js", type: "module" },
+      cache: { staticRoutes: false, images: false },
     });
+
+    expect(() =>
+      resolvePwaOptions({
+        serviceWorker: { source: "src/service-worker.js" },
+        cache: "auto",
+      }),
+    ).toThrow("cannot be combined");
+    expect(() => resolvePwaOptions({ serviceWorker: { source: " " } })).toThrow("non-empty path");
   });
 
   it("accepts images: swr and a compact advanced form", () => {
