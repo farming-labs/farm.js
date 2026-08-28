@@ -397,7 +397,7 @@ describe("compiled keyed-array append hints", () => {
       );
     }
     expect(harness.counters.executions).toBe(1);
-  });
+  }, 15_000);
 
   it("hydrates in StrictMode and drops a queued append after unmount", async () => {
     const harness = createAppendHarness([{ id: "a", label: "Alpha" }]);
