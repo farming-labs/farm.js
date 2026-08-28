@@ -5,6 +5,85 @@ import { materializeIterable } from "./iterable";
 export type CompilerStateUpdater = unknown | ((previous: unknown) => unknown);
 export type CompilerRuntimeReactivity = "static" | "hybrid";
 
+interface CompilerKeyedMapUpdateHint {
+  readonly sourceToken: object;
+  readonly changedIndices: readonly number[];
+  readonly previous?: CompilerKeyedMapUpdateHint;
+}
+
+const COMPILER_KEYED_COLLECTION_TOKENS = /* @__PURE__ */ new WeakMap<object, object>();
+const COMPILER_KEYED_MAP_UPDATES = /* @__PURE__ */ new WeakMap<
+  object,
+  CompilerKeyedMapUpdateHint
+>();
+const COMPILER_KEYED_COMMITTED_COLLECTIONS = /* @__PURE__ */ new WeakSet<object>();
+
+function compilerObject(value: unknown): object | undefined {
+  return (typeof value === "object" && value !== null) || typeof value === "function"
+    ? (value as object)
+    : undefined;
+}
+
+function compilerKeyedCollectionToken(value: unknown): object | undefined {
+  const target = compilerObject(value);
+  if (!target) return undefined;
+  let token = COMPILER_KEYED_COLLECTION_TOKENS.get(target);
+  if (!token) {
+    token = {};
+    COMPILER_KEYED_COLLECTION_TOKENS.set(target, token);
+  }
+  return token;
+}
+
+function commitCompilerKeyedCollection(value: unknown): object | undefined {
+  const target = compilerObject(value);
+  if (!target) return undefined;
+  COMPILER_KEYED_COMMITTED_COLLECTIONS.add(target);
+  return compilerKeyedCollectionToken(target);
+}
+
+function compilerKeyedMapChangedIndices(
+  value: unknown,
+  sourceToken: object | undefined,
+): readonly number[] | undefined {
+  const target = compilerObject(value);
+  if (!target || !sourceToken) return undefined;
+  const update = COMPILER_KEYED_MAP_UPDATES.get(target);
+  if (!update || update.sourceToken !== sourceToken) return undefined;
+  const changedIndices: number[] = [];
+  for (
+    let current: CompilerKeyedMapUpdateHint | undefined = update;
+    current;
+    current = current.previous
+  ) {
+    changedIndices.push(...current.changedIndices);
+  }
+  return changedIndices;
+}
+
+/** @internal Records compiler-proven same-order Array.map metadata and returns the Array. */
+export function createCompilerKeyedMapUpdate(
+  previous: unknown,
+  value: unknown,
+  changedIndices: readonly number[],
+): unknown {
+  const previousTarget = compilerObject(previous);
+  const valueTarget = compilerObject(value);
+  const sourceToken = compilerKeyedCollectionToken(previousTarget);
+  if (valueTarget && sourceToken) {
+    const previousUpdate =
+      previousTarget && !COMPILER_KEYED_COMMITTED_COLLECTIONS.has(previousTarget)
+        ? COMPILER_KEYED_MAP_UPDATES.get(previousTarget)
+        : undefined;
+    COMPILER_KEYED_MAP_UPDATES.set(valueTarget, {
+      sourceToken: previousUpdate?.sourceToken || sourceToken,
+      changedIndices,
+      ...(previousUpdate ? { previous: previousUpdate } : {}),
+    });
+  }
+  return value;
+}
+
 export interface CompilerCell {
   get(): unknown;
   set(next: CompilerStateUpdater): void;
@@ -224,8 +303,12 @@ export interface CompilerKeyedRowsBlockProps {
     ) => React.ReactNode,
   ): React.ReactElement;
   items(): Iterable<unknown> | null | undefined;
+  /** Complete component-state dependencies used anywhere inside this boundary. */
+  dependencies?: readonly number[];
   /** State cells that can change the row collection or its key projection. */
   structureDependencies?: readonly number[];
+  /** Direct state cell supplying items, eligible for compiler-emitted update hints. */
+  collectionDependency?: number;
   rowKey(item: unknown, index: number): React.Key;
   create(item: unknown, index: number): CompilerKeyedRowElement;
   bindings: readonly CompilerKeyedRowBinding[];
@@ -2697,9 +2780,102 @@ interface KeyedRowHostRuntime {
   ): CompilerHostTreeScope | null;
 }
 
+interface KeyedMapUpdateRuntime {
+  commit(value: unknown): object | undefined;
+  reconcile(
+    props: CompilerKeyedRowsBlockProps,
+    dirtyState: ReadonlySet<number>,
+    collectionToken: object | undefined,
+    instances: ReadonlyMap<string, CompilerKeyedRowInstance>,
+    conditionals: KeyedRowConditionalRuntime | undefined,
+  ):
+    | {
+        collectionToken: object | undefined;
+        conditionalChanges: readonly {
+          key: string;
+          id: number;
+          item: unknown;
+          index: number;
+        }[];
+        fallback: boolean;
+      }
+    | undefined;
+}
+
+const keyedMapUpdateRuntime: KeyedMapUpdateRuntime = {
+  commit: commitCompilerKeyedCollection,
+  reconcile: reconcileCompilerKeyedMapUpdate,
+};
+
 interface KeyedRowsRuntimeOptions {
   conditionals?: KeyedRowConditionalRuntime;
   hostBlocks?: KeyedRowHostRuntime;
+  keyedMapUpdates?: KeyedMapUpdateRuntime;
+}
+
+function reconcileCompilerKeyedMapUpdate(
+  props: CompilerKeyedRowsBlockProps,
+  dirtyState: ReadonlySet<number>,
+  collectionToken: object | undefined,
+  instances: ReadonlyMap<string, CompilerKeyedRowInstance>,
+  conditionals: KeyedRowConditionalRuntime | undefined,
+): ReturnType<KeyedMapUpdateRuntime["reconcile"]> {
+  const dependency = props.collectionDependency;
+  if (dependency === undefined) return undefined;
+  const dependencies = props.dependencies || props.structureDependencies || [];
+  const relevantDirty = [...dirtyState].filter((index) => dependencies.includes(index));
+  if (relevantDirty.length !== 1 || relevantDirty[0] !== dependency) return undefined;
+
+  const finalValue = props.items();
+  const hintedIndices = compilerKeyedMapChangedIndices(finalValue, collectionToken);
+  if (!hintedIndices || !Array.isArray(finalValue) || finalValue.length !== instances.size) {
+    return undefined;
+  }
+
+  const changedIndices = [...new Set(hintedIndices)].sort((left, right) => left - right);
+  const updates: Array<{
+    key: string;
+    item: unknown;
+    index: number;
+    instance: CompilerKeyedRowInstance;
+  }> = [];
+  try {
+    for (const index of changedIndices) {
+      if (!Number.isSafeInteger(index) || index < 0 || index >= finalValue.length) return undefined;
+      const item = finalValue[index];
+      const key = keyedRowIdentity(props.rowKey(item, index));
+      const instance = instances.get(key);
+      if (!instance || instance.index !== index) return undefined;
+      updates.push({ key, item, index, instance });
+    }
+  } catch {
+    return undefined;
+  }
+
+  const conditionalChanges: Array<{ key: string; id: number; item: unknown; index: number }> = [];
+  for (const { key, item, index, instance } of updates) {
+    if (props.hostBlocks) {
+      const descriptor = props.create(item, index);
+      if (!instance.scope?.update(descriptor)) {
+        return { collectionToken, conditionalChanges: [], fallback: true };
+      }
+    }
+    applyKeyedRowBindings(props, instance, item, index);
+    const conditionalValues =
+      conditionals?.readValues(props, item, index) || EMPTY_KEYED_ROW_CONDITIONAL_VALUES;
+    for (const [id, values] of conditionalValues) {
+      if (conditionals?.changed(instance.conditionalValues.get(id), values)) {
+        conditionalChanges.push({ key, id, item, index });
+      }
+    }
+    instance.conditionalValues = conditionalValues;
+    instance.item = item;
+  }
+  return {
+    collectionToken: commitCompilerKeyedCollection(finalValue),
+    conditionalChanges,
+    fallback: false,
+  };
 }
 
 function createKeyedRowConditionalRuntime(): KeyedRowConditionalRuntime {
@@ -2796,6 +2972,7 @@ function createKeyedRowsBlockComponent(
     private currentProps = this.props;
     private unsubscribe: (() => void) | undefined;
     private instances = new Map<string, CompilerKeyedRowInstance>();
+    private collectionToken: object | undefined;
     private renderVersion = 0;
     private readonly eventHandlers = new Map<
       string,
@@ -3030,6 +3207,10 @@ function createKeyedRowsBlockComponent(
       }
     }
 
+    private commitCurrentCollection(): void {
+      this.collectionToken = options.keyedMapUpdates?.commit(this.currentProps.items());
+    }
+
     private adopt(): boolean {
       if (!this.root) return false;
       const rows = this.readRows(this.currentProps);
@@ -3082,6 +3263,7 @@ function createKeyedRowsBlockComponent(
       this.rebuildElementIndex(instances);
       this.pruneEventHandlers(rows.keys);
       this.pruneConditionalListeners(rows.keys);
+      this.commitCurrentCollection();
       return true;
     }
 
@@ -3238,6 +3420,7 @@ function createKeyedRowsBlockComponent(
         existing.item = rows.items[index];
         existing.index = index;
       }
+      this.commitCurrentCollection();
       this.notifyConditionalChanges(conditionalChanges, afterCommit);
       return true;
     }
@@ -3300,6 +3483,7 @@ function createKeyedRowsBlockComponent(
       this.instances.delete(removedKey);
       this.eventHandlers.delete(removedKey);
       this.conditionalListeners.delete(removedKey);
+      this.commitCurrentCollection();
       this.notifyConditionalChanges(conditionalChanges, afterCommit);
       return true;
     }
@@ -3349,6 +3533,7 @@ function createKeyedRowsBlockComponent(
         this.instancesByElement = new WeakMap();
         this.eventHandlers.clear();
         this.conditionalListeners.clear();
+        this.commitCurrentCollection();
         afterCommit?.();
         return;
       }
@@ -3475,10 +3660,34 @@ function createKeyedRowsBlockComponent(
       ) {
         (activeElement as HTMLElement).focus({ preventScroll: true });
       }
+      this.commitCurrentCollection();
       this.notifyConditionalChanges(conditionalChanges, afterCommit);
     }
 
     private refresh: CompilerBlockRefresh = (afterCommit, dirtyState) => {
+      if (
+        dirtyState &&
+        options.keyedMapUpdates &&
+        this.mounted &&
+        this.root &&
+        !this.state.fallback
+      ) {
+        const result = options.keyedMapUpdates.reconcile(
+          this.currentProps,
+          dirtyState,
+          this.collectionToken,
+          this.instances,
+          options.conditionals,
+        );
+        if (result) {
+          if (result.fallback) this.activateFallback(afterCommit);
+          else {
+            this.collectionToken = result.collectionToken;
+            this.notifyConditionalChanges(result.conditionalChanges, afterCommit);
+          }
+          return;
+        }
+      }
       if (dirtyState && this.refreshDirtyBindings(dirtyState, afterCommit)) return;
       this.reconcile(afterCommit);
     };
@@ -4037,11 +4246,28 @@ export const keyedRowsRuntimeFeature: CompilerRuntimeFeature = {
   }),
 };
 
+export const keyedRowsHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner, { keyedMapUpdates: keyedMapUpdateRuntime }),
+  }),
+};
+
 export const keyedRowsConditionalRuntimeFeature: CompilerRuntimeFeature = {
   name: "keyed-rows:conditional",
   create: (owner) => ({
     KeyedRows: createKeyedRowsBlockComponent(owner, {
       conditionals: createKeyedRowConditionalRuntime(),
+    }),
+  }),
+};
+
+export const keyedRowsConditionalHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:conditional:hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner, {
+      conditionals: createKeyedRowConditionalRuntime(),
+      keyedMapUpdates: keyedMapUpdateRuntime,
     }),
   }),
 };
@@ -4055,12 +4281,33 @@ export const keyedRowsHostRuntimeFeature: CompilerRuntimeFeature = {
   }),
 };
 
+export const keyedRowsHostHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:host:hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner, {
+      hostBlocks: createKeyedRowHostRuntime(),
+      keyedMapUpdates: keyedMapUpdateRuntime,
+    }),
+  }),
+};
+
 export const keyedRowsCompleteRuntimeFeature: CompilerRuntimeFeature = {
   name: "keyed-rows:complete",
   create: (owner) => ({
     KeyedRows: createKeyedRowsBlockComponent(owner, {
       conditionals: createKeyedRowConditionalRuntime(),
       hostBlocks: createKeyedRowHostRuntime(),
+    }),
+  }),
+};
+
+export const keyedRowsCompleteHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:complete:hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner, {
+      conditionals: createKeyedRowConditionalRuntime(),
+      hostBlocks: createKeyedRowHostRuntime(),
+      keyedMapUpdates: keyedMapUpdateRuntime,
     }),
   }),
 };
@@ -4645,7 +4892,7 @@ const COMPLETE_RUNTIME_FEATURES: readonly CompilerRuntimeFeature[] = [
   hostConditionalRuntimeFeature,
   conditionalRangesRuntimeFeature,
   keyedListRuntimeFeature,
-  keyedRowsCompleteRuntimeFeature,
+  keyedRowsCompleteHintedRuntimeFeature,
   keyedRangesRuntimeFeature,
   mixedRangesRuntimeFeature,
   componentRuntimeFeature,

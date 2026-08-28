@@ -47,8 +47,11 @@ describe("React renderer Vite integration", () => {
           return <button onClick={() => setCount(count + 1)}>{count}</button>;
         }
         export function List() {
-          const [items, setItems] = useState(["A"]);
-          return <ul onClick={() => setItems([...items, "B"])}>{items.map((item) => <li key={item}>{item}</li>)}</ul>;
+          const [items, setItems] = useState([{ id: "a", label: "A" }]);
+          return <section>
+            <button onClick={() => setItems((current) => current.map((item) => item.id === "a" ? { ...item, label: "B" } : item))}>Update</button>
+            <ul>{items.map((item) => <li key={item.id}>{item.label}</li>)}</ul>
+          </section>;
         }
       `,
       "utf8",
@@ -82,6 +85,7 @@ describe("React renderer Vite integration", () => {
       componentsConsidered: 2,
       compiled: 2,
       fallback: 0,
+      keyedMapUpdateHints: 1,
     });
     expect(report.modules[0].compiled).toEqual(["Counter", "List"]);
     expect(report.modules[0].fallbacks).toEqual([]);

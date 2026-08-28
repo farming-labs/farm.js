@@ -12,6 +12,9 @@ export interface CompileReactModuleResult {
   map: unknown;
   compiled: readonly string[];
   diagnostics: readonly CompilerDiagnostic[];
+  optimizations: {
+    keyedMapUpdateHints: number;
+  };
 }
 
 interface StateBinding {
@@ -159,6 +162,7 @@ interface KeyedRowsPlan {
   dependencies: number[];
   source: t.JSXElement;
   collection: t.Expression;
+  collectionDependency?: number;
   structureDependencies: number[];
   keyCallback: t.ArrowFunctionExpression | t.FunctionExpression;
   renderCallback: t.ArrowFunctionExpression | t.FunctionExpression;
@@ -336,9 +340,13 @@ type CompilerRuntimeFeatureName =
   | "conditional-ranges"
   | "keyed-list"
   | "keyed-rows"
+  | "keyed-rows-hinted"
   | "keyed-rows-conditional"
+  | "keyed-rows-conditional-hinted"
   | "keyed-rows-host"
+  | "keyed-rows-host-hinted"
   | "keyed-rows-complete"
+  | "keyed-rows-complete-hinted"
   | "keyed-ranges"
   | "mixed-ranges"
   | "component";
@@ -349,9 +357,13 @@ const COMPILER_RUNTIME_FEATURE_EXPORTS: Record<CompilerRuntimeFeatureName, strin
   "conditional-ranges": "conditionalRangesRuntimeFeature",
   "keyed-list": "keyedListRuntimeFeature",
   "keyed-rows": "keyedRowsRuntimeFeature",
+  "keyed-rows-hinted": "keyedRowsHintedRuntimeFeature",
   "keyed-rows-conditional": "keyedRowsConditionalRuntimeFeature",
+  "keyed-rows-conditional-hinted": "keyedRowsConditionalHintedRuntimeFeature",
   "keyed-rows-host": "keyedRowsHostRuntimeFeature",
+  "keyed-rows-host-hinted": "keyedRowsHostHintedRuntimeFeature",
   "keyed-rows-complete": "keyedRowsCompleteRuntimeFeature",
+  "keyed-rows-complete-hinted": "keyedRowsCompleteHintedRuntimeFeature",
   "keyed-ranges": "keyedRangesRuntimeFeature",
   "mixed-ranges": "mixedRangesRuntimeFeature",
   component: "componentRuntimeFeature",
@@ -359,6 +371,7 @@ const COMPILER_RUNTIME_FEATURE_EXPORTS: Record<CompilerRuntimeFeatureName, strin
 
 function runtimeFeaturesForPlans(
   plans: readonly ComposableBlockPlan[],
+  keyedMapUpdateHints: boolean,
 ): CompilerRuntimeFeatureName[] {
   const features = new Set<CompilerRuntimeFeatureName>();
   let keyedRowsHaveConditionals = false;
@@ -374,14 +387,18 @@ function runtimeFeaturesForPlans(
     }
   }
   if (plans.some((plan) => plan.kind === "keyed-rows")) {
-    features.add(
+    const keyedRowsFeature =
       keyedRowsHaveConditionals && keyedRowsHaveHostBlocks
         ? "keyed-rows-complete"
         : keyedRowsHaveConditionals
           ? "keyed-rows-conditional"
           : keyedRowsHaveHostBlocks
             ? "keyed-rows-host"
-            : "keyed-rows",
+            : "keyed-rows";
+    features.add(
+      keyedMapUpdateHints
+        ? (`${keyedRowsFeature}-hinted` as CompilerRuntimeFeatureName)
+        : keyedRowsFeature,
     );
   }
   return [...features].sort();
@@ -691,6 +708,147 @@ function validateSetterUsage(
     },
   });
   return reason;
+}
+
+function isUnchangedMapItem(expression: t.Expression, item: t.Identifier): boolean {
+  return t.isIdentifier(expression, { name: item.name });
+}
+
+function isSafeKeyedMapReplacement(
+  expression: t.Expression,
+  item: t.Identifier,
+  safeGlobals: ReadonlySet<string>,
+): boolean {
+  if (!t.isObjectExpression(expression)) return false;
+  let spreadsItem = false;
+  for (const property of expression.properties) {
+    if (t.isSpreadElement(property)) {
+      if (!t.isIdentifier(property.argument, { name: item.name })) return false;
+      spreadsItem = true;
+      continue;
+    }
+    if (!t.isObjectProperty(property) || property.computed || !t.isExpression(property.value)) {
+      return false;
+    }
+    if (validateDerivedExpression(property.value, safeGlobals)) return false;
+  }
+  return spreadsItem;
+}
+
+function isSafeKeyedMapResult(
+  expression: t.Expression,
+  item: t.Identifier,
+  safeGlobals: ReadonlySet<string>,
+): boolean {
+  if (!t.isConditionalExpression(expression)) return false;
+  if (validateDerivedExpression(expression.test, safeGlobals)) return false;
+  return (
+    (isUnchangedMapItem(expression.consequent, item) &&
+      isSafeKeyedMapReplacement(expression.alternate, item, safeGlobals)) ||
+    (isUnchangedMapItem(expression.alternate, item) &&
+      isSafeKeyedMapReplacement(expression.consequent, item, safeGlobals))
+  );
+}
+
+function rewriteKeyedMapUpdateHints(
+  root: t.JSXElement,
+  hintedStateIndices: ReadonlySet<number>,
+  statesBySetter: ReadonlyMap<string, StateBinding>,
+  helperIdentifier: t.Identifier,
+  safeGlobals: ReadonlySet<string>,
+): { root: t.JSXElement; count: number } {
+  if (hintedStateIndices.size === 0) return { root: t.cloneNode(root, true), count: 0 };
+  const file = expressionFile(t.cloneNode(root, true));
+  let count = 0;
+  traverse(file, {
+    CallExpression(path) {
+      const callee = path.get("callee");
+      if (!callee.isIdentifier() || callee.scope.hasBinding(callee.node.name)) return;
+      const state = statesBySetter.get(callee.node.name);
+      if (!state || !hintedStateIndices.has(state.index) || path.node.arguments.length !== 1) {
+        return;
+      }
+      const updater = path.node.arguments[0];
+      if (
+        !t.isArrowFunctionExpression(updater) ||
+        updater.async ||
+        updater.generator ||
+        updater.params.length !== 1 ||
+        !t.isIdentifier(updater.params[0]) ||
+        !t.isCallExpression(updater.body) ||
+        !t.isMemberExpression(updater.body.callee) ||
+        updater.body.callee.computed ||
+        !t.isIdentifier(updater.body.callee.object, { name: updater.params[0].name }) ||
+        !t.isIdentifier(updater.body.callee.property, { name: "map" })
+      ) {
+        return;
+      }
+      const callback = updater.body.arguments[0];
+      if (
+        !t.isArrowFunctionExpression(callback) ||
+        callback.async ||
+        callback.generator ||
+        callback.params.length === 0 ||
+        callback.params.length > 3 ||
+        callback.params.some((parameter) => !t.isIdentifier(parameter)) ||
+        !t.isExpression(callback.body)
+      ) {
+        return;
+      }
+      const item = callback.params[0] as t.Identifier;
+      if (!isSafeKeyedMapResult(callback.body, item, safeGlobals)) return;
+
+      const changedIndices = path.scope.generateUidIdentifier("farmChangedIndices");
+      const mappedItem = path.scope.generateUidIdentifier("farmMappedItem");
+      const nextValue = path.scope.generateUidIdentifier("farmNextItems");
+      const index = t.isIdentifier(callback.params[1])
+        ? t.cloneNode(callback.params[1])
+        : path.scope.generateUidIdentifier("farmMapIndex");
+      const wrappedCallback = t.cloneNode(callback, true);
+      if (wrappedCallback.params.length === 1) wrappedCallback.params.push(t.cloneNode(index));
+      wrappedCallback.body = t.blockStatement([
+        t.variableDeclaration("const", [
+          t.variableDeclarator(t.cloneNode(mappedItem), t.cloneNode(callback.body, true)),
+        ]),
+        t.ifStatement(
+          t.binaryExpression("!==", t.cloneNode(mappedItem), t.cloneNode(item)),
+          t.expressionStatement(
+            t.callExpression(
+              t.memberExpression(t.cloneNode(changedIndices), t.identifier("push")),
+              [t.cloneNode(index)],
+            ),
+          ),
+        ),
+        t.returnStatement(t.cloneNode(mappedItem)),
+      ]);
+
+      const mapCall = t.cloneNode(updater.body, true);
+      mapCall.arguments[0] = wrappedCallback;
+      const previous = t.cloneNode(updater.params[0]);
+      path.node.arguments[0] = t.arrowFunctionExpression(
+        [t.cloneNode(previous)],
+        t.blockStatement([
+          t.variableDeclaration("const", [
+            t.variableDeclarator(t.cloneNode(changedIndices), t.arrayExpression([])),
+          ]),
+          t.variableDeclaration("const", [t.variableDeclarator(t.cloneNode(nextValue), mapCall)]),
+          t.returnStatement(
+            t.callExpression(t.cloneNode(helperIdentifier), [
+              t.cloneNode(previous),
+              t.cloneNode(nextValue),
+              t.cloneNode(changedIndices),
+            ]),
+          ),
+        ]),
+      );
+      count += 1;
+      path.skip();
+    },
+  });
+  return {
+    root: (file.program.body[0] as t.ExpressionStatement).expression as t.JSXElement,
+    count,
+  };
 }
 
 function rewriteStateAccess(
@@ -1148,6 +1306,7 @@ function analyzePublicList(
 
 interface KeyedRowsShape {
   collection: t.Expression;
+  collectionDependency?: number;
   structureDependencies: number[];
   keyCallback: t.ArrowFunctionExpression | t.FunctionExpression;
   renderCallback: t.ArrowFunctionExpression | t.FunctionExpression;
@@ -1626,6 +1785,9 @@ function analyzeKeyedRowChild(
   return {
     source,
     collection,
+    collectionDependency: t.isIdentifier(collection)
+      ? statesByValue.get(collection.name)?.index
+      : undefined,
     structureDependencies: [...structureDependencies].sort((left, right) => left - right),
     keyCallback,
     renderCallback,
@@ -3157,7 +3319,11 @@ function keyedRowConditionalObject(
   return t.objectExpression(properties);
 }
 
-function keyedRowsBoundary(blockRuntime: t.Identifier, plan: KeyedRowsPlan): t.JSXElement {
+function keyedRowsBoundary(
+  blockRuntime: t.Identifier,
+  plan: KeyedRowsPlan,
+  keyedMapUpdateHints: boolean,
+): t.JSXElement {
   const name = t.jsxMemberExpression(
     t.jsxIdentifier(blockRuntime.name),
     t.jsxIdentifier("KeyedRows"),
@@ -3196,6 +3362,18 @@ function keyedRowsBoundary(blockRuntime: t.Identifier, plan: KeyedRowsPlan): t.J
           t.jsxIdentifier("items"),
           t.jsxExpressionContainer(t.arrowFunctionExpression([], cloneExpression(plan.collection))),
         ),
+        ...(keyedMapUpdateHints
+          ? [
+              t.jsxAttribute(
+                t.jsxIdentifier("dependencies"),
+                t.jsxExpressionContainer(
+                  t.arrayExpression(
+                    plan.dependencies.map((dependency) => t.numericLiteral(dependency)),
+                  ),
+                ),
+              ),
+            ]
+          : []),
         t.jsxAttribute(
           t.jsxIdentifier("structureDependencies"),
           t.jsxExpressionContainer(
@@ -3204,6 +3382,14 @@ function keyedRowsBoundary(blockRuntime: t.Identifier, plan: KeyedRowsPlan): t.J
             ),
           ),
         ),
+        ...(!keyedMapUpdateHints || plan.collectionDependency === undefined
+          ? []
+          : [
+              t.jsxAttribute(
+                t.jsxIdentifier("collectionDependency"),
+                t.jsxExpressionContainer(t.numericLiteral(plan.collectionDependency)),
+              ),
+            ]),
         t.jsxAttribute(
           t.jsxIdentifier("rowKey"),
           t.jsxExpressionContainer(t.cloneNode(plan.keyCallback, true)),
@@ -3954,6 +4140,7 @@ function analyzeComposableBlocks(
               dependencies: keyedRows.dependencies,
               source: child,
               collection: keyedRows.collection,
+              collectionDependency: keyedRows.collectionDependency,
               structureDependencies: keyedRows.structureDependencies,
               keyCallback: keyedRows.keyCallback,
               renderCallback: keyedRows.renderCallback,
@@ -4217,6 +4404,7 @@ function lowerComposableBlocks(
   plans: readonly ComposableBlockPlan[],
   blockRuntime: t.Identifier,
   listNames: ReadonlySet<string>,
+  keyedMapUpdateHints: boolean,
 ): t.JSXElement {
   const planBySource = new Map<t.Node, ComposableBlockPlan>(
     plans.map((plan) => [plan.source, plan]),
@@ -4243,7 +4431,7 @@ function lowerComposableBlocks(
           return mixedRangesBoundary(blockRuntime, plan);
         }
         if (plan?.kind === "keyed-rows") {
-          return keyedRowsBoundary(blockRuntime, plan);
+          return keyedRowsBoundary(blockRuntime, plan, keyedMapUpdateHints);
         }
         if (plan?.kind === "keyed-ranges") {
           return keyedRangesBoundary(blockRuntime, plan);
@@ -4672,8 +4860,10 @@ function wrapperElement(definitionIdentifier: t.Identifier, props?: t.Expression
 function compileCandidate(
   candidate: Candidate,
   createComponentIdentifier: t.Identifier,
+  keyedMapUpdateIdentifier: t.Identifier,
   runtimeFeatureIdentifiers: ReadonlyMap<CompilerRuntimeFeatureName, t.Identifier>,
   usedRuntimeFeatures: Set<CompilerRuntimeFeatureName>,
+  optimizationCounts: { keyedMapUpdateHints: number },
   useStateNames: ReadonlySet<string>,
   reactNames: ReadonlySet<string>,
   listNames: ReadonlySet<string>,
@@ -4913,8 +5103,49 @@ function compileCandidate(
   }
   if (blockAnalysis.reason) return blockAnalysis.reason;
   if (analysis.reason) return analysis.reason;
+  const hintedStateIndices = new Set(
+    (blockAnalysis.plans || [])
+      .filter(
+        (plan): plan is KeyedRowsPlan =>
+          plan.kind === "keyed-rows" && plan.collectionDependency !== undefined,
+      )
+      .map((plan) => plan.collectionDependency as number),
+  );
+  const hintedRoot = rewriteKeyedMapUpdateHints(
+    expandedReactiveRoot,
+    hintedStateIndices,
+    statesBySetter,
+    keyedMapUpdateIdentifier,
+    safeGlobals,
+  );
+  let appliedKeyedMapUpdateHints = 0;
+  if (hintedRoot.count > 0) {
+    const hintedBlockAnalysis = analyzeComposableBlocks(
+      hintedRoot.root,
+      reactiveByValue,
+      safeGlobals,
+      listNames,
+      allowedComponentNames,
+    );
+    const hintedAnalysis = analyzeHostTree(
+      hintedRoot.root,
+      reactiveByValue,
+      safeGlobals,
+      hintedBlockAnalysis.conditionalExpressions || new Set<t.Expression>(),
+      hintedBlockAnalysis.keyedExpressions || new Set<t.Expression>(),
+      hintedBlockAnalysis.ownedElements || new Set<t.JSXElement>(),
+      hintedBlockAnalysis.componentElements || new Set<t.JSXElement>(),
+    );
+    if (!hintedBlockAnalysis.reason && !hintedAnalysis.reason) {
+      expandedReactiveRoot = hintedRoot.root;
+      blockAnalysis = hintedBlockAnalysis;
+      analysis = hintedAnalysis;
+      appliedKeyedMapUpdateHints = hintedRoot.count;
+      optimizationCounts.keyedMapUpdateHints += hintedRoot.count;
+    }
+  }
   const blockPlans = blockAnalysis.plans || [];
-  const runtimeFeatures = runtimeFeaturesForPlans(blockPlans);
+  const runtimeFeatures = runtimeFeaturesForPlans(blockPlans, appliedKeyedMapUpdateHints > 0);
   markShortCircuitBindings(analysis.bindings || []);
   assignStableBindingTargets(analysis.bindings || []);
 
@@ -4933,6 +5164,7 @@ function compileCandidate(
     blockPlans,
     blockParameter,
     listNames,
+    appliedKeyedMapUpdateHints > 0,
   );
   const rewrittenRoot = rewriteStateAccess(
     rootWithBlocks,
@@ -5097,6 +5329,7 @@ export async function compileReactModule(
 ): Promise<CompileReactModuleResult> {
   const compiled: string[] = [];
   const diagnostics: CompilerDiagnostic[] = [];
+  const optimizationCounts = { keyedMapUpdateHints: 0 };
   const plugin = (): PluginObj => ({
     name: "farm-react-aot",
     visitor: {
@@ -5134,6 +5367,9 @@ export async function compileReactModule(
         const candidates = collectCandidates(programPath);
         const createComponentIdentifier =
           programPath.scope.generateUidIdentifier("createCompiledComponent");
+        const keyedMapUpdateIdentifier = programPath.scope.generateUidIdentifier(
+          "createCompilerKeyedMapUpdate",
+        );
         const runtimeFeatureIdentifiers = new Map<CompilerRuntimeFeatureName, t.Identifier>(
           Object.entries(COMPILER_RUNTIME_FEATURE_EXPORTS).map(([feature, exportName]) => [
             feature as CompilerRuntimeFeatureName,
@@ -5155,8 +5391,10 @@ export async function compileReactModule(
           const reason = compileCandidate(
             candidate,
             createComponentIdentifier,
+            keyedMapUpdateIdentifier,
             runtimeFeatureIdentifiers,
             usedRuntimeFeatures,
+            optimizationCounts,
             useStateNames,
             reactNames,
             listNames,
@@ -5183,6 +5421,14 @@ export async function compileReactModule(
                   createComponentIdentifier,
                   t.identifier("createCompiledComponentWithFeatures"),
                 ),
+                ...(optimizationCounts.keyedMapUpdateHints > 0
+                  ? [
+                      t.importSpecifier(
+                        keyedMapUpdateIdentifier,
+                        t.identifier("createCompilerKeyedMapUpdate"),
+                      ),
+                    ]
+                  : []),
                 ...[...usedRuntimeFeatures]
                   .sort()
                   .map((feature) =>
@@ -5224,5 +5470,6 @@ export async function compileReactModule(
     map: result?.map || null,
     compiled,
     diagnostics,
+    optimizations: optimizationCounts,
   };
 }

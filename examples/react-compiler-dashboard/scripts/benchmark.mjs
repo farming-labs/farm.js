@@ -114,6 +114,10 @@ async function inspectBuild(compilerMode) {
     const compiled = new Set(compilerReport.modules.flatMap((module) => module.compiled));
     assert(compiled.has("OperationsDashboard"));
     assert(compiled.has("StandardTableBenchmark"));
+    assert(
+      compilerReport.summary.keyedMapUpdateHints > 0,
+      "The compiler build did not emit a mutation-aware keyed-map update hint.",
+    );
   }
 
   return {

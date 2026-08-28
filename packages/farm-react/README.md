@@ -162,6 +162,25 @@ Later list updates patch surviving rows by key, create or remove only the change
 longest increasing subsequence (LIS) to minimize DOM moves during a reorder. The outer user
 component and the list callback do not rerun for those compiler-cell updates.
 
+For a direct keyed `useState` collection, the compiler also recognizes conservative same-order
+updates such as:
+
+```tsx
+setItems((current) =>
+  current.map((item) => (item.id === targetId ? { ...item, selected: !item.selected } : item)),
+);
+```
+
+The generated native `map()` records which indexes returned new item identities. Farm then
+validates that length, keys, and positions are unchanged and patches only those row instances. The
+user's `map()` remains O(n); this removes the keyed runtime's second full key-and-binding scan.
+Queued hints compose. Key changes, structural edits, relevant mixed dependencies, and failed runtime
+checks use the existing complete reconciliation and LIS path. Non-functional setters, derived
+collections, block-bodied or mutating mappers, and other unproven forms are simply not hinted. No
+new option is required. A compiler report exposes the emitted-site count as
+`keyedMapUpdateHints`. The separate hint runtime capability is imported only when that count is
+nonzero, so direct-only and ordinary keyed builds do not retain it.
+
 An otherwise eligible host row may also contain an inline synchronous React event:
 
 ```tsx
@@ -438,7 +457,9 @@ compiler: {
 
 The default path is `.farm/react-compiler.json`. The report covers the production browser graph and
 contains project-relative module paths, compiled component names, fallback details, and fallback
-reasons aggregated by count. A custom project-relative `reportFile` also enables reporting.
+reasons aggregated by count. Its summary and per-module `optimizations` also report
+`keyedMapUpdateHints`, the number of compiler-proven direct keyed `map()` update sites. A custom
+project-relative `reportFile` also enables reporting.
 
 The runtime test compares the same counter interaction on both paths: ordinary React performs a
 second component render and commit, while the compiled component remains at one render and one

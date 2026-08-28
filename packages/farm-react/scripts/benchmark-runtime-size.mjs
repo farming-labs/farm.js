@@ -79,6 +79,9 @@ if (!keyedOn.code.includes("FarmCompiledKeyedRows")) {
 if (keyedOn.code.includes("FarmCompiledKeyedRowConditional")) {
   throw new Error("Plain keyed fixture retained the optional row-conditional runtime.");
 }
+if (keyedOn.code.includes("keyed-rows:hinted")) {
+  throw new Error("Plain keyed fixture retained the optional keyed-update hint runtime.");
+}
 
 const fullRuntimePremium = runtimeFull.gzip - runtimeControl.gzip;
 const coreRuntimePremium = runtimeCore.gzip - runtimeControl.gzip;
