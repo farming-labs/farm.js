@@ -12,6 +12,7 @@ export function KeyedTable() {
   );
   const [selected, setSelected] = useState(-1);
   const [marked, setMarked] = useState(() => new Set<number>());
+  const [queueById, setQueueById] = useState(() => new Map<number, string>());
   return (
     <main>
       <button onClick={() => setRows((value) => [...value].reverse())}>Reverse</button>
@@ -20,10 +21,12 @@ export function KeyedTable() {
           <li
             className={selected === row.id ? "selected" : ""}
             data-marked={marked.has(row.id)}
+            data-queue={queueById.get(row.id) ?? "none"}
             key={row.id}
             onClick={() => {
               setSelected(row.id);
               setMarked(new Set([row.id]));
+              setQueueById(new Map([[row.id, "ready"]]));
             }}
           >
             {row.label}

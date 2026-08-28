@@ -123,6 +123,10 @@ async function inspectBuild(compilerMode) {
       "The compiler build did not emit a keyed Set-membership target.",
     );
     assert(
+      compilerReport.summary.keyedMapLookupTargets > 0,
+      "The compiler build did not emit a keyed Map-lookup target.",
+    );
+    assert(
       compilerReport.summary.keyedMapUpdateHints > 0,
       "The compiler build did not emit a mutation-aware keyed-map update hint.",
     );
@@ -494,6 +498,19 @@ async function measureTrial(browser, trial, compilerMode, port) {
           },
         );
 
+        const tableMapLookup = await measureTable(
+          async () => ensure1000(),
+          async () => {
+            const row = table.querySelectorAll("tbody tr")[500];
+            const previous = row?.getAttribute("data-queue");
+            if (!row) throw new Error("Map lookup target row is missing.");
+            await runTableAction(
+              () => tableButton("table-queue").click(),
+              () => row.getAttribute("data-queue") !== previous,
+            );
+          },
+        );
+
         const tableRemove = await measureTable(
           async () => {
             if (rowCount() !== 1_000) await create1000();
@@ -521,6 +538,7 @@ async function measureTrial(browser, trial, compilerMode, port) {
           appendTo20k: [],
           clear20k: [],
           create10k: [],
+          mapLookup20k: [],
           membership20k: [],
           remove20k: [],
           select20k: [],
@@ -579,6 +597,16 @@ async function measureTrial(browser, trial, compilerMode, port) {
           );
           scale.membership20k.push(performance.now() - membershipStartedAt);
 
+          const mapLookupRow = table.querySelectorAll("tbody tr")[10_000];
+          const previousMapLookup = mapLookupRow?.getAttribute("data-queue");
+          if (!mapLookupRow) throw new Error("20,000-row Map lookup target is missing.");
+          const mapLookupStartedAt = performance.now();
+          await runTableAction(
+            () => tableButton("table-queue").click(),
+            () => mapLookupRow.getAttribute("data-queue") !== previousMapLookup,
+          );
+          scale.mapLookup20k.push(performance.now() - mapLookupStartedAt);
+
           const rowsBeforeSwap = table.querySelectorAll("tbody tr");
           const second = rowsBeforeSwap[1]?.getAttribute("data-row-id");
           const penultimate = rowsBeforeSwap[998]?.getAttribute("data-row-id");
@@ -619,6 +647,7 @@ async function measureTrial(browser, trial, compilerMode, port) {
             dashboardLive: dashboard.dataset.live,
             dashboardRevision: Number(dashboard.dataset.revision),
             finalMarkedCount: Number(table.dataset.markedCount),
+            finalQueueCount: Number(table.dataset.queueCount),
             finalTableRows: rowCount(),
             scalePeakRows: peakRows,
           },
@@ -634,6 +663,7 @@ async function measureTrial(browser, trial, compilerMode, port) {
             create: tableCreate,
             createMany: tableCreateMany,
             executionsAdded: Number(tableExecutions.textContent) - initialTableExecutions,
+            mapLookup: tableMapLookup,
             membership: tableMembership,
             remove: tableRemove,
             replace: tableReplace,
@@ -656,6 +686,7 @@ async function measureTrial(browser, trial, compilerMode, port) {
     assert.equal(result.correctness.activeBarStayedStableDuringInactiveUpdates, true);
     assert.equal(result.correctness.dashboardLive, "true");
     assert.equal(result.correctness.finalMarkedCount, 0);
+    assert.equal(result.correctness.finalQueueCount, 0);
     assert.equal(result.correctness.finalTableRows, 0);
     assert.equal(result.correctness.scalePeakRows, 20_000);
     assert.equal(browserErrors.length, 0, browserErrors.join("\n"));
@@ -687,6 +718,7 @@ async function measureTrial(browser, trial, compilerMode, port) {
         appendTo20k: timingSummary(result.scale.appendTo20k),
         clear20k: timingSummary(result.scale.clear20k),
         create10k: timingSummary(result.scale.create10k),
+        mapLookup20k: timingSummary(result.scale.mapLookup20k),
         membership20k: timingSummary(result.scale.membership20k),
         remove20k: timingSummary(result.scale.remove20k),
         select20k: timingSummary(result.scale.select20k),
@@ -699,6 +731,7 @@ async function measureTrial(browser, trial, compilerMode, port) {
         create: timingSummary(result.table.create),
         createMany: timingSummary(result.table.createMany),
         executionsAdded: result.table.executionsAdded,
+        mapLookup: timingSummary(result.table.mapLookup),
         membership: timingSummary(result.table.membership),
         remove: timingSummary(result.table.remove),
         replace: timingSummary(result.table.replace),
@@ -775,6 +808,7 @@ const tableMetrics = [
   "updateEvery10th",
   "select",
   "membership",
+  "mapLookup",
   "swap",
   "remove",
   "clear",
@@ -785,6 +819,7 @@ const scaleMetrics = [
   "updateEvery10th20k",
   "select20k",
   "membership20k",
+  "mapLookup20k",
   "swap20k",
   "remove20k",
   "clear20k",
@@ -817,6 +852,7 @@ const scalabilityCases = [
   ["updateEvery10th20k", "updateEvery10th", 2],
   ["select20k", "select", 20],
   ["membership20k", "membership", 20],
+  ["mapLookup20k", "mapLookup", 20],
   ["swap20k", "swap", 20],
   ["remove20k", "remove", 20],
   ["clear20k", "clear", 2],
@@ -935,12 +971,38 @@ const keyedMembershipRegressions = keyedMembershipResults.filter(
     !Number.isFinite(normalizedGrowth) ||
     normalizedGrowth > keyedMembershipMaximumNormalizedGrowth,
 );
+// A native Map lookup binding is similarly key-directed, but its mapped primitive value can feed
+// text, attributes, classes, or styles. Deterministic tests prove that only keys whose mapped value
+// changed evaluate the binding; this gate protects the corresponding end-to-end win at scale.
+const keyedMapLookupMinimumSpeedup = 10;
+const keyedMapLookupMaximumNormalizedGrowth = 2;
+const keyedMapLookupResults = ["static", "hybrid"].map((mode) => {
+  const tableMedianMs = comparisons.table.mapLookup[mode].medianMs;
+  const scaleMedianMs = comparisons.scale.mapLookup20k[mode].medianMs;
+  const growth = scaleMedianMs / Math.max(tableMedianMs, timingResolutionFloorMs);
+  return {
+    growth,
+    mode,
+    normalizedGrowth: growth / 20,
+    scaleMedianMs,
+    speedup: comparisons.scale.mapLookup20k[`${mode}VsBaseline`].speedup,
+    tableMedianMs,
+  };
+});
+const keyedMapLookupRegressions = keyedMapLookupResults.filter(
+  ({ normalizedGrowth, speedup }) =>
+    !Number.isFinite(speedup) ||
+    speedup < keyedMapLookupMinimumSpeedup ||
+    !Number.isFinite(normalizedGrowth) ||
+    normalizedGrowth > keyedMapLookupMaximumNormalizedGrowth,
+);
 const passed =
   performanceRegressions.length === 0 &&
   scalabilityRegressions.length === 0 &&
   keyedUpdateRegressions.length === 0 &&
   keyedIdentityRegressions.length === 0 &&
-  keyedMembershipRegressions.length === 0;
+  keyedMembershipRegressions.length === 0 &&
+  keyedMapLookupRegressions.length === 0;
 
 const report = {
   result: passed ? "PASS" : "CORRECTNESS_PASS_PERFORMANCE_REGRESSION",
@@ -970,6 +1032,13 @@ const report = {
     regressions: keyedMembershipRegressions,
     results: keyedMembershipResults,
     status: keyedMembershipRegressions.length === 0 ? "PASS" : "FAIL",
+  },
+  keyedMapLookupTargetGate: {
+    maximumNormalizedGrowth: keyedMapLookupMaximumNormalizedGrowth,
+    minimumSpeedup: keyedMapLookupMinimumSpeedup,
+    regressions: keyedMapLookupRegressions,
+    results: keyedMapLookupResults,
+    status: keyedMapLookupRegressions.length === 0 ? "PASS" : "FAIL",
   },
   scalabilityGate: {
     metrics: scalability,

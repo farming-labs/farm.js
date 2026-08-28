@@ -29,6 +29,7 @@ function observations(projectRoot: string): ReactCompilerModuleObservation[] {
         diagnostics: [],
         optimizations: {
           keyedIdentityTargets: 0,
+          keyedMapLookupTargets: 0,
           keyedMembershipTargets: 0,
           keyedMapUpdateHints: 0,
         },
@@ -52,6 +53,7 @@ function observations(projectRoot: string): ReactCompilerModuleObservation[] {
         ],
         optimizations: {
           keyedIdentityTargets: 4,
+          keyedMapLookupTargets: 5,
           keyedMembershipTargets: 2,
           keyedMapUpdateHints: 3,
         },
@@ -71,6 +73,7 @@ describe("React compiler coverage report", () => {
       compiled: 2,
       fallback: 2,
       keyedIdentityTargets: 4,
+      keyedMapLookupTargets: 5,
       keyedMembershipTargets: 2,
       keyedMapUpdateHints: 3,
     });
@@ -89,6 +92,7 @@ describe("React compiler coverage report", () => {
     });
     expect(report.modules[1]?.optimizations).toEqual({
       keyedIdentityTargets: 4,
+      keyedMapLookupTargets: 5,
       keyedMembershipTargets: 2,
       keyedMapUpdateHints: 3,
     });

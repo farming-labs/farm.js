@@ -41,6 +41,7 @@ describe("React AOT keyed update hints", () => {
     expect(result.diagnostics).toEqual([]);
     expect(result.optimizations).toEqual({
       keyedIdentityTargets: 0,
+      keyedMapLookupTargets: 0,
       keyedMembershipTargets: 0,
       keyedMapUpdateHints: 1,
     });

@@ -14,6 +14,7 @@ export interface CompileReactModuleResult {
   diagnostics: readonly CompilerDiagnostic[];
   optimizations: {
     keyedIdentityTargets: number;
+    keyedMapLookupTargets: number;
     keyedMembershipTargets: number;
     keyedMapUpdateHints: number;
   };
@@ -95,6 +96,10 @@ interface PendingKeyedRowBinding {
     value: t.Expression;
   };
   membershipTarget?: {
+    dependency: number;
+    value: t.Expression;
+  };
+  mapLookupTarget?: {
     dependency: number;
     value: t.Expression;
   };
@@ -599,6 +604,39 @@ function containsPotentialKeyedMembershipCall(
   return found;
 }
 
+function isPotentialKeyedMapLookupCall(
+  expression: t.CallExpression,
+  reactiveByValue: ReadonlyMap<string, StateBinding>,
+): boolean {
+  if (
+    expression.arguments.length !== 1 ||
+    !t.isExpression(expression.arguments[0]) ||
+    !t.isMemberExpression(expression.callee) ||
+    expression.callee.computed ||
+    !t.isIdentifier(expression.callee.object) ||
+    !t.isIdentifier(expression.callee.property, { name: "get" })
+  ) {
+    return false;
+  }
+  const reactive = reactiveByValue.get(expression.callee.object.name);
+  return Boolean(reactive?.setterName);
+}
+
+function containsPotentialKeyedMapLookupCall(
+  expression: t.Expression,
+  reactiveByValue: ReadonlyMap<string, StateBinding>,
+): boolean {
+  let found = false;
+  traverse(expressionFile(cloneExpression(expression)), {
+    CallExpression(path) {
+      if (!isPotentialKeyedMapLookupCall(path.node, reactiveByValue)) return;
+      found = true;
+      path.stop();
+    },
+  });
+  return found;
+}
+
 function keyedMembershipTarget(
   binding: PendingKeyedRowBinding,
   keyCallback: t.ArrowFunctionExpression | t.FunctionExpression,
@@ -639,6 +677,66 @@ function keyedMembershipTarget(
         member.node.object !== path.node ||
         member.node.computed ||
         !t.isIdentifier(member.node.property, { name: "has" }) ||
+        !call ||
+        !call.isCallExpression() ||
+        call.node.callee !== member.node ||
+        call.node.arguments.length !== 1 ||
+        !t.isExpression(call.node.arguments[0]) ||
+        !t.isNodesEquivalent(call.node.arguments[0], rowKeyExpression)
+      ) {
+        valid = false;
+        path.stop();
+        return;
+      }
+      target = reactive;
+      calls += 1;
+    },
+  });
+  return valid && target && calls > 0
+    ? { dependency: target.index, value: t.identifier(target.valueName) }
+    : undefined;
+}
+
+function keyedMapLookupTarget(
+  binding: PendingKeyedRowBinding,
+  keyCallback: t.ArrowFunctionExpression | t.FunctionExpression,
+  renderCallback: t.ArrowFunctionExpression | t.FunctionExpression,
+  reactiveByValue: ReadonlyMap<string, StateBinding>,
+  structureDependencies: ReadonlySet<number>,
+): PendingKeyedRowBinding["mapLookupTarget"] {
+  const dependencies = binding.dependencies || [];
+  if (dependencies.length !== 1 || structureDependencies.has(dependencies[0])) return undefined;
+  const keyExpression = returnedExpression(keyCallback);
+  const keyItem = keyCallback.params[0];
+  const rowItem = renderCallback.params[0];
+  if (!keyExpression || !t.isIdentifier(keyItem) || !t.isIdentifier(rowItem)) return undefined;
+
+  const replacements = new Map<string, t.Identifier>([[keyItem.name, rowItem]]);
+  const keyIndex = keyCallback.params[1];
+  const rowIndex = renderCallback.params[1];
+  if (t.isIdentifier(keyIndex) && t.isIdentifier(rowIndex)) {
+    replacements.set(keyIndex.name, rowIndex);
+  }
+  const rowKeyExpression = rewriteFreeIdentifierNames(keyExpression, replacements);
+  const file = expressionFile(cloneExpression(binding.value));
+  let target: StateBinding | undefined;
+  let valid = true;
+  let calls = 0;
+  traverse(file, {
+    ReferencedIdentifier(path) {
+      if (!valid || path.scope.hasBinding(path.node.name)) return;
+      const reactive = reactiveByValue.get(path.node.name);
+      if (!reactive) return;
+      const member = path.parentPath;
+      const call = member.parentPath;
+      if (
+        !reactive.setterName ||
+        reactive.index !== dependencies[0] ||
+        (target && target !== reactive) ||
+        !member.isMemberExpression() ||
+        member.node.object !== path.node ||
+        member.node.computed ||
+        !t.isIdentifier(member.node.property, { name: "get" }) ||
         !call ||
         !call.isCallExpression() ||
         call.node.callee !== member.node ||
@@ -1651,7 +1749,7 @@ function analyzeKeyedRowTree(
   renderCallback: t.ArrowFunctionExpression | t.FunctionExpression,
   safeGlobals: ReadonlySet<string>,
   compilerSetters: ReadonlySet<string>,
-  membershipReactiveByValue?: ReadonlyMap<string, StateBinding>,
+  keyedTargetReactiveByValue?: ReadonlyMap<string, StateBinding>,
 ): {
   bindings?: PendingKeyedRowBinding[];
   events?: PendingKeyedRowEvent[];
@@ -1676,8 +1774,10 @@ function analyzeKeyedRowTree(
     validateDerivedExpression(
       expression,
       safeGlobals,
-      membershipReactiveByValue
-        ? (call) => isPotentialKeyedMembershipCall(call, membershipReactiveByValue)
+      keyedTargetReactiveByValue
+        ? (call) =>
+            isPotentialKeyedMembershipCall(call, keyedTargetReactiveByValue) ||
+            isPotentialKeyedMapLookupCall(call, keyedTargetReactiveByValue)
         : undefined,
     );
   const visit = (element: t.JSXElement, path: number[]): string | undefined => {
@@ -2043,6 +2143,8 @@ function analyzeKeyedRowsContainer(
   if (!shape || shape.rowReason) return shape;
   const needsMembershipProof = (binding: PendingKeyedRowBinding) =>
     containsPotentialKeyedMembershipCall(binding.value, statesByValue);
+  const needsMapLookupProof = (binding: PendingKeyedRowBinding) =>
+    containsPotentialKeyedMapLookupCall(binding.value, statesByValue);
   if (
     shape.conditionals.length > 0 ||
     (shape.events.length > 0 &&
@@ -2052,11 +2154,13 @@ function analyzeKeyedRowsContainer(
         source: container,
       }))
   ) {
-    return shape.bindings.some(needsMembershipProof)
+    return shape.bindings.some(
+      (binding) => needsMembershipProof(binding) || needsMapLookupProof(binding),
+    )
       ? {
           ...shape,
           rowReason:
-            "keyed membership targets require compiler-owned rows without React-owned branches or events",
+            "keyed collection targets require compiler-owned rows without React-owned branches or events",
         }
       : shape;
   }
@@ -2077,6 +2181,13 @@ function analyzeKeyedRowsContainer(
       statesByValue,
       structureDependencies,
     ),
+    mapLookupTarget: keyedMapLookupTarget(
+      binding,
+      shape.keyCallback,
+      shape.renderCallback,
+      statesByValue,
+      structureDependencies,
+    ),
   }));
   if (
     bindings.some(
@@ -2086,6 +2197,16 @@ function analyzeKeyedRowsContainer(
     return {
       ...shape,
       rowReason: "keyed membership targets must call one local Set state with the exact row key",
+    };
+  }
+  if (
+    bindings.some(
+      (binding, index) => needsMapLookupProof(shape.bindings[index]) && !binding.mapLookupTarget,
+    )
+  ) {
+    return {
+      ...shape,
+      rowReason: "keyed Map lookup targets must call one local Map state with the exact row key",
     };
   }
   return {
@@ -3356,6 +3477,23 @@ function keyedRowBindingObject(
           t.objectProperty(
             t.identifier("read"),
             t.arrowFunctionExpression([], cloneExpression(binding.membershipTarget.value)),
+          ),
+        ]),
+      ),
+    );
+  }
+  if (binding.mapLookupTarget) {
+    properties.push(
+      t.objectProperty(
+        t.identifier("mapLookupTarget"),
+        t.objectExpression([
+          t.objectProperty(
+            t.identifier("dependency"),
+            t.numericLiteral(binding.mapLookupTarget.dependency),
+          ),
+          t.objectProperty(
+            t.identifier("read"),
+            t.arrowFunctionExpression([], cloneExpression(binding.mapLookupTarget.value)),
           ),
         ]),
       ),
@@ -5154,6 +5292,7 @@ function compileCandidate(
   usedRuntimeFeatures: Set<CompilerRuntimeFeatureName>,
   optimizationCounts: {
     keyedIdentityTargets: number;
+    keyedMapLookupTargets: number;
     keyedMembershipTargets: number;
     keyedMapUpdateHints: number;
   },
@@ -5454,6 +5593,14 @@ function compileCandidate(
         : 0),
     0,
   );
+  optimizationCounts.keyedMapLookupTargets += blockPlans.reduce(
+    (count, plan) =>
+      count +
+      (plan.kind === "keyed-rows"
+        ? plan.bindings.filter((binding) => binding.mapLookupTarget !== undefined).length
+        : 0),
+    0,
+  );
   const runtimeFeatures = runtimeFeaturesForPlans(blockPlans, appliedKeyedMapUpdateHints > 0);
   markShortCircuitBindings(analysis.bindings || []);
   assignStableBindingTargets(analysis.bindings || []);
@@ -5640,6 +5787,7 @@ export async function compileReactModule(
   const diagnostics: CompilerDiagnostic[] = [];
   const optimizationCounts = {
     keyedIdentityTargets: 0,
+    keyedMapLookupTargets: 0,
     keyedMembershipTargets: 0,
     keyedMapUpdateHints: 0,
   };
