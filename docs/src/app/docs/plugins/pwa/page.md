@@ -26,19 +26,21 @@ export default defineConfig({
   plugins: [
     pwa({
       offline: "/offline",
-      cache: "recommended",
+      cache: "auto",
     }),
   ],
 });
 ```
 
-`recommended` means:
+The worker always precaches immutable build assets. `cache: "auto"` additionally means:
 
-- Precache hashed JavaScript, CSS, fonts, WebAssembly, and emitted web manifest files.
 - Precache every HTML page Farm emitted as a static route.
 - Cache public same-origin images with SWR.
 - Keep up to 100 image responses fresh for 30 days.
-- Prompt before activating a new deployment.
+
+`auto` is the default, so you can omit `cache` for the same behavior. The previous `recommended`
+value remains available as a compatibility alias. Service worker updates separately default to
+`update: "prompt"`.
 
 The worker only intercepts `GET` requests and same-origin URLs. Dynamic pages, APIs, actions,
 integrations, and workflows remain network-owned.
@@ -89,7 +91,7 @@ export default function manifest(): MetadataRoute.Manifest {
 
 ## SWR in one line
 
-Use the explicit form when you do not want every recommended behavior:
+Use the explicit form when you want individual cache controls instead of the automatic preset:
 
 ```ts
 pwa({
@@ -152,17 +154,17 @@ worker and reloads once the new worker controls the page.
 
 ## Options
 
-| Option    | Default         | Description                                                             |
-| --------- | --------------- | ----------------------------------------------------------------------- |
-| `enabled` | `true`          | Generate and register the worker.                                       |
-| `offline` | `false`         | Static route served after an offline navigation misses the cache.       |
-| `update`  | `"prompt"`      | Prompt or automatically activate and reload for a waiting worker.       |
-| `cache`   | `"recommended"` | Recommended caching, a custom object, or `false` for build assets only. |
+| Option    | Default    | Description                                                           |
+| --------- | ---------- | --------------------------------------------------------------------- |
+| `enabled` | `true`     | Generate and register the worker.                                     |
+| `offline` | `false`    | Static route served after an offline navigation misses the cache.     |
+| `update`  | `"prompt"` | Prompt or automatically activate and reload for a waiting worker.     |
+| `cache`   | `"auto"`   | Automatic caching, a custom object, or `false` for build assets only. |
 
-| Cache option   | Default under `recommended` | Description                                          |
-| -------------- | --------------------------- | ---------------------------------------------------- |
-| `staticRoutes` | `true`                      | Every emitted static page, a route list, or `false`. |
-| `images`       | `"swr"`                     | SWR options, `true`, `"swr"`, or `false`.            |
+| Cache option   | Default under `auto` | Description                                          |
+| -------------- | -------------------- | ---------------------------------------------------- |
+| `staticRoutes` | `true`               | Every emitted static page, a route list, or `false`. |
+| `images`       | `"swr"`              | SWR options, `true`, `"swr"`, or `false`.            |
 
 ## Production lifecycle
 

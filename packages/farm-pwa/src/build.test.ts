@@ -40,7 +40,7 @@ describe("writePwaBuildArtifacts", () => {
       outputDir: root,
       preset: "node-server",
       basePath: "/",
-      options: resolvePwaOptions({ offline: "/offline", cache: "recommended" }),
+      options: resolvePwaOptions({ offline: "/offline", cache: "auto" }),
     });
 
     expect(result.workerPath).toBe(path.join(publicDir, "sw.js"));

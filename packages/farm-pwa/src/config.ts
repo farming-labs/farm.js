@@ -25,8 +25,8 @@ export interface PwaPluginOptions {
   offline?: string | false;
   /** How a waiting service worker becomes active. */
   update?: "prompt" | "auto";
-  /** Recommended caching, custom caching, or build assets only. */
-  cache?: "recommended" | PwaCacheOptions | false;
+  /** Automatic caching, a custom cache policy, or build assets only. */
+  cache?: "auto" | "recommended" | PwaCacheOptions | false;
 }
 
 export interface ResolvedPwaImageCacheOptions {
@@ -49,7 +49,8 @@ const DEFAULT_IMAGE_LIMIT = 100;
 const DEFAULT_IMAGE_TTL = "30d";
 
 export function resolvePwaOptions(options: PwaPluginOptions = {}): ResolvedPwaOptions {
-  const cache = options.cache ?? "recommended";
+  const cache = options.cache ?? "auto";
+  const usesAutomaticCache = cache === "auto" || cache === "recommended";
   const customCache = typeof cache === "object" ? cache : undefined;
 
   return {
@@ -57,18 +58,16 @@ export function resolvePwaOptions(options: PwaPluginOptions = {}): ResolvedPwaOp
     offline: normalizeRoute(options.offline ?? false, "offline"),
     update: options.update ?? "prompt",
     cache: {
-      staticRoutes:
-        cache === "recommended"
-          ? true
-          : cache === false
-            ? false
-            : normalizeStaticRoutes(customCache?.staticRoutes ?? false),
-      images:
-        cache === "recommended"
-          ? resolveImageCache("swr")
-          : cache === false
-            ? false
-            : resolveImageCache(customCache?.images ?? false),
+      staticRoutes: usesAutomaticCache
+        ? true
+        : cache === false
+          ? false
+          : normalizeStaticRoutes(customCache?.staticRoutes ?? false),
+      images: usesAutomaticCache
+        ? resolveImageCache("swr")
+        : cache === false
+          ? false
+          : resolveImageCache(customCache?.images ?? false),
     },
   };
 }

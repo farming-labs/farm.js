@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { parsePwaDuration, resolvePwaOptions } from "./config";
 
 describe("resolvePwaOptions", () => {
-  it("uses the short recommended configuration by default", () => {
-    expect(resolvePwaOptions({ offline: "/offline" })).toEqual({
+  it("uses the automatic cache preset by default", () => {
+    const expected = {
       enabled: true,
       offline: "/offline",
       update: "prompt",
@@ -15,7 +15,16 @@ describe("resolvePwaOptions", () => {
           ttlMs: 30 * 24 * 60 * 60 * 1_000,
         },
       },
-    });
+    };
+
+    expect(resolvePwaOptions({ offline: "/offline" })).toEqual(expected);
+    expect(resolvePwaOptions({ offline: "/offline", cache: "auto" })).toEqual(expected);
+  });
+
+  it("keeps recommended as a compatibility alias for auto", () => {
+    expect(resolvePwaOptions({ cache: "recommended" })).toEqual(
+      resolvePwaOptions({ cache: "auto" }),
+    );
   });
 
   it("accepts images: swr and a compact advanced form", () => {
