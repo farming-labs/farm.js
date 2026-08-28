@@ -1,7 +1,7 @@
 ---
 title: "Create a Plugin"
 description: "Build a typed Farm plugin with private state, request context, Web Request transforms, and framework lifecycle hooks."
-section: "Extending"
+section: "Plugin Ecosystem"
 ---
 
 # Create a Plugin

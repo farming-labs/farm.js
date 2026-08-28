@@ -9,6 +9,7 @@ import {
   siNuxt,
   siPreact,
   siReact,
+  siSentry,
   siSolid,
   siSvelte,
   siTanstack,
@@ -78,6 +79,7 @@ const icons = {
   "brand-resend": brandPath(
     "M14.679 0c4.648 0 7.413 2.765 7.413 6.434s-2.765 6.434-7.413 6.434H12.33L24 24h-8.245l-8.88-8.44c-.636-.588-.93-1.273-.93-1.86 0-.831.587-1.565 1.713-1.883l4.574-1.224c1.737-.465 2.936-1.81 2.936-3.572 0-2.153-1.761-3.4-3.939-3.4H0V0z",
   ),
+  "brand-sentry": brandPath(siSentry.path),
   "brand-shadcn": brandPath(
     "M22.219 11.784 11.784 22.219c-.407.407-.407 1.068 0 1.476.407.407 1.068.407 1.476 0L23.695 13.26c.407-.408.407-1.069 0-1.476-.408-.407-1.069-.407-1.476 0ZM20.132.305.305 20.132c-.407.407-.407 1.068 0 1.476.408.407 1.069.407 1.476 0L21.608 1.781c.407-.407.407-1.068 0-1.476-.408-.407-1.069-.407-1.476 0Z",
   ),
@@ -313,10 +315,11 @@ const sidebar = [
     ],
   },
   {
-    label: "Extending",
-    icon: "wrench",
+    label: "Plugin Ecosystem",
+    icon: "plug",
     children: [
-      { label: "Plugin Ecosystem", slug: "plugins", icon: "plug" },
+      { label: "Overview", slug: "plugins", icon: "plug" },
+      { label: "Sentry", slug: "plugins/sentry", icon: "brand-sentry" },
       { label: "Client Plugins", slug: "plugins/client", icon: "monitor" },
       { label: "Create a Plugin", slug: "plugins/create-plugin", icon: "wrench" },
     ],

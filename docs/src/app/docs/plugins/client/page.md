@@ -1,7 +1,7 @@
 ---
 title: "Client Plugins"
 description: "Define typed hydration, navigation, error, performance, and cleanup hooks directly inside a Farm plugin."
-section: "Extending"
+section: "Plugin Ecosystem"
 ---
 
 # Client Plugins

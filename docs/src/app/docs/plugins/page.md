@@ -1,7 +1,7 @@
 ---
 title: "Plugin Ecosystem"
 description: "Extend Farm's server and browser lifecycle with typed runtime, router, render, build, navigation, and development hooks."
-section: "Extending"
+section: "Plugin Ecosystem"
 ---
 
 # Plugin Ecosystem
@@ -9,6 +9,15 @@ section: "Extending"
 Plugins are Farm's framework extension surface. Use a plugin to change how Farm configures an app, handles requests, discovers routes, renders HTML, builds output, observes browser hydration and navigation, or responds to development events.
 
 Use an [integration](/docs/integrations) for a product or service such as authentication, payments, email, analytics, or a database. Integrations own product config, endpoints, typed callers, and providers. Plugins own framework lifecycle behavior.
+
+## Official plugins
+
+| Plugin                                 | Purpose                                                                                        |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| [Sentry](/docs/plugins/sentry)         | Report server errors with Farm event and route context, trace requests, and flush on shutdown. |
+| [Client plugins](/docs/plugins/client) | Add typed browser hydration, navigation, error, performance, and cleanup lifecycle hooks.      |
+
+Each published plugin has its own setup page in this section. Use [Create a Plugin](/docs/plugins/create-plugin) when the behavior is specific to your application or package.
 
 ## What framework-focused means
 
