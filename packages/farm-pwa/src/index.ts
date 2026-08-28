@@ -7,9 +7,17 @@ import {
   type PwaImageCache,
   type PwaImageCacheOptions,
   type PwaPluginOptions,
+  type PwaServiceWorkerOptions,
 } from "./config.js";
 
-export type { PwaCacheOptions, PwaDuration, PwaImageCache, PwaImageCacheOptions, PwaPluginOptions };
+export type {
+  PwaCacheOptions,
+  PwaDuration,
+  PwaImageCache,
+  PwaImageCacheOptions,
+  PwaPluginOptions,
+  PwaServiceWorkerOptions,
+};
 
 export interface FarmPwaBrowserRuntime {
   registration: ServiceWorkerRegistration;
@@ -29,12 +37,13 @@ declare global {
 }
 
 /**
- * Generate and register a route-aware service worker for a Farm application.
- * Build assets are always precached. Optional page and image caching stays
- * constrained to safe GET navigation and same-origin image requests.
+ * Generate or copy and then register a service worker for a Farm application.
+ * In generated mode, build assets are always precached while optional page and
+ * image caching stays constrained to safe GET navigation and same-origin images.
  */
 export function pwa(options: PwaPluginOptions = {}) {
   const resolved = resolvePwaOptions(options);
+  let configuredRoot = ".";
   let configuredBasePath = "/";
   let configuredOutputDir = ".farm/.output";
   const publicConfig = {
@@ -42,12 +51,14 @@ export function pwa(options: PwaPluginOptions = {}) {
     workerUrl: "/sw.js",
     scope: "/",
     update: resolved.update,
+    workerType: resolved.serviceWorker ? resolved.serviceWorker.type : "classic",
   };
 
   return definePlugin({
     name: "farm:pwa",
 
     configure(config) {
+      configuredRoot = config.root ?? ".";
       const basePath = normalizeBasePath(config.basePath);
       configuredBasePath = basePath;
       configuredOutputDir = `${config.root ?? "."}/.farm/.output`;
@@ -66,6 +77,7 @@ export function pwa(options: PwaPluginOptions = {}) {
         const generate = async () => {
           if (generated) return;
           const built = await writePwaBuildArtifacts({
+            root: configuredRoot,
             outputDir: nitroConfig.output?.dir ?? configuredOutputDir,
             publicDir: nitroConfig.output?.publicDir,
             preset: nitroConfig.preset ?? "node-server",
@@ -74,7 +86,9 @@ export function pwa(options: PwaPluginOptions = {}) {
           });
           generated = true;
           console.info(
-            `[farm:pwa] Generated ${built.workerUrl} with ${built.precacheUrls.length} precached files`,
+            built.mode === "custom"
+              ? `[farm:pwa] Copied custom service worker to ${built.workerUrl}`
+              : `[farm:pwa] Generated ${built.workerUrl} with ${built.precacheUrls.length} precached files`,
           );
         };
 
@@ -102,9 +116,12 @@ export function pwa(options: PwaPluginOptions = {}) {
       async setup({ public: config, isProd }) {
         if (!config.enabled || !isProd || !("serviceWorker" in navigator)) return undefined;
 
-        const registration = await navigator.serviceWorker.register(config.workerUrl, {
-          scope: config.scope,
-        });
+        const registration = await navigator.serviceWorker.register(
+          config.workerUrl,
+          config.workerType === "module"
+            ? { scope: config.scope, type: "module" }
+            : { scope: config.scope },
+        );
         const hadControllerAtSetup = Boolean(navigator.serviceWorker.controller);
         let applyingUpdate = false;
         let reloading = false;

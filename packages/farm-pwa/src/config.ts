@@ -18,6 +18,13 @@ export interface PwaCacheOptions {
   images?: PwaImageCache;
 }
 
+export interface PwaServiceWorkerOptions {
+  /** JavaScript file copied verbatim into the production output as sw.js. */
+  source: string;
+  /** Registration type for the custom worker. */
+  type?: "classic" | "module";
+}
+
 export interface PwaPluginOptions {
   /** Set false to keep the plugin registered without emitting or registering a worker. */
   enabled?: boolean;
@@ -25,8 +32,10 @@ export interface PwaPluginOptions {
   offline?: string | false;
   /** How a waiting service worker becomes active. */
   update?: "prompt" | "auto";
-  /** Automatic caching, a custom cache policy, or build assets only. */
+  /** Generated-worker caching, a custom cache policy, or build assets only. */
   cache?: "auto" | "recommended" | PwaCacheOptions | false;
+  /** Copy and register a prebuilt service worker instead of generating one. */
+  serviceWorker?: PwaServiceWorkerOptions;
 }
 
 export interface ResolvedPwaImageCacheOptions {
@@ -39,6 +48,7 @@ export interface ResolvedPwaOptions {
   enabled: boolean;
   offline: string | false;
   update: "prompt" | "auto";
+  serviceWorker: Required<PwaServiceWorkerOptions> | false;
   cache: {
     staticRoutes: boolean | string[];
     images: ResolvedPwaImageCacheOptions | false;
@@ -49,27 +59,51 @@ const DEFAULT_IMAGE_LIMIT = 100;
 const DEFAULT_IMAGE_TTL = "30d";
 
 export function resolvePwaOptions(options: PwaPluginOptions = {}): ResolvedPwaOptions {
+  const serviceWorker = resolveServiceWorker(options.serviceWorker);
+  if (serviceWorker && (options.offline !== undefined || options.cache !== undefined)) {
+    throw new TypeError(
+      "PWA serviceWorker cannot be combined with offline or cache because the custom worker owns those behaviors",
+    );
+  }
+
   const cache = options.cache ?? "auto";
   const usesAutomaticCache = cache === "auto" || cache === "recommended";
   const customCache = typeof cache === "object" ? cache : undefined;
 
   return {
     enabled: options.enabled !== false,
-    offline: normalizeRoute(options.offline ?? false, "offline"),
+    offline: serviceWorker ? false : normalizeRoute(options.offline ?? false, "offline"),
     update: options.update ?? "prompt",
+    serviceWorker,
     cache: {
-      staticRoutes: usesAutomaticCache
-        ? true
-        : cache === false
-          ? false
-          : normalizeStaticRoutes(customCache?.staticRoutes ?? false),
-      images: usesAutomaticCache
-        ? resolveImageCache("swr")
-        : cache === false
-          ? false
-          : resolveImageCache(customCache?.images ?? false),
+      staticRoutes: serviceWorker
+        ? false
+        : usesAutomaticCache
+          ? true
+          : cache === false
+            ? false
+            : normalizeStaticRoutes(customCache?.staticRoutes ?? false),
+      images: serviceWorker
+        ? false
+        : usesAutomaticCache
+          ? resolveImageCache("swr")
+          : cache === false
+            ? false
+            : resolveImageCache(customCache?.images ?? false),
     },
   };
+}
+
+function resolveServiceWorker(
+  value: PwaServiceWorkerOptions | undefined,
+): Required<PwaServiceWorkerOptions> | false {
+  if (!value) return false;
+  const source = value.source.trim();
+  if (!source) throw new TypeError("PWA serviceWorker source must be a non-empty path");
+  if (value.type !== undefined && value.type !== "classic" && value.type !== "module") {
+    throw new TypeError('PWA serviceWorker type must be "classic" or "module"');
+  }
+  return { source, type: value.type ?? "classic" };
 }
 
 export function parsePwaDuration(value: PwaDuration): number {

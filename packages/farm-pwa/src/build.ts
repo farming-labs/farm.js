@@ -4,6 +4,7 @@ import path from "node:path";
 import type { ResolvedPwaOptions } from "./config.js";
 
 export interface PwaBuildInput {
+  root?: string;
   outputDir: string;
   publicDir?: string;
   preset: string;
@@ -12,6 +13,7 @@ export interface PwaBuildInput {
 }
 
 export interface PwaBuildResult {
+  mode: "generated" | "custom";
   workerPath: string;
   workerUrl: string;
   precacheUrls: string[];
@@ -33,10 +35,38 @@ const PRECACHE_EXTENSIONS = new Set([
 
 export async function writePwaBuildArtifacts(input: PwaBuildInput): Promise<PwaBuildResult> {
   const publicDir = input.publicDir ?? resolvePwaPublicDir(input.outputDir, input.preset);
-  const files = await walkFiles(publicDir);
-  const staticRouteFiles = resolveStaticRouteFiles(files);
   const basePath = normalizeBasePath(input.basePath);
   const workerRelativePath = path.posix.join(basePath.replace(/^\//, ""), "sw.js");
+  const workerPath = path.join(publicDir, ...workerRelativePath.split("/"));
+
+  if (input.options.serviceWorker) {
+    const sourcePath = path.resolve(
+      input.root ?? process.cwd(),
+      input.options.serviceWorker.source,
+    );
+    let source: Buffer;
+    try {
+      source = await readFile(sourcePath);
+    } catch (cause) {
+      throw new Error(
+        `[farm:pwa] Custom service worker ${JSON.stringify(input.options.serviceWorker.source)} could not be read.`,
+        { cause },
+      );
+    }
+    await mkdir(path.dirname(workerPath), { recursive: true });
+    await writeFile(workerPath, source);
+    return {
+      mode: "custom",
+      workerPath,
+      workerUrl: withBasePath("/sw.js", basePath),
+      precacheUrls: [],
+      staticRoutes: {},
+      cacheId: createHash("sha256").update(source).digest("hex").slice(0, 16),
+    };
+  }
+
+  const files = await walkFiles(publicDir);
+  const staticRouteFiles = resolveStaticRouteFiles(files);
   const selectedRoutes = selectStaticRoutes(
     staticRouteFiles,
     input.options.cache.staticRoutes,
@@ -84,7 +114,6 @@ export async function writePwaBuildArtifacts(input: PwaBuildInput): Promise<PwaB
     .digest("hex")
     .slice(0, 16);
 
-  const workerPath = path.join(publicDir, ...workerRelativePath.split("/"));
   await mkdir(path.dirname(workerPath), { recursive: true });
   await writeFile(
     workerPath,
@@ -99,6 +128,7 @@ export async function writePwaBuildArtifacts(input: PwaBuildInput): Promise<PwaB
   );
 
   return {
+    mode: "generated",
     workerPath,
     workerUrl: withBasePath("/sw.js", basePath),
     precacheUrls,

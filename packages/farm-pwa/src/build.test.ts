@@ -84,6 +84,27 @@ describe("writePwaBuildArtifacts", () => {
     expect(result.staticRoutes).toEqual({ "/app/offline": "offline/index.html" });
   });
 
+  it("copies a custom service worker verbatim under basePath", async () => {
+    const { root, publicDir } = await createOutput("node-server");
+    const customWorker = 'self.addEventListener("fetch", () => undefined);\n';
+    await writeFile(path.join(root, "custom-worker.js"), customWorker);
+
+    const result = await writePwaBuildArtifacts({
+      root,
+      outputDir: root,
+      preset: "node-server",
+      basePath: "/app",
+      options: resolvePwaOptions({
+        serviceWorker: { source: "custom-worker.js", type: "module" },
+      }),
+    });
+
+    expect(result.mode).toBe("custom");
+    expect(result.workerUrl).toBe("/app/sw.js");
+    expect(result.precacheUrls).toEqual([]);
+    expect(await readFile(path.join(publicDir, "app", "sw.js"), "utf8")).toBe(customWorker);
+  });
+
   it("prefixes every logical static route without requiring basePath folders on disk", async () => {
     const { root } = await createOutput("node-server");
     const result = await writePwaBuildArtifacts({

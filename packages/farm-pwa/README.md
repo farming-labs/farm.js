@@ -1,7 +1,8 @@
 # @farm.js/pwa
 
 Installable, offline-aware Progressive Web Apps for Farm.js. The plugin generates a route-aware
-service worker during the production build and registers it through Farm's browser plugin lifecycle.
+service worker or copies a custom one during the production build, then registers it through Farm's
+browser plugin lifecycle.
 
 Farm.js is currently in beta.
 
@@ -73,6 +74,25 @@ pwa({
   },
 });
 ```
+
+## Bring your own service worker
+
+Advanced applications can replace the generated worker with a prebuilt JavaScript file:
+
+```ts
+pwa({
+  serviceWorker: {
+    source: "src/service-worker.js",
+    type: "module",
+  },
+});
+```
+
+The source path is relative to the Farm project root. Farm copies the file verbatim to the final
+`sw.js` location and keeps its production registration and update lifecycle. A custom worker owns
+all fetch, offline, and cache behavior, so `serviceWorker` cannot be combined with `offline` or
+`cache`. It must handle the `FARM_PWA_SKIP_WAITING` message for Farm's update action to activate a
+waiting worker.
 
 ## Updates
 

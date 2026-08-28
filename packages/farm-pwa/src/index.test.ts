@@ -87,6 +87,30 @@ describe("pwa browser lifecycle", () => {
 
     expect(serviceWorker.register).not.toHaveBeenCalled();
   });
+
+  it("registers a custom module worker through the same browser lifecycle", async () => {
+    const serviceWorker = new ServiceWorkerContainerMock();
+    serviceWorker.controller = null as never;
+    serviceWorker.registration.waiting = null;
+    vi.stubGlobal("navigator", { serviceWorker });
+    vi.stubGlobal("window", Object.assign(new EventTarget(), { location: { reload: vi.fn() } }));
+
+    const plugin = pwa({
+      serviceWorker: { source: "src/service-worker.js", type: "module" },
+    });
+    await plugin.client?.setup?.({
+      plugin: { name: plugin.name },
+      public: plugin.client.public,
+      router: {} as never,
+      isDev: false,
+      isProd: true,
+    } as never);
+
+    expect(serviceWorker.register).toHaveBeenCalledWith("/sw.js", {
+      scope: "/",
+      type: "module",
+    });
+  });
 });
 
 describe("pwa production build lifecycle", () => {
