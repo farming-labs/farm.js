@@ -43,6 +43,7 @@ export function StandardTableBenchmark() {
   const [rows, setRows] = useState(() => buildRows(100, 0));
   const [seed, setSeed] = useState(0);
   const [selected, setSelected] = useState(0);
+  const [markedIds, setMarkedIds] = useState(() => new Set<number>());
   const [operation, setOperation] = useState("initial 100 rows");
   const [revision, setRevision] = useState(0);
 
@@ -52,6 +53,7 @@ export function StandardTableBenchmark() {
       data-benchmark="table"
       data-revision={revision}
       data-selected={selected}
+      data-marked-count={markedIds.size}
       id="table-benchmark"
     >
       <header className="benchmark-heading">
@@ -91,6 +93,7 @@ export function StandardTableBenchmark() {
             setSeed(nextSeed);
             setRows(buildRows(1_000, nextSeed));
             setSelected(0);
+            setMarkedIds(new Set());
             setOperation("create 1,000");
             setRevision((value) => value + 1);
           }}
@@ -106,6 +109,7 @@ export function StandardTableBenchmark() {
             setSeed(nextSeed);
             setRows(buildRows(10_000, nextSeed));
             setSelected(0);
+            setMarkedIds(new Set());
             setOperation("create 10,000");
             setRevision((value) => value + 1);
           }}
@@ -134,6 +138,7 @@ export function StandardTableBenchmark() {
             setSeed(nextSeed);
             setRows(buildRows(1_000, nextSeed));
             setSelected(0);
+            setMarkedIds(new Set());
             setOperation("replace 1,000");
             setRevision((value) => value + 1);
           }}
@@ -155,6 +160,25 @@ export function StandardTableBenchmark() {
           }}
         >
           Update every 10th
+        </button>
+        <button
+          data-action="table-mark"
+          type="button"
+          onClick={() => {
+            setMarkedIds((current) => {
+              const middle = Math.floor(rows.length / 2);
+              const first = rows[middle]?.id;
+              const second = rows[middle + 1]?.id;
+              if (first === undefined || second === undefined) return current;
+              return current.has(first)
+                ? new Set([rows[middle + 2]?.id ?? first, rows[middle + 3]?.id ?? second])
+                : new Set([first, second]);
+            });
+            setOperation("mark two rows");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Mark two rows
         </button>
         <button
           data-action="table-swap"
@@ -186,6 +210,7 @@ export function StandardTableBenchmark() {
           onClick={() => {
             setRows([]);
             setSelected(0);
+            setMarkedIds(new Set());
             setOperation("clear");
             setRevision((value) => value + 1);
           }}
@@ -212,6 +237,7 @@ export function StandardTableBenchmark() {
             {rows.map((row, index) => (
               <tr
                 className={selected === row.id ? "table-row--selected" : ""}
+                data-marked={markedIds.has(row.id)}
                 data-row-id={row.id}
                 data-selected={selected === row.id}
                 key={row.id}

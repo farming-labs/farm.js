@@ -119,6 +119,10 @@ async function inspectBuild(compilerMode) {
       "The compiler build did not emit a key-directed row-binding target.",
     );
     assert(
+      compilerReport.summary.keyedMembershipTargets > 0,
+      "The compiler build did not emit a keyed Set-membership target.",
+    );
+    assert(
       compilerReport.summary.keyedMapUpdateHints > 0,
       "The compiler build did not emit a mutation-aware keyed-map update hint.",
     );
@@ -477,6 +481,19 @@ async function measureTrial(browser, trial, compilerMode, port) {
           },
         );
 
+        const tableMembership = await measureTable(
+          async () => ensure1000(),
+          async () => {
+            const row = table.querySelectorAll("tbody tr")[500];
+            const previous = row?.getAttribute("data-marked");
+            if (!row) throw new Error("Membership target row is missing.");
+            await runTableAction(
+              () => tableButton("table-mark").click(),
+              () => row.getAttribute("data-marked") !== previous,
+            );
+          },
+        );
+
         const tableRemove = await measureTable(
           async () => {
             if (rowCount() !== 1_000) await create1000();
@@ -504,6 +521,7 @@ async function measureTrial(browser, trial, compilerMode, port) {
           appendTo20k: [],
           clear20k: [],
           create10k: [],
+          membership20k: [],
           remove20k: [],
           select20k: [],
           swap20k: [],
@@ -551,6 +569,16 @@ async function measureTrial(browser, trial, compilerMode, port) {
             scale.select20k.push(performance.now() - selectStartedAt);
           }
 
+          const membershipRow = table.querySelectorAll("tbody tr")[10_000];
+          const previousMembership = membershipRow?.getAttribute("data-marked");
+          if (!membershipRow) throw new Error("20,000-row membership target is missing.");
+          const membershipStartedAt = performance.now();
+          await runTableAction(
+            () => tableButton("table-mark").click(),
+            () => membershipRow.getAttribute("data-marked") !== previousMembership,
+          );
+          scale.membership20k.push(performance.now() - membershipStartedAt);
+
           const rowsBeforeSwap = table.querySelectorAll("tbody tr");
           const second = rowsBeforeSwap[1]?.getAttribute("data-row-id");
           const penultimate = rowsBeforeSwap[998]?.getAttribute("data-row-id");
@@ -590,6 +618,7 @@ async function measureTrial(browser, trial, compilerMode, port) {
             activeBarStayedStableDuringInactiveUpdates: activeBarBefore === activeBarAfter,
             dashboardLive: dashboard.dataset.live,
             dashboardRevision: Number(dashboard.dataset.revision),
+            finalMarkedCount: Number(table.dataset.markedCount),
             finalTableRows: rowCount(),
             scalePeakRows: peakRows,
           },
@@ -605,6 +634,7 @@ async function measureTrial(browser, trial, compilerMode, port) {
             create: tableCreate,
             createMany: tableCreateMany,
             executionsAdded: Number(tableExecutions.textContent) - initialTableExecutions,
+            membership: tableMembership,
             remove: tableRemove,
             replace: tableReplace,
             select: tableSelect,
@@ -625,6 +655,7 @@ async function measureTrial(browser, trial, compilerMode, port) {
 
     assert.equal(result.correctness.activeBarStayedStableDuringInactiveUpdates, true);
     assert.equal(result.correctness.dashboardLive, "true");
+    assert.equal(result.correctness.finalMarkedCount, 0);
     assert.equal(result.correctness.finalTableRows, 0);
     assert.equal(result.correctness.scalePeakRows, 20_000);
     assert.equal(browserErrors.length, 0, browserErrors.join("\n"));
@@ -656,6 +687,7 @@ async function measureTrial(browser, trial, compilerMode, port) {
         appendTo20k: timingSummary(result.scale.appendTo20k),
         clear20k: timingSummary(result.scale.clear20k),
         create10k: timingSummary(result.scale.create10k),
+        membership20k: timingSummary(result.scale.membership20k),
         remove20k: timingSummary(result.scale.remove20k),
         select20k: timingSummary(result.scale.select20k),
         swap20k: timingSummary(result.scale.swap20k),
@@ -667,6 +699,7 @@ async function measureTrial(browser, trial, compilerMode, port) {
         create: timingSummary(result.table.create),
         createMany: timingSummary(result.table.createMany),
         executionsAdded: result.table.executionsAdded,
+        membership: timingSummary(result.table.membership),
         remove: timingSummary(result.table.remove),
         replace: timingSummary(result.table.replace),
         select: timingSummary(result.table.select),
@@ -741,6 +774,7 @@ const tableMetrics = [
   "append",
   "updateEvery10th",
   "select",
+  "membership",
   "swap",
   "remove",
   "clear",
@@ -750,6 +784,7 @@ const scaleMetrics = [
   "appendTo20k",
   "updateEvery10th20k",
   "select20k",
+  "membership20k",
   "swap20k",
   "remove20k",
   "clear20k",
@@ -781,6 +816,7 @@ const scalabilityCases = [
   ["create10k", "createMany", 1],
   ["updateEvery10th20k", "updateEvery10th", 2],
   ["select20k", "select", 20],
+  ["membership20k", "membership", 20],
   ["swap20k", "swap", 20],
   ["remove20k", "remove", 20],
   ["clear20k", "clear", 2],
@@ -874,11 +910,37 @@ const keyedIdentityRegressions = keyedIdentityResults.filter(
     !Number.isFinite(normalizedGrowth) ||
     normalizedGrowth > keyedIdentityMaximumNormalizedGrowth,
 );
+// A native Set membership update can change several keyed rows at once. The compiler snapshots the
+// previous and next primitive members and touches only their symmetric difference. The unit suite
+// verifies the exact read count; this browser gate protects the corresponding 20,000-row win.
+const keyedMembershipMinimumSpeedup = 10;
+const keyedMembershipMaximumNormalizedGrowth = 2;
+const keyedMembershipResults = ["static", "hybrid"].map((mode) => {
+  const tableMedianMs = comparisons.table.membership[mode].medianMs;
+  const scaleMedianMs = comparisons.scale.membership20k[mode].medianMs;
+  const growth = scaleMedianMs / Math.max(tableMedianMs, timingResolutionFloorMs);
+  return {
+    growth,
+    mode,
+    normalizedGrowth: growth / 20,
+    scaleMedianMs,
+    speedup: comparisons.scale.membership20k[`${mode}VsBaseline`].speedup,
+    tableMedianMs,
+  };
+});
+const keyedMembershipRegressions = keyedMembershipResults.filter(
+  ({ normalizedGrowth, speedup }) =>
+    !Number.isFinite(speedup) ||
+    speedup < keyedMembershipMinimumSpeedup ||
+    !Number.isFinite(normalizedGrowth) ||
+    normalizedGrowth > keyedMembershipMaximumNormalizedGrowth,
+);
 const passed =
   performanceRegressions.length === 0 &&
   scalabilityRegressions.length === 0 &&
   keyedUpdateRegressions.length === 0 &&
-  keyedIdentityRegressions.length === 0;
+  keyedIdentityRegressions.length === 0 &&
+  keyedMembershipRegressions.length === 0;
 
 const report = {
   result: passed ? "PASS" : "CORRECTNESS_PASS_PERFORMANCE_REGRESSION",
@@ -901,6 +963,13 @@ const report = {
     regressions: keyedIdentityRegressions,
     results: keyedIdentityResults,
     status: keyedIdentityRegressions.length === 0 ? "PASS" : "FAIL",
+  },
+  keyedMembershipTargetGate: {
+    maximumNormalizedGrowth: keyedMembershipMaximumNormalizedGrowth,
+    minimumSpeedup: keyedMembershipMinimumSpeedup,
+    regressions: keyedMembershipRegressions,
+    results: keyedMembershipResults,
+    status: keyedMembershipRegressions.length === 0 ? "PASS" : "FAIL",
   },
   scalabilityGate: {
     metrics: scalability,

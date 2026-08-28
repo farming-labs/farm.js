@@ -289,6 +289,11 @@ export interface CompilerKeyedRowBinding {
     dependency: number;
     read(): unknown;
   };
+  /** A compiler-proven native Set whose members are compared with this row's key. */
+  membershipTarget?: {
+    dependency: number;
+    read(): unknown;
+  };
   read(item: unknown, index: number): unknown;
 }
 
@@ -934,6 +939,11 @@ interface CompilerKeyedIdentityTargetSnapshot {
   key?: string;
 }
 
+interface CompilerKeyedMembershipTargetSnapshot {
+  eligible: boolean;
+  values?: ReadonlySet<unknown>;
+}
+
 const UNSET_KEYED_ROW_BINDING = Symbol("unset interactive keyed-row binding");
 
 function keyedRowIdentity(key: React.Key): string {
@@ -949,6 +959,52 @@ function keyedIdentityTargetSnapshot(value: unknown): CompilerKeyedIdentityTarge
     kind === "bigint"
     ? { eligible: true, key: String(value) }
     : { eligible: false };
+}
+
+const NATIVE_SET_PROTOTYPE = Set.prototype;
+const NATIVE_SET_ADD = Set.prototype.add;
+const NATIVE_SET_HAS = Set.prototype.has;
+const NATIVE_SET_VALUES = Set.prototype.values;
+
+function keyedMembershipTargetSnapshot(value: unknown): CompilerKeyedMembershipTargetSnapshot {
+  if (typeof value !== "object" || value === null) return { eligible: false };
+  let iterator: SetIterator<unknown>;
+  try {
+    iterator = NATIVE_SET_VALUES.call(value as Set<unknown>);
+  } catch {
+    return { eligible: false };
+  }
+  if (
+    Object.getPrototypeOf(value) !== NATIVE_SET_PROTOTYPE ||
+    Object.prototype.hasOwnProperty.call(value, "has") ||
+    (value as Set<unknown>).has !== NATIVE_SET_HAS
+  ) {
+    return { eligible: false };
+  }
+  const values = new Set<unknown>();
+  try {
+    for (const entry of iterator) {
+      if (!keyedIdentityTargetSnapshot(entry).eligible) return { eligible: false };
+      NATIVE_SET_ADD.call(values, entry);
+    }
+  } catch {
+    return { eligible: false };
+  }
+  return { eligible: true, values };
+}
+
+function keyedMembershipChangedKeys(
+  previous: ReadonlySet<unknown>,
+  next: ReadonlySet<unknown>,
+): Set<string> {
+  const keys = new Set<string>();
+  for (const value of previous) {
+    if (!NATIVE_SET_HAS.call(next, value)) NATIVE_SET_ADD.call(keys, String(value));
+  }
+  for (const value of next) {
+    if (!NATIVE_SET_HAS.call(previous, value)) NATIVE_SET_ADD.call(keys, String(value));
+  }
+  return keys;
 }
 
 function normalizedKeyedRowBindingValue(binding: CompilerKeyedRowBinding, value: unknown): unknown {
@@ -2994,6 +3050,7 @@ function createKeyedRowsBlockComponent(
     private unsubscribe: (() => void) | undefined;
     private instances = new Map<string, CompilerKeyedRowInstance>();
     private identityTargets = new Map<number, CompilerKeyedIdentityTargetSnapshot>();
+    private membershipTargets = new Map<number, CompilerKeyedMembershipTargetSnapshot>();
     private collectionToken: object | undefined;
     private renderVersion = 0;
     private readonly eventHandlers = new Map<
@@ -3231,28 +3288,54 @@ function createKeyedRowsBlockComponent(
 
     private commitCurrentCollection(dirtyState?: ReadonlySet<number>): void {
       this.collectionToken = options.keyedMapUpdates?.commit(this.currentProps.items());
-      this.commitIdentityTargets(dirtyState);
+      this.commitKeyedTargets(dirtyState);
     }
 
-    private commitIdentityTargets(dirtyState?: ReadonlySet<number>): void {
-      if (!dirtyState) this.identityTargets.clear();
+    private hasSafeMembershipTargets(dirtyState?: ReadonlySet<number>): boolean {
+      for (const binding of this.currentProps.bindings) {
+        const target = binding.membershipTarget;
+        if (!target || (dirtyState && !dirtyState.has(target.dependency))) continue;
+        if (!keyedMembershipTargetSnapshot(target.read()).eligible) return false;
+      }
+      return true;
+    }
+
+    private commitKeyedTargets(dirtyState?: ReadonlySet<number>): void {
+      if (!dirtyState) {
+        this.identityTargets.clear();
+        this.membershipTargets.clear();
+      }
       for (
         let bindingIndex = 0;
         bindingIndex < this.currentProps.bindings.length;
         bindingIndex += 1
       ) {
-        const target = this.currentProps.bindings[bindingIndex].identityTarget;
-        if (!target) {
+        const binding = this.currentProps.bindings[bindingIndex];
+        const identityTarget = binding.identityTarget;
+        if (!identityTarget) {
           this.identityTargets.delete(bindingIndex);
-          continue;
+        } else if (!dirtyState || dirtyState.has(identityTarget.dependency)) {
+          this.identityTargets.set(
+            bindingIndex,
+            keyedIdentityTargetSnapshot(identityTarget.read()),
+          );
         }
-        if (dirtyState && !dirtyState.has(target.dependency)) continue;
-        this.identityTargets.set(bindingIndex, keyedIdentityTargetSnapshot(target.read()));
+
+        const membershipTarget = binding.membershipTarget;
+        if (!membershipTarget) {
+          this.membershipTargets.delete(bindingIndex);
+        } else if (!dirtyState || dirtyState.has(membershipTarget.dependency)) {
+          this.membershipTargets.set(
+            bindingIndex,
+            keyedMembershipTargetSnapshot(membershipTarget.read()),
+          );
+        }
       }
     }
 
     private adopt(): boolean {
       if (!this.root) return false;
+      if (!this.hasSafeMembershipTargets()) return false;
       const rows = this.readRows(this.currentProps);
       const elements = [...this.root.children];
       if (!rows || rows.items.length !== elements.length) return false;
@@ -3402,24 +3485,78 @@ function createKeyedRowsBlockComponent(
         }
       }
 
+      const nextIdentityTargets = new Map<number, CompilerKeyedIdentityTargetSnapshot>();
+      const nextMembershipTargets = new Map<number, CompilerKeyedMembershipTargetSnapshot>();
       for (const bindingIndex of affectedBindingIndices) {
         const binding = this.currentProps.bindings[bindingIndex];
-        const target = binding.identityTarget;
-        const previousTarget = this.identityTargets.get(bindingIndex);
-        const nextTarget = target ? keyedIdentityTargetSnapshot(target.read()) : undefined;
-        const canTarget = Boolean(
-          target &&
+        if (binding.identityTarget) {
+          nextIdentityTargets.set(
+            bindingIndex,
+            keyedIdentityTargetSnapshot(binding.identityTarget.read()),
+          );
+        }
+        if (binding.membershipTarget) {
+          const snapshot = keyedMembershipTargetSnapshot(binding.membershipTarget.read());
+          if (!snapshot.eligible) {
+            this.activateFallback(afterCommit);
+            return true;
+          }
+          nextMembershipTargets.set(bindingIndex, snapshot);
+        }
+      }
+
+      for (const bindingIndex of affectedBindingIndices) {
+        const binding = this.currentProps.bindings[bindingIndex];
+        const identityTarget = binding.identityTarget;
+        const previousIdentityTarget = this.identityTargets.get(bindingIndex);
+        const nextIdentityTarget = nextIdentityTargets.get(bindingIndex);
+        const canTargetIdentity = Boolean(
+          identityTarget &&
           binding.dependencies?.length === 1 &&
-          binding.dependencies[0] === target.dependency &&
-          dirtyState.has(target.dependency) &&
-          previousTarget?.eligible &&
-          nextTarget?.eligible,
+          binding.dependencies[0] === identityTarget.dependency &&
+          dirtyState.has(identityTarget.dependency) &&
+          previousIdentityTarget?.eligible &&
+          nextIdentityTarget?.eligible,
+        );
+        const membershipTarget = binding.membershipTarget;
+        const previousMembershipTarget = this.membershipTargets.get(bindingIndex);
+        const nextMembershipTarget = nextMembershipTargets.get(bindingIndex);
+        const canTargetMembership = Boolean(
+          membershipTarget &&
+          binding.dependencies?.length === 1 &&
+          binding.dependencies[0] === membershipTarget.dependency &&
+          dirtyState.has(membershipTarget.dependency) &&
+          previousMembershipTarget?.eligible &&
+          previousMembershipTarget.values &&
+          nextMembershipTarget?.eligible &&
+          nextMembershipTarget.values,
         );
 
-        if (canTarget && previousTarget && nextTarget) {
+        if (
+          canTargetMembership &&
+          previousMembershipTarget?.values &&
+          nextMembershipTarget?.values
+        ) {
+          const keys = keyedMembershipChangedKeys(
+            previousMembershipTarget.values,
+            nextMembershipTarget.values,
+          );
+          for (const key of keys) {
+            const instance = this.instances.get(key);
+            if (instance) {
+              applyKeyedRowBinding(
+                this.currentProps,
+                instance,
+                instance.item,
+                instance.index,
+                bindingIndex,
+              );
+            }
+          }
+        } else if (canTargetIdentity && previousIdentityTarget && nextIdentityTarget) {
           const keys = new Set<string>();
-          if (previousTarget.key !== undefined) keys.add(previousTarget.key);
-          if (nextTarget.key !== undefined) keys.add(nextTarget.key);
+          if (previousIdentityTarget.key !== undefined) keys.add(previousIdentityTarget.key);
+          if (nextIdentityTarget.key !== undefined) keys.add(nextIdentityTarget.key);
           for (const key of keys) {
             const instance = this.instances.get(key);
             if (instance) {
@@ -3444,8 +3581,13 @@ function createKeyedRowsBlockComponent(
           }
         }
 
-        if (nextTarget) this.identityTargets.set(bindingIndex, nextTarget);
+        if (nextIdentityTarget) this.identityTargets.set(bindingIndex, nextIdentityTarget);
         else this.identityTargets.delete(bindingIndex);
+        if (nextMembershipTarget) {
+          this.membershipTargets.set(bindingIndex, nextMembershipTarget);
+        } else {
+          this.membershipTargets.delete(bindingIndex);
+        }
       }
       afterCommit?.();
       return true;
@@ -3582,6 +3724,11 @@ function createKeyedRowsBlockComponent(
         }
         this.fallbackKeysWereUnsafe = unsafeKeys;
         this.forceUpdate(afterCommit);
+        return;
+      }
+
+      if (!this.hasSafeMembershipTargets(dirtyState)) {
+        this.activateFallback(afterCommit);
         return;
       }
 
@@ -3818,6 +3965,7 @@ function createKeyedRowsBlockComponent(
       this.cleanupHostScopes();
       this.instances.clear();
       this.identityTargets.clear();
+      this.membershipTargets.clear();
       this.instancesByElement = new WeakMap();
       this.eventHandlers.clear();
       this.conditionalListeners.clear();

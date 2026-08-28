@@ -171,6 +171,14 @@ mixed structural dependencies, ambiguous expressions, non-primitive runtime targ
 rows, and unsupported shapes keep the complete scan or React fallback. No option is required, and
 the compiler report exposes the emitted binding count as `keyedIdentityTargets`.
 
+For multi-selection, an exact local-state expression such as `markedIds.has(item.id)` receives a
+separate Set-membership proof. The runtime compares the previous and next native `Set` snapshots and
+patches only row keys in their symmetric difference. It accepts ordinary native sets containing
+primitive keys. Different fields, extra reactive dependencies, Set subclasses or proxies, object
+members, customized `has` behavior, React-owned rows, nested blocks, and structural dependencies
+stay on the existing complete or React-owned paths. The compiler report exposes this count as
+`keyedMembershipTargets`.
+
 For a direct keyed `useState` collection, the compiler also recognizes conservative same-order
 updates such as:
 
@@ -467,9 +475,10 @@ compiler: {
 The default path is `.farm/react-compiler.json`. The report covers the production browser graph and
 contains project-relative module paths, compiled component names, fallback details, and fallback
 reasons aggregated by count. Its summary and per-module `optimizations` also report
-`keyedIdentityTargets`, the number of key-directed row bindings, and `keyedMapUpdateHints`, the
-number of compiler-proven direct keyed `map()` update sites. A custom project-relative `reportFile`
-also enables reporting.
+`keyedIdentityTargets`, the number of scalar key-directed row bindings;
+`keyedMembershipTargets`, the number of native-Set membership bindings; and
+`keyedMapUpdateHints`, the number of compiler-proven direct keyed `map()` update sites. A custom
+project-relative `reportFile` also enables reporting.
 
 The runtime test compares the same counter interaction on both paths: ordinary React performs a
 second component render and commit, while the compiled component remains at one render and one

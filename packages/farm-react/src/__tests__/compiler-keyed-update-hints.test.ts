@@ -39,7 +39,11 @@ describe("React AOT keyed update hints", () => {
 
     expect(result.compiled).toEqual(["Inventory"]);
     expect(result.diagnostics).toEqual([]);
-    expect(result.optimizations).toEqual({ keyedIdentityTargets: 0, keyedMapUpdateHints: 1 });
+    expect(result.optimizations).toEqual({
+      keyedIdentityTargets: 0,
+      keyedMembershipTargets: 0,
+      keyedMapUpdateHints: 1,
+    });
     expect(result.code).toContain("createCompilerKeyedMapUpdate");
     expect(result.code).toContain("keyedRowsHintedRuntimeFeature");
     expect(result.code).toContain("collectionDependency={0}");

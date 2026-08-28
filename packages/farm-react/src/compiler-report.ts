@@ -19,6 +19,7 @@ export interface ReactCompilerReport {
     compiled: number;
     fallback: number;
     keyedIdentityTargets: number;
+    keyedMembershipTargets: number;
     keyedMapUpdateHints: number;
   };
   fallbackReasons: Array<{
@@ -30,6 +31,7 @@ export interface ReactCompilerReport {
     compiled: readonly string[];
     optimizations: {
       keyedIdentityTargets: number;
+      keyedMembershipTargets: number;
       keyedMapUpdateHints: number;
     };
     fallbacks: ReactCompilerReportFallback[];
@@ -49,6 +51,7 @@ export function createReactCompilerReport(
   let compiled = 0;
   let fallback = 0;
   let keyedIdentityTargets = 0;
+  let keyedMembershipTargets = 0;
   let keyedMapUpdateHints = 0;
 
   const modules = [...observations]
@@ -57,6 +60,7 @@ export function createReactCompilerReport(
       compiled += result.compiled.length;
       fallback += result.diagnostics.length;
       keyedIdentityTargets += result.optimizations.keyedIdentityTargets || 0;
+      keyedMembershipTargets += result.optimizations.keyedMembershipTargets || 0;
       keyedMapUpdateHints += result.optimizations.keyedMapUpdateHints;
       const moduleId = projectRelativeId(projectRoot, id);
       const fallbacks = result.diagnostics.map((diagnostic) => {
@@ -84,6 +88,7 @@ export function createReactCompilerReport(
       compiled,
       fallback,
       keyedIdentityTargets,
+      keyedMembershipTargets,
       keyedMapUpdateHints,
     },
     fallbackReasons,

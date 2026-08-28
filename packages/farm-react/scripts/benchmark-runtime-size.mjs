@@ -85,6 +85,9 @@ if (keyedOn.code.includes("keyed-rows:hinted")) {
 if (!keyedOn.code.includes("identityTarget")) {
   throw new Error("Keyed selection fixture did not retain its key-directed binding target.");
 }
+if (!keyedOn.code.includes("membershipTarget")) {
+  throw new Error("Keyed selection fixture did not retain its Set-membership binding target.");
+}
 
 const fullRuntimePremium = runtimeFull.gzip - runtimeControl.gzip;
 const coreRuntimePremium = runtimeCore.gzip - runtimeControl.gzip;

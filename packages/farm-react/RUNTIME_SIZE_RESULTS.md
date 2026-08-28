@@ -24,17 +24,17 @@ is enforced on every pull request instead of serving only as a manually recorded
 | Fixture                                           | Compiler off gzip | Compiler on gzip | Compiler premium |
 | ------------------------------------------------- | ----------------: | ---------------: | ---------------: |
 | Direct text, attribute, style, and event bindings |          60,043 B |         63,721 B |          3,678 B |
-| Delegated keyed rows, LIS, and targeted selection |          60,107 B |         69,230 B |          9,123 B |
+| Keyed rows, LIS, scalar and Set targeting         |          60,135 B |         69,756 B |          9,621 B |
 
-The isolated compatibility runtime contributes 15,157 B gzip over the React control. The
-compiler-selected core contributes 3,766 B, a **75.2% reduction**. This comparison uses the same
+The isolated compatibility runtime contributes 15,630 B gzip over the React control. The
+compiler-selected core contributes 3,766 B, a **75.9% reduction**. This comparison uses the same
 hand-authored compiled definition and changes only the runtime entry used to create it.
 
-The keyed fixture retains `FarmCompiledKeyedRows` and a compiler-emitted `identityTarget`, but
-rejects the optional row-conditional and keyed-map-hint runtimes. Key-directed validation adds
-530 B gzip to this deliberately targeted keyed fixture. The direct compiler premium and isolated
-core runtime remain byte-for-byte unchanged. The direct fixture rejects every structural runtime
-marker. The checked machine-readable result is
+The keyed fixture retains `FarmCompiledKeyedRows` plus compiler-emitted `identityTarget` and
+`membershipTarget` metadata, but rejects the optional row-conditional and keyed-map-hint runtimes.
+Set membership adds 498 B gzip to the keyed fixture's compiler premium. The direct compiler premium
+and isolated core runtime remain byte-for-byte unchanged. The direct fixture rejects every
+structural runtime marker. The checked machine-readable result is
 [`RUNTIME_SIZE_RESULTS.json`](./RUNTIME_SIZE_RESULTS.json).
 
 ## Existing production benchmark audit
