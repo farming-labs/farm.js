@@ -44,6 +44,7 @@ export function StandardTableBenchmark() {
   const [seed, setSeed] = useState(0);
   const [selected, setSelected] = useState(0);
   const [markedIds, setMarkedIds] = useState(() => new Set<number>());
+  const [queueById, setQueueById] = useState(() => new Map<number, string>());
   const [operation, setOperation] = useState("initial 100 rows");
   const [revision, setRevision] = useState(0);
 
@@ -54,6 +55,7 @@ export function StandardTableBenchmark() {
       data-revision={revision}
       data-selected={selected}
       data-marked-count={markedIds.size}
+      data-queue-count={queueById.size}
       id="table-benchmark"
     >
       <header className="benchmark-heading">
@@ -94,6 +96,7 @@ export function StandardTableBenchmark() {
             setRows(buildRows(1_000, nextSeed));
             setSelected(0);
             setMarkedIds(new Set());
+            setQueueById(new Map());
             setOperation("create 1,000");
             setRevision((value) => value + 1);
           }}
@@ -110,6 +113,7 @@ export function StandardTableBenchmark() {
             setRows(buildRows(10_000, nextSeed));
             setSelected(0);
             setMarkedIds(new Set());
+            setQueueById(new Map());
             setOperation("create 10,000");
             setRevision((value) => value + 1);
           }}
@@ -139,6 +143,7 @@ export function StandardTableBenchmark() {
             setRows(buildRows(1_000, nextSeed));
             setSelected(0);
             setMarkedIds(new Set());
+            setQueueById(new Map());
             setOperation("replace 1,000");
             setRevision((value) => value + 1);
           }}
@@ -181,6 +186,31 @@ export function StandardTableBenchmark() {
           Mark two rows
         </button>
         <button
+          data-action="table-queue"
+          type="button"
+          onClick={() => {
+            setQueueById((current) => {
+              const middle = Math.floor(rows.length / 2);
+              const first = rows[middle]?.id;
+              const second = rows[middle + 1]?.id;
+              if (first === undefined || second === undefined) return current;
+              return current.has(first)
+                ? new Map([
+                    [rows[middle + 2]?.id ?? first, "expedite"],
+                    [rows[middle + 3]?.id ?? second, "hold"],
+                  ])
+                : new Map([
+                    [first, "expedite"],
+                    [second, "hold"],
+                  ]);
+            });
+            setOperation("queue two rows");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queue two rows
+        </button>
+        <button
           data-action="table-swap"
           id="swaprows"
           type="button"
@@ -211,6 +241,7 @@ export function StandardTableBenchmark() {
             setRows([]);
             setSelected(0);
             setMarkedIds(new Set());
+            setQueueById(new Map());
             setOperation("clear");
             setRevision((value) => value + 1);
           }}
@@ -238,6 +269,7 @@ export function StandardTableBenchmark() {
               <tr
                 className={selected === row.id ? "table-row--selected" : ""}
                 data-marked={markedIds.has(row.id)}
+                data-queue={queueById.get(row.id) ?? "none"}
                 data-row-id={row.id}
                 data-selected={selected === row.id}
                 key={row.id}

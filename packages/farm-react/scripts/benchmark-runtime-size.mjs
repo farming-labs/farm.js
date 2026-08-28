@@ -88,6 +88,9 @@ if (!keyedOn.code.includes("identityTarget")) {
 if (!keyedOn.code.includes("membershipTarget")) {
   throw new Error("Keyed selection fixture did not retain its Set-membership binding target.");
 }
+if (!keyedOn.code.includes("mapLookupTarget")) {
+  throw new Error("Keyed selection fixture did not retain its Map-lookup binding target.");
+}
 
 const fullRuntimePremium = runtimeFull.gzip - runtimeControl.gzip;
 const coreRuntimePremium = runtimeCore.gzip - runtimeControl.gzip;

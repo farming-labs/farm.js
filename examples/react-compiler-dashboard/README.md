@@ -71,6 +71,12 @@ keys with `markedIds.has(row.id)` at 1,000 and 20,000 rows. Both compiler modes 
 must contain a nonzero `keyedMembershipTargets` count. Differential unit tests separately require
 the exact number of binding reads to equal the primitive-key symmetric difference.
 
+Map lookup targeting has the same independent gate. The table replaces two queue values through
+`queueById.get(row.id)` at 1,000 and 20,000 rows. Both compiler modes must remain at least 10x faster
+than React at 20,000 rows, normalized growth may not exceed 2x, and the compiler report must contain
+a nonzero `keyedMapLookupTargets` count. Differential unit tests require binding reads to equal the
+present row keys whose mapped primitive values changed.
+
 Set `FARM_EXPERIMENT_BROWSER_PATH` to an installed Chrome/Chromium executable when Playwright's
 bundled browser is unavailable. Sample counts are configurable:
 

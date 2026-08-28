@@ -294,6 +294,11 @@ export interface CompilerKeyedRowBinding {
     dependency: number;
     read(): unknown;
   };
+  /** A compiler-proven native Map whose values are read with this row's key. */
+  mapLookupTarget?: {
+    dependency: number;
+    read(): unknown;
+  };
   read(item: unknown, index: number): unknown;
 }
 
@@ -944,6 +949,11 @@ interface CompilerKeyedMembershipTargetSnapshot {
   values?: ReadonlySet<unknown>;
 }
 
+interface CompilerKeyedMapLookupTargetSnapshot {
+  eligible: boolean;
+  values?: ReadonlyMap<unknown, unknown>;
+}
+
 const UNSET_KEYED_ROW_BINDING = Symbol("unset interactive keyed-row binding");
 
 function keyedRowIdentity(key: React.Key): string {
@@ -1003,6 +1013,69 @@ function keyedMembershipChangedKeys(
   }
   for (const value of next) {
     if (!NATIVE_SET_HAS.call(previous, value)) NATIVE_SET_ADD.call(keys, String(value));
+  }
+  return keys;
+}
+
+const NATIVE_MAP_PROTOTYPE = Map.prototype;
+const NATIVE_MAP_GET = Map.prototype.get;
+const NATIVE_MAP_SET = Map.prototype.set;
+const NATIVE_MAP_ENTRIES = Map.prototype.entries;
+
+function isSafeKeyedMapLookupValue(value: unknown): boolean {
+  return (
+    value === null ||
+    value === undefined ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "bigint" ||
+    typeof value === "boolean"
+  );
+}
+
+function keyedMapLookupTargetSnapshot(value: unknown): CompilerKeyedMapLookupTargetSnapshot {
+  if (typeof value !== "object" || value === null) return { eligible: false };
+  let iterator: MapIterator<[unknown, unknown]>;
+  try {
+    iterator = NATIVE_MAP_ENTRIES.call(value as Map<unknown, unknown>);
+  } catch {
+    return { eligible: false };
+  }
+  if (
+    Object.getPrototypeOf(value) !== NATIVE_MAP_PROTOTYPE ||
+    Object.prototype.hasOwnProperty.call(value, "get") ||
+    (value as Map<unknown, unknown>).get !== NATIVE_MAP_GET
+  ) {
+    return { eligible: false };
+  }
+  const values = new Map<unknown, unknown>();
+  try {
+    for (const [key, entry] of iterator) {
+      if (!keyedIdentityTargetSnapshot(key).eligible || !isSafeKeyedMapLookupValue(entry)) {
+        return { eligible: false };
+      }
+      NATIVE_MAP_SET.call(values, key, entry);
+    }
+  } catch {
+    return { eligible: false };
+  }
+  return { eligible: true, values };
+}
+
+function keyedMapLookupChangedKeys(
+  previous: ReadonlyMap<unknown, unknown>,
+  next: ReadonlyMap<unknown, unknown>,
+): Set<string> {
+  const keys = new Set<string>();
+  for (const [key, value] of previous) {
+    if (!Object.is(value, NATIVE_MAP_GET.call(next, key))) {
+      NATIVE_SET_ADD.call(keys, String(key));
+    }
+  }
+  for (const [key, value] of next) {
+    if (!Object.is(value, NATIVE_MAP_GET.call(previous, key))) {
+      NATIVE_SET_ADD.call(keys, String(key));
+    }
   }
   return keys;
 }
@@ -3051,6 +3124,7 @@ function createKeyedRowsBlockComponent(
     private instances = new Map<string, CompilerKeyedRowInstance>();
     private identityTargets = new Map<number, CompilerKeyedIdentityTargetSnapshot>();
     private membershipTargets = new Map<number, CompilerKeyedMembershipTargetSnapshot>();
+    private mapLookupTargets = new Map<number, CompilerKeyedMapLookupTargetSnapshot>();
     private collectionToken: object | undefined;
     private renderVersion = 0;
     private readonly eventHandlers = new Map<
@@ -3300,10 +3374,20 @@ function createKeyedRowsBlockComponent(
       return true;
     }
 
+    private hasSafeMapLookupTargets(dirtyState?: ReadonlySet<number>): boolean {
+      for (const binding of this.currentProps.bindings) {
+        const target = binding.mapLookupTarget;
+        if (!target || (dirtyState && !dirtyState.has(target.dependency))) continue;
+        if (!keyedMapLookupTargetSnapshot(target.read()).eligible) return false;
+      }
+      return true;
+    }
+
     private commitKeyedTargets(dirtyState?: ReadonlySet<number>): void {
       if (!dirtyState) {
         this.identityTargets.clear();
         this.membershipTargets.clear();
+        this.mapLookupTargets.clear();
       }
       for (
         let bindingIndex = 0;
@@ -3330,12 +3414,22 @@ function createKeyedRowsBlockComponent(
             keyedMembershipTargetSnapshot(membershipTarget.read()),
           );
         }
+
+        const mapLookupTarget = binding.mapLookupTarget;
+        if (!mapLookupTarget) {
+          this.mapLookupTargets.delete(bindingIndex);
+        } else if (!dirtyState || dirtyState.has(mapLookupTarget.dependency)) {
+          this.mapLookupTargets.set(
+            bindingIndex,
+            keyedMapLookupTargetSnapshot(mapLookupTarget.read()),
+          );
+        }
       }
     }
 
     private adopt(): boolean {
       if (!this.root) return false;
-      if (!this.hasSafeMembershipTargets()) return false;
+      if (!this.hasSafeMembershipTargets() || !this.hasSafeMapLookupTargets()) return false;
       const rows = this.readRows(this.currentProps);
       const elements = [...this.root.children];
       if (!rows || rows.items.length !== elements.length) return false;
@@ -3487,6 +3581,7 @@ function createKeyedRowsBlockComponent(
 
       const nextIdentityTargets = new Map<number, CompilerKeyedIdentityTargetSnapshot>();
       const nextMembershipTargets = new Map<number, CompilerKeyedMembershipTargetSnapshot>();
+      const nextMapLookupTargets = new Map<number, CompilerKeyedMapLookupTargetSnapshot>();
       for (const bindingIndex of affectedBindingIndices) {
         const binding = this.currentProps.bindings[bindingIndex];
         if (binding.identityTarget) {
@@ -3502,6 +3597,14 @@ function createKeyedRowsBlockComponent(
             return true;
           }
           nextMembershipTargets.set(bindingIndex, snapshot);
+        }
+        if (binding.mapLookupTarget) {
+          const snapshot = keyedMapLookupTargetSnapshot(binding.mapLookupTarget.read());
+          if (!snapshot.eligible) {
+            this.activateFallback(afterCommit);
+            return true;
+          }
+          nextMapLookupTargets.set(bindingIndex, snapshot);
         }
       }
 
@@ -3531,8 +3634,38 @@ function createKeyedRowsBlockComponent(
           nextMembershipTarget?.eligible &&
           nextMembershipTarget.values,
         );
+        const mapLookupTarget = binding.mapLookupTarget;
+        const previousMapLookupTarget = this.mapLookupTargets.get(bindingIndex);
+        const nextMapLookupTarget = nextMapLookupTargets.get(bindingIndex);
+        const canTargetMapLookup = Boolean(
+          mapLookupTarget &&
+          binding.dependencies?.length === 1 &&
+          binding.dependencies[0] === mapLookupTarget.dependency &&
+          dirtyState.has(mapLookupTarget.dependency) &&
+          previousMapLookupTarget?.eligible &&
+          previousMapLookupTarget.values &&
+          nextMapLookupTarget?.eligible &&
+          nextMapLookupTarget.values,
+        );
 
-        if (
+        if (canTargetMapLookup && previousMapLookupTarget?.values && nextMapLookupTarget?.values) {
+          const keys = keyedMapLookupChangedKeys(
+            previousMapLookupTarget.values,
+            nextMapLookupTarget.values,
+          );
+          for (const key of keys) {
+            const instance = this.instances.get(key);
+            if (instance) {
+              applyKeyedRowBinding(
+                this.currentProps,
+                instance,
+                instance.item,
+                instance.index,
+                bindingIndex,
+              );
+            }
+          }
+        } else if (
           canTargetMembership &&
           previousMembershipTarget?.values &&
           nextMembershipTarget?.values
@@ -3587,6 +3720,11 @@ function createKeyedRowsBlockComponent(
           this.membershipTargets.set(bindingIndex, nextMembershipTarget);
         } else {
           this.membershipTargets.delete(bindingIndex);
+        }
+        if (nextMapLookupTarget) {
+          this.mapLookupTargets.set(bindingIndex, nextMapLookupTarget);
+        } else {
+          this.mapLookupTargets.delete(bindingIndex);
         }
       }
       afterCommit?.();
@@ -3728,6 +3866,11 @@ function createKeyedRowsBlockComponent(
       }
 
       if (!this.hasSafeMembershipTargets(dirtyState)) {
+        this.activateFallback(afterCommit);
+        return;
+      }
+
+      if (!this.hasSafeMapLookupTargets(dirtyState)) {
         this.activateFallback(afterCommit);
         return;
       }
@@ -3966,6 +4109,7 @@ function createKeyedRowsBlockComponent(
       this.instances.clear();
       this.identityTargets.clear();
       this.membershipTargets.clear();
+      this.mapLookupTargets.clear();
       this.instancesByElement = new WeakMap();
       this.eventHandlers.clear();
       this.conditionalListeners.clear();

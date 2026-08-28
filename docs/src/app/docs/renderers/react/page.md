@@ -303,6 +303,7 @@ After a successful build, Farm writes `.farm/react-compiler.json`:
     "compiled": 2,
     "fallback": 2,
     "keyedIdentityTargets": 2,
+    "keyedMapLookupTargets": 1,
     "keyedMembershipTargets": 1,
     "keyedMapUpdateHints": 1
   },
@@ -318,6 +319,7 @@ After a successful build, Farm writes `.farm/react-compiler.json`:
       "compiled": ["ProductRow"],
       "optimizations": {
         "keyedIdentityTargets": 2,
+        "keyedMapLookupTargets": 1,
         "keyedMembershipTargets": 1,
         "keyedMapUpdateHints": 1
       },
@@ -337,6 +339,8 @@ After a successful build, Farm writes `.farm/react-compiler.json`:
 `componentsConsidered` counts candidates selected by the active mode. `compiled` counts components
 using the AOT runtime, and `fallback` counts candidates left on React. `keyedIdentityTargets` counts
 row bindings that can update by looking up the previous and next key directly.
+`keyedMapLookupTargets` counts row bindings that can update from changed primitive values in a
+local native `Map`.
 `keyedMembershipTargets` counts row bindings that can update from the changed members of a local
 native `Set`.
 `keyedMapUpdateHints` counts setter sites where the compiler proved that a direct keyed collection
@@ -756,6 +760,39 @@ key dependencies do not use this path. If a runtime value fails the native-Set g
 boundary returns to React before compiled bindings are evaluated. This keeps custom collection
 semantics and error handling under React ownership. No option or component primitive is required.
 The report exposes the emitted binding count as `keyedMembershipTargets`.
+
+#### Key-directed Map lookup updates
+
+Per-row status and metadata often live in a local Map rather than on the row objects:
+
+```tsx
+const [statusById, setStatusById] = useState(() => new Map<number, string>());
+
+<tbody>
+  {rows.map((row) => (
+    <tr data-status={statusById.get(row.id) ?? "none"} key={row.id}>
+      <td>{row.label}</td>
+    </tr>
+  ))}
+</tbody>;
+```
+
+For an exact `localMap.get(rowKey)` binding, the compiler records the local state cell and row-key
+expression. The runtime snapshots the previous and next entries and compares mapped values with
+`Object.is`. Only keys whose visible lookup result changed evaluate the row binding. Status text,
+validation messages, progress attributes, classes, and styles can therefore update without
+evaluating the same lookup for every row. The component and its `map()` callback do not rerun.
+Snapshot comparison still visits Map entries; this optimization removes the full row-binding and
+DOM-target scan, not the application's Map construction or the runtime's entry comparison.
+
+The proof accepts one local `useState` dependency and a direct `get()` call with the exact
+expression used by `key`. At runtime, targeting requires an ordinary native `Map` with string,
+number, bigint, or nullish keys and string, number, bigint, boolean, or nullish values. Map
+subclasses, proxies, own `get` overrides, object values, different row fields, extra reactive
+dependencies, React-owned rows, nested blocks, and structural key dependencies do not use this
+path. A failed runtime guard returns that keyed boundary to React before compiled bindings run.
+No option or component primitive is required. The report exposes the emitted binding count as
+`keyedMapLookupTargets`.
 
 #### Mutation-aware same-order updates
 
@@ -1568,9 +1605,10 @@ The package and example test suites verify more than generated code:
   updates outer and nested row conditions, preserves surviving row and branch identity, removes and
   inserts a row, and observes zero owner update executions;
 - the production 10,000/20,000-row benchmark requires nonzero `keyedIdentityTargets`,
-  `keyedMembershipTargets`, and `keyedMapUpdateHints` report counts, preserves the keyed-update
-  speedup floor, checks that scalar selection and Set membership remain key-directed at scale, and
-  passes DOM correctness, React-relative regression, and normalized scalability gates;
+  `keyedMapLookupTargets`, `keyedMembershipTargets`, and `keyedMapUpdateHints` report counts,
+  preserves the keyed-update speedup floor, checks that scalar selection, Set membership, and Map
+  lookups remain key-directed at scale, and passes DOM correctness, React-relative regression, and
+  normalized scalability gates;
 - the public `List` renders iterable and nullish collections correctly with the compiler off;
 - the packaged runtime, including a keyed-range component root, editable and interactive keyed-row
   events, row-local conditions, reorders, identity, selection, and hydration, is exercised

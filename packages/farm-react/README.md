@@ -179,6 +179,14 @@ members, customized `has` behavior, React-owned rows, nested blocks, and structu
 stay on the existing complete or React-owned paths. The compiler report exposes this count as
 `keyedMembershipTargets`.
 
+For per-row data, an exact local-state expression such as `statusById.get(item.id)` receives a
+separate Map-lookup proof. The runtime compares the previous and next native `Map` snapshots and
+patches only row keys whose mapped primitive value changed. It accepts ordinary native maps with
+primitive keys and primitive or nullish values. Different fields, extra dependencies, Map
+subclasses or proxies, object values, customized `get` behavior, React-owned rows, nested blocks,
+and structural dependencies keep the existing complete or React-owned paths. The compiler report
+exposes this count as `keyedMapLookupTargets`.
+
 For a direct keyed `useState` collection, the compiler also recognizes conservative same-order
 updates such as:
 
@@ -476,6 +484,7 @@ The default path is `.farm/react-compiler.json`. The report covers the productio
 contains project-relative module paths, compiled component names, fallback details, and fallback
 reasons aggregated by count. Its summary and per-module `optimizations` also report
 `keyedIdentityTargets`, the number of scalar key-directed row bindings;
+`keyedMapLookupTargets`, the number of native-Map keyed lookup bindings;
 `keyedMembershipTargets`, the number of native-Set membership bindings; and
 `keyedMapUpdateHints`, the number of compiler-proven direct keyed `map()` update sites. A custom
 project-relative `reportFile` also enables reporting.
