@@ -58,8 +58,12 @@ noise from failing the run while retaining the relative gate for meaningful oper
 The targeted keyed-update optimization has an additional persistence gate. Both compiler modes must
 remain at least 8x faster than bracketed React for update-every-10th at 10,000 and 20,000 rows. This
 is intentionally below the measured 16x-17x result for machine headroom, but above the older roughly
-5x full-reconciliation path. A failed performance, scalability, or persistence gate writes the JSON
-report and exits with a nonzero status.
+5x full-reconciliation path. Key-directed selection has its own browser gate: selection at 20,000
+rows must remain at least 10x faster than React, and its normalized growth may not exceed 2x the 20x
+row-count increase from 1,000 to 20,000 rows. The package unit suite separately requires at most two
+row-binding reads, which is the deterministic guard against returning to a full row scan. A failed
+performance, scalability, or persistence gate writes the JSON report and exits with a nonzero
+status.
 
 Set `FARM_EXPERIMENT_BROWSER_PATH` to an installed Chrome/Chromium executable when Playwright's
 bundled browser is unavailable. Sample counts are configurable:

@@ -13,6 +13,7 @@ export interface CompileReactModuleResult {
   compiled: readonly string[];
   diagnostics: readonly CompilerDiagnostic[];
   optimizations: {
+    keyedIdentityTargets: number;
     keyedMapUpdateHints: number;
   };
 }
@@ -88,6 +89,10 @@ interface PendingKeyedRowBinding {
   path: number[];
   name?: string;
   dependencies?: number[];
+  identityTarget?: {
+    dependency: number;
+    value: t.Expression;
+  };
   value: t.Expression;
 }
 
@@ -220,7 +225,9 @@ const DELEGATABLE_KEYED_ROW_EVENTS = new Set([
   "onWheel",
 ]);
 
-function canDelegateKeyedRowEvents(plan: KeyedRowsPlan): boolean {
+function canDelegateKeyedRowEvents(
+  plan: Pick<KeyedRowsPlan, "events" | "conditionals" | "source">,
+): boolean {
   if (plan.events.length === 0 || plan.conditionals.length > 0) return false;
   if (
     plan.source.openingElement.attributes.some(
@@ -475,6 +482,83 @@ function referencesIdentifier(expression: t.Expression, name: string): boolean {
     },
   });
   return referenced;
+}
+
+function rewriteFreeIdentifierNames<T extends t.Expression>(
+  expression: T,
+  replacements: ReadonlyMap<string, t.Identifier>,
+): T {
+  if (replacements.size === 0) return cloneExpression(expression);
+  const file = expressionFile(cloneExpression(expression));
+  traverse(file, {
+    ReferencedIdentifier(path) {
+      if (path.scope.hasBinding(path.node.name)) return;
+      const replacement = replacements.get(path.node.name);
+      if (!replacement) return;
+      path.replaceWith(t.cloneNode(replacement));
+      path.skip();
+    },
+  });
+  return (file.program.body[0] as t.ExpressionStatement).expression as T;
+}
+
+function keyedIdentityTarget(
+  binding: PendingKeyedRowBinding,
+  keyCallback: t.ArrowFunctionExpression | t.FunctionExpression,
+  renderCallback: t.ArrowFunctionExpression | t.FunctionExpression,
+  reactiveByValue: ReadonlyMap<string, StateBinding>,
+  structureDependencies: ReadonlySet<number>,
+): PendingKeyedRowBinding["identityTarget"] {
+  const dependencies = binding.dependencies || [];
+  if (dependencies.length !== 1 || structureDependencies.has(dependencies[0])) return undefined;
+  const keyExpression = returnedExpression(keyCallback);
+  const keyItem = keyCallback.params[0];
+  const rowItem = renderCallback.params[0];
+  if (!keyExpression || !t.isIdentifier(keyItem) || !t.isIdentifier(rowItem)) return undefined;
+
+  const replacements = new Map<string, t.Identifier>([[keyItem.name, rowItem]]);
+  const keyIndex = keyCallback.params[1];
+  const rowIndex = renderCallback.params[1];
+  if (t.isIdentifier(keyIndex) && t.isIdentifier(rowIndex)) {
+    replacements.set(keyIndex.name, rowIndex);
+  }
+  const rowKeyExpression = rewriteFreeIdentifierNames(keyExpression, replacements);
+  const file = expressionFile(cloneExpression(binding.value));
+  let target: StateBinding | undefined;
+  let valid = true;
+  let comparisons = 0;
+  traverse(file, {
+    ReferencedIdentifier(path) {
+      if (!valid || path.scope.hasBinding(path.node.name)) return;
+      const reactive = reactiveByValue.get(path.node.name);
+      if (!reactive) return;
+      if (reactive.index !== dependencies[0] || (target && target !== reactive)) {
+        valid = false;
+        path.stop();
+        return;
+      }
+      const parent = path.parentPath;
+      if (
+        !parent.isBinaryExpression() ||
+        (parent.node.operator !== "===" && parent.node.operator !== "!==")
+      ) {
+        valid = false;
+        path.stop();
+        return;
+      }
+      const other = parent.node.left === path.node ? parent.node.right : parent.node.left;
+      if (!t.isExpression(other) || !t.isNodesEquivalent(other, rowKeyExpression)) {
+        valid = false;
+        path.stop();
+        return;
+      }
+      target = reactive;
+      comparisons += 1;
+    },
+  });
+  return valid && target && comparisons > 0
+    ? { dependency: target.index, value: t.identifier(target.valueName) }
+    : undefined;
 }
 
 function collectReferencedLocals(expression: t.Expression, names: ReadonlySet<string>): string[] {
@@ -1836,7 +1920,33 @@ function analyzeKeyedRowsContainer(
 
   const children = meaningfulJsxChildren(container);
   if (children.length !== 1) return undefined;
-  return analyzeKeyedRowChild(children[0], statesByValue, safeGlobals, listNames, true);
+  const shape = analyzeKeyedRowChild(children[0], statesByValue, safeGlobals, listNames, true);
+  if (!shape || shape.rowReason) return shape;
+  if (
+    shape.conditionals.length > 0 ||
+    (shape.events.length > 0 &&
+      !canDelegateKeyedRowEvents({
+        conditionals: shape.conditionals,
+        events: shape.events,
+        source: container,
+      }))
+  ) {
+    return shape;
+  }
+  const structureDependencies = new Set(shape.structureDependencies);
+  return {
+    ...shape,
+    bindings: shape.bindings.map((binding) => ({
+      ...binding,
+      identityTarget: keyedIdentityTarget(
+        binding,
+        shape.keyCallback,
+        shape.renderCallback,
+        statesByValue,
+        structureDependencies,
+      ),
+    })),
+  };
 }
 
 function analyzeKeyedRangesContainer(
@@ -3071,6 +3181,23 @@ function keyedRowBindingObject(
   ];
   if (binding.name) {
     properties.push(t.objectProperty(t.identifier("name"), t.stringLiteral(binding.name)));
+  }
+  if (binding.identityTarget) {
+    properties.push(
+      t.objectProperty(
+        t.identifier("identityTarget"),
+        t.objectExpression([
+          t.objectProperty(
+            t.identifier("dependency"),
+            t.numericLiteral(binding.identityTarget.dependency),
+          ),
+          t.objectProperty(
+            t.identifier("read"),
+            t.arrowFunctionExpression([], cloneExpression(binding.identityTarget.value)),
+          ),
+        ]),
+      ),
+    );
   }
   properties.push(
     t.objectProperty(
@@ -4863,7 +4990,7 @@ function compileCandidate(
   keyedMapUpdateIdentifier: t.Identifier,
   runtimeFeatureIdentifiers: ReadonlyMap<CompilerRuntimeFeatureName, t.Identifier>,
   usedRuntimeFeatures: Set<CompilerRuntimeFeatureName>,
-  optimizationCounts: { keyedMapUpdateHints: number },
+  optimizationCounts: { keyedIdentityTargets: number; keyedMapUpdateHints: number },
   useStateNames: ReadonlySet<string>,
   reactNames: ReadonlySet<string>,
   listNames: ReadonlySet<string>,
@@ -5145,6 +5272,14 @@ function compileCandidate(
     }
   }
   const blockPlans = blockAnalysis.plans || [];
+  optimizationCounts.keyedIdentityTargets += blockPlans.reduce(
+    (count, plan) =>
+      count +
+      (plan.kind === "keyed-rows"
+        ? plan.bindings.filter((binding) => binding.identityTarget !== undefined).length
+        : 0),
+    0,
+  );
   const runtimeFeatures = runtimeFeaturesForPlans(blockPlans, appliedKeyedMapUpdateHints > 0);
   markShortCircuitBindings(analysis.bindings || []);
   assignStableBindingTargets(analysis.bindings || []);
@@ -5329,7 +5464,7 @@ export async function compileReactModule(
 ): Promise<CompileReactModuleResult> {
   const compiled: string[] = [];
   const diagnostics: CompilerDiagnostic[] = [];
-  const optimizationCounts = { keyedMapUpdateHints: 0 };
+  const optimizationCounts = { keyedIdentityTargets: 0, keyedMapUpdateHints: 0 };
   const plugin = (): PluginObj => ({
     name: "farm-react-aot",
     visitor: {

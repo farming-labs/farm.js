@@ -162,6 +162,15 @@ Later list updates patch surviving rows by key, create or remove only the change
 longest increasing subsequence (LIS) to minimize DOM moves during a reorder. The outer user
 component and the list callback do not rerun for those compiler-cell updates.
 
+When a separate state cell or primitive prop is compared with the exact row-key expression using
+`===` or `!==`, the compiler emits a key-directed binding proof. A selection change such as
+`item.id === selectedId` then looks up only the previously selected and newly selected row
+instances. Class, attribute, style, and leaf-text bindings on those rows update without evaluating
+the other keyed instances. The proof requires one reactive target used only in strict comparisons;
+mixed structural dependencies, ambiguous expressions, non-primitive runtime targets, React-owned
+rows, and unsupported shapes keep the complete scan or React fallback. No option is required, and
+the compiler report exposes the emitted binding count as `keyedIdentityTargets`.
+
 For a direct keyed `useState` collection, the compiler also recognizes conservative same-order
 updates such as:
 
@@ -458,8 +467,9 @@ compiler: {
 The default path is `.farm/react-compiler.json`. The report covers the production browser graph and
 contains project-relative module paths, compiled component names, fallback details, and fallback
 reasons aggregated by count. Its summary and per-module `optimizations` also report
-`keyedMapUpdateHints`, the number of compiler-proven direct keyed `map()` update sites. A custom
-project-relative `reportFile` also enables reporting.
+`keyedIdentityTargets`, the number of key-directed row bindings, and `keyedMapUpdateHints`, the
+number of compiler-proven direct keyed `map()` update sites. A custom project-relative `reportFile`
+also enables reporting.
 
 The runtime test compares the same counter interaction on both paths: ordinary React performs a
 second component render and commit, while the compiled component remains at one render and one

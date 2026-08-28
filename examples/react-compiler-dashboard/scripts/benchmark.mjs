@@ -115,6 +115,10 @@ async function inspectBuild(compilerMode) {
     assert(compiled.has("OperationsDashboard"));
     assert(compiled.has("StandardTableBenchmark"));
     assert(
+      compilerReport.summary.keyedIdentityTargets > 0,
+      "The compiler build did not emit a key-directed row-binding target.",
+    );
+    assert(
       compilerReport.summary.keyedMapUpdateHints > 0,
       "The compiler build did not emit a mutation-aware keyed-map update hint.",
     );
@@ -843,10 +847,38 @@ const keyedUpdateSpeedups = keyedUpdateCases.flatMap(([group, metric]) =>
 const keyedUpdateRegressions = keyedUpdateSpeedups.filter(
   ({ speedup }) => !Number.isFinite(speedup) || speedup < keyedUpdateMinimumSpeedup,
 );
+// Selection is a separate-state update whose value is compared with the exact row key. The unit
+// suite deterministically requires at most two row-binding reads. This browser gate protects a
+// substantial end-to-end win and rejects growth beyond the same normalized 2x scalability ceiling
+// used by the complete workload. Style invalidation, event dispatch, and DOM observation remain in
+// the measured boundary even though row-binding work is key-directed.
+const keyedIdentityMinimumSpeedup = 10;
+const keyedIdentityMaximumNormalizedGrowth = 2;
+const keyedIdentityResults = ["static", "hybrid"].map((mode) => {
+  const tableMedianMs = comparisons.table.select[mode].medianMs;
+  const scaleMedianMs = comparisons.scale.select20k[mode].medianMs;
+  const growth = scaleMedianMs / Math.max(tableMedianMs, timingResolutionFloorMs);
+  return {
+    growth,
+    mode,
+    normalizedGrowth: growth / 20,
+    scaleMedianMs,
+    speedup: comparisons.scale.select20k[`${mode}VsBaseline`].speedup,
+    tableMedianMs,
+  };
+});
+const keyedIdentityRegressions = keyedIdentityResults.filter(
+  ({ normalizedGrowth, speedup }) =>
+    !Number.isFinite(speedup) ||
+    speedup < keyedIdentityMinimumSpeedup ||
+    !Number.isFinite(normalizedGrowth) ||
+    normalizedGrowth > keyedIdentityMaximumNormalizedGrowth,
+);
 const passed =
   performanceRegressions.length === 0 &&
   scalabilityRegressions.length === 0 &&
-  keyedUpdateRegressions.length === 0;
+  keyedUpdateRegressions.length === 0 &&
+  keyedIdentityRegressions.length === 0;
 
 const report = {
   result: passed ? "PASS" : "CORRECTNESS_PASS_PERFORMANCE_REGRESSION",
@@ -862,6 +894,13 @@ const report = {
     regressions: keyedUpdateRegressions,
     speedups: keyedUpdateSpeedups,
     status: keyedUpdateRegressions.length === 0 ? "PASS" : "FAIL",
+  },
+  keyedIdentityTargetGate: {
+    maximumNormalizedGrowth: keyedIdentityMaximumNormalizedGrowth,
+    minimumSpeedup: keyedIdentityMinimumSpeedup,
+    regressions: keyedIdentityRegressions,
+    results: keyedIdentityResults,
+    status: keyedIdentityRegressions.length === 0 ? "PASS" : "FAIL",
   },
   scalabilityGate: {
     metrics: scalability,

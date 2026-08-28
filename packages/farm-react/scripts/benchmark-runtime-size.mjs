@@ -82,6 +82,9 @@ if (keyedOn.code.includes("FarmCompiledKeyedRowConditional")) {
 if (keyedOn.code.includes("keyed-rows:hinted")) {
   throw new Error("Plain keyed fixture retained the optional keyed-update hint runtime.");
 }
+if (!keyedOn.code.includes("identityTarget")) {
+  throw new Error("Keyed selection fixture did not retain its key-directed binding target.");
+}
 
 const fullRuntimePremium = runtimeFull.gzip - runtimeControl.gzip;
 const coreRuntimePremium = runtimeCore.gzip - runtimeControl.gzip;
