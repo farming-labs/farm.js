@@ -1493,8 +1493,9 @@ The package and example test suites verify more than generated code:
 - the production browser experiment rotates 1,000 compiler-owned host rows with one LIS move,
   updates outer and nested row conditions, preserves surviving row and branch identity, removes and
   inserts a row, and observes zero owner update executions;
-- the production 10,000/20,000-row benchmark requires a nonzero `keyedMapUpdateHints` report count
-  and passes DOM correctness, React-relative regression, and normalized scalability gates;
+- the production 10,000/20,000-row benchmark requires a nonzero `keyedMapUpdateHints` report count,
+  at least an 8x keyed-update speedup in both compiler modes, and passes DOM correctness,
+  React-relative regression, and normalized scalability gates;
 - the public `List` renders iterable and nullish collections correctly with the compiler off;
 - the packaged runtime, including a keyed-range component root, editable and interactive keyed-row
   events, row-local conditions, reorders, identity, selection, and hydration, is exercised

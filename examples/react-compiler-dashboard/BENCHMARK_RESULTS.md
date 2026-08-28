@@ -2,9 +2,10 @@
 
 Date: 2026-08-28
 
-Result: **PASS.** Correctness, the React-relative performance gate, and the normalized scalability
-gate all pass. The production run compares two bracketing React baselines with static and hybrid
-compiler builds from the exact same component source.
+Result: **PASS.** Correctness, the React-relative performance gate, the keyed-update optimization
+persistence gate, and the normalized scalability gate all pass. The production run compares two
+bracketing React baselines with static and hybrid compiler builds from the exact same component
+source.
 
 ## Environment and method
 
@@ -17,6 +18,7 @@ compiler builds from the exact same component source.
 - Timing boundary: event dispatch through an asserted DOM mutation
 - Baseline values average the medians from the two bracketing React trials
 - Performance gate: more than 10% and 0.25 ms slower than the bracketed baseline
+- Keyed-update persistence gate: at least 8x faster than React at both 10,000 and 20,000 rows
 - No CPU throttling
 
 Every trial passed DOM assertions and browser-error checks. The compiler report proved that both
@@ -54,6 +56,8 @@ immutable `map()` over 10,000 items and creates 1,000 replacement objects. The g
 the keyed runtime validate and patch those 1,000 rows without a second scan of all 10,000 keys and
 bindings. That reduced the measured median from the previous compiler result of 9.90 ms to 2.50 ms
 on the same benchmark shape; cross-run timings remain machine- and load-sensitive.
+The 8x persistence floor leaves substantial headroom below this run's 16.39x-17.62x result while
+still rejecting a silent return to the older roughly 5x full-reconciliation path.
 
 ## Repeated 20,000-row scale profile
 
