@@ -20,11 +20,11 @@ pnpm add @farm.js/pwa
 
 ```ts title="farm.config.ts"
 import { defineConfig } from "@farm.js/core";
-import { pwaPlugin } from "@farm.js/pwa";
+import { pwa } from "@farm.js/pwa";
 
 export default defineConfig({
   plugins: [
-    pwaPlugin({
+    pwa({
       offline: "/offline",
       cache: "recommended",
     }),
@@ -92,7 +92,7 @@ export default function manifest(): MetadataRoute.Manifest {
 Use the explicit form when you do not want every recommended behavior:
 
 ```ts
-pwaPlugin({
+pwa({
   cache: {
     staticRoutes: true,
     images: "swr",
@@ -114,7 +114,7 @@ Storage survives sign-out in the same browser profile.
 Customize the storage bounds with short names:
 
 ```ts
-pwaPlugin({
+pwa({
   cache: {
     staticRoutes: ["/", "/help", "/pricing"],
     images: {

@@ -15,11 +15,11 @@ pnpm add @farm.js/pwa
 
 ```ts
 import { defineConfig } from "@farm.js/core";
-import { pwaPlugin } from "@farm.js/pwa";
+import { pwa } from "@farm.js/pwa";
 
 export default defineConfig({
   plugins: [
-    pwaPlugin({
+    pwa({
       offline: "/offline",
       cache: "recommended",
     }),
@@ -36,7 +36,7 @@ does not duplicate it.
 `recommended` precaches emitted static pages and uses SWR for public same-origin images:
 
 ```ts
-pwaPlugin({
+pwa({
   offline: "/offline",
   cache: "recommended",
 });
@@ -45,7 +45,7 @@ pwaPlugin({
 The explicit short form is:
 
 ```ts
-pwaPlugin({
+pwa({
   cache: {
     staticRoutes: true,
     images: "swr",
@@ -59,7 +59,7 @@ and stores a newer response in the background. The default keeps 100 entries fre
 Override those limits only when needed:
 
 ```ts
-pwaPlugin({
+pwa({
   cache: {
     staticRoutes: ["/", "/pricing"],
     images: {

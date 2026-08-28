@@ -2,7 +2,7 @@ import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promise
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { pwaPlugin } from "./index";
+import { pwa } from "./index";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -28,7 +28,7 @@ class CustomEventMock<T = unknown> extends Event {
   }
 }
 
-describe("pwaPlugin browser lifecycle", () => {
+describe("pwa browser lifecycle", () => {
   it("registers only in production and exposes a prompt update action", async () => {
     const serviceWorker = new ServiceWorkerContainerMock();
     const browserWindow = new EventTarget() as EventTarget & {
@@ -45,7 +45,7 @@ describe("pwaPlugin browser lifecycle", () => {
       updateEvents.push(event as CustomEvent);
     });
 
-    const plugin = pwaPlugin({ offline: "/offline", cache: { images: "swr" } });
+    const plugin = pwa({ offline: "/offline", cache: { images: "swr" } });
     const publicConfig = plugin.client?.public;
     const state = await plugin.client?.setup?.({
       plugin: { name: plugin.name },
@@ -76,7 +76,7 @@ describe("pwaPlugin browser lifecycle", () => {
     vi.stubGlobal("navigator", { serviceWorker });
     vi.stubGlobal("window", Object.assign(new EventTarget(), { location: { reload: vi.fn() } }));
 
-    const plugin = pwaPlugin();
+    const plugin = pwa();
     await plugin.client?.setup?.({
       plugin: { name: plugin.name },
       public: plugin.client.public,
@@ -89,7 +89,7 @@ describe("pwaPlugin browser lifecycle", () => {
   });
 });
 
-describe("pwaPlugin production build lifecycle", () => {
+describe("pwa production build lifecycle", () => {
   it("generates the worker after prerendering and before Nitro compiles public assets", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "farm-pwa-plugin-"));
     const outputDir = path.join(root, ".farm", ".output");
@@ -103,7 +103,7 @@ describe("pwaPlugin production build lifecycle", () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
 
     try {
-      const plugin = pwaPlugin({ offline: "/offline" });
+      const plugin = pwa({ offline: "/offline" });
       await plugin.configure?.({ root } as never, {} as never);
       const configured = await plugin.build?.configure?.(
         {

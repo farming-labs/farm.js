@@ -33,7 +33,7 @@ declare global {
  * Build assets are always precached. Optional page and image caching stays
  * constrained to safe GET navigation and same-origin image requests.
  */
-export function pwaPlugin(options: PwaPluginOptions = {}) {
+export function pwa(options: PwaPluginOptions = {}) {
   const resolved = resolvePwaOptions(options);
   let configuredBasePath = "/";
   let configuredOutputDir = ".farm/.output";

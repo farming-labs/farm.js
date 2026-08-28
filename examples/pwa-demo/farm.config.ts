@@ -1,10 +1,10 @@
 import { defineConfig } from "@farm.js/core";
-import { pwaPlugin } from "@farm.js/pwa";
+import { pwa } from "@farm.js/pwa";
 
 export default defineConfig({
   images: { provider: "none" },
   plugins: [
-    pwaPlugin({
+    pwa({
       offline: "/offline",
       update: "prompt",
       cache: {
