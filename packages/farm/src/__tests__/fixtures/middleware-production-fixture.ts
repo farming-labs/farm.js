@@ -9,7 +9,7 @@ const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 const FIXTURE_PREFIX = ".tmp-production-middleware-";
 
 export async function createMiddlewareProductionFixture(): Promise<string> {
-  await removeStaleFixtures();
+  if (process.platform === "win32") await removeStaleFixtures();
   const root = await fs.mkdtemp(path.join(packageRoot, FIXTURE_PREFIX));
 
   await fs.mkdir(path.join(root, "node_modules", "@farm.js"), {
@@ -462,21 +462,23 @@ export async function cleanupMiddlewareProductionFixture(root: string): Promise<
   // module, so that one file is undeletable until the process exits. A
   // recursive remove retries it at every level on the way up and never
   // finishes, which used to exhaust the whole test timeout. Remove what is not
-  // locked instead and leave the rest for the operating system.
+  // locked instead. Exiting releases the lock, and the next run sweeps what is
+  // left behind.
   await removeUnlockedEntries(root);
 }
 
 /**
  * Sweep fixtures an earlier run could not finish removing.
  *
- * On Windows the locked native binary is released when that process exits, so
- * the leftovers are deletable by the time the next run starts.
+ * Windows only. The process that held the native binary has exited by now, so
+ * its leftovers are removable.
  */
 async function removeStaleFixtures(): Promise<void> {
   let entries: Dirent[];
   try {
     entries = await fs.readdir(packageRoot, { withFileTypes: true });
-  } catch {
+  } catch (error) {
+    if (!isLockError(error)) throw error;
     return;
   }
 
@@ -488,10 +490,18 @@ async function removeStaleFixtures(): Promise<void> {
         force: true,
         maxRetries: 0,
       });
-    } catch {
-      // Still held by a concurrent run, leave it.
+    } catch (error) {
+      // A concurrent run may still hold it. Anything else is unexpected.
+      if (!isLockError(error)) throw error;
     }
   }
+}
+
+/** Windows reports these while another handle is still open. */
+const LOCK_ERROR_CODES = new Set(["EPERM", "EBUSY", "ENOTEMPTY", "ENOENT"]);
+
+function isLockError(error: unknown): boolean {
+  return LOCK_ERROR_CODES.has((error as NodeJS.ErrnoException)?.code ?? "");
 }
 
 /** Best effort removal that steps over entries Windows still holds. */
@@ -499,7 +509,9 @@ async function removeUnlockedEntries(dir: string): Promise<void> {
   let entries: Dirent[];
   try {
     entries = await fs.readdir(dir, { withFileTypes: true });
-  } catch {
+  } catch (error) {
+    // Already gone, or held open. Anything else is a real failure.
+    if (!isLockError(error)) throw error;
     return;
   }
 
@@ -508,14 +520,15 @@ async function removeUnlockedEntries(dir: string): Promise<void> {
     if (entry.isDirectory() && !entry.isSymbolicLink()) await removeUnlockedEntries(full);
     try {
       await fs.rm(full, { recursive: true, force: true, maxRetries: 0 });
-    } catch {
-      // Locked, leave it for the operating system to reclaim.
+    } catch (error) {
+      // Leave locked entries for the next run, but do not hide real failures.
+      if (!isLockError(error)) throw error;
     }
   }
 
   try {
     await fs.rmdir(dir);
-  } catch {
-    // Still holds a locked child.
+  } catch (error) {
+    if (!isLockError(error)) throw error;
   }
 }
