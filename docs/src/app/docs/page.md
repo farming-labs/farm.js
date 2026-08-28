@@ -79,13 +79,14 @@ Docs runtime, markdown mirrors, and OpenAPI.
 - [Markdown Mirrors](/docs/markdown): Expose markdown versions of app pages so agents, crawlers, docs tools, and support workflows can read rendered content as text.
 - [OpenAPI Reference](/docs/openapi): Generate and publish API reference docs from Farm API route metadata, with Scalar-style presentation.
 
-### Extending
+### Plugin ecosystem
 
 Plugin system and lifecycle hooks.
 
 - [Plugin Ecosystem](/docs/plugins): Extend server and browser behavior across config, requests, routing, rendering, hydration, navigation, builds, and HMR.
+- [Sentry Plugin](/docs/plugins/sentry): Report server errors with route context and trace Farm requests with `@sentry/node`.
 - [Create a Plugin](/docs/plugins/create-plugin): Build a plugin with definePlugin when app behavior belongs in reusable framework lifecycle hooks.
-- [Client Plugins](/docs/plugins/client): Attach typed hydration, navigation, error, performance, and cleanup hooks through a browser-safe module.
+- [Client Plugin API](/docs/plugins/client): Attach typed hydration, navigation, error, performance, and cleanup hooks to a plugin through a browser-safe module.
 
 ### Migrations
 

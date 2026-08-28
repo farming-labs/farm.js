@@ -1,10 +1,10 @@
 ---
-title: "Client Plugins"
+title: "Client Plugin API"
 description: "Define typed hydration, navigation, error, performance, and cleanup hooks directly inside a Farm plugin."
-section: "Extending"
+section: "Plugin Ecosystem"
 ---
 
-# Client Plugins
+# Client Plugin API
 
 A Farm plugin can own server and browser behavior through one `definePlugin()` call. Add lifecycle hooks directly under `client`; Farm extracts those hooks into its generated browser runtime in development and production.
 
