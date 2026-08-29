@@ -4,6 +4,7 @@ import { useState } from "react";
 
 declare global {
   interface Array<T> {
+    toReversed(): T[];
     toSpliced(start: number, deleteCount: number, item: T): T[];
     with(index: number, item: T): T[];
   }
@@ -305,6 +306,30 @@ export function StandardTableBenchmark() {
           }}
         >
           Replace at known position (snapshot control)
+        </button>
+        <button
+          data-action="table-reverse"
+          type="button"
+          onClick={() => {
+            setRows((current) => current.toReversed());
+            setOperation("reverse rows");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Reverse rows
+        </button>
+        <button
+          data-action="table-reverse-snapshot"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              return current.toReversed();
+            });
+            setOperation("reverse rows (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Reverse rows (snapshot control)
         </button>
         <button
           data-action="table-replace"

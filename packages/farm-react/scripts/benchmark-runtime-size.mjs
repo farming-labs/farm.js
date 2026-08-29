@@ -61,6 +61,8 @@ const [
   keyedPrependOn,
   keyedPositionOff,
   keyedPositionOn,
+  keyedReorderOff,
+  keyedReorderOn,
   keyedRollingWindowOff,
   keyedRollingWindowOn,
   keyedSliceOff,
@@ -81,6 +83,8 @@ const [
   bundle("keyed-prepend.tsx", true),
   bundle("keyed-position.tsx", false),
   bundle("keyed-position.tsx", true),
+  bundle("keyed-reorder.tsx", false),
+  bundle("keyed-reorder.tsx", true),
   bundle("keyed-rolling-window.tsx", false),
   bundle("keyed-rolling-window.tsx", true),
   bundle("keyed-slice.tsx", false),
@@ -170,6 +174,13 @@ if (
     `Keyed position fixture did not retain its isolated position-hint runtime: rows=${keyedPositionOn.code.includes("FarmCompiledKeyedRows")}, feature=${keyedPositionOn.code.includes("keyed-rows:position-hinted")}, proof=${keyedPositionOn.code.includes("positionIndexIndependent")}.`,
   );
 }
+if (
+  !keyedReorderOn.code.includes("FarmCompiledKeyedRows") ||
+  !keyedReorderOn.code.includes("keyed-rows:reorder-hinted") ||
+  !keyedReorderOn.code.includes("reorderIndexIndependent")
+) {
+  throw new Error("Keyed reorder fixture did not retain its isolated reorder-hint runtime.");
+}
 for (const [name, output] of [
   ["direct", directOn],
   ["plain keyed", keyedOn],
@@ -192,6 +203,12 @@ for (const [name, output] of [
     output.code.includes("keyed-rows:position-hinted")
   ) {
     throw new Error(`${name} fixture retained the optional position-hint runtime.`);
+  }
+  if (
+    output.code.includes("reorderIndexIndependent") ||
+    output.code.includes("keyed-rows:reorder-hinted")
+  ) {
+    throw new Error(`${name} fixture retained the optional reorder-hint runtime.`);
   }
 }
 if (keyedPrependOn.code.includes("filterIndexIndependent")) {
@@ -300,6 +317,23 @@ const results = {
         brotli: keyedPositionOn.brotli - keyedPositionOff.brotli,
       },
     },
+    keyedReorder: {
+      compilerOff: {
+        raw: keyedReorderOff.raw,
+        gzip: keyedReorderOff.gzip,
+        brotli: keyedReorderOff.brotli,
+      },
+      compilerOn: {
+        raw: keyedReorderOn.raw,
+        gzip: keyedReorderOn.gzip,
+        brotli: keyedReorderOn.brotli,
+      },
+      compilerPremium: {
+        raw: keyedReorderOn.raw - keyedReorderOff.raw,
+        gzip: keyedReorderOn.gzip - keyedReorderOff.gzip,
+        brotli: keyedReorderOn.brotli - keyedReorderOff.brotli,
+      },
+    },
     keyedSlice: {
       compilerOff: {
         raw: keyedSliceOff.raw,
@@ -383,6 +417,13 @@ if (checkOnly) {
       maximum:
         (reference.fixtures.keyedPosition?.compilerPremium.gzip ??
           results.fixtures.keyedPosition.compilerPremium.gzip) + 256,
+    },
+    {
+      name: "keyed reorder compiler premium",
+      current: results.fixtures.keyedReorder.compilerPremium.gzip,
+      maximum:
+        (reference.fixtures.keyedReorder?.compilerPremium.gzip ??
+          results.fixtures.keyedReorder.compilerPremium.gzip) + 256,
     },
     {
       name: "keyed slice compiler premium",

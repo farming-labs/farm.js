@@ -306,6 +306,7 @@ After a successful build, Farm writes `.farm/react-compiler.json`:
     "keyedArrayFilterHints": 1,
     "keyedArrayPrependHints": 1,
     "keyedArrayPositionHints": 1,
+    "keyedArrayReorderHints": 1,
     "keyedArrayRollingWindowHints": 1,
     "keyedArraySliceHints": 1,
     "keyedCollectionUpdateHints": 3,
@@ -329,6 +330,7 @@ After a successful build, Farm writes `.farm/react-compiler.json`:
         "keyedArrayFilterHints": 1,
         "keyedArrayPrependHints": 1,
         "keyedArrayPositionHints": 1,
+        "keyedArrayReorderHints": 1,
         "keyedArrayRollingWindowHints": 1,
         "keyedArraySliceHints": 1,
         "keyedCollectionUpdateHints": 3,
@@ -370,6 +372,8 @@ the compiler proved a direct keyed array prepend and can hand the new prefix to 
 retained interval.
 `keyedArrayPositionHints` counts native keyed-array insertions and replacements whose exact
 position is known at build time.
+`keyedArrayReorderHints` counts direct native keyed-array reversals whose complete permutation is
+known at build time.
 `keyedArrayRollingWindowHints` counts direct keyed-array updates that retain a proven sliced tail
 and append an incoming suffix.
 `selected` is `true` when an annotation explicitly requested compilation. Module paths are relative
@@ -1040,6 +1044,33 @@ dependencies, and failed runtime checks keep complete keyed reconciliation. Nega
 positions use the native methods' normal indexing rules. No new option or component is required.
 Reports expose emitted sites as `keyedArrayPositionHints`; position-only modules retain a separate
 optional runtime capability.
+
+#### Keyed array reorder hints
+
+A direct native reverse states the complete next order without changing keyed row identity:
+
+```tsx
+setItems((current) => current.toReversed());
+```
+
+Farm recognizes only this concise functional-setter form. It preserves the original method lookup,
+native call, returned array, and thrown errors. Metadata is recorded only when the committed source
+and result are ordinary native arrays and the executed method is the native `toReversed()` method.
+A custom or unavailable method therefore keeps its normal behavior and never enters the fast path.
+
+At update time, Farm verifies the committed source token, equal lengths, every source row identity,
+and the exact reversed result before moving the DOM. The runtime leaves one row in place and moves
+the other rows through connected `insertBefore()` operations, the minimum `n - 1` moves for a
+reverse. It does not call row keys, recreate descriptors, reread bindings, or run the generic LIS
+calculation. Existing elements, handlers, form state, and focus stay attached to their keys.
+
+The first proof requires compiler-owned host rows whose render and key do not observe the index.
+Arguments, computed or chained calls, block-bodied updaters, subclassed or sparse behavior,
+collection-reading bindings, custom methods, two reversals queued before one commit, React-owned
+rows, nested host blocks, row conditionals, unrelated dirty dependencies, and any identity mismatch
+use complete keyed reconciliation. No option or component is added. Reports expose emitted sites as
+`keyedArrayReorderHints`; modules without one do not retain the optional reorder runtime. The
+application runtime must provide `Array.prototype.toReversed`; Farm does not polyfill it.
 
 #### Keyed array filter hints
 
@@ -1860,6 +1891,10 @@ The package and example test suites verify more than generated code:
 - 400 deterministic known-position insertions and replacements match normal React; targeted tests
   require one-row key, descriptor, and binding work, preserve surrounding DOM identity, and cover
   custom methods, queued updates, collection-reading rows, StrictMode hydration, and cleanup;
+- 2,000 deterministic randomized reversals match normal React; a 4,096-row targeted test requires
+  exactly `n - 1` connected DOM moves and zero key, descriptor, or binding reads, while fallback
+  tests cover custom methods, queued updates, collection-reading rows, StrictMode hydration, and
+  unmount cleanup;
 - the production browser experiment derives a keyed window from 2,048 source rows without
   rerunning the owner component or corrupting the existing compiler experiments;
 - the package reactivity benchmark updates one prop across 2,048 bindings, requires identical
@@ -1877,8 +1912,8 @@ The package and example test suites verify more than generated code:
 - the production 10,000/20,000-row benchmark requires nonzero `keyedIdentityTargets`,
   `keyedMapLookupTargets`, `keyedMembershipTargets`, `keyedCollectionUpdateHints`, and
   `keyedMapUpdateHints`, `keyedArrayAppendHints`, `keyedArrayPrependHints`,
-  `keyedArrayFilterHints`, `keyedArrayPositionHints`, `keyedArrayRollingWindowHints`, and
-  `keyedArraySliceHints` report counts,
+  `keyedArrayFilterHints`, `keyedArrayPositionHints`, `keyedArrayReorderHints`,
+  `keyedArrayRollingWindowHints`, and `keyedArraySliceHints` report counts,
   preserves the keyed-update speedup floor, checks that scalar selection, Set membership, and Map
   lookups remain key-directed at scale, compares dense hinted Set/Map updates with equivalent
   compiled snapshot controls, and passes DOM correctness, React-relative regression, direct-delta,

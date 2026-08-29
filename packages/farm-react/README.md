@@ -314,6 +314,22 @@ queued uncommitted updates, reused keys, nested or React-owned rows, and failed 
 keyed reconciliation. Reports expose the site count as `keyedArrayPositionHints`; the capability is
 tree-shaken from modules that do not emit it.
 
+A direct native reverse can carry its complete permutation to a separate optional runtime:
+
+```tsx
+setItems((current) => current.toReversed());
+```
+
+Farm preserves the method lookup, call result, and errors, then records metadata only for the native
+method on a committed ordinary array. The runtime verifies equal lengths and every reversed item
+identity before moving the existing keyed elements with the minimum `n - 1` connected DOM moves.
+It does not reread row keys, descriptors, or bindings and does not run the generic LIS calculation.
+Index-aware or collection-reading rows, arguments, computed or chained calls, block-bodied
+updaters, custom methods, sparse or subclassed behavior, queued uncommitted reversals, nested or
+React-owned rows, and failed checks keep complete keyed reconciliation. Reports expose the site
+count as `keyedArrayReorderHints`, and modules without one omit the reorder runtime. Farm does not
+polyfill `Array.prototype.toReversed`.
+
 Concise immutable filters on a direct keyed array can carry removal positions into the same
 optional runtime:
 
@@ -617,6 +633,7 @@ reasons aggregated by count. Its summary and per-module `optimizations` also rep
 `keyedArrayPrependHints`, the number of compiler-proven direct keyed-array prepend sites; and
 `keyedArrayPositionHints`, the number of compiler-proven native known-position insertion or
 replacement sites; and
+`keyedArrayReorderHints`, the number of compiler-proven direct native keyed-array reverse sites; and
 `keyedArrayRollingWindowHints`, the number of compiler-proven retained-tail plus incoming-suffix
 sites; and
 `keyedArraySliceHints`, the number of compiler-proven direct keyed-array slice sites. A custom
