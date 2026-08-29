@@ -46,7 +46,7 @@ interface CompilerKeyedArrayRollingWindowHint {
 }
 
 interface CompilerKeyedArrayPositionHint {
-  readonly kind: "insert" | "replace";
+  readonly kind: "insert" | "remove" | "replace";
   readonly sourceToken: object;
   readonly sourceLength: number;
   readonly resultLength: number;
@@ -330,6 +330,8 @@ function compilerKeyedArrayPosition(
     update.position < 0 ||
     update.position > expectedLength ||
     (update.kind === "insert" && update.resultLength !== expectedLength + 1) ||
+    (update.kind === "remove" &&
+      (update.position >= expectedLength || update.resultLength !== expectedLength - 1)) ||
     (update.kind === "replace" &&
       (update.position >= expectedLength || update.resultLength !== expectedLength))
   ) {
@@ -670,11 +672,11 @@ export function createCompilerKeyedArrayRollingWindow(
   return value;
 }
 
-/** @internal Executes a native known-position insert or replacement and records its position. */
+/** @internal Executes a native known-position insert, removal, or replacement and records it. */
 export function createCompilerKeyedArrayPositionUpdate(
   previous: unknown,
   method: unknown,
-  kind: "insert" | "replace",
+  kind: "insert" | "remove" | "replace",
   position: number,
   ...args: readonly unknown[]
 ): unknown {
@@ -710,6 +712,13 @@ export function createCompilerKeyedArrayPositionUpdate(
       args.length === 2 &&
       Object.is(args[0], 0) &&
       value.length === sourceLength + 1;
+    const validRemove =
+      kind === "remove" &&
+      method === NATIVE_ARRAY_TO_SPLICED &&
+      args.length === 1 &&
+      Object.is(args[0], 1) &&
+      normalizedPosition < sourceLength &&
+      value.length === sourceLength - 1;
     const validReplace =
       kind === "replace" &&
       method === NATIVE_ARRAY_WITH &&
@@ -717,7 +726,7 @@ export function createCompilerKeyedArrayPositionUpdate(
       position >= -sourceLength &&
       position < sourceLength &&
       value.length === sourceLength;
-    if (!validInsert && !validReplace) return value;
+    if (!validInsert && !validRemove && !validReplace) return value;
 
     const sourceToken = compilerKeyedCollectionToken(previousTarget);
     if (!sourceToken) return value;
@@ -4322,6 +4331,17 @@ function reconcileCompilerKeyedArrayPosition(
   if (!update || !Array.isArray(finalValue)) return undefined;
   const previousInstances = [...instances.values()];
   const previous = previousInstances[update.position];
+
+  if (update.kind === "remove") {
+    if (!previous || previous.index !== update.position) return undefined;
+    previous.scope?.cleanup();
+    previous.element.remove();
+    previousInstances.splice(update.position, 1);
+    for (let index = update.position; index < previousInstances.length; index += 1) {
+      previousInstances[index].index = index;
+    }
+    return new Map(previousInstances.map((instance) => [instance.key, instance]));
+  }
 
   let item: unknown;
   let key: string;

@@ -95,11 +95,13 @@ React and 1.25x faster than the compiled control. The report must contain a nonz
 `keyedArrayRollingWindowHints` count; package tests separately require retained DOM identity and
 work proportional only to the incoming suffix.
 
-Known-position insertions and replacements have separate 10,000-row comparisons. Concise native
-`toSpliced(position, 0, item)` and `with(position, item)` updates are measured against bracketed
-React and equivalent block-bodied compiled controls. The compiler report must contain a nonzero
-`keyedArrayPositionHints` count; package tests separately require one-row key/descriptor/binding
-work, surrounding DOM identity, randomized differential correctness, hydration, and cleanup.
+Known-position insertions, removals, and replacements have separate 10,000-row comparisons. Concise
+native `toSpliced(position, 0, item)`, `toSpliced(position, 1)`, and `with(position, item)` updates
+are measured against bracketed React and equivalent block-bodied compiled controls. The compiler
+report must contain a nonzero `keyedArrayPositionHints` count; package tests separately require zero
+surviving key/descriptor/binding reads for removal, surrounding DOM identity, randomized
+differential correctness, hydration, and cleanup. Known-position removal must remain at least 4x
+faster than React and 1.5x faster than the compiled control.
 
 Native keyed-array reversal has a separate 10,000-row comparison. Concise `toReversed()` is
 measured against bracketed React and an equivalent block-bodied compiled control. Both compiler
@@ -172,7 +174,7 @@ The default JSON report is `/tmp/farm-react-dashboard-benchmark.json`; change it
   updater. It isolates the saved survivor scan while both paths remove the same 1,000 DOM rows.
 - The known-position controls compare concise native `toSpliced()`/`with()` updates with equivalent
   block-bodied compiled controls. They verify surrounding DOM identity and isolate the saved full
-  keyed scan for one insertion or replacement.
+  keyed scan for one insertion, removal, or replacement.
 - The reverse control compares concise native `toReversed()` with an equivalent block-bodied
   compiled update. Both paths move the same keyed DOM rows; the hint isolates the saved key,
   descriptor, binding, and generic LIS work.

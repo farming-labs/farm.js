@@ -610,6 +610,42 @@ async function measureTrial(browser, trial, compilerMode, port) {
           },
         );
 
+        const tablePositionRemove = await measureTable(
+          async () => ensure10000(),
+          async () => {
+            const rows = table.querySelectorAll("tbody tr");
+            const before = rows[8_999];
+            const removed = rows[9_000];
+            const after = rows[9_001];
+            await runTableAction(
+              () => tableButton("table-position-remove").click(),
+              () =>
+                rowCount() === 9_999 &&
+                table.querySelectorAll("tbody tr")[8_999] === before &&
+                table.querySelectorAll("tbody tr")[9_000] === after &&
+                !removed?.isConnected,
+            );
+          },
+        );
+
+        const tablePositionRemoveSnapshot = await measureTable(
+          async () => ensure10000(),
+          async () => {
+            const rows = table.querySelectorAll("tbody tr");
+            const before = rows[8_999];
+            const removed = rows[9_000];
+            const after = rows[9_001];
+            await runTableAction(
+              () => tableButton("table-position-remove-snapshot").click(),
+              () =>
+                rowCount() === 9_999 &&
+                table.querySelectorAll("tbody tr")[8_999] === before &&
+                table.querySelectorAll("tbody tr")[9_000] === after &&
+                !removed?.isConnected,
+            );
+          },
+        );
+
         const tablePositionReplace = await measureTable(
           async () => ensure10000(),
           async () => {
@@ -1068,6 +1104,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
             prependSnapshot: tablePrependSnapshot,
             positionInsert: tablePositionInsert,
             positionInsertSnapshot: tablePositionInsertSnapshot,
+            positionRemove: tablePositionRemove,
+            positionRemoveSnapshot: tablePositionRemoveSnapshot,
             positionReplace: tablePositionReplace,
             positionReplaceSnapshot: tablePositionReplaceSnapshot,
             reverse: tableReverse,
@@ -1162,6 +1200,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
         prependSnapshot: timingSummary(result.table.prependSnapshot),
         positionInsert: timingSummary(result.table.positionInsert),
         positionInsertSnapshot: timingSummary(result.table.positionInsertSnapshot),
+        positionRemove: timingSummary(result.table.positionRemove),
+        positionRemoveSnapshot: timingSummary(result.table.positionRemoveSnapshot),
         positionReplace: timingSummary(result.table.positionReplace),
         positionReplaceSnapshot: timingSummary(result.table.positionReplaceSnapshot),
         reverse: timingSummary(result.table.reverse),
@@ -1252,6 +1292,8 @@ const tableMetrics = [
   "prependSnapshot",
   "positionInsert",
   "positionInsertSnapshot",
+  "positionRemove",
+  "positionRemoveSnapshot",
   "positionReplace",
   "positionReplaceSnapshot",
   "reverse",
@@ -1495,16 +1537,20 @@ const keyedRollingWindowRegressions = keyedRollingWindowResults.filter(
     !Number.isFinite(snapshotSpeedup) ||
     snapshotSpeedup < keyedRollingWindowMinimumSnapshotSpeedup,
 );
-// Native toSpliced()/with() calls expose one exact insertion or replacement position. The hinted
+// Native toSpliced()/with() calls expose one exact insertion, removal, or replacement position. The hinted
 // runtime should beat both React and an equivalent block-bodied compiled control while preserving
 // the same row identities around the changed position.
 const keyedPositionInsertMinimumSpeedup = 1.1;
 const keyedPositionInsertMinimumSnapshotSpeedup = 1.1;
+const keyedPositionRemoveMinimumSpeedup = 4;
+const keyedPositionRemoveMinimumSnapshotSpeedup = 1.5;
 const keyedPositionReplaceMinimumSpeedup = 2;
 const keyedPositionReplaceMinimumSnapshotSpeedup = 1.5;
 const keyedPositionResults = ["static", "hybrid"].map((mode) => {
   const insertMedianMs = comparisons.table.positionInsert[mode].medianMs;
   const insertSnapshotMedianMs = comparisons.table.positionInsertSnapshot[mode].medianMs;
+  const removeMedianMs = comparisons.table.positionRemove[mode].medianMs;
+  const removeSnapshotMedianMs = comparisons.table.positionRemoveSnapshot[mode].medianMs;
   const replaceMedianMs = comparisons.table.positionReplace[mode].medianMs;
   const replaceSnapshotMedianMs = comparisons.table.positionReplaceSnapshot[mode].medianMs;
   return {
@@ -1513,6 +1559,10 @@ const keyedPositionResults = ["static", "hybrid"].map((mode) => {
     insertSnapshotSpeedup: insertSnapshotMedianMs / insertMedianMs,
     insertSpeedup: comparisons.table.positionInsert[`${mode}VsBaseline`].speedup,
     mode,
+    removeMedianMs,
+    removeSnapshotMedianMs,
+    removeSnapshotSpeedup: removeSnapshotMedianMs / removeMedianMs,
+    removeSpeedup: comparisons.table.positionRemove[`${mode}VsBaseline`].speedup,
     replaceMedianMs,
     replaceSnapshotMedianMs,
     replaceSnapshotSpeedup: replaceSnapshotMedianMs / replaceMedianMs,
@@ -1520,11 +1570,22 @@ const keyedPositionResults = ["static", "hybrid"].map((mode) => {
   };
 });
 const keyedPositionRegressions = keyedPositionResults.filter(
-  ({ insertSnapshotSpeedup, insertSpeedup, replaceSnapshotSpeedup, replaceSpeedup }) =>
+  ({
+    insertSnapshotSpeedup,
+    insertSpeedup,
+    removeSnapshotSpeedup,
+    removeSpeedup,
+    replaceSnapshotSpeedup,
+    replaceSpeedup,
+  }) =>
     !Number.isFinite(insertSpeedup) ||
     insertSpeedup < keyedPositionInsertMinimumSpeedup ||
     !Number.isFinite(insertSnapshotSpeedup) ||
     insertSnapshotSpeedup < keyedPositionInsertMinimumSnapshotSpeedup ||
+    !Number.isFinite(removeSpeedup) ||
+    removeSpeedup < keyedPositionRemoveMinimumSpeedup ||
+    !Number.isFinite(removeSnapshotSpeedup) ||
+    removeSnapshotSpeedup < keyedPositionRemoveMinimumSnapshotSpeedup ||
     !Number.isFinite(replaceSpeedup) ||
     replaceSpeedup < keyedPositionReplaceMinimumSpeedup ||
     !Number.isFinite(replaceSnapshotSpeedup) ||
@@ -1781,6 +1842,8 @@ const report = {
     insertMinimumSnapshotSpeedup: keyedPositionInsertMinimumSnapshotSpeedup,
     insertMinimumSpeedup: keyedPositionInsertMinimumSpeedup,
     regressions: keyedPositionRegressions,
+    removeMinimumSnapshotSpeedup: keyedPositionRemoveMinimumSnapshotSpeedup,
+    removeMinimumSpeedup: keyedPositionRemoveMinimumSpeedup,
     replaceMinimumSnapshotSpeedup: keyedPositionReplaceMinimumSnapshotSpeedup,
     replaceMinimumSpeedup: keyedPositionReplaceMinimumSpeedup,
     results: keyedPositionResults,

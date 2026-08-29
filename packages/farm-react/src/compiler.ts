@@ -1618,14 +1618,18 @@ function rewriteKeyedArrayPositionHints(
               args.length === 3 &&
               t.isNumericLiteral(args[1], { value: 0 })
             ? "insert"
-            : undefined;
-      if (!kind || !t.isExpression(args[0]) || !t.isExpression(args.at(-1))) return;
+            : methodName === "toSpliced" &&
+                args.length === 2 &&
+                t.isNumericLiteral(args[1], { value: 1 })
+              ? "remove"
+              : undefined;
+      if (!kind || !t.isExpression(args[0])) return;
       const position = staticSliceIndex(args[0]);
-      const item = args.at(-1)!;
+      const item = kind === "remove" ? undefined : args.at(-1);
       if (
         position === undefined ||
-        !t.isExpression(item) ||
-        validateDerivedExpression(item, safeGlobals) !== undefined
+        (item !== undefined &&
+          (!t.isExpression(item) || validateDerivedExpression(item, safeGlobals) !== undefined))
       ) {
         return;
       }

@@ -29,12 +29,12 @@ is enforced on every pull request instead of serving only as a manually recorded
 | Keyed rows with prepend hints                     |          60,087 B |         72,080 B |         11,993 B |
 | Keyed rows with filter hints                      |          60,088 B |         72,298 B |         12,210 B |
 | Keyed rows with slice hints                       |          60,075 B |         72,335 B |         12,260 B |
-| Keyed rows with known-position hints              |          60,076 B |         72,206 B |         12,130 B |
+| Keyed rows with known-position hints              |          60,076 B |         72,264 B |         12,188 B |
 | Keyed rows with reverse hints                     |          60,058 B |         72,164 B |         12,106 B |
 | Keyed rows with sort hints                        |          60,077 B |         72,219 B |         12,142 B |
 | Keyed rows with rolling-window hints              |          60,098 B |         73,082 B |         12,984 B |
 
-The isolated compatibility runtime contributes 19,273 B gzip over the React control. The
+The isolated compatibility runtime contributes 19,344 B gzip over the React control. The
 compiler-selected core contributes 3,766 B, an **80.5% reduction**. This comparison uses the same
 hand-authored compiled definition and changes only the runtime entry used to create it.
 
@@ -45,7 +45,7 @@ fixtures prove that recognized functional updates retain only the matching hinte
 reuses the filter removal capability. Position-only and rolling-window modules select separate
 hint runtimes only when the compiler emits those update shapes. Reverse and sort share the
 optional reorder capability; the direct and isolated core results remain byte-for-byte unchanged.
-The position fixture pays a 937 B gzip premium, reverse pays 913 B, sort pays 949 B, slice pays
+The position fixture pays a 995 B gzip premium, reverse pays 913 B, sort pays 949 B, slice pays
 1,067 B, and rolling-window pays 1,791 B over the ordinary keyed fixture. Unrelated bundles reject
 the optional position and reorder runtime markers, and the direct fixture rejects every structural
 runtime marker. The checked

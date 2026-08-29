@@ -2,6 +2,28 @@
 
 Date: 2026-08-29
 
+## Known-position removal follow-up — 2026-08-30
+
+The full default production run for concise `toSpliced(position, 1)` support passed correctness,
+the React-relative regression gate, every existing optimization-persistence gate, and normalized
+scalability. The new 10,000-row known-position removal comparison measured:
+
+| Mode   | React median | Hinted removal | Compiled control | vs React | vs control |
+| ------ | -----------: | -------------: | ---------------: | -------: | ---------: |
+| Static |     64.95 ms |        7.00 ms |         17.00 ms |    9.28x |      2.43x |
+| Hybrid |     64.95 ms |        7.00 ms |         16.80 ms |    9.28x |      2.40x |
+
+The persisted gate requires at least 4x versus React and 1.5x versus the equivalent block-bodied
+compiled control. All three paths execute the same native immutable array removal and disconnect
+the same row. The hinted path preserves surrounding DOM identity, performs zero surviving key,
+descriptor, or binding reads, and avoids rerunning the owner component. The compiler report emitted
+three `keyedArrayPositionHints` sites—one insertion, one removal, and one replacement—in each
+compiled build. Both compiler modes added zero owner executions, while all existing append,
+prepend, slice, rolling-window, reverse, sort, filter, keyed-update, key-directed,
+collection-delta, general regression, and scalability gates remained green. The optional
+known-position package fixture grew by 58 B gzip; direct and core-only premiums were unchanged and
+the core runtime reduction remained 80.5%.
+
 ## Native keyed sort follow-up — 2026-08-30
 
 The full default production run for native `toSorted()` support also passed correctness, the
