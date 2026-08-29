@@ -5,8 +5,8 @@ update path in a realistic dashboard and a standard keyed-table workload.
 
 The table operation set is adapted from
 [`js-framework-benchmark`](https://github.com/krausest/js-framework-benchmark): create and replace
-1,000 rows, create 10,000, append or prepend 1,000, update every 10th row, select, swap, remove, and
-clear.
+1,000 rows, create 10,000, append or prepend 1,000, update every 10th row, select, swap, remove,
+reverse, sort, and clear.
 
 The page contains two independently measured components:
 
@@ -108,6 +108,13 @@ report must contain a nonzero `keyedArrayReorderHints` count; package tests sepa
 minimum `n - 1` connected DOM moves, zero key/descriptor/binding reads, randomized differential
 correctness, hydration, and cleanup.
 
+Native keyed-array sorting has its own 10,000-row comparison. Concise `toSorted()` is measured
+against bracketed React and an equivalent block-bodied compiled control. Both compiler modes must
+remain at least 4x faster than React and 1.25x faster than the compiled control. The report must
+contain a nonzero `keyedArraySortHints` count; package tests separately require the minimum
+`n - LIS` DOM moves, zero key/descriptor/binding reads, native method semantics, randomized
+differential correctness, focus and selection preservation, hydration, and cleanup.
+
 Set membership has a separate operation and persistence gate. The table alternates two marked row
 keys with `markedIds.has(row.id)` at 1,000 and 20,000 rows. Both compiler modes must remain at least
 10x faster than React at 20,000 rows, normalized growth may not exceed 2x, and the compiler report
@@ -169,6 +176,9 @@ The default JSON report is `/tmp/farm-react-dashboard-benchmark.json`; change it
 - The reverse control compares concise native `toReversed()` with an equivalent block-bodied
   compiled update. Both paths move the same keyed DOM rows; the hint isolates the saved key,
   descriptor, binding, and generic LIS work.
+- The sort control compares concise native `toSorted()` with an equivalent block-bodied compiled
+  update. Both paths run the same native sort and move the same keyed DOM rows; the hint isolates
+  the saved key, descriptor, and binding work while retaining only the required LIS moves.
 - This is an operation-compatible local benchmark, not an official `js-framework-benchmark`
   submission or a score comparable to its published result table. This app has richer rows and
   measures event dispatch through an asserted DOM result without CPU throttling.

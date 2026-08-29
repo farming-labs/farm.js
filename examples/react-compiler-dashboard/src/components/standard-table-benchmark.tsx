@@ -5,6 +5,7 @@ import { useState } from "react";
 declare global {
   interface Array<T> {
     toReversed(): T[];
+    toSorted(compare?: (left: T, right: T) => number): T[];
     toSpliced(start: number, deleteCount: number, item: T): T[];
     with(index: number, item: T): T[];
   }
@@ -330,6 +331,36 @@ export function StandardTableBenchmark() {
           }}
         >
           Reverse rows (snapshot control)
+        </button>
+        <button
+          data-action="table-sort"
+          type="button"
+          onClick={() => {
+            setRows((current) =>
+              current.toSorted(
+                (left, right) => left.amount - right.amount || left.id - right.id,
+              ),
+            );
+            setOperation("sort rows");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Sort rows
+        </button>
+        <button
+          data-action="table-sort-snapshot"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              return current.toSorted(
+                (left, right) => left.amount - right.amount || left.id - right.id,
+              );
+            });
+            setOperation("sort rows (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Sort rows (snapshot control)
         </button>
         <button
           data-action="table-replace"

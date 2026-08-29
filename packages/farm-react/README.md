@@ -330,6 +330,26 @@ React-owned rows, and failed checks keep complete keyed reconciliation. Reports 
 count as `keyedArrayReorderHints`, and modules without one omit the reorder runtime. Farm does not
 polyfill `Array.prototype.toReversed`.
 
+A direct native immutable sort can use the same optional reorder runtime:
+
+```tsx
+setItems((current) => current.toSorted((left, right) => left.rank - right.rank));
+setLabels((current) => current.toSorted());
+```
+
+Farm recognizes a concise functional setter with no comparator or an inline synchronous comparator
+from the compiler-safe expression subset. It preserves the original method lookup, comparator,
+stable native result, and errors. After the native sort runs, the runtime validates a committed
+ordinary dense array, equal lengths, and a unique one-to-one item-identity permutation. It then
+uses LIS to move only `n - LIS` keyed DOM nodes without rereading row keys, descriptors, or
+bindings. The native sorting work itself is unchanged.
+
+Index-aware or collection-reading rows, referenced comparators, block-bodied updaters, computed or
+chained calls, custom methods, sparse or subclassed arrays, duplicate item identities, queued
+uncommitted sorts, nested or React-owned rows, and failed checks keep complete keyed
+reconciliation. Reports expose the site count as `keyedArraySortHints`; sort shares the optional
+reorder runtime, and Farm does not polyfill `Array.prototype.toSorted`.
+
 Concise immutable filters on a direct keyed array can carry removal positions into the same
 optional runtime:
 
@@ -634,6 +654,7 @@ reasons aggregated by count. Its summary and per-module `optimizations` also rep
 `keyedArrayPositionHints`, the number of compiler-proven native known-position insertion or
 replacement sites; and
 `keyedArrayReorderHints`, the number of compiler-proven direct native keyed-array reverse sites; and
+`keyedArraySortHints`, the number of compiler-proven direct native keyed-array sort sites; and
 `keyedArrayRollingWindowHints`, the number of compiler-proven retained-tail plus incoming-suffix
 sites; and
 `keyedArraySliceHints`, the number of compiler-proven direct keyed-array slice sites. A custom

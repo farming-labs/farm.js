@@ -307,6 +307,7 @@ After a successful build, Farm writes `.farm/react-compiler.json`:
     "keyedArrayPrependHints": 1,
     "keyedArrayPositionHints": 1,
     "keyedArrayReorderHints": 1,
+    "keyedArraySortHints": 1,
     "keyedArrayRollingWindowHints": 1,
     "keyedArraySliceHints": 1,
     "keyedCollectionUpdateHints": 3,
@@ -331,6 +332,7 @@ After a successful build, Farm writes `.farm/react-compiler.json`:
         "keyedArrayPrependHints": 1,
         "keyedArrayPositionHints": 1,
         "keyedArrayReorderHints": 1,
+        "keyedArraySortHints": 1,
         "keyedArrayRollingWindowHints": 1,
         "keyedArraySliceHints": 1,
         "keyedCollectionUpdateHints": 3,
@@ -374,6 +376,8 @@ retained interval.
 position is known at build time.
 `keyedArrayReorderHints` counts direct native keyed-array reversals whose complete permutation is
 known at build time.
+`keyedArraySortHints` counts direct native keyed-array sorts whose resulting permutation can be
+validated without rebuilding keyed rows.
 `keyedArrayRollingWindowHints` counts direct keyed-array updates that retain a proven sliced tail
 and append an incoming suffix.
 `selected` is `true` when an annotation explicitly requested compilation. Module paths are relative
@@ -1071,6 +1075,36 @@ rows, nested host blocks, row conditionals, unrelated dirty dependencies, and an
 use complete keyed reconciliation. No option or component is added. Reports expose emitted sites as
 `keyedArrayReorderHints`; modules without one do not retain the optional reorder runtime. The
 application runtime must provide `Array.prototype.toReversed`; Farm does not polyfill it.
+
+#### Keyed array sort hints
+
+A direct native immutable sort can reuse every keyed row while changing only its DOM position:
+
+```tsx
+setItems((current) => current.toSorted((left, right) => left.rank - right.rank));
+setLabels((current) => current.toSorted());
+```
+
+Farm recognizes a concise functional setter with either no comparator or an inline synchronous
+comparator from the compiler's safe expression subset. It preserves the original method lookup,
+comparator execution, native result, stable-sort behavior, and thrown errors. The native sort still
+does the comparison work; this optimization removes repeated keyed-row work after the result is
+known.
+
+At commit time, Farm verifies a committed ordinary dense array, the native `toSorted()` method,
+equal lengths, and a one-to-one identity match between the previous and sorted items. It then
+computes the longest increasing subsequence of the resulting permutation and moves only the rows
+outside that subsequence. Keys, descriptors, and bindings are not reread, the owner component does
+not rerun, and existing elements, handlers, form state, focus, and text selection remain attached
+to their rows.
+
+This proof requires compiler-owned host rows whose render and key do not observe the row index.
+Referenced comparators, block-bodied updaters, computed or chained calls, custom methods, sparse or
+subclassed arrays, duplicate item identities, collection-reading bindings, queued uncommitted
+sorts, React-owned rows, nested host blocks, row conditionals, unrelated dirty dependencies, and
+failed validation keep complete keyed reconciliation. Reports expose emitted sites as
+`keyedArraySortHints`. Sort shares the optional reorder runtime, and Farm does not polyfill
+`Array.prototype.toSorted`.
 
 #### Keyed array filter hints
 
@@ -1895,6 +1929,9 @@ The package and example test suites verify more than generated code:
   exactly `n - 1` connected DOM moves and zero key, descriptor, or binding reads, while fallback
   tests cover custom methods, queued updates, collection-reading rows, StrictMode hydration, and
   unmount cleanup;
+- 2,000 deterministic randomized sorts match normal React; a 4,096-row targeted test requires
+  exactly `n - LIS` connected DOM moves and zero key, descriptor, or binding reads, while native
+  semantics, focus and selection, fallback cases, StrictMode hydration, and cleanup are covered;
 - the production browser experiment derives a keyed window from 2,048 source rows without
   rerunning the owner component or corrupting the existing compiler experiments;
 - the package reactivity benchmark updates one prop across 2,048 bindings, requires identical
@@ -1913,6 +1950,7 @@ The package and example test suites verify more than generated code:
   `keyedMapLookupTargets`, `keyedMembershipTargets`, `keyedCollectionUpdateHints`, and
   `keyedMapUpdateHints`, `keyedArrayAppendHints`, `keyedArrayPrependHints`,
   `keyedArrayFilterHints`, `keyedArrayPositionHints`, `keyedArrayReorderHints`,
+  `keyedArraySortHints`,
   `keyedArrayRollingWindowHints`, and `keyedArraySliceHints` report counts,
   preserves the keyed-update speedup floor, checks that scalar selection, Set membership, and Map
   lookups remain key-directed at scale, compares dense hinted Set/Map updates with equivalent

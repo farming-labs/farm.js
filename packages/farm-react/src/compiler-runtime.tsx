@@ -54,7 +54,7 @@ interface CompilerKeyedArrayPositionHint {
 }
 
 interface CompilerKeyedArrayReorderHint {
-  readonly kind: "reverse";
+  readonly kind: "reverse" | "sort";
   readonly sourceToken: object;
   readonly sourceLength: number;
   readonly resultLength: number;
@@ -126,6 +126,9 @@ const NATIVE_ARRAY_WITH = (
 const NATIVE_ARRAY_TO_REVERSED = (
   Array.prototype as unknown as { toReversed?: (...args: readonly unknown[]) => unknown }
 ).toReversed;
+const NATIVE_ARRAY_TO_SORTED = (
+  Array.prototype as unknown as { toSorted?: (...args: readonly unknown[]) => unknown }
+).toSorted;
 const NATIVE_REFLECT_APPLY = Reflect.apply;
 
 function compilerObject(value: unknown): object | undefined {
@@ -760,6 +763,54 @@ export function createCompilerKeyedArrayReorder(previous: unknown, method: unkno
     if (!sourceToken) return value;
     COMPILER_KEYED_ARRAY_REORDERS.set(valueTarget, {
       kind: "reverse",
+      sourceToken,
+      sourceLength: previous.length,
+      resultLength: value.length,
+    });
+  } catch {
+    // Metadata must never change the result of a successful native update.
+  }
+  return value;
+}
+
+/** @internal Executes a native immutable sort and records its keyed-row permutation. */
+export function createCompilerKeyedArraySort(
+  previous: unknown,
+  method: unknown,
+  ...args: readonly unknown[]
+): unknown {
+  const value = NATIVE_REFLECT_APPLY(
+    method as (...values: readonly unknown[]) => unknown,
+    previous,
+    args,
+  );
+
+  try {
+    const previousTarget = compilerObject(previous);
+    const valueTarget = compilerObject(value);
+    if (
+      !previousTarget ||
+      !valueTarget ||
+      !COMPILER_KEYED_COMMITTED_COLLECTIONS.has(previousTarget) ||
+      !Array.isArray(previous) ||
+      !Array.isArray(value) ||
+      Object.getPrototypeOf(previous) !== NATIVE_ARRAY_PROTOTYPE ||
+      Object.getPrototypeOf(value) !== NATIVE_ARRAY_PROTOTYPE ||
+      method !== NATIVE_ARRAY_TO_SORTED ||
+      args.length > 1 ||
+      (args.length === 1 && args[0] !== undefined && typeof args[0] !== "function") ||
+      value.length !== previous.length
+    ) {
+      return value;
+    }
+    for (let index = 0; index < previous.length; index += 1) {
+      if (!(index in previous)) return value;
+    }
+
+    const sourceToken = compilerKeyedCollectionToken(previousTarget);
+    if (!sourceToken) return value;
+    COMPILER_KEYED_ARRAY_REORDERS.set(valueTarget, {
+      kind: "sort",
       sourceToken,
       sourceLength: previous.length,
       resultLength: value.length,
@@ -4366,9 +4417,56 @@ function reconcileCompilerKeyedArrayReorder(
 
   const finalValue = props.items();
   const update = compilerKeyedArrayReorder(finalValue, collectionToken, instances.size);
-  if (!update || update.kind !== "reverse" || !Array.isArray(finalValue)) return undefined;
+  if (!update || !Array.isArray(finalValue)) return undefined;
 
   const previousInstances = [...instances.values()];
+  if (update.kind === "sort") {
+    const instancesByItem = new Map<unknown, CompilerKeyedRowInstance>();
+    try {
+      for (let sourceIndex = 0; sourceIndex < previousInstances.length; sourceIndex += 1) {
+        const instance = previousInstances[sourceIndex];
+        if (instance.index !== sourceIndex || instancesByItem.has(instance.item)) return undefined;
+        instancesByItem.set(instance.item, instance);
+      }
+
+      const nextInstances: CompilerKeyedRowInstance[] = [];
+      const sequence: number[] = [];
+      for (let targetIndex = 0; targetIndex < finalValue.length; targetIndex += 1) {
+        const item = finalValue[targetIndex];
+        const instance = instancesByItem.get(item);
+        if (!instance || !Object.is(instance.item, item)) return undefined;
+        instancesByItem.delete(item);
+        nextInstances.push(instance);
+        sequence.push(instance.index);
+      }
+      if (instancesByItem.size > 0) return undefined;
+
+      const activeElement = root.ownerDocument.activeElement;
+      const restoreFocus = Boolean(activeElement && root.contains(activeElement));
+      const stablePositions = longestIncreasingSubsequencePositions(sequence);
+      let anchor: ChildNode | null = null;
+      for (let index = nextInstances.length - 1; index >= 0; index -= 1) {
+        const instance = nextInstances[index];
+        if (!stablePositions.has(index) && instance.element.nextSibling !== anchor) {
+          root.insertBefore(instance.element, anchor);
+        }
+        anchor = instance.element;
+        instance.index = index;
+      }
+      if (
+        restoreFocus &&
+        activeElement?.isConnected &&
+        activeElement.ownerDocument.activeElement !== activeElement &&
+        "focus" in activeElement
+      ) {
+        (activeElement as HTMLElement).focus({ preventScroll: true });
+      }
+      return new Map(nextInstances.map((instance) => [instance.key, instance]));
+    } catch {
+      return undefined;
+    }
+  }
+
   try {
     for (let sourceIndex = 0; sourceIndex < previousInstances.length; sourceIndex += 1) {
       const instance = previousInstances[sourceIndex];

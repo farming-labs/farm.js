@@ -23,6 +23,7 @@ export interface ReactCompilerReport {
     keyedArrayPrependHints: number;
     keyedArrayPositionHints: number;
     keyedArrayReorderHints: number;
+    keyedArraySortHints: number;
     keyedArrayRollingWindowHints: number;
     keyedArraySliceHints: number;
     keyedCollectionUpdateHints: number;
@@ -44,6 +45,7 @@ export interface ReactCompilerReport {
       keyedArrayPrependHints: number;
       keyedArrayPositionHints: number;
       keyedArrayReorderHints: number;
+      keyedArraySortHints: number;
       keyedArrayRollingWindowHints: number;
       keyedArraySliceHints: number;
       keyedCollectionUpdateHints: number;
@@ -73,6 +75,7 @@ export function createReactCompilerReport(
   let keyedArrayPrependHints = 0;
   let keyedArrayPositionHints = 0;
   let keyedArrayReorderHints = 0;
+  let keyedArraySortHints = 0;
   let keyedArrayRollingWindowHints = 0;
   let keyedArraySliceHints = 0;
   let keyedCollectionUpdateHints = 0;
@@ -91,6 +94,7 @@ export function createReactCompilerReport(
       keyedArrayPrependHints += result.optimizations.keyedArrayPrependHints || 0;
       keyedArrayPositionHints += result.optimizations.keyedArrayPositionHints || 0;
       keyedArrayReorderHints += result.optimizations.keyedArrayReorderHints || 0;
+      keyedArraySortHints += result.optimizations.keyedArraySortHints || 0;
       keyedArrayRollingWindowHints += result.optimizations.keyedArrayRollingWindowHints || 0;
       keyedArraySliceHints += result.optimizations.keyedArraySliceHints || 0;
       keyedCollectionUpdateHints += result.optimizations.keyedCollectionUpdateHints || 0;
@@ -128,6 +132,7 @@ export function createReactCompilerReport(
       keyedArrayPrependHints,
       keyedArrayPositionHints,
       keyedArrayReorderHints,
+      keyedArraySortHints,
       keyedArrayRollingWindowHints,
       keyedArraySliceHints,
       keyedCollectionUpdateHints,
