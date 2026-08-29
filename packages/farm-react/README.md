@@ -281,6 +281,22 @@ collection-reading rows, React-owned structures, and failed validation keep comp
 reconciliation. No option or component is added. The compiler report exposes the emitted-site
 count as `keyedArraySliceHints`.
 
+A fixed-size feed can combine that retained tail with a new keyed suffix:
+
+```tsx
+setItems((current) => [...current.slice(1), nextItem]);
+setItems((current) => [...current.slice(1_000), ...nextItems]);
+```
+
+Farm executes the ordinary native slice and array construction, then validates the committed
+source, retained item identities, and incoming keys. It removes only the expired prefix, leaves
+the retained DOM rows in place, and creates only the incoming suffix. This first form supports one
+build-time safe-integer slice bound and compiler-owned, index-independent host rows. Reused keys,
+block-bodied updaters, custom slice behavior, collection-reading or index-aware rows, nested or
+React-owned rows, queued uncommitted windows, and failed checks use complete keyed reconciliation.
+The optional all-hint runtime is selected only for modules that emit this optimization. Reports
+expose the site count as `keyedArrayRollingWindowHints`.
+
 Concise immutable filters on a direct keyed array can carry removal positions into the same
 optional runtime:
 
@@ -582,6 +598,8 @@ reasons aggregated by count. Its summary and per-module `optimizations` also rep
 `keyedArrayAppendHints`, the number of compiler-proven direct keyed-array append sites; and
 `keyedArrayFilterHints`, the number of compiler-proven direct keyed-array filter sites; and
 `keyedArrayPrependHints`, the number of compiler-proven direct keyed-array prepend sites; and
+`keyedArrayRollingWindowHints`, the number of compiler-proven retained-tail plus incoming-suffix
+sites; and
 `keyedArraySliceHints`, the number of compiler-proven direct keyed-array slice sites. A custom
 project-relative `reportFile` also enables reporting.
 
