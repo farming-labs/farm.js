@@ -59,6 +59,8 @@ const [
   keyedFilterOn,
   keyedPrependOff,
   keyedPrependOn,
+  keyedRollingWindowOff,
+  keyedRollingWindowOn,
   keyedSliceOff,
   keyedSliceOn,
   runtimeControl,
@@ -75,6 +77,8 @@ const [
   bundle("keyed-filter.tsx", true),
   bundle("keyed-prepend.tsx", false),
   bundle("keyed-prepend.tsx", true),
+  bundle("keyed-rolling-window.tsx", false),
+  bundle("keyed-rolling-window.tsx", true),
   bundle("keyed-slice.tsx", false),
   bundle("keyed-slice.tsx", true),
   bundle("runtime-control.tsx", false),
@@ -146,6 +150,13 @@ if (
 ) {
   throw new Error("Keyed slice fixture did not retain its optional removal-hint runtime.");
 }
+if (
+  !keyedRollingWindowOn.code.includes("FarmCompiledKeyedRows") ||
+  !keyedRollingWindowOn.code.includes("keyed-rows:all-hinted") ||
+  !keyedRollingWindowOn.code.includes("filterIndexIndependent")
+) {
+  throw new Error("Keyed rolling-window fixture did not retain its isolated all-hint runtime.");
+}
 for (const [name, output] of [
   ["direct", directOn],
   ["plain keyed", keyedOn],
@@ -159,6 +170,9 @@ for (const [name, output] of [
     output.code.includes("keyed-rows:filter-prepend-hinted")
   ) {
     throw new Error(`${name} fixture retained the optional prepend-hint runtime.`);
+  }
+  if (output.code.includes("keyed-rows:all-hinted")) {
+    throw new Error(`${name} fixture retained the optional rolling-window runtime.`);
   }
 }
 if (keyedPrependOn.code.includes("filterIndexIndependent")) {
@@ -267,6 +281,23 @@ const results = {
         brotli: keyedSliceOn.brotli - keyedSliceOff.brotli,
       },
     },
+    keyedRollingWindow: {
+      compilerOff: {
+        raw: keyedRollingWindowOff.raw,
+        gzip: keyedRollingWindowOff.gzip,
+        brotli: keyedRollingWindowOff.brotli,
+      },
+      compilerOn: {
+        raw: keyedRollingWindowOn.raw,
+        gzip: keyedRollingWindowOn.gzip,
+        brotli: keyedRollingWindowOn.brotli,
+      },
+      compilerPremium: {
+        raw: keyedRollingWindowOn.raw - keyedRollingWindowOff.raw,
+        gzip: keyedRollingWindowOn.gzip - keyedRollingWindowOff.gzip,
+        brotli: keyedRollingWindowOn.brotli - keyedRollingWindowOff.brotli,
+      },
+    },
     isolatedRuntime: {
       control: {
         raw: runtimeControl.raw,
@@ -314,6 +345,13 @@ if (checkOnly) {
       name: "keyed slice compiler premium",
       current: results.fixtures.keyedSlice.compilerPremium.gzip,
       maximum: (reference.fixtures.keyedSlice?.compilerPremium.gzip ?? 12_250) + 256,
+    },
+    {
+      name: "keyed rolling-window compiler premium",
+      current: results.fixtures.keyedRollingWindow.compilerPremium.gzip,
+      maximum:
+        (reference.fixtures.keyedRollingWindow?.compilerPremium.gzip ??
+          results.fixtures.keyedRollingWindow.compilerPremium.gzip) + 256,
     },
     {
       name: "core runtime premium",

@@ -212,6 +212,36 @@ export function StandardTableBenchmark() {
           Drop benchmark prefix (snapshot control)
         </button>
         <button
+          data-action="table-roll-window"
+          type="button"
+          onClick={() => {
+            const nextSeed = seed + 1;
+            const additions = buildRows(1_000, nextSeed);
+            setSeed(nextSeed);
+            setRows((current) => [...current.slice(1_000), ...additions]);
+            setOperation("roll benchmark window");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Roll benchmark window
+        </button>
+        <button
+          data-action="table-roll-window-snapshot"
+          type="button"
+          onClick={() => {
+            const nextSeed = seed + 1;
+            const additions = buildRows(1_000, nextSeed);
+            setSeed(nextSeed);
+            setRows((current) => {
+              return [...current.slice(1_000), ...additions];
+            });
+            setOperation("roll benchmark window (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Roll benchmark window (snapshot control)
+        </button>
+        <button
           data-action="table-replace"
           type="button"
           onClick={() => {

@@ -21,6 +21,7 @@ export interface ReactCompilerReport {
     keyedArrayAppendHints: number;
     keyedArrayFilterHints: number;
     keyedArrayPrependHints: number;
+    keyedArrayRollingWindowHints: number;
     keyedArraySliceHints: number;
     keyedCollectionUpdateHints: number;
     keyedIdentityTargets: number;
@@ -39,6 +40,7 @@ export interface ReactCompilerReport {
       keyedArrayAppendHints: number;
       keyedArrayFilterHints: number;
       keyedArrayPrependHints: number;
+      keyedArrayRollingWindowHints: number;
       keyedArraySliceHints: number;
       keyedCollectionUpdateHints: number;
       keyedIdentityTargets: number;
@@ -65,6 +67,7 @@ export function createReactCompilerReport(
   let keyedArrayAppendHints = 0;
   let keyedArrayFilterHints = 0;
   let keyedArrayPrependHints = 0;
+  let keyedArrayRollingWindowHints = 0;
   let keyedArraySliceHints = 0;
   let keyedCollectionUpdateHints = 0;
   let keyedIdentityTargets = 0;
@@ -80,6 +83,7 @@ export function createReactCompilerReport(
       keyedArrayAppendHints += result.optimizations.keyedArrayAppendHints || 0;
       keyedArrayFilterHints += result.optimizations.keyedArrayFilterHints || 0;
       keyedArrayPrependHints += result.optimizations.keyedArrayPrependHints || 0;
+      keyedArrayRollingWindowHints += result.optimizations.keyedArrayRollingWindowHints || 0;
       keyedArraySliceHints += result.optimizations.keyedArraySliceHints || 0;
       keyedCollectionUpdateHints += result.optimizations.keyedCollectionUpdateHints || 0;
       keyedIdentityTargets += result.optimizations.keyedIdentityTargets || 0;
@@ -114,6 +118,7 @@ export function createReactCompilerReport(
       keyedArrayAppendHints,
       keyedArrayFilterHints,
       keyedArrayPrependHints,
+      keyedArrayRollingWindowHints,
       keyedArraySliceHints,
       keyedCollectionUpdateHints,
       keyedIdentityTargets,

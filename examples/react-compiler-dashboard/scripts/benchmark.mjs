@@ -143,6 +143,10 @@ async function inspectBuild(compilerMode) {
       "The compiler build did not emit a keyed-array prepend hint.",
     );
     assert(
+      compilerReport.summary.keyedArrayRollingWindowHints > 0,
+      "The compiler build did not emit a keyed-array rolling-window hint.",
+    );
+    assert(
       compilerReport.summary.keyedArraySliceHints > 0,
       "The compiler build did not emit a keyed-array slice hint.",
     );
@@ -534,6 +538,40 @@ async function measureTrial(browser, trial, compilerMode, port) {
           },
         );
 
+        const tableRollingWindow = await measureTable(
+          async () => ensure10000(),
+          async () => {
+            const rows = table.querySelectorAll("tbody tr");
+            const firstSurvivor = rows[1_000];
+            const previousLast = rows[9_999]?.getAttribute("data-row-id");
+            await runTableAction(
+              () => tableButton("table-roll-window").click(),
+              () =>
+                rowCount() === 10_000 &&
+                table.querySelector("tbody tr") === firstSurvivor &&
+                table.querySelector("tbody tr:last-child")?.getAttribute("data-row-id") !==
+                  previousLast,
+            );
+          },
+        );
+
+        const tableRollingWindowSnapshot = await measureTable(
+          async () => ensure10000(),
+          async () => {
+            const rows = table.querySelectorAll("tbody tr");
+            const firstSurvivor = rows[1_000];
+            const previousLast = rows[9_999]?.getAttribute("data-row-id");
+            await runTableAction(
+              () => tableButton("table-roll-window-snapshot").click(),
+              () =>
+                rowCount() === 10_000 &&
+                table.querySelector("tbody tr") === firstSurvivor &&
+                table.querySelector("tbody tr:last-child")?.getAttribute("data-row-id") !==
+                  previousLast,
+            );
+          },
+        );
+
         const tableUpdate = await measureTable(
           async () => ensure10000(),
           async () => {
@@ -911,6 +949,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
             remove: tableRemove,
             removeSnapshot: tableRemoveSnapshot,
             replace: tableReplace,
+            rollingWindow: tableRollingWindow,
+            rollingWindowSnapshot: tableRollingWindowSnapshot,
             select: tableSelect,
             snapshotMapLookup: tableSnapshotMapLookup,
             snapshotMembership: tableSnapshotMembership,
@@ -995,6 +1035,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
         remove: timingSummary(result.table.remove),
         removeSnapshot: timingSummary(result.table.removeSnapshot),
         replace: timingSummary(result.table.replace),
+        rollingWindow: timingSummary(result.table.rollingWindow),
+        rollingWindowSnapshot: timingSummary(result.table.rollingWindowSnapshot),
         select: timingSummary(result.table.select),
         snapshotMapLookup: timingSummary(result.table.snapshotMapLookup),
         snapshotMembership: timingSummary(result.table.snapshotMembership),
@@ -1085,6 +1127,8 @@ const tableMetrics = [
   "swap",
   "remove",
   "removeSnapshot",
+  "rollingWindow",
+  "rollingWindowSnapshot",
   "clear",
 ];
 const scaleMetrics = [
@@ -1284,6 +1328,29 @@ const keyedSliceRegressions = keyedSliceResults.filter(
     !Number.isFinite(snapshotSpeedup) ||
     snapshotSpeedup < keyedSliceMinimumSnapshotSpeedup,
 );
+// A rolling window combines one proven boundary removal with one incoming suffix. It should keep
+// the retained DOM rows untouched and stay materially ahead of both React and an equivalent
+// block-bodied compiled control at 10,000 rows.
+const keyedRollingWindowMinimumSpeedup = 2;
+const keyedRollingWindowMinimumSnapshotSpeedup = 1.25;
+const keyedRollingWindowResults = ["static", "hybrid"].map((mode) => {
+  const rollingMedianMs = comparisons.table.rollingWindow[mode].medianMs;
+  const snapshotMedianMs = comparisons.table.rollingWindowSnapshot[mode].medianMs;
+  return {
+    mode,
+    rollingMedianMs,
+    snapshotMedianMs,
+    snapshotSpeedup: snapshotMedianMs / rollingMedianMs,
+    speedup: comparisons.table.rollingWindow[`${mode}VsBaseline`].speedup,
+  };
+});
+const keyedRollingWindowRegressions = keyedRollingWindowResults.filter(
+  ({ snapshotSpeedup, speedup }) =>
+    !Number.isFinite(speedup) ||
+    speedup < keyedRollingWindowMinimumSpeedup ||
+    !Number.isFinite(snapshotSpeedup) ||
+    snapshotSpeedup < keyedRollingWindowMinimumSnapshotSpeedup,
+);
 // A concise native filter carries removal positions into the keyed-row runtime. Compare it with
 // React and an equivalent block-bodied compiled update that intentionally takes complete keyed
 // reconciliation, while also preserving the 20,000-row end-to-end speedup.
@@ -1431,6 +1498,7 @@ const passed =
   keyedAppendRegressions.length === 0 &&
   keyedPrependRegressions.length === 0 &&
   keyedSliceRegressions.length === 0 &&
+  keyedRollingWindowRegressions.length === 0 &&
   keyedFilterRegressions.length === 0 &&
   keyedIdentityRegressions.length === 0 &&
   keyedMembershipRegressions.length === 0 &&
@@ -1472,6 +1540,13 @@ const report = {
     regressions: keyedSliceRegressions,
     results: keyedSliceResults,
     status: keyedSliceRegressions.length === 0 ? "PASS" : "FAIL",
+  },
+  keyedRollingWindowHintGate: {
+    minimumSnapshotSpeedup: keyedRollingWindowMinimumSnapshotSpeedup,
+    minimumSpeedup: keyedRollingWindowMinimumSpeedup,
+    regressions: keyedRollingWindowRegressions,
+    results: keyedRollingWindowResults,
+    status: keyedRollingWindowRegressions.length === 0 ? "PASS" : "FAIL",
   },
   keyedFilterHintGate: {
     minimumSnapshotSpeedup: keyedFilterMinimumSnapshotSpeedup,

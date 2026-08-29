@@ -88,6 +88,13 @@ arrays, and at least 1.25x faster than the compiled control at 10,000 rows. The 
 a nonzero `keyedArraySliceHints` count; deterministic package tests separately require zero
 surviving key, descriptor, and binding reads while preserving surviving DOM identity.
 
+Rolling windows have a separate 10,000-row persistence gate. A concise
+`[...current.slice(1_000), ...incoming]` update is measured against bracketed React and an
+equivalent block-bodied compiled control. Both compiler modes must remain at least 2x faster than
+React and 1.25x faster than the compiled control. The report must contain a nonzero
+`keyedArrayRollingWindowHints` count; package tests separately require retained DOM identity and
+work proportional only to the incoming suffix.
+
 Set membership has a separate operation and persistence gate. The table alternates two marked row
 keys with `markedIds.has(row.id)` at 1,000 and 20,000 rows. Both compiler modes must remain at least
 10x faster than React at 20,000 rows, normalized growth may not exceed 2x, and the compiler report

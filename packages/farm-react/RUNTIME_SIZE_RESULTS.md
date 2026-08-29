@@ -24,25 +24,27 @@ is enforced on every pull request instead of serving only as a manually recorded
 | Fixture                                           | Compiler off gzip | Compiler on gzip | Compiler premium |
 | ------------------------------------------------- | ----------------: | ---------------: | ---------------: |
 | Direct text, attribute, style, and event bindings |          60,043 B |         63,721 B |          3,678 B |
-| Keyed rows, LIS, scalar, Set, and Map targeting   |          60,179 B |         71,259 B |         11,080 B |
-| Keyed rows with append hints                      |          60,085 B |         71,576 B |         11,491 B |
-| Keyed rows with prepend hints                     |          60,087 B |         71,984 B |         11,897 B |
-| Keyed rows with filter hints                      |          60,088 B |         72,191 B |         12,103 B |
-| Keyed rows with slice hints                       |          60,075 B |         72,228 B |         12,153 B |
+| Keyed rows, LIS, scalar, Set, and Map targeting   |          60,179 B |         71,304 B |         11,125 B |
+| Keyed rows with append hints                      |          60,085 B |         71,622 B |         11,537 B |
+| Keyed rows with prepend hints                     |          60,087 B |         72,013 B |         11,926 B |
+| Keyed rows with filter hints                      |          60,088 B |         72,230 B |         12,142 B |
+| Keyed rows with slice hints                       |          60,075 B |         72,271 B |         12,196 B |
+| Keyed rows with rolling-window hints              |          60,098 B |         73,004 B |         12,906 B |
 
-The isolated compatibility runtime contributes 17,814 B gzip over the React control. The
-compiler-selected core contributes 3,766 B, a **78.9% reduction**. This comparison uses the same
+The isolated compatibility runtime contributes 18,199 B gzip over the React control. The
+compiler-selected core contributes 3,766 B, a **79.3% reduction**. This comparison uses the same
 hand-authored compiled definition and changes only the runtime entry used to create it.
 
 The keyed fixture retains `FarmCompiledKeyedRows` plus compiler-emitted `identityTarget`,
 `membershipTarget`, and `mapLookupTarget` metadata, plus Set/Map producer-delta helpers. It rejects
 the optional row-conditional and keyed-update runtimes. Separate append, prepend, and filter
 fixtures prove that recognized functional updates retain only the matching hinted runtime. Slice
-reuses the filter removal capability rather than adding another structural runtime combination.
-The direct, ordinary keyed, append, prepend, and isolated core results remain byte-for-byte
-unchanged. The slice fixture pays a 1,073 B gzip premium over the ordinary keyed fixture while
-keeping removal and prepend capabilities out of unrelated bundles. The direct fixture rejects
-every structural runtime marker. The checked
+reuses the filter removal capability. Rolling windows select a separate all-hint runtime only when
+the compiler emits that update shape. The shared optional dispatch adds at most 46 B gzip to an
+existing keyed fixture; the direct and isolated core results remain byte-for-byte unchanged. The
+slice fixture pays a 1,071 B gzip premium and the rolling-window fixture pays a 1,781 B premium
+over the ordinary keyed fixture. Unrelated bundles reject the rolling-window runtime marker, and
+the direct fixture rejects every structural runtime marker. The checked
 machine-readable result is [`RUNTIME_SIZE_RESULTS.json`](./RUNTIME_SIZE_RESULTS.json).
 
 ## Existing production benchmark audit

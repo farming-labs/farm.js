@@ -16,6 +16,7 @@ export interface CompileReactModuleResult {
     keyedArrayAppendHints: number;
     keyedArrayFilterHints: number;
     keyedArrayPrependHints: number;
+    keyedArrayRollingWindowHints: number;
     keyedArraySliceHints: number;
     keyedCollectionUpdateHints: number;
     keyedIdentityTargets: number;
@@ -363,21 +364,25 @@ type CompilerRuntimeFeatureName =
   | "keyed-list"
   | "keyed-rows"
   | "keyed-rows-hinted"
+  | "keyed-rows-all-hinted"
   | "keyed-rows-filter-hinted"
   | "keyed-rows-prepend-hinted"
   | "keyed-rows-filter-prepend-hinted"
   | "keyed-rows-conditional"
   | "keyed-rows-conditional-hinted"
+  | "keyed-rows-conditional-all-hinted"
   | "keyed-rows-conditional-filter-hinted"
   | "keyed-rows-conditional-prepend-hinted"
   | "keyed-rows-conditional-filter-prepend-hinted"
   | "keyed-rows-host"
   | "keyed-rows-host-hinted"
+  | "keyed-rows-host-all-hinted"
   | "keyed-rows-host-filter-hinted"
   | "keyed-rows-host-prepend-hinted"
   | "keyed-rows-host-filter-prepend-hinted"
   | "keyed-rows-complete"
   | "keyed-rows-complete-hinted"
+  | "keyed-rows-complete-all-hinted"
   | "keyed-rows-complete-filter-hinted"
   | "keyed-rows-complete-prepend-hinted"
   | "keyed-rows-complete-filter-prepend-hinted"
@@ -392,22 +397,26 @@ const COMPILER_RUNTIME_FEATURE_EXPORTS: Record<CompilerRuntimeFeatureName, strin
   "keyed-list": "keyedListRuntimeFeature",
   "keyed-rows": "keyedRowsRuntimeFeature",
   "keyed-rows-hinted": "keyedRowsHintedRuntimeFeature",
+  "keyed-rows-all-hinted": "keyedRowsAllHintedRuntimeFeature",
   "keyed-rows-filter-hinted": "keyedRowsFilterHintedRuntimeFeature",
   "keyed-rows-prepend-hinted": "keyedRowsPrependHintedRuntimeFeature",
   "keyed-rows-filter-prepend-hinted": "keyedRowsFilterPrependHintedRuntimeFeature",
   "keyed-rows-conditional": "keyedRowsConditionalRuntimeFeature",
   "keyed-rows-conditional-hinted": "keyedRowsConditionalHintedRuntimeFeature",
+  "keyed-rows-conditional-all-hinted": "keyedRowsConditionalAllHintedRuntimeFeature",
   "keyed-rows-conditional-filter-hinted": "keyedRowsConditionalFilterHintedRuntimeFeature",
   "keyed-rows-conditional-prepend-hinted": "keyedRowsConditionalPrependHintedRuntimeFeature",
   "keyed-rows-conditional-filter-prepend-hinted":
     "keyedRowsConditionalFilterPrependHintedRuntimeFeature",
   "keyed-rows-host": "keyedRowsHostRuntimeFeature",
   "keyed-rows-host-hinted": "keyedRowsHostHintedRuntimeFeature",
+  "keyed-rows-host-all-hinted": "keyedRowsHostAllHintedRuntimeFeature",
   "keyed-rows-host-filter-hinted": "keyedRowsHostFilterHintedRuntimeFeature",
   "keyed-rows-host-prepend-hinted": "keyedRowsHostPrependHintedRuntimeFeature",
   "keyed-rows-host-filter-prepend-hinted": "keyedRowsHostFilterPrependHintedRuntimeFeature",
   "keyed-rows-complete": "keyedRowsCompleteRuntimeFeature",
   "keyed-rows-complete-hinted": "keyedRowsCompleteHintedRuntimeFeature",
+  "keyed-rows-complete-all-hinted": "keyedRowsCompleteAllHintedRuntimeFeature",
   "keyed-rows-complete-filter-hinted": "keyedRowsCompleteFilterHintedRuntimeFeature",
   "keyed-rows-complete-prepend-hinted": "keyedRowsCompletePrependHintedRuntimeFeature",
   "keyed-rows-complete-filter-prepend-hinted": "keyedRowsCompleteFilterPrependHintedRuntimeFeature",
@@ -421,6 +430,7 @@ function runtimeFeaturesForPlans(
   keyedMapUpdateHints: boolean,
   keyedArrayFilterHints: boolean,
   keyedArrayPrependHints: boolean,
+  keyedArrayRollingWindowHints: boolean,
 ): CompilerRuntimeFeatureName[] {
   const features = new Set<CompilerRuntimeFeatureName>();
   let keyedRowsHaveConditionals = false;
@@ -444,8 +454,9 @@ function runtimeFeaturesForPlans(
           : keyedRowsHaveHostBlocks
             ? "keyed-rows-host"
             : "keyed-rows";
-    const hintSuffix =
-      keyedArrayFilterHints && keyedArrayPrependHints
+    const hintSuffix = keyedArrayRollingWindowHints
+      ? "-all-hinted"
+      : keyedArrayFilterHints && keyedArrayPrependHints
         ? "-filter-prepend-hinted"
         : keyedArrayFilterHints
           ? "-filter-hinted"
@@ -1357,6 +1368,138 @@ function rewriteKeyedArrayPrependHints(
           t.returnStatement(
             t.callExpression(t.cloneNode(helperIdentifier), [
               t.cloneNode(previous),
+              t.cloneNode(nextValue),
+            ]),
+          ),
+        ]),
+      );
+      count += 1;
+      stateIndices.add(state.index);
+      path.skip();
+    },
+  });
+  return {
+    root: (file.program.body[0] as t.ExpressionStatement).expression as t.JSXElement,
+    count,
+    stateIndices,
+  };
+}
+
+function rewriteKeyedArrayRollingWindowHints(
+  root: t.JSXElement,
+  hintedStateIndices: ReadonlySet<number>,
+  statesBySetter: ReadonlyMap<string, StateBinding>,
+  sliceHelperIdentifier: t.Identifier,
+  rollingWindowHelperIdentifier: t.Identifier,
+  safeGlobals: ReadonlySet<string>,
+): { root: t.JSXElement; count: number; stateIndices: ReadonlySet<number> } {
+  if (hintedStateIndices.size === 0) {
+    return { root: t.cloneNode(root, true), count: 0, stateIndices: new Set() };
+  }
+  const file = expressionFile(t.cloneNode(root, true));
+  const stateIndices = new Set<number>();
+  let count = 0;
+  traverse(file, {
+    CallExpression(path) {
+      const callee = path.get("callee");
+      if (!callee.isIdentifier() || callee.scope.hasBinding(callee.node.name)) return;
+      const state = statesBySetter.get(callee.node.name);
+      if (!state || !hintedStateIndices.has(state.index) || path.node.arguments.length !== 1) {
+        return;
+      }
+      const updater = path.node.arguments[0];
+      if (
+        !t.isArrowFunctionExpression(updater) ||
+        updater.async ||
+        updater.generator ||
+        updater.params.length !== 1 ||
+        !t.isIdentifier(updater.params[0]) ||
+        !t.isArrayExpression(updater.body) ||
+        updater.body.elements.length < 2 ||
+        updater.body.elements.some((element) => element === null)
+      ) {
+        return;
+      }
+      const retainedSpread = updater.body.elements[0];
+      if (
+        !t.isSpreadElement(retainedSpread) ||
+        !t.isCallExpression(retainedSpread.argument) ||
+        retainedSpread.argument.arguments.length !== 1 ||
+        !t.isMemberExpression(retainedSpread.argument.callee) ||
+        retainedSpread.argument.callee.computed ||
+        !t.isIdentifier(retainedSpread.argument.callee.object, {
+          name: updater.params[0].name,
+        }) ||
+        !t.isIdentifier(retainedSpread.argument.callee.property, { name: "slice" }) ||
+        !t.isExpression(retainedSpread.argument.arguments[0])
+      ) {
+        return;
+      }
+      const retainedStart = staticSliceIndex(retainedSpread.argument.arguments[0]);
+      if (retainedStart === undefined || retainedStart === 0) return;
+
+      const safeIncomingValue = (value: t.Expression): boolean => {
+        if (t.isArrayExpression(value)) {
+          return value.elements.every(
+            (element) =>
+              element !== null &&
+              !t.isJSXNamespacedName(element) &&
+              !t.isArgumentPlaceholder(element) &&
+              safeIncomingValue(t.isSpreadElement(element) ? element.argument : element),
+          );
+        }
+        if (t.isObjectExpression(value)) {
+          return value.properties.every((property) => {
+            if (t.isSpreadElement(property)) return safeIncomingValue(property.argument);
+            if (!t.isObjectProperty(property) || !t.isExpression(property.value)) return false;
+            return (
+              (!property.computed ||
+                (t.isExpression(property.key) && safeIncomingValue(property.key))) &&
+              safeIncomingValue(property.value)
+            );
+          });
+        }
+        return validateDerivedExpression(value, safeGlobals) === undefined;
+      };
+      if (
+        updater.body.elements.slice(1).some((element) => {
+          if (!element || t.isJSXNamespacedName(element) || t.isArgumentPlaceholder(element)) {
+            return true;
+          }
+          return !safeIncomingValue(t.isSpreadElement(element) ? element.argument : element);
+        })
+      ) {
+        return;
+      }
+
+      const previous = t.cloneNode(updater.params[0]);
+      const sliceMethod = path.scope.generateUidIdentifier("farmSlice");
+      const retained = path.scope.generateUidIdentifier("farmRetainedItems");
+      const nextValue = path.scope.generateUidIdentifier("farmNextItems");
+      const nextElements = t.cloneNode(updater.body, true).elements;
+      nextElements[0] = t.spreadElement(t.cloneNode(retained));
+      path.node.arguments[0] = t.arrowFunctionExpression(
+        [t.cloneNode(previous)],
+        t.blockStatement([
+          t.variableDeclaration("const", [
+            t.variableDeclarator(
+              t.cloneNode(sliceMethod),
+              t.memberExpression(t.cloneNode(previous), t.identifier("slice")),
+            ),
+            t.variableDeclarator(
+              t.cloneNode(retained),
+              t.callExpression(t.cloneNode(sliceHelperIdentifier), [
+                t.cloneNode(previous),
+                t.cloneNode(sliceMethod),
+                t.numericLiteral(retainedStart),
+              ]),
+            ),
+            t.variableDeclarator(t.cloneNode(nextValue), t.arrayExpression(nextElements)),
+          ]),
+          t.returnStatement(
+            t.callExpression(t.cloneNode(rollingWindowHelperIdentifier), [
+              t.cloneNode(previous),
+              t.cloneNode(retained),
               t.cloneNode(nextValue),
             ]),
           ),
@@ -6256,6 +6399,7 @@ function compileCandidate(
   keyedArrayAppendIdentifier: t.Identifier,
   keyedArrayFilterIdentifier: t.Identifier,
   keyedArrayPrependIdentifier: t.Identifier,
+  keyedArrayRollingWindowIdentifier: t.Identifier,
   keyedArraySliceIdentifier: t.Identifier,
   keyedCollectionUpdateIdentifier: t.Identifier,
   keyedCollectionMutationIdentifier: t.Identifier,
@@ -6265,6 +6409,7 @@ function compileCandidate(
     keyedArrayAppendHints: number;
     keyedArrayFilterHints: number;
     keyedArrayPrependHints: number;
+    keyedArrayRollingWindowHints: number;
     keyedArraySliceHints: number;
     keyedCollectionUpdateHints: number;
     keyedIdentityTargets: number;
@@ -6657,6 +6802,42 @@ function compileCandidate(
       optimizationCounts.keyedArrayPrependHints += prependHintedRoot.count;
     }
   }
+  const rollingWindowHintedRoot = rewriteKeyedArrayRollingWindowHints(
+    expandedReactiveRoot,
+    shiftedIndexIndependentStateIndices,
+    statesBySetter,
+    keyedArraySliceIdentifier,
+    keyedArrayRollingWindowIdentifier,
+    safeGlobals,
+  );
+  let appliedKeyedArrayRollingWindowHints = 0;
+  let appliedRollingWindowHintedStateIndices: ReadonlySet<number> = new Set();
+  if (rollingWindowHintedRoot.count > 0) {
+    const hintedBlockAnalysis = analyzeComposableBlocks(
+      rollingWindowHintedRoot.root,
+      reactiveByValue,
+      safeGlobals,
+      listNames,
+      allowedComponentNames,
+    );
+    const hintedAnalysis = analyzeHostTree(
+      rollingWindowHintedRoot.root,
+      reactiveByValue,
+      safeGlobals,
+      hintedBlockAnalysis.conditionalExpressions || new Set<t.Expression>(),
+      hintedBlockAnalysis.keyedExpressions || new Set<t.Expression>(),
+      hintedBlockAnalysis.ownedElements || new Set<t.JSXElement>(),
+      hintedBlockAnalysis.componentElements || new Set<t.JSXElement>(),
+    );
+    if (!hintedBlockAnalysis.reason && !hintedAnalysis.reason) {
+      expandedReactiveRoot = rollingWindowHintedRoot.root;
+      blockAnalysis = hintedBlockAnalysis;
+      analysis = hintedAnalysis;
+      appliedKeyedArrayRollingWindowHints = rollingWindowHintedRoot.count;
+      appliedRollingWindowHintedStateIndices = rollingWindowHintedRoot.stateIndices;
+      optimizationCounts.keyedArrayRollingWindowHints += rollingWindowHintedRoot.count;
+    }
+  }
   const sliceHintedRoot = rewriteKeyedArraySliceHints(
     expandedReactiveRoot,
     shiftedIndexIndependentStateIndices,
@@ -6808,14 +6989,18 @@ function compileCandidate(
     appliedKeyedArrayAppendHints > 0 ||
     appliedKeyedArrayFilterHints > 0 ||
     appliedKeyedArrayPrependHints > 0 ||
+    appliedKeyedArrayRollingWindowHints > 0 ||
     appliedKeyedArraySliceHints > 0;
   const hasKeyedArrayRemovalHints =
-    appliedKeyedArrayFilterHints > 0 || appliedKeyedArraySliceHints > 0;
+    appliedKeyedArrayFilterHints > 0 ||
+    appliedKeyedArrayRollingWindowHints > 0 ||
+    appliedKeyedArraySliceHints > 0;
   const runtimeFeatures = runtimeFeaturesForPlans(
     blockPlans,
     hasKeyedUpdateHints,
     hasKeyedArrayRemovalHints,
     appliedKeyedArrayPrependHints > 0,
+    appliedKeyedArrayRollingWindowHints > 0,
   );
   markShortCircuitBindings(analysis.bindings || []);
   assignStableBindingTargets(analysis.bindings || []);
@@ -6832,6 +7017,7 @@ function compileCandidate(
   );
   const appliedRemovalHintedStateIndices = new Set([
     ...appliedFilterHintedStateIndices,
+    ...appliedRollingWindowHintedStateIndices,
     ...appliedSliceHintedStateIndices,
   ]);
   const rootWithBlocks = lowerComposableBlocks(
@@ -7010,6 +7196,7 @@ export async function compileReactModule(
     keyedArrayAppendHints: 0,
     keyedArrayFilterHints: 0,
     keyedArrayPrependHints: 0,
+    keyedArrayRollingWindowHints: 0,
     keyedArraySliceHints: 0,
     keyedCollectionUpdateHints: 0,
     keyedIdentityTargets: 0,
@@ -7066,6 +7253,9 @@ export async function compileReactModule(
         const keyedArrayPrependIdentifier = programPath.scope.generateUidIdentifier(
           "createCompilerKeyedArrayPrepend",
         );
+        const keyedArrayRollingWindowIdentifier = programPath.scope.generateUidIdentifier(
+          "createCompilerKeyedArrayRollingWindow",
+        );
         const keyedArraySliceIdentifier = programPath.scope.generateUidIdentifier(
           "createCompilerKeyedArraySlice",
         );
@@ -7100,6 +7290,7 @@ export async function compileReactModule(
             keyedArrayAppendIdentifier,
             keyedArrayFilterIdentifier,
             keyedArrayPrependIdentifier,
+            keyedArrayRollingWindowIdentifier,
             keyedArraySliceIdentifier,
             keyedCollectionUpdateIdentifier,
             keyedCollectionMutationIdentifier,
@@ -7164,7 +7355,16 @@ export async function compileReactModule(
                       ),
                     ]
                   : []),
-                ...(optimizationCounts.keyedArraySliceHints > 0
+                ...(optimizationCounts.keyedArrayRollingWindowHints > 0
+                  ? [
+                      t.importSpecifier(
+                        keyedArrayRollingWindowIdentifier,
+                        t.identifier("createCompilerKeyedArrayRollingWindow"),
+                      ),
+                    ]
+                  : []),
+                ...(optimizationCounts.keyedArraySliceHints > 0 ||
+                optimizationCounts.keyedArrayRollingWindowHints > 0
                   ? [
                       t.importSpecifier(
                         keyedArraySliceIdentifier,
