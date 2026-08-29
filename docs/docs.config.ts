@@ -323,6 +323,7 @@ const sidebar = [
         label: "Official Plugins",
         icon: "plug",
         children: [
+          { label: "Analyzer", slug: "plugins/analyzer", icon: "gauge" },
           { label: "PWA", slug: "plugins/pwa", icon: "monitor" },
           { label: "Sentry", slug: "plugins/sentry", icon: "brand-sentry" },
         ],
