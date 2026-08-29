@@ -1004,6 +1004,10 @@ function hashFunctionSource(source: string): string {
   return (hash >>> 0).toString(36);
 }
 
+function compareCodepoint(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 function stableSerialize(value: unknown, seen = new WeakSet<object>()): string {
   if (value === null) return "null";
   if (value === undefined) return "undefined";
@@ -1040,11 +1044,28 @@ function stableSerialize(value: unknown, seen = new WeakSet<object>()): string {
     }
     seen.add(value);
 
+    // Set and Map keep their contents internally, so Object.entries is empty
+    // for both. Serialize the contents and sort them by codepoint so equal
+    // contents give the same key regardless of insertion order.
+    if (value instanceof Set) {
+      const items = Array.from(value, (item) => stableSerialize(item, seen)).sort(compareCodepoint);
+      seen.delete(value);
+      return `set:[${items.join(",")}]`;
+    }
+    if (value instanceof Map) {
+      const items = Array.from(
+        value,
+        ([key, item]) => `[${stableSerialize(key, seen)},${stableSerialize(item, seen)}]`,
+      ).sort(compareCodepoint);
+      seen.delete(value);
+      return `map:[${items.join(",")}]`;
+    }
+
     // Codepoint comparison, not localeCompare: the host locale must not
     // change how a "stable" key serializes, or invalidations computed on one
     // server can miss entries written by another.
     const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) =>
-      a < b ? -1 : a > b ? 1 : 0,
+      compareCodepoint(a, b),
     );
     const serialized = entries
       .map(([key, item]) => `${JSON.stringify(key)}:${stableSerialize(item, seen)}`)
