@@ -2,6 +2,8 @@
 
 Thank you for your interest in contributing to Farm.js! This guide will help you get started.
 
+Repository architecture, package boundaries, verification expectations, and pull request guidance live in [`AGENTS.md`](./AGENTS.md). Coding agents must read and follow it; human contributors can use it as the current maintainer playbook.
+
 ## Development Setup
 
 ### Prerequisites
