@@ -16,6 +16,7 @@ export interface CompileReactModuleResult {
     keyedArrayAppendHints: number;
     keyedArrayFilterHints: number;
     keyedArrayPrependHints: number;
+    keyedArraySliceHints: number;
     keyedCollectionUpdateHints: number;
     keyedIdentityTargets: number;
     keyedMapLookupTargets: number;
@@ -1357,6 +1358,100 @@ function rewriteKeyedArrayPrependHints(
             t.callExpression(t.cloneNode(helperIdentifier), [
               t.cloneNode(previous),
               t.cloneNode(nextValue),
+            ]),
+          ),
+        ]),
+      );
+      count += 1;
+      stateIndices.add(state.index);
+      path.skip();
+    },
+  });
+  return {
+    root: (file.program.body[0] as t.ExpressionStatement).expression as t.JSXElement,
+    count,
+    stateIndices,
+  };
+}
+
+function staticSliceIndex(expression: t.Node): number | undefined {
+  if (t.isNumericLiteral(expression) && Number.isSafeInteger(expression.value)) {
+    return expression.value;
+  }
+  if (
+    t.isUnaryExpression(expression) &&
+    (expression.operator === "+" || expression.operator === "-") &&
+    t.isNumericLiteral(expression.argument)
+  ) {
+    const value =
+      expression.operator === "-" ? -expression.argument.value : expression.argument.value;
+    return Number.isSafeInteger(value) ? value : undefined;
+  }
+  return undefined;
+}
+
+function rewriteKeyedArraySliceHints(
+  root: t.JSXElement,
+  hintedStateIndices: ReadonlySet<number>,
+  statesBySetter: ReadonlyMap<string, StateBinding>,
+  helperIdentifier: t.Identifier,
+): { root: t.JSXElement; count: number; stateIndices: ReadonlySet<number> } {
+  if (hintedStateIndices.size === 0) {
+    return { root: t.cloneNode(root, true), count: 0, stateIndices: new Set() };
+  }
+  const file = expressionFile(t.cloneNode(root, true));
+  const stateIndices = new Set<number>();
+  let count = 0;
+  traverse(file, {
+    CallExpression(path) {
+      const callee = path.get("callee");
+      if (!callee.isIdentifier() || callee.scope.hasBinding(callee.node.name)) return;
+      const state = statesBySetter.get(callee.node.name);
+      if (!state || !hintedStateIndices.has(state.index) || path.node.arguments.length !== 1) {
+        return;
+      }
+      const updater = path.node.arguments[0];
+      if (
+        !t.isArrowFunctionExpression(updater) ||
+        updater.async ||
+        updater.generator ||
+        updater.params.length !== 1 ||
+        !t.isIdentifier(updater.params[0]) ||
+        !t.isCallExpression(updater.body) ||
+        updater.body.arguments.length < 1 ||
+        updater.body.arguments.length > 2 ||
+        !t.isMemberExpression(updater.body.callee) ||
+        updater.body.callee.computed ||
+        !t.isIdentifier(updater.body.callee.object, { name: updater.params[0].name }) ||
+        !t.isIdentifier(updater.body.callee.property, { name: "slice" })
+      ) {
+        return;
+      }
+      const indexes: number[] = [];
+      for (const argument of updater.body.arguments) {
+        if (!t.isExpression(argument)) return;
+        const value = staticSliceIndex(argument);
+        if (value === undefined) return;
+        indexes.push(value);
+      }
+      if (indexes.length === 1 && indexes[0] === 0) return;
+
+      const previous = t.cloneNode(updater.params[0]);
+      const sliceMethod = path.scope.generateUidIdentifier("farmSlice");
+      path.node.arguments[0] = t.arrowFunctionExpression(
+        [t.cloneNode(previous)],
+        t.blockStatement([
+          t.variableDeclaration("const", [
+            t.variableDeclarator(
+              t.cloneNode(sliceMethod),
+              t.memberExpression(t.cloneNode(previous), t.identifier("slice")),
+            ),
+          ]),
+          t.returnStatement(
+            t.callExpression(t.cloneNode(helperIdentifier), [
+              t.cloneNode(previous),
+              t.cloneNode(sliceMethod),
+              ...indexes.map((value) => t.numericLiteral(value)),
             ]),
           ),
         ]),
@@ -6161,6 +6256,7 @@ function compileCandidate(
   keyedArrayAppendIdentifier: t.Identifier,
   keyedArrayFilterIdentifier: t.Identifier,
   keyedArrayPrependIdentifier: t.Identifier,
+  keyedArraySliceIdentifier: t.Identifier,
   keyedCollectionUpdateIdentifier: t.Identifier,
   keyedCollectionMutationIdentifier: t.Identifier,
   runtimeFeatureIdentifiers: ReadonlyMap<CompilerRuntimeFeatureName, t.Identifier>,
@@ -6169,6 +6265,7 @@ function compileCandidate(
     keyedArrayAppendHints: number;
     keyedArrayFilterHints: number;
     keyedArrayPrependHints: number;
+    keyedArraySliceHints: number;
     keyedCollectionUpdateHints: number;
     keyedIdentityTargets: number;
     keyedMapLookupTargets: number;
@@ -6560,6 +6657,40 @@ function compileCandidate(
       optimizationCounts.keyedArrayPrependHints += prependHintedRoot.count;
     }
   }
+  const sliceHintedRoot = rewriteKeyedArraySliceHints(
+    expandedReactiveRoot,
+    shiftedIndexIndependentStateIndices,
+    statesBySetter,
+    keyedArraySliceIdentifier,
+  );
+  let appliedKeyedArraySliceHints = 0;
+  let appliedSliceHintedStateIndices: ReadonlySet<number> = new Set();
+  if (sliceHintedRoot.count > 0) {
+    const hintedBlockAnalysis = analyzeComposableBlocks(
+      sliceHintedRoot.root,
+      reactiveByValue,
+      safeGlobals,
+      listNames,
+      allowedComponentNames,
+    );
+    const hintedAnalysis = analyzeHostTree(
+      sliceHintedRoot.root,
+      reactiveByValue,
+      safeGlobals,
+      hintedBlockAnalysis.conditionalExpressions || new Set<t.Expression>(),
+      hintedBlockAnalysis.keyedExpressions || new Set<t.Expression>(),
+      hintedBlockAnalysis.ownedElements || new Set<t.JSXElement>(),
+      hintedBlockAnalysis.componentElements || new Set<t.JSXElement>(),
+    );
+    if (!hintedBlockAnalysis.reason && !hintedAnalysis.reason) {
+      expandedReactiveRoot = sliceHintedRoot.root;
+      blockAnalysis = hintedBlockAnalysis;
+      analysis = hintedAnalysis;
+      appliedKeyedArraySliceHints = sliceHintedRoot.count;
+      appliedSliceHintedStateIndices = sliceHintedRoot.stateIndices;
+      optimizationCounts.keyedArraySliceHints += sliceHintedRoot.count;
+    }
+  }
   const filterHintedRoot = rewriteKeyedArrayFilterHints(
     expandedReactiveRoot,
     shiftedIndexIndependentStateIndices,
@@ -6676,11 +6807,14 @@ function compileCandidate(
     appliedKeyedMapUpdateHints > 0 ||
     appliedKeyedArrayAppendHints > 0 ||
     appliedKeyedArrayFilterHints > 0 ||
-    appliedKeyedArrayPrependHints > 0;
+    appliedKeyedArrayPrependHints > 0 ||
+    appliedKeyedArraySliceHints > 0;
+  const hasKeyedArrayRemovalHints =
+    appliedKeyedArrayFilterHints > 0 || appliedKeyedArraySliceHints > 0;
   const runtimeFeatures = runtimeFeaturesForPlans(
     blockPlans,
     hasKeyedUpdateHints,
-    appliedKeyedArrayFilterHints > 0,
+    hasKeyedArrayRemovalHints,
     appliedKeyedArrayPrependHints > 0,
   );
   markShortCircuitBindings(analysis.bindings || []);
@@ -6696,13 +6830,17 @@ function compileCandidate(
     blockParameter,
     blockAnalysis.ownedElements || new Set<t.JSXElement>(),
   );
+  const appliedRemovalHintedStateIndices = new Set([
+    ...appliedFilterHintedStateIndices,
+    ...appliedSliceHintedStateIndices,
+  ]);
   const rootWithBlocks = lowerComposableBlocks(
     rootWithTargets,
     blockPlans,
     blockParameter,
     listNames,
     hasKeyedUpdateHints,
-    appliedFilterHintedStateIndices,
+    appliedRemovalHintedStateIndices,
     appliedPrependHintedStateIndices,
   );
   const rewrittenRoot = rewriteStateAccess(
@@ -6872,6 +7010,7 @@ export async function compileReactModule(
     keyedArrayAppendHints: 0,
     keyedArrayFilterHints: 0,
     keyedArrayPrependHints: 0,
+    keyedArraySliceHints: 0,
     keyedCollectionUpdateHints: 0,
     keyedIdentityTargets: 0,
     keyedMapLookupTargets: 0,
@@ -6927,6 +7066,9 @@ export async function compileReactModule(
         const keyedArrayPrependIdentifier = programPath.scope.generateUidIdentifier(
           "createCompilerKeyedArrayPrepend",
         );
+        const keyedArraySliceIdentifier = programPath.scope.generateUidIdentifier(
+          "createCompilerKeyedArraySlice",
+        );
         const keyedCollectionUpdateIdentifier = programPath.scope.generateUidIdentifier(
           "createCompilerKeyedCollectionUpdate",
         );
@@ -6958,6 +7100,7 @@ export async function compileReactModule(
             keyedArrayAppendIdentifier,
             keyedArrayFilterIdentifier,
             keyedArrayPrependIdentifier,
+            keyedArraySliceIdentifier,
             keyedCollectionUpdateIdentifier,
             keyedCollectionMutationIdentifier,
             runtimeFeatureIdentifiers,
@@ -7018,6 +7161,14 @@ export async function compileReactModule(
                       t.importSpecifier(
                         keyedArrayPrependIdentifier,
                         t.identifier("createCompilerKeyedArrayPrepend"),
+                      ),
+                    ]
+                  : []),
+                ...(optimizationCounts.keyedArraySliceHints > 0
+                  ? [
+                      t.importSpecifier(
+                        keyedArraySliceIdentifier,
+                        t.identifier("createCompilerKeyedArraySlice"),
                       ),
                     ]
                   : []),

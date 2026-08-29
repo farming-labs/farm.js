@@ -143,6 +143,10 @@ async function inspectBuild(compilerMode) {
       "The compiler build did not emit a keyed-array prepend hint.",
     );
     assert(
+      compilerReport.summary.keyedArraySliceHints > 0,
+      "The compiler build did not emit a keyed-array slice hint.",
+    );
+    assert(
       compilerReport.summary.keyedCollectionUpdateHints > 0,
       "The compiler build did not emit a keyed Set/Map collection-delta hint.",
     );
@@ -508,6 +512,28 @@ async function measureTrial(browser, trial, compilerMode, port) {
           },
         );
 
+        const tableSlicePrefix = await measureTable(
+          async () => ensure10000(),
+          async () => {
+            const firstSurvivor = table.querySelectorAll("tbody tr")[1_000];
+            await runTableAction(
+              () => tableButton("table-drop-prefix").click(),
+              () => rowCount() === 9_000 && table.querySelector("tbody tr") === firstSurvivor,
+            );
+          },
+        );
+
+        const tableSlicePrefixSnapshot = await measureTable(
+          async () => ensure10000(),
+          async () => {
+            const firstSurvivor = table.querySelectorAll("tbody tr")[1_000];
+            await runTableAction(
+              () => tableButton("table-drop-prefix-snapshot").click(),
+              () => rowCount() === 9_000 && table.querySelector("tbody tr") === firstSurvivor,
+            );
+          },
+        );
+
         const tableUpdate = await measureTable(
           async () => ensure10000(),
           async () => {
@@ -697,6 +723,7 @@ async function measureTrial(browser, trial, compilerMode, port) {
           select20k: [],
           snapshotMapLookup20k: [],
           snapshotMembership20k: [],
+          slicePrefixAt21k: [],
           swap20k: [],
           updateEvery10th20k: [],
         };
@@ -729,10 +756,12 @@ async function measureTrial(browser, trial, compilerMode, port) {
           );
           scale.prependAt20k.push(performance.now() - prependStartedAt);
           peakRows = Math.max(peakRows, rowCount());
+          const sliceStartedAt = performance.now();
           await runTableAction(
             () => tableButton("table-drop-prefix").click(),
-            () => rowCount() === 20_000,
+            () => rowCount() === 20_000 && table.querySelector("tbody tr") === previousFirstRow,
           );
+          scale.slicePrefixAt21k.push(performance.now() - sliceStartedAt);
 
           const firstLabel = table.querySelector("tbody tr td:nth-child(2)")?.textContent || "";
           const updateStartedAt = performance.now();
@@ -885,6 +914,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
             select: tableSelect,
             snapshotMapLookup: tableSnapshotMapLookup,
             snapshotMembership: tableSnapshotMembership,
+            slicePrefix: tableSlicePrefix,
+            slicePrefixSnapshot: tableSlicePrefixSnapshot,
             swap: tableSwap,
             updateEvery10th: tableUpdate,
           },
@@ -944,6 +975,7 @@ async function measureTrial(browser, trial, compilerMode, port) {
         select20k: timingSummary(result.scale.select20k),
         snapshotMapLookup20k: timingSummary(result.scale.snapshotMapLookup20k),
         snapshotMembership20k: timingSummary(result.scale.snapshotMembership20k),
+        slicePrefixAt21k: timingSummary(result.scale.slicePrefixAt21k),
         swap20k: timingSummary(result.scale.swap20k),
         updateEvery10th20k: timingSummary(result.scale.updateEvery10th20k),
       },
@@ -966,6 +998,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
         select: timingSummary(result.table.select),
         snapshotMapLookup: timingSummary(result.table.snapshotMapLookup),
         snapshotMembership: timingSummary(result.table.snapshotMembership),
+        slicePrefix: timingSummary(result.table.slicePrefix),
+        slicePrefixSnapshot: timingSummary(result.table.slicePrefixSnapshot),
         swap: timingSummary(result.table.swap),
         updateEvery10th: timingSummary(result.table.updateEvery10th),
       },
@@ -1046,6 +1080,8 @@ const tableMetrics = [
   "denseMapLookup",
   "snapshotMembership",
   "snapshotMapLookup",
+  "slicePrefix",
+  "slicePrefixSnapshot",
   "swap",
   "remove",
   "removeSnapshot",
@@ -1063,6 +1099,7 @@ const scaleMetrics = [
   "denseMapLookup20k",
   "snapshotMembership20k",
   "snapshotMapLookup20k",
+  "slicePrefixAt21k",
   "swap20k",
   "remove20k",
   "clear20k",
@@ -1093,6 +1130,7 @@ const timingResolutionFloorMs = 0.25;
 const scalabilityCases = [
   ["create10k", "createMany", 1],
   ["prependAt20k", "prepend", 2],
+  ["slicePrefixAt21k", "slicePrefix", 2],
   ["updateEvery10th20k", "updateEvery10th", 2],
   ["select20k", "select", 20],
   ["membership20k", "membership", 20],
@@ -1219,6 +1257,32 @@ const keyedPrependRegressions = keyedPrependResults.filter(
     scaleSpeedup < keyedPrependMinimumSpeedup ||
     !Number.isFinite(snapshotSpeedup) ||
     snapshotSpeedup < keyedPrependMinimumSnapshotSpeedup,
+);
+// A compiler-proven native slice identifies one exact retained interval. Reuse those row instances
+// without rescanning their keys, descriptors, or bindings. Compare it with React and a block-bodied
+// compiled control, and preserve the same advantage after trimming a 21,000-row list.
+const keyedSliceMinimumSpeedup = 3;
+const keyedSliceMinimumSnapshotSpeedup = 1.25;
+const keyedSliceResults = ["static", "hybrid"].map((mode) => {
+  const sliceMedianMs = comparisons.table.slicePrefix[mode].medianMs;
+  const snapshotMedianMs = comparisons.table.slicePrefixSnapshot[mode].medianMs;
+  return {
+    mode,
+    scaleSpeedup: comparisons.scale.slicePrefixAt21k[`${mode}VsBaseline`].speedup,
+    sliceMedianMs,
+    snapshotMedianMs,
+    snapshotSpeedup: snapshotMedianMs / sliceMedianMs,
+    speedup: comparisons.table.slicePrefix[`${mode}VsBaseline`].speedup,
+  };
+});
+const keyedSliceRegressions = keyedSliceResults.filter(
+  ({ scaleSpeedup, snapshotSpeedup, speedup }) =>
+    !Number.isFinite(speedup) ||
+    speedup < keyedSliceMinimumSpeedup ||
+    !Number.isFinite(scaleSpeedup) ||
+    scaleSpeedup < keyedSliceMinimumSpeedup ||
+    !Number.isFinite(snapshotSpeedup) ||
+    snapshotSpeedup < keyedSliceMinimumSnapshotSpeedup,
 );
 // A concise native filter carries removal positions into the keyed-row runtime. Compare it with
 // React and an equivalent block-bodied compiled update that intentionally takes complete keyed
@@ -1366,6 +1430,7 @@ const passed =
   keyedUpdateRegressions.length === 0 &&
   keyedAppendRegressions.length === 0 &&
   keyedPrependRegressions.length === 0 &&
+  keyedSliceRegressions.length === 0 &&
   keyedFilterRegressions.length === 0 &&
   keyedIdentityRegressions.length === 0 &&
   keyedMembershipRegressions.length === 0 &&
@@ -1400,6 +1465,13 @@ const report = {
     regressions: keyedPrependRegressions,
     results: keyedPrependResults,
     status: keyedPrependRegressions.length === 0 ? "PASS" : "FAIL",
+  },
+  keyedSliceHintGate: {
+    minimumSnapshotSpeedup: keyedSliceMinimumSnapshotSpeedup,
+    minimumSpeedup: keyedSliceMinimumSpeedup,
+    regressions: keyedSliceRegressions,
+    results: keyedSliceResults,
+    status: keyedSliceRegressions.length === 0 ? "PASS" : "FAIL",
   },
   keyedFilterHintGate: {
     minimumSnapshotSpeedup: keyedFilterMinimumSnapshotSpeedup,

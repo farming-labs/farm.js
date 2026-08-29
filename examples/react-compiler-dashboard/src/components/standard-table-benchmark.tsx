@@ -199,6 +199,19 @@ export function StandardTableBenchmark() {
           Drop benchmark prefix
         </button>
         <button
+          data-action="table-drop-prefix-snapshot"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              return current.slice(1_000);
+            });
+            setOperation("drop benchmark prefix (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Drop benchmark prefix (snapshot control)
+        </button>
+        <button
           data-action="table-replace"
           type="button"
           onClick={() => {

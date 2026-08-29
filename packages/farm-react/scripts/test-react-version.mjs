@@ -45,6 +45,7 @@ const testSource = String.raw`
     createCompilerKeyedArrayAppend,
     createCompilerKeyedArrayFilter,
     createCompilerKeyedArrayPrepend,
+    createCompilerKeyedArraySlice,
     createCompilerKeyedMapUpdate,
   } = await import(
     "@farm.js/react/compiler-runtime"
@@ -1564,6 +1565,85 @@ const testSource = String.raw`
   assert.equal(filterKeyReads, 2);
   assert.equal(filterBindingReads, 0);
   flushSync(() => filterRoot.unmount());
+
+  let sliceRows = () => undefined;
+  let sliceKeyReads = 0;
+  let sliceBindingReads = 0;
+  const SliceRows = createCompiledComponent({
+    displayName: "CompatibilitySliceRows",
+    initialize: () => [[
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+      { id: "c", label: "Gamma" },
+      { id: "d", label: "Delta" },
+    ]],
+    render(_props, state, blocks) {
+      const items = () => state[0].get();
+      sliceRows = (start, end) =>
+        state[0].set((previous) =>
+          end === undefined
+            ? createCompilerKeyedArraySlice(previous, previous.slice, start)
+            : createCompilerKeyedArraySlice(previous, previous.slice, start, end),
+        );
+      return React.createElement(
+        "section",
+        null,
+        React.createElement(blocks.KeyedRows, {
+          collectionDependency: 0,
+          dependencies: [0],
+          filterIndexIndependent: true,
+          id: 0,
+          items,
+          structureDependencies: [0],
+          render: () =>
+            React.createElement(
+              "ul",
+              null,
+              items().map((item) =>
+                React.createElement("li", { "data-key": item.id, key: item.id }, item.label),
+              ),
+            ),
+          rowKey: (item) => {
+            sliceKeyReads += 1;
+            return item.id;
+          },
+          create: (item) => ({
+            kind: "element",
+            tag: "li",
+            attributes: [{ name: "data-key", value: item.id }],
+            styles: [],
+            children: [item.label],
+          }),
+          bindings: [{
+            kind: "text",
+            path: [],
+            dependencies: [],
+            read: (item) => {
+              sliceBindingReads += 1;
+              return [item.label];
+            },
+          }],
+        }),
+      );
+    },
+    bindings: [{ kind: "block", id: 0, dependencies: [0] }],
+  });
+  const sliceContainer = document.createElement("div");
+  document.body.append(sliceContainer);
+  const sliceRoot = createRoot(sliceContainer);
+  flushSync(() => sliceRoot.render(React.createElement(SliceRows)));
+  const sliceGamma = sliceContainer.querySelector("[data-key='c']");
+  sliceKeyReads = 0;
+  sliceBindingReads = 0;
+  sliceRows(1);
+  sliceRows(1, -1);
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(sliceContainer.textContent, "Gamma");
+  assert.equal(sliceContainer.querySelector("[data-key='c']"), sliceGamma);
+  assert.equal(sliceKeyReads, 0);
+  assert.equal(sliceBindingReads, 0);
+  flushSync(() => sliceRoot.unmount());
 
   let prependRows = () => undefined;
   let prependKeyReads = 0;
