@@ -59,6 +59,8 @@ const [
   keyedFilterOn,
   keyedPrependOff,
   keyedPrependOn,
+  keyedPositionOff,
+  keyedPositionOn,
   keyedRollingWindowOff,
   keyedRollingWindowOn,
   keyedSliceOff,
@@ -77,6 +79,8 @@ const [
   bundle("keyed-filter.tsx", true),
   bundle("keyed-prepend.tsx", false),
   bundle("keyed-prepend.tsx", true),
+  bundle("keyed-position.tsx", false),
+  bundle("keyed-position.tsx", true),
   bundle("keyed-rolling-window.tsx", false),
   bundle("keyed-rolling-window.tsx", true),
   bundle("keyed-slice.tsx", false),
@@ -157,6 +161,15 @@ if (
 ) {
   throw new Error("Keyed rolling-window fixture did not retain its isolated all-hint runtime.");
 }
+if (
+  !keyedPositionOn.code.includes("FarmCompiledKeyedRows") ||
+  !keyedPositionOn.code.includes("keyed-rows:position-hinted") ||
+  !keyedPositionOn.code.includes("positionIndexIndependent")
+) {
+  throw new Error(
+    `Keyed position fixture did not retain its isolated position-hint runtime: rows=${keyedPositionOn.code.includes("FarmCompiledKeyedRows")}, feature=${keyedPositionOn.code.includes("keyed-rows:position-hinted")}, proof=${keyedPositionOn.code.includes("positionIndexIndependent")}.`,
+  );
+}
 for (const [name, output] of [
   ["direct", directOn],
   ["plain keyed", keyedOn],
@@ -173,6 +186,12 @@ for (const [name, output] of [
   }
   if (output.code.includes("keyed-rows:all-hinted")) {
     throw new Error(`${name} fixture retained the optional rolling-window runtime.`);
+  }
+  if (
+    output.code.includes("positionIndexIndependent") ||
+    output.code.includes("keyed-rows:position-hinted")
+  ) {
+    throw new Error(`${name} fixture retained the optional position-hint runtime.`);
   }
 }
 if (keyedPrependOn.code.includes("filterIndexIndependent")) {
@@ -264,6 +283,23 @@ const results = {
         brotli: keyedPrependOn.brotli - keyedPrependOff.brotli,
       },
     },
+    keyedPosition: {
+      compilerOff: {
+        raw: keyedPositionOff.raw,
+        gzip: keyedPositionOff.gzip,
+        brotli: keyedPositionOff.brotli,
+      },
+      compilerOn: {
+        raw: keyedPositionOn.raw,
+        gzip: keyedPositionOn.gzip,
+        brotli: keyedPositionOn.brotli,
+      },
+      compilerPremium: {
+        raw: keyedPositionOn.raw - keyedPositionOff.raw,
+        gzip: keyedPositionOn.gzip - keyedPositionOff.gzip,
+        brotli: keyedPositionOn.brotli - keyedPositionOff.brotli,
+      },
+    },
     keyedSlice: {
       compilerOff: {
         raw: keyedSliceOff.raw,
@@ -340,6 +376,13 @@ if (checkOnly) {
       name: "keyed prepend compiler premium",
       current: results.fixtures.keyedPrepend.compilerPremium.gzip,
       maximum: (reference.fixtures.keyedPrepend?.compilerPremium.gzip ?? 12_000) + 256,
+    },
+    {
+      name: "keyed position compiler premium",
+      current: results.fixtures.keyedPosition.compilerPremium.gzip,
+      maximum:
+        (reference.fixtures.keyedPosition?.compilerPremium.gzip ??
+          results.fixtures.keyedPosition.compilerPremium.gzip) + 256,
     },
     {
       name: "keyed slice compiler premium",

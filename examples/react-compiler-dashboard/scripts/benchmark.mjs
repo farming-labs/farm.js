@@ -143,6 +143,10 @@ async function inspectBuild(compilerMode) {
       "The compiler build did not emit a keyed-array prepend hint.",
     );
     assert(
+      compilerReport.summary.keyedArrayPositionHints > 0,
+      "The compiler build did not emit a keyed-array known-position hint.",
+    );
+    assert(
       compilerReport.summary.keyedArrayRollingWindowHints > 0,
       "The compiler build did not emit a keyed-array rolling-window hint.",
     );
@@ -572,6 +576,60 @@ async function measureTrial(browser, trial, compilerMode, port) {
           },
         );
 
+        const tablePositionInsert = await measureTable(
+          async () => ensure10000(),
+          async () => {
+            const previousAtPosition = table.querySelectorAll("tbody tr")[9_000];
+            await runTableAction(
+              () => tableButton("table-position-insert").click(),
+              () =>
+                rowCount() === 10_001 &&
+                table.querySelectorAll("tbody tr")[9_001] === previousAtPosition,
+            );
+          },
+        );
+
+        const tablePositionInsertSnapshot = await measureTable(
+          async () => ensure10000(),
+          async () => {
+            const previousAtPosition = table.querySelectorAll("tbody tr")[9_000];
+            await runTableAction(
+              () => tableButton("table-position-insert-snapshot").click(),
+              () =>
+                rowCount() === 10_001 &&
+                table.querySelectorAll("tbody tr")[9_001] === previousAtPosition,
+            );
+          },
+        );
+
+        const tablePositionReplace = await measureTable(
+          async () => ensure10000(),
+          async () => {
+            const row = table.querySelectorAll("tbody tr")[100];
+            const label = row?.querySelector("td:nth-child(2)")?.textContent || "";
+            await runTableAction(
+              () => tableButton("table-position-replace").click(),
+              () =>
+                table.querySelectorAll("tbody tr")[100] === row &&
+                row?.querySelector("td:nth-child(2)")?.textContent === `${label} @`,
+            );
+          },
+        );
+
+        const tablePositionReplaceSnapshot = await measureTable(
+          async () => ensure10000(),
+          async () => {
+            const row = table.querySelectorAll("tbody tr")[100];
+            const label = row?.querySelector("td:nth-child(2)")?.textContent || "";
+            await runTableAction(
+              () => tableButton("table-position-replace-snapshot").click(),
+              () =>
+                table.querySelectorAll("tbody tr")[100] === row &&
+                row?.querySelector("td:nth-child(2)")?.textContent === `${label} @`,
+            );
+          },
+        );
+
         const tableUpdate = await measureTable(
           async () => ensure10000(),
           async () => {
@@ -946,6 +1004,10 @@ async function measureTrial(browser, trial, compilerMode, port) {
             membership: tableMembership,
             prepend: tablePrepend,
             prependSnapshot: tablePrependSnapshot,
+            positionInsert: tablePositionInsert,
+            positionInsertSnapshot: tablePositionInsertSnapshot,
+            positionReplace: tablePositionReplace,
+            positionReplaceSnapshot: tablePositionReplaceSnapshot,
             remove: tableRemove,
             removeSnapshot: tableRemoveSnapshot,
             replace: tableReplace,
@@ -1032,6 +1094,10 @@ async function measureTrial(browser, trial, compilerMode, port) {
         membership: timingSummary(result.table.membership),
         prepend: timingSummary(result.table.prepend),
         prependSnapshot: timingSummary(result.table.prependSnapshot),
+        positionInsert: timingSummary(result.table.positionInsert),
+        positionInsertSnapshot: timingSummary(result.table.positionInsertSnapshot),
+        positionReplace: timingSummary(result.table.positionReplace),
+        positionReplaceSnapshot: timingSummary(result.table.positionReplaceSnapshot),
         remove: timingSummary(result.table.remove),
         removeSnapshot: timingSummary(result.table.removeSnapshot),
         replace: timingSummary(result.table.replace),
@@ -1114,6 +1180,10 @@ const tableMetrics = [
   "appendSnapshot",
   "prepend",
   "prependSnapshot",
+  "positionInsert",
+  "positionInsertSnapshot",
+  "positionReplace",
+  "positionReplaceSnapshot",
   "updateEvery10th",
   "select",
   "membership",
@@ -1351,6 +1421,41 @@ const keyedRollingWindowRegressions = keyedRollingWindowResults.filter(
     !Number.isFinite(snapshotSpeedup) ||
     snapshotSpeedup < keyedRollingWindowMinimumSnapshotSpeedup,
 );
+// Native toSpliced()/with() calls expose one exact insertion or replacement position. The hinted
+// runtime should beat both React and an equivalent block-bodied compiled control while preserving
+// the same row identities around the changed position.
+const keyedPositionInsertMinimumSpeedup = 1.1;
+const keyedPositionInsertMinimumSnapshotSpeedup = 1.1;
+const keyedPositionReplaceMinimumSpeedup = 2;
+const keyedPositionReplaceMinimumSnapshotSpeedup = 1.5;
+const keyedPositionResults = ["static", "hybrid"].map((mode) => {
+  const insertMedianMs = comparisons.table.positionInsert[mode].medianMs;
+  const insertSnapshotMedianMs = comparisons.table.positionInsertSnapshot[mode].medianMs;
+  const replaceMedianMs = comparisons.table.positionReplace[mode].medianMs;
+  const replaceSnapshotMedianMs = comparisons.table.positionReplaceSnapshot[mode].medianMs;
+  return {
+    insertMedianMs,
+    insertSnapshotMedianMs,
+    insertSnapshotSpeedup: insertSnapshotMedianMs / insertMedianMs,
+    insertSpeedup: comparisons.table.positionInsert[`${mode}VsBaseline`].speedup,
+    mode,
+    replaceMedianMs,
+    replaceSnapshotMedianMs,
+    replaceSnapshotSpeedup: replaceSnapshotMedianMs / replaceMedianMs,
+    replaceSpeedup: comparisons.table.positionReplace[`${mode}VsBaseline`].speedup,
+  };
+});
+const keyedPositionRegressions = keyedPositionResults.filter(
+  ({ insertSnapshotSpeedup, insertSpeedup, replaceSnapshotSpeedup, replaceSpeedup }) =>
+    !Number.isFinite(insertSpeedup) ||
+    insertSpeedup < keyedPositionInsertMinimumSpeedup ||
+    !Number.isFinite(insertSnapshotSpeedup) ||
+    insertSnapshotSpeedup < keyedPositionInsertMinimumSnapshotSpeedup ||
+    !Number.isFinite(replaceSpeedup) ||
+    replaceSpeedup < keyedPositionReplaceMinimumSpeedup ||
+    !Number.isFinite(replaceSnapshotSpeedup) ||
+    replaceSnapshotSpeedup < keyedPositionReplaceMinimumSnapshotSpeedup,
+);
 // A concise native filter carries removal positions into the keyed-row runtime. Compare it with
 // React and an equivalent block-bodied compiled update that intentionally takes complete keyed
 // reconciliation, while also preserving the 20,000-row end-to-end speedup.
@@ -1499,6 +1604,7 @@ const passed =
   keyedPrependRegressions.length === 0 &&
   keyedSliceRegressions.length === 0 &&
   keyedRollingWindowRegressions.length === 0 &&
+  keyedPositionRegressions.length === 0 &&
   keyedFilterRegressions.length === 0 &&
   keyedIdentityRegressions.length === 0 &&
   keyedMembershipRegressions.length === 0 &&
@@ -1547,6 +1653,15 @@ const report = {
     regressions: keyedRollingWindowRegressions,
     results: keyedRollingWindowResults,
     status: keyedRollingWindowRegressions.length === 0 ? "PASS" : "FAIL",
+  },
+  keyedPositionHintGate: {
+    insertMinimumSnapshotSpeedup: keyedPositionInsertMinimumSnapshotSpeedup,
+    insertMinimumSpeedup: keyedPositionInsertMinimumSpeedup,
+    regressions: keyedPositionRegressions,
+    replaceMinimumSnapshotSpeedup: keyedPositionReplaceMinimumSnapshotSpeedup,
+    replaceMinimumSpeedup: keyedPositionReplaceMinimumSpeedup,
+    results: keyedPositionResults,
+    status: keyedPositionRegressions.length === 0 ? "PASS" : "FAIL",
   },
   keyedFilterHintGate: {
     minimumSnapshotSpeedup: keyedFilterMinimumSnapshotSpeedup,

@@ -2,6 +2,13 @@
 
 import { useState } from "react";
 
+declare global {
+  interface Array<T> {
+    toSpliced(start: number, deleteCount: number, item: T): T[];
+    with(index: number, item: T): T[];
+  }
+}
+
 interface BenchmarkRow {
   id: number;
   label: string;
@@ -240,6 +247,64 @@ export function StandardTableBenchmark() {
           }}
         >
           Roll benchmark window (snapshot control)
+        </button>
+        <button
+          data-action="table-position-insert"
+          type="button"
+          onClick={() => {
+            const nextSeed = seed + 1;
+            const addition = buildRows(1, nextSeed)[0];
+            setSeed(nextSeed);
+            setRows((current) => current.toSpliced(9_000, 0, addition));
+            setOperation("insert at known position");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Insert at known position
+        </button>
+        <button
+          data-action="table-position-insert-snapshot"
+          type="button"
+          onClick={() => {
+            const nextSeed = seed + 1;
+            const addition = buildRows(1, nextSeed)[0];
+            setSeed(nextSeed);
+            setRows((current) => {
+              return current.toSpliced(9_000, 0, addition);
+            });
+            setOperation("insert at known position (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Insert at known position (snapshot control)
+        </button>
+        <button
+          data-action="table-position-replace"
+          type="button"
+          onClick={() => {
+            const current = rows[100];
+            const replacement = { ...current, label: `${current.label} @` };
+            setRows((items) => items.with(100, replacement));
+            setOperation("replace at known position");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Replace at known position
+        </button>
+        <button
+          data-action="table-position-replace-snapshot"
+          type="button"
+          onClick={() => {
+            const current = rows[100];
+            const replacement = { ...current, label: `${current.label} @` };
+            setRows((items) => {
+              return items.with(100, replacement);
+            });
+            setOperation("replace at known position (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Replace at known position (snapshot control)
         </button>
         <button
           data-action="table-replace"

@@ -297,6 +297,23 @@ React-owned rows, queued uncommitted windows, and failed checks use complete key
 The optional all-hint runtime is selected only for modules that emit this optimization. Reports
 expose the site count as `keyedArrayRollingWindowHints`.
 
+Native known-position updates can avoid a complete keyed scan too:
+
+```tsx
+setItems((current) => current.toSpliced(500, 0, nextItem));
+setItems((current) => current.with(500, replacement));
+```
+
+The compiler recognizes only a concise functional setter, a build-time safe-integer position, one
+inserted item with zero removals, or one direct replacement. Farm preserves the ordinary native
+method call and records metadata only after validating the committed native source and result. The
+runtime creates one inserted row or patches/replaces one row at the known position without
+rereading every existing key, descriptor, and binding. Index-aware or collection-reading rows,
+custom methods, other `toSpliced()` forms, block-bodied updaters, unsafe incoming expressions,
+queued uncommitted updates, reused keys, nested or React-owned rows, and failed checks use complete
+keyed reconciliation. Reports expose the site count as `keyedArrayPositionHints`; the capability is
+tree-shaken from modules that do not emit it.
+
 Concise immutable filters on a direct keyed array can carry removal positions into the same
 optional runtime:
 
@@ -598,6 +615,8 @@ reasons aggregated by count. Its summary and per-module `optimizations` also rep
 `keyedArrayAppendHints`, the number of compiler-proven direct keyed-array append sites; and
 `keyedArrayFilterHints`, the number of compiler-proven direct keyed-array filter sites; and
 `keyedArrayPrependHints`, the number of compiler-proven direct keyed-array prepend sites; and
+`keyedArrayPositionHints`, the number of compiler-proven native known-position insertion or
+replacement sites; and
 `keyedArrayRollingWindowHints`, the number of compiler-proven retained-tail plus incoming-suffix
 sites; and
 `keyedArraySliceHints`, the number of compiler-proven direct keyed-array slice sites. A custom

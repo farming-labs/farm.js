@@ -305,6 +305,7 @@ After a successful build, Farm writes `.farm/react-compiler.json`:
     "keyedArrayAppendHints": 1,
     "keyedArrayFilterHints": 1,
     "keyedArrayPrependHints": 1,
+    "keyedArrayPositionHints": 1,
     "keyedArrayRollingWindowHints": 1,
     "keyedArraySliceHints": 1,
     "keyedCollectionUpdateHints": 3,
@@ -327,6 +328,7 @@ After a successful build, Farm writes `.farm/react-compiler.json`:
         "keyedArrayAppendHints": 1,
         "keyedArrayFilterHints": 1,
         "keyedArrayPrependHints": 1,
+        "keyedArrayPositionHints": 1,
         "keyedArrayRollingWindowHints": 1,
         "keyedArraySliceHints": 1,
         "keyedCollectionUpdateHints": 3,
@@ -366,6 +368,8 @@ filter sites that can report removed positions. `keyedArrayPrependHints` counts 
 the compiler proved a direct keyed array prepend and can hand the new prefix to the runtime.
 `keyedArraySliceHints` counts direct keyed-array slices whose build-time bounds identify one exact
 retained interval.
+`keyedArrayPositionHints` counts native keyed-array insertions and replacements whose exact
+position is known at build time.
 `keyedArrayRollingWindowHints` counts direct keyed-array updates that retain a proven sliced tail
 and append an incoming suffix.
 `selected` is `true` when an annotation explicitly requested compilation. Module paths are relative
@@ -1006,6 +1010,36 @@ nested host blocks, row conditionals, unrelated dirty dependencies, and failed r
 all keep complete keyed reconciliation. No new component or option is required. Reports expose
 emitted sites as `keyedArrayRollingWindowHints`; only modules with such a site retain the optional
 all-hint runtime.
+
+#### Keyed array known-position hints
+
+Native immutable array methods can state an exact insertion or replacement position:
+
+```tsx
+setItems((current) => current.toSpliced(500, 0, nextItem));
+setItems((current) => current.with(500, replacement));
+```
+
+At build time, Farm recognizes only concise functional setters with a safe-integer position known
+by the compiler. `toSpliced()` must insert exactly one item with a zero delete count; `with()` must
+replace exactly one item. Farm preserves the original method lookup, argument evaluation, native
+call, return value, and thrown errors. If the method is not the native array method, the update
+still runs normally but no metadata is recorded.
+
+At update time, Farm validates the committed native source, result length, source token, normalized
+position, and incoming key before changing the DOM. An insertion creates one row at that position,
+preserves surrounding elements, and shifts only stored event indexes. A same-key replacement
+patches that row in place; a new-key replacement creates and swaps one host row. The owner component
+does not rerun, and existing row keys, descriptors, and bindings are not reread.
+
+The first proof requires compiler-owned host rows whose render and key do not observe the row index.
+Dynamic or fractional positions, other `toSpliced()` shapes, block-bodied updaters, unsafe incoming
+expressions, custom methods, queued uncommitted position updates, duplicate or reused keys,
+collection-reading bindings, React-owned rows, nested host blocks, row conditionals, unrelated dirty
+dependencies, and failed runtime checks keep complete keyed reconciliation. Negative safe-integer
+positions use the native methods' normal indexing rules. No new option or component is required.
+Reports expose emitted sites as `keyedArrayPositionHints`; position-only modules retain a separate
+optional runtime capability.
 
 #### Keyed array filter hints
 
@@ -1823,6 +1857,9 @@ The package and example test suites verify more than generated code:
 - 2,000 deterministic randomized keyed-array removals match normal React; targeted tests require
   zero surviving descriptor and binding reads, preserve DOM identity, and cover queued filters,
   unhinted-chain fallback, collection-reading rows, StrictMode hydration, and unmount cleanup;
+- 400 deterministic known-position insertions and replacements match normal React; targeted tests
+  require one-row key, descriptor, and binding work, preserve surrounding DOM identity, and cover
+  custom methods, queued updates, collection-reading rows, StrictMode hydration, and cleanup;
 - the production browser experiment derives a keyed window from 2,048 source rows without
   rerunning the owner component or corrupting the existing compiler experiments;
 - the package reactivity benchmark updates one prop across 2,048 bindings, requires identical
@@ -1840,7 +1877,8 @@ The package and example test suites verify more than generated code:
 - the production 10,000/20,000-row benchmark requires nonzero `keyedIdentityTargets`,
   `keyedMapLookupTargets`, `keyedMembershipTargets`, `keyedCollectionUpdateHints`, and
   `keyedMapUpdateHints`, `keyedArrayAppendHints`, `keyedArrayPrependHints`,
-  `keyedArrayFilterHints`, `keyedArrayRollingWindowHints`, and `keyedArraySliceHints` report counts,
+  `keyedArrayFilterHints`, `keyedArrayPositionHints`, `keyedArrayRollingWindowHints`, and
+  `keyedArraySliceHints` report counts,
   preserves the keyed-update speedup floor, checks that scalar selection, Set membership, and Map
   lookups remain key-directed at scale, compares dense hinted Set/Map updates with equivalent
   compiled snapshot controls, and passes DOM correctness, React-relative regression, direct-delta,
