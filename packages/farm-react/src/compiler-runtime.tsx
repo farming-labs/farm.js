@@ -53,6 +53,13 @@ interface CompilerKeyedArrayPositionHint {
   readonly position: number;
 }
 
+interface CompilerKeyedArrayReorderHint {
+  readonly kind: "reverse";
+  readonly sourceToken: object;
+  readonly sourceLength: number;
+  readonly resultLength: number;
+}
+
 type CompilerKeyedCollectionKind = "set" | "map";
 type CompilerKeyedCollectionMutation = "set-add" | "set-delete" | "map-set" | "map-delete";
 
@@ -93,6 +100,10 @@ const COMPILER_KEYED_ARRAY_POSITIONS = /* @__PURE__ */ new WeakMap<
   object,
   CompilerKeyedArrayPositionHint
 >();
+const COMPILER_KEYED_ARRAY_REORDERS = /* @__PURE__ */ new WeakMap<
+  object,
+  CompilerKeyedArrayReorderHint
+>();
 const COMPILER_KEYED_COLLECTION_DRAFTS = /* @__PURE__ */ new WeakMap<
   object,
   CompilerKeyedCollectionDraft
@@ -112,6 +123,9 @@ const NATIVE_ARRAY_TO_SPLICED = (
 const NATIVE_ARRAY_WITH = (
   Array.prototype as unknown as { with?: (...args: readonly unknown[]) => unknown }
 ).with;
+const NATIVE_ARRAY_TO_REVERSED = (
+  Array.prototype as unknown as { toReversed?: (...args: readonly unknown[]) => unknown }
+).toReversed;
 const NATIVE_REFLECT_APPLY = Reflect.apply;
 
 function compilerObject(value: unknown): object | undefined {
@@ -315,6 +329,26 @@ function compilerKeyedArrayPosition(
     (update.kind === "insert" && update.resultLength !== expectedLength + 1) ||
     (update.kind === "replace" &&
       (update.position >= expectedLength || update.resultLength !== expectedLength))
+  ) {
+    return undefined;
+  }
+  return update;
+}
+
+function compilerKeyedArrayReorder(
+  value: unknown,
+  sourceToken: object | undefined,
+  expectedLength: number,
+): CompilerKeyedArrayReorderHint | undefined {
+  const target = compilerObject(value);
+  if (!target || !sourceToken || !Array.isArray(value)) return undefined;
+  const update = COMPILER_KEYED_ARRAY_REORDERS.get(target);
+  if (
+    !update ||
+    update.sourceToken !== sourceToken ||
+    update.sourceLength !== expectedLength ||
+    update.resultLength !== expectedLength ||
+    update.resultLength !== value.length
   ) {
     return undefined;
   }
@@ -697,6 +731,45 @@ export function createCompilerKeyedArrayPositionUpdate(
   return value;
 }
 
+/** @internal Executes a native reverse and records its exact keyed-row permutation. */
+export function createCompilerKeyedArrayReorder(previous: unknown, method: unknown): unknown {
+  const value = NATIVE_REFLECT_APPLY(
+    method as (...values: readonly unknown[]) => unknown,
+    previous,
+    [],
+  );
+
+  try {
+    const previousTarget = compilerObject(previous);
+    const valueTarget = compilerObject(value);
+    if (
+      !previousTarget ||
+      !valueTarget ||
+      !COMPILER_KEYED_COMMITTED_COLLECTIONS.has(previousTarget) ||
+      !Array.isArray(previous) ||
+      !Array.isArray(value) ||
+      Object.getPrototypeOf(previous) !== NATIVE_ARRAY_PROTOTYPE ||
+      Object.getPrototypeOf(value) !== NATIVE_ARRAY_PROTOTYPE ||
+      method !== NATIVE_ARRAY_TO_REVERSED ||
+      value.length !== previous.length
+    ) {
+      return value;
+    }
+
+    const sourceToken = compilerKeyedCollectionToken(previousTarget);
+    if (!sourceToken) return value;
+    COMPILER_KEYED_ARRAY_REORDERS.set(valueTarget, {
+      kind: "reverse",
+      sourceToken,
+      sourceLength: previous.length,
+      resultLength: value.length,
+    });
+  } catch {
+    // Metadata must never change the result of a successful native update.
+  }
+  return value;
+}
+
 /** @internal Preserves a proven native collection mutation while recording its executed key. */
 export function applyCompilerKeyedCollectionMutation(
   collection: unknown,
@@ -1003,6 +1076,8 @@ export interface CompilerKeyedRowsBlockProps {
   prependIndexIndependent?: boolean;
   /** Compiler proof that a known-position insert cannot expose shifted row indexes. */
   positionIndexIndependent?: boolean;
+  /** Compiler proof that reordering cannot expose changed row indexes. */
+  reorderIndexIndependent?: boolean;
   rowKey(item: unknown, index: number): React.Key;
   create(item: unknown, index: number): CompilerKeyedRowElement;
   bindings: readonly CompilerKeyedRowBinding[];
@@ -3864,6 +3939,14 @@ interface KeyedUpdateRuntime {
     root: Element,
     reactOwnedRows: boolean,
   ): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined;
+  reorder?(
+    props: CompilerKeyedRowsBlockProps,
+    dirtyState: ReadonlySet<number>,
+    collectionToken: object | undefined,
+    instances: ReadonlyMap<string, CompilerKeyedRowInstance>,
+    root: Element,
+    reactOwnedRows: boolean,
+  ): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined;
   reconcile(
     props: CompilerKeyedRowsBlockProps,
     dirtyState: ReadonlySet<number>,
@@ -3910,6 +3993,11 @@ const keyedPositionUpdateRuntime: KeyedUpdateRuntime = {
   position: reconcileCompilerKeyedArrayPosition,
 };
 
+const keyedReorderUpdateRuntime: KeyedUpdateRuntime = {
+  ...keyedUpdateRuntime,
+  reorder: reconcileCompilerKeyedArrayReorder,
+};
+
 const keyedCompleteUpdateRuntime: KeyedUpdateRuntime = {
   ...keyedFilterPrependUpdateRuntime,
   rollingWindow: reconcileCompilerKeyedArrayRollingWindow,
@@ -3918,6 +4006,7 @@ const keyedCompleteUpdateRuntime: KeyedUpdateRuntime = {
 const keyedEveryUpdateRuntime: KeyedUpdateRuntime = {
   ...keyedCompleteUpdateRuntime,
   position: reconcileCompilerKeyedArrayPosition,
+  reorder: reconcileCompilerKeyedArrayReorder,
 };
 
 interface KeyedRowsRuntimeOptions {
@@ -4245,6 +4334,77 @@ function reconcileCompilerKeyedArrayPosition(
   previous.scope?.cleanup();
   previous.element.replaceWith(replacement.element);
   previousInstances[update.position] = replacement;
+  return new Map(previousInstances.map((instance) => [instance.key, instance]));
+}
+
+function reconcileCompilerKeyedArrayReorder(
+  props: CompilerKeyedRowsBlockProps,
+  dirtyState: ReadonlySet<number>,
+  collectionToken: object | undefined,
+  instances: ReadonlyMap<string, CompilerKeyedRowInstance>,
+  root: Element,
+  reactOwnedRows: boolean,
+): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined {
+  if (
+    reactOwnedRows ||
+    props.hostBlocks ||
+    (props.conditionals?.length || 0) > 0 ||
+    !props.reorderIndexIndependent ||
+    props.collectionDependency === undefined
+  ) {
+    return undefined;
+  }
+  const collectionDependency = props.collectionDependency;
+  if (props.bindings.some((binding) => binding.dependencies?.includes(collectionDependency))) {
+    return undefined;
+  }
+  const dependencies = props.dependencies || props.structureDependencies;
+  const relevantDirty = (dependencies || []).filter((index) => dirtyState.has(index));
+  if (relevantDirty.length !== 1 || relevantDirty[0] !== collectionDependency) {
+    return undefined;
+  }
+
+  const finalValue = props.items();
+  const update = compilerKeyedArrayReorder(finalValue, collectionToken, instances.size);
+  if (!update || update.kind !== "reverse" || !Array.isArray(finalValue)) return undefined;
+
+  const previousInstances = [...instances.values()];
+  try {
+    for (let sourceIndex = 0; sourceIndex < previousInstances.length; sourceIndex += 1) {
+      const instance = previousInstances[sourceIndex];
+      const targetIndex = previousInstances.length - sourceIndex - 1;
+      if (instance.index !== sourceIndex || !Object.is(instance.item, finalValue[targetIndex])) {
+        return undefined;
+      }
+    }
+  } catch {
+    return undefined;
+  }
+
+  const activeElement = root.ownerDocument.activeElement;
+  const restoreFocus = Boolean(activeElement && root.contains(activeElement));
+  // A reverse has a one-row LIS. Keep the first committed row in place and
+  // move every following row before the previous anchor, which performs the
+  // minimum n - 1 connected DOM moves without rescanning keys or descriptors.
+  let anchor = previousInstances[0]?.element || null;
+  for (let sourceIndex = 1; sourceIndex < previousInstances.length; sourceIndex += 1) {
+    const element = previousInstances[sourceIndex].element;
+    root.insertBefore(element, anchor);
+    anchor = element;
+  }
+
+  previousInstances.reverse();
+  for (let index = 0; index < previousInstances.length; index += 1) {
+    previousInstances[index].index = index;
+  }
+  if (
+    restoreFocus &&
+    activeElement?.isConnected &&
+    activeElement.ownerDocument.activeElement !== activeElement &&
+    "focus" in activeElement
+  ) {
+    (activeElement as HTMLElement).focus({ preventScroll: true });
+  }
   return new Map(previousInstances.map((instance) => [instance.key, instance]));
 }
 
@@ -5445,6 +5605,21 @@ function createKeyedRowsBlockComponent(
           afterCommit?.();
           return;
         }
+        const reorderedInstances = options.keyedUpdates.reorder?.(
+          this.currentProps,
+          dirtyState,
+          this.collectionToken,
+          this.instances,
+          this.root,
+          this.hasReactOwnedRows(),
+        );
+        if (reorderedInstances) {
+          this.instances = new Map(reorderedInstances);
+          this.rebuildElementIndex(this.instances);
+          this.commitCurrentCollection(dirtyState);
+          afterCommit?.();
+          return;
+        }
         const rollingWindowInstances = options.keyedUpdates.rollingWindow?.(
           this.currentProps,
           dirtyState,
@@ -6075,6 +6250,15 @@ export const keyedRowsPositionHintedRuntimeFeature: CompilerRuntimeFeature = {
   }),
 };
 
+export const keyedRowsReorderHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:reorder-hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner, {
+      keyedUpdates: keyedReorderUpdateRuntime,
+    }),
+  }),
+};
+
 export const keyedRowsAllHintedRuntimeFeature: CompilerRuntimeFeature = {
   name: "keyed-rows:all-hinted",
   create: (owner) => ({
@@ -6145,6 +6329,16 @@ export const keyedRowsConditionalPositionHintedRuntimeFeature: CompilerRuntimeFe
     KeyedRows: createKeyedRowsBlockComponent(owner, {
       conditionals: createKeyedRowConditionalRuntime(),
       keyedUpdates: keyedPositionUpdateRuntime,
+    }),
+  }),
+};
+
+export const keyedRowsConditionalReorderHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:conditional:reorder-hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner, {
+      conditionals: createKeyedRowConditionalRuntime(),
+      keyedUpdates: keyedReorderUpdateRuntime,
     }),
   }),
 };
@@ -6228,6 +6422,16 @@ export const keyedRowsHostPositionHintedRuntimeFeature: CompilerRuntimeFeature =
   }),
 };
 
+export const keyedRowsHostReorderHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:host:reorder-hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner, {
+      hostBlocks: createKeyedRowHostRuntime(),
+      keyedUpdates: keyedReorderUpdateRuntime,
+    }),
+  }),
+};
+
 export const keyedRowsHostAllHintedRuntimeFeature: CompilerRuntimeFeature = {
   name: "keyed-rows:host:all-hinted",
   create: (owner) => ({
@@ -6306,6 +6510,17 @@ export const keyedRowsCompletePositionHintedRuntimeFeature: CompilerRuntimeFeatu
       conditionals: createKeyedRowConditionalRuntime(),
       hostBlocks: createKeyedRowHostRuntime(),
       keyedUpdates: keyedPositionUpdateRuntime,
+    }),
+  }),
+};
+
+export const keyedRowsCompleteReorderHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:complete:reorder-hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner, {
+      conditionals: createKeyedRowConditionalRuntime(),
+      hostBlocks: createKeyedRowHostRuntime(),
+      keyedUpdates: keyedReorderUpdateRuntime,
     }),
   }),
 };

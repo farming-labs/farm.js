@@ -101,6 +101,13 @@ React and equivalent block-bodied compiled controls. The compiler report must co
 `keyedArrayPositionHints` count; package tests separately require one-row key/descriptor/binding
 work, surrounding DOM identity, randomized differential correctness, hydration, and cleanup.
 
+Native keyed-array reversal has a separate 10,000-row comparison. Concise `toReversed()` is
+measured against bracketed React and an equivalent block-bodied compiled control. Both compiler
+modes must remain at least 8x faster than React and 1.25x faster than the compiled control. The
+report must contain a nonzero `keyedArrayReorderHints` count; package tests separately require the
+minimum `n - 1` connected DOM moves, zero key/descriptor/binding reads, randomized differential
+correctness, hydration, and cleanup.
+
 Set membership has a separate operation and persistence gate. The table alternates two marked row
 keys with `markedIds.has(row.id)` at 1,000 and 20,000 rows. Both compiler modes must remain at least
 10x faster than React at 20,000 rows, normalized growth may not exceed 2x, and the compiler report
@@ -159,6 +166,9 @@ The default JSON report is `/tmp/farm-react-dashboard-benchmark.json`; change it
 - The known-position controls compare concise native `toSpliced()`/`with()` updates with equivalent
   block-bodied compiled controls. They verify surrounding DOM identity and isolate the saved full
   keyed scan for one insertion or replacement.
+- The reverse control compares concise native `toReversed()` with an equivalent block-bodied
+  compiled update. Both paths move the same keyed DOM rows; the hint isolates the saved key,
+  descriptor, binding, and generic LIS work.
 - This is an operation-compatible local benchmark, not an official `js-framework-benchmark`
   submission or a score comparable to its published result table. This app has richer rows and
   measures event dispatch through an asserted DOM result without CPU throttling.

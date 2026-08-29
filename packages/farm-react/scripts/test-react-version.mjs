@@ -45,6 +45,7 @@ const testSource = String.raw`
     createCompilerKeyedArrayAppend,
     createCompilerKeyedArrayFilter,
     createCompilerKeyedArrayPrepend,
+    createCompilerKeyedArrayReorder,
     createCompilerKeyedArraySlice,
     createCompilerKeyedMapUpdate,
   } = await import(
@@ -84,6 +85,68 @@ const testSource = String.raw`
   await Promise.resolve();
   assert.equal(container.textContent, "Count: 1");
   flushSync(() => root.unmount());
+
+  let reverseCompatibilityRows = () => undefined;
+  let reorderExecutions = 0;
+  const ReorderRows = createCompiledComponent({
+    displayName: "CompatibilityReorderRows",
+    initialize: () => [[
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+      { id: "c", label: "Gamma" },
+    ]],
+    render(_props, state, blocks) {
+      reorderExecutions += 1;
+      const items = () => state[0].get();
+      reverseCompatibilityRows = () =>
+        state[0].set((previous) =>
+          createCompilerKeyedArrayReorder(previous, previous.toReversed),
+        );
+      return React.createElement(
+        "section",
+        null,
+        React.createElement(blocks.KeyedRows, {
+          collectionDependency: 0,
+          dependencies: [0],
+          id: 0,
+          items,
+          reorderIndexIndependent: true,
+          structureDependencies: [0],
+          render: () =>
+            React.createElement(
+              "ol",
+              null,
+              items().map((item) =>
+                React.createElement("li", { key: item.id, "data-key": item.id }, item.label),
+              ),
+            ),
+          rowKey: (item) => item.id,
+          create: (item) => ({
+            kind: "element",
+            tag: "li",
+            attributes: [{ name: "data-key", value: item.id }],
+            styles: [],
+            children: [item.label],
+          }),
+          bindings: [{ kind: "text", path: [], dependencies: [], read: (item) => [item.label] }],
+        }),
+      );
+    },
+    bindings: [{ kind: "block", id: 0, dependencies: [0] }],
+  });
+  const reorderContainer = document.createElement("div");
+  document.body.append(reorderContainer);
+  const reorderRoot = createRoot(reorderContainer);
+  flushSync(() => reorderRoot.render(React.createElement(ReorderRows)));
+  const reorderAlpha = reorderContainer.querySelector("[data-key='a']");
+  const reorderGamma = reorderContainer.querySelector("[data-key='c']");
+  reverseCompatibilityRows();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(reorderContainer.querySelector("li:first-child"), reorderGamma);
+  assert.equal(reorderContainer.querySelector("li:last-child"), reorderAlpha);
+  assert.equal(reorderExecutions, 1);
+  flushSync(() => reorderRoot.unmount());
 
   const StaticBindings = createCompiledComponentWithFeatures({
     displayName: "CompatibilityStaticBindings",
