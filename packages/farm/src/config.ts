@@ -945,6 +945,7 @@ export async function resolveConfig(
     experimental: {
       serverComponents: false,
       serverActions: false,
+      isolatedClientHydration: "off",
       ...userConfig.experimental,
     },
     plugins: [...resolveIntegrationPlugins(integrations), ...(userConfig.plugins || [])],

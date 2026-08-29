@@ -163,6 +163,9 @@
       "internal/client-runtime": [
         "./dist/internal/client-runtime.d.ts"
       ],
+      "internal/isolated-boundary": [
+        "./dist/internal/isolated-boundary.d.ts"
+      ],
       "internal/build-runtime": [
         "./dist/internal/build-runtime.d.ts"
       ],
@@ -552,6 +555,11 @@
       "types": "./dist/internal/client-runtime.d.ts",
       "import": "./dist/internal/client-runtime.mjs",
       "require": "./dist/internal/client-runtime.cjs"
+    },
+    "./internal/isolated-boundary": {
+      "types": "./dist/internal/isolated-boundary.d.ts",
+      "import": "./dist/internal/isolated-boundary.mjs",
+      "require": "./dist/internal/isolated-boundary.cjs"
     },
     "./internal/build-runtime": {
       "types": "./dist/internal/build-runtime.d.ts",

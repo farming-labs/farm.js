@@ -182,6 +182,15 @@ happens. To make the interactivity work, fetch data in a synchronous page (for e
 route loader) and render the `"use client"` component from there, or enable experimental server
 components support.
 
+### Isolated client leaves without RSC
+
+`"use client"` also remains available in a normal React SSR application. Set
+`experimental.isolatedClientHydration` to `"analyze"` to audit which local client leaves Farm can
+split without changing runtime behavior, or to `"enabled"` to hydrate safe leaves independently.
+Unsupported routes keep the existing route-wide ownership model. See
+[Isolated client hydration](/docs/configuration#isolated-client-hydration) for the modes and safety
+rules.
+
 ## Automatic optimized boundaries
 
 Automatic optimized boundaries are a React-only experiment and are not applied to Preact, Solid,

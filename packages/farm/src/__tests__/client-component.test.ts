@@ -4,6 +4,7 @@ import os from "os";
 import path from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  getClientModuleHydrationPlan,
   getClientModuleMetadata,
   getIslandStrategyExport,
   hasHydrateExport,
@@ -188,6 +189,64 @@ describe("client component path resolution", () => {
     });
     expect(isClientComponentModule(pageFile, root)).toBe(false);
     expect(shouldHydrateModule(pageFile, root)).toBe(true);
+  });
+
+  it("isolates a supported client leaf only in enabled mode", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-isolated-client-plan-"));
+    tempDirs.push(root);
+    const layoutFile = path.join(root, "src", "app", "layout.tsx");
+    const counterFile = path.join(root, "src", "components", "counter.tsx");
+    fs.mkdirSync(path.dirname(layoutFile), { recursive: true });
+    fs.mkdirSync(path.dirname(counterFile), { recursive: true });
+    fs.writeFileSync(
+      counterFile,
+      `'use client';\nexport default function Counter() { return <button>1</button>; }\n`,
+    );
+    fs.writeFileSync(
+      layoutFile,
+      `import Counter from "../components/counter";\nexport default function Layout({ children }) { return <main><Counter />{children}</main>; }\n`,
+    );
+
+    const analyzed = getClientModuleHydrationPlan(layoutFile, root, "analyze");
+    expect(analyzed).toMatchObject({
+      shouldHydrate: true,
+      isolatedHydrationEligible: true,
+      hasIsolatedClientBoundaries: false,
+    });
+    expect(analyzed.isolatedBoundaries).toEqual([
+      { modulePath: counterFile, islandStrategy: "load" },
+    ]);
+
+    const enabled = getClientModuleHydrationPlan(layoutFile, root, "enabled");
+    expect(enabled).toMatchObject({
+      shouldHydrate: false,
+      legacyShouldHydrate: true,
+      isolatedHydrationEligible: true,
+      hasIsolatedClientBoundaries: true,
+    });
+  });
+
+  it("keeps unsupported client export graphs on route-wide hydration", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-isolated-client-fallback-"));
+    tempDirs.push(root);
+    const pageFile = path.join(root, "src", "app", "page.tsx");
+    const clientFile = path.join(root, "src", "client.tsx");
+    fs.mkdirSync(path.dirname(pageFile), { recursive: true });
+    fs.writeFileSync(
+      clientFile,
+      `'use client';\nfunction Counter() { return null; }\nexport { Counter };\n`,
+    );
+    fs.writeFileSync(
+      pageFile,
+      `import { Counter } from "../client";\nexport default function Page() { return <Counter />; }\n`,
+    );
+
+    expect(getClientModuleHydrationPlan(pageFile, root, "enabled")).toMatchObject({
+      shouldHydrate: true,
+      isolatedHydrationEligible: false,
+      hasIsolatedClientBoundaries: false,
+      fallbackReason: expect.stringContaining("unsupported export shape"),
+    });
   });
 
   it("detects client boundaries exposed by package export maps", () => {

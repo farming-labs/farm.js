@@ -61,6 +61,7 @@ export const farmPackageBuildOptions = {
     "i18n/server": "src/i18n/server.ts",
     "i18n/client": "src/i18n/client.tsx",
     "internal/client-runtime": "src/client/production-runtime.ts",
+    "internal/isolated-boundary": "src/client/isolated-boundary.ts",
     "internal/production-runtime": "src/nitro/production-runtime.ts",
     "internal/metadata-image-runtime": "src/metadata-image.ts",
     "internal/build-runtime": "src/nitro/build-runtime.ts",

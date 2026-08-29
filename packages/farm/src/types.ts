@@ -226,6 +226,22 @@ export interface FarmConfig {
     serverComponents?: boolean;
     serverActions?: boolean;
     /**
+     * Controls non-RSC hydration ownership for server modules that import
+     * leaf `"use client"` components.
+     *
+     * - `"off"` keeps the current route-wide hydration boundary.
+     * - `"analyze"` reports eligible boundaries without changing runtime behavior.
+     * - `"enabled"` hydrates eligible client leaves independently and falls
+     *   back to route-wide hydration for unsupported module graphs.
+     *
+     * This does not enable React Server Components. `"use client"` remains a
+     * valid client-boundary declaration in normal SSR applications.
+     *
+     * @experimental
+     * @default "off"
+     */
+    isolatedClientHydration?: FarmIsolatedClientHydrationMode;
+    /**
      * Automatically optimize eligible server-only host-element subtrees with
      * the native Strata renderer. Unsupported trees keep normal React
      * rendering; no application boundary component is required.
@@ -237,6 +253,8 @@ export interface FarmConfig {
   };
   vite?: any;
 }
+
+export type FarmIsolatedClientHydrationMode = "off" | "analyze" | "enabled";
 
 /**
  * Middleware data available in page components

@@ -173,6 +173,7 @@ async function defaultHandler({
         isClientComponent: false,
         shouldHydrate: false,
         islandStrategy: null,
+        hasIsolatedClientBoundaries: false,
       };
       const isClientComponent = moduleMetadata.isClientComponent;
       const shouldHydrate = moduleMetadata.shouldHydrate;
@@ -188,11 +189,15 @@ async function defaultHandler({
             isClientComponent: false,
             shouldHydrate: false,
             islandStrategy: null,
+            hasIsolatedClientBoundaries: false,
           },
       );
       const layoutShouldHydrate = layoutHydrationMetadata.some(
         (metadata) => metadata.shouldHydrate,
       );
+      const hasIsolatedClientBoundaries =
+        moduleMetadata.hasIsolatedClientBoundaries === true ||
+        layoutHydrationMetadata.some((metadata) => metadata.hasIsolatedClientBoundaries === true);
       const hydrationStrategies = [
         ...(shouldHydrate && moduleMetadata.islandStrategy ? [moduleMetadata.islandStrategy] : []),
         ...layoutHydrationMetadata.flatMap((metadata) =>
@@ -285,7 +290,8 @@ async function defaultHandler({
         isClientComponent,
         pageShouldHydrate: shouldHydrate,
         layoutShouldHydrate,
-        shouldHydrate: shouldHydrate || layoutShouldHydrate,
+        ...(hasIsolatedClientBoundaries ? { hasIsolatedClientBoundaries: true } : {}),
+        shouldHydrate: shouldHydrate || layoutShouldHydrate || hasIsolatedClientBoundaries,
         islandStrategy: hydrationIslandStrategy,
         renderPlan,
         fragment: fragmentHtml

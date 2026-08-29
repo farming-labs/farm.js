@@ -250,6 +250,7 @@ mount, and shortcut together.
 | serverActions | Restricting trusted action origins and request body size.                         |
 | images        | Configuring responsive widths, remote allowlists, formats, and optimizer limits.  |
 | performance   | Budgeting image and font preload hints without changing the rendered resources.   |
+| experimental  | Auditing or enabling opt-in rendering experiments such as isolated hydration.     |
 | openapi       | Publishing API reference docs.                                                    |
 
 ## API client base URL
@@ -277,6 +278,42 @@ public URL in the browser bundle.
 
 The option configures `createAPIClient()` automatically. An explicit per-client `baseURL` still
 takes precedence.
+
+## Isolated client hydration
+
+React applications can keep using `"use client"` without enabling React Server Components. By
+default, Farm preserves its compatible route-wide hydration behavior. The isolated hydration
+experiment lets an otherwise server-rendered page or layout ship and hydrate eligible client leaves
+instead of the complete route module:
+
+```ts
+import { defineConfig } from "@farm.js/core";
+
+export default defineConfig({
+  experimental: {
+    isolatedClientHydration: "enabled",
+  },
+});
+```
+
+The option has three modes:
+
+| Mode        | Behavior                                                                     |
+| ----------- | ---------------------------------------------------------------------------- |
+| `"off"`     | Keeps route-wide hydration. This is the default.                             |
+| `"analyze"` | Reports eligible boundaries without changing emitted code or runtime work.   |
+| `"enabled"` | Hydrates safe client leaves independently and keeps unsupported routes safe. |
+
+An eligible boundary is a local, statically analyzable `"use client"` module with a default or
+named capitalized component export and serializable props. Farm preserves its server-rendered HTML,
+emits the client component as a separate browser chunk, and hydrates that leaf as its own React
+root. Package boundaries, re-export graphs, ambiguous exports, and routes that still require
+route-wide hydration retain the existing behavior. If runtime props cannot be serialized, Farm
+preserves the SSR output and leaves that boundary inert instead of executing unsafe client code.
+
+This flag does not enable RSC, change the meaning of `"use client"`, or make Server Components part
+of the wire format. Treat `"enabled"` as an experimental performance option and measure the route's
+client JavaScript and interaction cost before adopting it broadly.
 
 ## Images
 
