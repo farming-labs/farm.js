@@ -1937,22 +1937,6 @@ importers:
         specifier: ^5.3.3
         version: 5.9.3
 
-  packages/farm-sentry:
-    dependencies:
-      '@farm.js/core':
-        specifier: workspace:*
-        version: link:../farm
-    devDependencies:
-      '@sentry/node':
-        specifier: ^10.71.0
-        version: 10.71.0(@opentelemetry/core@2.10.0)(supports-color@10.2.2)
-      typescript:
-        specifier: ^5.3.3
-        version: 5.9.3
-      vitest:
-        specifier: ^3.2.7
-        version: 3.2.7(@types/node@20.19.21)(jsdom@25.0.1)(supports-color@10.2.2)
-
   packages/farm-polar:
     dependencies:
       '@farm.js/core':
@@ -2094,6 +2078,22 @@ importers:
 
   packages/farm-renderer-tests:
     dependencies:
+      vitest:
+        specifier: ^3.2.7
+        version: 3.2.7(@types/node@20.19.21)(jsdom@25.0.1)(supports-color@10.2.2)
+
+  packages/farm-sentry:
+    dependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
+    devDependencies:
+      '@sentry/node':
+        specifier: ^10.71.0
+        version: 10.71.0(@opentelemetry/core@2.10.0)(supports-color@10.2.2)
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
       vitest:
         specifier: ^3.2.7
         version: 3.2.7(@types/node@20.19.21)(jsdom@25.0.1)(supports-color@10.2.2)
