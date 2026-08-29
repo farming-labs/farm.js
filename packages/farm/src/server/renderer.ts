@@ -1227,6 +1227,7 @@ export class ServerRenderer {
               isClientComponent?: boolean;
               shouldHydrate?: boolean;
               islandStrategy?: "load" | "interaction" | "visible" | "idle" | null;
+              hasIsolatedClientBoundaries?: boolean;
             }
           | undefined;
         if (typeof manifestEntry?.shouldHydrate === "boolean") {
@@ -1234,6 +1235,9 @@ export class ServerRenderer {
             isClientComponent: manifestEntry.isClientComponent === true,
             shouldHydrate: manifestEntry.shouldHydrate,
             islandStrategy: manifestEntry.islandStrategy ?? null,
+            ...(manifestEntry.hasIsolatedClientBoundaries === true
+              ? { hasIsolatedClientBoundaries: true }
+              : {}),
           };
         }
         return {
@@ -1250,6 +1254,9 @@ export class ServerRenderer {
         modulePath: toRootRelativeUrlPath(layout.modulePath, this.config.root) ?? layout.modulePath,
         shouldHydrate: layoutHydrationMetadata[index]?.shouldHydrate === true,
         islandStrategy: layoutHydrationMetadata[index]?.islandStrategy ?? null,
+        ...(layoutHydrationMetadata[index]?.hasIsolatedClientBoundaries === true
+          ? { hasIsolatedClientBoundaries: true }
+          : {}),
       }));
       const hydrationStrategies = [
         ...(shouldHydrate && moduleMetadata.islandStrategy ? [moduleMetadata.islandStrategy] : []),
@@ -1265,6 +1272,9 @@ export class ServerRenderer {
       const hasHydratableRouteSlots = renderedRouteSlots.some(
         (slot) => slot.isClientComponent || slot.shouldHydrate,
       );
+      const hasIsolatedClientBoundaries =
+        routeManifestEntry?.hasIsolatedClientBoundaries === true ||
+        layoutHydrationMetadata.some((metadata) => metadata.hasIsolatedClientBoundaries === true);
 
       (req as any).__FARM_PAGE_PATH__ = route.modulePath;
       (req as any).__FARM_ROUTE__ = pathname;
@@ -1272,7 +1282,11 @@ export class ServerRenderer {
       (req as any).__FARM_PAGE_SHOULD_HYDRATE__ = shouldHydrate;
       (req as any).__FARM_LAYOUT_SHOULD_HYDRATE__ = shouldHydrateLayout;
       (req as any).__FARM_LAYOUTS__ = clientLayouts;
-      (req as any).__FARM_SHOULD_HYDRATE__ = shouldHydrate || shouldHydrateLayout;
+      if (hasIsolatedClientBoundaries) {
+        (req as any).__FARM_HAS_ISOLATED_CLIENT_BOUNDARIES__ = true;
+      }
+      (req as any).__FARM_SHOULD_HYDRATE__ =
+        shouldHydrate || shouldHydrateLayout || hasIsolatedClientBoundaries;
       (req as any).__FARM_ISLAND_STRATEGY__ = hydrationIslandStrategy;
       (req as any).__FARM_HAS_HYDRATABLE_ROUTE_SLOTS__ = hasHydratableRouteSlots;
       (req as any).__FARM_LOADING_MODULE_PATH__ = loadingBoundaryEntry?.modulePath
@@ -2013,6 +2027,11 @@ window.__FARM_PAGE_SHOULD_HYDRATE__ = ${JSON.stringify((req as any).__FARM_PAGE_
 window.__FARM_LAYOUT_SHOULD_HYDRATE__ = ${JSON.stringify((req as any).__FARM_LAYOUT_SHOULD_HYDRATE__ === true)};
 window.__FARM_LAYOUTS__ = ${JSON.stringify((req as any).__FARM_LAYOUTS__ || [])};
 window.__FARM_SHOULD_HYDRATE__ = ${JSON.stringify((req as any).__FARM_SHOULD_HYDRATE__ === true)};
+${
+  (req as any).__FARM_HAS_ISOLATED_CLIENT_BOUNDARIES__ === true
+    ? "window.__FARM_HAS_ISOLATED_CLIENT_BOUNDARIES__ = true;"
+    : ""
+}
 window.__FARM_ISLAND_STRATEGY__ = ${JSON.stringify((req as any).__FARM_ISLAND_STRATEGY__ || "load")};
 window.__FARM_PAGE_MODULE__ = ${JSON.stringify(relativePath)};
 window.__FARM_LOADING_MODULE__ = ${JSON.stringify((req as any).__FARM_LOADING_MODULE_PATH__ || null)};
@@ -2251,6 +2270,11 @@ window.__FARM_LAYOUT_SHOULD_HYDRATE__ = ${JSON.stringify(
       )};
 window.__FARM_LAYOUTS__ = ${JSON.stringify((req as any).__FARM_LAYOUTS__ || [])};
 window.__FARM_SHOULD_HYDRATE__ = ${JSON.stringify((req as any).__FARM_SHOULD_HYDRATE__ === true)};
+${
+  (req as any).__FARM_HAS_ISOLATED_CLIENT_BOUNDARIES__ === true
+    ? "window.__FARM_HAS_ISOLATED_CLIENT_BOUNDARIES__ = true;"
+    : ""
+}
 window.__FARM_ISLAND_STRATEGY__ = ${JSON.stringify((req as any).__FARM_ISLAND_STRATEGY__ || "load")};
 window.__FARM_PAGE_MODULE__ = ${JSON.stringify(relativePath)};
 window.__FARM_LOADING_MODULE__ = ${JSON.stringify(

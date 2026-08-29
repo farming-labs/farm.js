@@ -6,6 +6,7 @@ import { createServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { gzipSync } from "node:zlib";
 import { describe, expect, it, vi } from "vitest";
 import { build } from "../build";
 import { loadFarmProductionVite, type FarmProductionViteRuntime } from "../build/production-vite";
@@ -122,6 +123,21 @@ async function readClientBundle(root: string): Promise<string> {
   return fs.readFile(path.join(clientDir, fingerprinted ?? "farm-client.js"), "utf8");
 }
 
+async function readAllClientJavaScript(root: string): Promise<string> {
+  const readDirectory = async (clientDir: string): Promise<string> => {
+    const entries = await fs.readdir(clientDir, { withFileTypes: true });
+    const contents = await Promise.all(
+      entries.map(async (entry) => {
+        const entryPath = path.join(clientDir, entry.name);
+        if (entry.isDirectory()) return readDirectory(entryPath);
+        return entry.name.endsWith(".js") ? fs.readFile(entryPath, "utf8") : "";
+      }),
+    );
+    return contents.join("\n");
+  };
+  return readDirectory(path.join(root, ".farm", "client"));
+}
+
 async function runProductionRequest(
   serverDir: string,
   assertion: (response: Response) => Promise<void>,
@@ -211,6 +227,117 @@ async function expectNitroFallback(root: string): Promise<void> {
 }
 
 describe("production prebuilt SSR output", () => {
+  it("isolates a client leaf without shipping its server layout", async () => {
+    const root = await createProductionFixture();
+    const baselineRoot = await createProductionFixture();
+
+    try {
+      let randomState = 0x5f3759df;
+      const serverLayoutSentinel = `SERVER_LAYOUT_SENTINEL_${Array.from({ length: 8192 }, () => {
+        randomState = (randomState * 1664525 + 1013904223) >>> 0;
+        return String.fromCharCode(33 + (randomState % 90));
+      }).join("")}`;
+      const counterSource = `
+"use client";
+
+import { useState } from "react";
+
+export default function Counter({ initial = 0 }) {
+  const [count, setCount] = useState(initial);
+  return <button data-isolated-counter onClick={() => setCount(count + 1)}>{count}</button>;
+}
+`.trim();
+      const layoutSource = `
+import Counter from "../components/counter";
+
+const serverLayoutSentinel = ${JSON.stringify(serverLayoutSentinel)};
+
+export default function RootLayout({ children }) {
+  return <html data-server-layout={serverLayoutSentinel}><body><Counter initial={2} />{children}</body></html>;
+}
+`.trim();
+      for (const fixtureRoot of [root, baselineRoot]) {
+        await fs.mkdir(path.join(fixtureRoot, "src", "components"), { recursive: true });
+        await fs.writeFile(
+          path.join(fixtureRoot, "src", "components", "counter.tsx"),
+          counterSource,
+        );
+        await fs.writeFile(path.join(fixtureRoot, "src", "app", "layout.tsx"), layoutSource);
+      }
+
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          experimental: { isolatedClientHydration: "enabled" },
+          generateBuildId: () => "isolated-client-leaf-test",
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+
+      const clientJavaScript = await readAllClientJavaScript(root);
+      expect(clientJavaScript).not.toContain("SERVER_LAYOUT_SENTINEL_");
+      expect(clientJavaScript).toContain("data-isolated-counter");
+      expect(clientJavaScript).toContain("__farm_client_boundary_originals__");
+
+      const baselineConfig = await resolveConfig(
+        {
+          root: baselineRoot,
+          srcDir: "src",
+          images: { provider: "none" },
+          experimental: { isolatedClientHydration: "off" },
+          generateBuildId: () => "route-wide-client-baseline-test",
+        },
+        "production",
+      );
+      await build(baselineConfig, { root: baselineRoot, preset: "node-server" });
+      const baselineJavaScript = await readAllClientJavaScript(baselineRoot);
+      expect(baselineJavaScript).toContain("SERVER_LAYOUT_SENTINEL_");
+      expect(baselineJavaScript).not.toContain("farm-client-boundary");
+      expect(baselineJavaScript).not.toContain("__farm_client_boundary_originals__");
+      expect(Buffer.byteLength(clientJavaScript)).toBeLessThan(
+        Buffer.byteLength(baselineJavaScript),
+      );
+      expect(gzipSync(clientJavaScript).byteLength).toBeLessThan(
+        gzipSync(baselineJavaScript).byteLength,
+      );
+
+      const analyzeConfig = await resolveConfig(
+        {
+          root: baselineRoot,
+          srcDir: "src",
+          images: { provider: "none" },
+          experimental: { isolatedClientHydration: "analyze" },
+          generateBuildId: () => "route-wide-client-baseline-test",
+        },
+        "production",
+      );
+      await build(analyzeConfig, { root: baselineRoot, preset: "node-server" });
+      expect(await readAllClientJavaScript(baselineRoot)).toBe(baselineJavaScript);
+
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          const html = await response.text();
+          expect(html).toContain("SERVER_LAYOUT_SENTINEL_");
+          expect(html).toContain('data-farm-client-boundary="/src/components/counter.tsx"');
+          expect(html).toContain('data-farm-client-export="default"');
+          expect(html).toContain('data-isolated-counter="true"');
+          expect(html).toContain(">2</button>");
+        },
+      );
+    } finally {
+      await Promise.all(
+        [root, baselineRoot].map((fixtureRoot) =>
+          fs.rm(fixtureRoot, { recursive: true, force: true }),
+        ),
+      );
+    }
+  }, 120_000);
+
   it("retries an incomplete Rolldown client bundle after the parallel SSR build", async () => {
     const root = await createProductionFixture();
 

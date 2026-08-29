@@ -21,7 +21,9 @@ import { createFarmMarkdownSourceResponse, isFarmMarkdownPageFile } from "./app-
 import { sendWebResponse } from "./server/response";
 import {
   getClientModuleMetadata,
+  getIslandStrategyExport,
   hasUseClientDirective,
+  isIsolatableClientBoundarySource,
   stripUseClientDirective,
 } from "./utils/client-component";
 import {
@@ -84,6 +86,7 @@ import {
   resolveFarmRenderer,
 } from "./renderer";
 import type { FarmRenderer } from "./renderer";
+import type { FarmIslandStrategy } from "./island";
 import { resolveRouteRenderingConfig } from "./ssg";
 import {
   createFarmRouteRenderPlan,
@@ -494,6 +497,99 @@ export function rewriteEarlySsrRelativeImports(options: {
     output = output.slice(0, replacement.start) + replacement.code + output.slice(replacement.end);
   }
   return output;
+}
+
+export function transformIsolatedClientBoundaryModule(options: {
+  code: string;
+  moduleReference: string;
+  islandStrategy: FarmIslandStrategy;
+  parse: (code: string) => FarmModuleAstNode;
+}): string | null {
+  let ast: FarmModuleAstNode;
+  try {
+    ast = options.parse(options.code);
+  } catch {
+    return null;
+  }
+
+  const body = Array.isArray((ast as any).body) ? ((ast as any).body as any[]) : [];
+  const replacements: Array<{ start: number; end: number; code: string }> = [];
+  const wrapperStatements: string[] = [];
+  const originalEntries: string[] = [];
+  let transformedExports = 0;
+
+  const addWrapper = (localName: string, exportName: string, isDefault = false) => {
+    const safeName = exportName.replace(/[^A-Za-z0-9_$]/g, "_");
+    const wrapperName = `__farm_isolated_boundary_${safeName || "default"}__`;
+    wrapperStatements.push(
+      `const ${wrapperName} = __farm_create_isolated_boundary__(__farm_isolated_react__, ${localName}, ${JSON.stringify(options.moduleReference)}, ${JSON.stringify(exportName)}, ${JSON.stringify(options.islandStrategy)});`,
+    );
+    wrapperStatements.push(
+      isDefault ? `export default ${wrapperName};` : `export { ${wrapperName} as ${exportName} };`,
+    );
+    originalEntries.push(`${JSON.stringify(exportName)}: ${localName}`);
+    transformedExports++;
+  };
+
+  for (const node of body) {
+    if (node?.type === "ExportDefaultDeclaration" && node.declaration) {
+      const declaration = node.declaration;
+      if (
+        (declaration.type === "FunctionDeclaration" || declaration.type === "ClassDeclaration") &&
+        declaration.id?.name
+      ) {
+        replacements.push({
+          start: node.start,
+          end: node.end,
+          code: options.code.slice(declaration.start, declaration.end),
+        });
+        addWrapper(declaration.id.name, "default", true);
+      } else {
+        const originalName = "__farm_isolated_original_default__";
+        replacements.push({
+          start: node.start,
+          end: node.end,
+          code: `const ${originalName} = (${options.code.slice(declaration.start, declaration.end)});`,
+        });
+        addWrapper(originalName, "default", true);
+      }
+      continue;
+    }
+
+    if (node?.type !== "ExportNamedDeclaration" || !node.declaration) continue;
+    const declaration = node.declaration;
+    const declaredNames: string[] = [];
+    if (
+      (declaration.type === "FunctionDeclaration" || declaration.type === "ClassDeclaration") &&
+      declaration.id?.name
+    ) {
+      declaredNames.push(declaration.id.name);
+    } else if (declaration.type === "VariableDeclaration") {
+      for (const declarator of declaration.declarations || []) {
+        if (declarator.id?.type === "Identifier") declaredNames.push(declarator.id.name);
+      }
+    }
+    const componentNames = declaredNames.filter((name) => /^[A-Z]/.test(name));
+    if (componentNames.length === 0) continue;
+
+    replacements.push({
+      start: node.start,
+      end: node.end,
+      code: options.code.slice(declaration.start, declaration.end),
+    });
+    for (const name of declaredNames) {
+      if (/^[A-Z]/.test(name)) addWrapper(name, name);
+      else wrapperStatements.push(`export { ${name} };`);
+    }
+  }
+
+  if (transformedExports === 0) return null;
+  let output = options.code;
+  for (const replacement of replacements.sort((left, right) => right.start - left.start)) {
+    output = output.slice(0, replacement.start) + replacement.code + output.slice(replacement.end);
+  }
+
+  return `import * as __farm_isolated_react__ from "react";\nimport { createFarmIsolatedClientBoundary as __farm_create_isolated_boundary__ } from "@farm.js/core/internal/isolated-boundary";\n${output}\n${wrapperStatements.join("\n")}\nexport const __farm_client_boundary_originals__ = Object.freeze({ ${originalEntries.join(", ")} });\n`;
 }
 
 function walkModuleAst(node: FarmModuleAstNode, visit: (node: FarmModuleAstNode) => void): void {
@@ -2491,6 +2587,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           resolvedConfig?.publicRuntimeConfig || options.publicRuntimeConfig,
           isReactRenderer(renderer) ? docs?.adapter?.react : undefined,
           renderer,
+          resolvedConfig?.experimental?.isolatedClientHydration === "enabled",
         );
       }
 
@@ -2628,6 +2725,7 @@ export const manifest = getManifest();
       }
 
       if (hasUseClientDirective(transformedCode)) {
+        const clientBoundarySource = transformedCode;
         const moduleInfo = this.getModuleInfo(id);
         if (moduleInfo) {
           (moduleInfo as any).isClientComponent = true;
@@ -2635,6 +2733,30 @@ export const manifest = getManifest();
 
         transformedCode = stripUseClientDirective(transformedCode);
         transformed = true;
+
+        const currentConfig = (farmApp?.getConfig() ?? options) as FarmVitePluginOptions;
+        const isolatedHydrationEnabled =
+          currentConfig.experimental?.isolatedClientHydration === "enabled" &&
+          currentConfig.experimental?.serverComponents !== true &&
+          isReactRenderer(resolveFarmRenderer(currentConfig.renderer));
+        if (isolatedHydrationEnabled && isIsolatableClientBoundarySource(clientBoundarySource)) {
+          const root = currentConfig.root || server?.config.root || process.cwd();
+          const cleanId = id.split("?", 1)[0];
+          const transformedBoundary = transformIsolatedClientBoundaryModule({
+            code: transformedCode,
+            moduleReference: toViteModuleId(cleanId, root),
+            islandStrategy: getIslandStrategyExport(clientBoundarySource) ?? "load",
+            parse: (source) => this.parse(source) as unknown as FarmModuleAstNode,
+          });
+          if (!transformedBoundary) {
+            this.error(
+              `[Farm.js] Could not compile isolated client boundary ${cleanId}. ` +
+                `Use experimental.isolatedClientHydration = "analyze" to inspect eligibility ` +
+                `or "off" to retain route-wide hydration.`,
+            );
+          }
+          transformedCode = transformedBoundary;
+        }
 
         // Store client component for later injection
         if (!farmApp) {
@@ -3324,6 +3446,7 @@ function generateClientCode(
   publicRuntimeConfig: Record<string, unknown> | undefined = undefined,
   docsAdapterReact?: string,
   renderer: FarmRenderer = REACT_RENDERER,
+  isolatedHydrationEnabled = false,
 ): string {
   const hasClerkProvider = integrationProviders.some((provider) => provider.type === "clerk");
   const providerImportBlock = hasClerkProvider
@@ -3354,6 +3477,55 @@ async function hydrateFarmDocsAdapterRuntime() {
   return true;
 }`
     : `async function hydrateFarmDocsAdapterRuntime() { return false; }`;
+  const isolatedHydrationRuntime = isolatedHydrationEnabled
+    ? `const farmIsolatedBoundaryRoots = new Map();
+
+function disposeFarmIsolatedClientBoundaries(scope) {
+  for (const [container, root] of farmIsolatedBoundaryRoots) {
+    if (container === scope || scope.contains(container)) {
+      try { root.unmount(); } catch {}
+      farmIsolatedBoundaryRoots.delete(container);
+    }
+  }
+}
+
+async function hydrateFarmIsolatedClientBoundaries(scope = document) {
+  const candidates = Array.from(scope.querySelectorAll('farm-client-boundary[data-farm-client-boundary]'));
+  const boundaries = candidates.filter((container) => {
+    if (farmIsolatedBoundaryRoots.has(container)) return false;
+    return !container.parentElement?.closest('farm-client-boundary[data-farm-client-boundary]');
+  });
+  await Promise.all(boundaries.map(async (container) => {
+    const reference = container.getAttribute('data-farm-client-boundary');
+    const exportName = container.getAttribute('data-farm-client-export') || 'default';
+    const strategy = container.getAttribute('data-farm-island-strategy') || 'load';
+    if (!reference) return;
+    const scheduled = scheduleFarmIslandHydration({
+      container,
+      strategy,
+      hydrate: async () => {
+        try {
+          const module = await import(/* @vite-ignore */ reference);
+          const Component = module.__farm_client_boundary_originals__?.[exportName];
+          if (typeof Component !== 'function' && typeof Component !== 'object') {
+            throw new Error('compiled original export was not found');
+          }
+          const props = JSON.parse(container.getAttribute('data-farm-client-props') || '{}');
+          const root = hydrateRoot(container, React.createElement(Component, props));
+          farmIsolatedBoundaryRoots.set(container, root);
+        } catch (error) {
+          console.warn(
+            '[Farm.js] Could not hydrate isolated client boundary ' + reference + '#' + exportName + '. Server HTML was preserved.',
+            error,
+          );
+        }
+      },
+    });
+    if (strategy === 'load') await scheduled;
+    else void scheduled.catch((error) => console.warn('[Farm.js] Deferred boundary hydration failed:', error));
+  }));
+}`
+    : "";
 
   return `
 ${rendererClientImports}
@@ -3384,6 +3556,7 @@ const integrationDocumentNavigationMatchers = ${JSON.stringify(documentNavigatio
 installChunkErrorRecovery();
 
 let reactRoot = null;
+${isolatedHydrationRuntime}
 
 function matchesDocumentNavigation(pathname) {
   return integrationDocumentNavigationMatchers.some((matcher) => {
@@ -4384,7 +4557,15 @@ async function renderPage(pageData) {
     const nextPage = fragment.querySelector('#__farm_page__');
     const pageShouldHydrate = route.pageShouldHydrate || route.isClientComponent;
     const layoutShouldHydrate = route.layoutShouldHydrate;
-    const shouldHydrate = route.shouldHydrate || pageShouldHydrate || layoutShouldHydrate;
+    ${
+      isolatedHydrationEnabled
+        ? `const hasIsolatedClientBoundaries = Boolean(
+      fragment.querySelector('farm-client-boundary[data-farm-client-boundary]'),
+    );
+    const shouldHydrate =
+      pageShouldHydrate || layoutShouldHydrate || (route.shouldHydrate && !hasIsolatedClientBoundaries);`
+        : "const shouldHydrate = route.shouldHydrate || pageShouldHydrate || layoutShouldHydrate;"
+    }
 
     // A React-owned layout can update in place. Rendering the same layout
     // component chain preserves its state while changing only the route child.
@@ -4406,6 +4587,7 @@ async function renderPage(pageData) {
         },
       );
     } else {
+      ${isolatedHydrationEnabled ? "disposeFarmIsolatedClientBoundaries(container);" : ""}
       if (activeLayoutShouldHydrate) {
         if (appRoot) { try { appRoot.unmount(); } catch (error) {} appRoot = null; }
         if (reactRoot) { try { reactRoot.unmount(); } catch (error) {} reactRoot = null; }
@@ -4453,6 +4635,12 @@ async function renderPage(pageData) {
             console.warn('[Farm.js] Deferred island hydration failed:', error);
           });
         }
+      }${
+        isolatedHydrationEnabled
+          ? ` else if (hasIsolatedClientBoundaries) {
+        await hydrateFarmIsolatedClientBoundaries(container);
+      }`
+          : ""
       }
     }
 
@@ -4513,6 +4701,17 @@ async function hydrate() {
       pageShouldHydrate ||
       layoutShouldHydrate;
     const hydratedSlots = await hydrateInitialRouteSlots();
+    ${
+      isolatedHydrationEnabled
+        ? `const hasIsolatedClientBoundaries =
+      window.__FARM_HAS_ISOLATED_CLIENT_BOUNDARIES__ === true;
+    if (hasIsolatedClientBoundaries && !pageShouldHydrate && !layoutShouldHydrate) {
+      await hydrateFarmIsolatedClientBoundaries(rootContainer);
+      replayPreHydrationClicks();
+      return;
+    }`
+        : ""
+    }
     if (!shouldHydrate) {
       if (hydratedSlots) replayPreHydrationClicks();
       return

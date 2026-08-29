@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { isFarmIslandStrategy, type FarmIslandStrategy } from "../island";
+import type { FarmIsolatedClientHydrationMode } from "../types";
 
 function readIfExists(filePath: string): string | null {
   try {
@@ -69,6 +70,22 @@ export interface ClientModuleMetadata {
    * server-rendered HTML stays intact instead of crashing to a blank page.
    */
   suppressedAsyncHydration?: true;
+}
+
+export interface IsolatedClientBoundaryReference {
+  /** Absolute source path. Converted to a Vite URL only at the manifest edge. */
+  modulePath: string;
+  islandStrategy: FarmIslandStrategy;
+}
+
+export interface ClientModuleHydrationPlan extends ClientModuleMetadata {
+  mode: FarmIsolatedClientHydrationMode;
+  legacyShouldHydrate: boolean;
+  legacyIslandStrategy: FarmIslandStrategy | null;
+  isolatedHydrationEligible: boolean;
+  hasIsolatedClientBoundaries: boolean;
+  isolatedBoundaries: IsolatedClientBoundaryReference[];
+  fallbackReason?: string;
 }
 
 interface ParsedClientModuleMetadata {
@@ -463,6 +480,131 @@ function parseClientModuleMetadata(
 export function getClientModuleMetadata(modulePath: string, root?: string): ClientModuleMetadata {
   const resolvedPath = resolveModuleSourcePath(modulePath, root);
   return inspectClientModuleMetadata(resolvedPath, root, new Set(), true);
+}
+
+/**
+ * Resolve hydration ownership without changing the legacy metadata contract.
+ * The old metadata remains the conservative fallback; only an enabled and
+ * completely supported graph moves ownership to leaf client modules.
+ */
+export function getClientModuleHydrationPlan(
+  modulePath: string,
+  root: string | undefined,
+  mode: FarmIsolatedClientHydrationMode = "off",
+): ClientModuleHydrationPlan {
+  const metadata = getClientModuleMetadata(modulePath, root);
+  const resolvedPath = resolveModuleSourcePath(modulePath, root);
+  const content = readIfExists(resolvedPath ?? "");
+  const parsed = parseClientModuleMetadata(content, true);
+  const emptyPlan = (fallbackReason?: string): ClientModuleHydrationPlan => ({
+    ...metadata,
+    mode,
+    legacyShouldHydrate: metadata.shouldHydrate,
+    legacyIslandStrategy: metadata.islandStrategy,
+    isolatedHydrationEligible: false,
+    hasIsolatedClientBoundaries: false,
+    isolatedBoundaries: [],
+    ...(fallbackReason ? { fallbackReason } : {}),
+  });
+
+  if (mode === "off") return emptyPlan();
+  if (!resolvedPath) return emptyPlan("the owner source could not be resolved");
+  if (parsed.isClientComponent) {
+    return emptyPlan("the owner is already a client component");
+  }
+  if (parsed.hasHydrateExport) {
+    return emptyPlan("the owner explicitly exports `hydrate = true`");
+  }
+
+  const inspection = collectIsolatedClientBoundaries(resolvedPath, root);
+  if (inspection.boundaries.length === 0) {
+    return emptyPlan(inspection.fallbackReason);
+  }
+  if (inspection.fallbackReason) {
+    return emptyPlan(inspection.fallbackReason);
+  }
+
+  const enabled = mode === "enabled";
+  return {
+    ...metadata,
+    shouldHydrate: enabled ? false : metadata.shouldHydrate,
+    islandStrategy: enabled ? null : metadata.islandStrategy,
+    mode,
+    legacyShouldHydrate: metadata.shouldHydrate,
+    legacyIslandStrategy: metadata.islandStrategy,
+    isolatedHydrationEligible: true,
+    hasIsolatedClientBoundaries: enabled,
+    isolatedBoundaries: inspection.boundaries,
+  };
+}
+
+/**
+ * The first compiler pass intentionally accepts only statically named React
+ * component exports. A rejected module retains route-wide hydration.
+ */
+export function isIsolatableClientBoundarySource(content: string | null): boolean {
+  if (!content || !hasUseClientDirective(content)) return false;
+  if (/\bexport\s*\{/.test(content) || /\bexport\s*\*/.test(content)) return false;
+  return (
+    /\bexport\s+default\s+(?!(?:type|interface)\b)/.test(content) ||
+    /\bexport\s+(?:async\s+)?function\s+[A-Z][$\w]*/.test(content) ||
+    /\bexport\s+(?:const|let|var|class)\s+[A-Z][$\w]*/.test(content)
+  );
+}
+
+function collectIsolatedClientBoundaries(
+  ownerPath: string,
+  root: string | undefined,
+): { boundaries: IsolatedClientBoundaryReference[]; fallbackReason?: string } {
+  const boundaries = new Map<string, IsolatedClientBoundaryReference>();
+  const visited = new Set<string>();
+  let fallbackReason: string | undefined;
+  const projectRoot = root ? path.resolve(root) : undefined;
+
+  const visit = (moduleSourcePath: string) => {
+    if (fallbackReason || visited.has(moduleSourcePath)) return;
+    visited.add(moduleSourcePath);
+    const content = readIfExists(moduleSourcePath);
+    const parsed = parseClientModuleMetadata(content, false);
+
+    if (parsed.isClientComponent) {
+      if (projectRoot && !path.resolve(moduleSourcePath).startsWith(`${projectRoot}${path.sep}`)) {
+        fallbackReason = `client boundary ${moduleSourcePath} is outside the application root`;
+        return;
+      }
+      if (!isIsolatableClientBoundarySource(content)) {
+        fallbackReason = `client boundary ${moduleSourcePath} uses an unsupported export shape`;
+        return;
+      }
+      boundaries.set(moduleSourcePath, {
+        modulePath: moduleSourcePath,
+        islandStrategy: parsed.islandStrategy ?? "load",
+      });
+      return;
+    }
+
+    if (parsed.hasHydrateExport) {
+      fallbackReason = `imported module ${moduleSourcePath} explicitly exports hydrate = true`;
+      return;
+    }
+
+    for (const specifier of getImportSpecifiers(content)) {
+      const importedPath = resolveImportedModuleSourcePath(moduleSourcePath, specifier, root);
+      if (!importedPath) continue;
+      if (!specifier.startsWith(".") && !specifier.startsWith("/")) {
+        const packageMetadata = inspectPackageClientBoundary(importedPath, root, new Set());
+        if (packageMetadata.shouldHydrate) {
+          fallbackReason = `package client boundary ${specifier} cannot yet be isolated`;
+          return;
+        }
+        continue;
+      }
+      visit(importedPath);
+    }
+  };
+
+  visit(ownerPath);
+  return { boundaries: Array.from(boundaries.values()), fallbackReason };
 }
 
 export function isClientComponentModule(modulePath: string, root?: string): boolean {

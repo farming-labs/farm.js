@@ -267,6 +267,17 @@ describe("resolveConfig", () => {
     });
   });
 
+  it("keeps isolated client hydration off by default and preserves its rollout mode", async () => {
+    const defaults = await resolveConfig({}, "production");
+    const configured = await resolveConfig(
+      { experimental: { isolatedClientHydration: "analyze" } },
+      "production",
+    );
+
+    expect(defaults.experimental.isolatedClientHydration).toBe("off");
+    expect(configured.experimental.isolatedClientHydration).toBe("analyze");
+  });
+
   it("enables DevTools by default only in development", async () => {
     const development = await resolveConfig({}, "development");
     const production = await resolveConfig({}, "production");

@@ -35,7 +35,11 @@ import {
 } from "../app-markdown";
 import path from "path";
 import type { ViteDevServer } from "vite";
-import { getClientModuleMetadata } from "../utils/client-component";
+import {
+  getClientModuleHydrationPlan,
+  getClientModuleMetadata,
+  type IsolatedClientBoundaryReference,
+} from "../utils/client-component";
 import type { MetadataImageKind } from "../metadata";
 import type { FarmIslandStrategy } from "../island";
 import type { FarmServerRendererRuntime } from "../renderer";
@@ -99,6 +103,8 @@ export interface FarmClientRouteManifest {
     shouldHydrate: boolean;
     isClientComponent: boolean;
     islandStrategy: FarmIslandStrategy | null;
+    hasIsolatedClientBoundaries?: true;
+    isolatedBoundaries?: IsolatedClientBoundaryReference[];
     renderPlan: FarmRouteRenderPlan;
     suppressedAsyncHydration?: true;
     search?: ProgrammaticRouteSearchClientOptions;
@@ -115,6 +121,8 @@ export interface FarmClientRouteManifest {
     shouldHydrate: boolean;
     isClientComponent: boolean;
     islandStrategy: FarmIslandStrategy | null;
+    hasIsolatedClientBoundaries?: true;
+    isolatedBoundaries?: IsolatedClientBoundaryReference[];
   }>;
   slots: Array<{
     name: string;
@@ -571,13 +579,59 @@ export class RouteManager {
       return absolutePath;
     };
 
+    const isolatedMode = this.config.experimental?.isolatedClientHydration ?? "off";
     const layoutEntries = Array.from(this.layouts.values()).map((entry) => ({
       entry,
-      metadata: getClientModuleMetadata(entry.modulePath, normalizedProjectRoot),
+      metadata: getClientModuleHydrationPlan(entry.modulePath, normalizedProjectRoot, isolatedMode),
     }));
 
-    const routes = Array.from(this.routes.values()).map((entry) => {
-      const metadata = getClientModuleMetadata(entry.modulePath, normalizedProjectRoot);
+    const routeEntries = Array.from(this.routes.values()).map((entry) => ({
+      entry,
+      metadata: getClientModuleHydrationPlan(entry.modulePath, normalizedProjectRoot, isolatedMode),
+    }));
+    if (isolatedMode === "analyze") {
+      for (const { entry, metadata } of [...layoutEntries, ...routeEntries]) {
+        if (!metadata.isolatedHydrationEligible) continue;
+        logger.info(
+          `[Farm.js] isolated hydration analysis: ${entry.modulePath} can keep ${metadata.isolatedBoundaries.length} client boundary${metadata.isolatedBoundaries.length === 1 ? "" : "ies"} while excluding its server owner from the browser graph.`,
+        );
+      }
+    }
+
+    // A route-wide page root needs its complete layout chain in the browser.
+    // Conservatively retain a layout when any child page still uses that path.
+    for (const layoutEntry of layoutEntries) {
+      if (!layoutEntry.metadata.hasIsolatedClientBoundaries) continue;
+      const conflictsWithRouteRoot = routeEntries.some(
+        ({ entry, metadata }) =>
+          metadata.shouldHydrate &&
+          (layoutEntry.entry.pattern === "/" ||
+            entry.pattern === layoutEntry.entry.pattern ||
+            entry.pattern.startsWith(`${layoutEntry.entry.pattern.replace(/\/$/, "")}/`)),
+      );
+      if (conflictsWithRouteRoot) {
+        layoutEntry.metadata.shouldHydrate = layoutEntry.metadata.legacyShouldHydrate;
+        layoutEntry.metadata.islandStrategy = layoutEntry.metadata.legacyIslandStrategy;
+        layoutEntry.metadata.hasIsolatedClientBoundaries = false;
+      }
+    }
+    for (const routeEntry of routeEntries) {
+      if (!routeEntry.metadata.hasIsolatedClientBoundaries) continue;
+      const conflictsWithLayoutRoot = layoutEntries.some(
+        ({ entry, metadata }) =>
+          metadata.shouldHydrate &&
+          (entry.pattern === "/" ||
+            routeEntry.entry.pattern === entry.pattern ||
+            routeEntry.entry.pattern.startsWith(`${entry.pattern.replace(/\/$/, "")}/`)),
+      );
+      if (conflictsWithLayoutRoot) {
+        routeEntry.metadata.shouldHydrate = routeEntry.metadata.legacyShouldHydrate;
+        routeEntry.metadata.islandStrategy = routeEntry.metadata.legacyIslandStrategy;
+        routeEntry.metadata.hasIsolatedClientBoundaries = false;
+      }
+    }
+
+    const routes = routeEntries.map(({ entry, metadata }) => {
       const programmaticPage = this.programmaticPages.get(entry.modulePath);
       const layoutShouldHydrate = layoutEntries.some(
         ({ entry: layout, metadata: layoutMetadata }) =>
@@ -592,6 +646,15 @@ export class RouteManager {
         shouldHydrate: metadata.shouldHydrate,
         isClientComponent: metadata.isClientComponent,
         islandStrategy: metadata.islandStrategy,
+        ...(metadata.hasIsolatedClientBoundaries
+          ? {
+              hasIsolatedClientBoundaries: true as const,
+              isolatedBoundaries: metadata.isolatedBoundaries.map((boundary) => ({
+                ...boundary,
+                modulePath: toUrlPath(boundary.modulePath),
+              })),
+            }
+          : {}),
         renderPlan: createFarmRouteRenderPlan({
           pageShouldHydrate: metadata.shouldHydrate,
           layoutShouldHydrate,
@@ -614,6 +677,15 @@ export class RouteManager {
       shouldHydrate: metadata.shouldHydrate,
       isClientComponent: metadata.isClientComponent,
       islandStrategy: metadata.islandStrategy,
+      ...(metadata.hasIsolatedClientBoundaries
+        ? {
+            hasIsolatedClientBoundaries: true as const,
+            isolatedBoundaries: metadata.isolatedBoundaries.map((boundary) => ({
+              ...boundary,
+              modulePath: toUrlPath(boundary.modulePath),
+            })),
+          }
+        : {}),
     }));
 
     const slots = Array.from(this.routeSlots.values()).map((entry) => {

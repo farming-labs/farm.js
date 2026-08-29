@@ -350,10 +350,16 @@ The first implementation is opt-in:
 ```ts
 export default defineConfig({
   experimental: {
-    isolatedClientHydration: true,
+    isolatedClientHydration: "enabled",
   },
 });
 ```
+
+The rollout has three explicit modes. Omitting the option or using `"off"` preserves route-wide
+hydration. `"analyze"` reports which owners are eligible and the client modules they would remove
+without changing runtime behavior. `"enabled"` uses isolated roots for safe shapes and automatically
+keeps route-wide hydration for unsupported graphs. Boolean values are intentionally not accepted so
+configuration remains unambiguous as the experiment evolves.
 
 The flag must select the same plan during development, production SSR, SSG, and SPA navigation.
 It should graduate to the default only after the acceptance matrix is stable across React 18 and

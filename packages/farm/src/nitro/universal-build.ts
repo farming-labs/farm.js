@@ -22,8 +22,12 @@ import { constants as fsConstants, existsSync, readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { builtinModules, createRequire } from "module";
 import { isDeepStrictEqual } from "node:util";
-import { logger, toPosixPath } from "../utils";
-import { getClientModuleMetadata } from "../utils/client-component";
+import { logger, toPosixPath, toViteModuleId } from "../utils";
+import {
+  getClientModuleHydrationPlan,
+  getClientModuleMetadata,
+  type IsolatedClientBoundaryReference,
+} from "../utils/client-component";
 import { isFarmMarkdownPageFile } from "../app-markdown";
 import type { ProgrammaticRedirectRoute } from "../routes";
 import type { NitroConfig } from "nitro/config";
@@ -1093,15 +1097,24 @@ async function buildClient(
     relativePath: string;
     pageShouldHydrate: boolean;
     islandStrategy: FarmIslandStrategy;
+    hasIsolatedClientBoundaries: boolean;
+    isolatedBoundaries: IsolatedClientBoundaryReference[];
   }> = [];
+
+  const isolatedMode = config.experimental?.isolatedClientHydration ?? "off";
 
   const clientLayouts = layoutRoutes.map((layout) => {
     try {
-      const metadata = getClientModuleMetadata(layout.modulePath, root);
+      const metadata = getClientModuleHydrationPlan(layout.modulePath, root, isolatedMode);
       return {
         ...layout,
         shouldHydrate: metadata.shouldHydrate,
         islandStrategy: metadata.islandStrategy,
+        legacyShouldHydrate: metadata.legacyShouldHydrate,
+        legacyIslandStrategy: metadata.legacyIslandStrategy,
+        hasIsolatedClientBoundaries: metadata.hasIsolatedClientBoundaries,
+        isolatedHydrationEligible: metadata.isolatedHydrationEligible,
+        isolatedBoundaries: metadata.isolatedBoundaries,
       };
     } catch (error) {
       logger.warn(`⚠️  Could not inspect layout file ${layout.modulePath}: ${error}`);
@@ -1109,6 +1122,11 @@ async function buildClient(
         ...layout,
         shouldHydrate: false,
         islandStrategy: null,
+        legacyShouldHydrate: false,
+        legacyIslandStrategy: null,
+        hasIsolatedClientBoundaries: false,
+        isolatedHydrationEligible: false,
+        isolatedBoundaries: [],
       };
     }
   });
@@ -1136,22 +1154,76 @@ async function buildClient(
         routePattern.startsWith(`${adapterDocsEntry}/`)),
     );
 
-  for (const route of pageRoutes) {
+  const routePlans = pageRoutes.map((route) => ({
+    route,
+    metadata: isFarmMarkdownPageFile(route.modulePath)
+      ? {
+          isClientComponent: false,
+          shouldHydrate: false,
+          islandStrategy: null,
+          legacyShouldHydrate: false,
+          legacyIslandStrategy: null,
+          hasIsolatedClientBoundaries: false,
+          isolatedBoundaries: [] as IsolatedClientBoundaryReference[],
+          suppressedAsyncHydration: undefined,
+        }
+      : getClientModuleHydrationPlan(route.modulePath, root, isolatedMode),
+  }));
+
+  if (isolatedMode === "analyze") {
+    for (const { entry, metadata } of [
+      ...clientLayouts.map((layout) => ({ entry: layout, metadata: layout })),
+      ...routePlans.map(({ route, metadata }) => ({ entry: route, metadata })),
+    ]) {
+      if (!("isolatedHydrationEligible" in metadata) || !metadata.isolatedHydrationEligible) {
+        continue;
+      }
+      logger.info(
+        `📊 Isolated hydration analysis: ${entry.modulePath} can exclude its server owner and hydrate ${metadata.isolatedBoundaries.length} client boundary${metadata.isolatedBoundaries.length === 1 ? "" : "ies"}.`,
+      );
+    }
+  }
+
+  for (const { route, metadata } of routePlans) {
+    if (metadata.shouldHydrate) {
+      for (const layout of clientLayouts) {
+        if (
+          layout.hasIsolatedClientBoundaries &&
+          layoutAppliesToRoute(layout.pattern, route.pattern)
+        ) {
+          layout.shouldHydrate = layout.legacyShouldHydrate;
+          layout.islandStrategy = layout.legacyIslandStrategy;
+          layout.hasIsolatedClientBoundaries = false;
+          layout.isolatedBoundaries = [];
+        }
+      }
+    }
+  }
+  for (const { route, metadata } of routePlans) {
+    if (
+      metadata.hasIsolatedClientBoundaries &&
+      clientLayouts.some(
+        (layout) => layout.shouldHydrate && layoutAppliesToRoute(layout.pattern, route.pattern),
+      )
+    ) {
+      metadata.shouldHydrate = metadata.legacyShouldHydrate;
+      metadata.islandStrategy = metadata.legacyIslandStrategy;
+      metadata.hasIsolatedClientBoundaries = false;
+      metadata.isolatedBoundaries = [];
+    }
+  }
+
+  for (const { route, metadata } of routePlans) {
     // The adapter imports and hydrates its compiled MDX modules itself. Keeping
     // the same files in Farm's generic route table duplicates the docs runtime
     // and can pull server-only Markdown dependencies into the browser bundle.
     if (isAdapterDocsRoute(route.pattern)) continue;
 
     try {
-      const metadata = isFarmMarkdownPageFile(route.modulePath)
-        ? {
-            isClientComponent: false,
-            shouldHydrate: false,
-            islandStrategy: null,
-          }
-        : getClientModuleMetadata(route.modulePath, root);
       const applicableClientLayouts = clientLayouts.filter(
-        (layout) => layout.shouldHydrate && layoutAppliesToRoute(layout.pattern, route.pattern),
+        (layout) =>
+          (layout.shouldHydrate || layout.hasIsolatedClientBoundaries) &&
+          layoutAppliesToRoute(layout.pattern, route.pattern),
       );
       if (metadata.suppressedAsyncHydration) {
         logger.warn(
@@ -1160,7 +1232,11 @@ async function buildClient(
             `and its client imports are not interactive.`,
         );
       }
-      if (metadata.shouldHydrate || applicableClientLayouts.length > 0) {
+      if (
+        metadata.shouldHydrate ||
+        metadata.hasIsolatedClientBoundaries ||
+        applicableClientLayouts.length > 0
+      ) {
         const relativePath = route.modulePath.replace(root, "").replace(/^\//, "");
         const hydrationStrategies = [
           ...(metadata.islandStrategy ? [metadata.islandStrategy] : []),
@@ -1178,6 +1254,15 @@ async function buildClient(
           relativePath,
           pageShouldHydrate: metadata.shouldHydrate,
           islandStrategy,
+          hasIsolatedClientBoundaries:
+            metadata.hasIsolatedClientBoundaries ||
+            applicableClientLayouts.some((layout) => layout.hasIsolatedClientBoundaries),
+          isolatedBoundaries: [
+            ...(metadata.hasIsolatedClientBoundaries ? metadata.isolatedBoundaries : []),
+            ...applicableClientLayouts
+              .filter((layout) => layout.hasIsolatedClientBoundaries)
+              .flatMap((layout) => layout.isolatedBoundaries),
+          ],
         });
         logger.info(`📱 Found hydratable route: ${route.pattern} -> ${route.modulePath}`);
       }
@@ -1209,6 +1294,8 @@ async function buildClient(
         relativePath: "",
         pageShouldHydrate: false,
         islandStrategy,
+        hasIsolatedClientBoundaries: false,
+        isolatedBoundaries: [] as IsolatedClientBoundaryReference[],
       }));
 
       // Docs requests take precedence over app page routes on the server, so
@@ -1727,12 +1814,16 @@ function generateClientHydrationEntry(
     relativePath: string;
     pageShouldHydrate: boolean;
     islandStrategy: FarmIslandStrategy;
+    hasIsolatedClientBoundaries: boolean;
+    isolatedBoundaries: IsolatedClientBoundaryReference[];
   }>,
   layoutRoutes: Array<{
     pattern: string;
     modulePath: string;
     shouldHydrate: boolean;
     islandStrategy: FarmIslandStrategy | null;
+    hasIsolatedClientBoundaries: boolean;
+    isolatedBoundaries: IsolatedClientBoundaryReference[];
   }>,
   clientRouteSlots: UniversalRouteSlot[],
   root: string,
@@ -1785,9 +1876,11 @@ function generateClientHydrationEntry(
 
   layoutRoutes.forEach((layout, index) => {
     const relativePath = toImportPath(layout.modulePath);
-    layoutImportStatements.push(`import Layout${index} from "${relativePath}";`);
+    if (!layout.hasIsolatedClientBoundaries) {
+      layoutImportStatements.push(`import Layout${index} from "${relativePath}";`);
+    }
     layoutRegistrations.push(
-      `  { pattern: ${JSON.stringify(layout.pattern)}, Component: Layout${index}, shouldHydrate: ${JSON.stringify(layout.shouldHydrate)}, islandStrategy: ${JSON.stringify(layout.islandStrategy)} }`,
+      `  { pattern: ${JSON.stringify(layout.pattern)}, Component: ${layout.hasIsolatedClientBoundaries ? "null" : `Layout${index}`}, shouldHydrate: ${JSON.stringify(layout.shouldHydrate)}, islandStrategy: ${JSON.stringify(layout.islandStrategy)} }`,
     );
   });
 
@@ -2140,19 +2233,89 @@ document.addEventListener("click", function(e) {
   const imports: string[] = [];
   const routeEntries: string[] = [];
   const routeSlotEntries: string[] = [];
+  const isolatedBoundaryModules = new Map<string, string>();
 
   clientPages.forEach((page) => {
+    for (const boundary of page.isolatedBoundaries) {
+      isolatedBoundaryModules.set(
+        toViteModuleId(boundary.modulePath, root),
+        toImportPath(boundary.modulePath),
+      );
+    }
     const load = page.pageShouldHydrate
       ? `() => import(${JSON.stringify(toImportPath(page.modulePath))}).then((module) => module.default)`
       : "null";
     routeEntries.push(`  {
     pattern: ${JSON.stringify(page.pattern)},
     pageShouldHydrate: ${JSON.stringify(page.pageShouldHydrate)},
+    ${page.hasIsolatedClientBoundaries ? "hasIsolatedClientBoundaries: true," : ""}
     islandStrategy: ${JSON.stringify(page.islandStrategy)},
     navigation: "html-fragment",
     load: ${load},
   }`);
   });
+  const isolatedHydrationEnabled = isolatedBoundaryModules.size > 0;
+  const isolatedHydrationRuntime = isolatedHydrationEnabled
+    ? `const farmIsolatedBoundaryLoaders = {
+${Array.from(isolatedBoundaryModules.entries())
+  .map(
+    ([reference, modulePath]) =>
+      `  ${JSON.stringify(reference)}: () => import(${JSON.stringify(modulePath)}),`,
+  )
+  .join("\n")}
+};
+const farmIsolatedBoundaryRoots = new Map();
+
+function disposeFarmIsolatedClientBoundaries(scope) {
+  for (const [container, root] of farmIsolatedBoundaryRoots) {
+    if (container === scope || scope.contains(container)) {
+      try { root.unmount(); } catch {}
+      farmIsolatedBoundaryRoots.delete(container);
+    }
+  }
+}
+
+async function hydrateFarmIsolatedClientBoundaries(scope = document) {
+  const candidates = Array.from(scope.querySelectorAll("farm-client-boundary[data-farm-client-boundary]"));
+  const boundaries = candidates.filter((container) => {
+    if (farmIsolatedBoundaryRoots.has(container)) return false;
+    return !container.parentElement?.closest("farm-client-boundary[data-farm-client-boundary]");
+  });
+  await Promise.all(boundaries.map(async (container) => {
+    const reference = container.getAttribute("data-farm-client-boundary");
+    const exportName = container.getAttribute("data-farm-client-export") || "default";
+    const strategy = container.getAttribute("data-farm-island-strategy") || "load";
+    const loader = reference ? farmIsolatedBoundaryLoaders[reference] : null;
+    if (!reference || !loader) {
+      console.warn("[Farm.js] Missing isolated client boundary loader:", reference);
+      return;
+    }
+    const scheduled = scheduleFarmIslandHydration({
+      container,
+      strategy,
+      hydrate: async function() {
+        try {
+          const module = await loader();
+          const Component = module.__farm_client_boundary_originals__?.[exportName];
+          if (typeof Component !== "function" && typeof Component !== "object") {
+            throw new Error("compiled original export was not found");
+          }
+          const props = JSON.parse(container.getAttribute("data-farm-client-props") || "{}");
+          const root = hydrateRoot(container, React.createElement(Component, props));
+          farmIsolatedBoundaryRoots.set(container, root);
+        } catch (error) {
+          console.warn(
+            "[Farm.js] Could not hydrate isolated client boundary " + reference + "#" + exportName + ". Server HTML was preserved.",
+            error,
+          );
+        }
+      },
+    });
+    if (strategy === "load") await scheduled;
+    else void scheduled.catch((error) => console.warn("[Farm.js] Deferred boundary hydration failed:", error));
+  }));
+}`
+    : "";
   clientRouteSlots.forEach((slot, index) => {
     const importPath = toImportPath(slot.modulePath);
     imports.push(`import RouteSlot${index} from "${importPath}";`);
@@ -2189,6 +2352,8 @@ installChunkErrorRecovery();
 const clientRoutes = [
 ${routeEntries.join(",\n")}
 ];
+
+${isolatedHydrationRuntime}
 
 const clientRouteSlots = [
 ${routeSlotEntries.join(",\n")}
@@ -2496,6 +2661,19 @@ async function hydrate() {
 
   if (!matched) {
     return;
+  }
+
+  ${
+    isolatedHydrationEnabled
+      ? `if (
+    matched.route.hasIsolatedClientBoundaries &&
+    !matched.route.pageShouldHydrate &&
+    !hasHydratableLayout(pathname)
+  ) {
+    await hydrateFarmIsolatedClientBoundaries(document);
+    return;
+  }`
+      : ""
   }
   
   const rootContainer = document.getElementById("root");
@@ -2884,6 +3062,7 @@ ${generateUniversalRouterStateProperties()}
     }
 
     const rootWasReactOwned = reactRootContainer === currentRoot;
+    ${isolatedHydrationEnabled ? "disposeFarmIsolatedClientBoundaries(currentRoot);" : ""}
     resetReactRoot();
     resetRouteSlotRoots();
     if (rootWasReactOwned || !replaceSharedLayoutBoundary(currentRoot, newRoot)) {
@@ -2907,6 +3086,12 @@ ${generateUniversalRouterStateProperties()}
         reactRoot = hydrateRoot(pageContainer, wrappedElement);
         reactRootContainer = pageContainer;
         isHydrated = true;
+      }${
+        isolatedHydrationEnabled
+          ? ` else if (matched.route.hasIsolatedClientBoundaries) {
+        await hydrateFarmIsolatedClientBoundaries(currentRoot);
+      }`
+          : ""
       }
     }
     return true;
