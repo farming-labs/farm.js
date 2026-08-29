@@ -95,6 +95,12 @@ React and 1.25x faster than the compiled control. The report must contain a nonz
 `keyedArrayRollingWindowHints` count; package tests separately require retained DOM identity and
 work proportional only to the incoming suffix.
 
+Known-position insertions and replacements have separate 10,000-row comparisons. Concise native
+`toSpliced(position, 0, item)` and `with(position, item)` updates are measured against bracketed
+React and equivalent block-bodied compiled controls. The compiler report must contain a nonzero
+`keyedArrayPositionHints` count; package tests separately require one-row key/descriptor/binding
+work, surrounding DOM identity, randomized differential correctness, hydration, and cleanup.
+
 Set membership has a separate operation and persistence gate. The table alternates two marked row
 keys with `markedIds.has(row.id)` at 1,000 and 20,000 rows. Both compiler modes must remain at least
 10x faster than React at 20,000 rows, normalized growth may not exceed 2x, and the compiler report
@@ -150,6 +156,9 @@ The default JSON report is `/tmp/farm-react-dashboard-benchmark.json`; change it
   saved suffix scan while the hinted path still creates and inserts every required new DOM row.
 - The slice snapshot control retains the same 9,000-row suffix through an unsupported block-bodied
   updater. It isolates the saved survivor scan while both paths remove the same 1,000 DOM rows.
+- The known-position controls compare concise native `toSpliced()`/`with()` updates with equivalent
+  block-bodied compiled controls. They verify surrounding DOM identity and isolate the saved full
+  keyed scan for one insertion or replacement.
 - This is an operation-compatible local benchmark, not an official `js-framework-benchmark`
   submission or a score comparable to its published result table. This app has richer rows and
   measures event dispatch through an asserted DOM result without CPU throttling.
