@@ -60,14 +60,14 @@
         "brotli": 51833
       },
       "compilerOn": {
-        "raw": 234383,
-        "gzip": 72021,
-        "brotli": 61687
+        "raw": 234684,
+        "gzip": 72191,
+        "brotli": 61864
       },
       "compilerPremium": {
-        "raw": 41503,
-        "gzip": 11933,
-        "brotli": 9854
+        "raw": 41804,
+        "gzip": 12103,
+        "brotli": 10031
       }
     },
     "keyedPrepend": {
@@ -87,6 +87,23 @@
         "brotli": 9839
       }
     },
+    "keyedSlice": {
+      "compilerOff": {
+        "raw": 192871,
+        "gzip": 60075,
+        "brotli": 51855
+      },
+      "compilerOn": {
+        "raw": 234736,
+        "gzip": 72228,
+        "brotli": 61910
+      },
+      "compilerPremium": {
+        "raw": 41865,
+        "gzip": 12153,
+        "brotli": 10055
+      }
+    },
     "isolatedRuntime": {
       "control": {
         "raw": 192643,
@@ -94,18 +111,18 @@
         "brotli": 51666
       },
       "full": {
-        "raw": 273099,
-        "gzip": 77561,
-        "brotli": 66731
+        "raw": 273386,
+        "gzip": 77733,
+        "brotli": 66928
       },
       "coreOnly": {
         "raw": 204922,
         "gzip": 63685,
         "brotli": 54902
       },
-      "fullRuntimePremiumGzip": 17642,
+      "fullRuntimePremiumGzip": 17814,
       "coreRuntimePremiumGzip": 3766,
-      "gzipReductionPercent": 78.7
+      "gzipReductionPercent": 78.9
     }
   }
 }

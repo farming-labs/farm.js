@@ -19,10 +19,13 @@ interface CompilerKeyedArrayAppendHint {
 }
 
 interface CompilerKeyedArrayFilterHint {
+  readonly kind: "filter" | "slice";
   readonly sourceToken: object;
   readonly sourceLength: number;
   readonly resultLength: number;
-  readonly removedIndices: readonly number[];
+  readonly removedIndices?: readonly number[];
+  readonly retainedEnd?: number;
+  readonly retainedStart?: number;
   readonly previous?: CompilerKeyedArrayFilterHint;
 }
 
@@ -78,6 +81,7 @@ const COMPILER_KEYED_COMMITTED_COLLECTIONS = /* @__PURE__ */ new WeakSet<object>
 const NATIVE_ARRAY_PROTOTYPE = Array.prototype;
 const NATIVE_ARRAY_ITERATOR = Array.prototype[Symbol.iterator];
 const NATIVE_ARRAY_FILTER = Array.prototype.filter;
+const NATIVE_ARRAY_SLICE = Array.prototype.slice;
 const NATIVE_REFLECT_APPLY = Reflect.apply;
 
 function compilerObject(value: unknown): object | undefined {
@@ -154,7 +158,7 @@ function compilerKeyedArrayFilterSurvivors(
   value: unknown,
   sourceToken: object | undefined,
   expectedLength: number,
-): readonly number[] | undefined {
+): { readonly indices: readonly number[]; readonly keysStable: boolean } | undefined {
   const target = compilerObject(value);
   if (!target || !sourceToken || !Array.isArray(value)) return undefined;
   const update = COMPILER_KEYED_ARRAY_FILTERS.get(target);
@@ -170,20 +174,39 @@ function compilerKeyedArrayFilterSurvivors(
   }
 
   let survivors = Array.from({ length: expectedLength }, (_, index) => index);
+  let keysStable = true;
   for (let updateIndex = updates.length - 1; updateIndex >= 0; updateIndex -= 1) {
     const current = updates[updateIndex];
     if (current.sourceLength !== survivors.length) return undefined;
-    const removed = new Set<number>();
-    for (const index of current.removedIndices) {
-      if (!Number.isSafeInteger(index) || index < 0 || index >= current.sourceLength) {
+    if (current.kind === "slice") {
+      const start = current.retainedStart;
+      const end = current.retainedEnd;
+      if (
+        start === undefined ||
+        end === undefined ||
+        !Number.isSafeInteger(start) ||
+        !Number.isSafeInteger(end) ||
+        start < 0 ||
+        end < start ||
+        end > current.sourceLength ||
+        current.resultLength !== end - start
+      ) {
         return undefined;
       }
+      survivors = survivors.slice(start, end);
+      continue;
+    }
+    keysStable = false;
+    const removed = new Set<number>();
+    for (const index of current.removedIndices || []) {
+      if (!Number.isSafeInteger(index) || index < 0 || index >= current.sourceLength)
+        return undefined;
       removed.add(index);
     }
     if (current.resultLength !== current.sourceLength - removed.size) return undefined;
     survivors = survivors.filter((_sourceIndex, index) => !removed.has(index));
   }
-  return survivors.length === value.length ? survivors : undefined;
+  return survivors.length === value.length ? { indices: survivors, keysStable } : undefined;
 }
 
 function compilerKeyedArrayPrependLength(
@@ -403,6 +426,7 @@ export function createCompilerKeyedArrayFilter(
       ? COMPILER_KEYED_ARRAY_FILTERS.get(previousTarget)
       : undefined;
     COMPILER_KEYED_ARRAY_FILTERS.set(valueTarget, {
+      kind: "filter",
       sourceToken: previousUpdate?.sourceToken || sourceToken,
       sourceLength,
       resultLength: value.length,
@@ -411,6 +435,67 @@ export function createCompilerKeyedArrayFilter(
     });
   } catch {
     // Metadata must never change the result of a successful native filter.
+  }
+  return value;
+}
+
+/** @internal Executes a compiler-proven native Array.slice and records its retained interval. */
+export function createCompilerKeyedArraySlice(
+  previous: unknown,
+  method: unknown,
+  ...args: readonly number[]
+): unknown {
+  const canHint = (() => {
+    try {
+      return (
+        Array.isArray(previous) &&
+        Object.getPrototypeOf(previous) === NATIVE_ARRAY_PROTOTYPE &&
+        method === NATIVE_ARRAY_SLICE &&
+        args.length > 0 &&
+        args.length <= 2 &&
+        args.every((value) => Number.isSafeInteger(value))
+      );
+    } catch {
+      return false;
+    }
+  })();
+  const value = NATIVE_REFLECT_APPLY(method as (...values: number[]) => unknown, previous, args);
+  if (!canHint) return value;
+
+  try {
+    const previousTarget = compilerObject(previous);
+    const valueTarget = compilerObject(value);
+    if (
+      !previousTarget ||
+      !valueTarget ||
+      !Array.isArray(value) ||
+      Object.getPrototypeOf(value) !== NATIVE_ARRAY_PROTOTYPE
+    ) {
+      return value;
+    }
+    const sourceLength = (previous as unknown[]).length;
+    const normalize = (relative: number): number =>
+      relative < 0 ? Math.max(sourceLength + relative, 0) : Math.min(relative, sourceLength);
+    const retainedStart = normalize(args[0]);
+    const retainedEnd = args.length === 2 ? normalize(args[1]) : sourceLength;
+    const resultLength = Math.max(retainedEnd - retainedStart, 0);
+    if (value.length !== resultLength || resultLength >= sourceLength) return value;
+    const sourceToken = compilerKeyedCollectionToken(previousTarget);
+    if (!sourceToken) return value;
+    const previousUpdate = !COMPILER_KEYED_COMMITTED_COLLECTIONS.has(previousTarget)
+      ? COMPILER_KEYED_ARRAY_FILTERS.get(previousTarget)
+      : undefined;
+    COMPILER_KEYED_ARRAY_FILTERS.set(valueTarget, {
+      kind: "slice",
+      sourceToken: previousUpdate?.sourceToken || sourceToken,
+      sourceLength,
+      resultLength,
+      retainedEnd: Math.max(retainedEnd, retainedStart),
+      retainedStart,
+      ...(previousUpdate ? { previous: previousUpdate } : {}),
+    });
+  } catch {
+    // Metadata must never change the result of a successful native slice.
   }
   return value;
 }
@@ -3843,12 +3928,13 @@ function reconcileCompilerKeyedArrayFilter(
   }
 
   const finalValue = props.items();
-  const survivorIndices = compilerKeyedArrayFilterSurvivors(
+  const survivorResult = compilerKeyedArrayFilterSurvivors(
     finalValue,
     collectionToken,
     instances.size,
   );
-  if (!survivorIndices || !Array.isArray(finalValue)) return undefined;
+  if (!survivorResult || !Array.isArray(finalValue)) return undefined;
+  const { indices: survivorIndices, keysStable } = survivorResult;
   const previousInstances = [...instances.values()];
   const survivors: CompilerKeyedRowInstance[] = [];
   try {
@@ -3860,7 +3946,7 @@ function reconcileCompilerKeyedArrayFilter(
         !instance ||
         instance.index !== sourceIndex ||
         !Object.is(instance.item, item) ||
-        keyedRowIdentity(props.rowKey(item, index)) !== instance.key
+        (!keysStable && keyedRowIdentity(props.rowKey(item, index)) !== instance.key)
       ) {
         return undefined;
       }

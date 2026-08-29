@@ -305,6 +305,7 @@ After a successful build, Farm writes `.farm/react-compiler.json`:
     "keyedArrayAppendHints": 1,
     "keyedArrayFilterHints": 1,
     "keyedArrayPrependHints": 1,
+    "keyedArraySliceHints": 1,
     "keyedCollectionUpdateHints": 3,
     "keyedIdentityTargets": 2,
     "keyedMapLookupTargets": 1,
@@ -325,6 +326,7 @@ After a successful build, Farm writes `.farm/react-compiler.json`:
         "keyedArrayAppendHints": 1,
         "keyedArrayFilterHints": 1,
         "keyedArrayPrependHints": 1,
+        "keyedArraySliceHints": 1,
         "keyedCollectionUpdateHints": 3,
         "keyedIdentityTargets": 2,
         "keyedMapLookupTargets": 1,
@@ -360,6 +362,8 @@ module.
 and can hand the appended suffix to the runtime. `keyedArrayFilterHints` counts concise keyed-array
 filter sites that can report removed positions. `keyedArrayPrependHints` counts setter sites where
 the compiler proved a direct keyed array prepend and can hand the new prefix to the runtime.
+`keyedArraySliceHints` counts direct keyed-array slices whose build-time bounds identify one exact
+retained interval.
 `selected` is `true` when an annotation explicitly requested compilation. Module paths are relative
 to the project root, and the output is sorted and contains no timestamp, so CI can compare reports
 without machine-specific noise.
@@ -937,6 +941,38 @@ dependency, or any failed runtime check keeps complete keyed reconciliation. A p
 after an unhinted update also falls back. Reports expose emitted sites as
 `keyedArrayPrependHints`; the optional runtime capability is retained only when a module emits the
 matching hint.
+
+#### Keyed array slice hints
+
+A direct keyed `useState` array can retain a known window without rescanning all surviving rows:
+
+```tsx
+setItems((current) => current.slice(1_000));
+setItems((current) => current.slice(0, -1_000));
+setItems((current) => current.slice(2, 8));
+setItems((current) => current.slice(-5));
+```
+
+At build time, Farm recognizes a concise functional setter that directly calls native `slice()`
+with one or two safe-integer bounds known by the compiler. The application still executes its
+ordinary `slice()`. Generated metadata records the normalized retained interval and links multiple
+slice or filter updates queued before one compiler flush.
+
+At update time, Farm validates the native arrays, committed source, queued lengths, interval, and
+surviving item identities before changing the DOM. It removes only rows outside the interval,
+updates stored indexes used by delegated row events, and preserves every surviving element. A
+slice-only chain does not reread surviving keys, descriptors, or bindings, and the owner component
+does not rerun.
+
+The proof requires compiler-owned host rows whose render callback and key do not observe the row
+index. Runtime or fractional bounds, `slice()` without a bound, a no-op `slice(0)`, block-bodied or
+chained updaters, custom slice methods, sparse or subclassed arrays, collection-derived keys,
+collection-reading bindings, React-owned row structures, nested host blocks, row conditionals,
+unrelated dirty dependencies, and failed runtime validation keep complete keyed reconciliation.
+These checks make the metadata an optional optimization rather than a new behavior contract. No
+configuration or component primitive is added. Reports expose emitted sites as
+`keyedArraySliceHints`; slice reuses the existing removal-hint runtime so it does not add another
+structural runtime combination.
 
 #### Keyed array filter hints
 
@@ -1744,6 +1780,10 @@ The package and example test suites verify more than generated code:
   descriptor, and binding reads to equal only the inserted prefix, preserve every existing DOM
   row, update delegated event indexes, and cover queued updates, StrictMode hydration, unmount,
   invalid metadata, custom arrays, and conservative fallback;
+- 2,000 deterministic queued keyed-array slices match normal React; targeted tests require zero
+  surviving key, descriptor, and binding reads, preserve focused controlled-input identity and
+  selection, update delegated event indexes, and cover native bounds, queued slice/filter chains,
+  Strict Mode hydration, unmount cleanup, custom methods, proxies, and conservative fallback;
 - 2,000 deterministic randomized keyed-array removals match normal React; targeted tests require
   zero surviving descriptor and binding reads, preserve DOM identity, and cover queued filters,
   unhinted-chain fallback, collection-reading rows, StrictMode hydration, and unmount cleanup;
@@ -1764,7 +1804,7 @@ The package and example test suites verify more than generated code:
 - the production 10,000/20,000-row benchmark requires nonzero `keyedIdentityTargets`,
   `keyedMapLookupTargets`, `keyedMembershipTargets`, `keyedCollectionUpdateHints`, and
   `keyedMapUpdateHints`, `keyedArrayAppendHints`, `keyedArrayPrependHints`, and
-  `keyedArrayFilterHints` report counts,
+  `keyedArrayFilterHints`, and `keyedArraySliceHints` report counts,
   preserves the keyed-update speedup floor, checks that scalar selection, Set membership, and Map
   lookups remain key-directed at scale, compares dense hinted Set/Map updates with equivalent
   compiled snapshot controls, and passes DOM correctness, React-relative regression, direct-delta,

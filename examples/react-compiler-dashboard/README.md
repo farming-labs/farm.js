@@ -81,6 +81,13 @@ least 1.25x faster than the compiled control at 10,000 rows. The report must con
 `keyedArrayPrependHints` count; deterministic package tests separately require key, descriptor, and
 binding work to equal only the new prefix while preserving every existing DOM row.
 
+Keyed array slices have an independent retained-window comparison. A concise `slice(1_000)` is
+measured against bracketed React and an equivalent block-bodied compiled snapshot control. Both
+compiler modes must remain at least 3x faster than React while trimming 10,000- and 21,000-row
+arrays, and at least 1.25x faster than the compiled control at 10,000 rows. The report must contain
+a nonzero `keyedArraySliceHints` count; deterministic package tests separately require zero
+surviving key, descriptor, and binding reads while preserving surviving DOM identity.
+
 Set membership has a separate operation and persistence gate. The table alternates two marked row
 keys with `markedIds.has(row.id)` at 1,000 and 20,000 rows. Both compiler modes must remain at least
 10x faster than React at 20,000 rows, normalized growth may not exceed 2x, and the compiler report
@@ -134,6 +141,8 @@ The default JSON report is `/tmp/farm-react-dashboard-benchmark.json`; change it
   an unsupported block-bodied updater, isolating the saved full key-and-binding scan.
 - The prepend snapshot control does the same work at the beginning of the array. It isolates the
   saved suffix scan while the hinted path still creates and inserts every required new DOM row.
+- The slice snapshot control retains the same 9,000-row suffix through an unsupported block-bodied
+  updater. It isolates the saved survivor scan while both paths remove the same 1,000 DOM rows.
 - This is an operation-compatible local benchmark, not an official `js-framework-benchmark`
   submission or a score comparable to its published result table. This app has richer rows and
   measures event dispatch through an asserted DOM result without CPU throttling.

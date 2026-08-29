@@ -264,6 +264,23 @@ keys, React-owned row structures, middle insertion, direct replacement, duplicat
 sparse arrays, and failed validation use complete keyed reconciliation. The compiler report
 exposes the emitted-site count as `keyedArrayPrependHints`.
 
+Literal native slices can carry their exact retained interval into the same removal runtime:
+
+```tsx
+setItems((current) => current.slice(1_000));
+setItems((current) => current.slice(0, -1_000));
+setItems((current) => current.slice(2, 8));
+```
+
+For compiler-owned host rows whose render and key do not read the row index, Farm validates the
+committed source and queued slice chain, preserves every surviving DOM row, and removes only rows
+outside the retained interval. A slice-only chain does not reread surviving keys, descriptors, or
+bindings. One or two build-time safe-integer bounds are required. Runtime bounds, block-bodied or
+chained updates, custom slice methods, sparse or subclassed arrays, index-aware or
+collection-reading rows, React-owned structures, and failed validation keep complete keyed
+reconciliation. No option or component is added. The compiler report exposes the emitted-site
+count as `keyedArraySliceHints`.
+
 Concise immutable filters on a direct keyed array can carry removal positions into the same
 optional runtime:
 
@@ -564,7 +581,8 @@ reasons aggregated by count. Its summary and per-module `optimizations` also rep
 `keyedMapUpdateHints`, the number of compiler-proven direct keyed `map()` update sites; and
 `keyedArrayAppendHints`, the number of compiler-proven direct keyed-array append sites; and
 `keyedArrayFilterHints`, the number of compiler-proven direct keyed-array filter sites; and
-`keyedArrayPrependHints`, the number of compiler-proven direct keyed-array prepend sites. A custom
+`keyedArrayPrependHints`, the number of compiler-proven direct keyed-array prepend sites; and
+`keyedArraySliceHints`, the number of compiler-proven direct keyed-array slice sites. A custom
 project-relative `reportFile` also enables reporting.
 
 The runtime test compares the same counter interaction on both paths: ordinary React performs a
