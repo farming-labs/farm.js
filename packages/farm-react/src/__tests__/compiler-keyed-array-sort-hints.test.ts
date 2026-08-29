@@ -1,0 +1,114 @@
+import { describe, expect, it } from "vitest";
+import { compileReactModule } from "../compiler";
+import { normalizeReactCompilerOptions } from "../index";
+
+const infer = normalizeReactCompilerOptions(true, "/app");
+
+async function compile(source: string) {
+  return compileReactModule(source, "/app/KeyedArraySortHints.tsx", infer);
+}
+
+describe("React AOT keyed-array sort hints", () => {
+  it("records a direct native sort for index-independent keyed rows", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Table() {
+        const [rows, setRows] = useState([
+          { id: "a", rank: 2, label: "Alpha" },
+          { id: "b", rank: 1, label: "Beta" },
+        ]);
+        return <section>
+          <button onClick={() => setRows((current) => current.toSorted((left, right) => left.rank - right.rank))}>Sort</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </section>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Table"]);
+    expect(result.optimizations.keyedArraySortHints).toBe(1);
+    expect(result.code).toContain("createCompilerKeyedArraySort");
+    expect(result.code).toContain("keyedRowsReorderHintedRuntimeFeature");
+    expect(result.code).toContain("reorderIndexIndependent");
+  });
+
+  it("supports the native default comparator and shares the reorder runtime with reverse", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Table() {
+        const [rows, setRows] = useState(["beta", "alpha"]);
+        return <section>
+          <button onClick={() => setRows((current) => current.toSorted())}>Sort</button>
+          <button onClick={() => setRows((current) => current.toReversed())}>Reverse</button>
+          <ul>{rows.map((row) => <li key={row}>{row}</li>)}</ul>
+        </section>;
+      }
+    `);
+
+    expect(result.optimizations.keyedArraySortHints).toBe(1);
+    expect(result.optimizations.keyedArrayReorderHints).toBe(1);
+    expect(result.code).toContain("createCompilerKeyedArraySort");
+    expect(result.code).toContain("createCompilerKeyedArrayReorder");
+    expect(result.code).toContain("keyedRowsReorderHintedRuntimeFeature");
+    expect(result.code).not.toContain("keyedRowsEveryHintedRuntimeFeature");
+  });
+
+  it.each([
+    {
+      name: "an index-dependent row",
+      row: "(row, index) => <li key={row.id}>{index}: {row.label}</li>",
+      update: "current.toSorted((left, right) => left.rank - right.rank)",
+    },
+    {
+      name: "a block-bodied updater",
+      row: "row => <li key={row.id}>{row.label}</li>",
+      update: "{ return current.toSorted((left, right) => left.rank - right.rank); }",
+    },
+    {
+      name: "a referenced comparator",
+      declaration: "const compare = (left, right) => left.rank - right.rank;",
+      row: "row => <li key={row.id}>{row.label}</li>",
+      update: "current.toSorted(compare)",
+    },
+    {
+      name: "a one-parameter comparator",
+      row: "row => <li key={row.id}>{row.label}</li>",
+      update: "current.toSorted((row) => row.rank)",
+    },
+    {
+      name: "an async comparator",
+      row: "row => <li key={row.id}>{row.label}</li>",
+      update: "current.toSorted(async (left, right) => left.rank - right.rank)",
+    },
+    {
+      name: "a multi-statement comparator",
+      row: "row => <li key={row.id}>{row.label}</li>",
+      update:
+        "current.toSorted((left, right) => { const difference = left.rank - right.rank; return difference; })",
+    },
+    {
+      name: "a computed method",
+      row: "row => <li key={row.id}>{row.label}</li>",
+      update: 'current["toSorted"]((left, right) => left.rank - right.rank)',
+    },
+    {
+      name: "a chained transform",
+      row: "row => <li key={row.id}>{row.label}</li>",
+      update: "current.slice().toSorted((left, right) => left.rank - right.rank)",
+    },
+  ])("keeps $name off the sort fast path", async ({ declaration = "", row, update }) => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Table() {
+        const [rows, setRows] = useState([{ id: "a", rank: 1, label: "Alpha" }]);
+        ${declaration}
+        return <section>
+          <button onClick={() => setRows((current) => ${update})}>Sort</button>
+          <ul>{rows.map(${row})}</ul>
+        </section>;
+      }
+    `);
+
+    expect(result.optimizations.keyedArraySortHints).toBe(0);
+    expect(result.code).not.toContain("createCompilerKeyedArraySort");
+  });
+});

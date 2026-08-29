@@ -18,6 +18,7 @@ export interface CompileReactModuleResult {
     keyedArrayPrependHints: number;
     keyedArrayPositionHints: number;
     keyedArrayReorderHints: number;
+    keyedArraySortHints: number;
     keyedArrayRollingWindowHints: number;
     keyedArraySliceHints: number;
     keyedCollectionUpdateHints: number;
@@ -1716,6 +1717,85 @@ function rewriteKeyedArrayReorderHints(
             t.callExpression(t.cloneNode(helperIdentifier), [
               t.cloneNode(previous),
               t.cloneNode(method),
+            ]),
+          ),
+        ]),
+      );
+      count += 1;
+      stateIndices.add(state.index);
+      path.skip();
+    },
+  });
+  return {
+    root: (file.program.body[0] as t.ExpressionStatement).expression as t.JSXElement,
+    count,
+    stateIndices,
+  };
+}
+
+function rewriteKeyedArraySortHints(
+  root: t.JSXElement,
+  hintedStateIndices: ReadonlySet<number>,
+  statesBySetter: ReadonlyMap<string, StateBinding>,
+  helperIdentifier: t.Identifier,
+  safeGlobals: ReadonlySet<string>,
+): { root: t.JSXElement; count: number; stateIndices: ReadonlySet<number> } {
+  if (hintedStateIndices.size === 0) {
+    return { root: t.cloneNode(root, true), count: 0, stateIndices: new Set() };
+  }
+  const file = expressionFile(t.cloneNode(root, true));
+  const stateIndices = new Set<number>();
+  let count = 0;
+  traverse(file, {
+    CallExpression(path) {
+      const callee = path.get("callee");
+      if (!callee.isIdentifier() || callee.scope.hasBinding(callee.node.name)) return;
+      const state = statesBySetter.get(callee.node.name);
+      if (!state || !hintedStateIndices.has(state.index) || path.node.arguments.length !== 1) {
+        return;
+      }
+      const updater = path.node.arguments[0];
+      if (
+        !t.isArrowFunctionExpression(updater) ||
+        updater.async ||
+        updater.generator ||
+        updater.params.length !== 1 ||
+        !t.isIdentifier(updater.params[0]) ||
+        !t.isCallExpression(updater.body) ||
+        updater.body.arguments.length > 1 ||
+        !t.isMemberExpression(updater.body.callee) ||
+        updater.body.callee.computed ||
+        !t.isIdentifier(updater.body.callee.object, { name: updater.params[0].name }) ||
+        !t.isIdentifier(updater.body.callee.property, { name: "toSorted" })
+      ) {
+        return;
+      }
+      const comparator = updater.body.arguments[0];
+      if (
+        comparator &&
+        !t.isArrowFunctionExpression(comparator) &&
+        !t.isFunctionExpression(comparator)
+      ) {
+        return;
+      }
+      if (comparator && validateCollectionCallback(comparator, "toSorted", safeGlobals)) return;
+
+      const previous = t.cloneNode(updater.params[0]);
+      const method = path.scope.generateUidIdentifier("farmToSorted");
+      path.node.arguments[0] = t.arrowFunctionExpression(
+        [t.cloneNode(previous)],
+        t.blockStatement([
+          t.variableDeclaration("const", [
+            t.variableDeclarator(
+              t.cloneNode(method),
+              t.memberExpression(t.cloneNode(previous), t.identifier("toSorted")),
+            ),
+          ]),
+          t.returnStatement(
+            t.callExpression(t.cloneNode(helperIdentifier), [
+              t.cloneNode(previous),
+              t.cloneNode(method),
+              ...(comparator ? [t.cloneNode(comparator, true)] : []),
             ]),
           ),
         ]),
@@ -6624,6 +6704,7 @@ function compileCandidate(
   keyedArrayPrependIdentifier: t.Identifier,
   keyedArrayPositionIdentifier: t.Identifier,
   keyedArrayReorderIdentifier: t.Identifier,
+  keyedArraySortIdentifier: t.Identifier,
   keyedArrayRollingWindowIdentifier: t.Identifier,
   keyedArraySliceIdentifier: t.Identifier,
   keyedCollectionUpdateIdentifier: t.Identifier,
@@ -6636,6 +6717,7 @@ function compileCandidate(
     keyedArrayPrependHints: number;
     keyedArrayPositionHints: number;
     keyedArrayReorderHints: number;
+    keyedArraySortHints: number;
     keyedArrayRollingWindowHints: number;
     keyedArraySliceHints: number;
     keyedCollectionUpdateHints: number;
@@ -7134,6 +7216,41 @@ function compileCandidate(
       optimizationCounts.keyedArrayReorderHints += reorderHintedRoot.count;
     }
   }
+  const sortHintedRoot = rewriteKeyedArraySortHints(
+    expandedReactiveRoot,
+    shiftedIndexIndependentStateIndices,
+    statesBySetter,
+    keyedArraySortIdentifier,
+    safeGlobals,
+  );
+  let appliedKeyedArraySortHints = 0;
+  let appliedSortHintedStateIndices: ReadonlySet<number> = new Set();
+  if (sortHintedRoot.count > 0) {
+    const hintedBlockAnalysis = analyzeComposableBlocks(
+      sortHintedRoot.root,
+      reactiveByValue,
+      safeGlobals,
+      listNames,
+      allowedComponentNames,
+    );
+    const hintedAnalysis = analyzeHostTree(
+      sortHintedRoot.root,
+      reactiveByValue,
+      safeGlobals,
+      hintedBlockAnalysis.conditionalExpressions || new Set<t.Expression>(),
+      hintedBlockAnalysis.keyedExpressions || new Set<t.Expression>(),
+      hintedBlockAnalysis.ownedElements || new Set<t.JSXElement>(),
+      hintedBlockAnalysis.componentElements || new Set<t.JSXElement>(),
+    );
+    if (!hintedBlockAnalysis.reason && !hintedAnalysis.reason) {
+      expandedReactiveRoot = sortHintedRoot.root;
+      blockAnalysis = hintedBlockAnalysis;
+      analysis = hintedAnalysis;
+      appliedKeyedArraySortHints = sortHintedRoot.count;
+      appliedSortHintedStateIndices = sortHintedRoot.stateIndices;
+      optimizationCounts.keyedArraySortHints += sortHintedRoot.count;
+    }
+  }
   const sliceHintedRoot = rewriteKeyedArraySliceHints(
     expandedReactiveRoot,
     shiftedIndexIndependentStateIndices,
@@ -7287,6 +7404,7 @@ function compileCandidate(
     appliedKeyedArrayPrependHints > 0 ||
     appliedKeyedArrayPositionHints > 0 ||
     appliedKeyedArrayReorderHints > 0 ||
+    appliedKeyedArraySortHints > 0 ||
     appliedKeyedArrayRollingWindowHints > 0 ||
     appliedKeyedArraySliceHints > 0;
   const hasKeyedArrayRemovalHints =
@@ -7299,7 +7417,7 @@ function compileCandidate(
     hasKeyedArrayRemovalHints,
     appliedKeyedArrayPrependHints > 0,
     appliedKeyedArrayPositionHints > 0,
-    appliedKeyedArrayReorderHints > 0,
+    appliedKeyedArrayReorderHints > 0 || appliedKeyedArraySortHints > 0,
     appliedKeyedArrayRollingWindowHints > 0,
   );
   markShortCircuitBindings(analysis.bindings || []);
@@ -7329,7 +7447,7 @@ function compileCandidate(
     appliedRemovalHintedStateIndices,
     appliedPrependHintedStateIndices,
     appliedPositionHintedStateIndices,
-    appliedReorderHintedStateIndices,
+    new Set([...appliedReorderHintedStateIndices, ...appliedSortHintedStateIndices]),
   );
   const rewrittenRoot = rewriteStateAccess(
     rootWithBlocks,
@@ -7500,6 +7618,7 @@ export async function compileReactModule(
     keyedArrayPrependHints: 0,
     keyedArrayPositionHints: 0,
     keyedArrayReorderHints: 0,
+    keyedArraySortHints: 0,
     keyedArrayRollingWindowHints: 0,
     keyedArraySliceHints: 0,
     keyedCollectionUpdateHints: 0,
@@ -7563,6 +7682,9 @@ export async function compileReactModule(
         const keyedArrayReorderIdentifier = programPath.scope.generateUidIdentifier(
           "createCompilerKeyedArrayReorder",
         );
+        const keyedArraySortIdentifier = programPath.scope.generateUidIdentifier(
+          "createCompilerKeyedArraySort",
+        );
         const keyedArrayRollingWindowIdentifier = programPath.scope.generateUidIdentifier(
           "createCompilerKeyedArrayRollingWindow",
         );
@@ -7602,6 +7724,7 @@ export async function compileReactModule(
             keyedArrayPrependIdentifier,
             keyedArrayPositionIdentifier,
             keyedArrayReorderIdentifier,
+            keyedArraySortIdentifier,
             keyedArrayRollingWindowIdentifier,
             keyedArraySliceIdentifier,
             keyedCollectionUpdateIdentifier,
@@ -7680,6 +7803,14 @@ export async function compileReactModule(
                       t.importSpecifier(
                         keyedArrayReorderIdentifier,
                         t.identifier("createCompilerKeyedArrayReorder"),
+                      ),
+                    ]
+                  : []),
+                ...(optimizationCounts.keyedArraySortHints > 0
+                  ? [
+                      t.importSpecifier(
+                        keyedArraySortIdentifier,
+                        t.identifier("createCompilerKeyedArraySort"),
                       ),
                     ]
                   : []),

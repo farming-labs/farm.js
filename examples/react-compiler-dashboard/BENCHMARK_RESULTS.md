@@ -2,6 +2,26 @@
 
 Date: 2026-08-29
 
+## Native keyed sort follow-up — 2026-08-30
+
+The full default production run for native `toSorted()` support also passed correctness, the
+React-relative regression gate, every existing optimization-persistence gate, and normalized
+scalability. The new 10,000-row sort comparison measured:
+
+| Mode   | React median | Hinted sort | Compiled control | vs React | vs control |
+| ------ | -----------: | ----------: | ---------------: | -------: | ---------: |
+| Static |    154.25 ms |    26.70 ms |         42.00 ms |    5.78x |      1.57x |
+| Hybrid |    154.25 ms |    25.40 ms |         40.10 ms |    6.07x |      1.58x |
+
+The gate requires at least 4x versus React and 1.25x versus the equivalent block-bodied compiled
+control. Both paths execute the same native sort and move the same keyed DOM rows; the hint avoids
+key, descriptor, and binding reads and moves only rows outside the LIS. The compiler report emitted
+one `keyedArraySortHints` site in each compiled build, both compiler modes added zero owner
+executions, and all existing append, prepend, slice, rolling-window, known-position, reverse,
+filter, keyed-update, key-directed, collection-delta, and scalability gates remained green. The
+hybrid page chunk was 21,791 B gzip; the direct-only and isolated core package-size fixtures stayed
+byte-for-byte unchanged.
+
 Result: **PASS.** Correctness, React-relative performance, keyed update, keyed append, keyed prepend,
 keyed filter, scalar selection, Set-membership, Map-lookup, collection-delta, and normalized
 scalability gates all pass.

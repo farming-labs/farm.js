@@ -63,6 +63,8 @@ const [
   keyedPositionOn,
   keyedReorderOff,
   keyedReorderOn,
+  keyedSortOff,
+  keyedSortOn,
   keyedRollingWindowOff,
   keyedRollingWindowOn,
   keyedSliceOff,
@@ -85,6 +87,8 @@ const [
   bundle("keyed-position.tsx", true),
   bundle("keyed-reorder.tsx", false),
   bundle("keyed-reorder.tsx", true),
+  bundle("keyed-sort.tsx", false),
+  bundle("keyed-sort.tsx", true),
   bundle("keyed-rolling-window.tsx", false),
   bundle("keyed-rolling-window.tsx", true),
   bundle("keyed-slice.tsx", false),
@@ -180,6 +184,13 @@ if (
   !keyedReorderOn.code.includes("reorderIndexIndependent")
 ) {
   throw new Error("Keyed reorder fixture did not retain its isolated reorder-hint runtime.");
+}
+if (
+  !keyedSortOn.code.includes("FarmCompiledKeyedRows") ||
+  !keyedSortOn.code.includes("keyed-rows:reorder-hinted") ||
+  !keyedSortOn.code.includes("reorderIndexIndependent")
+) {
+  throw new Error("Keyed sort fixture did not retain its isolated reorder-hint runtime.");
 }
 for (const [name, output] of [
   ["direct", directOn],
@@ -334,6 +345,23 @@ const results = {
         brotli: keyedReorderOn.brotli - keyedReorderOff.brotli,
       },
     },
+    keyedSort: {
+      compilerOff: {
+        raw: keyedSortOff.raw,
+        gzip: keyedSortOff.gzip,
+        brotli: keyedSortOff.brotli,
+      },
+      compilerOn: {
+        raw: keyedSortOn.raw,
+        gzip: keyedSortOn.gzip,
+        brotli: keyedSortOn.brotli,
+      },
+      compilerPremium: {
+        raw: keyedSortOn.raw - keyedSortOff.raw,
+        gzip: keyedSortOn.gzip - keyedSortOff.gzip,
+        brotli: keyedSortOn.brotli - keyedSortOff.brotli,
+      },
+    },
     keyedSlice: {
       compilerOff: {
         raw: keyedSliceOff.raw,
@@ -424,6 +452,13 @@ if (checkOnly) {
       maximum:
         (reference.fixtures.keyedReorder?.compilerPremium.gzip ??
           results.fixtures.keyedReorder.compilerPremium.gzip) + 256,
+    },
+    {
+      name: "keyed sort compiler premium",
+      current: results.fixtures.keyedSort.compilerPremium.gzip,
+      maximum:
+        (reference.fixtures.keyedSort?.compilerPremium.gzip ??
+          results.fixtures.keyedSort.compilerPremium.gzip) + 256,
     },
     {
       name: "keyed slice compiler premium",

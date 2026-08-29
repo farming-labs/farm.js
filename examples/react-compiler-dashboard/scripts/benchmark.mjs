@@ -151,6 +151,10 @@ async function inspectBuild(compilerMode) {
       "The compiler build did not emit a keyed-array reorder hint.",
     );
     assert(
+      compilerReport.summary.keyedArraySortHints > 0,
+      "The compiler build did not emit a keyed-array sort hint.",
+    );
+    assert(
       compilerReport.summary.keyedArrayRollingWindowHints > 0,
       "The compiler build did not emit a keyed-array rolling-window hint.",
     );
@@ -666,6 +670,28 @@ async function measureTrial(browser, trial, compilerMode, port) {
           },
         );
 
+        const tableSort = await measureTable(
+          async () => create10000(),
+          async () => {
+            const first = table.querySelector("tbody tr");
+            await runTableAction(
+              () => tableButton("table-sort").click(),
+              () => rowCount() === 10_000 && table.querySelector("tbody tr") !== first,
+            );
+          },
+        );
+
+        const tableSortSnapshot = await measureTable(
+          async () => create10000(),
+          async () => {
+            const first = table.querySelector("tbody tr");
+            await runTableAction(
+              () => tableButton("table-sort-snapshot").click(),
+              () => rowCount() === 10_000 && table.querySelector("tbody tr") !== first,
+            );
+          },
+        );
+
         const tableUpdate = await measureTable(
           async () => ensure10000(),
           async () => {
@@ -1046,6 +1072,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
             positionReplaceSnapshot: tablePositionReplaceSnapshot,
             reverse: tableReverse,
             reverseSnapshot: tableReverseSnapshot,
+            sort: tableSort,
+            sortSnapshot: tableSortSnapshot,
             remove: tableRemove,
             removeSnapshot: tableRemoveSnapshot,
             replace: tableReplace,
@@ -1138,6 +1166,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
         positionReplaceSnapshot: timingSummary(result.table.positionReplaceSnapshot),
         reverse: timingSummary(result.table.reverse),
         reverseSnapshot: timingSummary(result.table.reverseSnapshot),
+        sort: timingSummary(result.table.sort),
+        sortSnapshot: timingSummary(result.table.sortSnapshot),
         remove: timingSummary(result.table.remove),
         removeSnapshot: timingSummary(result.table.removeSnapshot),
         replace: timingSummary(result.table.replace),
@@ -1226,6 +1256,8 @@ const tableMetrics = [
   "positionReplaceSnapshot",
   "reverse",
   "reverseSnapshot",
+  "sort",
+  "sortSnapshot",
   "updateEvery10th",
   "select",
   "membership",
@@ -1521,6 +1553,30 @@ const keyedReorderRegressions = keyedReorderResults.filter(
     !Number.isFinite(snapshotSpeedup) ||
     snapshotSpeedup < keyedReorderMinimumSnapshotSpeedup,
 );
+// A direct native toSorted() exposes a permutation while preserving every keyed row object. The
+// hinted path validates that permutation by item identity, uses LIS to move only the required DOM
+// nodes, and avoids key, descriptor, and binding reads. Compare it with React and the equivalent
+// block-bodied compiled control at 10,000 rows.
+const keyedSortMinimumSpeedup = 4;
+const keyedSortMinimumSnapshotSpeedup = 1.25;
+const keyedSortResults = ["static", "hybrid"].map((mode) => {
+  const sortMedianMs = comparisons.table.sort[mode].medianMs;
+  const snapshotMedianMs = comparisons.table.sortSnapshot[mode].medianMs;
+  return {
+    mode,
+    snapshotMedianMs,
+    snapshotSpeedup: snapshotMedianMs / sortMedianMs,
+    sortMedianMs,
+    speedup: comparisons.table.sort[`${mode}VsBaseline`].speedup,
+  };
+});
+const keyedSortRegressions = keyedSortResults.filter(
+  ({ snapshotSpeedup, speedup }) =>
+    !Number.isFinite(speedup) ||
+    speedup < keyedSortMinimumSpeedup ||
+    !Number.isFinite(snapshotSpeedup) ||
+    snapshotSpeedup < keyedSortMinimumSnapshotSpeedup,
+);
 // A concise native filter carries removal positions into the keyed-row runtime. Compare it with
 // React and an equivalent block-bodied compiled update that intentionally takes complete keyed
 // reconciliation, while also preserving the 20,000-row end-to-end speedup.
@@ -1671,6 +1727,7 @@ const passed =
   keyedRollingWindowRegressions.length === 0 &&
   keyedPositionRegressions.length === 0 &&
   keyedReorderRegressions.length === 0 &&
+  keyedSortRegressions.length === 0 &&
   keyedFilterRegressions.length === 0 &&
   keyedIdentityRegressions.length === 0 &&
   keyedMembershipRegressions.length === 0 &&
@@ -1735,6 +1792,13 @@ const report = {
     regressions: keyedReorderRegressions,
     results: keyedReorderResults,
     status: keyedReorderRegressions.length === 0 ? "PASS" : "FAIL",
+  },
+  keyedSortHintGate: {
+    minimumSnapshotSpeedup: keyedSortMinimumSnapshotSpeedup,
+    minimumSpeedup: keyedSortMinimumSpeedup,
+    regressions: keyedSortRegressions,
+    results: keyedSortResults,
+    status: keyedSortRegressions.length === 0 ? "PASS" : "FAIL",
   },
   keyedFilterHintGate: {
     minimumSnapshotSpeedup: keyedFilterMinimumSnapshotSpeedup,

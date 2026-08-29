@@ -46,6 +46,7 @@ const testSource = String.raw`
     createCompilerKeyedArrayFilter,
     createCompilerKeyedArrayPrepend,
     createCompilerKeyedArrayReorder,
+    createCompilerKeyedArraySort,
     createCompilerKeyedArraySlice,
     createCompilerKeyedMapUpdate,
   } = await import(
@@ -87,13 +88,14 @@ const testSource = String.raw`
   flushSync(() => root.unmount());
 
   let reverseCompatibilityRows = () => undefined;
+  let sortCompatibilityRows = () => undefined;
   let reorderExecutions = 0;
   const ReorderRows = createCompiledComponent({
     displayName: "CompatibilityReorderRows",
     initialize: () => [[
-      { id: "a", label: "Alpha" },
-      { id: "b", label: "Beta" },
-      { id: "c", label: "Gamma" },
+      { id: "a", label: "Alpha", rank: 3 },
+      { id: "b", label: "Beta", rank: 1 },
+      { id: "c", label: "Gamma", rank: 2 },
     ]],
     render(_props, state, blocks) {
       reorderExecutions += 1;
@@ -101,6 +103,14 @@ const testSource = String.raw`
       reverseCompatibilityRows = () =>
         state[0].set((previous) =>
           createCompilerKeyedArrayReorder(previous, previous.toReversed),
+        );
+      sortCompatibilityRows = () =>
+        state[0].set((previous) =>
+          createCompilerKeyedArraySort(
+            previous,
+            previous.toSorted,
+            (left, right) => left.rank - right.rank,
+          ),
         );
       return React.createElement(
         "section",
@@ -144,6 +154,13 @@ const testSource = String.raw`
   await Promise.resolve();
   await Promise.resolve();
   assert.equal(reorderContainer.querySelector("li:first-child"), reorderGamma);
+  assert.equal(reorderContainer.querySelector("li:last-child"), reorderAlpha);
+  assert.equal(reorderExecutions, 1);
+  const reorderBeta = reorderContainer.querySelector("[data-key='b']");
+  sortCompatibilityRows();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(reorderContainer.querySelector("li:first-child"), reorderBeta);
   assert.equal(reorderContainer.querySelector("li:last-child"), reorderAlpha);
   assert.equal(reorderExecutions, 1);
   flushSync(() => reorderRoot.unmount());

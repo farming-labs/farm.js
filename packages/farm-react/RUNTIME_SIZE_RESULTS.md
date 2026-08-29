@@ -24,16 +24,18 @@ is enforced on every pull request instead of serving only as a manually recorded
 | Fixture                                           | Compiler off gzip | Compiler on gzip | Compiler premium |
 | ------------------------------------------------- | ----------------: | ---------------: | ---------------: |
 | Direct text, attribute, style, and event bindings |          60,043 B |         63,721 B |          3,678 B |
-| Keyed rows, LIS, scalar, Set, and Map targeting   |          60,179 B |         71,345 B |         11,166 B |
-| Keyed rows with append hints                      |          60,085 B |         71,662 B |         11,577 B |
-| Keyed rows with prepend hints                     |          60,087 B |         72,055 B |         11,968 B |
-| Keyed rows with filter hints                      |          60,088 B |         72,269 B |         12,181 B |
-| Keyed rows with slice hints                       |          60,075 B |         72,309 B |         12,234 B |
-| Keyed rows with known-position hints              |          60,076 B |         72,175 B |         12,099 B |
-| Keyed rows with rolling-window hints              |          60,098 B |         73,048 B |         12,950 B |
+| Keyed rows, LIS, scalar, Set, and Map targeting   |          60,179 B |         71,372 B |         11,193 B |
+| Keyed rows with append hints                      |          60,085 B |         71,694 B |         11,609 B |
+| Keyed rows with prepend hints                     |          60,087 B |         72,080 B |         11,993 B |
+| Keyed rows with filter hints                      |          60,088 B |         72,298 B |         12,210 B |
+| Keyed rows with slice hints                       |          60,075 B |         72,335 B |         12,260 B |
+| Keyed rows with known-position hints              |          60,076 B |         72,206 B |         12,130 B |
+| Keyed rows with reverse hints                     |          60,058 B |         72,164 B |         12,106 B |
+| Keyed rows with sort hints                        |          60,077 B |         72,219 B |         12,142 B |
+| Keyed rows with rolling-window hints              |          60,098 B |         73,082 B |         12,984 B |
 
-The isolated compatibility runtime contributes 18,549 B gzip over the React control. The
-compiler-selected core contributes 3,766 B, a **79.7% reduction**. This comparison uses the same
+The isolated compatibility runtime contributes 19,273 B gzip over the React control. The
+compiler-selected core contributes 3,766 B, an **80.5% reduction**. This comparison uses the same
 hand-authored compiled definition and changes only the runtime entry used to create it.
 
 The keyed fixture retains `FarmCompiledKeyedRows` plus compiler-emitted `identityTarget`,
@@ -41,12 +43,12 @@ The keyed fixture retains `FarmCompiledKeyedRows` plus compiler-emitted `identit
 the optional row-conditional and keyed-update runtimes. Separate append, prepend, and filter
 fixtures prove that recognized functional updates retain only the matching hinted runtime. Slice
 reuses the filter removal capability. Position-only and rolling-window modules select separate
-hint runtimes only when the compiler emits those update shapes. The shared optional dispatch adds
-at most 44 B gzip to an existing keyed fixture; the direct and isolated core results remain
-byte-for-byte unchanged. The position fixture pays a 933 B gzip premium, the slice fixture pays a
-1,068 B premium, and the rolling-window fixture pays a 1,784 B premium over the ordinary keyed
-fixture. Unrelated bundles reject the optional position and rolling-window runtime markers, and the
-direct fixture rejects every structural runtime marker. The checked
+hint runtimes only when the compiler emits those update shapes. Reverse and sort share the
+optional reorder capability; the direct and isolated core results remain byte-for-byte unchanged.
+The position fixture pays a 937 B gzip premium, reverse pays 913 B, sort pays 949 B, slice pays
+1,067 B, and rolling-window pays 1,791 B over the ordinary keyed fixture. Unrelated bundles reject
+the optional position and reorder runtime markers, and the direct fixture rejects every structural
+runtime marker. The checked
 machine-readable result is [`RUNTIME_SIZE_RESULTS.json`](./RUNTIME_SIZE_RESULTS.json).
 
 ## Existing production benchmark audit
