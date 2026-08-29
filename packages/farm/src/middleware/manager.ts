@@ -392,8 +392,8 @@ export class MiddlewareManager {
           if (result.matched) {
             return result;
           }
-        } else if (typeof matcher === "function") {
-          return { matched: matcher(ctx) };
+        } else if (typeof matcher === "function" && matcher(ctx)) {
+          return { matched: true };
         }
       }
       return { matched: false };
