@@ -1486,7 +1486,9 @@ export class ServerRenderer {
           });
         });
       });
-    } catch (error) {
+    } catch (caughtError) {
+      let error = caughtError;
+
       if (isWebResponse(error)) {
         if (!res.headersSent && !(res as any).writableEnded) {
           await sendWebResponse(res, error);
@@ -1524,12 +1526,20 @@ export class ServerRenderer {
       if (isFarmNotFoundError(error)) {
         emitFarmEvent({ type: "route.notFound", pathname });
         if (!res.headersSent && !(res as any).writableEnded) {
-          await this.render404(req, res);
-        } else if (!(res as any).writableEnded) {
-          res.end();
+          try {
+            await this.render404(req, res);
+            completeRender(404, pathname);
+            return;
+          } catch (notFoundRenderError) {
+            error = notFoundRenderError;
+          }
+        } else {
+          if (!(res as any).writableEnded) {
+            res.end();
+          }
+          completeRender(404, pathname);
+          return;
         }
-        completeRender(404, pathname);
-        return;
       }
 
       emitFarmEvent({ type: "render.error", route: pathname, error });
@@ -2498,12 +2508,8 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
           for (const ext of notFoundExtensions) {
             const layoutPath = path.join(appDir, `layout${ext}`);
             if (fs.existsSync(layoutPath)) {
-              try {
-                const layoutModule = await this.routeManager.loadLayoutModule(layoutPath);
-                LayoutComponent = layoutModule.default;
-              } catch {
-                // Layout import failed, continue without it
-              }
+              const layoutModule = await this.routeManager.loadLayoutModule(layoutPath);
+              LayoutComponent = layoutModule.default;
               break;
             }
           }
@@ -2529,7 +2535,7 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
         }
       }
     } catch (error) {
-      logger.warn(`Failed to render custom 404 page: ${error}`);
+      throw new Error(`Failed to render custom 404 page: ${error}`);
     }
 
     // Render the shared adaptive fallback when the app does not provide its own page.
