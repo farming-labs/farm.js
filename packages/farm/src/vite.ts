@@ -3715,9 +3715,18 @@ class LegacyManifestSPARouter {
       return;
     }
 
-    // Same page - just update hash
+    // Same page - update fragment history without loading route data.
     if (pathname === window.location.pathname && search === window.location.search) {
-      if (url.hash) window.location.hash = url.hash;
+      if (url.hash === window.location.hash) return;
+      if (replace) {
+        window.history.replaceState(window.history.state, '', url);
+      } else {
+        window.history.pushState(window.history.state, '', url);
+      }
+      if (scroll) {
+        if (url.hash) document.querySelector(url.hash)?.scrollIntoView();
+        else window.scrollTo(0, 0);
+      }
       return;
     }
 

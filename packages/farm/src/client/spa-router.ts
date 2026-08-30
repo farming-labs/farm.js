@@ -269,10 +269,21 @@ export class SPARouter {
       return;
     }
 
-    // Same page navigation - just update hash/scroll
+    // Same page navigation - update fragment history without fetching route data.
     if (!refresh && pathname === window.location.pathname && search === window.location.search) {
-      if (url.hash) {
-        window.location.hash = url.hash;
+      if (url.hash === window.location.hash) return;
+
+      this.writePageState(
+        replace ? "replace" : "push",
+        state === undefined ? readPageState() : state,
+        url.toString(),
+      );
+      if (scroll) {
+        if (url.hash) {
+          getHashTargetElement(url.hash)?.scrollIntoView();
+        } else {
+          window.scrollTo(0, 0);
+        }
       }
       return;
     }
