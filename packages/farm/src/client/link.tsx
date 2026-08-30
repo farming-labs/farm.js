@@ -11,6 +11,7 @@ import {
 import type { FarmViewTransitionMode } from "./spa-router";
 import { isFarmLocaleChangeHref, localizeActiveFarmHref } from "../i18n/client-runtime";
 import type { FarmI18nLocale } from "../i18n/types";
+import { getFarmTrailingSlashPreference } from "../trailing-slash";
 
 /**
  * Prefetch strategy (TanStack Router–style):
@@ -245,7 +246,7 @@ function LinkInner<TRoute extends string = DefaultRouteHref>(
   const baseHref = resolveLinkHref(href, params, {
     query,
     hash,
-    trailingSlash,
+    trailingSlash: trailingSlash ?? getFarmTrailingSlashPreference(),
   });
   const resolvedHref = localizeActiveFarmHref(baseHref, locale);
   const isExternal = isExternalUrl(resolvedHref);

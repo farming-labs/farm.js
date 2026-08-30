@@ -150,6 +150,8 @@ export interface FarmConfig {
   layers?: readonly ResolvedFarmLayer[];
   outDir?: string;
   basePath?: string;
+  /** Generate and canonicalize non-root application page URLs with a trailing slash. */
+  trailingSlash?: boolean;
   /**
    * Component renderer used for JSX compilation, SSR, and browser hydration.
    * React is used when omitted.

@@ -55,6 +55,10 @@ export {
   reportFarmPreloadWarnings,
 } from "../preload";
 export { searchParamsToObject } from "../search-params";
+export {
+  resolveFarmTrailingSlashRedirect,
+  setFarmTrailingSlashPreference,
+} from "../trailing-slash";
 
 export function appendFarmLinkHeader(headers: Headers, value: string): void {
   const current = headers.get("Link");
