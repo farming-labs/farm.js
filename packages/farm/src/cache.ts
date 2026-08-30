@@ -1035,7 +1035,15 @@ function stableSerialize(value: unknown, seen = new WeakSet<object>()): string {
   }
 
   if (Array.isArray(value)) {
-    return `[${value.map((item) => stableSerialize(item, seen)).join(",")}]`;
+    const items: string[] = [];
+    for (let index = 0; index < value.length; index++) {
+      items.push(
+        Object.prototype.hasOwnProperty.call(value, index)
+          ? stableSerialize(value[index], seen)
+          : "[Hole]",
+      );
+    }
+    return `[${items.join(",")}]`;
   }
 
   if (value && typeof value === "object") {
