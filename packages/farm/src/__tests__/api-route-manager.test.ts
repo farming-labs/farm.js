@@ -19,6 +19,81 @@ afterEach(() => {
 });
 
 describe("APIRouteManager", () => {
+  it("uses GET for HEAD requests and strips the response body", async () => {
+    const manager = new APIRouteManager("/tmp/farm-api-head-test");
+    const getHandler = async () =>
+      new Response("payload", {
+        status: 201,
+        headers: { "x-handler": "get" },
+      });
+    manager.getRoutes().set("/api/status", {
+      path: "/api/status",
+      filePath: "/tmp/farm-api-head-test/status/route.ts",
+      methods: ["GET"],
+      endpoints: { GET: getHandler },
+    });
+
+    const response = await manager.getHandler()!(
+      new Request("http://example.com/api/status", { method: "HEAD" }),
+    );
+
+    expect(response.status).toBe(201);
+    expect(response.headers.get("x-handler")).toBe("get");
+    expect(await response.text()).toBe("");
+  });
+
+  it("strips bodies returned by explicit HEAD handlers", async () => {
+    const manager = new APIRouteManager("/tmp/farm-api-head-test");
+    manager.getRoutes().set("/api/status", {
+      path: "/api/status",
+      filePath: "/tmp/farm-api-head-test/status/route.ts",
+      methods: ["GET", "HEAD"],
+      endpoints: {
+        GET: async () => new Response("get"),
+        HEAD: async () => new Response("head", { headers: { "x-handler": "head" } }),
+      },
+    });
+
+    const response = await manager.getHandler()!(
+      new Request("http://example.com/api/status", { method: "HEAD" }),
+    );
+
+    expect(response.headers.get("x-handler")).toBe("head");
+    expect(await response.text()).toBe("");
+  });
+
+  it("includes implicit HEAD support in Allow headers", async () => {
+    const manager = new APIRouteManager("/tmp/farm-api-head-test");
+    manager.getRoutes().set("/api/status", {
+      path: "/api/status",
+      filePath: "/tmp/farm-api-head-test/status/route.ts",
+      methods: ["GET", "POST"],
+      endpoints: {
+        GET: async () => new Response("get"),
+        POST: async () => new Response("post"),
+      },
+    });
+
+    const response = await manager.getHandler()!(
+      new Request("http://example.com/api/status", { method: "DELETE" }),
+    );
+
+    expect(response.status).toBe(405);
+    expect(response.headers.get("allow")).toBe("GET, HEAD, POST");
+  });
+
+  it("uses the same HEAD method helpers in the generated production runtime", () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), "src", "nitro", "universal-build.ts"),
+      "utf8",
+    );
+
+    expect(source).toContain("const endpoint = resolveAPIRouteEndpoint(route, method);");
+    expect(source).toContain('"Allow": getAllowedAPIRouteMethods(route).join(", ")');
+    expect(source).toContain("endpoints: ${varName}");
+    expect(source).not.toContain("const endpoint = route.handlers[method];");
+  });
+
   it("passes through Next-style Response objects with stream bodies", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-api-route-"));
     tempDirs.push(root);

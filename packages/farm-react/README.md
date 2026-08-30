@@ -302,6 +302,7 @@ Native known-position updates can avoid a complete keyed scan too:
 ```tsx
 setItems((current) => current.toSpliced(selectedIndex, 0, nextItem));
 setItems((current) => current.toSpliced(selectedIndex, 1));
+setItems((current) => current.toSpliced(selectedIndex, 25));
 setItems((current) => current.toSpliced(selectedIndex, 1, replacement));
 setItems((current) => current.with(selectedIndex, replacement));
 ```
@@ -309,18 +310,19 @@ setItems((current) => current.with(selectedIndex, replacement));
 The compiler recognizes only a concise functional setter and either a safe-integer literal or a
 compiler-safe runtime position expression, such as an identifier, property read, arithmetic,
 conditional, or safe `Math` call. The update must insert one item with zero removals, remove one
-item, or replace one item through either `toSpliced()` or `with()`. Farm preserves method lookup,
+item or a fixed positive safe-integer literal range, or replace one item through either
+`toSpliced()` or `with()`. Farm preserves method lookup,
 evaluates the position and remaining arguments once in their original order, executes the ordinary
 native call, and records metadata only after validating the committed native source, result, and
-actual safe-integer position. The runtime creates one inserted row, removes one known row, or
-patches/replaces one row at that position without rereading every existing key, descriptor, and
-binding. Surviving rows keep their DOM identity. Index-aware or collection-reading rows, custom
-methods, position expressions with user calls or mutations, runtime positions that are not safe
-integers, other `toSpliced()`
-forms, block-bodied updaters, unsafe incoming expressions, queued uncommitted updates, reused keys,
-nested or React-owned rows, and failed checks use complete keyed reconciliation. Reports expose the
-site count as `keyedArrayPositionHints`; the capability is tree-shaken from modules that do not emit
-it.
+actual safe-integer position and clamped removal count. The runtime creates one inserted row,
+removes only the known row or range, or patches/replaces one row at that position without rereading
+every existing key, descriptor, and binding. Surviving rows keep their DOM identity. Index-aware or
+collection-reading rows, custom methods, position expressions with user calls or mutations,
+runtime positions that are not safe integers, dynamic, zero, negative, or fractional removal
+counts, other `toSpliced()` forms, block-bodied updaters, unsafe incoming expressions, queued
+uncommitted updates, reused keys, nested or React-owned rows, and failed checks use complete keyed
+reconciliation. Reports expose the site count as `keyedArrayPositionHints`; the capability is
+tree-shaken from modules that do not emit it.
 
 A direct native reverse can carry its complete permutation to a separate optional runtime:
 
@@ -659,8 +661,9 @@ reasons aggregated by count. Its summary and per-module `optimizations` also rep
 `keyedArrayAppendHints`, the number of compiler-proven direct keyed-array append sites; and
 `keyedArrayFilterHints`, the number of compiler-proven direct keyed-array filter sites; and
 `keyedArrayPrependHints`, the number of compiler-proven direct keyed-array prepend sites; and
-`keyedArrayPositionHints`, the number of compiler-proven native exact-position insertion, removal,
-or replacement sites, including guarded compiler-safe runtime positions; and
+`keyedArrayPositionHints`, the number of compiler-proven native exact-position insertion, single or
+contiguous-range removal, or replacement sites, including guarded compiler-safe runtime positions;
+and
 `keyedArrayReorderHints`, the number of compiler-proven direct native keyed-array reverse sites; and
 `keyedArraySortHints`, the number of compiler-proven direct native keyed-array sort sites; and
 `keyedArrayRollingWindowHints`, the number of compiler-proven retained-tail plus incoming-suffix

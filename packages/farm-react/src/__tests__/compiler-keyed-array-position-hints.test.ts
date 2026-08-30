@@ -17,6 +17,7 @@ describe("React AOT keyed-array position hints", () => {
         return <section>
           <button onClick={() => setRows((current) => current.toSpliced(1, 0, next))}>Insert</button>
           <button onClick={() => setRows((current) => current.toSpliced(0, 1))}>Remove</button>
+          <button onClick={() => setRows((current) => current.toSpliced(0, 2))}>Remove range</button>
           <button onClick={() => setRows((current) => current.toSpliced(0, 1, next))}>Splice replace</button>
           <button onClick={() => setRows((current) => current.with(0, next))}>Replace</button>
           <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
@@ -25,7 +26,7 @@ describe("React AOT keyed-array position hints", () => {
     `);
 
     expect(result.compiled).toEqual(["Table"]);
-    expect(result.optimizations.keyedArrayPositionHints).toBe(4);
+    expect(result.optimizations.keyedArrayPositionHints).toBe(5);
     expect(result.code).toContain("createCompilerKeyedArrayPositionUpdate");
     expect(result.code).toContain("keyedRowsPositionHintedRuntimeFeature");
   });
@@ -55,6 +56,7 @@ describe("React AOT keyed-array position hints", () => {
         return <section>
           <button onClick={() => setRows((current) => current.toSpliced(offset, 0, next))}>Insert</button>
           <button onClick={() => setRows((current) => current.toSpliced(positions.remove, 1))}>Remove</button>
+          <button onClick={() => setRows((current) => current.toSpliced(offset + delta, 2))}>Remove range</button>
           <button onClick={() => setRows((current) => current.toSpliced(offset + delta, 1, next))}>Splice replace</button>
           <button onClick={() => setRows((current) => current.with(offset + delta, next))}>Replace</button>
           <button onClick={() => setRows((current) => current.with(current.length - 1, next))}>Replace last</button>
@@ -65,7 +67,7 @@ describe("React AOT keyed-array position hints", () => {
     `);
 
     expect(result.compiled).toEqual(["Table"]);
-    expect(result.optimizations.keyedArrayPositionHints).toBe(6);
+    expect(result.optimizations.keyedArrayPositionHints).toBe(7);
     expect(result.code).toContain("createCompilerKeyedArrayPositionUpdate");
     expect(result.code).toMatch(/\.get\(\)\.remove/);
     expect(result.code).toContain("current.length - 1");
@@ -85,7 +87,7 @@ describe("React AOT keyed-array position hints", () => {
     {
       name: "a block-bodied removal updater",
       row: "row => <li key={row.id}>{row.label}</li>",
-      update: "{ return current.toSpliced(0, 1); }",
+      update: "{ return current.toSpliced(0, 2); }",
     },
     {
       name: "an unsafe incoming call",
@@ -98,9 +100,14 @@ describe("React AOT keyed-array position hints", () => {
       update: "current.toSpliced(0, 0)",
     },
     {
-      name: "a multi-item removal",
+      name: "a negative range removal",
       row: "row => <li key={row.id}>{row.label}</li>",
-      update: "current.toSpliced(0, 2)",
+      update: "current.toSpliced(0, -2)",
+    },
+    {
+      name: "a fractional range removal",
+      row: "row => <li key={row.id}>{row.label}</li>",
+      update: "current.toSpliced(0, 1.5)",
     },
     {
       name: "a dynamic removal count",

@@ -1034,23 +1034,24 @@ function stableSerialize(value: unknown, seen = new WeakSet<object>()): string {
     return `regexp:${value.toString()}`;
   }
 
-  if (Array.isArray(value)) {
-    const items: string[] = [];
-    for (let index = 0; index < value.length; index++) {
-      items.push(
-        Object.prototype.hasOwnProperty.call(value, index)
-          ? stableSerialize(value[index], seen)
-          : "[Hole]",
-      );
-    }
-    return `[${items.join(",")}]`;
-  }
-
   if (value && typeof value === "object") {
     if (seen.has(value)) {
       return "[Circular]";
     }
     seen.add(value);
+
+    if (Array.isArray(value)) {
+      const items: string[] = [];
+      for (let index = 0; index < value.length; index++) {
+        items.push(
+          Object.prototype.hasOwnProperty.call(value, index)
+            ? stableSerialize(value[index], seen)
+            : "[Hole]",
+        );
+      }
+      seen.delete(value);
+      return `[${items.join(",")}]`;
+    }
 
     // Set and Map keep their contents internally, so Object.entries is empty
     // for both. Serialize the contents and sort them by codepoint so equal
