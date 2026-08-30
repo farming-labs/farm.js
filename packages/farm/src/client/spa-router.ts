@@ -178,7 +178,7 @@ export class SPARouter {
       event.preventDefault();
       event.returnValue = "";
     }
-    this.saveScrollPosition(window.location.pathname);
+    this.saveScrollPosition(window.location.pathname + window.location.search);
   };
 
   constructor(options: RouterOptions = {}) {
@@ -290,7 +290,7 @@ export class SPARouter {
 
     // Save current scroll position
     if (this.options.scrollRestoration) {
-      this.saveScrollPosition(window.location.pathname);
+      this.saveScrollPosition(window.location.pathname + window.location.search);
     }
 
     this.startNavigation({
@@ -441,7 +441,7 @@ export class SPARouter {
 
   registerScrollElement(key: string, element: HTMLElement): () => void {
     this.scrollElements.set(key, element);
-    this.restoreScrollElement(window.location.pathname, key, element);
+    this.restoreScrollElement(window.location.pathname + window.location.search, key, element);
     return () => {
       if (this.scrollElements.get(key) === element) {
         this.scrollElements.delete(key);
@@ -522,7 +522,7 @@ export class SPARouter {
         window.scrollTo(0, 0);
       }
     } else if (this.options.scrollRestoration) {
-      this.restoreScrollPosition(options.pathname);
+      this.restoreScrollPosition(this.currentHistoryPath ?? options.fullPath);
     }
   }
 
@@ -704,7 +704,7 @@ export class SPARouter {
 
       // Restore scroll position
       if (this.options.scrollRestoration) {
-        this.restoreScrollPosition(window.location.pathname);
+        this.restoreScrollPosition(window.location.pathname + window.location.search);
       }
 
       if (clientNavigation) {

@@ -1999,7 +1999,7 @@ ${generateUniversalRouterStateProperties()}
     const from = this.currentPath;
     if (await this.shouldBlockNavigation({ from, to, action })) return;
 
-    this.saveScrollPosition(window.location.pathname);
+    this.saveScrollPosition(window.location.pathname + window.location.search);
     this.startNavigation(from, url, action);
     let clientNavigation;
     try {
@@ -2028,7 +2028,7 @@ ${generateUniversalRouterStateProperties()}
           if (url.hash) document.querySelector(url.hash)?.scrollIntoView();
           else window.scrollTo(0, 0);
         } else {
-          this.restoreScrollPosition(url.pathname);
+          this.restoreScrollPosition(to);
         }
       });
       await farmClientRuntime.resolveNavigation(clientNavigation);
@@ -2197,7 +2197,7 @@ window.addEventListener("beforeunload", function(event) {
     event.preventDefault();
     event.returnValue = "";
   }
-  spaRouter.saveScrollPosition(window.location.pathname);
+  spaRouter.saveScrollPosition(window.location.pathname + window.location.search);
 });
 
 // Handle popstate (back/forward)
@@ -2843,7 +2843,7 @@ ${generateUniversalRouterStateProperties()}
 
     // A route transition invalidates any trigger waiting on the previous DOM boundary.
     cancelPendingPageHydration();
-    this.saveScrollPosition(window.location.pathname);
+    this.saveScrollPosition(window.location.pathname + window.location.search);
     this.startNavigation(from, url, action);
     let clientNavigation;
 
@@ -2974,7 +2974,7 @@ ${generateUniversalRouterStateProperties()}
         if (url.hash) document.querySelector(url.hash)?.scrollIntoView();
         else window.scrollTo(0, 0);
       } else {
-        this.restoreScrollPosition(url.pathname);
+        this.restoreScrollPosition(to);
       }
       await farmClientRuntime.resolveNavigation(clientNavigation);
       void farmClientRuntime.scheduleNavigationRendered(clientNavigation);
@@ -3193,7 +3193,7 @@ window.addEventListener("beforeunload", function(event) {
     event.preventDefault();
     event.returnValue = "";
   }
-  spaRouter.saveScrollPosition(window.location.pathname);
+  spaRouter.saveScrollPosition(window.location.pathname + window.location.search);
 });
 
 // Handle popstate (back/forward)
