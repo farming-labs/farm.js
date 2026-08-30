@@ -262,7 +262,6 @@ export default defineConfig({
   },
 
   // Build configuration
-  output: 'standalone',
   compress: true,
 
   // Development indicators

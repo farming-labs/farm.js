@@ -74,6 +74,18 @@ describe("config helpers", () => {
     });
   });
 
+  it("warns instead of silently accepting a top-level output mode", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const config = await resolveConfig({ output: "export" }, "production");
+
+    expect(config).not.toHaveProperty("output");
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('top-level "output" option is not supported'),
+    );
+    warn.mockRestore();
+  });
+
   it("resolves smart preload budgets", async () => {
     const defaults = await resolveConfig({}, "production");
     const configured = await resolveConfig(
