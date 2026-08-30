@@ -10,6 +10,8 @@ import {
   createFarmRequestBodyErrorResponse,
   DEFAULT_FARM_SERVER_BODY_SIZE_LIMIT,
 } from "../server-http";
+import { DEFAULT_FARM_API_BASE_PATH, normalizeFarmAPIBasePath } from "./config";
+import { resolveFarmAPICanonicalPathname } from "./server-path";
 
 export type APIRouteParamValue = string | string[];
 export type APIRouteParams = Record<string, APIRouteParamValue>;
@@ -69,6 +71,28 @@ export function matchAPIRoute<T extends { path: string }>(
   }
 
   return null;
+}
+
+/** Match canonical routes through a configurable same-origin public API path. */
+export function matchAPIRouteAtBasePath<T extends { path: string }>(
+  routes: Map<string, T>,
+  pathname: string,
+  serverBasePath = DEFAULT_FARM_API_BASE_PATH,
+): APIRouteMatch<T> | null {
+  const directMatch = matchAPIRoute(routes, pathname);
+  if (directMatch) return directMatch;
+
+  const canonicalPathname = resolveFarmAPICanonicalPathname(pathname, serverBasePath);
+  return canonicalPathname === pathname ? null : matchAPIRoute(routes, canonicalPathname);
+}
+
+/** Test whether a pathname belongs to the configured local API surface. */
+export function isFarmAPIPathname(
+  pathname: string,
+  serverBasePath = DEFAULT_FARM_API_BASE_PATH,
+): boolean {
+  const basePath = normalizeFarmAPIBasePath(serverBasePath);
+  return basePath !== "/" && (pathname === basePath || pathname.startsWith(`${basePath}/`));
 }
 
 export async function invokeAPIRouteEndpoint(

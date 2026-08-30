@@ -95,6 +95,47 @@ describe("route runtime deployment manifest", () => {
     });
   });
 
+  it("publishes API runtime patterns at the configured local base path", async () => {
+    const root = createTempDir();
+    const apiPath = writeFile(root, "src/app/api/reports/[id]/route.ts");
+    const modules = new Map<string, Record<string, unknown>>([
+      [
+        apiPath,
+        {
+          maxDuration: 15,
+          GET: () => Response.json({ ok: true }),
+        },
+      ],
+    ]);
+    const config = createConfig(root, {
+      "/v2/api/**": { maxDuration: 20 },
+    });
+    config.api = { baseURL: "/v2/api", basePath: "/v2/api" };
+    const moduleServer = createModuleServer(root, modules);
+    const routeManager = new RouteManager(config, moduleServer);
+    const apiRouteManager = new APIRouteManager(path.join(root, "src/app"), moduleServer, {
+      throwOnLoadError: true,
+      basePath: "/v2/api",
+    });
+    await routeManager.discoverRoutes();
+    await apiRouteManager.discoverRoutes();
+
+    const manifest = await createFarmRouteRuntimeManifest({
+      config: config as ResolvedFarmConfig,
+      routeManager,
+      apiRouteManager,
+      root,
+    });
+
+    expect(manifest.routes).toContainEqual(
+      expect.objectContaining({
+        kind: "api",
+        pattern: "/v2/api/reports/[id]",
+        maxDuration: 15,
+      }),
+    );
+  });
+
   it("rejects incompatible runtimes and reports unsupported provider hints", () => {
     const manifest: FarmRouteRuntimeManifest = {
       version: 1,
@@ -256,6 +297,7 @@ function createConfig(root: string, routeRules: FarmConfig["routeRules"]): Requi
     root,
     srcDir: "src",
     routeRules,
+    api: { baseURL: "/api", basePath: "/api" },
     mdx: { markdownRoutes: true, className: "farm-markdown" },
   } as Required<FarmConfig>;
 }

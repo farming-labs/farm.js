@@ -14,6 +14,7 @@ import { _runWithFarmI18nRequest, type FarmI18nRuntime } from "../i18n/server";
 import {
   getAllowedAPIRouteMethods,
   invokeAPIRouteEndpoint,
+  matchAPIRouteAtBasePath,
   matchAPIRoute,
   resolveAPIRouteEndpoint,
   type APIRouteMatch,
@@ -31,6 +32,8 @@ export interface APIRouteManagerOptions {
   throwOnLoadError?: boolean;
   i18n?: FarmI18nRuntime;
   bodySizeLimit?: number;
+  /** Same-origin path where canonical `/api` routes are served. */
+  basePath?: string;
 }
 
 export interface APIRouteHandlerOptions {
@@ -56,6 +59,7 @@ export class APIRouteManager {
   private throwOnLoadError: boolean;
   private i18n?: FarmI18nRuntime;
   private bodySizeLimit?: number;
+  private basePath?: string;
 
   constructor(
     appDir: string | readonly string[],
@@ -67,6 +71,7 @@ export class APIRouteManager {
     this.throwOnLoadError = options.throwOnLoadError === true;
     this.i18n = options.i18n;
     this.bodySizeLimit = options.bodySizeLimit;
+    this.basePath = options.basePath;
   }
 
   /**
@@ -306,7 +311,7 @@ export class APIRouteManager {
       const method = request.method.toUpperCase();
 
       // Find matching route
-      const match = matchAPIRoute(this.routes, pathname);
+      const match = matchAPIRouteAtBasePath(this.routes, pathname, this.basePath);
       if (!match) {
         return new Response(JSON.stringify({ error: "Not Found" }), {
           status: 404,
@@ -356,7 +361,7 @@ export class APIRouteManager {
   }
 
   matchRoute(pathname: string): APIRouteMatch<APIRoute> | null {
-    return matchAPIRoute(this.routes, pathname);
+    return matchAPIRouteAtBasePath(this.routes, pathname, this.basePath);
   }
 
   /**

@@ -20,9 +20,9 @@ import {
   API_ROUTE_METHODS,
   getAllowedAPIRouteMethods,
   invokeAPIRouteEndpoint,
-  matchAPIRoute,
   resolveAPIRouteEndpoint,
 } from "./route-manager";
+import { matchAPIRouteAtBasePath } from "./runtime";
 import { sendWebResponse } from "../server/response";
 import { isFarmAPIRouteFileName } from "./route-files";
 import { _withAfterNodeMiddleware } from "../after";
@@ -43,6 +43,8 @@ export interface FarmApiPluginOptions {
   debug?: boolean;
   /** Maximum request body size, for example `"10mb"`. */
   bodySizeLimit?: number | string;
+  /** Same-origin path where canonical `/api` routes are served. @default "/api" */
+  basePath?: string;
 }
 
 export interface ApiRoute {
@@ -61,6 +63,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
   const bodySizeLimit = resolveFarmServerConfig({
     bodySizeLimit: options.bodySizeLimit,
   }).bodySizeLimit;
+  const basePath = options.basePath;
 
   // API routes cache
   let apiRoutesCache: Map<string, ApiRoute> = new Map();
@@ -128,7 +131,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
         const method = request.method.toUpperCase();
         const pathname = url.pathname;
 
-        const match = matchAPIRoute(apiRoutesCache, pathname);
+        const match = matchAPIRouteAtBasePath(apiRoutesCache, pathname, basePath);
         if (!match) {
           return new Response(JSON.stringify({ error: "Not Found" }), {
             status: 404,
@@ -333,7 +336,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
               await discoveryPromise;
             }
 
-            if (!matchAPIRoute(apiRoutesCache, pathname)) {
+            if (!matchAPIRouteAtBasePath(apiRoutesCache, pathname, basePath)) {
               return next();
             }
 
@@ -362,7 +365,10 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
               // reaches the API router.
               const currentUrl = req.url || url;
               const currentPathname = currentUrl.split("?")[0];
-              if (currentPathname !== pathname && !matchAPIRoute(apiRoutesCache, currentPathname)) {
+              if (
+                currentPathname !== pathname &&
+                !matchAPIRouteAtBasePath(apiRoutesCache, currentPathname, basePath)
+              ) {
                 // Rewritten off the API surface; let the page pipeline serve it.
                 return next();
               }
