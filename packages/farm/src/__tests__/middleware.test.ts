@@ -1035,12 +1035,14 @@ describe("Middleware Context", () => {
 
   it("should handle cookies", () => {
     const req = createMockRequest("/test");
-    req.headers.cookie = "session=abc123; user=john";
+    req.headers.cookie = "session=abc123; user=john; preview=";
     const res = createMockResponse();
     const ctx = createContext(req, res);
 
     expect(ctx.cookies.get("session")).toBe("abc123");
     expect(ctx.cookies.get("user")).toBe("john");
+    expect(ctx.cookies.get("preview")).toBe("");
+    expect(ctx.cookies.get("constructor")).toBeUndefined();
 
     ctx.cookies.set("new-cookie", "value123", { maxAge: 3600 });
     expect(res.setHeader).toHaveBeenCalled();

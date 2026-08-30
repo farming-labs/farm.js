@@ -21,6 +21,7 @@ Data and headers written during middleware are request-scoped:
 | `ctx.data.set(key, value)` or `context.data.set(key, value)`         | Passes serializable, client-safe data to later middleware and page props.                     |
 | `ctx.locals.set(key, value)` or `context.set(key, value)`            | Passes server-only context to later middleware, layouts, pages, and nested Server Components. |
 | `ctx.headers.set(name, value)` or `context.headers.set(name, value)` | Adds headers to the final response.                                                           |
+| `ctx.cookies.get(name)`                                              | Reads decoded request cookies, including valid empty values.                                  |
 | `ctx.params` or `context.params`                                     | Contains params from the matched config matcher or route-scoped middleware path.              |
 | `return new Response(...)`                                           | Stops the chain and sends that response immediately.                                          |
 
