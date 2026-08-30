@@ -65,6 +65,18 @@ function hintedReplace(previous: Item[], position: number, item: Item): Item[] {
   ) as Item[];
 }
 
+function hintedSpliceReplace(previous: Item[], position: number, item: Item): Item[] {
+  const source = previous as PositionArray;
+  return createCompilerKeyedArrayPositionUpdate(
+    source,
+    source.toSpliced,
+    "replace",
+    position,
+    1,
+    item,
+  ) as Item[];
+}
+
 function hintedRemove(previous: Item[], position: number): Item[] {
   const source = previous as PositionArray;
   return createCompilerKeyedArrayPositionUpdate(
@@ -91,6 +103,7 @@ function createPositionHarness(initialItems: Item[], readsCollection = false) {
   let insert: (position: number, item: Item) => void = () => undefined;
   let remove: (position: number) => void = () => undefined;
   let replace: (position: number, item: Item) => void = () => undefined;
+  let withReplace: (position: number, item: Item) => void = () => undefined;
   let queueTwo: (first: Item, second: Item) => void = () => undefined;
   let queueRemoveTwo: () => void = () => undefined;
   let customInsert: (item: Item) => void = () => undefined;
@@ -104,6 +117,8 @@ function createPositionHarness(initialItems: Item[], readsCollection = false) {
         state[0].set((previous) => hintedInsert(previous as Item[], position, item));
       remove = (position) => state[0].set((previous) => hintedRemove(previous as Item[], position));
       replace = (position, item) =>
+        state[0].set((previous) => hintedSpliceReplace(previous as Item[], position, item));
+      withReplace = (position, item) =>
         state[0].set((previous) => hintedReplace(previous as Item[], position, item));
       queueTwo = (first, second) => {
         state[0].set((previous) => hintedInsert(previous as Item[], 1, first));
@@ -179,6 +194,7 @@ function createPositionHarness(initialItems: Item[], readsCollection = false) {
     queueRemoveTwo: () => queueRemoveTwo(),
     remove: (position: number) => remove(position),
     replace: (position: number, item: Item) => replace(position, item),
+    withReplace: (position: number, item: Item) => withReplace(position, item),
   };
 }
 
@@ -252,7 +268,7 @@ describe("compiled keyed-array position hints", () => {
     expect(harness.counters.bindings).toBe(0);
   });
 
-  it("patches a same-key replacement and creates one host row for a new key", async () => {
+  it("patches a same-key toSpliced replacement and creates one host row for a new key", async () => {
     const harness = createPositionHarness([
       { id: "a", label: "Alpha" },
       { id: "b", label: "Beta" },
@@ -288,6 +304,17 @@ describe("compiled keyed-array position hints", () => {
     expect(harness.counters.keys).toBe(2);
     expect(harness.counters.descriptors).toBe(1);
     expect(harness.counters.bindings).toBe(2);
+
+    const alpha = container.querySelector('[data-key="a"]');
+    await act(async () => {
+      harness.withReplace(0, { id: "a", label: "Alpha updated" });
+      await flushCompilerUpdates();
+    });
+    expect(container.querySelector('[data-key="a"]')).toBe(alpha);
+    expect(alpha?.textContent).toBe("Alpha updated");
+    expect(harness.counters.keys).toBe(3);
+    expect(harness.counters.descriptors).toBe(1);
+    expect(harness.counters.bindings).toBe(3);
   });
 
   it("preserves native removal arguments, return values, and errors", () => {
@@ -328,6 +355,117 @@ describe("compiled keyed-array position hints", () => {
         1,
       ),
     ).toThrow(error);
+  });
+
+  it("preserves native toSpliced replacement clamping, return values, and errors", () => {
+    const source = [
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+      { id: "c", label: "Gamma" },
+    ] as PositionArray;
+    const replacement = { id: "d", label: "Delta" };
+    const replaced = createCompilerKeyedArrayPositionUpdate(
+      source,
+      source.toSpliced,
+      "replace",
+      -99,
+      1,
+      replacement,
+    ) as Item[];
+    expect(replaced.map((item) => item.id)).toEqual(["d", "b", "c"]);
+    expect(source.map((item) => item.id)).toEqual(["a", "b", "c"]);
+
+    const appended = createCompilerKeyedArrayPositionUpdate(
+      source,
+      source.toSpliced,
+      "replace",
+      99,
+      1,
+      replacement,
+    ) as Item[];
+    expect(appended.map((item) => item.id)).toEqual(["a", "b", "c", "d"]);
+
+    const customResult = [replacement];
+    const custom = function (this: Item[], position: number, deleteCount: number, item: Item) {
+      expect(this).toBe(source);
+      expect([position, deleteCount, item]).toEqual([1, 1, replacement]);
+      return customResult;
+    };
+    expect(
+      createCompilerKeyedArrayPositionUpdate(source, custom, "replace", 1, 1, replacement),
+    ).toBe(customResult);
+
+    const error = new Error("replace failed");
+    expect(() =>
+      createCompilerKeyedArrayPositionUpdate(
+        source,
+        () => {
+          throw error;
+        },
+        "replace",
+        1,
+        1,
+        replacement,
+      ),
+    ).toThrow(error);
+  });
+
+  it("falls back for out-of-range and subclass toSpliced replacements", async () => {
+    const harness = createPositionHarness([
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+      { id: "c", label: "Gamma" },
+    ]);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Table />));
+    const alpha = container.querySelector('[data-key="a"]');
+    const beta = container.querySelector('[data-key="b"]');
+    const gamma = container.querySelector('[data-key="c"]');
+    harness.counters.keys = 0;
+
+    await act(async () => {
+      harness.replace(99, { id: "d", label: "Delta" });
+      await flushCompilerUpdates();
+    });
+    expect([...container.querySelectorAll("li")].map((node) => node.textContent)).toEqual([
+      "Alpha",
+      "Beta",
+      "Gamma",
+      "Delta",
+    ]);
+    expect(container.querySelector('[data-key="a"]')).toBe(alpha);
+    expect(container.querySelector('[data-key="b"]')).toBe(beta);
+    expect(container.querySelector('[data-key="c"]')).toBe(gamma);
+    expect(harness.counters.keys).toBe(4);
+
+    class ItemArray extends Array<Item> {}
+    const subclass = createPositionHarness(
+      new ItemArray(
+        { id: "a", label: "Alpha" },
+        { id: "b", label: "Beta" },
+        { id: "c", label: "Gamma" },
+      ),
+    );
+    const subclassContainer = document.createElement("div");
+    document.body.append(subclassContainer);
+    const subclassRoot = createRoot(subclassContainer);
+    roots.push(subclassRoot);
+    await act(async () => subclassRoot.render(<subclass.Table />));
+    subclass.counters.keys = 0;
+
+    await act(async () => {
+      subclass.replace(1, { id: "d", label: "Delta" });
+      await flushCompilerUpdates();
+    });
+    expect([...subclassContainer.querySelectorAll("li")].map((node) => node.textContent)).toEqual([
+      "Alpha",
+      "Delta",
+      "Gamma",
+    ]);
+    expect(subclass.counters.keys).toBe(3);
   });
 
   it("evaluates coercible runtime positions once and preserves their native result", () => {

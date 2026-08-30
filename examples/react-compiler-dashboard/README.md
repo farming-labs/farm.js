@@ -96,7 +96,8 @@ React and 1.25x faster than the compiled control. The report must contain a nonz
 work proportional only to the incoming suffix.
 
 Exact-position insertions, removals, and replacements have separate 10,000-row comparisons. Concise
-native `toSpliced(position, 0, item)`, `toSpliced(position, 1)`, and `with(position, item)` updates
+native `toSpliced(position, 0, item)`, `toSpliced(position, 1)`,
+`toSpliced(position, 1, replacement)`, and `with(position, replacement)` updates
 use event-local runtime position variables and are measured against bracketed React and equivalent
 block-bodied compiled controls. The compiler report must contain a nonzero
 `keyedArrayPositionHints` count; package tests separately require zero surviving
@@ -174,7 +175,8 @@ The default JSON report is `/tmp/farm-react-dashboard-benchmark.json`; change it
 - The slice snapshot control retains the same 9,000-row suffix through an unsupported block-bodied
   updater. It isolates the saved survivor scan while both paths remove the same 1,000 DOM rows.
 - The exact-position controls pass event-local runtime variables to concise native
-  `toSpliced()`/`with()` updates and compare them with equivalent block-bodied compiled controls.
+  `toSpliced()` updates and compare them with equivalent block-bodied compiled controls. Package
+  tests cover the equivalent `with()` replacement path too.
   They verify surrounding DOM identity and isolate the saved full keyed scan for one insertion,
   removal, or replacement.
 - The reverse control compares concise native `toReversed()` with an equivalent block-bodied

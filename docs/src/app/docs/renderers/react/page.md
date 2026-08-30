@@ -1026,6 +1026,7 @@ Native immutable array methods can state an exact insertion, removal, or replace
 ```tsx
 setItems((current) => current.toSpliced(selectedIndex, 0, nextItem));
 setItems((current) => current.toSpliced(selectedIndex, 1));
+setItems((current) => current.toSpliced(selectedIndex, 1, replacement));
 setItems((current) => current.with(selectedIndex, replacement));
 ```
 
@@ -1033,11 +1034,12 @@ At build time, Farm recognizes only concise functional setters whose position is
 safe-integer literal or a compiler-safe runtime expression. Identifiers, property reads,
 side-effect-free arithmetic and conditionals, and safe `Math` calls are supported. User-defined
 calls, assignments, update expressions, and other effectful forms are not transformed.
-`toSpliced()` must insert exactly one item with a zero delete count or remove exactly one item;
-`with()` must replace exactly one item. Farm preserves the original method lookup, evaluates every
-argument once in its original order, and preserves the native call, return value, coercion, and
-thrown errors. If the method is not native or the evaluated position is not already a safe integer,
-the update still runs normally but no metadata is recorded.
+`toSpliced()` must insert exactly one item with a zero delete count, remove exactly one item, or
+replace exactly one item with a delete count of one; `with()` must replace exactly one item. Farm
+preserves the original method lookup, evaluates every argument once in its original order, and
+preserves the native call, return value, coercion, and thrown errors. If the method is not native or
+the evaluated position is not already a safe integer, the update still runs normally but no
+metadata is recorded.
 
 At update time, Farm validates the committed native source, result length, source token, normalized
 position, and any incoming key before changing the DOM. An insertion creates one row at that

@@ -1634,10 +1634,14 @@ function rewriteKeyedArrayPositionHints(
               t.isNumericLiteral(args[1], { value: 0 })
             ? "insert"
             : methodName === "toSpliced" &&
-                args.length === 2 &&
+                args.length === 3 &&
                 t.isNumericLiteral(args[1], { value: 1 })
-              ? "remove"
-              : undefined;
+              ? "replace"
+              : methodName === "toSpliced" &&
+                  args.length === 2 &&
+                  t.isNumericLiteral(args[1], { value: 1 })
+                ? "remove"
+                : undefined;
       if (!kind || !t.isExpression(args[0])) return;
       const position = args[0];
       const item = kind === "remove" ? undefined : args.at(-1);

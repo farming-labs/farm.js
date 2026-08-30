@@ -302,19 +302,21 @@ Native known-position updates can avoid a complete keyed scan too:
 ```tsx
 setItems((current) => current.toSpliced(selectedIndex, 0, nextItem));
 setItems((current) => current.toSpliced(selectedIndex, 1));
+setItems((current) => current.toSpliced(selectedIndex, 1, replacement));
 setItems((current) => current.with(selectedIndex, replacement));
 ```
 
 The compiler recognizes only a concise functional setter and either a safe-integer literal or a
 compiler-safe runtime position expression, such as an identifier, property read, arithmetic,
 conditional, or safe `Math` call. The update must insert one item with zero removals, remove one
-item, or directly replace one item. Farm preserves method lookup, evaluates the position and
-remaining arguments once in their original order, executes the ordinary native call, and records
-metadata only after validating the committed native source, result, and actual safe-integer
-position. The runtime creates one inserted row, removes one known row, or patches/replaces one row
-at that position without rereading every existing key, descriptor, and binding. Surviving rows keep
-their DOM identity. Index-aware or collection-reading rows, custom methods, position expressions
-with user calls or mutations, runtime positions that are not safe integers, other `toSpliced()`
+item, or replace one item through either `toSpliced()` or `with()`. Farm preserves method lookup,
+evaluates the position and remaining arguments once in their original order, executes the ordinary
+native call, and records metadata only after validating the committed native source, result, and
+actual safe-integer position. The runtime creates one inserted row, removes one known row, or
+patches/replaces one row at that position without rereading every existing key, descriptor, and
+binding. Surviving rows keep their DOM identity. Index-aware or collection-reading rows, custom
+methods, position expressions with user calls or mutations, runtime positions that are not safe
+integers, other `toSpliced()`
 forms, block-bodied updaters, unsafe incoming expressions, queued uncommitted updates, reused keys,
 nested or React-owned rows, and failed checks use complete keyed reconciliation. Reports expose the
 site count as `keyedArrayPositionHints`; the capability is tree-shaken from modules that do not emit

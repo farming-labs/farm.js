@@ -2,6 +2,25 @@
 
 Date: 2026-08-29
 
+## Native `toSpliced()` replacement follow-up — 2026-08-30
+
+The full bracketed production-browser run changed the exact-position replacement workload to the
+concise native `toSpliced(position, 1, replacement)` form. Both compiler builds emitted the three
+expected `keyedArrayPositionHints` sites and passed DOM correctness, every React-relative and
+compiled-control persistence gate, and normalized scalability through the 21,000-row peak.
+
+| Mode   | React median | Hinted replacement | Compiled control | vs React | vs control |
+| ------ | -----------: | -----------------: | ---------------: | -------: | ---------: |
+| Static |     47.35 ms |            3.80 ms |         13.40 ms |   12.46x |      3.53x |
+| Hybrid |     47.35 ms |            3.70 ms |         13.80 ms |   12.80x |      3.73x |
+
+Static and hybrid each added zero owner executions. Package tests separately prove same-key DOM
+identity, one-row new-key replacement, the existing native `with()` path, 1,000 differential
+updates, native clamping and errors, out-of-range and subclass fallback, focus and selection,
+delegated events, hydration, Strict Mode, and unmount cleanup. The optional known-position fixture
+grew by 13 B gzip, from a 12,188 B to a 12,201 B compiler premium; the isolated core runtime
+reduction remains 80.5%.
+
 ## Compiler-safe runtime positions follow-up — 2026-08-30
 
 The full bracketed production-browser run replaced the three literal position controls with
