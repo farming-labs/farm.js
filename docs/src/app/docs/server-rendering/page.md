@@ -81,6 +81,11 @@ Review each suggestion, including its imported code, then add the static export 
 keeps personalized pages dynamic while making stable pages easy to move onto the fastest rendering
 and caching path.
 
+If an explicitly static route directly reads request APIs or request props, Farm reports the unsafe
+read and keeps the route dynamic instead of freezing request-specific HTML into a shared artifact.
+This check covers the route module itself; continue reviewing imported components and data loaders,
+because request-bound work in transitive imports cannot be proven safe from the route source alone.
+
 **src/app/about/page.tsx**
 
 ```tsx

@@ -192,7 +192,9 @@ export default function SafeRulePage() {
   return root;
 }
 
-async function createRuntimeSensitiveFixture(kind: "context" | "plugin" | "i18n"): Promise<string> {
+async function createRuntimeSensitiveFixture(
+  kind: "context" | "plugin" | "i18n" | "route",
+): Promise<string> {
   const root = await fs.mkdtemp(path.join(packageRoot, `.tmp-production-ssg-${kind}-`));
   await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
   await fs.symlink(packageRoot, path.join(root, "node_modules", "@farm.js", "core"), "junction");
@@ -227,7 +229,17 @@ export default function PluginPage() {
   return <main>plugin-page</main>;
 }
 `.trim()
-        : `
+        : kind === "route"
+          ? `
+import { getCurrentRequest } from "@farm.js/core/request";
+
+export const ssg = true;
+export default function RequestPage() {
+  const tenant = getCurrentRequest().headers.get("x-tenant") || "public";
+  return <main>request-{tenant}</main>;
+}
+`.trim()
+          : `
 export const ssg = true;
 export default function I18nPage() {
   return <main>i18n-page</main>;
@@ -260,7 +272,8 @@ export default {
   }],
 };
 `.trim()
-        : `
+        : kind === "i18n"
+          ? `
 export default {
   srcDir: "src",
   images: { provider: "none" },
@@ -270,6 +283,12 @@ export default {
     routing: "prefix-always",
     detection: ["url", "cookie", "accept-language"],
   },
+};
+`.trim()
+          : `
+export default {
+  srcDir: "src",
+  images: { provider: "none" },
 };
 `.trim(),
   );
@@ -640,4 +659,36 @@ describe("production SSG output", () => {
       }
     }
   }, 180_000);
+
+  it("keeps an explicitly static route that reads the request server-handled", async () => {
+    const root = await createRuntimeSensitiveFixture("route");
+    let production: Awaited<ReturnType<typeof startProductionServer>> | undefined;
+
+    try {
+      const config = await loadFixtureConfig(root);
+      await build(config, { root, preset: "node-server" });
+      await expect(
+        fs.access(path.join(root, ".farm", ".output", "public", "sensitive", "index.html")),
+      ).rejects.toThrow();
+
+      production = await startProductionServer(
+        path.join(root, ".farm", ".output", "server"),
+        "/sensitive",
+      );
+      const tenantAHtml = await fetch(`${production.origin}/sensitive`, {
+        headers: { "x-tenant": "tenant-a" },
+      }).then((response) => response.text());
+      const tenantBHtml = await fetch(`${production.origin}/sensitive`, {
+        headers: { "x-tenant": "tenant-b" },
+      }).then((response) => response.text());
+
+      expect(tenantAHtml).toMatch(/request-(?:<!-- -->)?tenant-a/);
+      expect(tenantAHtml).not.toContain("tenant-b");
+      expect(tenantBHtml).toMatch(/request-(?:<!-- -->)?tenant-b/);
+      expect(tenantBHtml).not.toContain("tenant-a");
+    } finally {
+      await production?.stop();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
 });
