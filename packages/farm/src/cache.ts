@@ -1029,7 +1029,10 @@ function stableSerialize(value: unknown, seen = new WeakSet<object>()): string {
   }
 
   if (value instanceof Date) {
-    return `date:${value.toISOString()}`;
+    // toISOString throws on an Invalid Date. Key building must not throw on a
+    // supported type, so all invalid dates share one stable marker and the
+    // caller's own validation decides what to do with the input.
+    return Number.isNaN(value.getTime()) ? "date:invalid" : `date:${value.toISOString()}`;
   }
   if (value instanceof URL) {
     return `url:${value.toString()}`;
