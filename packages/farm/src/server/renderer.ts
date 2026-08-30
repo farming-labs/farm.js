@@ -29,6 +29,8 @@ import { matchSSGPage, resolveRouteRenderingConfigFromFile } from "../ssg";
 import { getIntegrationProviders, getRegisteredIntegrationAPIManifest } from "../integrations";
 import { _runWithCurrentRequest, createWebRequestFromFarmRequest } from "./request";
 import { createFarmCacheKey, getFarmDataCache, normalizeRevalidatePath } from "../cache";
+import { resolveFarmNotFoundComponentPath } from "../not-found";
+import { getFarmAppDirectories } from "../layers";
 import { emitFarmEvent } from "../observability";
 import {
   getFarmRedirectError,
@@ -402,6 +404,10 @@ export class ServerRenderer {
 
   async initialize(): Promise<void> {
     if (this.rendererRuntime) return;
+
+    if (this.config.notFound.component?.trim()) {
+      resolveFarmNotFoundComponentPath(this.config, getFarmAppDirectories(this.config));
+    }
 
     const loaded = isReactRenderer(this.config.renderer)
       ? await import("../renderer/react/server")
@@ -2477,15 +2483,10 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
       // Look for custom not-found page
       const appDir = path.join(this.config.root, this.config.srcDir, "app");
       const notFoundExtensions = getFarmRendererComponentExtensions(this.config.renderer);
-      let notFoundPath: string | null = null;
-
-      for (const ext of notFoundExtensions) {
-        const checkPath = path.join(appDir, `not-found${ext}`);
-        if (fs.existsSync(checkPath)) {
-          notFoundPath = checkPath;
-          break;
-        }
-      }
+      const notFoundPath = resolveFarmNotFoundComponentPath(
+        this.config,
+        getFarmAppDirectories(this.config),
+      );
 
       if (notFoundPath) {
         // Use routeManager to load the module (uses Vite's ssrLoadModule in dev)

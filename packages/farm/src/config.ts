@@ -383,6 +383,7 @@ export interface ResolvedFarmConfig extends Required<
 > {
   /** @internal Tracks whether `context` came from user/layer config instead of the default noop. */
   [FARM_RESOLVED_CUSTOM_CONTEXT]?: boolean;
+  root: string;
   extends: readonly FarmLayerEntry[];
   layers: ResolvedFarmLayer[];
   plugins: FarmPlugin[];
@@ -407,6 +408,7 @@ export interface ResolvedFarmConfig extends Required<
   theme: ResolvedFarmThemeConfig;
   renderer: FarmRenderer;
   routeRules: FarmRouteRules;
+  notFound: NotFoundConfig;
 }
 
 export function hasCustomFarmRouteContext(config: ResolvedFarmConfig): boolean {
