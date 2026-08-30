@@ -1,4 +1,5 @@
 import { useRouter as useFarmRouter } from "./client/router";
+import { getRouter as getFarmSPARouter } from "./client/spa-router";
 
 export {
   getFarmRedirectError,
@@ -18,12 +19,12 @@ export function useRouter() {
     back: router.back,
     forward: router.forward,
     refresh() {
-      if (typeof window !== "undefined") {
-        window.location.reload();
-      }
+      if (typeof window === "undefined") return Promise.resolve();
+      return getFarmSPARouter().refresh();
     },
-    prefetch(_href: string) {
-      return Promise.resolve();
+    prefetch(href: string) {
+      if (typeof window === "undefined") return Promise.resolve();
+      return getFarmSPARouter().prefetch(href);
     },
   };
 }
