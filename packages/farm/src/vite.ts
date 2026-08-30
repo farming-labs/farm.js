@@ -7,6 +7,8 @@ import type { FarmPlugin, FarmPluginRuntimeSession, PluginManager } from "./plug
 import { generateFarmClientPluginEntryCode } from "./client-plugin-build";
 import { APIRouteManager } from "./api/route-manager";
 import { DEFAULT_FARM_API_BASE_PATH } from "./api/config";
+import { resolveFarmAPIServerBasePath } from "./api/server-path";
+import { isFarmAPIPathname } from "./api/runtime";
 import type { OpenAPIManager } from "./openapi/manager";
 import { MiddlewareManager } from "./middleware/manager";
 import { generateFarmTypeArtifacts, type GenerateFarmTypeArtifactsOptions } from "./type-artifacts";
@@ -732,6 +734,7 @@ export function farmPlugin(
       await farmApp.initialize();
 
       const farmConfig = farmApp.getConfig();
+      const apiServerBasePath = resolveFarmAPIServerBasePath(farmConfig.api);
       const serverConfig = resolveFarmServerConfig(farmConfig.server);
       let imageHandler: FarmImageHandler | null = null;
       if (farmConfig.images.provider !== "none") {
@@ -975,6 +978,7 @@ export function farmPlugin(
       apiRouteManager = new APIRouteManager(appDirs, server, {
         i18n: farmApp.getI18nRuntime(),
         bodySizeLimit: serverConfig.bodySizeLimit,
+        basePath: apiServerBasePath,
       });
       await apiRouteManager.discoverRoutes();
       let discoveredWorkflows: FarmDiscoveredWorkflow[] = [];
@@ -1630,7 +1634,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           // Handle API routes first
           const matchedApiRoute = apiRouteManager.matchRoute(requestPathname);
           const hasMatchedApiRoute = Boolean(matchedApiRoute);
-          if (hasMatchedApiRoute || req.url?.startsWith("/api/")) {
+          if (hasMatchedApiRoute || isFarmAPIPathname(requestPathname, apiServerBasePath)) {
             const startTime = Date.now();
             const method = req.method || "GET";
             const urlPath = req.url || "/";

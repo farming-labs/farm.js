@@ -1,5 +1,6 @@
 import path from "path";
 import type { APIRouteManager } from "./api/route-manager";
+import { resolveFarmAPIServerBasePath, resolveFarmAPIServerRoutePath } from "./api/server-path";
 import type { ResolvedFarmConfig } from "./config";
 import { getFarmPresetRuntime, type FarmPresetRuntime } from "./deployment";
 import {
@@ -46,7 +47,11 @@ export async function createFarmRouteRuntimeManifest(options: {
   }
 
   for (const [pattern, route] of options.apiRouteManager.getRoutes()) {
-    const inherited = resolveFarmRouteRuleRuntimeConfig(pattern, options.config.routeRules);
+    const publicPattern = resolveFarmAPIServerRoutePath(
+      pattern,
+      resolveFarmAPIServerBasePath(options.config.api),
+    );
+    const inherited = resolveFarmRouteRuleRuntimeConfig(publicPattern, options.config.routeRules);
     const own = normalizeFarmRouteRuntimeConfig(
       getFarmRouteRuntimeConfig(route),
       `API route "${pattern}"`,
@@ -54,7 +59,7 @@ export async function createFarmRouteRuntimeManifest(options: {
 
     routes.push({
       kind: "api",
-      pattern,
+      pattern: publicPattern,
       rendering: "dynamic",
       source: normalizeManifestSource(root, route.filePath),
       ...resolveFarmRouteRuntimeConfig(

@@ -40,6 +40,35 @@ describe("APIRouteManager", () => {
     expect(manager.getRoutes().get("/api/jsx")?.methods).toEqual(["GET"]);
   });
 
+  it("serves canonical routes through a custom same-origin API path", async () => {
+    const manager = new APIRouteManager("/tmp/farm-api-base-path-test", undefined, {
+      basePath: "/v2/api",
+    });
+    manager.getRoutes().set("/api/users/[id]", {
+      path: "/api/users/[id]",
+      filePath: "/tmp/farm-api-base-path-test/users/[id]/route.ts",
+      methods: ["GET"],
+      endpoints: {
+        GET: async (_request: Request, { params }: { params: Promise<{ id: string }> }) =>
+          Response.json(await params),
+      },
+    });
+
+    const response = await manager.getHandler()!(new Request("http://example.com/v2/api/users/42"));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ id: "42" });
+    expect(manager.matchRoute("/v2/api/users/42")?.route.path).toBe("/api/users/[id]");
+
+    manager.getRoutes().set("/v2/api/users/[id]", {
+      path: "/v2/api/users/[id]",
+      filePath: "/tmp/farm-api-base-path-test/explicit/[id]/route.ts",
+      methods: ["GET"],
+      endpoints: { GET: async () => Response.json({ source: "explicit" }) },
+    });
+    expect(manager.matchRoute("/v2/api/users/42")?.route.path).toBe("/v2/api/users/[id]");
+  });
+
   it("uses GET for HEAD requests and strips the response body", async () => {
     const manager = new APIRouteManager("/tmp/farm-api-head-test");
     const getHandler = async () =>

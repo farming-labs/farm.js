@@ -10,6 +10,7 @@ import { existsSync } from "node:fs";
 import { logger } from "../utils";
 import { createFarmApp } from "../app";
 import { APIRouteManager } from "../api/route-manager";
+import { resolveFarmAPIServerBasePath } from "../api/server-path";
 import { getFarmAppDirectories } from "../layers";
 import { buildUniversal } from "../nitro/universal-build";
 import { getFarmDocsRouteTypeEntries } from "../docs";
@@ -191,6 +192,7 @@ async function buildWithProductionNodeEnv(inputConfig: ResolvedFarmConfig, optio
         throwOnLoadError: true,
         i18n: farmApp.getI18nRuntime(),
         bodySizeLimit: config.server.bodySizeLimit,
+        basePath: resolveFarmAPIServerBasePath(config.api),
       },
     );
     const [, apiDiscovery] = await Promise.allSettled([

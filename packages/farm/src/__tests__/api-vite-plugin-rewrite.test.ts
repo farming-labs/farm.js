@@ -40,7 +40,10 @@ interface DevHarness {
  * middleware stub that mimics ctx.rewrite() by mutating req.url — exactly
  * what middleware/context.ts does.
  */
-async function createDevHarness(routes: Record<string, string>): Promise<DevHarness> {
+async function createDevHarness(
+  routes: Record<string, string>,
+  options: { basePath?: string } = {},
+): Promise<DevHarness> {
   const root = await mkdtemp(path.join(tmpdir(), "farm-api-rewrite-"));
   tempDirs.add(root);
 
@@ -50,7 +53,7 @@ async function createDevHarness(routes: Record<string, string>): Promise<DevHarn
     await writeFile(path.join(dir, "route.js"), source);
   }
 
-  const plugin = farmApiPlugin() as any;
+  const plugin = farmApiPlugin(options) as any;
   let handlerFn: ((req: any, res: any, next: () => void) => Promise<void>) | undefined;
 
   const server = {
@@ -125,6 +128,19 @@ async function createDevHarness(routes: Record<string, string>): Promise<DevHarn
 }
 
 describe("dev API dispatch after middleware rewrites", () => {
+  it("serves canonical routes through the configured local base path", async () => {
+    const harness = await createDevHarness(
+      {
+        users: `export const GET = async () => Response.json({ source: "custom-base" });\n`,
+      },
+      { basePath: "/v2/api" },
+    );
+
+    const result = await harness.dispatch("/v2/api/users");
+    expect(result.passedToNext).toBe(false);
+    expect(JSON.parse(result.body ?? "")).toEqual({ source: "custom-base" });
+  });
+
   it("dispatches the rewritten endpoint like production", async () => {
     const harness = await createDevHarness({
       "v1/users": `export const GET = async () => Response.json({ version: "v1" });\n`,

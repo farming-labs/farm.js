@@ -9,6 +9,7 @@ import {
 } from "./client-css-href";
 import type { RouteManager } from "../routing/route-manager";
 import type { APIRouteManager } from "../api/route-manager";
+import { resolveFarmAPIServerBasePath } from "../api/server-path";
 import type { ServerRenderer } from "../server/renderer";
 import type { FarmPlugin, PluginManager } from "../plugin";
 import {
@@ -3937,7 +3938,7 @@ function generateVirtualEntryCode(
     : "";
   const apiRouteHelpersImport =
     apiRoutes.length > 0
-      ? `import { getAllowedAPIRouteMethods, invokeAPIRouteEndpoint, matchAPIRoute, resolveAPIRouteEndpoint } from "@farm.js/core/api/runtime";`
+      ? `import { getAllowedAPIRouteMethods, invokeAPIRouteEndpoint, matchAPIRouteAtBasePath, resolveAPIRouteEndpoint } from "@farm.js/core/api/runtime";`
       : "";
   const productionRuntimeImport = `import {
   _runWithAfterRequest,
@@ -4074,7 +4075,11 @@ ${integrationRuntimeImport}
 const apiRouteMap = new Map(apiRoutes.map((route) => [route.path, route]));
 
 function matchLocalAPIRequest(request) {
-  return matchAPIRoute(apiRouteMap, new URL(request.url).pathname);
+  return matchAPIRouteAtBasePath(
+    apiRouteMap,
+    new URL(request.url).pathname,
+    farmLocalAPIBasePath
+  );
 }
 
 async function handleAPIRequest(request) {
@@ -4379,6 +4384,13 @@ const farmDocsAPIHandler = ${
 // API routes bundled at build time
 const apiRoutes = [${apiRegistrations.join(",")}
 ];
+const farmLocalAPIBasePath = ${JSON.stringify(resolveFarmAPIServerBasePath(config.api))};
+
+function isFarmLocalAPIPathname(pathname) {
+  return farmLocalAPIBasePath !== "/" &&
+    (pathname === farmLocalAPIBasePath ||
+      pathname.startsWith(farmLocalAPIBasePath + "/"));
+}
 
 // Page routes bundled at build time
 const pageRoutes = [${pageRegistrations.join(",")}
@@ -5394,14 +5406,12 @@ function getFarmPluginRequestOptions(request) {
     return { kind: "docs", route: { ...route, pattern: docsPath } };
   }
 
-  for (const apiRoute of apiRoutes) {
-    const params = matchRuntimePathPattern(apiRoute.path, pathname);
-    if (params !== null) {
-      return {
-        kind: "api",
-        route: { ...route, pattern: apiRoute.path, params },
-      };
-    }
+  const apiMatch = ${apiRoutes.length > 0 ? "matchLocalAPIRequest(request)" : "null"};
+  if (apiMatch) {
+    return {
+      kind: "api",
+      route: { ...route, pattern: apiMatch.route.path, params: apiMatch.params },
+    };
   }
 
   const metadataImageMatch = matchMetadataImageRequest(routePathname);
@@ -5440,7 +5450,7 @@ function getFarmPluginRequestOptions(request) {
     };
   }
 
-  if (pathname.startsWith("/api/")) {
+  if (isFarmLocalAPIPathname(pathname)) {
     return { kind: "api", route };
   }
 
@@ -5696,7 +5706,8 @@ async function handleFarmRequest(request) {
       }
       const response = await handleFarmRequestInContext(request, farmLocaleResolution);
       return applyFarmI18nResponse(response, farmLocaleResolution);
-    }
+    },
+    { redirect: !isFarmLocalAPIPathname(new URL(request.url).pathname) }
   )`
       : "handleFarmRequestInContext(request, null)"
   };
@@ -5911,15 +5922,19 @@ async function handleFarmRequestInContext(
       : ""
   }
 
-  // Preserve the explicit JSON 404 for /api/* misses.
-  if (pathname.startsWith("/api/")) {
-    if (farmDocsAPIHandler) {
-      const docsAPIResponse = await farmDocsAPIHandler(request.clone());
-      if (docsAPIResponse) {
-        return applyProductionMiddlewareHeaders(docsAPIResponse, middlewareHeaders);
-      }
+  ${
+    config.docs?.enabled
+      ? `if (farmDocsAPIHandler && isFarmDocsAPIRequest(pathname)) {
+    const docsAPIResponse = await farmDocsAPIHandler(request.clone());
+    if (docsAPIResponse) {
+      return applyProductionMiddlewareHeaders(docsAPIResponse, middlewareHeaders);
     }
+  }`
+      : ""
+  }
 
+  // Preserve the explicit JSON 404 for misses below the configured local API path.
+  if (isFarmLocalAPIPathname(pathname)) {
     return applyProductionMiddlewareHeaders(new Response(
       JSON.stringify({ error: "API route not found", pathname }),
       { status: 404, headers: { "Content-Type": "application/json" } }
@@ -7472,14 +7487,18 @@ export default async function farmNitroEventHandler(event) {
       },
     ],
     routeRules: {
-      "/api/**": {
-        cors: true,
-        headers: {
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "*",
-          "Access-Control-Allow-Headers": "*",
-        },
-      },
+      ...(resolveFarmAPIServerBasePath(config.api) === "/"
+        ? {}
+        : {
+            [`${resolveFarmAPIServerBasePath(config.api)}/**`]: {
+              cors: true,
+              headers: {
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "*",
+                "Access-Control-Allow-Headers": "*",
+              },
+            },
+          }),
       "/**": {
         prerender: false,
       },
@@ -7925,15 +7944,19 @@ async function postProcessVercelOutput(
     },
     ...runtimeRoutes,
     // API routes
-    {
-      src: "/api/(.*)",
-      dest: "/__nitro",
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "*",
-        "Access-Control-Allow-Headers": "*",
-      },
-    },
+    ...(resolveFarmAPIServerBasePath(config.api) === "/"
+      ? []
+      : [
+          {
+            src: `${resolveFarmAPIServerBasePath(config.api)}/(.*)`,
+            dest: "/__nitro",
+            headers: {
+              "Access-Control-Allow-Origin": "*",
+              "Access-Control-Allow-Methods": "*",
+              "Access-Control-Allow-Headers": "*",
+            },
+          },
+        ]),
     // All other routes go to the serverless function
     {
       src: "/(.*)",

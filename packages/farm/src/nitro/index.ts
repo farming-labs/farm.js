@@ -13,6 +13,7 @@ import {
   prepareFarmCronForNitro,
 } from "../cron";
 import { routeRulesToNitroRouteRules } from "../route-rules";
+import { resolveFarmAPIServerBasePath } from "../api/server-path";
 
 /**
  * Create Nitro configuration for Farm.js
@@ -26,6 +27,7 @@ export async function createNitroConfig(
   preset = "node-server",
 ): Promise<NitroConfig> {
   const root = config.root || process.cwd();
+  const apiBasePath = resolveFarmAPIServerBasePath(config.api);
   const srcDir = config.srcDir || "src";
   const distDir = ".farm";
   // Nitro build directory - where Nitro does its work (temporary)
@@ -86,12 +88,14 @@ export const farmRegistry: {
   env?: any;
   deploymentId?: string;
   basePath?: string;
+  apiBasePath?: string;
   clientManifest?: any;
   routePaths?: Record<string, string>;
 } = {
   env: ${JSON.stringify(config.env || { server: {}, public: {} }, null, 2)},
   deploymentId: ${JSON.stringify(config.deploymentId)},
   basePath: ${JSON.stringify(config.basePath)},
+  apiBasePath: ${JSON.stringify(apiBasePath)},
   routePaths: ${JSON.stringify(routePaths, null, 2)},
 };
 `,
@@ -116,11 +120,14 @@ export default defineEventHandler(async (event: H3Event) => {
   // Get URL using H3's abstraction (works in all environments)
   const url = getRequestURL(event);
   const urlPath = url.pathname;
+  const apiBasePath = farmRegistry.apiBasePath || '/api';
+  const isAPIPath = apiBasePath !== '/' &&
+    (urlPath === apiBasePath || urlPath.startsWith(apiBasePath + '/'));
   
   // Only handle API routes - for Vercel, Nitro routes /api/* to this handler
   // According to https://nitro.build/deploy/providers/vercel
   // This handler should process all /api/* routes
-  if (!urlPath.startsWith('/api/')) {
+  if (!isAPIPath) {
     // Return undefined to let Nitro's routing system handle non-API routes
     return undefined;
   }
@@ -291,6 +298,9 @@ export default defineEventHandler(async (event: H3Event) => {
     // Get URL from H3 event
     const url = getRequestURL(event);
     const pathname = url.pathname;
+    const apiBasePath = farmRegistry.apiBasePath || '/api';
+    const isAPIPath = apiBasePath !== '/' &&
+      (pathname === apiBasePath || pathname.startsWith(apiBasePath + '/'));
     const redirectMatch = routeManager.matchRedirect(pathname);
     if (redirectMatch) {
       setResponseStatus(event, redirectMatch.statusCode);
@@ -333,14 +343,14 @@ export default defineEventHandler(async (event: H3Event) => {
     }
 
     // Skip API routes - let the API handler process them
-    if (pathname.startsWith('/api/')) {
+    if (isAPIPath) {
       // Return undefined to let Nitro's API handler process
       return undefined;
     }
     
     // Skip static assets - let Nitro serve them
     // Only skip if it's clearly a static file (has extension and not in root)
-    if (pathname.startsWith('/assets/') || (pathname.includes('.') && !pathname.startsWith('/api/'))) {
+    if (pathname.startsWith('/assets/') || (pathname.includes('.') && !isAPIPath)) {
       // Check if it's a static file by extension
       const staticExtensions = ['.js', '.css', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.woff', '.woff2', '.ttf', '.eot'];
       const hasStaticExtension = staticExtensions.some(ext => pathname.toLowerCase().endsWith(ext));
@@ -588,14 +598,18 @@ export default defineEventHandler(async (event: H3Event) => {
       : [],
     // Route rules for Vercel
     routeRules: {
-      "/api/**": {
-        cors: true,
-        headers: {
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "*",
-          "Access-Control-Allow-Headers": "*",
-        },
-      },
+      ...(apiBasePath === "/"
+        ? {}
+        : {
+            [`${apiBasePath}/**`]: {
+              cors: true,
+              headers: {
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "*",
+                "Access-Control-Allow-Headers": "*",
+              },
+            },
+          }),
       "/**": {
         prerender: false,
       },

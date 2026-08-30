@@ -311,6 +311,11 @@ and `basePath` is ignored. Both fields accept a string or a sync/async resolver 
 `{ root, mode, env }`. Farm resolves the function during configuration and only embeds the resulting
 public URL in the browser bundle.
 
+A root-relative API root is also mounted by Farm in development and production. For example,
+`api: { basePath: "/v2/api" }` makes a route declared at `app/api/users/route.ts` available at
+`/v2/api/users`. Farm treats an absolute `baseURL` as external and does not remount the current
+application's API routes for it.
+
 The option configures `createAPIClient()` automatically. An explicit per-client `baseURL` still
 takes precedence.
 

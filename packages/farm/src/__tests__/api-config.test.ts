@@ -6,6 +6,11 @@ import {
   resolveFarmAPIConfig,
   resolveFarmAPIRequestURL,
 } from "../api/config";
+import {
+  resolveFarmAPICanonicalPathname,
+  resolveFarmAPIServerBasePath,
+  resolveFarmAPIServerRoutePath,
+} from "../api/server-path";
 
 const context = {
   root: "/workspace/app",
@@ -87,5 +92,23 @@ describe("Farm API config", () => {
     expect(resolveFarmAPIRequestURL("/api/users", "https://api.example.com").href).toBe(
       "https://api.example.com/api/users",
     );
+  });
+
+  it("mounts root-relative API roots locally and leaves external origins at /api", () => {
+    expect(resolveFarmAPIServerBasePath({ baseURL: "/v2/api", basePath: "/v2/api" })).toBe(
+      "/v2/api",
+    );
+    expect(
+      resolveFarmAPIServerBasePath({
+        baseURL: "https://api.example.com/v2/api",
+        basePath: "/v2/api",
+      }),
+    ).toBe("/api");
+  });
+
+  it("translates between a local public API root and canonical route paths", () => {
+    expect(resolveFarmAPICanonicalPathname("/v2/api/users/42", "/v2/api")).toBe("/api/users/42");
+    expect(resolveFarmAPIServerRoutePath("/api/users/[id]", "/v2/api")).toBe("/v2/api/users/[id]");
+    expect(resolveFarmAPICanonicalPathname("/about", "/v2/api")).toBe("/about");
   });
 });

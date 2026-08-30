@@ -19,7 +19,7 @@ export interface FarmAPIConfig {
    * already has a path is used as-is. May be resolved from deployment context.
    */
   baseURL?: FarmAPIConfigValue;
-  /** Public API path used when `baseURL` has no path. @default "/api" */
+  /** Public API path and same-origin server mount used when `baseURL` has no path. @default "/api" */
   basePath?: FarmAPIConfigValue;
 }
 
