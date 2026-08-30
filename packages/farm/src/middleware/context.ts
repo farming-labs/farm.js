@@ -5,35 +5,7 @@
 import type { IncomingMessage, ServerResponse } from "http";
 import type { ViteDevServer } from "vite";
 import type { MiddlewareContext, CookieJar, CookieOptions } from "./types";
-
-/**
- * Parse cookies from Cookie header
- */
-function decodeCookieValue(value: string): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    // Cookies are not required to be percent-encoded; keep the raw value
-    // instead of failing the whole request on malformed encoding.
-    return value;
-  }
-}
-
-function parseCookies(cookieHeader?: string): Record<string, string> {
-  if (!cookieHeader) return {};
-
-  return cookieHeader.split(";").reduce(
-    (cookies, cookie) => {
-      const [name, ...rest] = cookie.split("=");
-      const value = rest.join("=").trim();
-      if (name && value) {
-        cookies[name.trim()] = decodeCookieValue(value);
-      }
-      return cookies;
-    },
-    {} as Record<string, string>,
-  );
-}
+import { parseMiddlewareCookieHeader } from "./cookie-header";
 
 /**
  * Serialize a cookie
@@ -85,7 +57,7 @@ class CookieJarImpl implements CookieJar {
     private req: IncomingMessage,
     private res: ServerResponse,
   ) {
-    this.cookies = parseCookies(req.headers.cookie);
+    this.cookies = parseMiddlewareCookieHeader(req.headers.cookie);
   }
 
   get(name: string): string | undefined {

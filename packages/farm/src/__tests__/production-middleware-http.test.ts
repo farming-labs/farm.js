@@ -109,6 +109,26 @@ describe("production middleware HTTP behavior", () => {
     expect(seen).toEqual({ track: "100%", session: "abc123" });
   });
 
+  it("preserves empty request cookies without inherited record values", async () => {
+    const seen: Record<string, string | undefined> = {};
+    const runner = createProductionMiddlewareRunner({
+      config: {
+        handler(ctx) {
+          seen.preview = ctx.cookies.get("preview");
+          seen.constructor = ctx.cookies.get("constructor");
+        },
+      },
+    });
+
+    await runner(
+      new Request("https://example.com/", {
+        headers: { cookie: "preview=" },
+      }),
+    );
+
+    expect(seen).toEqual({ preview: "", constructor: undefined });
+  });
+
   it("ignores forwarded client addresses unless trustProxy is enabled", async () => {
     const createRunner = (trustProxy: boolean) =>
       createProductionMiddlewareRunner({

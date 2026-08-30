@@ -15,6 +15,7 @@ import { normalizeMiddlewareModule } from "./module";
 import { stripFarmLocaleFromPathname } from "../i18n/routing";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
 import type { ResolvedFarmServerConfig } from "../server-http";
+import { parseMiddlewareCookieHeader } from "./cookie-header";
 
 export interface ProductionMiddlewareModuleEntry {
   path: string;
@@ -103,32 +104,6 @@ class WebResponseHeaderMap extends Map<string, string> {
   }
 }
 
-function decodeCookieValue(value: string): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    // Cookies are not required to be percent-encoded; keep the raw value
-    // instead of failing the whole request on malformed encoding.
-    return value;
-  }
-}
-
-function parseCookies(cookieHeader?: string | null): Record<string, string> {
-  if (!cookieHeader) return {};
-
-  return cookieHeader.split(";").reduce(
-    (cookies, cookie) => {
-      const [name, ...rest] = cookie.split("=");
-      const value = rest.join("=").trim();
-      if (name && value) {
-        cookies[name.trim()] = decodeCookieValue(value);
-      }
-      return cookies;
-    },
-    {} as Record<string, string>,
-  );
-}
-
 function serializeCookie(name: string, value: string, options: CookieOptions = {}): string {
   let cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}`;
 
@@ -152,7 +127,7 @@ class WebCookieJar implements CookieJar {
     request: Request,
     private headers: WebResponseHeaderMap,
   ) {
-    this.cookies = parseCookies(request.headers.get("cookie"));
+    this.cookies = parseMiddlewareCookieHeader(request.headers.get("cookie"));
   }
 
   get(name: string): string | undefined {
