@@ -37,18 +37,25 @@ export async function build(config: ResolvedFarmConfig, options: BuildOptions = 
   return withProductionNodeEnv(() => buildWithProductionNodeEnv(config, options));
 }
 
-async function buildWithProductionNodeEnv(config: ResolvedFarmConfig, options: BuildOptions) {
+/** Every build path derived from config, recomputed once plugins have transformed it. */
+function resolveBuildTargets(config: ResolvedFarmConfig, options: BuildOptions) {
   const root = options.root || config.root || process.cwd();
-  const preset = options.preset || config.preset || "node-server";
-  const srcDir = config.srcDir || "src";
-  const distDir = config.distDir || ".farm";
-  const deployOutputDir = resolveDeployOutputPath(root, config.deploy.outputDir);
+  return {
+    root,
+    preset: options.preset || config.preset || "node-server",
+    srcDir: config.srcDir || "src",
+    distDir: config.distDir || ".farm",
+    deployOutputDir: resolveDeployOutputPath(root, config.deploy.outputDir),
+  };
+}
+
+async function buildWithProductionNodeEnv(inputConfig: ResolvedFarmConfig, options: BuildOptions) {
+  let config = inputConfig;
+  let { root, preset, srcDir, distDir, deployOutputDir } = resolveBuildTargets(config, options);
   const productionViteResultPromise =
     options.universal === false
       ? undefined
       : Promise.allSettled([Promise.resolve(options.productionVite ?? loadFarmProductionVite())]);
-
-  logger.info(`🚜 Building Farm.js application with preset: ${preset}...`);
 
   const pluginManager = new PluginManager({
     config,
@@ -60,6 +67,17 @@ async function buildWithProductionNodeEnv(config: ResolvedFarmConfig, options: B
 
   try {
     await pluginManager.runHookParallel("init");
+
+    // Plugins transform config before anything reads it. Every target above is
+    // derived from config, so the hook has to settle first and the targets have
+    // to be recomputed, or the build writes to paths the returned config never
+    // asked for.
+    config = await pluginManager.runHookSerial("config", config);
+    pluginManager.updateConfig(config);
+    ({ root, preset, srcDir, distDir, deployOutputDir } = resolveBuildTargets(config, options));
+
+    logger.info(`🚜 Building Farm.js application with preset: ${preset}...`);
+
     await pluginManager.setupPlugins();
     await pluginManager.runHookParallel("beforeBundle", {
       root,

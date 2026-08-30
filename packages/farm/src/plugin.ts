@@ -705,6 +705,16 @@ export class PluginManager {
     };
   }
 
+  /**
+   * Replace the config every later hook sees. The `config` hook may return a
+   * transformed config, and hooks that run after it read `context.config`, so
+   * the manager has to be told rather than keeping the config it was built
+   * with.
+   */
+  updateConfig(config: FarmConfig): void {
+    this.context.config = config;
+  }
+
   private createPluginHookContext(
     plugin: FarmPlugin,
     context: FarmPluginContext = this.context,
