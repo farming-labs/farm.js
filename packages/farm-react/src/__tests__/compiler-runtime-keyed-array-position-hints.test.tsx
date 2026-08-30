@@ -88,6 +88,17 @@ function hintedRemove(previous: Item[], position: number): Item[] {
   ) as Item[];
 }
 
+function hintedRemoveRange(previous: Item[], position: number, count: number): Item[] {
+  const source = previous as PositionArray;
+  return createCompilerKeyedArrayPositionUpdate(
+    source,
+    source.toSpliced,
+    "remove",
+    position,
+    count,
+  ) as Item[];
+}
+
 function rowDescriptor(item: Item, text = item.label): CompilerKeyedRowElement {
   return {
     kind: "element",
@@ -102,6 +113,7 @@ function createPositionHarness(initialItems: Item[], readsCollection = false) {
   const counters = { executions: 0, renders: 0, keys: 0, descriptors: 0, bindings: 0 };
   let insert: (position: number, item: Item) => void = () => undefined;
   let remove: (position: number) => void = () => undefined;
+  let removeRange: (position: number, count: number) => void = () => undefined;
   let replace: (position: number, item: Item) => void = () => undefined;
   let withReplace: (position: number, item: Item) => void = () => undefined;
   let queueTwo: (first: Item, second: Item) => void = () => undefined;
@@ -116,6 +128,8 @@ function createPositionHarness(initialItems: Item[], readsCollection = false) {
       insert = (position, item) =>
         state[0].set((previous) => hintedInsert(previous as Item[], position, item));
       remove = (position) => state[0].set((previous) => hintedRemove(previous as Item[], position));
+      removeRange = (position, count) =>
+        state[0].set((previous) => hintedRemoveRange(previous as Item[], position, count));
       replace = (position, item) =>
         state[0].set((previous) => hintedSpliceReplace(previous as Item[], position, item));
       withReplace = (position, item) =>
@@ -193,6 +207,7 @@ function createPositionHarness(initialItems: Item[], readsCollection = false) {
     queueTwo: (first: Item, second: Item) => queueTwo(first, second),
     queueRemoveTwo: () => queueRemoveTwo(),
     remove: (position: number) => remove(position),
+    removeRange: (position: number, count: number) => removeRange(position, count),
     replace: (position: number, item: Item) => replace(position, item),
     withReplace: (position: number, item: Item) => withReplace(position, item),
   };
@@ -268,6 +283,81 @@ describe("compiled keyed-array position hints", () => {
     expect(harness.counters.bindings).toBe(0);
   });
 
+  it("removes a known contiguous range without reading surviving keys or bindings", async () => {
+    const initialItems = Array.from(
+      { length: 4_096 },
+      (_, index): Item => ({ id: `row-${index}`, label: `Row ${index}` }),
+    );
+    const harness = createPositionHarness(initialItems);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Table />));
+    const before = container.querySelector('[data-key="row-2047"]');
+    const firstRemoved = container.querySelector('[data-key="row-2048"]');
+    const lastRemoved = container.querySelector('[data-key="row-2175"]');
+    const after = container.querySelector('[data-key="row-2176"]');
+    harness.counters.keys = 0;
+    harness.counters.descriptors = 0;
+    harness.counters.bindings = 0;
+
+    await act(async () => {
+      harness.removeRange(2_048, 128);
+      await flushCompilerUpdates();
+    });
+
+    const rows = [...container.querySelectorAll("li")];
+    expect(rows[2_047]).toBe(before);
+    expect(rows[2_048]).toBe(after);
+    expect(firstRemoved?.isConnected).toBe(false);
+    expect(lastRemoved?.isConnected).toBe(false);
+    expect(rows).toHaveLength(3_968);
+    expect(harness.counters.executions).toBe(1);
+    expect(harness.counters.renders).toBe(1);
+    expect(harness.counters.keys).toBe(0);
+    expect(harness.counters.descriptors).toBe(0);
+    expect(harness.counters.bindings).toBe(0);
+  });
+
+  it("clamps a known range at the array boundary and falls back for unsafe counts", async () => {
+    const harness = createPositionHarness([
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+      { id: "c", label: "Gamma" },
+      { id: "d", label: "Delta" },
+    ]);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Table />));
+    const alpha = container.querySelector('[data-key="a"]');
+    const beta = container.querySelector('[data-key="b"]');
+    harness.counters.keys = 0;
+
+    await act(async () => {
+      harness.removeRange(-2, 99);
+      await flushCompilerUpdates();
+    });
+
+    expect([...container.querySelectorAll("li")].map((node) => node.textContent)).toEqual([
+      "Alpha",
+      "Beta",
+    ]);
+    expect(container.querySelector('[data-key="a"]')).toBe(alpha);
+    expect(container.querySelector('[data-key="b"]')).toBe(beta);
+    expect(harness.counters.keys).toBe(0);
+
+    harness.counters.keys = 0;
+    await act(async () => {
+      harness.removeRange(0, 1.5);
+      await flushCompilerUpdates();
+    });
+    expect(container.textContent).toBe("Beta");
+    expect(harness.counters.keys).toBe(1);
+  });
+
   it("patches a same-key toSpliced replacement and creates one host row for a new key", async () => {
     const harness = createPositionHarness([
       { id: "a", label: "Alpha" },
@@ -331,6 +421,16 @@ describe("compiled keyed-array position hints", () => {
       1,
     ) as Item[];
     expect(removed.map((item) => item.id)).toEqual(["a", "b"]);
+    expect(source.map((item) => item.id)).toEqual(["a", "b", "c"]);
+
+    const rangeRemoved = createCompilerKeyedArrayPositionUpdate(
+      source,
+      source.toSpliced,
+      "remove",
+      -2,
+      99,
+    ) as Item[];
+    expect(rangeRemoved.map((item) => item.id)).toEqual(["a"]);
     expect(source.map((item) => item.id)).toEqual(["a", "b", "c"]);
 
     const customResult = [source[1]];
@@ -663,14 +763,18 @@ describe("compiled keyed-array position hints", () => {
     );
     const harness = createPositionHarness(initialItems);
     let updateReact: (
-      kind: "insert" | "remove" | "replace",
+      kind: "insert" | "remove" | "remove-range" | "replace",
       position: number,
       item?: Item,
+      count?: number,
     ) => void = () => undefined;
     function NormalTable() {
       const [items, setItems] = useState(initialItems);
-      updateReact = (kind, position, item) =>
+      updateReact = (kind, position, item, count) =>
         setItems((previous) => {
+          if (kind === "remove-range") {
+            return [...previous.slice(0, position), ...previous.slice(position + (count || 0))];
+          }
           if (kind === "remove") {
             return [...previous.slice(0, position), ...previous.slice(position + 1)];
           }
@@ -700,10 +804,22 @@ describe("compiled keyed-array position hints", () => {
 
     let length = initialItems.length;
     for (let step = 0; step < 1_000; step += 1) {
-      const kind = step % 7 === 0 ? "remove" : step % 5 === 0 ? "insert" : "replace";
-      const position = (step * 17) % (kind === "insert" ? length + 1 : length);
+      const kind =
+        length === 0
+          ? "insert"
+          : step % 13 === 0 && length > 3
+            ? "remove-range"
+            : step % 7 === 0
+              ? "remove"
+              : step % 5 === 0
+                ? "insert"
+                : "replace";
+      const count = kind === "remove-range" ? Math.min((step % 4) + 2, length) : 1;
+      const position =
+        (step * 17) %
+        (kind === "insert" ? length + 1 : kind === "remove-range" ? length - count + 1 : length);
       const item =
-        kind === "remove"
+        kind === "remove" || kind === "remove-range"
           ? undefined
           : {
               id: `${kind}-${step}`,
@@ -712,12 +828,18 @@ describe("compiled keyed-array position hints", () => {
       await act(async () => {
         if (kind === "insert") harness.insert(position, item!);
         else if (kind === "remove") harness.remove(position);
+        else if (kind === "remove-range") harness.removeRange(position, count);
         else harness.replace(position, item!);
-        updateReact(kind, position, item);
+        updateReact(kind, position, item, count);
         await flushCompilerUpdates();
       });
       if (kind === "insert") length += 1;
       else if (kind === "remove") length -= 1;
+      else if (kind === "remove-range") length -= count;
+      expect(
+        compiledContainer.querySelector("ul")?.textContent,
+        `step ${step}: ${kind} at ${position} with count ${count}`,
+      ).toBe(reactContainer.querySelector("ol")?.textContent);
     }
 
     expect(compiledContainer.querySelector("ul")?.textContent).toBe(
@@ -728,11 +850,12 @@ describe("compiled keyed-array position hints", () => {
     expect(harness.counters.renders).toBe(1);
   });
 
-  it("preserves focused input identity and selection when removing a preceding row", async () => {
+  it("preserves focused input identity and selection when removing preceding rows", async () => {
     const initialItems: Item[] = [
       { id: "a", label: "Alpha" },
       { id: "b", label: "Beta" },
       { id: "c", label: "Gamma" },
+      { id: "d", label: "Delta" },
     ];
     let remove = () => undefined;
     const FormRows = createCompiledComponent({
@@ -740,7 +863,7 @@ describe("compiled keyed-array position hints", () => {
       initialize: () => [initialItems],
       render(_props: Record<string, never>, state, blocks) {
         const items = () => state[0].get() as Item[];
-        remove = () => state[0].set((previous) => hintedRemove(previous as Item[], 0));
+        remove = () => state[0].set((previous) => hintedRemoveRange(previous as Item[], 0, 2));
         return (
           <section>
             <blocks.KeyedRows
@@ -781,7 +904,7 @@ describe("compiled keyed-array position hints", () => {
     const root = createRoot(container);
     roots.push(root);
     await act(async () => root.render(<FormRows />));
-    const input = container.querySelector('[data-key="b"]') as HTMLInputElement;
+    const input = container.querySelector('[data-key="c"]') as HTMLInputElement;
     input.focus();
     input.setSelectionRange(1, 3);
 
@@ -790,16 +913,17 @@ describe("compiled keyed-array position hints", () => {
       await flushCompilerUpdates();
     });
 
-    expect(container.querySelector('[data-key="b"]')).toBe(input);
+    expect(container.querySelector('[data-key="c"]')).toBe(input);
     expect(document.activeElement).toBe(input);
     expect([input.selectionStart, input.selectionEnd]).toEqual([1, 3]);
   });
 
-  it("updates delegated event indexes after removing an earlier row", async () => {
+  it("updates delegated event indexes after removing earlier rows", async () => {
     const initialItems: Item[] = [
       { id: "a", label: "Alpha" },
       { id: "b", label: "Beta" },
       { id: "c", label: "Gamma" },
+      { id: "d", label: "Delta" },
     ];
     let remove = () => undefined;
     const calls: string[] = [];
@@ -808,7 +932,7 @@ describe("compiled keyed-array position hints", () => {
       initialize: () => [initialItems],
       render(_props: Record<string, never>, state, blocks) {
         const items = () => state[0].get() as Item[];
-        remove = () => state[0].set((previous) => hintedRemove(previous as Item[], 0));
+        remove = () => state[0].set((previous) => hintedRemoveRange(previous as Item[], 0, 2));
         return (
           <section>
             <blocks.KeyedRows
@@ -874,9 +998,9 @@ describe("compiled keyed-array position hints", () => {
       await flushCompilerUpdates();
     });
     await act(async () => {
-      (container.querySelector('[data-row-button="c"]') as HTMLButtonElement).click();
+      (container.querySelector('[data-row-button="d"]') as HTMLButtonElement).click();
     });
-    expect(calls).toEqual(["c:1"]);
+    expect(calls).toEqual(["d:1"]);
   });
 
   it("hydrates in StrictMode and drops a queued position update after unmount", async () => {
@@ -912,10 +1036,10 @@ describe("compiled keyed-array position hints", () => {
     expect(recoverable).toEqual([]);
 
     await act(async () => {
-      harness.remove(-1);
+      harness.removeRange(-2, 2);
       await flushCompilerUpdates();
     });
-    expect(container.textContent).toBe("AlphaGamma");
+    expect(container.textContent).toBe("Alpha");
     expect(recoverable).toEqual([]);
 
     roots.pop();

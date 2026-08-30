@@ -310,6 +310,32 @@ export function StandardTableBenchmark() {
           Remove at runtime position (snapshot control)
         </button>
         <button
+          data-action="table-position-range-remove"
+          type="button"
+          onClick={() => {
+            const position = 8_000;
+            setRows((current) => current.toSpliced(position, 64));
+            setOperation("remove range at runtime position");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Remove range at runtime position
+        </button>
+        <button
+          data-action="table-position-range-remove-snapshot"
+          type="button"
+          onClick={() => {
+            const position = 8_000;
+            setRows((current) => {
+              return current.toSpliced(position, 64);
+            });
+            setOperation("remove range at runtime position (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Remove range at runtime position (snapshot control)
+        </button>
+        <button
           data-action="table-position-replace"
           type="button"
           onClick={() => {

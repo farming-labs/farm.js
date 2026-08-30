@@ -97,13 +97,14 @@ work proportional only to the incoming suffix.
 
 Exact-position insertions, removals, and replacements have separate 10,000-row comparisons. Concise
 native `toSpliced(position, 0, item)`, `toSpliced(position, 1)`,
-`toSpliced(position, 1, replacement)`, and `with(position, replacement)` updates
-use event-local runtime position variables and are measured against bracketed React and equivalent
-block-bodied compiled controls. The compiler report must contain a nonzero
-`keyedArrayPositionHints` count; package tests separately require zero surviving
-key/descriptor/binding reads for removal, surrounding DOM identity, randomized differential
-correctness, runtime-position fallback, hydration, and cleanup. Exact-position removal must remain
-at least 4x faster than React and 1.5x faster than the compiled control.
+`toSpliced(position, 64)`, `toSpliced(position, 1, replacement)`, and
+`with(position, replacement)` updates use event-local runtime position variables and are measured
+against bracketed React and equivalent block-bodied compiled controls. The compiler report must
+contain all four dashboard `keyedArrayPositionHints`; package tests separately require zero
+surviving key/descriptor/binding reads for removal, surrounding DOM identity, randomized
+differential correctness, runtime-position and count fallback, hydration, and cleanup. Both the
+single-row and 64-row removal gates must remain at least 4x faster than React and 1.5x faster than
+their compiled controls.
 
 Native keyed-array reversal has a separate 10,000-row comparison. Concise `toReversed()` is
 measured against bracketed React and an equivalent block-bodied compiled control. Both compiler
@@ -178,7 +179,7 @@ The default JSON report is `/tmp/farm-react-dashboard-benchmark.json`; change it
   `toSpliced()` updates and compare them with equivalent block-bodied compiled controls. Package
   tests cover the equivalent `with()` replacement path too.
   They verify surrounding DOM identity and isolate the saved full keyed scan for one insertion,
-  removal, or replacement.
+  one replacement, or a single/contiguous-range removal.
 - The reverse control compares concise native `toReversed()` with an equivalent block-bodied
   compiled update. Both paths move the same keyed DOM rows; the hint isolates the saved key,
   descriptor, binding, and generic LIS work.

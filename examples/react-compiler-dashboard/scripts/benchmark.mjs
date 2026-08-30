@@ -143,8 +143,8 @@ async function inspectBuild(compilerMode) {
       "The compiler build did not emit a keyed-array prepend hint.",
     );
     assert(
-      compilerReport.summary.keyedArrayPositionHints > 0,
-      "The compiler build did not emit a keyed-array exact-position hint.",
+      compilerReport.summary.keyedArrayPositionHints >= 4,
+      "The compiler build did not emit all four keyed-array exact-position hints.",
     );
     assert(
       compilerReport.summary.keyedArrayReorderHints > 0,
@@ -646,6 +646,46 @@ async function measureTrial(browser, trial, compilerMode, port) {
           },
         );
 
+        const tablePositionRangeRemove = await measureTable(
+          async () => ensure10000(),
+          async () => {
+            const rows = table.querySelectorAll("tbody tr");
+            const before = rows[7_999];
+            const firstRemoved = rows[8_000];
+            const lastRemoved = rows[8_063];
+            const after = rows[8_064];
+            await runTableAction(
+              () => tableButton("table-position-range-remove").click(),
+              () =>
+                rowCount() === 9_936 &&
+                table.querySelectorAll("tbody tr")[7_999] === before &&
+                table.querySelectorAll("tbody tr")[8_000] === after &&
+                !firstRemoved?.isConnected &&
+                !lastRemoved?.isConnected,
+            );
+          },
+        );
+
+        const tablePositionRangeRemoveSnapshot = await measureTable(
+          async () => ensure10000(),
+          async () => {
+            const rows = table.querySelectorAll("tbody tr");
+            const before = rows[7_999];
+            const firstRemoved = rows[8_000];
+            const lastRemoved = rows[8_063];
+            const after = rows[8_064];
+            await runTableAction(
+              () => tableButton("table-position-range-remove-snapshot").click(),
+              () =>
+                rowCount() === 9_936 &&
+                table.querySelectorAll("tbody tr")[7_999] === before &&
+                table.querySelectorAll("tbody tr")[8_000] === after &&
+                !firstRemoved?.isConnected &&
+                !lastRemoved?.isConnected,
+            );
+          },
+        );
+
         const tablePositionReplace = await measureTable(
           async () => ensure10000(),
           async () => {
@@ -1106,6 +1146,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
             positionInsertSnapshot: tablePositionInsertSnapshot,
             positionRemove: tablePositionRemove,
             positionRemoveSnapshot: tablePositionRemoveSnapshot,
+            positionRangeRemove: tablePositionRangeRemove,
+            positionRangeRemoveSnapshot: tablePositionRangeRemoveSnapshot,
             positionReplace: tablePositionReplace,
             positionReplaceSnapshot: tablePositionReplaceSnapshot,
             reverse: tableReverse,
@@ -1202,6 +1244,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
         positionInsertSnapshot: timingSummary(result.table.positionInsertSnapshot),
         positionRemove: timingSummary(result.table.positionRemove),
         positionRemoveSnapshot: timingSummary(result.table.positionRemoveSnapshot),
+        positionRangeRemove: timingSummary(result.table.positionRangeRemove),
+        positionRangeRemoveSnapshot: timingSummary(result.table.positionRangeRemoveSnapshot),
         positionReplace: timingSummary(result.table.positionReplace),
         positionReplaceSnapshot: timingSummary(result.table.positionReplaceSnapshot),
         reverse: timingSummary(result.table.reverse),
@@ -1294,6 +1338,8 @@ const tableMetrics = [
   "positionInsertSnapshot",
   "positionRemove",
   "positionRemoveSnapshot",
+  "positionRangeRemove",
+  "positionRangeRemoveSnapshot",
   "positionReplace",
   "positionReplaceSnapshot",
   "reverse",
@@ -1591,6 +1637,29 @@ const keyedPositionRegressions = keyedPositionResults.filter(
     !Number.isFinite(replaceSnapshotSpeedup) ||
     replaceSnapshotSpeedup < keyedPositionReplaceMinimumSnapshotSpeedup,
 );
+// A fixed positive toSpliced() delete count exposes one exact contiguous removal range. The hinted
+// runtime should remove only that range while retaining the surrounding DOM nodes, and it should
+// stay ahead of React and the equivalent block-bodied compiled control at 10,000 rows.
+const keyedRangeRemovalMinimumSpeedup = 4;
+const keyedRangeRemovalMinimumSnapshotSpeedup = 1.5;
+const keyedRangeRemovalResults = ["static", "hybrid"].map((mode) => {
+  const rangeMedianMs = comparisons.table.positionRangeRemove[mode].medianMs;
+  const snapshotMedianMs = comparisons.table.positionRangeRemoveSnapshot[mode].medianMs;
+  return {
+    mode,
+    rangeMedianMs,
+    snapshotMedianMs,
+    snapshotSpeedup: snapshotMedianMs / rangeMedianMs,
+    speedup: comparisons.table.positionRangeRemove[`${mode}VsBaseline`].speedup,
+  };
+});
+const keyedRangeRemovalRegressions = keyedRangeRemovalResults.filter(
+  ({ snapshotSpeedup, speedup }) =>
+    !Number.isFinite(speedup) ||
+    speedup < keyedRangeRemovalMinimumSpeedup ||
+    !Number.isFinite(snapshotSpeedup) ||
+    snapshotSpeedup < keyedRangeRemovalMinimumSnapshotSpeedup,
+);
 // A direct native reverse exposes the complete permutation. The hinted path should preserve the
 // same keyed DOM nodes while avoiding key, descriptor, binding, and generic LIS work. Compare it
 // with both React and the equivalent block-bodied compiled control at 10,000 rows.
@@ -1787,6 +1856,7 @@ const passed =
   keyedSliceRegressions.length === 0 &&
   keyedRollingWindowRegressions.length === 0 &&
   keyedPositionRegressions.length === 0 &&
+  keyedRangeRemovalRegressions.length === 0 &&
   keyedReorderRegressions.length === 0 &&
   keyedSortRegressions.length === 0 &&
   keyedFilterRegressions.length === 0 &&
@@ -1848,6 +1918,13 @@ const report = {
     replaceMinimumSpeedup: keyedPositionReplaceMinimumSpeedup,
     results: keyedPositionResults,
     status: keyedPositionRegressions.length === 0 ? "PASS" : "FAIL",
+  },
+  keyedRangeRemovalHintGate: {
+    minimumSnapshotSpeedup: keyedRangeRemovalMinimumSnapshotSpeedup,
+    minimumSpeedup: keyedRangeRemovalMinimumSpeedup,
+    regressions: keyedRangeRemovalRegressions,
+    results: keyedRangeRemovalResults,
+    status: keyedRangeRemovalRegressions.length === 0 ? "PASS" : "FAIL",
   },
   keyedReorderHintGate: {
     minimumSnapshotSpeedup: keyedReorderMinimumSnapshotSpeedup,

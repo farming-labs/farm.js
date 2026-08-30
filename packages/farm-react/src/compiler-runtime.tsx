@@ -331,7 +331,7 @@ function compilerKeyedArrayPosition(
     update.position > expectedLength ||
     (update.kind === "insert" && update.resultLength !== expectedLength + 1) ||
     (update.kind === "remove" &&
-      (update.position >= expectedLength || update.resultLength !== expectedLength - 1)) ||
+      (update.resultLength >= expectedLength || update.position > update.resultLength)) ||
     (update.kind === "replace" &&
       (update.position >= expectedLength || update.resultLength !== expectedLength))
   ) {
@@ -706,6 +706,8 @@ export function createCompilerKeyedArrayPositionUpdate(
     const sourceLength = previous.length;
     const normalizedPosition =
       position < 0 ? Math.max(sourceLength + position, 0) : Math.min(position, sourceLength);
+    const deleteCount = args[0];
+    const removedCount = sourceLength - value.length;
     const validInsert =
       kind === "insert" &&
       method === NATIVE_ARRAY_TO_SPLICED &&
@@ -716,9 +718,10 @@ export function createCompilerKeyedArrayPositionUpdate(
       kind === "remove" &&
       method === NATIVE_ARRAY_TO_SPLICED &&
       args.length === 1 &&
-      Object.is(args[0], 1) &&
+      Number.isSafeInteger(deleteCount) &&
+      (deleteCount as number) > 0 &&
       normalizedPosition < sourceLength &&
-      value.length === sourceLength - 1;
+      removedCount === Math.min(deleteCount as number, sourceLength - normalizedPosition);
     const validReplace =
       kind === "replace" &&
       value.length === sourceLength &&
@@ -4337,10 +4340,16 @@ function reconcileCompilerKeyedArrayPosition(
   const previous = previousInstances[update.position];
 
   if (update.kind === "remove") {
-    if (!previous || previous.index !== update.position) return undefined;
-    previous.scope?.cleanup();
-    previous.element.remove();
-    previousInstances.splice(update.position, 1);
+    const count = update.sourceLength - update.resultLength;
+    const removed = previousInstances.slice(update.position, update.position + count);
+    if (removed.some((instance, index) => instance.index !== update.position + index)) {
+      return undefined;
+    }
+    for (const instance of removed) {
+      instance.scope?.cleanup();
+      instance.element.remove();
+    }
+    previousInstances.splice(update.position, count);
     for (let index = update.position; index < previousInstances.length; index += 1) {
       previousInstances[index].index = index;
     }
