@@ -96,6 +96,61 @@ interface CachedPPRShell {
   html: string;
 }
 
+function formatSSGManifestError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function parseSSGManifest(content: string, manifestPath: string): SSGPage[] {
+  let manifest: unknown;
+
+  try {
+    manifest = JSON.parse(content);
+  } catch (error) {
+    throw new Error(
+      `Failed to parse SSG manifest at ${manifestPath}: ${formatSSGManifestError(error)}`,
+    );
+  }
+
+  if (!Array.isArray(manifest)) {
+    throw new Error(`Invalid SSG manifest at ${manifestPath}: expected an array of pages.`);
+  }
+
+  for (const [index, page] of manifest.entries()) {
+    if (!page || typeof page !== "object" || Array.isArray(page)) {
+      throw new Error(`Invalid SSG manifest at ${manifestPath}: page ${index} must be an object.`);
+    }
+
+    const entry = page as Record<string, unknown>;
+    if (typeof entry.urlPath !== "string") {
+      throw new Error(
+        `Invalid SSG manifest at ${manifestPath}: page ${index} must have a string urlPath.`,
+      );
+    }
+    if (
+      !entry.params ||
+      typeof entry.params !== "object" ||
+      Array.isArray(entry.params) ||
+      Object.values(entry.params).some((value) => typeof value !== "string")
+    ) {
+      throw new Error(
+        `Invalid SSG manifest at ${manifestPath}: page ${index} must have string params.`,
+      );
+    }
+    if (
+      entry.revalidate !== undefined &&
+      (typeof entry.revalidate !== "number" ||
+        !Number.isFinite(entry.revalidate) ||
+        entry.revalidate <= 0)
+    ) {
+      throw new Error(
+        `Invalid SSG manifest at ${manifestPath}: page ${index} revalidate must be a positive number.`,
+      );
+    }
+  }
+
+  return manifest as SSGPage[];
+}
+
 interface PPRShellCacheOptions {
   pathname: string;
   search: string;
@@ -614,16 +669,23 @@ export class ServerRenderer {
    * Load SSG manifest from build output
    */
   private loadSSGManifest(): void {
+    const manifestPath = path.join(this.config.root, this.config.outDir, "__ssg_manifest.json");
+    let content: string;
+
     try {
-      const manifestPath = path.join(this.config.root, this.config.outDir, "__ssg_manifest.json");
-      if (fs.existsSync(manifestPath)) {
-        const content = fs.readFileSync(manifestPath, "utf-8");
-        this.ssgManifest = JSON.parse(content);
-        logger.info(`Loaded SSG manifest: ${this.ssgManifest.length} pages`);
+      content = fs.readFileSync(manifestPath, "utf-8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return;
       }
-    } catch {
-      // No manifest in dev mode or first build
+
+      throw new Error(
+        `Failed to read SSG manifest at ${manifestPath}: ${formatSSGManifestError(error)}`,
+      );
     }
+
+    this.ssgManifest = parseSSGManifest(content, manifestPath);
+    logger.info(`Loaded SSG manifest: ${this.ssgManifest.length} pages`);
   }
 
   /**
