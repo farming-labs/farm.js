@@ -470,7 +470,7 @@ export interface FarmPlugin<
   version?: string;
   enforce?: "pre" | "post";
 
-  /** Transform Farm config before it is resolved. */
+  /** Transform Farm config before the development or production pipeline is created. */
   configure?: (
     config: FarmConfig,
     context: FarmPluginContextFor<TIntegrationInstance, TIntegrationBound>,
@@ -703,16 +703,6 @@ export class PluginManager {
         },
       },
     };
-  }
-
-  /**
-   * Replace the config every later hook sees. The `config` hook may return a
-   * transformed config, and hooks that run after it read `context.config`, so
-   * the manager has to be told rather than keeping the config it was built
-   * with.
-   */
-  updateConfig(config: FarmConfig): void {
-    this.context.config = config;
   }
 
   private createPluginHookContext(

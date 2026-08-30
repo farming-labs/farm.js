@@ -29,10 +29,13 @@ async function createFixture(configSource: string): Promise<string> {
   return root;
 }
 
-async function buildFixture(root: string): Promise<void> {
+async function buildFixture(
+  root: string,
+  options: { preset?: string } = { preset: "vercel" },
+): Promise<void> {
   const userConfig = await loadConfig(root, undefined, "production");
   const config = await resolveConfig({ ...userConfig, root }, "production");
-  await build(config, { root, preset: "vercel" });
+  await build(config, { root, ...options });
 }
 
 async function exists(target: string): Promise<boolean> {
@@ -100,7 +103,7 @@ export default {
 `,
     );
 
-    await buildFixture(root);
+    await buildFixture(root, {});
 
     // distDir is read while the build computes its output paths. Running the
     // hook after that point would leave the build writing to the original
@@ -108,6 +111,8 @@ export default {
     const manifest = "route-runtime-manifest.json";
     expect(await exists(path.join(root, ".farm-from-plugin", manifest))).toBe(true);
     expect(await exists(path.join(root, ".farm", manifest))).toBe(false);
+    expect(await exists(path.join(root, ".farm-from-plugin", ".output"))).toBe(true);
+    expect(await exists(path.join(root, ".farm", ".output"))).toBe(false);
   }, 300000);
 
   it("keeps the current config when the hook returns nothing", async () => {
@@ -146,6 +151,7 @@ import { definePlugin } from "@farm.js/core";
 
 export default {
   srcDir: "src",
+  deploy: { outputDir: ".custom-output" },
   plugins: [
     definePlugin({
       name: "test:later-hooks",
@@ -173,5 +179,6 @@ export default {
       bundle: ".farm-from-plugin",
       context: ".farm-from-plugin",
     });
+    expect(await exists(path.join(root, ".custom-output"))).toBe(true);
   }, 300000);
 });

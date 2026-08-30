@@ -118,3 +118,62 @@ test("loads and resolves production config while NODE_ENV is production", async 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+async function observeBuildPreset(cliPreset) {
+  const root = await mkdtemp(path.join(os.tmpdir(), "farm-cli-build-preset-"));
+
+  try {
+    await writeFile(
+      path.join(root, "farm.config.mjs"),
+      [
+        "export default {",
+        '  preset: "vercel",',
+        "  plugins: [{",
+        '    name: "test:configure-preset",',
+        "    configure(config) {",
+        "      return {",
+        "        ...config,",
+        '        preset: "node-server",',
+        "        deploy: {",
+        "          ...config.deploy,",
+        '          target: "node",',
+        '          preset: "node-server",',
+        '          outputDir: ".farm/.output",',
+        "        },",
+        "      };",
+        "    },",
+        "    build: {",
+        "      before(bundle) {",
+        "        throw new Error(`observed-build-preset:${bundle.preset}`);",
+        "      },",
+        "    },",
+        "  }],",
+        "};",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const args = [cliBin, "build", "--root", root];
+    if (cliPreset) args.push("--preset", cliPreset);
+
+    try {
+      await execFileAsync(process.execPath, args);
+      assert.fail("expected the preset probe to stop the build");
+    } catch (error) {
+      return `${error.stdout || ""}\n${error.stderr || ""}`.match(
+        /observed-build-preset:([^\s]+)/,
+      )?.[1];
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+test("lets configure change the preset when the CLI has no deploy override", async () => {
+  assert.equal(await observeBuildPreset(), "node-server");
+});
+
+test("keeps an explicit CLI preset ahead of configure", async () => {
+  assert.equal(await observeBuildPreset("vercel"), "vercel");
+});

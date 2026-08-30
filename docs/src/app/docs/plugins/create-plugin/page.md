@@ -179,7 +179,7 @@ Keep the public surface small: export the factory, its options, and any intentio
 
 ## Transform config
 
-`configure` runs before Farm resolves config. Return only when the plugin needs to replace the current value.
+`configure` runs after Farm loads the app config and before it creates the development or production pipeline. Return only when the plugin needs to replace the current value.
 
 ```ts
 export const observabilityDefaults = definePlugin({
