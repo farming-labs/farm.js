@@ -6,6 +6,7 @@ import { act, createElement } from "react";
 import { expectTypeOf } from "vitest";
 import { createRoot } from "react-dom/client";
 import { Link, type LinkProps, type RouteHref } from "../client/link";
+import { setFarmTrailingSlashPreference } from "../trailing-slash";
 
 const prefetch = vi.fn().mockResolvedValue(undefined);
 const navigate = vi.fn();
@@ -44,6 +45,7 @@ describe("Link", () => {
     delete (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
     delete (window as any).__FARM_SPA_ROUTER__;
     delete (window as any).__FARM_MANIFEST__;
+    setFarmTrailingSlashPreference(false);
   });
 
   function render(ui: React.ReactElement) {
@@ -174,6 +176,24 @@ describe("Link", () => {
   });
 
   describe("navigation", () => {
+    it("inherits the app trailing-slash preference", () => {
+      setFarmTrailingSlashPreference(true);
+      const el = render(
+        createElement(Link, { href: "/about?tab=team", hash: "people" }),
+      ) as HTMLAnchorElement;
+
+      expect(el.getAttribute("href")).toBe("/about/?tab=team#people");
+    });
+
+    it("lets the link override the app trailing-slash preference", () => {
+      setFarmTrailingSlashPreference(true);
+      const el = render(
+        createElement(Link, { href: "/about", trailingSlash: false }),
+      ) as HTMLAnchorElement;
+
+      expect(el.getAttribute("href")).toBe("/about");
+    });
+
     it("internal click prevents default and calls router.navigate", () => {
       const el = render(createElement(Link, { href: "/dashboard" })) as HTMLAnchorElement;
       const e = new MouseEvent("click", { bubbles: true, button: 0, cancelable: true });

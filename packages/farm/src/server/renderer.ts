@@ -59,6 +59,10 @@ import { sendWebResponse } from "./response";
 import { renderFarmFontDevHead } from "../font-vite";
 import { createFarmMetadataImageResponse } from "../metadata-image";
 import { createFarmMetadataRouteResponse } from "../metadata-route";
+import {
+  resolveFarmTrailingSlashRedirect,
+  setFarmTrailingSlashPreference,
+} from "../trailing-slash";
 import { DEFAULT_NOT_FOUND_STYLES } from "../components/not-found-styles";
 import {
   createDefaultErrorMarkup,
@@ -891,6 +895,7 @@ export class ServerRenderer {
 
   async renderPage(req: FarmRequest, res: FarmResponse): Promise<void> {
     await this.initialize();
+    setFarmTrailingSlashPreference(this.config.trailingSlash);
     const request = createWebRequestFromFarmRequest(req);
     const runtime = this.i18nRuntime;
 
@@ -966,6 +971,18 @@ export class ServerRenderer {
 
       this.applyDeploymentHeaders(req, res);
 
+      const match = this.routeManager.matchRoute(pathname);
+      if (match.route) {
+        const redirectLocation = resolveFarmTrailingSlashRedirect(url, this.config.trailingSlash);
+        if (redirectLocation) {
+          res.statusCode = 308;
+          res.setHeader("Location", redirectLocation);
+          res.end();
+          completeRender(308, match.route.pattern);
+          return;
+        }
+      }
+
       // Check for pre-rendered SSG page first (production only)
       if (process.env.NODE_ENV === "production") {
         const ssgPage = await this.shouldServeSSG(pathname);
@@ -979,7 +996,6 @@ export class ServerRenderer {
       }
 
       // Match route
-      const match = this.routeManager.matchRoute(pathname);
       const route = match.route;
       params = match.params;
       layouts = match.layouts;

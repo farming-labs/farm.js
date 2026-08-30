@@ -148,6 +148,7 @@ export class FarmApp {
       layers: [...(config.layers || [])],
       outDir: config.outDir || "dist",
       basePath: config.basePath || "/",
+      trailingSlash: config.trailingSlash ?? false,
       renderer: resolveFarmRenderer(config.renderer),
       preset: config.preset ?? "node-server",
       deploy: config.deploy || {},
