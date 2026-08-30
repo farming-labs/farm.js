@@ -61,6 +61,9 @@ src/app/api/files/[...path]/route.ts -> /api/files/*
 
 Use `createEndpoint` when you want input validation and typed client generation. Use plain `GET`, `POST`, `PATCH`, and friends when you want to handle the raw `Request`.
 
+`HEAD` follows normal HTTP semantics. A route can export a dedicated `HEAD` handler, otherwise Farm
+uses its `GET` handler and returns the same status and headers without a response body.
+
 ## Body and query input
 
 ```ts
