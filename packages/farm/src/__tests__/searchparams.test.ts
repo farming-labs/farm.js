@@ -226,7 +226,7 @@ describe("SearchParams in the production runtime", () => {
     const source = readSource("nitro", "universal-build.ts");
 
     expect(source).toContain(
-      'import { createClientPluginManager, installChunkErrorRecovery, scheduleFarmIslandHydration, searchParamsToObject } from "@farm.js/core/internal/client-runtime";',
+      'import { createClientPluginManager, installChunkErrorRecovery, scheduleFarmIslandHydration, searchParamsToObject, setFarmTrailingSlashPreference } from "@farm.js/core/internal/client-runtime";',
     );
     expect(source).toContain(
       "const searchParams = searchParamsToObject(new URLSearchParams(window.location.search));",

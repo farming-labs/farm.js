@@ -64,6 +64,7 @@ import type { FarmRouteRuntimeManifest, FarmRouteRuntimeManifestEntry } from "..
 import { createFarmVercelRouteRuntimeFunctions } from "./vercel-route-runtime";
 import { createFarmVercelImmutableAssetRoute } from "./vercel-assets";
 import { createFarmNodeServerEntry } from "./node-server-entry";
+import { resolveFarmNotFoundComponentPath } from "../not-found";
 import { readFarmI18nCatalogs } from "../i18n/catalog";
 import type { FarmI18nCatalogs } from "../i18n/types";
 import { getFarmIntegrationPluginServerRuntime } from "../integrations";
@@ -76,12 +77,7 @@ import { createFarmSourceAlias } from "../server/vite-config";
 import { DEFAULT_NOT_FOUND_STYLES } from "../components/not-found-styles";
 import { createFarmThemeCssPlugin } from "../theme/vite";
 import { resolveFarmInstrumentationFile } from "../instrumentation";
-import {
-  getFarmRendererComponentExtensions,
-  isReactRenderer,
-  loadFarmRendererVitePlugins,
-  REACT_RENDERER,
-} from "../renderer";
+import { isReactRenderer, loadFarmRendererVitePlugins, REACT_RENDERER } from "../renderer";
 import type { FarmRenderer } from "../renderer";
 
 // Type alias for OutputBundle
@@ -1339,6 +1335,7 @@ async function buildClient(
     config.plugins,
     config.renderer,
     config.publicRuntimeConfig,
+    config.trailingSlash,
   );
 
   // Write the client entry to a temporary file
@@ -1853,6 +1850,7 @@ function generateClientHydrationEntry(
   plugins: readonly FarmPlugin[] = [],
   renderer: FarmRenderer = REACT_RENDERER,
   publicRuntimeConfig: Record<string, unknown> | undefined = undefined,
+  trailingSlash = false,
 ): string {
   const toImportPath = (targetPath: string) => targetPath.replace(/\\/g, "/");
   const clientPluginEntry: FarmClientPluginEntryCode = generateFarmClientPluginEntryCode(
@@ -1961,13 +1959,14 @@ async function hydrateFarmDocsAdapterRuntime() {
 // Farm.js Client Runtime (no client components)
 ${cssImport}
 ${layoutImports}
-import { createClientPluginManager, installChunkErrorRecovery } from "@farm.js/core/internal/client-runtime";
+import { createClientPluginManager, installChunkErrorRecovery, setFarmTrailingSlashPreference } from "@farm.js/core/internal/client-runtime";
 ${clientPluginEntry.imports}
 ${i18nClientRuntime}
 ${docsNavigationRuntime}
 ${docsAdapterRuntime}
 ${generateFarmDocsSearchClientRuntime(docsSearchEnabled, docsSearchModuleId)}
 
+setFarmTrailingSlashPreference(${JSON.stringify(trailingSlash)});
 installChunkErrorRecovery();
 mountFarmDocsSearch();
 
@@ -2336,7 +2335,7 @@ async function hydrateFarmIsolatedClientBoundaries(scope = document) {
 ${cssImport}
 ${layoutImports}
 ${rendererClientImports}
-import { createClientPluginManager, installChunkErrorRecovery, scheduleFarmIslandHydration, searchParamsToObject } from "@farm.js/core/internal/client-runtime";
+import { createClientPluginManager, installChunkErrorRecovery, scheduleFarmIslandHydration, searchParamsToObject, setFarmTrailingSlashPreference } from "@farm.js/core/internal/client-runtime";
 import { matchFarmRoute } from "@farm.js/core/router";
 ${clientPluginEntry.imports}
 ${i18nClientRuntime}
@@ -2346,6 +2345,7 @@ ${docsAdapterRuntime}
 ${imports.join("\n")}
 ${generateFarmDocsSearchClientRuntime(docsSearchEnabled, docsSearchModuleId)}
 
+setFarmTrailingSlashPreference(${JSON.stringify(trailingSlash)});
 installChunkErrorRecovery();
 
 // Client component routes
@@ -3372,20 +3372,7 @@ async function buildSSRInMemory(
   const instrumentationPath = resolveFarmInstrumentationFile(root, config.srcDir || "src");
 
   // Check for custom not-found page
-  let notFoundPath: string | null = null;
-  const notFoundExtensions = getFarmRendererComponentExtensions(config.renderer);
-  for (const sourceAppDir of appDirs) {
-    for (const ext of notFoundExtensions) {
-      const checkPath = path.join(sourceAppDir, `not-found${ext}`);
-      try {
-        await fs.access(checkPath);
-        notFoundPath = checkPath;
-        break;
-      } catch {
-        // File doesn't exist, continue checking
-      }
-    }
-  }
+  const notFoundPath = resolveFarmNotFoundComponentPath(config, appDirs);
   if (notFoundPath) logger.info(`📋 Found custom 404 page: ${notFoundPath}`);
 
   // Sort layouts by depth (root first)
@@ -3755,7 +3742,7 @@ function generateVirtualEntryCode(
   {
     path: ${JSON.stringify(route.path)},
     methods: ${JSON.stringify(route.methods)},
-    handlers: ${varName},
+    endpoints: ${varName},
   }`);
   });
 
@@ -3929,7 +3916,7 @@ function generateVirtualEntryCode(
     : "";
   const apiRouteHelpersImport =
     apiRoutes.length > 0
-      ? `import { invokeAPIRouteEndpoint, matchAPIRoute } from "@farm.js/core/api/runtime";`
+      ? `import { getAllowedAPIRouteMethods, invokeAPIRouteEndpoint, matchAPIRoute, resolveAPIRouteEndpoint } from "@farm.js/core/api/runtime";`
       : "";
   const productionRuntimeImport = `import {
   _runWithAfterRequest,
@@ -3968,10 +3955,12 @@ function generateVirtualEntryCode(
   reportFarmPreloadWarnings,
   renderMetadataHead,
   resolveFarmRouteContext,
+  resolveFarmTrailingSlashRedirect,
   resolveDefaultErrorStatus,
   resolveFarmInstrumentationRuntime,
   runWithFarmRequestSpan,
   searchParamsToObject,
+  setFarmTrailingSlashPreference,
   stripFarmLocaleFromPathname,
   withFarmRouteContext,
 } from "@farm.js/core/internal/production-runtime";`;
@@ -4085,14 +4074,14 @@ async function handleAPIRequest(request) {
     route: route.path,
     method,
   });
-  const endpoint = route.handlers[method];
+  const endpoint = resolveAPIRouteEndpoint(route, method);
   if (!endpoint) {
     const response = new Response(
       JSON.stringify({ error: "Method Not Allowed" }),
       {
         status: 405,
         headers: {
-          "Allow": route.methods.join(", "),
+          "Allow": getAllowedAPIRouteMethods(route).join(", "),
           "Content-Type": "application/json",
         },
       }
@@ -4192,6 +4181,7 @@ const farmUserConfig = ${
   };
 const farmRuntimeConfigs = [${[...layerConfigValues, "farmUserConfig"].join(", ")}].filter(Boolean);
 const farmResolvedRuntimeConfig = Object.assign({}, ...farmRuntimeConfigs);
+setFarmTrailingSlashPreference(${JSON.stringify(config.trailingSlash)});
 const hasConfiguredRouteContext = typeof farmResolvedRuntimeConfig.context === "function";
 const configuredIntegrations = Object.assign(
   {},
@@ -5919,6 +5909,19 @@ async function handleFarmRequestInContext(
   emitFarmEvent({ type: "render.start", route: pathname, pathname });
   const matchedRoute = matchPageRoute(routePathname);
   if (matchedRoute) {
+    const trailingSlashLocation = resolveFarmTrailingSlashRedirect(
+      url,
+      ${JSON.stringify(config.trailingSlash)}
+    );
+    if (trailingSlashLocation) {
+      return applyProductionMiddlewareHeaders(
+        new Response(null, {
+          status: 308,
+          headers: { Location: trailingSlashLocation },
+        }),
+        middlewareHeaders
+      );
+    }
     const { route, params } = matchedRoute;
     emitFarmEvent({ type: "route.matched", pathname, route: route.pattern, params });
     

@@ -114,7 +114,7 @@ const ROUTE_PROP_LABELS = new Map<string, string>([
  * Resolve route rendering from Farm exports, Next-compatible exports, and
  * top-of-file directives such as `"use ssg";` or `"use ssg; 60";`.
  */
-export function resolveRouteRenderingConfig(
+function resolveConfiguredRouteRenderingConfig(
   mod: RouteModule | null | undefined,
   source?: string,
 ): RouteRenderingConfig {
@@ -167,6 +167,31 @@ export function resolveRouteRenderingConfig(
     revalidate: ssg || ppr ? revalidate : undefined,
     dynamic,
     directive: directiveConfig?.directive,
+  };
+}
+
+/**
+ * Resolve the effective rendering mode. Direct request reads make an explicitly
+ * static route dynamic so request-specific HTML cannot enter a shared artifact.
+ */
+export function resolveRouteRenderingConfig(
+  mod: RouteModule | null | undefined,
+  source?: string,
+): RouteRenderingConfig {
+  const rendering = resolveConfiguredRouteRenderingConfig(mod, source);
+  if (!rendering.ssg || !source) {
+    return rendering;
+  }
+
+  const requestBlockers = findRequestBoundSourceBlockers(source);
+  if (requestBlockers.length === 0) {
+    return rendering;
+  }
+
+  return {
+    ...rendering,
+    ssg: false,
+    revalidate: undefined,
   };
 }
 
@@ -634,7 +659,17 @@ export async function collectSSGPages(
       }
 
       const source = await readFile(route.filePath, "utf8").catch(() => undefined);
+      const configuredRendering = resolveConfiguredRouteRenderingConfig(mod, source);
       const rendering = resolveRouteRenderingConfig(mod, source);
+
+      if (configuredRendering.ssg && !rendering.ssg && source) {
+        const blockers = findRequestBoundSourceBlockers(source);
+        console.warn(
+          `[Farm.js] Static rendering disabled for "${route.path}" because ${blockers.join(
+            " and ",
+          )}. Farm will render this route on each request instead.`,
+        );
+      }
 
       // Check if page is marked for SSG
       if (rendering.ssg) {

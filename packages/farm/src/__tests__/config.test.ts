@@ -89,6 +89,18 @@ describe("config helpers", () => {
     warn.mockRestore();
   });
 
+  it("warns instead of silently accepting a top-level output mode", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const config = await resolveConfig({ output: "export" }, "production");
+
+    expect(config).not.toHaveProperty("output");
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('top-level "output" option is not supported'),
+    );
+    warn.mockRestore();
+  });
+
   it("resolves smart preload budgets", async () => {
     const defaults = await resolveConfig({}, "production");
     const configured = await resolveConfig(
@@ -316,6 +328,26 @@ describe("resolveConfig", () => {
 
     expect(disabled.devtools).toEqual({ enabled: false, shortcut: false });
     expect(customized.devtools).toEqual({ enabled: true, shortcut: "mod+shift+d" });
+  });
+
+  it("keeps build activity development-only and resolves its corner", async () => {
+    const development = await resolveConfig(
+      { devIndicators: { buildActivityPosition: "top-left" } },
+      "development",
+    );
+    const production = await resolveConfig(
+      { devIndicators: { buildActivity: true, buildActivityPosition: "top-left" } },
+      "production",
+    );
+
+    expect(development.devIndicators).toEqual({
+      buildActivity: true,
+      buildActivityPosition: "top-left",
+    });
+    expect(production.devIndicators).toEqual({
+      buildActivity: false,
+      buildActivityPosition: "top-left",
+    });
   });
 
   it("resolves explicit and generated deployment IDs", async () => {

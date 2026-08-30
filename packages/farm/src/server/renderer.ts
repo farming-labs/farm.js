@@ -29,6 +29,8 @@ import { matchSSGPage, resolveRouteRenderingConfigFromFile } from "../ssg";
 import { getIntegrationProviders, getRegisteredIntegrationAPIManifest } from "../integrations";
 import { _runWithCurrentRequest, createWebRequestFromFarmRequest } from "./request";
 import { createFarmCacheKey, getFarmDataCache, normalizeRevalidatePath } from "../cache";
+import { resolveFarmNotFoundComponentPath } from "../not-found";
+import { getFarmAppDirectories } from "../layers";
 import { emitFarmEvent } from "../observability";
 import {
   getFarmRedirectError,
@@ -59,6 +61,10 @@ import { sendWebResponse } from "./response";
 import { renderFarmFontDevHead } from "../font-vite";
 import { createFarmMetadataImageResponse } from "../metadata-image";
 import { createFarmMetadataRouteResponse } from "../metadata-route";
+import {
+  resolveFarmTrailingSlashRedirect,
+  setFarmTrailingSlashPreference,
+} from "../trailing-slash";
 import { DEFAULT_NOT_FOUND_STYLES } from "../components/not-found-styles";
 import {
   createDefaultErrorMarkup,
@@ -94,6 +100,61 @@ interface CachedSSGPage {
 
 interface CachedPPRShell {
   html: string;
+}
+
+function formatSSGManifestError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function parseSSGManifest(content: string, manifestPath: string): SSGPage[] {
+  let manifest: unknown;
+
+  try {
+    manifest = JSON.parse(content);
+  } catch (error) {
+    throw new Error(
+      `Failed to parse SSG manifest at ${manifestPath}: ${formatSSGManifestError(error)}`,
+    );
+  }
+
+  if (!Array.isArray(manifest)) {
+    throw new Error(`Invalid SSG manifest at ${manifestPath}: expected an array of pages.`);
+  }
+
+  for (const [index, page] of manifest.entries()) {
+    if (!page || typeof page !== "object" || Array.isArray(page)) {
+      throw new Error(`Invalid SSG manifest at ${manifestPath}: page ${index} must be an object.`);
+    }
+
+    const entry = page as Record<string, unknown>;
+    if (typeof entry.urlPath !== "string") {
+      throw new Error(
+        `Invalid SSG manifest at ${manifestPath}: page ${index} must have a string urlPath.`,
+      );
+    }
+    if (
+      !entry.params ||
+      typeof entry.params !== "object" ||
+      Array.isArray(entry.params) ||
+      Object.values(entry.params).some((value) => typeof value !== "string")
+    ) {
+      throw new Error(
+        `Invalid SSG manifest at ${manifestPath}: page ${index} must have string params.`,
+      );
+    }
+    if (
+      entry.revalidate !== undefined &&
+      (typeof entry.revalidate !== "number" ||
+        !Number.isFinite(entry.revalidate) ||
+        entry.revalidate <= 0)
+    ) {
+      throw new Error(
+        `Invalid SSG manifest at ${manifestPath}: page ${index} revalidate must be a positive number.`,
+      );
+    }
+  }
+
+  return manifest as SSGPage[];
 }
 
 interface PPRShellCacheOptions {
@@ -403,6 +464,10 @@ export class ServerRenderer {
   async initialize(): Promise<void> {
     if (this.rendererRuntime) return;
 
+    if (this.config.notFound?.component?.trim()) {
+      resolveFarmNotFoundComponentPath(this.config, getFarmAppDirectories(this.config));
+    }
+
     const loaded = isReactRenderer(this.config.renderer)
       ? await import("../renderer/react/server")
       : this.viteServer
@@ -614,16 +679,23 @@ export class ServerRenderer {
    * Load SSG manifest from build output
    */
   private loadSSGManifest(): void {
+    const manifestPath = path.join(this.config.root, this.config.outDir, "__ssg_manifest.json");
+    let content: string;
+
     try {
-      const manifestPath = path.join(this.config.root, this.config.outDir, "__ssg_manifest.json");
-      if (fs.existsSync(manifestPath)) {
-        const content = fs.readFileSync(manifestPath, "utf-8");
-        this.ssgManifest = JSON.parse(content);
-        logger.info(`Loaded SSG manifest: ${this.ssgManifest.length} pages`);
+      content = fs.readFileSync(manifestPath, "utf-8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return;
       }
-    } catch {
-      // No manifest in dev mode or first build
+
+      throw new Error(
+        `Failed to read SSG manifest at ${manifestPath}: ${formatSSGManifestError(error)}`,
+      );
     }
+
+    this.ssgManifest = parseSSGManifest(content, manifestPath);
+    logger.info(`Loaded SSG manifest: ${this.ssgManifest.length} pages`);
   }
 
   /**
@@ -891,6 +963,7 @@ export class ServerRenderer {
 
   async renderPage(req: FarmRequest, res: FarmResponse): Promise<void> {
     await this.initialize();
+    setFarmTrailingSlashPreference(this.config.trailingSlash);
     const request = createWebRequestFromFarmRequest(req);
     const runtime = this.i18nRuntime;
 
@@ -966,6 +1039,18 @@ export class ServerRenderer {
 
       this.applyDeploymentHeaders(req, res);
 
+      const match = this.routeManager.matchRoute(pathname);
+      if (match.route) {
+        const redirectLocation = resolveFarmTrailingSlashRedirect(url, this.config.trailingSlash);
+        if (redirectLocation) {
+          res.statusCode = 308;
+          res.setHeader("Location", redirectLocation);
+          res.end();
+          completeRender(308, match.route.pattern);
+          return;
+        }
+      }
+
       // Check for pre-rendered SSG page first (production only)
       if (process.env.NODE_ENV === "production") {
         const ssgPage = await this.shouldServeSSG(pathname);
@@ -979,7 +1064,6 @@ export class ServerRenderer {
       }
 
       // Match route
-      const match = this.routeManager.matchRoute(pathname);
       const route = match.route;
       params = match.params;
       layouts = match.layouts;
@@ -1486,7 +1570,9 @@ export class ServerRenderer {
           });
         });
       });
-    } catch (error) {
+    } catch (caughtError) {
+      let error = caughtError;
+
       if (isWebResponse(error)) {
         if (!res.headersSent && !(res as any).writableEnded) {
           await sendWebResponse(res, error);
@@ -1524,12 +1610,20 @@ export class ServerRenderer {
       if (isFarmNotFoundError(error)) {
         emitFarmEvent({ type: "route.notFound", pathname });
         if (!res.headersSent && !(res as any).writableEnded) {
-          await this.render404(req, res);
-        } else if (!(res as any).writableEnded) {
-          res.end();
+          try {
+            await this.render404(req, res);
+            completeRender(404, pathname);
+            return;
+          } catch (notFoundRenderError) {
+            error = notFoundRenderError;
+          }
+        } else {
+          if (!(res as any).writableEnded) {
+            res.end();
+          }
+          completeRender(404, pathname);
+          return;
         }
-        completeRender(404, pathname);
-        return;
       }
 
       emitFarmEvent({ type: "render.error", route: pathname, error });
@@ -2477,15 +2571,10 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
       // Look for custom not-found page
       const appDir = path.join(this.config.root, this.config.srcDir, "app");
       const notFoundExtensions = getFarmRendererComponentExtensions(this.config.renderer);
-      let notFoundPath: string | null = null;
-
-      for (const ext of notFoundExtensions) {
-        const checkPath = path.join(appDir, `not-found${ext}`);
-        if (fs.existsSync(checkPath)) {
-          notFoundPath = checkPath;
-          break;
-        }
-      }
+      const notFoundPath = resolveFarmNotFoundComponentPath(
+        this.config,
+        getFarmAppDirectories(this.config),
+      );
 
       if (notFoundPath) {
         // Use routeManager to load the module (uses Vite's ssrLoadModule in dev)
@@ -2498,12 +2587,8 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
           for (const ext of notFoundExtensions) {
             const layoutPath = path.join(appDir, `layout${ext}`);
             if (fs.existsSync(layoutPath)) {
-              try {
-                const layoutModule = await this.routeManager.loadLayoutModule(layoutPath);
-                LayoutComponent = layoutModule.default;
-              } catch {
-                // Layout import failed, continue without it
-              }
+              const layoutModule = await this.routeManager.loadLayoutModule(layoutPath);
+              LayoutComponent = layoutModule.default;
               break;
             }
           }
@@ -2529,7 +2614,7 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
         }
       }
     } catch (error) {
-      logger.warn(`Failed to render custom 404 page: ${error}`);
+      throw new Error(`Failed to render custom 404 page: ${error}`);
     }
 
     // Render the shared adaptive fallback when the app does not provide its own page.

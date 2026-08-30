@@ -1008,6 +1008,10 @@ function compareCodepoint(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
+function serializeBinaryBytes(bytes: Uint8Array): string {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 function stableSerialize(value: unknown, seen = new WeakSet<object>()): string {
   if (value === null) return "null";
   if (value === undefined) return "undefined";
@@ -1033,9 +1037,16 @@ function stableSerialize(value: unknown, seen = new WeakSet<object>()): string {
   if (value instanceof RegExp) {
     return `regexp:${value.toString()}`;
   }
-
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => stableSerialize(item, seen)).join(",")}]`;
+  if (value instanceof ArrayBuffer) {
+    return `arraybuffer:${serializeBinaryBytes(new Uint8Array(value))}`;
+  }
+  if (typeof SharedArrayBuffer !== "undefined" && value instanceof SharedArrayBuffer) {
+    return `sharedarraybuffer:${serializeBinaryBytes(new Uint8Array(value))}`;
+  }
+  if (ArrayBuffer.isView(value)) {
+    const viewType = Object.prototype.toString.call(value).slice(8, -1);
+    const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+    return `binary:${viewType}:${serializeBinaryBytes(bytes)}`;
   }
 
   if (value && typeof value === "object") {
@@ -1043,6 +1054,19 @@ function stableSerialize(value: unknown, seen = new WeakSet<object>()): string {
       return "[Circular]";
     }
     seen.add(value);
+
+    if (Array.isArray(value)) {
+      const items: string[] = [];
+      for (let index = 0; index < value.length; index++) {
+        items.push(
+          Object.prototype.hasOwnProperty.call(value, index)
+            ? stableSerialize(value[index], seen)
+            : "[Hole]",
+        );
+      }
+      seen.delete(value);
+      return `[${items.join(",")}]`;
+    }
 
     // Set and Map keep their contents internally, so Object.entries is empty
     // for both. Serialize the contents and sort them by codepoint so equal

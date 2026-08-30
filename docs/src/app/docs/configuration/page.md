@@ -263,6 +263,7 @@ mount, and shortcut together.
 | mdx           | Rendering `page.md` and `page.mdx` app routes, plus MDX components.               |
 | deploy        | Selecting a target, preset, and output directory.                                 |
 | deploymentId  | Detecting stale browser requests during rolling deployments.                      |
+| trailingSlash | Choosing the canonical URL shape for application page routes and links.           |
 | routeRules    | Applying rendering, cache, redirect, CORS, and header behavior to route patterns. |
 | security      | Applying an app-wide CSP with an enforcing or report-only response header.        |
 | serverActions | Restricting trusted action origins and request body size.                         |
@@ -270,6 +271,22 @@ mount, and shortcut together.
 | performance   | Budgeting image and font preload hints without changing the rendered resources.   |
 | experimental  | Auditing or enabling opt-in rendering experiments such as isolated hydration.     |
 | openapi       | Publishing API reference docs.                                                    |
+
+## Trailing slashes
+
+Application page URLs omit a trailing slash by default. Set `trailingSlash: true` to generate
+framework links with a slash and redirect matching page requests to that canonical URL in both
+development and production:
+
+```ts title="farm.config.ts"
+export default defineConfig({
+  trailingSlash: true,
+});
+```
+
+The redirect uses status 308 and preserves the query string. The root URL remains `/`, and API,
+integration, image, and metadata routes keep their own URL contracts. A `<Link trailingSlash={false}>`
+or `<Link trailingSlash>` prop overrides the app default for that link.
 
 ## API client base URL
 

@@ -973,6 +973,18 @@ export default function DashboardError({ error, reset }: ErrorProps) {
 
 `error.tsx` receives `error`, `reset`, `params`, `path`, `search`, `searchParams`, middleware data, and plugin context. The closest route error boundary handles normal render/data failures. Redirects and `notFound()` still escape to Farm's redirect and not-found handling.
 
+Place `not-found.*` at the app root to customize unmatched URLs. When the component lives elsewhere,
+set its project-relative path explicitly; Farm uses the same file in development and production and
+fails startup or build when the path is missing or incompatible with the selected renderer:
+
+```ts title="farm.config.ts"
+export default defineConfig({
+  notFound: {
+    component: "./src/ui/not-found.tsx",
+  },
+});
+```
+
 ## Catch-all routes
 
 Catch-all routes are useful for docs, CMS content, and nested marketing pages where the page is resolved from content instead of a fixed file for every URL.

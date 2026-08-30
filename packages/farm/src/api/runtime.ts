@@ -19,6 +19,31 @@ export interface APIRouteMatch<T extends { path: string }> {
   params: APIRouteParams;
 }
 
+interface APIRouteMethodTable {
+  methods: string[];
+  endpoints: Record<string, any>;
+}
+
+export function resolveAPIRouteEndpoint(
+  route: APIRouteMethodTable,
+  method: string,
+): any | undefined {
+  const normalizedMethod = method.toUpperCase();
+  return (
+    route.endpoints[normalizedMethod] ??
+    (normalizedMethod === "HEAD" ? route.endpoints.GET : undefined)
+  );
+}
+
+export function getAllowedAPIRouteMethods(route: APIRouteMethodTable): string[] {
+  const methods = [...route.methods];
+  const getIndex = methods.indexOf("GET");
+  if (getIndex >= 0 && !methods.includes("HEAD")) {
+    methods.splice(getIndex + 1, 0, "HEAD");
+  }
+  return methods;
+}
+
 export function matchAPIRoute<T extends { path: string }>(
   routes: Map<string, T>,
   pathname: string,
@@ -60,9 +85,19 @@ export async function invokeAPIRouteEndpoint(
     throw error;
   }
 
-  return _runWithCurrentRequest(request, () =>
+  const response = await _runWithCurrentRequest(request, () =>
     invokeAPIRouteEndpointInContext(endpoint, request, params),
   );
+
+  if (request.method.toUpperCase() !== "HEAD") {
+    return response;
+  }
+
+  return new Response(null, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
 }
 
 async function invokeAPIRouteEndpointInContext(

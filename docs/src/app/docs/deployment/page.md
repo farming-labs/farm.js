@@ -265,6 +265,11 @@ export default defineConfig({
 });
 ```
 
+Both options belong inside `deploy`. A top-level `output: "standalone"`, `"static"`, or `"export"`
+does not select Farm rendering behavior. Choose a deployment target here, then configure static
+pages with `dynamic = "force-static"` or `routeRules` as described in
+[Server Rendering](/docs/server-rendering).
+
 ## Platform deploys
 
 | Command                                | What it expects                                         |

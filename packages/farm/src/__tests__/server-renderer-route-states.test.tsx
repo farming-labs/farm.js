@@ -1,7 +1,7 @@
 // @vitest-environment node
 
 import React from "react";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -537,6 +537,49 @@ describe("file route loading.tsx and error.tsx", () => {
     expect(html).toContain('id="__farm_page__"');
     expect(html).toContain('data-farm-client="false"');
     expect(html).toContain("Settings fragment");
+  });
+});
+
+describe("custom not-found rendering", () => {
+  it("surfaces a root layout import failure through the error response", async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), "farm-not-found-layout-"));
+    temporaryDirectories.push(directory);
+    const appDirectory = path.join(directory, "src", "app");
+    const notFoundPath = path.join(appDirectory, "not-found.tsx");
+    const rootLayoutPath = path.join(appDirectory, "layout.tsx");
+    await mkdir(appDirectory, { recursive: true });
+    await Promise.all([writeFile(notFoundPath, ""), writeFile(rootLayoutPath, "")]);
+
+    const errorSpy = vi.spyOn(logger, "error").mockImplementation(() => {});
+    const response = createMockResponse();
+    const routeManager = {
+      matchMetadataRoute: () => null,
+      matchMetadataImage: () => null,
+      matchRoute: () => ({ route: null, params: {}, layouts: [], slots: [] }),
+      async loadRouteModule(modulePath: string) {
+        expect(modulePath).toBe(notFoundPath);
+        return {
+          default: function CustomNotFound() {
+            return React.createElement("main", null, "Custom not found");
+          },
+        };
+      },
+      async loadLayoutModule(modulePath: string) {
+        expect(modulePath).toBe(rootLayoutPath);
+        throw new Error("root layout import failed");
+      },
+    };
+    const renderer = new ServerRenderer(
+      { ...createConfig(), root: directory } as Required<FarmConfig>,
+      routeManager as any,
+    );
+
+    await renderer.renderPage(createMockRequest("/missing"), response);
+
+    expect(response.statusCode).toBe(500);
+    expect(response.body).toContain("Internal Server Error");
+    expect(response.body).not.toContain("Custom not found");
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("root layout import failed"));
   });
 });
 

@@ -262,6 +262,36 @@ describe("route rendering config", () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
+  it("keeps explicitly static routes dynamic when they read request data", async () => {
+    const dir = await createTempDir("farm-request-bound-static-");
+    const pagePath = path.join(dir, "page.tsx");
+    const source = `
+      import { getCurrentRequest } from "@farm.js/core/request";
+
+      export const dynamic = "force-static";
+      export default function TenantPage() {
+        return <main>{getCurrentRequest().headers.get("x-tenant")}</main>;
+      }
+    `;
+    await writeFile(pagePath, source);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    expect(resolveRouteRenderingConfig({ dynamic: "force-static" }, source)).toMatchObject({
+      ssg: false,
+      dynamic: "force-static",
+    });
+    await expect(
+      collectSSGPages(
+        [{ path: "/tenant", filePath: pagePath, isDynamic: false, pattern: "/tenant" }],
+        async () => ({ dynamic: "force-static" }) as RouteModule,
+      ),
+    ).resolves.toEqual({ ssg: [], ssr: ["/tenant"] });
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('Static rendering disabled for "/tenant"'),
+    );
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("the current Request"));
+  });
+
   it("collects static pages marked by source directives", async () => {
     const dir = await createTempDir("farm-ssg-directive-");
     const pagePath = path.join(dir, "page.tsx");

@@ -127,6 +127,7 @@ export * from "./markdown";
 export * from "./app-markdown";
 export * from "./observability";
 export * from "./devtools-config";
+export * from "./dev-indicators";
 export * from "./workflows";
 export * from "./cron";
 export * from "./env";

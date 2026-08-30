@@ -16,6 +16,7 @@ import type { FarmServerConfig } from "./server-http";
 import type { FarmLayerEntry, ResolvedFarmLayer } from "./layers";
 import type { FarmRouteMaxDuration, FarmRouteRegions, FarmRouteRuntime } from "./route-runtime";
 import type { FarmDevtoolsUserConfig } from "./devtools-config";
+import type { FarmDevIndicatorsConfig } from "./dev-indicators";
 import type { FarmImageConfig } from "./image-config";
 import type { FarmPlugin } from "./plugin";
 import type { FarmI18nUserConfig, ResolvedFarmI18nConfig } from "./i18n/types";
@@ -150,6 +151,8 @@ export interface FarmConfig {
   layers?: readonly ResolvedFarmLayer[];
   outDir?: string;
   basePath?: string;
+  /** Generate and canonicalize non-root application page URLs with a trailing slash. */
+  trailingSlash?: boolean;
   /**
    * Component renderer used for JSX compilation, SSR, and browser hydration.
    * React is used when omitted.
@@ -207,6 +210,10 @@ export interface FarmConfig {
   i18n?: FarmI18nUserConfig | ResolvedFarmI18nConfig | false;
   /** Build identifier used to detect stale clients during rolling deployments. */
   deploymentId?: string;
+  /** Optional project-relative module used for unmatched page routes. */
+  notFound?: {
+    component?: string;
+  };
   /** Server-only application runtime values. */
   serverRuntimeConfig?: Record<string, unknown>;
   /** Serializable application values exposed to `src/client.ts`. */
@@ -217,6 +224,8 @@ export interface FarmConfig {
   observability?: FarmObservabilityUserConfig;
   /** Development-only runtime inspector. Enabled by default during `farm dev`. */
   devtools?: FarmDevtoolsUserConfig;
+  /** Development-only browser feedback for build and HMR activity. */
+  devIndicators?: FarmDevIndicatorsConfig;
   /**
    * When true, Link href is not strictly typed (accepts any string).
    * Use when you want to skip route-type errors on Link or don't use generated route types.

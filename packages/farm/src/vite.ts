@@ -40,6 +40,7 @@ import {
   FARM_DEVTOOLS_PATH,
   resolveFarmDevtoolsConfig,
 } from "./devtools-config";
+import { generateFarmDevIndicatorsClientRuntime } from "./dev-indicators";
 import * as fs from "fs";
 import * as path from "path";
 import { pathToFileURL } from "node:url";
@@ -2572,6 +2573,9 @@ window.__FARM_MANIFEST__ = ${inlineValue({
         const generatedDevtoolsClientRuntime = devtoolsClientRuntime
           ? devtoolsClientRuntime.generateFarmDevtoolsClientRuntime(devtools)
           : "";
+        const generatedDevIndicatorsClientRuntime = farmApp
+          ? generateFarmDevIndicatorsClientRuntime(farmApp.getConfig().devIndicators)
+          : "";
 
         return generateClientCode(
           isReactRenderer(renderer) ? getIntegrationProviders(integrations) : [],
@@ -2580,7 +2584,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             ...(docsRuntime?.getFarmDocsDocumentNavigationMatchers(docs) ?? []),
           ],
           generatedDocsSearchRuntime,
-          generatedDevtoolsClientRuntime,
+          `${generatedDevtoolsClientRuntime}\n${generatedDevIndicatorsClientRuntime}`,
           resolvedConfig?.plugins || [],
           root,
           resolvedConfig?.srcDir || options.srcDir || "src",
@@ -2588,6 +2592,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           isReactRenderer(renderer) ? docs?.adapter?.react : undefined,
           renderer,
           resolvedConfig?.experimental?.isolatedClientHydration === "enabled",
+          resolvedConfig?.trailingSlash ?? false,
         );
       }
 
@@ -3447,6 +3452,7 @@ function generateClientCode(
   docsAdapterReact?: string,
   renderer: FarmRenderer = REACT_RENDERER,
   isolatedHydrationEnabled = false,
+  trailingSlash = false,
 ): string {
   const hasClerkProvider = integrationProviders.some((provider) => provider.type === "clerk");
   const providerImportBlock = hasClerkProvider
@@ -3531,7 +3537,7 @@ async function hydrateFarmIsolatedClientBoundaries(scope = document) {
 ${rendererClientImports}
 import { installChunkErrorRecovery, SPARouter } from '@farm.js/core/client'
 import { createClientPluginManager } from '@farm.js/core/plugin/client'
-import { scheduleFarmIslandHydration, searchParamsToObject } from '@farm.js/core/internal/client-runtime'
+import { scheduleFarmIslandHydration, searchParamsToObject, setFarmTrailingSlashPreference } from '@farm.js/core/internal/client-runtime'
 import { reviveDeferredData } from '@farm.js/core/deferred'
 import {
   createFarmDeploymentMismatchError,
@@ -3553,6 +3559,7 @@ window.__FARM_REACT__ = React;
 const integrationProviders = ${JSON.stringify(integrationProviders)};
 const integrationDocumentNavigationMatchers = ${JSON.stringify(documentNavigationMatchers)};
 
+setFarmTrailingSlashPreference(${JSON.stringify(trailingSlash)});
 installChunkErrorRecovery();
 
 let reactRoot = null;
