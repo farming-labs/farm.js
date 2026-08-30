@@ -83,16 +83,16 @@ export default function Page() {
 
 Farm provides a deliberately small compatibility surface for common App Router behavior:
 
-| API                   | Farm behavior                                                |
-| --------------------- | ------------------------------------------------------------ |
-| `redirect()`          | Produces a redirect response through Farm's redirect signal. |
-| `permanentRedirect()` | Produces the same signal with status 308.                    |
-| `notFound()`          | Produces a not-found signal that Farm renders as a 404.      |
-| `useRouter()`         | Uses Farm's client router.                                   |
-| `usePathname()`       | Reads the current pathname on the client.                    |
-| `useSearchParams()`   | Reads the current URL search parameters on the client.       |
-| `headers()`           | Reads the current request headers on the server.             |
-| `cookies()`           | Reads the current request cookies on the server.             |
+| API                   | Farm behavior                                                    |
+| --------------------- | ---------------------------------------------------------------- |
+| `redirect()`          | Produces a redirect response through Farm's redirect signal.     |
+| `permanentRedirect()` | Produces the same signal with status 308.                        |
+| `notFound()`          | Produces a not-found signal that Farm renders as a 404.          |
+| `useRouter()`         | Uses Farm's client router for navigation, refresh, and prefetch. |
+| `usePathname()`       | Reads the current pathname on the client.                        |
+| `useSearchParams()`   | Reads the current URL search parameters on the client.           |
+| `headers()`           | Reads the current request headers on the server.                 |
+| `cookies()`           | Reads the current request cookies on the server.                 |
 
 ## Manual review
 
