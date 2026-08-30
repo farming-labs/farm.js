@@ -339,7 +339,6 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs" | "
 
   notFound?: NotFoundConfig;
 
-  output?: "standalone" | "static" | "export";
   distDir?: string;
   generateBuildId?: () => string | Promise<string>;
   compress?: boolean;
@@ -430,7 +429,6 @@ export type FarmLayerConfig = Omit<
   | "outDir"
   | "distDir"
   | "deploy"
-  | "output"
   | "preset"
   | "publicDir"
   | "generateBuildId"
@@ -870,6 +868,12 @@ export async function resolveConfig(
   });
   userConfig = layerResolution.config;
 
+  if ((userConfig as Record<string, unknown>).output !== undefined) {
+    logger.warn(
+      'The top-level "output" option is not supported and has no effect. Configure `deploy.target`, `deploy.preset`, or `deploy.outputDir` for deployment output, and use route rendering configuration for static pages.',
+    );
+  }
+
   // The docs adapter runtime is React-only today; other renderers keep the
   // embedded docs handler without any migration notice.
   if (isReactRenderer(resolveFarmRenderer(userConfig.renderer))) {
@@ -991,7 +995,6 @@ export async function resolveConfig(
     serverActions: resolveServerActionsConfig(userConfig.serverActions),
     security,
     deploymentId,
-    output: userConfig.output || "standalone",
     distDir: userConfig.distDir || ".farm",
     generateBuildId,
     compress: userConfig.compress ?? true,
