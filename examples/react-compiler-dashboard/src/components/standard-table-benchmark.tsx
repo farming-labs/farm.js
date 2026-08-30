@@ -6,6 +6,7 @@ declare global {
   interface Array<T> {
     toReversed(): T[];
     toSorted(compare?: (left: T, right: T) => number): T[];
+    toSpliced(start: number, deleteCount: number): T[];
     toSpliced(start: number, deleteCount: number, item: T): T[];
     with(index: number, item: T): T[];
   }
@@ -279,6 +280,30 @@ export function StandardTableBenchmark() {
           }}
         >
           Insert at known position (snapshot control)
+        </button>
+        <button
+          data-action="table-position-remove"
+          type="button"
+          onClick={() => {
+            setRows((current) => current.toSpliced(9_000, 1));
+            setOperation("remove at known position");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Remove at known position
+        </button>
+        <button
+          data-action="table-position-remove-snapshot"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              return current.toSpliced(9_000, 1);
+            });
+            setOperation("remove at known position (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Remove at known position (snapshot control)
         </button>
         <button
           data-action="table-position-replace"

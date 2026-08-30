@@ -44,6 +44,7 @@ const testSource = String.raw`
     createCompiledComponentWithFeatures,
     createCompilerKeyedArrayAppend,
     createCompilerKeyedArrayFilter,
+    createCompilerKeyedArrayPositionUpdate,
     createCompilerKeyedArrayPrepend,
     createCompilerKeyedArrayReorder,
     createCompilerKeyedArraySort,
@@ -88,6 +89,7 @@ const testSource = String.raw`
   flushSync(() => root.unmount());
 
   let reverseCompatibilityRows = () => undefined;
+  let removeCompatibilityRow = () => undefined;
   let sortCompatibilityRows = () => undefined;
   let reorderExecutions = 0;
   const ReorderRows = createCompiledComponent({
@@ -103,6 +105,16 @@ const testSource = String.raw`
       reverseCompatibilityRows = () =>
         state[0].set((previous) =>
           createCompilerKeyedArrayReorder(previous, previous.toReversed),
+        );
+      removeCompatibilityRow = () =>
+        state[0].set((previous) =>
+          createCompilerKeyedArrayPositionUpdate(
+            previous,
+            previous.toSpliced,
+            "remove",
+            1,
+            1,
+          ),
         );
       sortCompatibilityRows = () =>
         state[0].set((previous) =>
@@ -120,6 +132,7 @@ const testSource = String.raw`
           dependencies: [0],
           id: 0,
           items,
+          positionIndexIndependent: true,
           reorderIndexIndependent: true,
           structureDependencies: [0],
           render: () =>
@@ -160,6 +173,13 @@ const testSource = String.raw`
   sortCompatibilityRows();
   await Promise.resolve();
   await Promise.resolve();
+  assert.equal(reorderContainer.querySelector("li:first-child"), reorderBeta);
+  assert.equal(reorderContainer.querySelector("li:last-child"), reorderAlpha);
+  assert.equal(reorderExecutions, 1);
+  removeCompatibilityRow();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(reorderContainer.querySelector("[data-key='c']"), null);
   assert.equal(reorderContainer.querySelector("li:first-child"), reorderBeta);
   assert.equal(reorderContainer.querySelector("li:last-child"), reorderAlpha);
   assert.equal(reorderExecutions, 1);
