@@ -48,6 +48,25 @@ describe("React AOT keyed-array position hints", () => {
     expect(result.optimizations.keyedArrayPositionHints).toBe(3);
   });
 
+  it("records exact-position batch insertions without retaining the single-row helper", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Table({ first, second, incoming, offset }) {
+        const [rows, setRows] = useState([{ id: "a", label: "Alpha" }]);
+        return <section>
+          <button onClick={() => setRows((current) => current.toSpliced(offset, 0, first, second))}>Insert pair</button>
+          <button onClick={() => setRows((current) => current.toSpliced(-1, 0, ...incoming))}>Insert batch</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </section>;
+      }
+    `);
+
+    expect(result.optimizations.keyedArrayPositionHints).toBe(2);
+    expect(result.code).toContain("createCompilerKeyedArrayBatchInsert");
+    expect(result.code).toContain("keyedRowsBatchPositionHintedRuntimeFeature");
+    expect(result.code).not.toContain("createCompilerKeyedArrayPositionUpdate");
+  });
+
   it("records compiler-safe runtime position expressions", async () => {
     const result = await compile(`
       import { useState } from "react";
@@ -125,14 +144,14 @@ describe("React AOT keyed-array position hints", () => {
       update: "current.slice().toSpliced(0, 1)",
     },
     {
-      name: "a multi-item insertion",
-      row: "row => <li key={row.id}>{row.label}</li>",
-      update: "current.toSpliced(0, 0, next, next)",
-    },
-    {
       name: "a multi-item replacement",
       row: "row => <li key={row.id}>{row.label}</li>",
       update: "current.toSpliced(0, 1, next, next)",
+    },
+    {
+      name: "an unsafe incoming spread call",
+      row: "row => <li key={row.id}>{row.label}</li>",
+      update: "current.toSpliced(0, 0, ...makeRows())",
     },
     {
       name: "a fractional literal position",

@@ -2,6 +2,27 @@
 
 Date: 2026-08-29
 
+## Exact-position batch insertion follow-up — 2026-08-30
+
+The full bracketed production-browser run added an isolated 10,000-row workload for concise native
+`toSpliced(position, 0, ...incoming)` updates that insert 64 rows in the middle. Both compiler
+builds emitted the fifth expected `keyedArrayPositionHints` site, preserved the DOM nodes on both
+sides of the insertion, produced zero owner executions, and passed the independent 4x React and
+1.5x compiled-control floors.
+
+| Mode   | React median | Hinted batch | Compiled control | vs React | vs control |
+| ------ | -----------: | -----------: | ---------------: | -------: | ---------: |
+| Static |     71.70 ms |      8.50 ms |         20.80 ms |    8.44x |      2.45x |
+| Hybrid |     71.70 ms |      8.50 ms |         21.80 ms |    8.44x |      2.56x |
+
+Package tests separately verify one-fragment insertion, work proportional to the 64 incoming rows,
+retained-row identity checks, duplicate and colliding key fallback before live DOM mutation, custom
+method semantics and errors, queued-update fallback, 1,000 differential updates, controlled-input
+focus and selection, delegated event indexes, hydration, Strict Mode, and unmount cleanup. The
+batch-only runtime-size fixture has a 12,470 B gzip compiler premium. Direct and core-only bundles
+remain unchanged, and modules that emit only the previous single-position operations do not retain
+the batch helper or runtime capability.
+
 ## Native contiguous `toSpliced()` removal follow-up — 2026-08-30
 
 The full bracketed production-browser run added one isolated 10,000-row workload for concise native
