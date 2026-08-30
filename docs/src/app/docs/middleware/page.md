@@ -27,6 +27,7 @@ Data and headers written during middleware are request-scoped:
 ## Route middleware
 
 Middleware can live near the routes it protects. Use it for auth, request metadata, A/B flags, rate limit checks, or headers that belong to an area of the app.
+Route-group directories such as `(marketing)` organize middleware without adding a URL segment.
 
 **src/app/dashboard/middleware.ts**
 

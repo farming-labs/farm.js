@@ -78,6 +78,7 @@ import { DEFAULT_NOT_FOUND_STYLES } from "../components/not-found-styles";
 import { createFarmThemeCssPlugin } from "../theme/vite";
 import { resolveFarmInstrumentationFile } from "../instrumentation";
 import { isReactRenderer, loadFarmRendererVitePlugins, REACT_RENDERER } from "../renderer";
+import { appendMiddlewareRoutePath } from "../middleware/path";
 import type { FarmRenderer } from "../renderer";
 
 // Type alias for OutputBundle
@@ -678,7 +679,7 @@ export async function discoverMiddlewareRoutes(
         continue;
       }
 
-      const childRoutePath = routePath === "/" ? `/${entry.name}` : `${routePath}/${entry.name}`;
+      const childRoutePath = appendMiddlewareRoutePath(routePath, entry.name);
       await walk(path.join(dir, entry.name), childRoutePath, discovered);
     }
   }
