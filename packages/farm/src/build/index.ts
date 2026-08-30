@@ -1,5 +1,9 @@
 import type { ResolvedFarmConfig } from "../config";
-import { resolveDeployOutputPath } from "../config";
+import {
+  getDefaultDeployOutputDir,
+  getDeployTargetForPreset,
+  resolveDeployOutputPath,
+} from "../config";
 import type { ViteDevServer } from "vite";
 import path from "path";
 import { existsSync } from "node:fs";
@@ -30,6 +34,13 @@ interface BuildOptions {
   productionVite?: FarmProductionViteRuntime | Promise<FarmProductionViteRuntime>;
 }
 
+interface BuildTargetBaseline {
+  preset: string;
+  distDir: string;
+  outputDir: string;
+  outputWasDerived: boolean;
+}
+
 /**
  * Build Farm.js application for production
  */
@@ -37,18 +48,58 @@ export async function build(config: ResolvedFarmConfig, options: BuildOptions = 
   return withProductionNodeEnv(() => buildWithProductionNodeEnv(config, options));
 }
 
-async function buildWithProductionNodeEnv(config: ResolvedFarmConfig, options: BuildOptions) {
+/** Every build path derived from config, recomputed once plugins have transformed it. */
+function createBuildTargetBaseline(config: ResolvedFarmConfig): BuildTargetBaseline {
+  const preset = config.preset || "node-server";
+  const distDir = config.distDir || ".farm";
+  const outputDir = config.deploy.outputDir;
+  return {
+    preset,
+    distDir,
+    outputDir,
+    outputWasDerived:
+      outputDir === getDefaultDeployOutputDir(config.deploy.target, preset, distDir),
+  };
+}
+
+function resolveBuildTargets(
+  config: ResolvedFarmConfig,
+  options: BuildOptions,
+  baseline: BuildTargetBaseline,
+) {
   const root = options.root || config.root || process.cwd();
   const preset = options.preset || config.preset || "node-server";
-  const srcDir = config.srcDir || "src";
   const distDir = config.distDir || ".farm";
-  const deployOutputDir = resolveDeployOutputPath(root, config.deploy.outputDir);
+  const outputWasReplaced = config.deploy.outputDir !== baseline.outputDir;
+  const shouldRefreshDerivedOutput =
+    baseline.outputWasDerived &&
+    !outputWasReplaced &&
+    (preset !== baseline.preset || distDir !== baseline.distDir);
+  const deployTarget =
+    preset === config.deploy.preset ? config.deploy.target : getDeployTargetForPreset(preset);
+  const outputDir = shouldRefreshDerivedOutput
+    ? getDefaultDeployOutputDir(deployTarget, preset, distDir)
+    : config.deploy.outputDir;
+
+  return {
+    root,
+    preset,
+    srcDir: config.srcDir || "src",
+    distDir,
+    deployTarget,
+    outputDir,
+    deployOutputDir: resolveDeployOutputPath(root, outputDir),
+  };
+}
+
+async function buildWithProductionNodeEnv(inputConfig: ResolvedFarmConfig, options: BuildOptions) {
+  let config = inputConfig;
+  const targetBaseline = createBuildTargetBaseline(config);
+  let targets: ReturnType<typeof resolveBuildTargets> | undefined;
   const productionViteResultPromise =
     options.universal === false
       ? undefined
       : Promise.allSettled([Promise.resolve(options.productionVite ?? loadFarmProductionVite())]);
-
-  logger.info(`🚜 Building Farm.js application with preset: ${preset}...`);
 
   const pluginManager = new PluginManager({
     config,
@@ -60,6 +111,27 @@ async function buildWithProductionNodeEnv(config: ResolvedFarmConfig, options: B
 
   try {
     await pluginManager.runHookParallel("init");
+
+    // Settle plugin config before deriving the paths and deployment plan used
+    // by the production pipeline. Otherwise the build can report the returned
+    // config while still writing to the original locations.
+    config = await pluginManager.runHookSerial("config", config);
+    targets = resolveBuildTargets(config, options, targetBaseline);
+    config = {
+      ...config,
+      preset: targets.preset,
+      deploy: {
+        ...config.deploy,
+        target: targets.deployTarget,
+        preset: targets.preset,
+        outputDir: targets.outputDir,
+      },
+    };
+    pluginManager.updateContext({ config });
+    const { root, preset, srcDir, distDir, deployOutputDir } = targets;
+
+    logger.info(`🚜 Building Farm.js application with preset: ${preset}...`);
+
     await pluginManager.setupPlugins();
     await pluginManager.runHookParallel("beforeBundle", {
       root,
@@ -177,6 +249,8 @@ async function buildWithProductionNodeEnv(config: ResolvedFarmConfig, options: B
     logger.success(`✅ Build completed successfully! (preset: ${preset})`);
     logger.info(`📁 Output directory: ${deployOutputDir}`);
   } catch (error) {
+    const { root, preset, distDir, deployOutputDir } =
+      targets ?? resolveBuildTargets(config, options, targetBaseline);
     await pluginManager.runHookParallel("onError", {
       phase: "build",
       error,

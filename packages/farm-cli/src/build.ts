@@ -21,6 +21,7 @@ export interface BuildFarmOptions {
  */
 export async function buildFarm(options: BuildFarmOptions = {}) {
   const root = options.root || process.cwd();
+  const hasDeployOverride = options.preset !== undefined || options.target !== undefined;
 
   try {
     await withProductionNodeEnv(async () => {
@@ -49,7 +50,7 @@ export async function buildFarm(options: BuildFarmOptions = {}) {
       const config = await resolveConfig(userConfig, mode);
 
       // Override preset/target if provided via CLI
-      if (options.preset || options.target) {
+      if (hasDeployOverride) {
         const deploy = resolveDeployConfig(userConfig, {
           preset: options.preset as any,
           target: options.target,
@@ -62,7 +63,7 @@ export async function buildFarm(options: BuildFarmOptions = {}) {
       // also knows the preset and output directory; a second banner here
       // would only repeat it.
       await buildRuntimeResult.value.build(config, {
-        preset: config.preset,
+        preset: hasDeployOverride ? config.preset : undefined,
         root,
         productionVite: productionViteResult.value,
       });

@@ -470,7 +470,7 @@ export interface FarmPlugin<
   version?: string;
   enforce?: "pre" | "post";
 
-  /** Transform Farm config before it is resolved. */
+  /** Transform Farm config before the development or production pipeline is created. */
   configure?: (
     config: FarmConfig,
     context: FarmPluginContextFor<TIntegrationInstance, TIntegrationBound>,

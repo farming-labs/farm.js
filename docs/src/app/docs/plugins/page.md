@@ -134,16 +134,16 @@ export const frameworkPlugin = definePlugin({
 
 Only define the groups your plugin needs.
 
-| Surface     | Purpose                                                                        |
-| ----------- | ------------------------------------------------------------------------------ |
-| `configure` | Transform Farm config before resolution.                                       |
-| `setup`     | Create private, typed plugin state for one plugin manager.                     |
-| `runtime`   | Wrap Web `Request` and `Response` handling.                                    |
-| `router`    | Observe route discovery, generation, and matching.                             |
-| `render`    | Observe rendering or transform final HTML.                                     |
-| `build`     | Run around bundling and configure the Nitro build.                             |
-| `dev`       | Access the Vite server and HMR updates.                                        |
-| `client`    | Define browser setup, hydration, navigation, errors, performance, and cleanup. |
+| Surface     | Purpose                                                                         |
+| ----------- | ------------------------------------------------------------------------------- |
+| `configure` | Transform Farm config before the development or production pipeline is created. |
+| `setup`     | Create private, typed plugin state for one plugin manager.                      |
+| `runtime`   | Wrap Web `Request` and `Response` handling.                                     |
+| `router`    | Observe route discovery, generation, and matching.                              |
+| `render`    | Observe rendering or transform final HTML.                                      |
+| `build`     | Run around bundling and configure the Nitro build.                              |
+| `dev`       | Access the Vite server and HMR updates.                                         |
+| `client`    | Define browser setup, hydration, navigation, errors, performance, and cleanup.  |
 
 ## Complete lifecycle reference
 
@@ -154,7 +154,7 @@ Only define the groups your plugin needs.
 | `name`      | Yes      | Stable plugin identity. Package authors should namespace it, such as `acme:security`.  |
 | `version`   | No       | Optional plugin version metadata for package authors and tooling.                      |
 | `enforce`   | No       | Places the plugin in the `pre` or `post` ordering group. Omit it for normal order.     |
-| `configure` | No       | Receives Farm config before resolution and may return replacement config.              |
+| `configure` | No       | Receives Farm config before pipeline creation and may return replacement config.       |
 | `setup`     | No       | Runs once per plugin manager and returns private state inferred by every grouped hook. |
 | `runtime`   | No       | Handles portable Web `Request` and `Response` lifecycle work.                          |
 | `router`    | No       | Observes route discovery, route graph generation, and page matching.                   |
