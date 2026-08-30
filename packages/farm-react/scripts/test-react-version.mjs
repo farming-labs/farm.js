@@ -43,6 +43,7 @@ const testSource = String.raw`
     createCompiledComponent,
     createCompiledComponentWithFeatures,
     createCompilerKeyedArrayAppend,
+    createCompilerKeyedArrayBatchInsert,
     createCompilerKeyedArrayFilter,
     createCompilerKeyedArrayPositionUpdate,
     createCompilerKeyedArrayPrepend,
@@ -89,6 +90,7 @@ const testSource = String.raw`
   flushSync(() => root.unmount());
 
   let reverseCompatibilityRows = () => undefined;
+  let insertCompatibilityRows = () => undefined;
   let removeCompatibilityRow = () => undefined;
   let sortCompatibilityRows = () => undefined;
   let reorderExecutions = 0;
@@ -114,6 +116,16 @@ const testSource = String.raw`
             "remove",
             1,
             1,
+          ),
+        );
+      insertCompatibilityRows = () =>
+        state[0].set((previous) =>
+          createCompilerKeyedArrayBatchInsert(
+            previous,
+            previous.toSpliced,
+            1,
+            { id: "d", label: "Delta", rank: 4 },
+            { id: "e", label: "Epsilon", rank: 5 },
           ),
         );
       sortCompatibilityRows = () =>
@@ -180,6 +192,15 @@ const testSource = String.raw`
   await Promise.resolve();
   await Promise.resolve();
   assert.equal(reorderContainer.querySelector("[data-key='c']"), null);
+  assert.equal(reorderContainer.querySelector("li:first-child"), reorderBeta);
+  assert.equal(reorderContainer.querySelector("li:last-child"), reorderAlpha);
+  assert.equal(reorderExecutions, 1);
+  insertCompatibilityRows();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(reorderContainer.querySelectorAll("li").length, 4);
+  assert.equal(reorderContainer.querySelectorAll("li")[1].textContent, "Delta");
+  assert.equal(reorderContainer.querySelectorAll("li")[2].textContent, "Epsilon");
   assert.equal(reorderContainer.querySelector("li:first-child"), reorderBeta);
   assert.equal(reorderContainer.querySelector("li:last-child"), reorderAlpha);
   assert.equal(reorderExecutions, 1);

@@ -8,6 +8,7 @@ declare global {
     toSorted(compare?: (left: T, right: T) => number): T[];
     toSpliced(start: number, deleteCount: number): T[];
     toSpliced(start: number, deleteCount: number, item: T): T[];
+    toSpliced(start: number, deleteCount: number, ...items: T[]): T[];
     with(index: number, item: T): T[];
   }
 }
@@ -282,6 +283,38 @@ export function StandardTableBenchmark() {
           }}
         >
           Insert at runtime position (snapshot control)
+        </button>
+        <button
+          data-action="table-position-batch-insert"
+          type="button"
+          onClick={() => {
+            const nextSeed = seed + 1;
+            const additions = buildRows(64, nextSeed);
+            const position = 5_000;
+            setSeed(nextSeed);
+            setRows((current) => current.toSpliced(position, 0, ...additions));
+            setOperation("insert batch at runtime position");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Insert 64 at runtime position
+        </button>
+        <button
+          data-action="table-position-batch-insert-snapshot"
+          type="button"
+          onClick={() => {
+            const nextSeed = seed + 1;
+            const additions = buildRows(64, nextSeed);
+            const position = 5_000;
+            setSeed(nextSeed);
+            setRows((current) => {
+              return current.toSpliced(position, 0, ...additions);
+            });
+            setOperation("insert batch at runtime position (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Insert 64 at runtime position (snapshot control)
         </button>
         <button
           data-action="table-position-remove"

@@ -61,6 +61,8 @@ const [
   keyedPrependOn,
   keyedPositionOff,
   keyedPositionOn,
+  keyedBatchPositionOff,
+  keyedBatchPositionOn,
   keyedReorderOff,
   keyedReorderOn,
   keyedSortOff,
@@ -85,6 +87,8 @@ const [
   bundle("keyed-prepend.tsx", true),
   bundle("keyed-position.tsx", false),
   bundle("keyed-position.tsx", true),
+  bundle("keyed-batch-position.tsx", false),
+  bundle("keyed-batch-position.tsx", true),
   bundle("keyed-reorder.tsx", false),
   bundle("keyed-reorder.tsx", true),
   bundle("keyed-sort.tsx", false),
@@ -177,6 +181,19 @@ if (
   throw new Error(
     `Keyed position fixture did not retain its isolated position-hint runtime: rows=${keyedPositionOn.code.includes("FarmCompiledKeyedRows")}, feature=${keyedPositionOn.code.includes("keyed-rows:position-hinted")}, proof=${keyedPositionOn.code.includes("positionIndexIndependent")}.`,
   );
+}
+if (
+  !keyedBatchPositionOn.code.includes("FarmCompiledKeyedRows") ||
+  !keyedBatchPositionOn.code.includes("keyed-rows:batch-position-hinted") ||
+  !keyedBatchPositionOn.code.includes("positionIndexIndependent")
+) {
+  throw new Error("Keyed batch-position fixture did not retain its isolated batch runtime.");
+}
+if (
+  keyedPositionOn.code.includes("keyed-rows:batch-position-hinted") ||
+  keyedPositionOn.code.includes("createCompilerKeyedArrayBatchInsert")
+) {
+  throw new Error("Single-row position fixture retained the optional batch-insertion runtime.");
 }
 if (
   !keyedReorderOn.code.includes("FarmCompiledKeyedRows") ||
@@ -328,6 +345,23 @@ const results = {
         brotli: keyedPositionOn.brotli - keyedPositionOff.brotli,
       },
     },
+    keyedBatchPosition: {
+      compilerOff: {
+        raw: keyedBatchPositionOff.raw,
+        gzip: keyedBatchPositionOff.gzip,
+        brotli: keyedBatchPositionOff.brotli,
+      },
+      compilerOn: {
+        raw: keyedBatchPositionOn.raw,
+        gzip: keyedBatchPositionOn.gzip,
+        brotli: keyedBatchPositionOn.brotli,
+      },
+      compilerPremium: {
+        raw: keyedBatchPositionOn.raw - keyedBatchPositionOff.raw,
+        gzip: keyedBatchPositionOn.gzip - keyedBatchPositionOff.gzip,
+        brotli: keyedBatchPositionOn.brotli - keyedBatchPositionOff.brotli,
+      },
+    },
     keyedReorder: {
       compilerOff: {
         raw: keyedReorderOff.raw,
@@ -445,6 +479,13 @@ if (checkOnly) {
       maximum:
         (reference.fixtures.keyedPosition?.compilerPremium.gzip ??
           results.fixtures.keyedPosition.compilerPremium.gzip) + 256,
+    },
+    {
+      name: "keyed batch-position compiler premium",
+      current: results.fixtures.keyedBatchPosition.compilerPremium.gzip,
+      maximum:
+        (reference.fixtures.keyedBatchPosition?.compilerPremium.gzip ??
+          results.fixtures.keyedBatchPosition.compilerPremium.gzip) + 256,
     },
     {
       name: "keyed reorder compiler premium",

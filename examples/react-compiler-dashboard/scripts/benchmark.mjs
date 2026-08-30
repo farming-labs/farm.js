@@ -143,8 +143,8 @@ async function inspectBuild(compilerMode) {
       "The compiler build did not emit a keyed-array prepend hint.",
     );
     assert(
-      compilerReport.summary.keyedArrayPositionHints >= 4,
-      "The compiler build did not emit all four keyed-array exact-position hints.",
+      compilerReport.summary.keyedArrayPositionHints >= 5,
+      "The compiler build did not emit the keyed-array exact-position hints.",
     );
     assert(
       compilerReport.summary.keyedArrayReorderHints > 0,
@@ -606,6 +606,38 @@ async function measureTrial(browser, trial, compilerMode, port) {
               () =>
                 rowCount() === 10_001 &&
                 table.querySelectorAll("tbody tr")[9_001] === previousAtPosition,
+            );
+          },
+        );
+
+        const tablePositionBatchInsert = await measureTable(
+          async () => ensure10000(),
+          async () => {
+            const rows = table.querySelectorAll("tbody tr");
+            const before = rows[4_999];
+            const previousAtPosition = rows[5_000];
+            await runTableAction(
+              () => tableButton("table-position-batch-insert").click(),
+              () =>
+                rowCount() === 10_064 &&
+                table.querySelectorAll("tbody tr")[4_999] === before &&
+                table.querySelectorAll("tbody tr")[5_064] === previousAtPosition,
+            );
+          },
+        );
+
+        const tablePositionBatchInsertSnapshot = await measureTable(
+          async () => ensure10000(),
+          async () => {
+            const rows = table.querySelectorAll("tbody tr");
+            const before = rows[4_999];
+            const previousAtPosition = rows[5_000];
+            await runTableAction(
+              () => tableButton("table-position-batch-insert-snapshot").click(),
+              () =>
+                rowCount() === 10_064 &&
+                table.querySelectorAll("tbody tr")[4_999] === before &&
+                table.querySelectorAll("tbody tr")[5_064] === previousAtPosition,
             );
           },
         );
@@ -1142,6 +1174,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
             membership: tableMembership,
             prepend: tablePrepend,
             prependSnapshot: tablePrependSnapshot,
+            positionBatchInsert: tablePositionBatchInsert,
+            positionBatchInsertSnapshot: tablePositionBatchInsertSnapshot,
             positionInsert: tablePositionInsert,
             positionInsertSnapshot: tablePositionInsertSnapshot,
             positionRemove: tablePositionRemove,
@@ -1240,6 +1274,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
         membership: timingSummary(result.table.membership),
         prepend: timingSummary(result.table.prepend),
         prependSnapshot: timingSummary(result.table.prependSnapshot),
+        positionBatchInsert: timingSummary(result.table.positionBatchInsert),
+        positionBatchInsertSnapshot: timingSummary(result.table.positionBatchInsertSnapshot),
         positionInsert: timingSummary(result.table.positionInsert),
         positionInsertSnapshot: timingSummary(result.table.positionInsertSnapshot),
         positionRemove: timingSummary(result.table.positionRemove),
@@ -1334,6 +1370,8 @@ const tableMetrics = [
   "appendSnapshot",
   "prepend",
   "prependSnapshot",
+  "positionBatchInsert",
+  "positionBatchInsertSnapshot",
   "positionInsert",
   "positionInsertSnapshot",
   "positionRemove",
@@ -1582,6 +1620,29 @@ const keyedRollingWindowRegressions = keyedRollingWindowResults.filter(
     speedup < keyedRollingWindowMinimumSpeedup ||
     !Number.isFinite(snapshotSpeedup) ||
     snapshotSpeedup < keyedRollingWindowMinimumSnapshotSpeedup,
+);
+// A compiler-proven toSpliced(position, 0, ...items) insertion creates the incoming rows in one
+// fragment and leaves both retained sides untouched. Protect that exact 10,000-row/64-row workload
+// against React and the equivalent block-bodied compiled control without changing older gates.
+const keyedBatchInsertMinimumSpeedup = 4;
+const keyedBatchInsertMinimumSnapshotSpeedup = 1.5;
+const keyedBatchInsertResults = ["static", "hybrid"].map((mode) => {
+  const batchMedianMs = comparisons.table.positionBatchInsert[mode].medianMs;
+  const snapshotMedianMs = comparisons.table.positionBatchInsertSnapshot[mode].medianMs;
+  return {
+    batchMedianMs,
+    mode,
+    snapshotMedianMs,
+    snapshotSpeedup: snapshotMedianMs / batchMedianMs,
+    speedup: comparisons.table.positionBatchInsert[`${mode}VsBaseline`].speedup,
+  };
+});
+const keyedBatchInsertRegressions = keyedBatchInsertResults.filter(
+  ({ snapshotSpeedup, speedup }) =>
+    !Number.isFinite(speedup) ||
+    speedup < keyedBatchInsertMinimumSpeedup ||
+    !Number.isFinite(snapshotSpeedup) ||
+    snapshotSpeedup < keyedBatchInsertMinimumSnapshotSpeedup,
 );
 // Native toSpliced()/with() calls with event-local runtime positions expose one exact insertion,
 // removal, or replacement position. The hinted runtime should beat both React and an equivalent
@@ -1855,6 +1916,7 @@ const passed =
   keyedPrependRegressions.length === 0 &&
   keyedSliceRegressions.length === 0 &&
   keyedRollingWindowRegressions.length === 0 &&
+  keyedBatchInsertRegressions.length === 0 &&
   keyedPositionRegressions.length === 0 &&
   keyedRangeRemovalRegressions.length === 0 &&
   keyedReorderRegressions.length === 0 &&
@@ -1907,6 +1969,13 @@ const report = {
     regressions: keyedRollingWindowRegressions,
     results: keyedRollingWindowResults,
     status: keyedRollingWindowRegressions.length === 0 ? "PASS" : "FAIL",
+  },
+  keyedBatchInsertHintGate: {
+    minimumSnapshotSpeedup: keyedBatchInsertMinimumSnapshotSpeedup,
+    minimumSpeedup: keyedBatchInsertMinimumSpeedup,
+    regressions: keyedBatchInsertRegressions,
+    results: keyedBatchInsertResults,
+    status: keyedBatchInsertRegressions.length === 0 ? "PASS" : "FAIL",
   },
   keyedPositionHintGate: {
     insertMinimumSnapshotSpeedup: keyedPositionInsertMinimumSnapshotSpeedup,

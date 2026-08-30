@@ -1025,6 +1025,8 @@ Native immutable array methods can state an exact insertion, removal, or replace
 
 ```tsx
 setItems((current) => current.toSpliced(selectedIndex, 0, nextItem));
+setItems((current) => current.toSpliced(selectedIndex, 0, nextA, nextB));
+setItems((current) => current.toSpliced(selectedIndex, 0, ...incomingItems));
 setItems((current) => current.toSpliced(selectedIndex, 1));
 setItems((current) => current.toSpliced(selectedIndex, 25));
 setItems((current) => current.toSpliced(selectedIndex, 1, replacement));
@@ -1035,18 +1037,24 @@ At build time, Farm recognizes only concise functional setters whose position is
 safe-integer literal or a compiler-safe runtime expression. Identifiers, property reads,
 side-effect-free arithmetic and conditionals, and safe `Math` calls are supported. User-defined
 calls, assignments, update expressions, and other effectful forms are not transformed.
-`toSpliced()` must insert exactly one item with a zero delete count, remove one item or a contiguous
-range using a positive safe-integer literal delete count, or replace exactly one item with a delete
-count of one; `with()` must replace exactly one item. Farm preserves the original method lookup,
+`toSpliced()` must insert compiler-safe items with a zero delete count, remove one item or a
+contiguous range using a positive safe-integer literal delete count, or replace exactly one item
+with a delete count of one; `with()` must replace exactly one item. An explicit pair or a safe
+spread such as `...incomingItems` selects the batch path when at least two items are produced at
+runtime. Farm preserves the original method lookup,
 evaluates every argument once in its original order, and preserves the native call, return value,
 coercion, and thrown errors. If the method is not native, the evaluated position is not already a
 safe integer, or the removal count is dynamic or unsafe, the update still runs normally but no
 metadata is recorded.
 
 At update time, Farm validates the committed native source, result length, source token, normalized
-position, clamped removal count, and any incoming key before changing the DOM. An insertion creates
-one row at that position, preserves surrounding elements, and shifts only stored event indexes. A
-removal cleans up and removes only the known row or contiguous range while preserving every
+position, clamped removal count, and any incoming key before changing the DOM. For a batch, Farm
+computes every key, descriptor, binding snapshot, and detached host row before mutating the live
+tree. Duplicate incoming keys or collisions with existing keys therefore take complete
+reconciliation without a partial insertion. Valid rows are mounted in one document fragment;
+surrounding elements remain connected and only stored suffix indexes shift. A single insertion
+creates one row at that position. A removal cleans up and removes only the known row or contiguous
+range while preserving every
 surviving element. A same-key replacement patches that row in place; a new-key replacement creates
 and swaps one host row. The owner component does not rerun, and surviving row keys, descriptors,
 and bindings are not reread.
@@ -1059,8 +1067,9 @@ duplicate or reused keys, collection-reading bindings, React-owned rows, nested 
 conditionals, unrelated dirty dependencies, and failed runtime checks keep complete keyed
 reconciliation. Negative safe-integer positions and counts larger than the remaining suffix use the
 native method's normal clamping rules. No new option or component is required. Reports expose
-emitted sites as `keyedArrayPositionHints`; position-only modules retain a separate optional runtime
-capability.
+emitted sites as `keyedArrayPositionHints`. Batch insertions select a separate optional runtime
+capability, so modules with only the existing single-row position operations retain their previous
+runtime size.
 
 #### Keyed array reorder hints
 

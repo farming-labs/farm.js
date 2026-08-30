@@ -53,6 +53,13 @@ interface CompilerKeyedArrayPositionHint {
   readonly position: number;
 }
 
+interface CompilerKeyedArrayBatchInsertHint {
+  readonly sourceToken: object;
+  readonly sourceLength: number;
+  readonly resultLength: number;
+  readonly position: number;
+}
+
 interface CompilerKeyedArrayReorderHint {
   readonly kind: "reverse" | "sort";
   readonly sourceToken: object;
@@ -99,6 +106,10 @@ const COMPILER_KEYED_ARRAY_ROLLING_WINDOWS = /* @__PURE__ */ new WeakMap<
 const COMPILER_KEYED_ARRAY_POSITIONS = /* @__PURE__ */ new WeakMap<
   object,
   CompilerKeyedArrayPositionHint
+>();
+const COMPILER_KEYED_ARRAY_BATCH_INSERTS = /* @__PURE__ */ new WeakMap<
+  object,
+  CompilerKeyedArrayBatchInsertHint
 >();
 const COMPILER_KEYED_ARRAY_REORDERS = /* @__PURE__ */ new WeakMap<
   object,
@@ -334,6 +345,28 @@ function compilerKeyedArrayPosition(
       (update.resultLength >= expectedLength || update.position > update.resultLength)) ||
     (update.kind === "replace" &&
       (update.position >= expectedLength || update.resultLength !== expectedLength))
+  ) {
+    return undefined;
+  }
+  return update;
+}
+
+function compilerKeyedArrayBatchInsert(
+  value: unknown,
+  sourceToken: object | undefined,
+  expectedLength: number,
+): CompilerKeyedArrayBatchInsertHint | undefined {
+  const target = compilerObject(value);
+  if (!target || !sourceToken || !Array.isArray(value)) return undefined;
+  const update = COMPILER_KEYED_ARRAY_BATCH_INSERTS.get(target);
+  if (
+    !update ||
+    update.sourceToken !== sourceToken ||
+    update.sourceLength !== expectedLength ||
+    update.resultLength !== value.length ||
+    update.resultLength < expectedLength + 2 ||
+    update.position < 0 ||
+    update.position > expectedLength
   ) {
     return undefined;
   }
@@ -743,6 +776,57 @@ export function createCompilerKeyedArrayPositionUpdate(
       sourceLength,
       resultLength: value.length,
       position: normalizedPosition,
+    });
+  } catch {
+    // Metadata must never change the result of a successful native update.
+  }
+  return value;
+}
+
+/** @internal Executes a native exact-position batch insertion and records it. */
+export function createCompilerKeyedArrayBatchInsert(
+  previous: unknown,
+  method: unknown,
+  position: number,
+  ...items: readonly unknown[]
+): unknown {
+  const value = NATIVE_REFLECT_APPLY(
+    method as (...values: readonly unknown[]) => unknown,
+    previous,
+    [position, 0, ...items],
+  );
+
+  try {
+    const previousTarget = compilerObject(previous);
+    const valueTarget = compilerObject(value);
+    if (
+      !previousTarget ||
+      !valueTarget ||
+      !COMPILER_KEYED_COMMITTED_COLLECTIONS.has(previousTarget) ||
+      !Array.isArray(previous) ||
+      !Array.isArray(value) ||
+      Object.getPrototypeOf(previous) !== NATIVE_ARRAY_PROTOTYPE ||
+      Object.getPrototypeOf(value) !== NATIVE_ARRAY_PROTOTYPE ||
+      method !== NATIVE_ARRAY_TO_SPLICED ||
+      !Number.isSafeInteger(position) ||
+      items.length < 2 ||
+      value.length !== previous.length + items.length
+    ) {
+      return value;
+    }
+    for (let index = 0; index < previous.length; index += 1) {
+      if (!Object.prototype.hasOwnProperty.call(previous, index)) return value;
+    }
+    const sourceToken = compilerKeyedCollectionToken(previousTarget);
+    if (!sourceToken) return value;
+    COMPILER_KEYED_ARRAY_BATCH_INSERTS.set(valueTarget, {
+      sourceToken,
+      sourceLength: previous.length,
+      resultLength: value.length,
+      position:
+        position < 0
+          ? Math.max(previous.length + position, 0)
+          : Math.min(position, previous.length),
     });
   } catch {
     // Metadata must never change the result of a successful native update.
@@ -4060,6 +4144,11 @@ const keyedPositionUpdateRuntime: KeyedUpdateRuntime = {
   position: reconcileCompilerKeyedArrayPosition,
 };
 
+const keyedBatchPositionUpdateRuntime: KeyedUpdateRuntime = {
+  ...keyedUpdateRuntime,
+  position: reconcileCompilerKeyedArrayPositionWithBatch,
+};
+
 const keyedReorderUpdateRuntime: KeyedUpdateRuntime = {
   ...keyedUpdateRuntime,
   reorder: reconcileCompilerKeyedArrayReorder,
@@ -4074,6 +4163,11 @@ const keyedEveryUpdateRuntime: KeyedUpdateRuntime = {
   ...keyedCompleteUpdateRuntime,
   position: reconcileCompilerKeyedArrayPosition,
   reorder: reconcileCompilerKeyedArrayReorder,
+};
+
+const keyedBatchEveryUpdateRuntime: KeyedUpdateRuntime = {
+  ...keyedEveryUpdateRuntime,
+  position: reconcileCompilerKeyedArrayPositionWithBatch,
 };
 
 interface KeyedRowsRuntimeOptions {
@@ -4419,6 +4513,90 @@ function reconcileCompilerKeyedArrayPosition(
   previous.element.replaceWith(replacement.element);
   previousInstances[update.position] = replacement;
   return new Map(previousInstances.map((instance) => [instance.key, instance]));
+}
+
+function reconcileCompilerKeyedArrayBatchInsert(
+  props: CompilerKeyedRowsBlockProps,
+  dirtyState: ReadonlySet<number>,
+  collectionToken: object | undefined,
+  instances: ReadonlyMap<string, CompilerKeyedRowInstance>,
+  root: Element,
+  reactOwnedRows: boolean,
+): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined {
+  if (
+    reactOwnedRows ||
+    props.hostBlocks ||
+    (props.conditionals?.length || 0) > 0 ||
+    !props.positionIndexIndependent ||
+    props.collectionDependency === undefined
+  ) {
+    return undefined;
+  }
+  const collectionDependency = props.collectionDependency;
+  if (props.bindings.some((binding) => binding.dependencies?.includes(collectionDependency))) {
+    return undefined;
+  }
+  const dependencies = props.dependencies || props.structureDependencies;
+  const relevantDirty = (dependencies || []).filter((index) => dirtyState.has(index));
+  if (relevantDirty.length !== 1 || relevantDirty[0] !== collectionDependency) {
+    return undefined;
+  }
+
+  const finalValue = props.items();
+  const update = compilerKeyedArrayBatchInsert(finalValue, collectionToken, instances.size);
+  if (!update || !Array.isArray(finalValue)) return undefined;
+  const previousInstances = [...instances.values()];
+  const insertCount = update.resultLength - update.sourceLength;
+  for (let sourceIndex = 0; sourceIndex < update.sourceLength; sourceIndex += 1) {
+    const instance = previousInstances[sourceIndex];
+    const resultIndex = sourceIndex < update.position ? sourceIndex : sourceIndex + insertCount;
+    if (
+      !instance ||
+      instance.index !== sourceIndex ||
+      !Object.is(instance.item, finalValue[resultIndex])
+    ) {
+      return undefined;
+    }
+  }
+  const knownKeys = new Set(instances.keys());
+  const incoming: CompilerKeyedRowInstance[] = [];
+  try {
+    for (let offset = 0; offset < insertCount; offset += 1) {
+      const index = update.position + offset;
+      const item = finalValue[index];
+      const key = keyedRowIdentity(props.rowKey(item, index));
+      if (knownKeys.has(key)) return undefined;
+      knownKeys.add(key);
+      const descriptor = props.create(item, index);
+      incoming.push({
+        key,
+        element: createCompilerHostElement(root.ownerDocument, descriptor),
+        values: readKeyedRowBindingValues(props, item, index),
+        item,
+        index,
+        conditionalValues: EMPTY_KEYED_ROW_CONDITIONAL_VALUES,
+      });
+    }
+  } catch {
+    return undefined;
+  }
+
+  const fragment = root.ownerDocument.createDocumentFragment();
+  for (const instance of incoming) fragment.append(instance.element);
+  root.insertBefore(fragment, previousInstances[update.position]?.element || null);
+  previousInstances.splice(update.position, 0, ...incoming);
+  for (let index = update.position + insertCount; index < previousInstances.length; index += 1) {
+    previousInstances[index].index = index;
+  }
+  return new Map(previousInstances.map((instance) => [instance.key, instance]));
+}
+
+function reconcileCompilerKeyedArrayPositionWithBatch(
+  ...args: Parameters<typeof reconcileCompilerKeyedArrayPosition>
+): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined {
+  return (
+    reconcileCompilerKeyedArrayBatchInsert(...args) || reconcileCompilerKeyedArrayPosition(...args)
+  );
 }
 
 function reconcileCompilerKeyedArrayReorder(
@@ -6381,6 +6559,15 @@ export const keyedRowsPositionHintedRuntimeFeature: CompilerRuntimeFeature = {
   }),
 };
 
+export const keyedRowsBatchPositionHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:batch-position-hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner, {
+      keyedUpdates: keyedBatchPositionUpdateRuntime,
+    }),
+  }),
+};
+
 export const keyedRowsReorderHintedRuntimeFeature: CompilerRuntimeFeature = {
   name: "keyed-rows:reorder-hinted",
   create: (owner) => ({
@@ -6404,6 +6591,15 @@ export const keyedRowsEveryHintedRuntimeFeature: CompilerRuntimeFeature = {
   create: (owner) => ({
     KeyedRows: createKeyedRowsBlockComponent(owner, {
       keyedUpdates: keyedEveryUpdateRuntime,
+    }),
+  }),
+};
+
+export const keyedRowsBatchEveryHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:batch-every-hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner, {
+      keyedUpdates: keyedBatchEveryUpdateRuntime,
     }),
   }),
 };
@@ -6464,6 +6660,16 @@ export const keyedRowsConditionalPositionHintedRuntimeFeature: CompilerRuntimeFe
   }),
 };
 
+export const keyedRowsConditionalBatchPositionHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:conditional:batch-position-hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner, {
+      conditionals: createKeyedRowConditionalRuntime(),
+      keyedUpdates: keyedBatchPositionUpdateRuntime,
+    }),
+  }),
+};
+
 export const keyedRowsConditionalReorderHintedRuntimeFeature: CompilerRuntimeFeature = {
   name: "keyed-rows:conditional:reorder-hinted",
   create: (owner) => ({
@@ -6490,6 +6696,16 @@ export const keyedRowsConditionalEveryHintedRuntimeFeature: CompilerRuntimeFeatu
     KeyedRows: createKeyedRowsBlockComponent(owner, {
       conditionals: createKeyedRowConditionalRuntime(),
       keyedUpdates: keyedEveryUpdateRuntime,
+    }),
+  }),
+};
+
+export const keyedRowsConditionalBatchEveryHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:conditional:batch-every-hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner, {
+      conditionals: createKeyedRowConditionalRuntime(),
+      keyedUpdates: keyedBatchEveryUpdateRuntime,
     }),
   }),
 };
@@ -6553,6 +6769,16 @@ export const keyedRowsHostPositionHintedRuntimeFeature: CompilerRuntimeFeature =
   }),
 };
 
+export const keyedRowsHostBatchPositionHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:host:batch-position-hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner, {
+      hostBlocks: createKeyedRowHostRuntime(),
+      keyedUpdates: keyedBatchPositionUpdateRuntime,
+    }),
+  }),
+};
+
 export const keyedRowsHostReorderHintedRuntimeFeature: CompilerRuntimeFeature = {
   name: "keyed-rows:host:reorder-hinted",
   create: (owner) => ({
@@ -6579,6 +6805,16 @@ export const keyedRowsHostEveryHintedRuntimeFeature: CompilerRuntimeFeature = {
     KeyedRows: createKeyedRowsBlockComponent(owner, {
       hostBlocks: createKeyedRowHostRuntime(),
       keyedUpdates: keyedEveryUpdateRuntime,
+    }),
+  }),
+};
+
+export const keyedRowsHostBatchEveryHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:host:batch-every-hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner, {
+      hostBlocks: createKeyedRowHostRuntime(),
+      keyedUpdates: keyedBatchEveryUpdateRuntime,
     }),
   }),
 };
@@ -6645,6 +6881,17 @@ export const keyedRowsCompletePositionHintedRuntimeFeature: CompilerRuntimeFeatu
   }),
 };
 
+export const keyedRowsCompleteBatchPositionHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:complete:batch-position-hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner, {
+      conditionals: createKeyedRowConditionalRuntime(),
+      hostBlocks: createKeyedRowHostRuntime(),
+      keyedUpdates: keyedBatchPositionUpdateRuntime,
+    }),
+  }),
+};
+
 export const keyedRowsCompleteReorderHintedRuntimeFeature: CompilerRuntimeFeature = {
   name: "keyed-rows:complete:reorder-hinted",
   create: (owner) => ({
@@ -6674,6 +6921,17 @@ export const keyedRowsCompleteEveryHintedRuntimeFeature: CompilerRuntimeFeature 
       conditionals: createKeyedRowConditionalRuntime(),
       hostBlocks: createKeyedRowHostRuntime(),
       keyedUpdates: keyedEveryUpdateRuntime,
+    }),
+  }),
+};
+
+export const keyedRowsCompleteBatchEveryHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:complete:batch-every-hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner, {
+      conditionals: createKeyedRowConditionalRuntime(),
+      hostBlocks: createKeyedRowHostRuntime(),
+      keyedUpdates: keyedBatchEveryUpdateRuntime,
     }),
   }),
 };
@@ -7293,7 +7551,7 @@ const COMPLETE_RUNTIME_FEATURES: readonly CompilerRuntimeFeature[] = [
   hostConditionalRuntimeFeature,
   conditionalRangesRuntimeFeature,
   keyedListRuntimeFeature,
-  keyedRowsCompleteEveryHintedRuntimeFeature,
+  keyedRowsCompleteBatchEveryHintedRuntimeFeature,
   keyedRangesRuntimeFeature,
   mixedRangesRuntimeFeature,
   componentRuntimeFeature,
