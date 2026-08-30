@@ -865,14 +865,14 @@ export function normalizeRevalidatePath(routePath: string): string {
   }
 
   try {
-    if (/^https?:\/\//.test(normalized)) {
+    if (/^https?:\/\//i.test(normalized)) {
       normalized = new URL(normalized).pathname;
     }
   } catch {
     // Keep the original path if URL parsing fails.
   }
 
-  normalized = normalized.split("?")[0] ?? normalized;
+  normalized = normalized.split(/[?#]/, 1)[0] ?? normalized;
   normalized = normalized.startsWith("/") ? normalized : `/${normalized}`;
   normalized = normalized.replace(/\/{2,}/g, "/");
   if (normalized.length > 1) {
