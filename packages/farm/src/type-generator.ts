@@ -85,21 +85,28 @@ export class APITypeGenerator {
   private extractExportedMethods(content: string): string[] {
     const methods: string[] = [];
     const httpMethods = ["GET", "HEAD", "QUERY", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"];
+    const namedExports = new Set<string>();
+
+    for (const match of content.matchAll(/export\s*\{([\s\S]*?)\}/g)) {
+      for (const specifier of match[1].split(",")) {
+        const normalized = specifier.trim().replace(/^type\s+/, "");
+        if (!normalized) continue;
+
+        const alias = normalized.match(/^([A-Za-z_$][\w$]*)\s+as\s+([A-Za-z_$][\w$]*)$/);
+        const exportedName = alias?.[2] ?? normalized.match(/^([A-Za-z_$][\w$]*)$/)?.[1];
+        if (exportedName) namedExports.add(exportedName);
+      }
+    }
 
     for (const method of httpMethods) {
-      // Look for export const METHOD = or export { METHOD }
+      // Look for a direct declaration or the name exposed by an export list.
       const patterns = [
         new RegExp(`export\\s+const\\s+${method}\\s*=`, "g"),
         new RegExp(`export\\s+(?:async\\s+)?function\\s+${method}\\s*\\(`, "g"),
-        new RegExp(`export\\s*{\\s*${method}\\s*}`, "g"),
-        new RegExp(`export\\s*{\\s*${method}\\s*as\\s+\\w+\\s*}`, "g"),
       ];
 
-      for (const pattern of patterns) {
-        if (pattern.test(content)) {
-          methods.push(method);
-          break;
-        }
+      if (namedExports.has(method) || patterns.some((pattern) => pattern.test(content))) {
+        methods.push(method);
       }
     }
 

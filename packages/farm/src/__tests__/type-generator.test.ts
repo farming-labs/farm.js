@@ -104,4 +104,35 @@ describe("APITypeGenerator", () => {
     expect(content).toContain("profile: {");
     expect(content).toContain("query: typeof QUERY_profile;");
   });
+
+  it("detects the HTTP names exposed by export lists", () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "farm-api-types-"));
+    const appDir = path.join(root, "src", "app");
+    const aliasedRouteDir = path.join(appDir, "api", "aliased");
+    const listedRouteDir = path.join(appDir, "api", "listed");
+    const renamedRouteDir = path.join(appDir, "api", "renamed");
+    mkdirSync(aliasedRouteDir, { recursive: true });
+    mkdirSync(listedRouteDir, { recursive: true });
+    mkdirSync(renamedRouteDir, { recursive: true });
+
+    writeFileSync(
+      path.join(aliasedRouteDir, "route.ts"),
+      "const handler = async () => new Response('ok');\nexport { handler as GET };\n",
+    );
+    writeFileSync(
+      path.join(listedRouteDir, "route.ts"),
+      "const GET = async () => new Response('ok');\nconst POST = GET;\nexport { GET, POST };\n",
+    );
+    writeFileSync(
+      path.join(renamedRouteDir, "route.ts"),
+      "const GET = async () => new Response('ok');\nexport { GET as handler };\n",
+    );
+
+    const generator = new APITypeGenerator(appDir);
+    const routes = generator.scanAPIRoutes();
+
+    expect(routes.find((route) => route.path === "/api/aliased")?.methods).toEqual(["GET"]);
+    expect(routes.find((route) => route.path === "/api/listed")?.methods).toEqual(["GET", "POST"]);
+    expect(routes.some((route) => route.path === "/api/renamed")).toBe(false);
+  });
 });
