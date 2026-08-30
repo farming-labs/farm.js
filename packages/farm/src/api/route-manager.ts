@@ -18,6 +18,7 @@ import {
   resolveAPIRouteEndpoint,
   type APIRouteMatch,
 } from "./runtime";
+import { isFarmAPIRouteFileName } from "./route-files";
 
 export interface APIRoute extends FarmRouteRuntimeConfig {
   path: string;
@@ -115,11 +116,7 @@ export class APIRouteManager {
 
       if (entry.isDirectory()) {
         files.push(...this.findRouteFiles(fullPath));
-      } else if (
-        entry.name === "route.ts" ||
-        entry.name === "route.tsx" ||
-        entry.name === "route.js"
-      ) {
+      } else if (isFarmAPIRouteFileName(entry.name)) {
         files.push(fullPath);
       }
     }

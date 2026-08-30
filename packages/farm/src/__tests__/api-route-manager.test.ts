@@ -19,6 +19,27 @@ afterEach(() => {
 });
 
 describe("APIRouteManager", () => {
+  it("discovers JSX route files", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-api-route-"));
+    tempDirs.push(root);
+
+    const routeDir = path.join(root, "api", "jsx");
+    fs.mkdirSync(routeDir, { recursive: true });
+    const routeFile = path.join(routeDir, "route.jsx");
+    fs.writeFileSync(routeFile, "export const GET = () => new Response('jsx');\n");
+
+    const manager = new APIRouteManager(root, {
+      ssrLoadModule: async (filePath: string) => {
+        expect(filePath).toBe(routeFile);
+        return { GET: async () => new Response("jsx") };
+      },
+    } as any);
+
+    await manager.discoverRoutes();
+
+    expect(manager.getRoutes().get("/api/jsx")?.methods).toEqual(["GET"]);
+  });
+
   it("uses GET for HEAD requests and strips the response body", async () => {
     const manager = new APIRouteManager("/tmp/farm-api-head-test");
     const getHandler = async () =>
