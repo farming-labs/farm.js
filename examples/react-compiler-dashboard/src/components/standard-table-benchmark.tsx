@@ -317,6 +317,38 @@ export function StandardTableBenchmark() {
           Insert 64 at runtime position (snapshot control)
         </button>
         <button
+          data-action="table-position-window-replace"
+          type="button"
+          onClick={() => {
+            const nextSeed = seed + 1;
+            const replacements = buildRows(64, nextSeed);
+            const position = 5_000;
+            setSeed(nextSeed);
+            setRows((current) => current.toSpliced(position, 64, ...replacements));
+            setOperation("replace 64-row runtime window");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Replace 64-row runtime window
+        </button>
+        <button
+          data-action="table-position-window-replace-snapshot"
+          type="button"
+          onClick={() => {
+            const nextSeed = seed + 1;
+            const replacements = buildRows(64, nextSeed);
+            const position = 5_000;
+            setSeed(nextSeed);
+            setRows((current) => {
+              return current.toSpliced(position, 64, ...replacements);
+            });
+            setOperation("replace 64-row runtime window (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Replace 64-row runtime window (snapshot control)
+        </button>
+        <button
           data-action="table-position-remove"
           type="button"
           onClick={() => {

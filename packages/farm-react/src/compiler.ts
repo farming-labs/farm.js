@@ -369,10 +369,12 @@ type CompilerRuntimeFeatureName =
   | "keyed-rows-hinted"
   | "keyed-rows-position-hinted"
   | "keyed-rows-batch-position-hinted"
+  | "keyed-rows-window-position-hinted"
   | "keyed-rows-reorder-hinted"
   | "keyed-rows-all-hinted"
   | "keyed-rows-every-hinted"
   | "keyed-rows-batch-every-hinted"
+  | "keyed-rows-window-every-hinted"
   | "keyed-rows-filter-hinted"
   | "keyed-rows-prepend-hinted"
   | "keyed-rows-filter-prepend-hinted"
@@ -380,10 +382,12 @@ type CompilerRuntimeFeatureName =
   | "keyed-rows-conditional-hinted"
   | "keyed-rows-conditional-position-hinted"
   | "keyed-rows-conditional-batch-position-hinted"
+  | "keyed-rows-conditional-window-position-hinted"
   | "keyed-rows-conditional-reorder-hinted"
   | "keyed-rows-conditional-all-hinted"
   | "keyed-rows-conditional-every-hinted"
   | "keyed-rows-conditional-batch-every-hinted"
+  | "keyed-rows-conditional-window-every-hinted"
   | "keyed-rows-conditional-filter-hinted"
   | "keyed-rows-conditional-prepend-hinted"
   | "keyed-rows-conditional-filter-prepend-hinted"
@@ -391,10 +395,12 @@ type CompilerRuntimeFeatureName =
   | "keyed-rows-host-hinted"
   | "keyed-rows-host-position-hinted"
   | "keyed-rows-host-batch-position-hinted"
+  | "keyed-rows-host-window-position-hinted"
   | "keyed-rows-host-reorder-hinted"
   | "keyed-rows-host-all-hinted"
   | "keyed-rows-host-every-hinted"
   | "keyed-rows-host-batch-every-hinted"
+  | "keyed-rows-host-window-every-hinted"
   | "keyed-rows-host-filter-hinted"
   | "keyed-rows-host-prepend-hinted"
   | "keyed-rows-host-filter-prepend-hinted"
@@ -402,10 +408,12 @@ type CompilerRuntimeFeatureName =
   | "keyed-rows-complete-hinted"
   | "keyed-rows-complete-position-hinted"
   | "keyed-rows-complete-batch-position-hinted"
+  | "keyed-rows-complete-window-position-hinted"
   | "keyed-rows-complete-reorder-hinted"
   | "keyed-rows-complete-all-hinted"
   | "keyed-rows-complete-every-hinted"
   | "keyed-rows-complete-batch-every-hinted"
+  | "keyed-rows-complete-window-every-hinted"
   | "keyed-rows-complete-filter-hinted"
   | "keyed-rows-complete-prepend-hinted"
   | "keyed-rows-complete-filter-prepend-hinted"
@@ -422,10 +430,12 @@ const COMPILER_RUNTIME_FEATURE_EXPORTS: Record<CompilerRuntimeFeatureName, strin
   "keyed-rows-hinted": "keyedRowsHintedRuntimeFeature",
   "keyed-rows-position-hinted": "keyedRowsPositionHintedRuntimeFeature",
   "keyed-rows-batch-position-hinted": "keyedRowsBatchPositionHintedRuntimeFeature",
+  "keyed-rows-window-position-hinted": "keyedRowsWindowPositionHintedRuntimeFeature",
   "keyed-rows-reorder-hinted": "keyedRowsReorderHintedRuntimeFeature",
   "keyed-rows-all-hinted": "keyedRowsAllHintedRuntimeFeature",
   "keyed-rows-every-hinted": "keyedRowsEveryHintedRuntimeFeature",
   "keyed-rows-batch-every-hinted": "keyedRowsBatchEveryHintedRuntimeFeature",
+  "keyed-rows-window-every-hinted": "keyedRowsWindowEveryHintedRuntimeFeature",
   "keyed-rows-filter-hinted": "keyedRowsFilterHintedRuntimeFeature",
   "keyed-rows-prepend-hinted": "keyedRowsPrependHintedRuntimeFeature",
   "keyed-rows-filter-prepend-hinted": "keyedRowsFilterPrependHintedRuntimeFeature",
@@ -434,10 +444,14 @@ const COMPILER_RUNTIME_FEATURE_EXPORTS: Record<CompilerRuntimeFeatureName, strin
   "keyed-rows-conditional-position-hinted": "keyedRowsConditionalPositionHintedRuntimeFeature",
   "keyed-rows-conditional-batch-position-hinted":
     "keyedRowsConditionalBatchPositionHintedRuntimeFeature",
+  "keyed-rows-conditional-window-position-hinted":
+    "keyedRowsConditionalWindowPositionHintedRuntimeFeature",
   "keyed-rows-conditional-reorder-hinted": "keyedRowsConditionalReorderHintedRuntimeFeature",
   "keyed-rows-conditional-all-hinted": "keyedRowsConditionalAllHintedRuntimeFeature",
   "keyed-rows-conditional-every-hinted": "keyedRowsConditionalEveryHintedRuntimeFeature",
   "keyed-rows-conditional-batch-every-hinted": "keyedRowsConditionalBatchEveryHintedRuntimeFeature",
+  "keyed-rows-conditional-window-every-hinted":
+    "keyedRowsConditionalWindowEveryHintedRuntimeFeature",
   "keyed-rows-conditional-filter-hinted": "keyedRowsConditionalFilterHintedRuntimeFeature",
   "keyed-rows-conditional-prepend-hinted": "keyedRowsConditionalPrependHintedRuntimeFeature",
   "keyed-rows-conditional-filter-prepend-hinted":
@@ -446,10 +460,12 @@ const COMPILER_RUNTIME_FEATURE_EXPORTS: Record<CompilerRuntimeFeatureName, strin
   "keyed-rows-host-hinted": "keyedRowsHostHintedRuntimeFeature",
   "keyed-rows-host-position-hinted": "keyedRowsHostPositionHintedRuntimeFeature",
   "keyed-rows-host-batch-position-hinted": "keyedRowsHostBatchPositionHintedRuntimeFeature",
+  "keyed-rows-host-window-position-hinted": "keyedRowsHostWindowPositionHintedRuntimeFeature",
   "keyed-rows-host-reorder-hinted": "keyedRowsHostReorderHintedRuntimeFeature",
   "keyed-rows-host-all-hinted": "keyedRowsHostAllHintedRuntimeFeature",
   "keyed-rows-host-every-hinted": "keyedRowsHostEveryHintedRuntimeFeature",
   "keyed-rows-host-batch-every-hinted": "keyedRowsHostBatchEveryHintedRuntimeFeature",
+  "keyed-rows-host-window-every-hinted": "keyedRowsHostWindowEveryHintedRuntimeFeature",
   "keyed-rows-host-filter-hinted": "keyedRowsHostFilterHintedRuntimeFeature",
   "keyed-rows-host-prepend-hinted": "keyedRowsHostPrependHintedRuntimeFeature",
   "keyed-rows-host-filter-prepend-hinted": "keyedRowsHostFilterPrependHintedRuntimeFeature",
@@ -457,10 +473,13 @@ const COMPILER_RUNTIME_FEATURE_EXPORTS: Record<CompilerRuntimeFeatureName, strin
   "keyed-rows-complete-hinted": "keyedRowsCompleteHintedRuntimeFeature",
   "keyed-rows-complete-position-hinted": "keyedRowsCompletePositionHintedRuntimeFeature",
   "keyed-rows-complete-batch-position-hinted": "keyedRowsCompleteBatchPositionHintedRuntimeFeature",
+  "keyed-rows-complete-window-position-hinted":
+    "keyedRowsCompleteWindowPositionHintedRuntimeFeature",
   "keyed-rows-complete-reorder-hinted": "keyedRowsCompleteReorderHintedRuntimeFeature",
   "keyed-rows-complete-all-hinted": "keyedRowsCompleteAllHintedRuntimeFeature",
   "keyed-rows-complete-every-hinted": "keyedRowsCompleteEveryHintedRuntimeFeature",
   "keyed-rows-complete-batch-every-hinted": "keyedRowsCompleteBatchEveryHintedRuntimeFeature",
+  "keyed-rows-complete-window-every-hinted": "keyedRowsCompleteWindowEveryHintedRuntimeFeature",
   "keyed-rows-complete-filter-hinted": "keyedRowsCompleteFilterHintedRuntimeFeature",
   "keyed-rows-complete-prepend-hinted": "keyedRowsCompletePrependHintedRuntimeFeature",
   "keyed-rows-complete-filter-prepend-hinted": "keyedRowsCompleteFilterPrependHintedRuntimeFeature",
@@ -476,6 +495,7 @@ function runtimeFeaturesForPlans(
   keyedArrayPrependHints: boolean,
   keyedArrayPositionHints: boolean,
   keyedArrayBatchInsertHints: boolean,
+  keyedArrayWindowReplaceHints: boolean,
   keyedArrayReorderHints: boolean,
   keyedArrayRollingWindowHints: boolean,
 ): CompilerRuntimeFeatureName[] {
@@ -503,28 +523,32 @@ function runtimeFeaturesForPlans(
             : "keyed-rows";
     const arrayRangeHints =
       keyedArrayRollingWindowHints || keyedArrayFilterHints || keyedArrayPrependHints;
-    const hintSuffix = keyedArrayBatchInsertHints
+    const hintSuffix = keyedArrayWindowReplaceHints
       ? arrayRangeHints || keyedArrayReorderHints
-        ? "-batch-every-hinted"
-        : "-batch-position-hinted"
-      : (keyedArrayPositionHints && (arrayRangeHints || keyedArrayReorderHints)) ||
-          (keyedArrayReorderHints && arrayRangeHints)
-        ? "-every-hinted"
-        : keyedArrayRollingWindowHints
-          ? "-all-hinted"
-          : keyedArrayPositionHints
-            ? "-position-hinted"
-            : keyedArrayReorderHints
-              ? "-reorder-hinted"
-              : keyedArrayFilterHints && keyedArrayPrependHints
-                ? "-filter-prepend-hinted"
-                : keyedArrayFilterHints
-                  ? "-filter-hinted"
-                  : keyedArrayPrependHints
-                    ? "-prepend-hinted"
-                    : keyedMapUpdateHints
-                      ? "-hinted"
-                      : "";
+        ? "-window-every-hinted"
+        : "-window-position-hinted"
+      : keyedArrayBatchInsertHints
+        ? arrayRangeHints || keyedArrayReorderHints
+          ? "-batch-every-hinted"
+          : "-batch-position-hinted"
+        : (keyedArrayPositionHints && (arrayRangeHints || keyedArrayReorderHints)) ||
+            (keyedArrayReorderHints && arrayRangeHints)
+          ? "-every-hinted"
+          : keyedArrayRollingWindowHints
+            ? "-all-hinted"
+            : keyedArrayPositionHints
+              ? "-position-hinted"
+              : keyedArrayReorderHints
+                ? "-reorder-hinted"
+                : keyedArrayFilterHints && keyedArrayPrependHints
+                  ? "-filter-prepend-hinted"
+                  : keyedArrayFilterHints
+                    ? "-filter-hinted"
+                    : keyedArrayPrependHints
+                      ? "-prepend-hinted"
+                      : keyedMapUpdateHints
+                        ? "-hinted"
+                        : "";
     features.add(`${keyedRowsFeature}${hintSuffix}` as CompilerRuntimeFeatureName);
   }
   return [...features].sort();
@@ -1614,11 +1638,13 @@ function rewriteKeyedArrayPositionHints(
   statesBySetter: ReadonlyMap<string, StateBinding>,
   helperIdentifier: t.Identifier,
   batchInsertHelperIdentifier: t.Identifier,
+  windowReplaceHelperIdentifier: t.Identifier,
   safeGlobals: ReadonlySet<string>,
 ): {
   root: t.JSXElement;
   count: number;
   batchInsertCount: number;
+  windowReplaceCount: number;
   stateIndices: ReadonlySet<number>;
 } {
   if (hintedStateIndices.size === 0) {
@@ -1626,6 +1652,7 @@ function rewriteKeyedArrayPositionHints(
       root: t.cloneNode(root, true),
       count: 0,
       batchInsertCount: 0,
+      windowReplaceCount: 0,
       stateIndices: new Set(),
     };
   }
@@ -1633,6 +1660,7 @@ function rewriteKeyedArrayPositionHints(
   const stateIndices = new Set<number>();
   let count = 0;
   let batchInsertCount = 0;
+  let windowReplaceCount = 0;
   traverse(file, {
     CallExpression(path) {
       const callee = path.get("callee");
@@ -1659,35 +1687,46 @@ function rewriteKeyedArrayPositionHints(
 
       const methodName = updater.body.callee.property.name;
       const args = updater.body.arguments;
+      const toSplicedDeleteCount =
+        methodName === "toSpliced" && args.length >= 2 && t.isNumericLiteral(args[1])
+          ? args[1].value
+          : undefined;
       const isBatchInsert =
         methodName === "toSpliced" &&
         args.length >= 3 &&
         t.isNumericLiteral(args[1], { value: 0 }) &&
         (args.length > 3 || t.isSpreadElement(args[2]));
-      const toSplicedDeleteCount =
-        methodName === "toSpliced" && args.length === 2 && t.isNumericLiteral(args[1])
-          ? args[1].value
-          : undefined;
+      const isWindowReplace =
+        methodName === "toSpliced" &&
+        args.length >= 3 &&
+        toSplicedDeleteCount !== undefined &&
+        Number.isSafeInteger(toSplicedDeleteCount) &&
+        toSplicedDeleteCount > 0 &&
+        (toSplicedDeleteCount !== 1 || args.length > 3 || t.isSpreadElement(args[2]));
       const kind = isBatchInsert
         ? "batch-insert"
-        : methodName === "with" && args.length === 2
-          ? "replace"
-          : methodName === "toSpliced" &&
-              args.length === 3 &&
-              t.isNumericLiteral(args[1], { value: 0 })
-            ? "insert"
+        : isWindowReplace
+          ? "window-replace"
+          : methodName === "with" && args.length === 2
+            ? "replace"
             : methodName === "toSpliced" &&
                 args.length === 3 &&
-                t.isNumericLiteral(args[1], { value: 1 })
-              ? "replace"
-              : toSplicedDeleteCount !== undefined &&
-                  Number.isSafeInteger(toSplicedDeleteCount) &&
-                  toSplicedDeleteCount > 0
-                ? "remove"
-                : undefined;
+                t.isNumericLiteral(args[1], { value: 0 })
+              ? "insert"
+              : methodName === "toSpliced" &&
+                  args.length === 3 &&
+                  t.isNumericLiteral(args[1], { value: 1 })
+                ? "replace"
+                : args.length === 2 &&
+                    toSplicedDeleteCount !== undefined &&
+                    Number.isSafeInteger(toSplicedDeleteCount) &&
+                    toSplicedDeleteCount > 0
+                  ? "remove"
+                  : undefined;
       if (!kind || !t.isExpression(args[0])) return;
       const position = args[0];
-      const incoming = kind === "batch-insert" ? args.slice(2) : [args.at(-1)];
+      const incoming =
+        kind === "batch-insert" || kind === "window-replace" ? args.slice(2) : [args.at(-1)];
       if (
         validateKeyedArrayPositionExpression(position, safeGlobals) !== undefined ||
         (kind !== "remove" &&
@@ -1724,17 +1763,26 @@ function rewriteKeyedArrayPositionHints(
                   t.cloneNode(position, true),
                   ...args.slice(2).map((argument) => t.cloneNode(argument, true)),
                 ])
-              : t.callExpression(t.cloneNode(helperIdentifier), [
-                  t.cloneNode(previous),
-                  t.cloneNode(method),
-                  t.stringLiteral(kind),
-                  ...args.map((argument) => t.cloneNode(argument, true)),
-                ]),
+              : kind === "window-replace"
+                ? t.callExpression(t.cloneNode(windowReplaceHelperIdentifier), [
+                    t.cloneNode(previous),
+                    t.cloneNode(method),
+                    t.cloneNode(position, true),
+                    t.cloneNode(args[1], true),
+                    ...args.slice(2).map((argument) => t.cloneNode(argument, true)),
+                  ])
+                : t.callExpression(t.cloneNode(helperIdentifier), [
+                    t.cloneNode(previous),
+                    t.cloneNode(method),
+                    t.stringLiteral(kind),
+                    ...args.map((argument) => t.cloneNode(argument, true)),
+                  ]),
           ),
         ]),
       );
       count += 1;
       if (kind === "batch-insert") batchInsertCount += 1;
+      if (kind === "window-replace") windowReplaceCount += 1;
       stateIndices.add(state.index);
       path.skip();
     },
@@ -1743,6 +1791,7 @@ function rewriteKeyedArrayPositionHints(
     root: (file.program.body[0] as t.ExpressionStatement).expression as t.JSXElement,
     count,
     batchInsertCount,
+    windowReplaceCount,
     stateIndices,
   };
 }
@@ -6786,6 +6835,7 @@ function compileCandidate(
   keyedArrayPrependIdentifier: t.Identifier,
   keyedArrayPositionIdentifier: t.Identifier,
   keyedArrayBatchInsertIdentifier: t.Identifier,
+  keyedArrayWindowReplaceIdentifier: t.Identifier,
   keyedArrayReorderIdentifier: t.Identifier,
   keyedArraySortIdentifier: t.Identifier,
   keyedArrayRollingWindowIdentifier: t.Identifier,
@@ -6809,7 +6859,10 @@ function compileCandidate(
     keyedMembershipTargets: number;
     keyedMapUpdateHints: number;
   },
-  compilerUsage: { keyedArrayBatchInsertHints: number },
+  compilerUsage: {
+    keyedArrayBatchInsertHints: number;
+    keyedArrayWindowReplaceHints: number;
+  },
   useStateNames: ReadonlySet<string>,
   reactNames: ReadonlySet<string>,
   listNames: ReadonlySet<string>,
@@ -7237,10 +7290,12 @@ function compileCandidate(
     statesBySetter,
     keyedArrayPositionIdentifier,
     keyedArrayBatchInsertIdentifier,
+    keyedArrayWindowReplaceIdentifier,
     safeGlobals,
   );
   let appliedKeyedArrayPositionHints = 0;
   let appliedKeyedArrayBatchInsertHints = 0;
+  let appliedKeyedArrayWindowReplaceHints = 0;
   let appliedPositionHintedStateIndices: ReadonlySet<number> = new Set();
   if (positionHintedRoot.count > 0) {
     const hintedBlockAnalysis = analyzeComposableBlocks(
@@ -7265,9 +7320,11 @@ function compileCandidate(
       analysis = hintedAnalysis;
       appliedKeyedArrayPositionHints = positionHintedRoot.count;
       appliedKeyedArrayBatchInsertHints = positionHintedRoot.batchInsertCount;
+      appliedKeyedArrayWindowReplaceHints = positionHintedRoot.windowReplaceCount;
       appliedPositionHintedStateIndices = positionHintedRoot.stateIndices;
       optimizationCounts.keyedArrayPositionHints += positionHintedRoot.count;
       compilerUsage.keyedArrayBatchInsertHints += positionHintedRoot.batchInsertCount;
+      compilerUsage.keyedArrayWindowReplaceHints += positionHintedRoot.windowReplaceCount;
     }
   }
   const reorderHintedRoot = rewriteKeyedArrayReorderHints(
@@ -7506,6 +7563,7 @@ function compileCandidate(
     appliedKeyedArrayPrependHints > 0,
     appliedKeyedArrayPositionHints > 0,
     appliedKeyedArrayBatchInsertHints > 0,
+    appliedKeyedArrayWindowReplaceHints > 0,
     appliedKeyedArrayReorderHints > 0 || appliedKeyedArraySortHints > 0,
     appliedKeyedArrayRollingWindowHints > 0,
   );
@@ -7716,7 +7774,10 @@ export async function compileReactModule(
     keyedMembershipTargets: 0,
     keyedMapUpdateHints: 0,
   };
-  const compilerUsage = { keyedArrayBatchInsertHints: 0 };
+  const compilerUsage = {
+    keyedArrayBatchInsertHints: 0,
+    keyedArrayWindowReplaceHints: 0,
+  };
   const plugin = (): PluginObj => ({
     name: "farm-react-aot",
     visitor: {
@@ -7772,6 +7833,9 @@ export async function compileReactModule(
         const keyedArrayBatchInsertIdentifier = programPath.scope.generateUidIdentifier(
           "createCompilerKeyedArrayBatchInsert",
         );
+        const keyedArrayWindowReplaceIdentifier = programPath.scope.generateUidIdentifier(
+          "createCompilerKeyedArrayWindowReplace",
+        );
         const keyedArrayReorderIdentifier = programPath.scope.generateUidIdentifier(
           "createCompilerKeyedArrayReorder",
         );
@@ -7817,6 +7881,7 @@ export async function compileReactModule(
             keyedArrayPrependIdentifier,
             keyedArrayPositionIdentifier,
             keyedArrayBatchInsertIdentifier,
+            keyedArrayWindowReplaceIdentifier,
             keyedArrayReorderIdentifier,
             keyedArraySortIdentifier,
             keyedArrayRollingWindowIdentifier,
@@ -7886,7 +7951,8 @@ export async function compileReactModule(
                     ]
                   : []),
                 ...(optimizationCounts.keyedArrayPositionHints >
-                compilerUsage.keyedArrayBatchInsertHints
+                compilerUsage.keyedArrayBatchInsertHints +
+                  compilerUsage.keyedArrayWindowReplaceHints
                   ? [
                       t.importSpecifier(
                         keyedArrayPositionIdentifier,
@@ -7899,6 +7965,14 @@ export async function compileReactModule(
                       t.importSpecifier(
                         keyedArrayBatchInsertIdentifier,
                         t.identifier("createCompilerKeyedArrayBatchInsert"),
+                      ),
+                    ]
+                  : []),
+                ...(compilerUsage.keyedArrayWindowReplaceHints > 0
+                  ? [
+                      t.importSpecifier(
+                        keyedArrayWindowReplaceIdentifier,
+                        t.identifier("createCompilerKeyedArrayWindowReplace"),
                       ),
                     ]
                   : []),

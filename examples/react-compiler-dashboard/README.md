@@ -98,9 +98,10 @@ work proportional only to the incoming suffix.
 Exact-position insertions, removals, and replacements have separate 10,000-row comparisons. Concise
 native `toSpliced(position, 0, item)`, `toSpliced(position, 0, ...items)`, `toSpliced(position, 1)`,
 `toSpliced(position, 64)`, `toSpliced(position, 1, replacement)`, and
-`with(position, replacement)` updates use event-local runtime position variables and are measured
-against bracketed React and equivalent block-bodied compiled controls. The compiler report must
-contain all five dashboard `keyedArrayPositionHints`; package tests separately require zero
+`toSpliced(position, 64, ...replacements)` and `with(position, replacement)` updates use event-local
+runtime position variables and are measured against bracketed React and equivalent block-bodied
+compiled controls. The compiler report must contain all six dashboard `keyedArrayPositionHints`;
+package tests separately require zero
 surviving key/descriptor/binding reads for removal, surrounding DOM identity, randomized
 differential correctness, runtime-position and count fallback, hydration, and cleanup. Both the
 single-row and 64-row removal gates must remain at least 4x faster than React and 1.5x faster than
@@ -110,6 +111,14 @@ The batch insertion case mounts 64 new rows at the middle of a 10,000-row table.
 both surrounding DOM nodes, add no owner executions, remain at least 4x faster than React, and stay
 at least 1.5x faster than the equivalent block-bodied compiled control. This gate is independent of
 the older single-row position gates, so a batch regression cannot hide inside their aggregate.
+
+The exact-window replacement case swaps 64 rows in the middle of a 10,000-row table. It must
+preserve both retained boundary nodes, disconnect both removed boundaries, add no owner
+executions, remain at least 4x faster than React, and stay at least 1.5x faster than the equivalent
+block-bodied compiled control. Package tests require work proportional only to the 64 incoming
+rows and cover empty spreads, negative positions, clamped counts, reused and duplicate keys,
+native custom-method behavior, queued fallback, controlled-input focus and selection, delegated
+events, 1,000 differential replacements, hydration, Strict Mode, and unmount cleanup.
 
 Native keyed-array reversal has a separate 10,000-row comparison. Concise `toReversed()` is
 measured against bracketed React and an equivalent block-bodied compiled control. Both compiler

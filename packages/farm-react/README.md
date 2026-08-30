@@ -306,29 +306,34 @@ setItems((current) => current.toSpliced(selectedIndex, 0, ...incomingItems));
 setItems((current) => current.toSpliced(selectedIndex, 1));
 setItems((current) => current.toSpliced(selectedIndex, 25));
 setItems((current) => current.toSpliced(selectedIndex, 1, replacement));
+setItems((current) => current.toSpliced(selectedIndex, 25, ...replacements));
 setItems((current) => current.with(selectedIndex, replacement));
 ```
 
 The compiler recognizes only a concise functional setter and either a safe-integer literal or a
 compiler-safe runtime position expression, such as an identifier, property read, arithmetic,
 conditional, or safe `Math` call. The update must insert one or more compiler-safe items with zero
-removals, remove one item or a fixed positive safe-integer literal range, or replace one item
-through either `toSpliced()` or `with()`. Farm preserves method lookup,
+removals, remove one item or a fixed positive safe-integer literal range, replace one item through
+either `toSpliced()` or `with()`, or replace a fixed positive safe-integer literal window with
+compiler-safe explicit items or a safe spread. Farm preserves method lookup,
 evaluates the position and remaining arguments once in their original order, executes the ordinary
 native call, and records metadata only after validating the committed native source, result, and
 actual safe-integer position and clamped removal count. A batch requires at least two evaluated
-items at runtime. Farm creates every incoming key, descriptor, binding snapshot, and detached row
-before changing the live DOM, rejects key collisions, and inserts the complete batch through one
-document fragment. The runtime otherwise creates one inserted row,
+items at runtime. Exact-window replacement supports a safe spread that evaluates to zero, one, or
+many items. Farm creates every incoming key, descriptor, binding snapshot, and detached row before
+changing the live DOM, rejects key collisions, and mounts the complete incoming batch through one
+document fragment. It then removes only the replaced window. The runtime otherwise creates one inserted row,
 removes only the known row or range, or patches/replaces one row at that position without rereading
 every existing key, descriptor, and binding. Surviving rows keep their DOM identity. Index-aware or
 collection-reading rows, custom methods, position expressions with user calls or mutations,
 runtime positions that are not safe integers, dynamic, zero, negative, or fractional removal
 counts, other `toSpliced()` forms, block-bodied updaters, unsafe incoming expressions, queued
 uncommitted updates, reused keys, nested or React-owned rows, and failed checks use complete keyed
-reconciliation. Reports expose the site count as `keyedArrayPositionHints`. Batch insertion uses a
-separate optional runtime capability, so existing single-position and non-position bundles do not
-retain its validation or fragment-mounting code.
+reconciliation. Reusing a key from the replaced window is valid React behavior, so it takes the
+complete keyed reconciliation path and preserves that row instance. Reports expose the site count
+as `keyedArrayPositionHints`. Batch insertion and exact-window replacement use progressively
+separate optional runtime capabilities, so existing single-position and batch-only bundles do not
+retain window validation or replacement code.
 
 A direct native reverse can carry its complete permutation to a separate optional runtime:
 
@@ -668,7 +673,8 @@ reasons aggregated by count. Its summary and per-module `optimizations` also rep
 `keyedArrayFilterHints`, the number of compiler-proven direct keyed-array filter sites; and
 `keyedArrayPrependHints`, the number of compiler-proven direct keyed-array prepend sites; and
 `keyedArrayPositionHints`, the number of compiler-proven native exact-position insertion, single or
-contiguous-range removal, or replacement sites, including guarded compiler-safe runtime positions;
+contiguous-range removal, single-row replacement, or exact-window replacement sites, including
+guarded compiler-safe runtime positions;
 and
 `keyedArrayReorderHints`, the number of compiler-proven direct native keyed-array reverse sites; and
 `keyedArraySortHints`, the number of compiler-proven direct native keyed-array sort sites; and

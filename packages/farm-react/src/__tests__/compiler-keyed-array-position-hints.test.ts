@@ -65,6 +65,28 @@ describe("React AOT keyed-array position hints", () => {
     expect(result.code).toContain("createCompilerKeyedArrayBatchInsert");
     expect(result.code).toContain("keyedRowsBatchPositionHintedRuntimeFeature");
     expect(result.code).not.toContain("createCompilerKeyedArrayPositionUpdate");
+    expect(result.code).not.toContain("createCompilerKeyedArrayWindowReplace");
+  });
+
+  it("records exact-window replacements without retaining older position helpers", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Table({ first, second, incoming, offset }) {
+        const [rows, setRows] = useState([{ id: "a", label: "Alpha" }]);
+        return <section>
+          <button onClick={() => setRows((current) => current.toSpliced(offset, 2, first, second))}>Replace pair</button>
+          <button onClick={() => setRows((current) => current.toSpliced(offset, 2, first))}>Replace with one</button>
+          <button onClick={() => setRows((current) => current.toSpliced(-3, 4, ...incoming))}>Replace window</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </section>;
+      }
+    `);
+
+    expect(result.optimizations.keyedArrayPositionHints).toBe(3);
+    expect(result.code).toContain("createCompilerKeyedArrayWindowReplace");
+    expect(result.code).toContain("keyedRowsWindowPositionHintedRuntimeFeature");
+    expect(result.code).not.toContain("createCompilerKeyedArrayPositionUpdate");
+    expect(result.code).not.toContain("createCompilerKeyedArrayBatchInsert");
   });
 
   it("records compiler-safe runtime position expressions", async () => {
@@ -144,9 +166,9 @@ describe("React AOT keyed-array position hints", () => {
       update: "current.slice().toSpliced(0, 1)",
     },
     {
-      name: "a multi-item replacement",
+      name: "a dynamic replacement count",
       row: "row => <li key={row.id}>{row.label}</li>",
-      update: "current.toSpliced(0, 1, next, next)",
+      update: "current.toSpliced(0, deleteCount, next, next)",
     },
     {
       name: "an unsafe incoming spread call",
@@ -187,5 +209,7 @@ describe("React AOT keyed-array position hints", () => {
 
     expect(result.optimizations.keyedArrayPositionHints).toBe(0);
     expect(result.code).not.toContain("createCompilerKeyedArrayPositionUpdate");
+    expect(result.code).not.toContain("createCompilerKeyedArrayBatchInsert");
+    expect(result.code).not.toContain("createCompilerKeyedArrayWindowReplace");
   });
 });

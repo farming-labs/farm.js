@@ -143,7 +143,7 @@ async function inspectBuild(compilerMode) {
       "The compiler build did not emit a keyed-array prepend hint.",
     );
     assert(
-      compilerReport.summary.keyedArrayPositionHints >= 5,
+      compilerReport.summary.keyedArrayPositionHints >= 6,
       "The compiler build did not emit the keyed-array exact-position hints.",
     );
     assert(
@@ -638,6 +638,46 @@ async function measureTrial(browser, trial, compilerMode, port) {
                 rowCount() === 10_064 &&
                 table.querySelectorAll("tbody tr")[4_999] === before &&
                 table.querySelectorAll("tbody tr")[5_064] === previousAtPosition,
+            );
+          },
+        );
+
+        const tablePositionWindowReplace = await measureTable(
+          async () => ensure10000(),
+          async () => {
+            const rows = table.querySelectorAll("tbody tr");
+            const before = rows[4_999];
+            const firstRemoved = rows[5_000];
+            const lastRemoved = rows[5_063];
+            const after = rows[5_064];
+            await runTableAction(
+              () => tableButton("table-position-window-replace").click(),
+              () =>
+                rowCount() === 10_000 &&
+                table.querySelectorAll("tbody tr")[4_999] === before &&
+                table.querySelectorAll("tbody tr")[5_064] === after &&
+                !firstRemoved?.isConnected &&
+                !lastRemoved?.isConnected,
+            );
+          },
+        );
+
+        const tablePositionWindowReplaceSnapshot = await measureTable(
+          async () => ensure10000(),
+          async () => {
+            const rows = table.querySelectorAll("tbody tr");
+            const before = rows[4_999];
+            const firstRemoved = rows[5_000];
+            const lastRemoved = rows[5_063];
+            const after = rows[5_064];
+            await runTableAction(
+              () => tableButton("table-position-window-replace-snapshot").click(),
+              () =>
+                rowCount() === 10_000 &&
+                table.querySelectorAll("tbody tr")[4_999] === before &&
+                table.querySelectorAll("tbody tr")[5_064] === after &&
+                !firstRemoved?.isConnected &&
+                !lastRemoved?.isConnected,
             );
           },
         );
@@ -1176,6 +1216,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
             prependSnapshot: tablePrependSnapshot,
             positionBatchInsert: tablePositionBatchInsert,
             positionBatchInsertSnapshot: tablePositionBatchInsertSnapshot,
+            positionWindowReplace: tablePositionWindowReplace,
+            positionWindowReplaceSnapshot: tablePositionWindowReplaceSnapshot,
             positionInsert: tablePositionInsert,
             positionInsertSnapshot: tablePositionInsertSnapshot,
             positionRemove: tablePositionRemove,
@@ -1276,6 +1318,10 @@ async function measureTrial(browser, trial, compilerMode, port) {
         prependSnapshot: timingSummary(result.table.prependSnapshot),
         positionBatchInsert: timingSummary(result.table.positionBatchInsert),
         positionBatchInsertSnapshot: timingSummary(result.table.positionBatchInsertSnapshot),
+        positionWindowReplace: timingSummary(result.table.positionWindowReplace),
+        positionWindowReplaceSnapshot: timingSummary(
+          result.table.positionWindowReplaceSnapshot,
+        ),
         positionInsert: timingSummary(result.table.positionInsert),
         positionInsertSnapshot: timingSummary(result.table.positionInsertSnapshot),
         positionRemove: timingSummary(result.table.positionRemove),
@@ -1372,6 +1418,8 @@ const tableMetrics = [
   "prependSnapshot",
   "positionBatchInsert",
   "positionBatchInsertSnapshot",
+  "positionWindowReplace",
+  "positionWindowReplaceSnapshot",
   "positionInsert",
   "positionInsertSnapshot",
   "positionRemove",
@@ -1643,6 +1691,29 @@ const keyedBatchInsertRegressions = keyedBatchInsertResults.filter(
     speedup < keyedBatchInsertMinimumSpeedup ||
     !Number.isFinite(snapshotSpeedup) ||
     snapshotSpeedup < keyedBatchInsertMinimumSnapshotSpeedup,
+);
+// A compiler-proven toSpliced(position, count, ...items) replacement can validate the retained
+// prefix and suffix, prepare the incoming rows, and swap only that exact DOM window. Keep this
+// 10,000-row/64-row workload independent from the insertion and single-position gates.
+const keyedWindowReplaceMinimumSpeedup = 4;
+const keyedWindowReplaceMinimumSnapshotSpeedup = 1.5;
+const keyedWindowReplaceResults = ["static", "hybrid"].map((mode) => {
+  const windowMedianMs = comparisons.table.positionWindowReplace[mode].medianMs;
+  const snapshotMedianMs = comparisons.table.positionWindowReplaceSnapshot[mode].medianMs;
+  return {
+    mode,
+    snapshotMedianMs,
+    snapshotSpeedup: snapshotMedianMs / windowMedianMs,
+    speedup: comparisons.table.positionWindowReplace[`${mode}VsBaseline`].speedup,
+    windowMedianMs,
+  };
+});
+const keyedWindowReplaceRegressions = keyedWindowReplaceResults.filter(
+  ({ snapshotSpeedup, speedup }) =>
+    !Number.isFinite(speedup) ||
+    speedup < keyedWindowReplaceMinimumSpeedup ||
+    !Number.isFinite(snapshotSpeedup) ||
+    snapshotSpeedup < keyedWindowReplaceMinimumSnapshotSpeedup,
 );
 // Native toSpliced()/with() calls with event-local runtime positions expose one exact insertion,
 // removal, or replacement position. The hinted runtime should beat both React and an equivalent
@@ -1917,6 +1988,7 @@ const passed =
   keyedSliceRegressions.length === 0 &&
   keyedRollingWindowRegressions.length === 0 &&
   keyedBatchInsertRegressions.length === 0 &&
+  keyedWindowReplaceRegressions.length === 0 &&
   keyedPositionRegressions.length === 0 &&
   keyedRangeRemovalRegressions.length === 0 &&
   keyedReorderRegressions.length === 0 &&
@@ -1976,6 +2048,13 @@ const report = {
     regressions: keyedBatchInsertRegressions,
     results: keyedBatchInsertResults,
     status: keyedBatchInsertRegressions.length === 0 ? "PASS" : "FAIL",
+  },
+  keyedWindowReplaceHintGate: {
+    minimumSnapshotSpeedup: keyedWindowReplaceMinimumSnapshotSpeedup,
+    minimumSpeedup: keyedWindowReplaceMinimumSpeedup,
+    regressions: keyedWindowReplaceRegressions,
+    results: keyedWindowReplaceResults,
+    status: keyedWindowReplaceRegressions.length === 0 ? "PASS" : "FAIL",
   },
   keyedPositionHintGate: {
     insertMinimumSnapshotSpeedup: keyedPositionInsertMinimumSnapshotSpeedup,

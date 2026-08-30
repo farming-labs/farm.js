@@ -63,6 +63,8 @@ const [
   keyedPositionOn,
   keyedBatchPositionOff,
   keyedBatchPositionOn,
+  keyedWindowPositionOff,
+  keyedWindowPositionOn,
   keyedReorderOff,
   keyedReorderOn,
   keyedSortOff,
@@ -89,6 +91,8 @@ const [
   bundle("keyed-position.tsx", true),
   bundle("keyed-batch-position.tsx", false),
   bundle("keyed-batch-position.tsx", true),
+  bundle("keyed-window-position.tsx", false),
+  bundle("keyed-window-position.tsx", true),
   bundle("keyed-reorder.tsx", false),
   bundle("keyed-reorder.tsx", true),
   bundle("keyed-sort.tsx", false),
@@ -191,9 +195,22 @@ if (
 }
 if (
   keyedPositionOn.code.includes("keyed-rows:batch-position-hinted") ||
-  keyedPositionOn.code.includes("createCompilerKeyedArrayBatchInsert")
+  keyedPositionOn.code.includes("createCompilerKeyedArrayBatchInsert") ||
+  keyedPositionOn.code.includes("keyed-rows:window-position-hinted")
 ) {
-  throw new Error("Single-row position fixture retained the optional batch-insertion runtime.");
+  throw new Error("Single-row position fixture retained an optional multi-row runtime.");
+}
+if (keyedBatchPositionOn.code.includes("keyed-rows:window-position-hinted")) {
+  throw new Error("Batch-position fixture retained the optional window-replacement runtime.");
+}
+if (
+  !keyedWindowPositionOn.code.includes("FarmCompiledKeyedRows") ||
+  !keyedWindowPositionOn.code.includes("keyed-rows:window-position-hinted") ||
+  !keyedWindowPositionOn.code.includes("positionIndexIndependent")
+) {
+  throw new Error(
+    `Keyed window-position fixture did not retain its isolated window runtime: rows=${keyedWindowPositionOn.code.includes("FarmCompiledKeyedRows")}, feature=${keyedWindowPositionOn.code.includes("keyed-rows:window-position-hinted")}, proof=${keyedWindowPositionOn.code.includes("positionIndexIndependent")}.`,
+  );
 }
 if (
   !keyedReorderOn.code.includes("FarmCompiledKeyedRows") ||
@@ -362,6 +379,23 @@ const results = {
         brotli: keyedBatchPositionOn.brotli - keyedBatchPositionOff.brotli,
       },
     },
+    keyedWindowPosition: {
+      compilerOff: {
+        raw: keyedWindowPositionOff.raw,
+        gzip: keyedWindowPositionOff.gzip,
+        brotli: keyedWindowPositionOff.brotli,
+      },
+      compilerOn: {
+        raw: keyedWindowPositionOn.raw,
+        gzip: keyedWindowPositionOn.gzip,
+        brotli: keyedWindowPositionOn.brotli,
+      },
+      compilerPremium: {
+        raw: keyedWindowPositionOn.raw - keyedWindowPositionOff.raw,
+        gzip: keyedWindowPositionOn.gzip - keyedWindowPositionOff.gzip,
+        brotli: keyedWindowPositionOn.brotli - keyedWindowPositionOff.brotli,
+      },
+    },
     keyedReorder: {
       compilerOff: {
         raw: keyedReorderOff.raw,
@@ -486,6 +520,13 @@ if (checkOnly) {
       maximum:
         (reference.fixtures.keyedBatchPosition?.compilerPremium.gzip ??
           results.fixtures.keyedBatchPosition.compilerPremium.gzip) + 256,
+    },
+    {
+      name: "keyed window-position compiler premium",
+      current: results.fixtures.keyedWindowPosition.compilerPremium.gzip,
+      maximum:
+        (reference.fixtures.keyedWindowPosition?.compilerPremium.gzip ??
+          results.fixtures.keyedWindowPosition.compilerPremium.gzip) + 256,
     },
     {
       name: "keyed reorder compiler premium",
