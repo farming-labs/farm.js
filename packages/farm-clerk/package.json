@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/clerk",
-  "version": "0.1.0-beta.70",
+  "version": "0.1.0-beta.71",
   "description": "Clerk integration for Farm.js",
   "license": "MIT",
   "repository": {
