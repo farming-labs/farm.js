@@ -405,7 +405,7 @@ export class ServerRenderer {
   async initialize(): Promise<void> {
     if (this.rendererRuntime) return;
 
-    if (this.config.notFound.component?.trim()) {
+    if (this.config.notFound?.component?.trim()) {
       resolveFarmNotFoundComponentPath(this.config, getFarmAppDirectories(this.config));
     }
 

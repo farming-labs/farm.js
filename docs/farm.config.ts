@@ -3,9 +3,6 @@ import { withDocs } from "@farming-labs/farmjs/config";
 
 export default withDocs(
   defineConfig({
-    notFound: {
-      component: "./src/app/not-found.tsx",
-    },
     async headers() {
       return [
         {
