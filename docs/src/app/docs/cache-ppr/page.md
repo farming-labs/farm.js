@@ -66,6 +66,9 @@ revalidateTag("products");
 revalidatePath("/pricing");
 ```
 
+`revalidatePath()` accepts a pathname or an HTTP(S) URL. Query strings and fragments do not change
+the cache path and are removed during normalization.
+
 ## PPR shell
 
 **src/app/dashboard/page.tsx**

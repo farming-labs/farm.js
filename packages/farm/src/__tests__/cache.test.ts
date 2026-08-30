@@ -474,6 +474,8 @@ describe("server cache primitives", () => {
 
   it("normalizes paths and stable cache keys", () => {
     expect(normalizeRevalidatePath("https://example.com/docs/?q=1")).toBe("/docs");
+    expect(normalizeRevalidatePath("HTTPS://example.com/docs?tab=api#intro")).toBe("/docs");
+    expect(normalizeRevalidatePath("/docs#intro")).toBe("/docs");
     expect(normalizeRevalidatePath("docs///intro/")).toBe("/docs/intro");
     expect(createFarmCacheKey([{ b: 1, a: 2 }])).toBe(createFarmCacheKey([{ a: 2, b: 1 }]));
   });
