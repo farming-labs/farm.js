@@ -55,8 +55,9 @@ const icons = {
   "brand-authjs": brandSvg(
     '<path fill="currentColor" stroke="none" d="M12 1.8 4 4.3v6.1c0 5.2 3.2 9.7 8 11.8 4.8-2.1 8-6.6 8-11.8V4.3L12 1.8Z"></path><path fill="var(--color-fd-background, #000)" stroke="none" d="M10.5 12.3a3.4 3.4 0 1 1 2.7-1.4l4.2 4.2v2.1h-2.1v-1.5h-1.5v-1.5h-1.5l-1.8-1.9Zm-1.2-2.2a1.1 1.1 0 1 0 0-2.2 1.1 1.1 0 0 0 0 2.2Z"></path>',
   ),
-  "brand-autumn": brandSvg(
-    '<path fill="currentColor" stroke="none" d="M12 2.5c3.7 2.6 6.1 6.7 6.1 10.4 0 4.5-3 8.1-6.1 8.1s-6.1-3.6-6.1-8.1C5.9 9.2 8.3 5.1 12 2.5Z"></path><path fill="var(--color-fd-background, #000)" stroke="none" d="M12 7.1 8.7 17h2.1l.5-1.8h3.3l.5 1.8h2.2L13.9 7.1h-1.9Zm-.1 6.2 1-3.3 1 3.3h-2Z"></path>',
+  "brand-autumn": brandPath(
+    "M10.714 9.069 7.904 15.495l2.202 2.855 6.531-8.438-7.366 13.039 10.936-6.598V4.85l-9.493 4.219Z",
+    "0 0 28 28",
   ),
   "brand-better-auth": brandPath(
     "M0 3.39v17.22h5.783V15.06h6.434V8.939H5.783V3.39ZM12.217 8.94h5.638v6.122h-5.638v5.548H24V3.391H12.217Z",
@@ -65,6 +66,10 @@ const icons = {
     "m21.47 20.829-2.881-2.881a.572.572 0 0 0-.7-.084 6.854 6.854 0 0 1-7.081 0 .576.576 0 0 0-.7.084l-2.881 2.881a.576.576 0 0 0-.103.69.57.57 0 0 0 .166.186 12 12 0 0 0 14.113 0 .58.58 0 0 0 .239-.423.576.576 0 0 0-.172-.453Zm.002-17.668-2.88 2.88a.569.569 0 0 1-.701.084A6.857 6.857 0 0 0 8.724 8.08a6.862 6.862 0 0 0-1.222 3.692 6.86 6.86 0 0 0 .978 3.764.573.573 0 0 1-.083.699l-2.881 2.88a.567.567 0 0 1-.864-.063A11.993 11.993 0 0 1 6.771 2.7a11.99 11.99 0 0 1 14.637-.405.566.566 0 0 1 .232.418.57.57 0 0 1-.168.448Zm-7.118 12.261a3.427 3.427 0 1 0 0-6.854 3.427 3.427 0 0 0 0 6.854Z",
   ),
   "brand-cloudflare": brandPath(siCloudflare.path),
+  "brand-eve": brandSvg(
+    '<rect width="102" height="102" fill="currentColor"></rect><path fill="var(--color-fd-background, #fff)" stroke="none" d="M49.28 66.94 75.03 34.96h-6.89L47.91 60.11l-5.49 6.83h6.86ZM0 34.96h42.4v5.11H0zm0 13.32h27.66v5.11H0zm0 13.54h27.66v5.11H0zm69.63-26.86H102v5.11H69.63zm4.71 13.32H102v5.11H74.34zm0 13.54H102v5.11H74.34z"></path>',
+    "0 0 102 102",
+  ),
   "brand-inngest": brandSvg(
     '<path fill="currentColor" stroke="none" d="M4 3.5a2.6 2.6 0 1 0 0 5.2 2.6 2.6 0 0 0 0-5.2Zm2.3 6.6H1.7v10.4h4.6V10.1Zm2 10.4V10h4l.2 1.2a5 5 0 0 1 3.6-1.5c3 0 4.9 2 4.9 5.4v5.4h-4.6v-5.2c0-1.1-.5-1.7-1.4-1.7-1.1 0-2 .8-2 2.2v4.7H8.3Z"></path>',
   ),
@@ -258,7 +263,7 @@ const sidebar = [
         label: "Agents",
         icon: "sparkles",
         children: [
-          { label: "Eve", slug: "integrations/eve", icon: "sparkles" },
+          { label: "Eve", slug: "integrations/eve", icon: "brand-eve" },
           {
             label: "Cloudflare Agents",
             slug: "integrations/cf-agent",
