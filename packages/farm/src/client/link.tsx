@@ -170,7 +170,13 @@ function isModifierEvent(e: React.MouseEvent): boolean {
 }
 
 function isExternalUrl(href: string): boolean {
-  return href.startsWith("http://") || href.startsWith("https://") || href.startsWith("//");
+  const normalizedHref = href.toLowerCase();
+  return (
+    normalizedHref.startsWith("http://") ||
+    normalizedHref.startsWith("https://") ||
+    href.startsWith("//") ||
+    normalizedHref.startsWith("mailto:")
+  );
 }
 
 function getRouter(): {
