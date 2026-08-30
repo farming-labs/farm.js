@@ -59,6 +59,16 @@ describe("route helpers", () => {
     );
   });
 
+  it("rejects empty supplied path segments", () => {
+    expect(() => buildFarmRoutePath("/users/[id]", { id: "" })).toThrow(
+      'Route param "id" for /users/[id] cannot contain an empty path segment.',
+    );
+    expect(() => buildFarmRoutePath("/docs/[...slug]", { slug: ["core", ""] })).toThrow(
+      'Route param "slug" for /docs/[...slug] cannot contain an empty path segment.',
+    );
+    expect(buildFarmRoutePath("/docs/[[...slug]]")).toBe("/docs");
+  });
+
   it("checks active routes exactly or by static prefix", () => {
     expect(isFarmRouteActive("/docs", "/docs")).toBe(true);
     expect(isFarmRouteActive("/docs", "/docs/routing")).toBe(false);

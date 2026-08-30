@@ -120,7 +120,16 @@ export function buildFarmRoutePath(
       throw new Error(`Route param "${segment.name}" for ${pattern} expects a single value.`);
     }
 
-    parts.push(...values.map((item) => encodePathSegment(String(item))));
+    const encodedValues = values.map((item) => {
+      const value = String(item);
+      if (!value) {
+        throw new Error(
+          `Route param "${segment.name}" for ${pattern} cannot contain an empty path segment.`,
+        );
+      }
+      return encodePathSegment(value);
+    });
+    parts.push(...encodedValues);
   }
 
   let pathname = parts.length ? `/${parts.join("/")}` : "/";

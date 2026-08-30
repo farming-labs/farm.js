@@ -164,6 +164,9 @@ This returns `/docs/core/routing`. Optional catch-all params can be omitted, sta
 For navigation state, `router.isActive(pattern, pathname, { exact: false })` also matches
 descendants after dynamic segments, such as `/users/42/settings` for `/users/[id]`.
 
+Supplied path parameters must contain non-empty segments; omit an optional catch-all instead of
+passing an empty string.
+
 Client components can pass the same route list to `useRouter` when they want current route params:
 
 ```tsx
