@@ -261,6 +261,7 @@ export class SPARouter {
     const fullPath = pathname + search;
 
     if (
+      isFarmExternalNavigationURL(url, window.location.origin) ||
       isFarmLocaleChangeHref(url.toString()) ||
       this.options.shouldUseDocumentNavigation(pathname)
     ) {
@@ -360,6 +361,7 @@ export class SPARouter {
   async prefetch(href: string): Promise<void> {
     if (isFarmLocaleChangeHref(href)) return;
     const url = new URL(href, window.location.origin);
+    if (isFarmExternalNavigationURL(url, window.location.origin)) return;
     const fullPath = url.pathname + url.search;
     const interceptFrom = window.location.pathname + window.location.search;
 
@@ -856,6 +858,10 @@ export class SPARouter {
   clearCache(): void {
     this.cache.clear();
   }
+}
+
+export function isFarmExternalNavigationURL(url: URL, currentOrigin: string): boolean {
+  return url.origin !== currentOrigin;
 }
 
 function readBrowserDeploymentId(): string | undefined {

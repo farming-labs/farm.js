@@ -174,6 +174,9 @@ export function CurrentUserTab() {
 }
 ```
 
+Imperative `push()` and `replace()` calls use SPA navigation for same-origin routes. Absolute
+cross-origin URLs use normal document navigation instead of Farm's local page-data endpoint.
+
 ## Navigation blocking
 
 Use `useBlocker` when a client component needs to protect unsaved work before SPA navigation continues.
