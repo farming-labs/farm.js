@@ -11,7 +11,13 @@ import {
   type FarmRouteRuntimeConfig,
 } from "../route-runtime";
 import { _runWithFarmI18nRequest, type FarmI18nRuntime } from "../i18n/server";
-import { invokeAPIRouteEndpoint, matchAPIRoute, type APIRouteMatch } from "./runtime";
+import {
+  getAllowedAPIRouteMethods,
+  invokeAPIRouteEndpoint,
+  matchAPIRoute,
+  resolveAPIRouteEndpoint,
+  type APIRouteMatch,
+} from "./runtime";
 
 export interface APIRoute extends FarmRouteRuntimeConfig {
   path: string;
@@ -313,12 +319,12 @@ export class APIRouteManager {
 
       // Check if method is supported
       const { route, params } = match;
-      const endpoint = route.endpoints[method];
+      const endpoint = resolveAPIRouteEndpoint(route, method);
       if (!endpoint) {
         return new Response(JSON.stringify({ error: "Method Not Allowed" }), {
           status: 405,
           headers: {
-            Allow: route.methods.join(", "),
+            Allow: getAllowedAPIRouteMethods(route).join(", "),
             "Content-Type": "application/json",
           },
         });
@@ -365,9 +371,11 @@ export class APIRouteManager {
 }
 
 export {
+  getAllowedAPIRouteMethods,
   invokeAPIRouteEndpoint,
   isWebResponse,
   matchAPIRoute,
   normalizeRouteResponse,
+  resolveAPIRouteEndpoint,
 } from "./runtime";
 export type { APIRouteMatch, APIRouteParams, APIRouteParamValue } from "./runtime";

@@ -3755,7 +3755,7 @@ function generateVirtualEntryCode(
   {
     path: ${JSON.stringify(route.path)},
     methods: ${JSON.stringify(route.methods)},
-    handlers: ${varName},
+    endpoints: ${varName},
   }`);
   });
 
@@ -3929,7 +3929,7 @@ function generateVirtualEntryCode(
     : "";
   const apiRouteHelpersImport =
     apiRoutes.length > 0
-      ? `import { invokeAPIRouteEndpoint, matchAPIRoute } from "@farm.js/core/api/runtime";`
+      ? `import { getAllowedAPIRouteMethods, invokeAPIRouteEndpoint, matchAPIRoute, resolveAPIRouteEndpoint } from "@farm.js/core/api/runtime";`
       : "";
   const productionRuntimeImport = `import {
   _runWithAfterRequest,
@@ -4085,14 +4085,14 @@ async function handleAPIRequest(request) {
     route: route.path,
     method,
   });
-  const endpoint = route.handlers[method];
+  const endpoint = resolveAPIRouteEndpoint(route, method);
   if (!endpoint) {
     const response = new Response(
       JSON.stringify({ error: "Method Not Allowed" }),
       {
         status: 405,
         headers: {
-          "Allow": route.methods.join(", "),
+          "Allow": getAllowedAPIRouteMethods(route).join(", "),
           "Content-Type": "application/json",
         },
       }

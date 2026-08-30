@@ -16,7 +16,13 @@
  */
 
 import type { Plugin, ViteDevServer } from "vite";
-import { API_ROUTE_METHODS, invokeAPIRouteEndpoint, matchAPIRoute } from "./route-manager";
+import {
+  API_ROUTE_METHODS,
+  getAllowedAPIRouteMethods,
+  invokeAPIRouteEndpoint,
+  matchAPIRoute,
+  resolveAPIRouteEndpoint,
+} from "./route-manager";
 import { sendWebResponse } from "../server/response";
 import { _withAfterNodeMiddleware } from "../after";
 import { isProgrammaticRoutesFileName } from "../routes-shared";
@@ -130,12 +136,12 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
         }
 
         const { route, params } = match;
-        const endpoint = route.endpoints[method];
+        const endpoint = resolveAPIRouteEndpoint(route, method);
         if (!endpoint) {
           return new Response(JSON.stringify({ error: "Method Not Allowed" }), {
             status: 405,
             headers: {
-              Allow: route.methods.join(", "),
+              Allow: getAllowedAPIRouteMethods(route).join(", "),
               "Content-Type": "application/json",
             },
           });
