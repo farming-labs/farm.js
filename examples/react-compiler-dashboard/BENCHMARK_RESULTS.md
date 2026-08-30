@@ -2,6 +2,25 @@
 
 Date: 2026-08-29
 
+## Native contiguous `toSpliced()` removal follow-up — 2026-08-30
+
+The full bracketed production-browser run added one isolated 10,000-row workload for concise native
+`toSpliced(position, 64)` updates. Both compiler builds emitted all four expected
+`keyedArrayPositionHints` sites and passed DOM correctness, every existing performance and
+optimization-persistence gate, and normalized scalability through the 21,000-row peak.
+
+| Mode   | React median | Hinted range removal | Compiled control | vs React | vs control |
+| ------ | -----------: | -------------------: | ---------------: | -------: | ---------: |
+| Static |     66.75 ms |              8.40 ms |         21.50 ms |    7.95x |      2.56x |
+| Hybrid |     66.75 ms |              7.10 ms |         20.60 ms |    9.40x |      2.90x |
+
+Static and hybrid each added zero owner executions. Package tests separately prove exact range
+cleanup, surrounding DOM identity, clamped native counts, unsafe-count fallback, 1,000 mixed
+differential updates, focus and selection, delegated event indexes, hydration, Strict Mode, and
+unmount cleanup. The optional known-position fixture grew by 84 B gzip, from a 12,201 B to a
+12,285 B compiler premium; direct and core-only fixtures remain protected, and the isolated core
+runtime reduction is 80.6%.
+
 ## Native `toSpliced()` replacement follow-up — 2026-08-30
 
 The full bracketed production-browser run changed the exact-position replacement workload to the

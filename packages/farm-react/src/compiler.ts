@@ -1626,6 +1626,10 @@ function rewriteKeyedArrayPositionHints(
 
       const methodName = updater.body.callee.property.name;
       const args = updater.body.arguments;
+      const toSplicedDeleteCount =
+        methodName === "toSpliced" && args.length === 2 && t.isNumericLiteral(args[1])
+          ? args[1].value
+          : undefined;
       const kind =
         methodName === "with" && args.length === 2
           ? "replace"
@@ -1637,9 +1641,9 @@ function rewriteKeyedArrayPositionHints(
                 args.length === 3 &&
                 t.isNumericLiteral(args[1], { value: 1 })
               ? "replace"
-              : methodName === "toSpliced" &&
-                  args.length === 2 &&
-                  t.isNumericLiteral(args[1], { value: 1 })
+              : toSplicedDeleteCount !== undefined &&
+                  Number.isSafeInteger(toSplicedDeleteCount) &&
+                  toSplicedDeleteCount > 0
                 ? "remove"
                 : undefined;
       if (!kind || !t.isExpression(args[0])) return;

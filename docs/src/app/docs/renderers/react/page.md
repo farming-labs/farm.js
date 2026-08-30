@@ -372,8 +372,8 @@ filter sites that can report removed positions. `keyedArrayPrependHints` counts 
 the compiler proved a direct keyed array prepend and can hand the new prefix to the runtime.
 `keyedArraySliceHints` counts direct keyed-array slices whose build-time bounds identify one exact
 retained interval.
-`keyedArrayPositionHints` counts native keyed-array insertions, removals, and replacements whose
-exact position is known at build time.
+`keyedArrayPositionHints` counts compiler-proven native keyed-array insertions, single or
+contiguous-range removals, and replacements with an exact guarded position.
 `keyedArrayReorderHints` counts direct native keyed-array reversals whose complete permutation is
 known at build time.
 `keyedArraySortHints` counts direct native keyed-array sorts whose resulting permutation can be
@@ -1026,6 +1026,7 @@ Native immutable array methods can state an exact insertion, removal, or replace
 ```tsx
 setItems((current) => current.toSpliced(selectedIndex, 0, nextItem));
 setItems((current) => current.toSpliced(selectedIndex, 1));
+setItems((current) => current.toSpliced(selectedIndex, 25));
 setItems((current) => current.toSpliced(selectedIndex, 1, replacement));
 setItems((current) => current.with(selectedIndex, replacement));
 ```
@@ -1034,28 +1035,31 @@ At build time, Farm recognizes only concise functional setters whose position is
 safe-integer literal or a compiler-safe runtime expression. Identifiers, property reads,
 side-effect-free arithmetic and conditionals, and safe `Math` calls are supported. User-defined
 calls, assignments, update expressions, and other effectful forms are not transformed.
-`toSpliced()` must insert exactly one item with a zero delete count, remove exactly one item, or
-replace exactly one item with a delete count of one; `with()` must replace exactly one item. Farm
-preserves the original method lookup, evaluates every argument once in its original order, and
-preserves the native call, return value, coercion, and thrown errors. If the method is not native or
-the evaluated position is not already a safe integer, the update still runs normally but no
+`toSpliced()` must insert exactly one item with a zero delete count, remove one item or a contiguous
+range using a positive safe-integer literal delete count, or replace exactly one item with a delete
+count of one; `with()` must replace exactly one item. Farm preserves the original method lookup,
+evaluates every argument once in its original order, and preserves the native call, return value,
+coercion, and thrown errors. If the method is not native, the evaluated position is not already a
+safe integer, or the removal count is dynamic or unsafe, the update still runs normally but no
 metadata is recorded.
 
 At update time, Farm validates the committed native source, result length, source token, normalized
-position, and any incoming key before changing the DOM. An insertion creates one row at that
-position, preserves surrounding elements, and shifts only stored event indexes. A removal cleans up
-and removes only the known row while preserving every surviving element. A same-key replacement
-patches that row in place; a new-key replacement creates and swaps one host row. The owner component
-does not rerun, and surviving row keys, descriptors, and bindings are not reread.
+position, clamped removal count, and any incoming key before changing the DOM. An insertion creates
+one row at that position, preserves surrounding elements, and shifts only stored event indexes. A
+removal cleans up and removes only the known row or contiguous range while preserving every
+surviving element. A same-key replacement patches that row in place; a new-key replacement creates
+and swaps one host row. The owner component does not rerun, and surviving row keys, descriptors,
+and bindings are not reread.
 
 The proof requires compiler-owned host rows whose render and key do not observe the row index.
 Effectful position expressions, runtime values that are fractional or otherwise not safe integers,
-other `toSpliced()` shapes, block-bodied updaters, unsafe incoming expressions, custom methods,
-queued uncommitted position updates, duplicate or reused keys, collection-reading bindings,
-React-owned rows, nested host blocks, row conditionals, unrelated dirty dependencies, and failed
-runtime checks keep complete keyed reconciliation. Negative safe-integer positions use the native
-methods' normal indexing rules. No new option or component is required. Reports expose emitted
-sites as `keyedArrayPositionHints`; position-only modules retain a separate optional runtime
+dynamic, zero, negative, or fractional removal counts, other `toSpliced()` shapes, block-bodied
+updaters, unsafe incoming expressions, custom methods, queued uncommitted position updates,
+duplicate or reused keys, collection-reading bindings, React-owned rows, nested host blocks, row
+conditionals, unrelated dirty dependencies, and failed runtime checks keep complete keyed
+reconciliation. Negative safe-integer positions and counts larger than the remaining suffix use the
+native method's normal clamping rules. No new option or component is required. Reports expose
+emitted sites as `keyedArrayPositionHints`; position-only modules retain a separate optional runtime
 capability.
 
 #### Keyed array reorder hints
@@ -1931,11 +1935,12 @@ The package and example test suites verify more than generated code:
 - 2,000 deterministic randomized keyed-array removals match normal React; targeted tests require
   zero surviving descriptor and binding reads, preserve DOM identity, and cover queued filters,
   unhinted-chain fallback, collection-reading rows, StrictMode hydration, and unmount cleanup;
-- 1,000 deterministic exact-position insertions, removals, and replacements match normal React;
-  compiler tests cover literal and guarded runtime expressions, while targeted removal tests
-  require zero surviving key, descriptor, or binding reads, preserve focused input and surrounding
-  DOM identity, and cover native evaluation and coercion, negative and non-integer runtime values,
-  custom methods, queued updates, collection-reading rows, StrictMode hydration, and cleanup;
+- 1,000 deterministic exact-position insertions, single and contiguous-range removals, and
+  replacements match normal React; compiler tests cover literal counts and guarded runtime
+  positions, while targeted removal tests require zero surviving key, descriptor, or binding reads,
+  preserve focused input and surrounding DOM identity, and cover native evaluation and coercion,
+  clamping, unsafe runtime positions and counts, custom methods, queued updates,
+  collection-reading rows, StrictMode hydration, and cleanup;
 - 2,000 deterministic randomized reversals match normal React; a 4,096-row targeted test requires
   exactly `n - 1` connected DOM moves and zero key, descriptor, or binding reads, while fallback
   tests cover custom methods, queued updates, collection-reading rows, StrictMode hydration, and
@@ -1965,8 +1970,9 @@ The package and example test suites verify more than generated code:
   `keyedArrayRollingWindowHints`, and `keyedArraySliceHints` report counts,
   preserves the keyed-update speedup floor, checks that scalar selection, Set membership, and Map
   lookups remain key-directed at scale, compares dense hinted Set/Map updates with equivalent
-  compiled snapshot controls, and passes DOM correctness, React-relative regression, direct-delta,
-  and normalized scalability gates;
+  compiled snapshot controls, requires separate single-row and contiguous-range removal speedup
+  floors, and passes DOM correctness, React-relative regression, direct-delta, and normalized
+  scalability gates;
 - the public `List` renders iterable and nullish collections correctly with the compiler off;
 - the packaged runtime, including a keyed-range component root, editable and interactive keyed-row
   events, row-local conditions, reorders, identity, selection, and hydration, is exercised
