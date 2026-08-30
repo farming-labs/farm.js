@@ -3722,7 +3722,7 @@ class LegacyManifestSPARouter {
     }
 
     // Save scroll position
-    this.saveScrollPosition(window.location.pathname);
+    this.saveScrollPosition(window.location.pathname + window.location.search);
 
     try {
       // CLIENT-SIDE route matching - no server request!
@@ -3863,7 +3863,7 @@ class LegacyManifestSPARouter {
       };
 
       if (this.onNavigate) await this.onNavigate(pageData);
-      this.restoreScrollPosition(pathname);
+      this.restoreScrollPosition(pathname + search);
     } catch (error) {
       console.error('[Farm.js] Popstate error:', error);
       window.location.reload();
