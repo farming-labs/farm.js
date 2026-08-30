@@ -16,6 +16,7 @@ import type { FarmServerConfig } from "./server-http";
 import type { FarmLayerEntry, ResolvedFarmLayer } from "./layers";
 import type { FarmRouteMaxDuration, FarmRouteRegions, FarmRouteRuntime } from "./route-runtime";
 import type { FarmDevtoolsUserConfig } from "./devtools-config";
+import type { FarmDevIndicatorsConfig } from "./dev-indicators";
 import type { FarmImageConfig } from "./image-config";
 import type { FarmPlugin } from "./plugin";
 import type { FarmI18nUserConfig, ResolvedFarmI18nConfig } from "./i18n/types";
@@ -223,6 +224,8 @@ export interface FarmConfig {
   observability?: FarmObservabilityUserConfig;
   /** Development-only runtime inspector. Enabled by default during `farm dev`. */
   devtools?: FarmDevtoolsUserConfig;
+  /** Development-only browser feedback for build and HMR activity. */
+  devIndicators?: FarmDevIndicatorsConfig;
   /**
    * When true, Link href is not strictly typed (accepts any string).
    * Use when you want to skip route-type errors on Link or don't use generated route types.

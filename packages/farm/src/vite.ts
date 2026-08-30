@@ -40,6 +40,7 @@ import {
   FARM_DEVTOOLS_PATH,
   resolveFarmDevtoolsConfig,
 } from "./devtools-config";
+import { generateFarmDevIndicatorsClientRuntime } from "./dev-indicators";
 import * as fs from "fs";
 import * as path from "path";
 import { pathToFileURL } from "node:url";
@@ -2572,6 +2573,9 @@ window.__FARM_MANIFEST__ = ${inlineValue({
         const generatedDevtoolsClientRuntime = devtoolsClientRuntime
           ? devtoolsClientRuntime.generateFarmDevtoolsClientRuntime(devtools)
           : "";
+        const generatedDevIndicatorsClientRuntime = farmApp
+          ? generateFarmDevIndicatorsClientRuntime(farmApp.getConfig().devIndicators)
+          : "";
 
         return generateClientCode(
           isReactRenderer(renderer) ? getIntegrationProviders(integrations) : [],
@@ -2580,7 +2584,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             ...(docsRuntime?.getFarmDocsDocumentNavigationMatchers(docs) ?? []),
           ],
           generatedDocsSearchRuntime,
-          generatedDevtoolsClientRuntime,
+          `${generatedDevtoolsClientRuntime}\n${generatedDevIndicatorsClientRuntime}`,
           resolvedConfig?.plugins || [],
           root,
           resolvedConfig?.srcDir || options.srcDir || "src",

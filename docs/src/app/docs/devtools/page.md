@@ -54,6 +54,26 @@ export default defineConfig({
 
 `mod` maps to `Command` on macOS and `Ctrl` on Windows and Linux. Farm also accepts `ctrl`, `meta`, `alt`, and `shift` explicitly. DevTools remains development-only even when `enabled: true` is present in production configuration.
 
+## Configure the build activity indicator
+
+During HMR, Farm briefly shows build status in the bottom-right corner. Move it when that corner
+overlaps application controls, or disable it independently from DevTools:
+
+```ts title="farm.config.ts"
+import { defineConfig } from "@farm.js/core";
+
+export default defineConfig({
+  devIndicators: {
+    buildActivity: true,
+    buildActivityPosition: "top-left",
+  },
+});
+```
+
+`buildActivityPosition` accepts `top-left`, `top-right`, `bottom-left`, or `bottom-right`. Set
+`buildActivity: false` to emit no indicator runtime. Dev indicators are omitted from production
+output regardless of this setting.
+
 ## What the dashboard shows
 
 | View     | What Farm reports                                                                                                            |

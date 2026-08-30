@@ -53,6 +53,11 @@ import { logger } from "./utils";
 import { normalizeFarmDeploymentId } from "./deployment";
 import { resolveFarmDevtoolsConfig, type ResolvedFarmDevtoolsConfig } from "./devtools-config";
 import {
+  resolveFarmDevIndicatorsConfig,
+  type FarmDevIndicatorsConfig,
+  type ResolvedFarmDevIndicatorsConfig,
+} from "./dev-indicators";
+import {
   resolveFarmImageConfig,
   type FarmImageConfig,
   type ResolvedFarmImageConfig,
@@ -136,6 +141,11 @@ export type {
   FarmDevtoolsUserConfig,
   ResolvedFarmDevtoolsConfig,
 } from "./devtools-config";
+export type {
+  FarmBuildActivityPosition,
+  FarmDevIndicatorsConfig,
+  ResolvedFarmDevIndicatorsConfig,
+} from "./dev-indicators";
 export type {
   FarmPerformanceConfig,
   FarmPreloadMode,
@@ -334,10 +344,7 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs" | "
   generateBuildId?: () => string | Promise<string>;
   compress?: boolean;
 
-  devIndicators?: {
-    buildActivity?: boolean;
-    buildActivityPosition?: "bottom-right" | "bottom-left" | "top-right" | "top-left";
-  };
+  devIndicators?: FarmDevIndicatorsConfig;
 
   serverRuntimeConfig?: Record<string, any>;
   publicRuntimeConfig?: Record<string, any>;
@@ -372,6 +379,7 @@ export interface ResolvedFarmConfig extends Required<
     | "server"
     | "serverActions"
     | "devtools"
+    | "devIndicators"
     | "images"
     | "i18n"
     | "auth"
@@ -400,6 +408,7 @@ export interface ResolvedFarmConfig extends Required<
   server: ResolvedFarmServerConfig;
   serverActions: ResolvedFarmServerActionsConfig;
   devtools: ResolvedFarmDevtoolsConfig;
+  devIndicators: ResolvedFarmDevIndicatorsConfig;
   images: ResolvedFarmImageConfig;
   i18n: ResolvedFarmI18nConfig;
   auth: ResolvedFarmAuthConfig;
@@ -986,11 +995,7 @@ export async function resolveConfig(
     distDir: userConfig.distDir || ".farm",
     generateBuildId,
     compress: userConfig.compress ?? true,
-    devIndicators: {
-      buildActivity: true,
-      buildActivityPosition: "bottom-right",
-      ...userConfig.devIndicators,
-    },
+    devIndicators: resolveFarmDevIndicatorsConfig(userConfig.devIndicators, mode),
     serverRuntimeConfig: userConfig.serverRuntimeConfig || {},
     publicRuntimeConfig: userConfig.publicRuntimeConfig || {},
     env,

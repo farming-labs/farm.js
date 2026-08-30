@@ -19,6 +19,10 @@ import { findProgrammaticRouteFiles } from "./routes.server";
 import path from "path";
 import type { ViteDevServer } from "vite";
 import { resolveFarmDevtoolsConfig, type ResolvedFarmDevtoolsConfig } from "./devtools-config";
+import {
+  resolveFarmDevIndicatorsConfig,
+  type ResolvedFarmDevIndicatorsConfig,
+} from "./dev-indicators";
 import { resolveFarmI18nConfig } from "./i18n/config";
 import {
   createFarmI18nRuntime,
@@ -39,7 +43,7 @@ import { normalizeFarmAPIConfig, type ResolvedFarmAPIConfig } from "./api/config
 
 type NormalizedFarmConfig = Omit<
   Required<FarmConfig>,
-  "api" | "devtools" | "images" | "i18n" | "performance" | "security" | "theme"
+  "api" | "devtools" | "devIndicators" | "images" | "i18n" | "performance" | "security" | "theme"
 > & {
   api: ResolvedFarmAPIConfig;
   docs: FarmDocsResolvedConfig;
@@ -48,6 +52,7 @@ type NormalizedFarmConfig = Omit<
   cron: FarmCronResolvedConfig;
   workflows: FarmWorkflowsResolvedConfig;
   devtools: ResolvedFarmDevtoolsConfig;
+  devIndicators: ResolvedFarmDevIndicatorsConfig;
   images: ResolvedFarmImageConfig;
   i18n: ResolvedFarmI18nConfig;
   auth: ResolvedFarmAuthConfig;
@@ -186,6 +191,10 @@ export class FarmApp {
       observability: config.observability ?? false,
       devtools: resolveFarmDevtoolsConfig(
         config.devtools,
+        process.env.NODE_ENV === "production" ? "production" : "development",
+      ),
+      devIndicators: resolveFarmDevIndicatorsConfig(
+        config.devIndicators,
         process.env.NODE_ENV === "production" ? "production" : "development",
       ),
       env: config.env || { server: {}, public: {} },

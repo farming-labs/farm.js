@@ -303,6 +303,26 @@ describe("resolveConfig", () => {
     expect(customized.devtools).toEqual({ enabled: true, shortcut: "mod+shift+d" });
   });
 
+  it("keeps build activity development-only and resolves its corner", async () => {
+    const development = await resolveConfig(
+      { devIndicators: { buildActivityPosition: "top-left" } },
+      "development",
+    );
+    const production = await resolveConfig(
+      { devIndicators: { buildActivity: true, buildActivityPosition: "top-left" } },
+      "production",
+    );
+
+    expect(development.devIndicators).toEqual({
+      buildActivity: true,
+      buildActivityPosition: "top-left",
+    });
+    expect(production.devIndicators).toEqual({
+      buildActivity: false,
+      buildActivityPosition: "top-left",
+    });
+  });
+
   it("resolves explicit and generated deployment IDs", async () => {
     delete process.env.FARM_DEPLOYMENT_ID;
     delete process.env.VERCEL_GIT_COMMIT_SHA;
