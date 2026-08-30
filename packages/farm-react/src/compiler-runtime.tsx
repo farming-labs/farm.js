@@ -721,11 +721,15 @@ export function createCompilerKeyedArrayPositionUpdate(
       value.length === sourceLength - 1;
     const validReplace =
       kind === "replace" &&
-      method === NATIVE_ARRAY_WITH &&
-      args.length === 1 &&
-      position >= -sourceLength &&
-      position < sourceLength &&
-      value.length === sourceLength;
+      value.length === sourceLength &&
+      ((method === NATIVE_ARRAY_WITH &&
+        args.length === 1 &&
+        position >= -sourceLength &&
+        position < sourceLength) ||
+        (method === NATIVE_ARRAY_TO_SPLICED &&
+          args.length === 2 &&
+          Object.is(args[0], 1) &&
+          normalizedPosition < sourceLength));
     if (!validInsert && !validRemove && !validReplace) return value;
 
     const sourceToken = compilerKeyedCollectionToken(previousTarget);

@@ -17,6 +17,7 @@ describe("React AOT keyed-array position hints", () => {
         return <section>
           <button onClick={() => setRows((current) => current.toSpliced(1, 0, next))}>Insert</button>
           <button onClick={() => setRows((current) => current.toSpliced(0, 1))}>Remove</button>
+          <button onClick={() => setRows((current) => current.toSpliced(0, 1, next))}>Splice replace</button>
           <button onClick={() => setRows((current) => current.with(0, next))}>Replace</button>
           <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
         </section>;
@@ -24,7 +25,7 @@ describe("React AOT keyed-array position hints", () => {
     `);
 
     expect(result.compiled).toEqual(["Table"]);
-    expect(result.optimizations.keyedArrayPositionHints).toBe(3);
+    expect(result.optimizations.keyedArrayPositionHints).toBe(4);
     expect(result.code).toContain("createCompilerKeyedArrayPositionUpdate");
     expect(result.code).toContain("keyedRowsPositionHintedRuntimeFeature");
   });
@@ -36,13 +37,14 @@ describe("React AOT keyed-array position hints", () => {
         const [rows, setRows] = useState([{ id: "a", label: "Alpha" }]);
         return <section>
           <button onClick={() => setRows((current) => current.with(-1, next))}>Replace</button>
+          <button onClick={() => setRows((current) => current.toSpliced(-1, 1, next))}>Splice replace</button>
           <button onClick={() => setRows((current) => current.toSpliced(-1, 1))}>Remove</button>
           <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
         </section>;
       }
     `);
 
-    expect(result.optimizations.keyedArrayPositionHints).toBe(2);
+    expect(result.optimizations.keyedArrayPositionHints).toBe(3);
   });
 
   it("records compiler-safe runtime position expressions", async () => {
@@ -53,6 +55,7 @@ describe("React AOT keyed-array position hints", () => {
         return <section>
           <button onClick={() => setRows((current) => current.toSpliced(offset, 0, next))}>Insert</button>
           <button onClick={() => setRows((current) => current.toSpliced(positions.remove, 1))}>Remove</button>
+          <button onClick={() => setRows((current) => current.toSpliced(offset + delta, 1, next))}>Splice replace</button>
           <button onClick={() => setRows((current) => current.with(offset + delta, next))}>Replace</button>
           <button onClick={() => setRows((current) => current.with(current.length - 1, next))}>Replace last</button>
           <button onClick={() => setRows((current) => current.with(Math.trunc(offset), next))}>Replace rounded</button>
@@ -62,7 +65,7 @@ describe("React AOT keyed-array position hints", () => {
     `);
 
     expect(result.compiled).toEqual(["Table"]);
-    expect(result.optimizations.keyedArrayPositionHints).toBe(5);
+    expect(result.optimizations.keyedArrayPositionHints).toBe(6);
     expect(result.code).toContain("createCompilerKeyedArrayPositionUpdate");
     expect(result.code).toMatch(/\.get\(\)\.remove/);
     expect(result.code).toContain("current.length - 1");
@@ -120,9 +123,9 @@ describe("React AOT keyed-array position hints", () => {
       update: "current.toSpliced(0, 0, next, next)",
     },
     {
-      name: "a direct toSpliced replacement",
+      name: "a multi-item replacement",
       row: "row => <li key={row.id}>{row.label}</li>",
-      update: "current.toSpliced(0, 1, next)",
+      update: "current.toSpliced(0, 1, next, next)",
     },
     {
       name: "a fractional literal position",

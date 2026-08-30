@@ -316,7 +316,7 @@ export function StandardTableBenchmark() {
             const position = 100;
             const current = rows[position];
             const replacement = { ...current, label: `${current.label} @` };
-            setRows((items) => items.with(position, replacement));
+            setRows((items) => items.toSpliced(position, 1, replacement));
             setOperation("replace at runtime position");
             setRevision((value) => value + 1);
           }}
@@ -331,7 +331,7 @@ export function StandardTableBenchmark() {
             const current = rows[position];
             const replacement = { ...current, label: `${current.label} @` };
             setRows((items) => {
-              return items.with(position, replacement);
+              return items.toSpliced(position, 1, replacement);
             });
             setOperation("replace at runtime position (snapshot control)");
             setRevision((value) => value + 1);
