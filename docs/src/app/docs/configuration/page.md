@@ -39,6 +39,24 @@ export default defineConfig({
 
 `defineConfig` is the canonical Farm helper. `defineFarmConfig` remains available as a deprecated exact alias for existing applications.
 
+## TypeScript
+
+Farm transpiles TypeScript through the selected renderer and Vite. It reads the project's normal
+`tsconfig.json`, but `farm build` does not run a separate project type check. Keep type checking as
+an explicit script so the same command runs locally and in CI:
+
+```json title="package.json"
+{
+  "scripts": {
+    "type-check": "tsc --noEmit"
+  }
+}
+```
+
+A top-level `typescript.tsconfigPath` or `typescript.ignoreBuildErrors` setting has no effect in
+Farm. Configure compiler behavior in `tsconfig.json`; point an explicit `tsc -p` command at a
+different file when needed.
+
 ## Renderer
 
 React remains the default renderer, so existing applications and configurations do not need to
