@@ -25,6 +25,7 @@ import { emitFarmEvent } from "../observability";
 import { stripFarmLocaleFromPathname } from "../i18n/routing";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
 import { createCliColors } from "../cli-colors";
+import { appendMiddlewareRoutePath } from "./path";
 
 export interface DiscoveredMiddleware {
   path: string;
@@ -143,7 +144,7 @@ export class MiddlewareManager {
     for (const entry of entries) {
       if (entry.isDirectory() && !entry.name.startsWith(".") && !entry.name.startsWith("_")) {
         const subPath = path.join(dir, entry.name);
-        const subRoutePath = path.posix.join(routePath, entry.name);
+        const subRoutePath = appendMiddlewareRoutePath(routePath, entry.name);
         await this.discoverInDirectory(subPath, subRoutePath, discovered);
       }
     }
