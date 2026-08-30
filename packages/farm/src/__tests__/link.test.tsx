@@ -327,6 +327,19 @@ describe("Link", () => {
       expect(onClick).toHaveBeenCalled();
       expect(navigate).not.toHaveBeenCalled();
     });
+
+    it("preserves mailto hrefs without prefetching them", () => {
+      const el = render(
+        createElement(Link, {
+          href: "mailto:team@example.com?subject=Farm",
+          prefetch: "render",
+        }),
+      ) as HTMLAnchorElement;
+
+      expect(el.getAttribute("href")).toBe("mailto:team@example.com?subject=Farm");
+      expect(prefetch).not.toHaveBeenCalled();
+      expect(navigate).not.toHaveBeenCalled();
+    });
   });
 
   describe("typed href", () => {
