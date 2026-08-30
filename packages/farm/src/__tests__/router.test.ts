@@ -64,4 +64,13 @@ describe("route helpers", () => {
     expect(isFarmRouteActive("/docs", "/docs/routing")).toBe(false);
     expect(isFarmRouteActive("/docs", "/docs/routing", { exact: false })).toBe(true);
   });
+
+  it("checks dynamic route descendants by their matched prefix", () => {
+    expect(isFarmRouteActive("/users/[id]", "/users/42/settings", { exact: false })).toBe(true);
+    expect(isFarmRouteActive("/(app)/users/[id]", "/users/42/settings", { exact: false })).toBe(
+      true,
+    );
+    expect(isFarmRouteActive("/users/[id]", "/users", { exact: false })).toBe(false);
+    expect(isFarmRouteActive("/users/[id]", "/projects/42/settings", { exact: false })).toBe(false);
+  });
 });

@@ -141,9 +141,9 @@ export function isFarmRouteActive(
   if (matchFarmRoute(pattern, normalizedPathname)) return true;
   if (options.exact !== false) return false;
 
-  const normalizedPattern = normalizePathname(pattern);
-  if (normalizedPattern === "/") return normalizedPathname === "/";
-  return normalizedPathname.startsWith(`${normalizedPattern}/`);
+  const segments = parseRoutePattern(pattern);
+  if (segments.length === 0) return normalizedPathname === "/";
+  return matchSegments(segments, normalizedPathname, true) !== null;
 }
 
 function normalizeRouteInput<TMeta>(
@@ -216,7 +216,11 @@ function parseRoutePattern(pattern: string): RouterSegment[] {
     });
 }
 
-function matchSegments(segments: RouterSegment[], pathname: string): FarmRouterParams | null {
+function matchSegments(
+  segments: RouterSegment[],
+  pathname: string,
+  allowTrailingSegments = false,
+): FarmRouterParams | null {
   const parts = splitPathname(pathname);
   const params: FarmRouterParams = {};
 
@@ -247,7 +251,7 @@ function matchSegments(segments: RouterSegment[], pathname: string): FarmRouterP
     pathIndex++;
   }
 
-  return pathIndex === parts.length ? params : null;
+  return allowTrailingSegments || pathIndex === parts.length ? params : null;
 }
 
 function compareRoutes<TMeta>(
