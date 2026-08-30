@@ -1,6 +1,7 @@
 import { readFileSync, existsSync, readdirSync, mkdirSync } from "fs";
 import { join, relative, dirname } from "path";
 import { writeFileIfChanged } from "./write-file-if-changed";
+import { isFarmAPIRouteFileName } from "./api/route-files";
 
 export interface APIRouteInfo {
   path: string;
@@ -45,7 +46,7 @@ export class APITypeGenerator {
       if (item.isDirectory()) {
         const newBasePath = basePath ? `${basePath}/${item.name}` : item.name;
         this.scanDirectory(fullPath, appDir, routes, newBasePath);
-      } else if (/^route\.(ts|tsx|js|jsx)$/.test(item.name)) {
+      } else if (isFarmAPIRouteFileName(item.name)) {
         const routeInfo = this.extractRouteInfo(fullPath, appDir, basePath);
         if (routeInfo) {
           routes.push(routeInfo);

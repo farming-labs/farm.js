@@ -52,6 +52,7 @@ export async function GET() {
 ## Route file shape
 
 Farm follows the familiar route-file convention: each route lives in `src/app/api/**/route.ts` and exports one or more HTTP methods.
+The equivalent `route.tsx`, `route.js`, and `route.jsx` filenames use the same discovery and generated-type behavior.
 
 ```txt
 src/app/api/hello/route.ts          -> /api/hello

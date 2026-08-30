@@ -24,6 +24,7 @@ import {
   resolveAPIRouteEndpoint,
 } from "./route-manager";
 import { sendWebResponse } from "../server/response";
+import { isFarmAPIRouteFileName } from "./route-files";
 import { _withAfterNodeMiddleware } from "../after";
 import { isProgrammaticRoutesFileName } from "../routes-shared";
 import { findProgrammaticRouteFilesInDir } from "../routes.server";
@@ -185,11 +186,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
             const fullPath = path.join(dir, entry.name);
             if (entry.isDirectory()) {
               files.push(...findRouteFiles(fullPath));
-            } else if (
-              entry.name === "route.ts" ||
-              entry.name === "route.tsx" ||
-              entry.name === "route.js"
-            ) {
+            } else if (isFarmAPIRouteFileName(entry.name)) {
               files.push(fullPath);
             }
           }
