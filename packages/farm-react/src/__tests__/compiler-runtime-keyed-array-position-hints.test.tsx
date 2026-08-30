@@ -330,6 +330,76 @@ describe("compiled keyed-array position hints", () => {
     ).toThrow(error);
   });
 
+  it("evaluates coercible runtime positions once and preserves their native result", () => {
+    const source = [
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+      { id: "c", label: "Gamma" },
+    ] as PositionArray;
+    let coercions = 0;
+    const position = {
+      valueOf() {
+        coercions += 1;
+        return 1;
+      },
+    };
+
+    const result = createCompilerKeyedArrayPositionUpdate(
+      source,
+      source.toSpliced,
+      "remove",
+      position as unknown as number,
+      1,
+    ) as Item[];
+
+    expect(result.map((item) => item.id)).toEqual(["a", "c"]);
+    expect(coercions).toBe(1);
+  });
+
+  it("falls back while preserving fractional, NaN, and infinite runtime positions", async () => {
+    const harness = createPositionHarness([
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+      { id: "c", label: "Gamma" },
+      { id: "d", label: "Delta" },
+    ]);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Table />));
+
+    await act(async () => {
+      harness.remove(1.75);
+      await flushCompilerUpdates();
+    });
+    expect([...container.querySelectorAll("li")].map((node) => node.textContent)).toEqual([
+      "Alpha",
+      "Gamma",
+      "Delta",
+    ]);
+
+    await act(async () => {
+      harness.remove(Number.NaN);
+      await flushCompilerUpdates();
+    });
+    const gamma = container.querySelector('[data-key="c"]');
+    const delta = container.querySelector('[data-key="d"]');
+    expect([...container.querySelectorAll("li")].map((node) => node.textContent)).toEqual([
+      "Gamma",
+      "Delta",
+    ]);
+
+    await act(async () => {
+      harness.remove(Number.POSITIVE_INFINITY);
+      await flushCompilerUpdates();
+    });
+    expect(container.querySelector('[data-key="c"]')).toBe(gamma);
+    expect(container.querySelector('[data-key="d"]')).toBe(delta);
+    expect(harness.counters.executions).toBe(1);
+    expect(harness.counters.renders).toBe(1);
+  });
+
   it("preserves native negative, clamped, empty, and subclass removal behavior", async () => {
     class ItemArray extends Array<Item> {}
     const initialItems = new ItemArray(

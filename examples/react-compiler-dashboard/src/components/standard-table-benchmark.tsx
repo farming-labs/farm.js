@@ -257,13 +257,14 @@ export function StandardTableBenchmark() {
           onClick={() => {
             const nextSeed = seed + 1;
             const addition = buildRows(1, nextSeed)[0];
+            const position = 9_000;
             setSeed(nextSeed);
-            setRows((current) => current.toSpliced(9_000, 0, addition));
-            setOperation("insert at known position");
+            setRows((current) => current.toSpliced(position, 0, addition));
+            setOperation("insert at runtime position");
             setRevision((value) => value + 1);
           }}
         >
-          Insert at known position
+          Insert at runtime position
         </button>
         <button
           data-action="table-position-insert-snapshot"
@@ -271,67 +272,72 @@ export function StandardTableBenchmark() {
           onClick={() => {
             const nextSeed = seed + 1;
             const addition = buildRows(1, nextSeed)[0];
+            const position = 9_000;
             setSeed(nextSeed);
             setRows((current) => {
-              return current.toSpliced(9_000, 0, addition);
+              return current.toSpliced(position, 0, addition);
             });
-            setOperation("insert at known position (snapshot control)");
+            setOperation("insert at runtime position (snapshot control)");
             setRevision((value) => value + 1);
           }}
         >
-          Insert at known position (snapshot control)
+          Insert at runtime position (snapshot control)
         </button>
         <button
           data-action="table-position-remove"
           type="button"
           onClick={() => {
-            setRows((current) => current.toSpliced(9_000, 1));
-            setOperation("remove at known position");
+            const position = 9_000;
+            setRows((current) => current.toSpliced(position, 1));
+            setOperation("remove at runtime position");
             setRevision((value) => value + 1);
           }}
         >
-          Remove at known position
+          Remove at runtime position
         </button>
         <button
           data-action="table-position-remove-snapshot"
           type="button"
           onClick={() => {
+            const position = 9_000;
             setRows((current) => {
-              return current.toSpliced(9_000, 1);
+              return current.toSpliced(position, 1);
             });
-            setOperation("remove at known position (snapshot control)");
+            setOperation("remove at runtime position (snapshot control)");
             setRevision((value) => value + 1);
           }}
         >
-          Remove at known position (snapshot control)
+          Remove at runtime position (snapshot control)
         </button>
         <button
           data-action="table-position-replace"
           type="button"
           onClick={() => {
-            const current = rows[100];
+            const position = 100;
+            const current = rows[position];
             const replacement = { ...current, label: `${current.label} @` };
-            setRows((items) => items.with(100, replacement));
-            setOperation("replace at known position");
+            setRows((items) => items.with(position, replacement));
+            setOperation("replace at runtime position");
             setRevision((value) => value + 1);
           }}
         >
-          Replace at known position
+          Replace at runtime position
         </button>
         <button
           data-action="table-position-replace-snapshot"
           type="button"
           onClick={() => {
-            const current = rows[100];
+            const position = 100;
+            const current = rows[position];
             const replacement = { ...current, label: `${current.label} @` };
             setRows((items) => {
-              return items.with(100, replacement);
+              return items.with(position, replacement);
             });
-            setOperation("replace at known position (snapshot control)");
+            setOperation("replace at runtime position (snapshot control)");
             setRevision((value) => value + 1);
           }}
         >
-          Replace at known position (snapshot control)
+          Replace at runtime position (snapshot control)
         </button>
         <button
           data-action="table-reverse"
