@@ -64,6 +64,7 @@ import type { FarmRouteRuntimeManifest, FarmRouteRuntimeManifestEntry } from "..
 import { createFarmVercelRouteRuntimeFunctions } from "./vercel-route-runtime";
 import { createFarmVercelImmutableAssetRoute } from "./vercel-assets";
 import { createFarmNodeServerEntry } from "./node-server-entry";
+import { resolveFarmNotFoundComponentPath } from "../not-found";
 import { readFarmI18nCatalogs } from "../i18n/catalog";
 import type { FarmI18nCatalogs } from "../i18n/types";
 import { getFarmIntegrationPluginServerRuntime } from "../integrations";
@@ -76,12 +77,7 @@ import { createFarmSourceAlias } from "../server/vite-config";
 import { DEFAULT_NOT_FOUND_STYLES } from "../components/not-found-styles";
 import { createFarmThemeCssPlugin } from "../theme/vite";
 import { resolveFarmInstrumentationFile } from "../instrumentation";
-import {
-  getFarmRendererComponentExtensions,
-  isReactRenderer,
-  loadFarmRendererVitePlugins,
-  REACT_RENDERER,
-} from "../renderer";
+import { isReactRenderer, loadFarmRendererVitePlugins, REACT_RENDERER } from "../renderer";
 import type { FarmRenderer } from "../renderer";
 
 // Type alias for OutputBundle
@@ -3372,20 +3368,7 @@ async function buildSSRInMemory(
   const instrumentationPath = resolveFarmInstrumentationFile(root, config.srcDir || "src");
 
   // Check for custom not-found page
-  let notFoundPath: string | null = null;
-  const notFoundExtensions = getFarmRendererComponentExtensions(config.renderer);
-  for (const sourceAppDir of appDirs) {
-    for (const ext of notFoundExtensions) {
-      const checkPath = path.join(sourceAppDir, `not-found${ext}`);
-      try {
-        await fs.access(checkPath);
-        notFoundPath = checkPath;
-        break;
-      } catch {
-        // File doesn't exist, continue checking
-      }
-    }
-  }
+  const notFoundPath = resolveFarmNotFoundComponentPath(config, appDirs);
   if (notFoundPath) logger.info(`📋 Found custom 404 page: ${notFoundPath}`);
 
   // Sort layouts by depth (root first)

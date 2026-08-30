@@ -207,6 +207,10 @@ export interface FarmConfig {
   i18n?: FarmI18nUserConfig | ResolvedFarmI18nConfig | false;
   /** Build identifier used to detect stale clients during rolling deployments. */
   deploymentId?: string;
+  /** Optional project-relative module used for unmatched page routes. */
+  notFound?: {
+    component?: string;
+  };
   /** Server-only application runtime values. */
   serverRuntimeConfig?: Record<string, unknown>;
   /** Serializable application values exposed to `src/client.ts`. */

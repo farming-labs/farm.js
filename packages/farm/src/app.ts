@@ -176,6 +176,7 @@ export class FarmApp {
             mode: process.env.NODE_ENV === "production" ? "production" : "development",
           }),
       deploymentId: config.deploymentId || "development",
+      notFound: config.notFound || {},
       serverRuntimeConfig: config.serverRuntimeConfig || {},
       publicRuntimeConfig: config.publicRuntimeConfig || {},
       docs: isResolvedDocsConfig(config.docs) ? config.docs : defaultDocsConfig,
