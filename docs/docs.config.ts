@@ -67,7 +67,7 @@ const icons = {
   ),
   "brand-cloudflare": brandPath(siCloudflare.path),
   "brand-eve": brandSvg(
-    '<rect width="102" height="102" fill="currentColor"></rect><path fill="var(--color-fd-background, #fff)" stroke="none" d="M49.28 66.94 75.03 34.96h-6.89L47.91 60.11l-5.49 6.83h6.86ZM0 34.96h42.4v5.11H0zm0 13.32h27.66v5.11H0zm0 13.54h27.66v5.11H0zm69.63-26.86H102v5.11H69.63zm4.71 13.32H102v5.11H74.34zm0 13.54H102v5.11H74.34z"></path>',
+    '<rect width="102" height="102" fill="currentColor" stroke="none"></rect><path fill="var(--color-fd-background, #fff)" stroke="none" d="M49.28 66.94 75.03 34.96h-6.89L47.91 60.11l-5.49 6.83h6.86ZM0 34.96h42.4v5.11H0zm0 13.32h27.66v5.11H0zm0 13.54h27.66v5.11H0zm69.63-26.86H102v5.11H69.63zm4.71 13.32H102v5.11H74.34zm0 13.54H102v5.11H74.34z"></path>',
     "0 0 102 102",
   ),
   "brand-inngest": brandSvg(
