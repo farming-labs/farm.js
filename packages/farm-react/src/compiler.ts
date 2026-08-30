@@ -1572,6 +1572,21 @@ function staticSliceIndex(expression: t.Node): number | undefined {
   return undefined;
 }
 
+function validateKeyedArrayPositionExpression(
+  expression: t.Expression,
+  safeGlobals: ReadonlySet<string>,
+): string | undefined {
+  const isNumericLiteral =
+    t.isNumericLiteral(expression) ||
+    (t.isUnaryExpression(expression) &&
+      (expression.operator === "+" || expression.operator === "-") &&
+      t.isNumericLiteral(expression.argument));
+  if (isNumericLiteral && staticSliceIndex(expression) === undefined) {
+    return "non-safe-integer position literals";
+  }
+  return validateDerivedExpression(expression, safeGlobals);
+}
+
 function rewriteKeyedArrayPositionHints(
   root: t.JSXElement,
   hintedStateIndices: ReadonlySet<number>,
@@ -1624,10 +1639,10 @@ function rewriteKeyedArrayPositionHints(
               ? "remove"
               : undefined;
       if (!kind || !t.isExpression(args[0])) return;
-      const position = staticSliceIndex(args[0]);
+      const position = args[0];
       const item = kind === "remove" ? undefined : args.at(-1);
       if (
-        position === undefined ||
+        validateKeyedArrayPositionExpression(position, safeGlobals) !== undefined ||
         (item !== undefined &&
           (!t.isExpression(item) || validateDerivedExpression(item, safeGlobals) !== undefined))
       ) {

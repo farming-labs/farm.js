@@ -45,16 +45,34 @@ describe("React AOT keyed-array position hints", () => {
     expect(result.optimizations.keyedArrayPositionHints).toBe(2);
   });
 
+  it("records compiler-safe runtime position expressions", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Table({ next, offset, delta, positions }) {
+        const [rows, setRows] = useState([{ id: "a", label: "Alpha" }]);
+        return <section>
+          <button onClick={() => setRows((current) => current.toSpliced(offset, 0, next))}>Insert</button>
+          <button onClick={() => setRows((current) => current.toSpliced(positions.remove, 1))}>Remove</button>
+          <button onClick={() => setRows((current) => current.with(offset + delta, next))}>Replace</button>
+          <button onClick={() => setRows((current) => current.with(current.length - 1, next))}>Replace last</button>
+          <button onClick={() => setRows((current) => current.with(Math.trunc(offset), next))}>Replace rounded</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </section>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Table"]);
+    expect(result.optimizations.keyedArrayPositionHints).toBe(5);
+    expect(result.code).toContain("createCompilerKeyedArrayPositionUpdate");
+    expect(result.code).toMatch(/\.get\(\)\.remove/);
+    expect(result.code).toContain("current.length - 1");
+  });
+
   it.each([
     {
       name: "an index-dependent row",
       row: "(row, index) => <li key={row.id}>{index}: {row.label}</li>",
       update: "current.with(0, next)",
-    },
-    {
-      name: "a dynamic position",
-      row: "row => <li key={row.id}>{row.label}</li>",
-      update: "current.with(offset, next)",
     },
     {
       name: "a block-bodied updater",
@@ -106,10 +124,30 @@ describe("React AOT keyed-array position hints", () => {
       row: "row => <li key={row.id}>{row.label}</li>",
       update: "current.toSpliced(0, 1, next)",
     },
+    {
+      name: "a fractional literal position",
+      row: "row => <li key={row.id}>{row.label}</li>",
+      update: "current.with(0.5, next)",
+    },
+    {
+      name: "a position call",
+      row: "row => <li key={row.id}>{row.label}</li>",
+      update: "current.with(getOffset(), next)",
+    },
+    {
+      name: "a position assignment",
+      row: "row => <li key={row.id}>{row.label}</li>",
+      update: "current.with(offset = 1, next)",
+    },
+    {
+      name: "a position update expression",
+      row: "row => <li key={row.id}>{row.label}</li>",
+      update: "current.with(offset++, next)",
+    },
   ])("keeps $name off the position fast path", async ({ row, update }) => {
     const result = await compile(`
       import { useState } from "react";
-      export function Table({ next, offset, deleteCount, makeNext }) {
+      export function Table({ next, offset, deleteCount, makeNext, getOffset }) {
         const [rows, setRows] = useState([{ id: "a", label: "Alpha" }]);
         return <section>
           <button onClick={() => setRows((current) => ${update})}>Change</button>

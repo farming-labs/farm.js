@@ -2,6 +2,30 @@
 
 Date: 2026-08-29
 
+## Compiler-safe runtime positions follow-up — 2026-08-30
+
+The full bracketed production-browser run replaced the three literal position controls with
+event-local runtime variables. Both compiler builds emitted all three `keyedArrayPositionHints`
+sites and passed DOM correctness, the React-relative regression gate, every existing optimization
+persistence gate, and normalized scalability.
+
+| Operation   | Mode   | React median | Hinted update | Compiled control | vs React | vs control |
+| ----------- | ------ | -----------: | ------------: | ---------------: | -------: | ---------: |
+| Insert      | Static |     83.60 ms |       8.70 ms |         24.40 ms |    9.61x |      2.80x |
+| Insert      | Hybrid |     83.60 ms |       8.10 ms |         25.30 ms |   10.32x |      3.12x |
+| Remove      | Static |     83.70 ms |      10.30 ms |         23.90 ms |    8.13x |      2.32x |
+| Remove      | Hybrid |     83.70 ms |       9.80 ms |         24.30 ms |    8.54x |      2.48x |
+| Replace     | Static |     60.00 ms |       6.50 ms |         21.10 ms |    9.23x |      3.25x |
+| Replace     | Hybrid |     60.00 ms |       5.10 ms |         17.00 ms |   11.76x |      3.33x |
+
+Static and hybrid each added zero owner executions. The full suite retained its 4x React and 1.5x
+compiled-control removal floors and every older append, prepend, slice, rolling-window, reverse,
+sort, filter, keyed-update, key-directed, collection-delta, general regression, and scalability
+floor. Because this follow-up broadens compiler eligibility and reuses the existing guarded runtime
+unchanged, runtime-size fixtures stayed byte-for-byte identical: the known-position fixture remains
+72,264 B gzip, direct and core-only premiums are unchanged, and core runtime reduction remains
+80.5%.
+
 ## Known-position removal follow-up — 2026-08-30
 
 The full default production run for concise `toSpliced(position, 1)` support passed correctness,

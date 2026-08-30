@@ -144,7 +144,7 @@ async function inspectBuild(compilerMode) {
     );
     assert(
       compilerReport.summary.keyedArrayPositionHints > 0,
-      "The compiler build did not emit a keyed-array known-position hint.",
+      "The compiler build did not emit a keyed-array exact-position hint.",
     );
     assert(
       compilerReport.summary.keyedArrayReorderHints > 0,
@@ -1537,9 +1537,9 @@ const keyedRollingWindowRegressions = keyedRollingWindowResults.filter(
     !Number.isFinite(snapshotSpeedup) ||
     snapshotSpeedup < keyedRollingWindowMinimumSnapshotSpeedup,
 );
-// Native toSpliced()/with() calls expose one exact insertion, removal, or replacement position. The hinted
-// runtime should beat both React and an equivalent block-bodied compiled control while preserving
-// the same row identities around the changed position.
+// Native toSpliced()/with() calls with event-local runtime positions expose one exact insertion,
+// removal, or replacement position. The hinted runtime should beat both React and an equivalent
+// block-bodied compiled control while preserving the same row identities around the changed position.
 const keyedPositionInsertMinimumSpeedup = 1.1;
 const keyedPositionInsertMinimumSnapshotSpeedup = 1.1;
 const keyedPositionRemoveMinimumSpeedup = 4;
