@@ -350,11 +350,6 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs" | "
 
   env?: FarmEnvConfig<any, any>;
 
-  typescript?: {
-    tsconfigPath?: string;
-    ignoreBuildErrors?: boolean;
-  };
-
   vite?: ViteUserConfig | ((config: ViteUserConfig) => ViteUserConfig);
 
   [key: string]: any;
@@ -868,6 +863,12 @@ export async function resolveConfig(
   });
   userConfig = layerResolution.config;
 
+  if ((userConfig as Record<string, unknown>).typescript !== undefined) {
+    logger.warn(
+      'The top-level "typescript" option is not supported and has no effect. Configure TypeScript in `tsconfig.json` and run `tsc --noEmit` separately when builds must enforce project type errors.',
+    );
+  }
+
   if ((userConfig as Record<string, unknown>).output !== undefined) {
     logger.warn(
       'The top-level "output" option is not supported and has no effect. Configure `deploy.target`, `deploy.preset`, or `deploy.outputDir` for deployment output, and use route rendering configuration for static pages.',
@@ -1002,11 +1003,6 @@ export async function resolveConfig(
     serverRuntimeConfig: userConfig.serverRuntimeConfig || {},
     publicRuntimeConfig: userConfig.publicRuntimeConfig || {},
     env,
-    typescript: {
-      tsconfigPath: "tsconfig.json",
-      ignoreBuildErrors: false,
-      ...userConfig.typescript,
-    },
     vite: typeof userConfig.vite === "function" ? userConfig.vite({}) : userConfig.vite || {},
   };
 

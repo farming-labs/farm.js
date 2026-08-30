@@ -74,6 +74,21 @@ describe("config helpers", () => {
     });
   });
 
+  it("warns instead of silently accepting TypeScript build settings", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const config = await resolveConfig(
+      { typescript: { tsconfigPath: "config/tsconfig.json", ignoreBuildErrors: true } },
+      "production",
+    );
+
+    expect(config).not.toHaveProperty("typescript");
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('top-level "typescript" option is not supported'),
+    );
+    warn.mockRestore();
+  });
+
   it("warns instead of silently accepting a top-level output mode", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 

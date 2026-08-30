@@ -270,11 +270,6 @@ export default defineConfig({
     buildActivityPosition: 'bottom-right',
   },
 
-  // TypeScript
-  typescript: {
-    ignoreBuildErrors: false,
-  },
-
   // OpenAPI Documentation
   openapi: {
     enabled: true,
