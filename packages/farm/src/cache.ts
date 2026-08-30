@@ -1041,9 +1041,16 @@ function stableSerialize(value: unknown, seen = new WeakSet<object>()): string {
     seen.add(value);
 
     if (Array.isArray(value)) {
-      const serialized = value.map((item) => stableSerialize(item, seen)).join(",");
+      const items: string[] = [];
+      for (let index = 0; index < value.length; index++) {
+        items.push(
+          Object.prototype.hasOwnProperty.call(value, index)
+            ? stableSerialize(value[index], seen)
+            : "[Hole]",
+        );
+      }
       seen.delete(value);
-      return `[${serialized}]`;
+      return `[${items.join(",")}]`;
     }
 
     // Set and Map keep their contents internally, so Object.entries is empty
