@@ -1992,7 +1992,17 @@ ${generateUniversalRouterStateProperties()}
     const action = options.action || (options.replace ? "replace" : "push");
     const to = url.pathname + url.search;
     if (!options.refresh && action !== "pop" && to === this.currentPath) {
-      if (url.hash) window.location.hash = url.hash;
+      if (url.hash === window.location.hash) return;
+      const pageState = options.state === undefined
+        ? window.history.state?.[FARM_PAGE_STATE_KEY]
+        : options.state;
+      const historyState = createHistoryState(to, pageState, window.history.state);
+      if (action === "replace") window.history.replaceState(historyState, "", url);
+      else window.history.pushState(historyState, "", url);
+      if (options.scroll !== false) {
+        if (url.hash) document.querySelector(url.hash)?.scrollIntoView();
+        else window.scrollTo(0, 0);
+      }
       return;
     }
     if (action === "pop" && to === this.currentPath) return;
@@ -2832,7 +2842,17 @@ ${generateUniversalRouterStateProperties()}
     const action = options.action || (options.replace ? "replace" : "push");
     const to = url.pathname + url.search;
     if (action !== "pop" && to === this.currentPath) {
-      if (url.hash) window.location.hash = url.hash;
+      if (url.hash === window.location.hash) return;
+      const pageState = options.state === undefined
+        ? window.history.state?.[FARM_PAGE_STATE_KEY]
+        : options.state;
+      const historyState = createHistoryState(to, pageState, window.history.state);
+      if (action === "replace") window.history.replaceState(historyState, "", url);
+      else window.history.pushState(historyState, "", url);
+      if (options.scroll !== false) {
+        if (url.hash) document.querySelector(url.hash)?.scrollIntoView();
+        else window.scrollTo(0, 0);
+      }
       return;
     }
     if (action === "pop" && to === this.currentPath) return;

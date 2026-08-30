@@ -113,6 +113,8 @@ export const generateStaticParams: GenerateStaticParams<"/users/[id]"> = async (
 ## Typed navigation
 
 Farm writes the route union into the consolidated `src/farm.d.ts` declaration file. Link hrefs and route component props accept real routes without widening everything to plain string. Link hrefs can also include query strings and hash fragments.
+Changing only the fragment preserves SPA state, honors push versus replace history, and does not
+request route data again.
 
 **Client navigation**
 
