@@ -1,6 +1,7 @@
 import type { FarmPlugin, FarmPluginContext } from "../plugin";
 import type { HeaderConfig } from "../config";
 import type { FarmRequest, FarmResponse } from "../types";
+import { compileConfigRoutePattern } from "./route-pattern";
 
 export function createHeadersPlugin(
   headers: HeaderConfig[],
@@ -20,6 +21,11 @@ export function createHeadersPlugin(
     ) => void | Promise<void>;
   } = {},
 ): FarmPlugin {
+  const compiledHeaders = headers.map((config) => ({
+    config,
+    pattern: compileConfigRoutePattern(config.source),
+  }));
+
   return {
     name: "farm:headers",
     enforce: "pre",
@@ -31,13 +37,9 @@ export function createHeadersPlugin(
       const url = new URL(req.url || "/", `http://${req.headers.host}`);
       const pathname = url.pathname;
 
-      for (const headerConfig of headers) {
-        const sourceRegex = new RegExp(
-          "^" + headerConfig.source.replace(/\*/g, "(.*)").replace(/\//g, "\\/") + "$",
-        );
-
-        if (sourceRegex.test(pathname)) {
-          for (const header of headerConfig.headers) {
+      for (const { config, pattern } of compiledHeaders) {
+        if (pattern.regex.test(pathname)) {
+          for (const header of config.headers) {
             res.setHeader(header.key, header.value);
           }
         }

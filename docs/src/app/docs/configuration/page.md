@@ -560,6 +560,19 @@ export default async function BlogPage() {
 
 ## Route rules
 
+Farm's `redirects()`, `rewrites()`, and `headers()` config functions use the same source pattern
+syntax. `:name` captures one path segment, while `:name*` and plain `*` capture the remaining
+characters. Redirect and rewrite destinations can reuse named captures or use numbered captures
+such as `$1`. All other source characters are matched literally.
+
+```ts
+export default defineConfig({
+  async redirects() {
+    return [{ source: "/old/:path*", destination: "/new/:path*", permanent: true }];
+  },
+});
+```
+
 Use `routeRules` when behavior belongs to a URL pattern instead of one page file. Rules are normalized into Farm redirects/headers and passed to Nitro route rules for production adapters.
 
 ```ts
