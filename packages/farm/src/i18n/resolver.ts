@@ -133,20 +133,43 @@ function resolveAcceptLanguage(
   locales: readonly string[],
 ): string | undefined {
   if (!header) return undefined;
-  const candidates = header
-    .split(",")
-    .map((entry, index) => {
-      const [locale = "", ...parameters] = entry.trim().split(";");
-      const qualityValue = parameters
-        .map((parameter) => parameter.trim())
-        .find((parameter) => parameter.startsWith("q="));
-      const quality = qualityValue ? Number(qualityValue.slice(2)) : 1;
-      return { locale, quality: Number.isFinite(quality) ? quality : 0, index };
-    })
-    .filter((candidate) => candidate.locale && candidate.locale !== "*" && candidate.quality > 0)
+
+  const byRange = new Map<string, { locale: string; quality: number; index: number }>();
+  for (const [index, entry] of header.split(",").entries()) {
+    const [rawLocale = "", ...parameters] = entry.trim().split(";");
+    const locale = rawLocale.trim();
+    if (!locale) continue;
+
+    let quality = 1;
+    for (const parameter of parameters) {
+      const [rawName, rawValue] = parameter.trim().split("=", 2);
+      if (rawName?.trim().toLowerCase() !== "q") continue;
+      const value = rawValue?.trim() ?? "";
+      quality = /^(?:0(?:\.\d{0,3})?|1(?:\.0{0,3})?)$/.test(value) ? Number(value) : 0;
+    }
+
+    const key = locale.toLowerCase();
+    const previous = byRange.get(key);
+    if (!previous || quality > previous.quality) {
+      byRange.set(key, { locale, quality, index: previous?.index ?? index });
+    }
+  }
+
+  const candidates = [...byRange.values()]
+    .filter((candidate) => candidate.quality > 0)
     .sort((a, b) => b.quality - a.quality || a.index - b.index);
+  const explicitRanges = [...byRange.values()].filter(({ locale }) => locale !== "*");
 
   for (const candidate of candidates) {
+    if (candidate.locale === "*") {
+      const wildcardMatch = locales.find(
+        (locale) =>
+          !explicitRanges.some((range) => matchFarmLocale(range.locale, [locale]) !== undefined),
+      );
+      if (wildcardMatch) return wildcardMatch;
+      continue;
+    }
+
     const locale = matchFarmLocale(candidate.locale, locales);
     if (locale) return locale;
   }
