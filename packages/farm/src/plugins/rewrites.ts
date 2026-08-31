@@ -1,6 +1,7 @@
 import type { FarmPlugin, FarmPluginContext } from "../plugin";
 import type { RewriteConfig } from "../config";
 import type { FarmRequest, FarmResponse } from "../types";
+import { compileConfigRoutePattern, interpolateConfigRouteDestination } from "./route-pattern";
 
 export function createRewritesPlugin(
   rewrites: RewriteConfig[],
@@ -20,6 +21,11 @@ export function createRewritesPlugin(
     ) => void | Promise<void>;
   } = {},
 ): FarmPlugin {
+  const compiledRewrites = rewrites.map((rewrite) => ({
+    rewrite,
+    pattern: compileConfigRoutePattern(rewrite.source),
+  }));
+
   return {
     name: "farm:rewrites",
     enforce: "pre",
@@ -31,13 +37,14 @@ export function createRewritesPlugin(
       const url = new URL(req.url || "/", `http://${req.headers.host}`);
       const pathname = url.pathname;
 
-      for (const rewrite of rewrites) {
-        const sourceRegex = new RegExp(
-          "^" + rewrite.source.replace(/\*/g, "(.*)").replace(/\//g, "\\/") + "$",
-        );
-
-        if (sourceRegex.test(pathname)) {
-          const newPath = pathname.replace(sourceRegex, rewrite.destination);
+      for (const { rewrite, pattern } of compiledRewrites) {
+        const match = pathname.match(pattern.regex);
+        if (match) {
+          const newPath = interpolateConfigRouteDestination(
+            rewrite.destination,
+            match,
+            pattern.tokens,
+          );
           req.url = newPath + url.search;
           break;
         }
