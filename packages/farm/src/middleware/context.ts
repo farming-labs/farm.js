@@ -111,6 +111,17 @@ export function createContext(
 
   let handled = false;
 
+  const applyResponseHeaders = () => {
+    for (const [key, value] of headers) {
+      try {
+        res.setHeader(key, value);
+      } catch {
+        // Keep helper behavior aligned with the middleware manager: an invalid
+        // optional header must not prevent the response itself from completing.
+      }
+    }
+  };
+
   const ctx: MiddlewareContext = {
     request: req,
     response: res,
@@ -142,6 +153,7 @@ export function createContext(
       ctx._handled = true;
       handled = true;
 
+      applyResponseHeaders();
       res.writeHead(status, {
         Location: redirectUrl,
         "Content-Type": "text/plain",
@@ -169,6 +181,7 @@ export function createContext(
       ctx._handled = true;
       handled = true;
 
+      applyResponseHeaders();
       res.writeHead(status, {
         "Content-Type": "application/json",
       });
@@ -184,6 +197,7 @@ export function createContext(
       ctx._handled = true;
       handled = true;
 
+      applyResponseHeaders();
       res.writeHead(status, {
         "Content-Type": "text/plain",
       });
@@ -199,6 +213,7 @@ export function createContext(
       ctx._handled = true;
       handled = true;
 
+      applyResponseHeaders();
       res.writeHead(status, {
         "Content-Type": "text/html",
       });
