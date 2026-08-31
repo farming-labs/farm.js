@@ -78,10 +78,10 @@ describe("typed endpoint errors", () => {
 
   it("rejects malformed JSON before an endpoint handler executes", async () => {
     let executed = false;
-    const handler = (ctx: { body: unknown }) => {
+    const handler = createEndpoint({ method: "POST" }, (ctx) => {
       executed = true;
       return { body: ctx.body };
-    };
+    });
     const response = await invokeAPIRouteEndpoint(
       handler,
       new Request("https://farm.test/api/products", {
