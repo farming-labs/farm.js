@@ -467,6 +467,7 @@ export function createAPIClient<
     const fetchOptions: RequestInit = {
       method: requestOptions.method || "GET",
       headers,
+      credentials: options.credentials,
     };
 
     // Handle body
