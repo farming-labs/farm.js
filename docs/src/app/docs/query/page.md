@@ -105,6 +105,13 @@ export default async function UserPage({ params }: PageProps) {
 }
 ```
 
+## Pagination metadata
+
+`createPaginationMeta(searchParams, { totalItems, itemsPerPage })` returns a safe page, offset,
+limit, and next/previous flags for server-rendered lists. Missing, malformed, zero, negative, or
+unsafe `page` values fall back to page 1. `totalItems` must be a non-negative safe integer and
+`itemsPerPage` must be a positive safe integer; invalid configuration throws a `RangeError`.
+
 ## Parser reference
 
 | Parser              | Reads                                                    |

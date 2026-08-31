@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { asArrayOf, asInteger, asString } from "../query/parsers";
-import { loadSearchParams } from "../query/server";
+import { createPaginationMeta, loadSearchParams } from "../query/server";
 
 describe("loadSearchParams", () => {
   it("keeps every value of an array-shaped prop", async () => {
@@ -66,5 +66,42 @@ describe("loadSearchParams", () => {
 
     expect(query.tag).toBeNull();
     expect(query.name).toBeNull();
+  });
+
+  it("keeps pagination metadata finite and non-negative", async () => {
+    await expect(
+      createPaginationMeta(Promise.resolve(new URLSearchParams("page=-3")), {
+        totalItems: 42,
+        itemsPerPage: 10,
+      }),
+    ).resolves.toMatchObject({
+      currentPage: 1,
+      totalPages: 5,
+      offset: 0,
+      limit: 10,
+      hasPreviousPage: false,
+      hasNextPage: true,
+    });
+
+    await expect(
+      createPaginationMeta(Promise.resolve(new URLSearchParams("page=not-a-number")), {
+        totalItems: 0,
+      }),
+    ).resolves.toMatchObject({
+      currentPage: 1,
+      totalPages: 0,
+      offset: 0,
+      hasPreviousPage: false,
+      hasNextPage: false,
+    });
+  });
+
+  it("rejects invalid pagination configuration", async () => {
+    await expect(createPaginationMeta(Promise.resolve({}), { totalItems: -1 })).rejects.toThrow(
+      "Pagination totalItems",
+    );
+    await expect(
+      createPaginationMeta(Promise.resolve({}), { totalItems: 10, itemsPerPage: 0 }),
+    ).rejects.toThrow("Pagination itemsPerPage");
   });
 });
