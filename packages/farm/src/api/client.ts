@@ -453,8 +453,11 @@ export function createAPIClient<
     // Handle query parameters
     if (requestOptions.query) {
       Object.entries(requestOptions.query).forEach(([key, value]) => {
-        if (value !== undefined && value !== null) {
-          url.searchParams.set(key, String(value));
+        if (value === undefined || value === null) return;
+        url.searchParams.delete(key);
+        const values = Array.isArray(value) ? value : [value];
+        for (const item of values) {
+          if (item !== undefined && item !== null) url.searchParams.append(key, String(item));
         }
       });
     }

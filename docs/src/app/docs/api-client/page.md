@@ -70,6 +70,15 @@ if (result.error) {
 A typed `HEAD` route is called with `.head()`. Its result keeps the same `{ data, error, key }`
 shape, with `data` set to `undefined` because HTTP HEAD responses do not have a body.
 
+Array-valued query inputs use repeated URL parameters. For example,
+
+```ts
+await api.posts.get({ query: { tag: ["react", "vite"] } });
+// GET /api/posts?tag=react&tag=vite
+```
+
+This is the same array representation that API route query schemas receive.
+
 ## Type-safe QUERY requests
 
 A route that exports `QUERY` becomes a `.query()` caller. Its body and response are inferred from
