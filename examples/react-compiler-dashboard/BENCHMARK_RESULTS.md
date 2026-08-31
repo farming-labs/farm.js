@@ -2,6 +2,28 @@
 
 Date: 2026-08-29
 
+## Queued same-key exact-window refresh follow-up — 2026-08-31
+
+The full bracketed production-browser run added a separate 10,000-row workload that queues two
+32-row same-key refreshes before one compiler flush. Both compiler builds emitted all nine expected
+`keyedArrayPositionHints` sites, preserved every one of the 64 touched DOM rows, updated the changed
+label and amount in both windows, produced zero owner executions, and passed every existing
+correctness, performance, persistence, and scalability gate without lowering a threshold.
+
+| Mode   | React median | Queued refresh | Compiled control | vs React | vs control |
+| ------ | -----------: | -------------: | ---------------: | -------: | ---------: |
+| Static |     60.70 ms |       14.00 ms |         28.30 ms |    4.34x |      2.02x |
+| Hybrid |     60.70 ms |        9.20 ms |         18.30 ms |    6.60x |      1.99x |
+
+The independent gate requires at least 4x versus React and 1.5x versus the block-bodied compiled
+control in both modes. Package tests additionally compare 1,000 deterministic queued updates with
+normal React and cover disjoint and overlapping windows, last-update-wins behavior, complete-chain
+preparation before mutation, structural and key-changing fallback, controlled-input focus and
+selection, delegated events, hydration, Strict Mode, and unmount cleanup. The isolated exact-window
+fixture has a 13,358 B gzip compiler premium, 254 B above the previous result and inside its
+unchanged 256 B allowance. Direct, core-only, and unrelated hint fixtures remain unchanged. The
+measured environment was Chrome 145.0.7632.6, Node.js 23.11.0, and Apple M1 macOS arm64.
+
 ## Same-key exact-window refresh follow-up — 2026-08-31
 
 The full bracketed production-browser run added a separate 10,000-row workload for refreshing 64

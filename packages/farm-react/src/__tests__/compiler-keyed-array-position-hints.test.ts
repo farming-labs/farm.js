@@ -89,6 +89,31 @@ describe("React AOT keyed-array position hints", () => {
     expect(result.code).not.toContain("createCompilerKeyedArrayBatchInsert");
   });
 
+  it("records multiple exact-window replacements queued by one event", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Table({ firstWindow, secondWindow }) {
+        const [rows, setRows] = useState([
+          { id: "a", label: "Alpha" },
+          { id: "b", label: "Beta" },
+          { id: "c", label: "Gamma" },
+          { id: "d", label: "Delta" },
+        ]);
+        return <section>
+          <button onClick={() => {
+            setRows((current) => current.toSpliced(0, 2, ...firstWindow));
+            setRows((current) => current.toSpliced(2, 2, ...secondWindow));
+          }}>Refresh windows</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </section>;
+      }
+    `);
+
+    expect(result.optimizations.keyedArrayPositionHints).toBe(2);
+    expect(result.code.match(/createCompilerKeyedArrayWindowReplace\(/g)).toHaveLength(2);
+    expect(result.code).toContain("keyedRowsWindowPositionHintedRuntimeFeature");
+  });
+
   it("records compiler-safe runtime position expressions", async () => {
     const result = await compile(`
       import { useState } from "react";

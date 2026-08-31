@@ -385,6 +385,58 @@ export function StandardTableBenchmark() {
           Refresh 64-row same-key window (snapshot control)
         </button>
         <button
+          data-action="table-position-window-refresh-queued"
+          type="button"
+          onClick={() => {
+            const firstPosition = 2_500;
+            const secondPosition = 7_500;
+            const first = rows.slice(firstPosition, firstPosition + 32).map((row, offset) =>
+              offset === 16
+                ? { ...row, amount: row.amount + 1, label: `${row.label} queued` }
+                : { ...row },
+            );
+            const second = rows.slice(secondPosition, secondPosition + 32).map((row, offset) =>
+              offset === 16
+                ? { ...row, amount: row.amount + 1, label: `${row.label} queued` }
+                : { ...row },
+            );
+            setRows((current) => current.toSpliced(firstPosition, 32, ...first));
+            setRows((current) => current.toSpliced(secondPosition, 32, ...second));
+            setOperation("refresh two queued same-key windows");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Refresh two queued same-key windows
+        </button>
+        <button
+          data-action="table-position-window-refresh-queued-snapshot"
+          type="button"
+          onClick={() => {
+            const firstPosition = 2_500;
+            const secondPosition = 7_500;
+            const first = rows.slice(firstPosition, firstPosition + 32).map((row, offset) =>
+              offset === 16
+                ? { ...row, amount: row.amount + 1, label: `${row.label} queued` }
+                : { ...row },
+            );
+            const second = rows.slice(secondPosition, secondPosition + 32).map((row, offset) =>
+              offset === 16
+                ? { ...row, amount: row.amount + 1, label: `${row.label} queued` }
+                : { ...row },
+            );
+            setRows((current) => {
+              return current.toSpliced(firstPosition, 32, ...first);
+            });
+            setRows((current) => {
+              return current.toSpliced(secondPosition, 32, ...second);
+            });
+            setOperation("refresh two queued same-key windows (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Refresh two queued same-key windows (snapshot control)
+        </button>
+        <button
           data-action="table-position-remove"
           type="button"
           onClick={() => {

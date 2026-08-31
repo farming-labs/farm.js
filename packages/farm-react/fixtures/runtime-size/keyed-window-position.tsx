@@ -13,10 +13,11 @@ interface Row {
 }
 
 interface WindowPositionTableProps {
-  incoming: Row[];
+  first: Row[];
+  second: Row[];
 }
 
-export function WindowPositionTable({ incoming }: WindowPositionTableProps) {
+export function WindowPositionTable({ first, second }: WindowPositionTableProps) {
   const [rows, setRows] = useState<Row[]>([
     { id: 1, label: "Alpha" },
     { id: 2, label: "Beta" },
@@ -24,8 +25,13 @@ export function WindowPositionTable({ incoming }: WindowPositionTableProps) {
   ]);
   return (
     <main>
-      <button onClick={() => setRows((current) => current.toSpliced(1, 2, ...incoming))}>
-        Replace rows
+      <button
+        onClick={() => {
+          setRows((current) => current.toSpliced(1, 1, ...first));
+          setRows((current) => current.toSpliced(2, 1, ...second));
+        }}
+      >
+        Refresh queued windows
       </button>
       <ul>
         {rows.map((row) => (
@@ -38,9 +44,7 @@ export function WindowPositionTable({ incoming }: WindowPositionTableProps) {
 
 createRoot(document.body).render(
   <WindowPositionTable
-    incoming={[
-      { id: 2, label: "Beta refreshed" },
-      { id: 3, label: "Gamma refreshed" },
-    ]}
+    first={[{ id: 2, label: "Beta refreshed" }]}
+    second={[{ id: 3, label: "Gamma refreshed" }]}
   />,
 );
