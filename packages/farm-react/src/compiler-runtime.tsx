@@ -4792,11 +4792,9 @@ function reconcileCompilerKeyedArrayWindowReplace(
   const previousInstances = [...instances.values()];
   if (updates.length > 1) {
     const touchedIndices = new Set<number>();
-    let overlaps = false;
     for (const update of updates) {
       if (update.insertedCount !== update.removedCount) return undefined;
       for (let index = update.position; index < update.position + update.removedCount; index += 1) {
-        overlaps ||= touchedIndices.has(index);
         touchedIndices.add(index);
       }
     }
@@ -4833,10 +4831,11 @@ function reconcileCompilerKeyedArrayWindowReplace(
         const item = finalValue[index];
         const key = keyedRowIdentity(props.rowKey(item, index));
         if (key !== instance.key) {
-          // Overlapping fresh-key windows can introduce and then remove an
-          // intermediate identity. Keep that edit history on complete keyed
-          // reconciliation until it has a separate proof.
-          if (overlaps || knownKeys.has(key) || incomingKeys.has(key)) return undefined;
+          // Fixed-length queued windows never shift positions, and React only
+          // commits their final array. Intermediate identities were never
+          // mounted, so only the final key must be new to the committed
+          // rows and unique across the prepared replacements.
+          if (knownKeys.has(key) || incomingKeys.has(key)) return undefined;
           incomingKeys.add(key);
           replacesRows = true;
           const descriptor = props.create(item, index);

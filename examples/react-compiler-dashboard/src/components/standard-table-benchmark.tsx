@@ -441,11 +441,11 @@ export function StandardTableBenchmark() {
           type="button"
           onClick={() => {
             const firstPosition = 2_500;
-            const secondPosition = 7_500;
+            const secondPosition = 2_516;
             const firstSeed = seed + 1;
             const secondSeed = seed + 2;
             const first = buildRows(32, firstSeed).map((row, offset) =>
-              offset === 16 ? { ...row, label: `${row.label} queued replacement` } : row,
+              offset === 8 ? { ...row, label: `${row.label} queued replacement` } : row,
             );
             const second = buildRows(32, secondSeed).map((row, offset) =>
               offset === 16 ? { ...row, label: `${row.label} queued replacement` } : row,
@@ -453,22 +453,22 @@ export function StandardTableBenchmark() {
             setSeed(secondSeed);
             setRows((current) => current.toSpliced(firstPosition, 32, ...first));
             setRows((current) => current.toSpliced(secondPosition, 32, ...second));
-            setOperation("replace two queued fresh-key windows");
+            setOperation("replace two overlapping queued fresh-key windows");
             setRevision((value) => value + 1);
           }}
         >
-          Replace two queued fresh-key windows
+          Replace two overlapping queued fresh-key windows
         </button>
         <button
           data-action="table-position-window-replace-queued-snapshot"
           type="button"
           onClick={() => {
             const firstPosition = 2_500;
-            const secondPosition = 7_500;
+            const secondPosition = 2_516;
             const firstSeed = seed + 1;
             const secondSeed = seed + 2;
             const first = buildRows(32, firstSeed).map((row, offset) =>
-              offset === 16 ? { ...row, label: `${row.label} queued replacement` } : row,
+              offset === 8 ? { ...row, label: `${row.label} queued replacement` } : row,
             );
             const second = buildRows(32, secondSeed).map((row, offset) =>
               offset === 16 ? { ...row, label: `${row.label} queued replacement` } : row,
@@ -480,11 +480,11 @@ export function StandardTableBenchmark() {
             setRows((current) => {
               return current.toSpliced(secondPosition, 32, ...second);
             });
-            setOperation("replace two queued fresh-key windows (snapshot control)");
+            setOperation("replace two overlapping queued fresh-key windows (snapshot control)");
             setRevision((value) => value + 1);
           }}
         >
-          Replace two queued fresh-key windows (snapshot control)
+          Replace two overlapping queued fresh-key windows (snapshot control)
         </button>
         <button
           data-action="table-position-remove"

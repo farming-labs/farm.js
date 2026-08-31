@@ -2,6 +2,31 @@
 
 Date: 2026-08-29
 
+## Overlapping fresh-key exact-window replacement follow-up — 2026-09-01
+
+The full bracketed production-browser run changed the 10,000-row queued replacement workload to
+two overlapping 32-row windows. Their final union contains 48 rows: the later update wins in the
+16-row overlap, intermediate identities are never mounted, both surrounding anchor rows retain
+their DOM identity, and all 48 committed rows receive fresh keys. Both compiler builds emitted all
+11 expected `keyedArrayPositionHints` sites, produced zero owner executions, and passed every
+existing correctness, performance, persistence, and scalability gate without lowering a threshold.
+
+| Mode   | React median | Overlapping replacement | Compiled control | vs React | vs control |
+| ------ | -----------: | ----------------------: | ---------------: | -------: | ---------: |
+| Static |     53.35 ms |                 8.80 ms |         20.00 ms |    6.06x |      2.27x |
+| Hybrid |     53.35 ms |                 8.40 ms |         20.10 ms |    6.35x |      2.39x |
+
+The independent gate still requires at least 4x versus React and 1.5x versus the block-bodied
+compiled control in both modes. Package tests separately prove exact final-union work, committed-key
+restoration, final-state validation after an intermediate collision, preparation before the first
+DOM replacement, existing-key move and duplicate-key fallback, 1,000 deterministic differential
+updates, controlled-input focus and selection, delegated events, hydration, Strict Mode, React
+18/19 compatibility, and unmount cleanup. The isolated exact-window fixture has a 13,517 B gzip
+compiler premium, 8 B smaller than the preceding disjoint-window result and inside the unchanged
+runtime-size limit. Every unrelated size fixture remains within its existing budget; the isolated
+full-runtime bundle still removes 81.8% when the compiler is disabled. The measured environment was
+Chrome 145.0.7632.6, Node.js 23.11.0, and Apple M1 macOS arm64.
+
 ## Queued fresh-key exact-window replacement follow-up — 2026-09-01
 
 The full bracketed production-browser run added a separate 10,000-row workload that queues two
