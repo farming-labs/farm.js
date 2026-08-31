@@ -381,6 +381,7 @@ function LinkInner<TRoute extends string = DefaultRouteHref>(
       onClick?.(event);
       if (event.defaultPrevented) return;
       if (isExternal) return;
+      if (event.currentTarget.hasAttribute("download")) return;
       if (target && target !== "_self") return;
       if (isModifierEvent(event)) return;
       if (event.button !== 0) return;
