@@ -87,6 +87,23 @@ describe("APIRouteManager", () => {
     expect(manager.matchRoute("/api/shop/settings")?.route.path).toBe("/api/shop/[item]");
   });
 
+  it("matches URL-encoded Unicode static route segments", async () => {
+    const manager = new APIRouteManager("/tmp/farm-api-unicode-test");
+    manager.getRoutes().set("/api/café", {
+      path: "/api/café",
+      filePath: "/tmp/farm-api-unicode-test/café/route.ts",
+      methods: ["GET"],
+      endpoints: { GET: async () => Response.json({ route: "café" }) },
+    });
+
+    const pathname = new URL("http://example.com/api/caf%C3%A9").pathname;
+    expect(manager.matchRoute(pathname)?.route.path).toBe("/api/café");
+
+    const response = await manager.getHandler()!(new Request("http://example.com/api/caf%C3%A9"));
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ route: "café" });
+  });
+
   it("uses GET for HEAD requests and strips the response body", async () => {
     const manager = new APIRouteManager("/tmp/farm-api-head-test");
     const getHandler = async () =>

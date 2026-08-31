@@ -60,6 +60,9 @@ src/app/api/users/[id]/route.ts     -> /api/users/:id
 src/app/api/files/[...path]/route.ts -> /api/files/*
 ```
 
+Static route directory names may contain Unicode. Browsers percent-encode those path segments;
+Farm decodes both the discovered route and request segment before matching them.
+
 Use `createEndpoint` when you want input validation and typed client generation. Use plain `GET`, `POST`, `PATCH`, and friends when you want to handle the raw `Request`.
 Plain handlers always receive that `Request`; parameter names such as `request`, `context`, or `ctx`
 do not change the calling convention. Use `createEndpoint` for the parsed `{ body, query, headers }`
