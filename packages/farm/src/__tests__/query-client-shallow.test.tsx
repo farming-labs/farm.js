@@ -251,6 +251,60 @@ describe("useQueryState shallow routing", () => {
     expect(historyChange).toHaveBeenCalledTimes(1);
   });
 
+  it("composes throttled updates for different query keys", () => {
+    vi.useFakeTimers();
+
+    let setQuery!: (value: string | null) => void;
+    let setPage!: (value: string | null) => void;
+
+    function App() {
+      const [, updateQuery] = useQueryState("q", asString, { throttleMs: 50 });
+      const [, updatePage] = useQueryState("page", asString, { throttleMs: 50 });
+      setQuery = updateQuery;
+      setPage = updatePage;
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+
+    act(() => {
+      setQuery("farm");
+      setPage("2");
+      vi.runAllTimers();
+    });
+
+    expect(window.location.search).toBe("?q=farm&page=2");
+  });
+
+  it("cancels a throttled update when the value returns to the current URL", () => {
+    vi.useFakeTimers();
+    window.history.replaceState(null, "", "/?q=old");
+
+    let setQuery!: (value: string | null) => void;
+
+    function App() {
+      const [, updateQuery] = useQueryState("q", asString, { throttleMs: 50 });
+      setQuery = updateQuery;
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+
+    act(() => {
+      setQuery("new");
+      setQuery("old");
+      vi.runAllTimers();
+    });
+
+    expect(window.location.search).toBe("?q=old");
+  });
+
   it("preserves Farm page history state when updating query params", async () => {
     vi.useFakeTimers();
     spaRouter = new SPARouter({ scrollRestoration: false });
