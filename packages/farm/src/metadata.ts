@@ -31,11 +31,36 @@ export function mergeMetadata(
   return {
     ...base,
     ...next,
+    title: mergeMetadataTitle(base.title, next.title),
     openGraph: mergeNestedMetadata(base.openGraph, next.openGraph),
     twitter: mergeNestedMetadata(base.twitter, next.twitter),
     alternates: mergeNestedMetadata((base as any).alternates, (next as any).alternates),
     icons: mergeNestedMetadata((base as any).icons, (next as any).icons),
   };
+}
+
+function mergeMetadataTitle(base: Metadata["title"], next: Metadata["title"]): Metadata["title"] {
+  if (next === undefined) return base;
+
+  const parentTemplate = isRecord(base) ? normalizeContent(base.template) : undefined;
+  if (typeof next === "string") {
+    return parentTemplate ? applyTitleTemplate(parentTemplate, next) : next;
+  }
+
+  if (!isRecord(next)) return next;
+
+  const defaultTitle = normalizeContent(next.default) ?? resolveMetadataTitle(base);
+  return {
+    ...next,
+    default:
+      defaultTitle && parentTemplate
+        ? applyTitleTemplate(parentTemplate, defaultTitle)
+        : defaultTitle,
+  };
+}
+
+function applyTitleTemplate(template: string, title: string): string {
+  return template.split("%s").join(title);
 }
 
 export function addMetadataImageReference(

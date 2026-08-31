@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { renderMetadataHead } from "../metadata";
+import { mergeMetadata, renderMetadataHead } from "../metadata";
 
 describe("metadata head rendering", () => {
   it("reports when favicon metadata emits a browser icon", () => {
@@ -29,6 +29,20 @@ describe("metadata head rendering", () => {
     expect(renderMetadataHead(undefined)).toMatchObject({
       hasExplicitTitle: false,
     });
+  });
+
+  it("applies parent title templates to child metadata", () => {
+    const root = mergeMetadata(undefined, {
+      title: { default: "Acme", template: "%s | Acme" },
+    });
+    const section = mergeMetadata(root, {
+      title: { default: "Docs", template: "%s — Docs" },
+    });
+    const page = mergeMetadata(section, { title: "Getting started" });
+
+    expect(renderMetadataHead(root).title).toBe("Acme");
+    expect(renderMetadataHead(section).title).toBe("Docs | Acme");
+    expect(renderMetadataHead(page).title).toBe("Getting started — Docs");
   });
 
   it("keeps the fallback available when only an Apple touch icon is configured", () => {
