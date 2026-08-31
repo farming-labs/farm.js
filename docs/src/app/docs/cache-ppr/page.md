@@ -55,6 +55,9 @@ const products = await cache.getOrSet(key, () => fetchProducts(), {
 });
 ```
 
+`clear()` invalidates entries and any fills already in progress. Existing callers still receive
+their result, but an older fill cannot repopulate the cache after it has been cleared.
+
 ## Revalidate
 
 **server action or route handler**
