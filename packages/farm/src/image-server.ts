@@ -194,8 +194,35 @@ export function selectOutputFormat(
   accept: string,
   formats: readonly FarmImageFormat[],
 ): FarmImageFormat | undefined {
-  const normalizedAccept = accept.toLowerCase();
-  return formats.find((format) => normalizedAccept.includes(format));
+  const qualityByFormat = new Map<string, number>();
+
+  for (const range of accept.split(",")) {
+    const [rawType, ...parameters] = range.split(";");
+    const type = rawType.trim().toLowerCase();
+    if (!type) continue;
+
+    let quality = 1;
+    for (const parameter of parameters) {
+      const [rawName, rawValue] = parameter.split("=", 2);
+      if (rawName.trim().toLowerCase() !== "q") continue;
+      const parsed = Number(rawValue?.trim());
+      quality = Number.isFinite(parsed) && parsed >= 0 && parsed <= 1 ? parsed : 0;
+      break;
+    }
+
+    qualityByFormat.set(type, Math.max(qualityByFormat.get(type) ?? 0, quality));
+  }
+
+  let selected: FarmImageFormat | undefined;
+  let selectedQuality = 0;
+  for (const format of formats) {
+    const quality = qualityByFormat.get(format) ?? 0;
+    if (quality > selectedQuality) {
+      selected = format;
+      selectedQuality = quality;
+    }
+  }
+  return selected;
 }
 
 export function isPrivateImageAddress(address: string): boolean {

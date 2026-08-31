@@ -141,7 +141,7 @@ export default defineConfig({
 | `deviceSizes`         | Responsive viewport widths accepted by the endpoint.                                                                     |
 | `imageSizes`          | Smaller fixed image widths accepted by the endpoint.                                                                     |
 | `qualities`           | Quality allowlist. `Image` selects the nearest configured value.                                                         |
-| `formats`             | Preferred modern output formats, negotiated through the request `Accept` header.                                         |
+| `formats`             | Preferred modern output formats, negotiated through the request `Accept` header and its quality values.                  |
 | `minimumCacheTTL`     | Browser and in-process transformed-image cache lifetime in seconds.                                                      |
 | `maximumResponseBody` | Maximum source and transformed body size. Accepts bytes or values such as `"10mb"`.                                      |
 | `maximumRedirects`    | Maximum remote redirects; every destination is checked again.                                                            |
@@ -153,6 +153,8 @@ Pass a `loader` prop when an application already uses an image CDN. The loader r
 ## Security model
 
 The optimizer accepts only configured widths and qualities. It does not forward browser cookies or authorization headers, limits response bodies, checks file signatures instead of trusting `Content-Type`, revalidates redirect destinations, and blocks loopback, link-local, and private network targets.
+Formats explicitly rejected with `q=0` are never emitted. Farm uses the configured format order to
+break equal-quality ties and keeps the source format when the client only sends wildcard ranges.
 
 SVG optimization and private-network sources are disabled by default. `dangerouslyAllowSVG` adds a restrictive content security policy but should still be enabled only for trusted files. `dangerouslyAllowLocalIP` is intended for controlled private deployments and weakens SSRF protection.
 
