@@ -233,6 +233,7 @@ export class FarmDataCache {
   private inflight = new Map<string, Promise<unknown>>();
   private invalidatedTagVersions = new Map<string, number>();
   private version = 0;
+  private generation = 0;
   private adapter?: FarmCacheAdapter;
   private namespace = "farm";
   private local = true;
@@ -467,6 +468,7 @@ export class FarmDataCache {
 
   clear(): void {
     const count = this.entries.size;
+    this.generation++;
     this.entries.clear();
     this.inflight.clear();
     this.invalidatedTagVersions.clear();
@@ -594,13 +596,16 @@ export class FarmDataCache {
     }
 
     const tags = Array.from(normalizeCacheOptionsTags(options));
-    const promise = this.fillCacheEntry(key, producer, options, tags)
+    const generation = this.generation;
+    const promise = this.fillCacheEntry(key, producer, options, tags, generation)
       .catch((error) => {
         emitFarmEvent({ type: "cache.error", key, operation: "set", error });
         throw error;
       })
       .finally(() => {
-        this.inflight.delete(key);
+        if (this.inflight.get(key) === promise) {
+          this.inflight.delete(key);
+        }
       });
 
     this.inflight.set(key, promise);
@@ -612,6 +617,7 @@ export class FarmDataCache {
     producer: () => Promise<T> | T,
     options: FarmCacheOptions,
     tags: readonly string[],
+    generation: number,
   ): Promise<T> {
     const leaseKey = `${this.namespace}:lease:${key}`;
     let leaseToken: string | null | undefined;
@@ -632,7 +638,9 @@ export class FarmDataCache {
       const initialCreatedVersion = this.version;
       const initialTagVersions = await this.getAdapterTagVersions(tags);
       const value = await producer();
-      await this.writeAsync(key, value, options, initialTagVersions, initialCreatedVersion);
+      if (generation === this.generation) {
+        await this.writeAsync(key, value, options, initialTagVersions, initialCreatedVersion);
+      }
       return value;
     } finally {
       if (leaseToken && this.adapter?.releaseLease) {

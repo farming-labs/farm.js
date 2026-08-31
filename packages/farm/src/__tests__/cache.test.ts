@@ -346,6 +346,48 @@ describe("server cache primitives", () => {
     expect(calls).toBe(1);
   });
 
+  it("does not restore an in-flight cache fill after clear", async () => {
+    const cache = new FarmDataCache();
+    let finishFirstFill!: () => void;
+    let finishSecondFill!: () => void;
+    const firstFillGate = new Promise<void>((resolve) => {
+      finishFirstFill = resolve;
+    });
+    const secondFillGate = new Promise<void>((resolve) => {
+      finishSecondFill = resolve;
+    });
+    let calls = 0;
+
+    const firstFill = cache.getOrSet("products", async () => {
+      const value = ++calls;
+      await firstFillGate;
+      return { calls: value };
+    });
+
+    await vi.waitFor(() => expect(calls).toBe(1));
+    cache.clear();
+
+    const secondFill = cache.getOrSet("products", async () => {
+      const value = ++calls;
+      await secondFillGate;
+      return { calls: value };
+    });
+    await vi.waitFor(() => expect(calls).toBe(2));
+
+    finishFirstFill();
+    await expect(firstFill).resolves.toEqual({ calls: 1 });
+    expect(cache.get("products")).toBeUndefined();
+
+    const dedupedFill = cache.getOrSet("products", async () => ({ calls: ++calls }));
+    finishSecondFill();
+    await expect(Promise.all([secondFill, dedupedFill])).resolves.toEqual([
+      { calls: 2 },
+      { calls: 2 },
+    ]);
+    expect(calls).toBe(2);
+    expect(cache.get("products")).toEqual({ calls: 2 });
+  });
+
   it("does not make a local value fresh when its tag is invalidated during generation", async () => {
     const cache = new FarmDataCache();
     let finishGeneration!: () => void;
