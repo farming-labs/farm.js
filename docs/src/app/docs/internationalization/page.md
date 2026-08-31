@@ -169,6 +169,10 @@ export function ProductLinks() {
 
 Farm also strips the locale before route and middleware matching, keeps it in SPA page-data snapshots, and localizes internal `redirect()` destinations. Existing page, layout, loading, error, metadata image, and middleware files do not need locale wrappers.
 
+Configuration `redirects()`, `rewrites()`, and `headers()` use the same internal, unprefixed source
+paths. A request such as `/fr/legacy` can match a `/legacy` rule; an internal redirect or rewrite
+destination keeps the active `fr` prefix. Development and production apply this behavior equally.
+
 ## Request signals
 
 For a request without an explicit locale prefix, Farm resolves the locale in this order:

@@ -1,7 +1,13 @@
 import type { FarmPlugin, FarmPluginContext } from "../plugin";
 import type { RewriteConfig } from "../config";
 import type { FarmRequest, FarmResponse } from "../types";
-import { compileConfigRoutePattern, interpolateConfigRouteDestination } from "./route-pattern";
+import type { ResolvedFarmI18nConfig } from "../i18n/types";
+import {
+  compileConfigRoutePattern,
+  interpolateConfigRouteDestination,
+  localizeConfigRouteDestination,
+  resolveConfigRoutePathname,
+} from "./route-pattern";
 
 export const FARM_CONFIG_REWRITES_PLUGIN_NAME = "farm:rewrites";
 
@@ -10,6 +16,7 @@ export function createRewritesPlugin(
   {
     beforeRequest: overrideBeforeRequest,
     afterResponse: overrideAfterResponse,
+    i18n,
   }: {
     beforeRequest?: (
       req: FarmRequest,
@@ -21,6 +28,7 @@ export function createRewritesPlugin(
       res: FarmResponse,
       context: FarmPluginContext,
     ) => void | Promise<void>;
+    i18n?: ResolvedFarmI18nConfig;
   } = {},
 ): FarmPlugin {
   const compiledRewrites = rewrites.map((rewrite) => ({
@@ -37,15 +45,16 @@ export function createRewritesPlugin(
         await overrideBeforeRequest(req, res, context);
       }
       const url = new URL(req.url || "/", `http://${req.headers.host}`);
-      const pathname = url.pathname;
+      const routePath = resolveConfigRoutePathname(url.pathname, i18n);
+      const pathname = routePath.pathname;
 
       for (const { rewrite, pattern } of compiledRewrites) {
         const match = pathname.match(pattern.regex);
         if (match) {
-          const newPath = interpolateConfigRouteDestination(
-            rewrite.destination,
-            match,
-            pattern.tokens,
+          const newPath = localizeConfigRouteDestination(
+            interpolateConfigRouteDestination(rewrite.destination, match, pattern.tokens),
+            routePath.locale,
+            i18n,
           );
           const destinationUrl = new URL(newPath, url);
           if (!destinationUrl.search && url.search) {

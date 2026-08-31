@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createHeadersPlugin } from "../plugins/headers";
 import { createRedirectsPlugin } from "../plugins/redirects";
 import { createRewritesPlugin } from "../plugins/rewrites";
+import { resolveFarmI18nConfig } from "../i18n/config";
 
 function createRequest(url: string): IncomingMessage {
   return {
@@ -32,6 +33,15 @@ async function runBeforeRequest(
 }
 
 describe("config route plugins", () => {
+  const i18n = resolveFarmI18nConfig(
+    {
+      locales: ["en", "fr"],
+      defaultLocale: "en",
+      routing: "prefix-except-default",
+    },
+    { root: "/tmp/farm-config-route-i18n", mode: "development" },
+  );
+
   it("keeps named and plain redirect captures in source order", async () => {
     const plugin = createRedirectsPlugin([
       {
@@ -133,5 +143,36 @@ describe("config route plugins", () => {
     await runBeforeRequest(plugin, req, createResponse());
 
     expect(req.url).toBe("/current?view=compact");
+  });
+
+  it("matches locale-prefixed config routes and localizes their destinations", async () => {
+    const redirect = createRedirectsPlugin(
+      [{ source: "/docs/:path*", destination: "/learn/:path*" }],
+      { i18n },
+    );
+    const redirectRequest = createRequest("/fr/docs/start");
+    const redirectResponse = createResponse();
+
+    await runBeforeRequest(redirect, redirectRequest, redirectResponse);
+
+    expect(redirectResponse.writeHead).toHaveBeenCalledWith(307, {
+      Location: "/fr/learn/start",
+    });
+
+    const rewrite = createRewritesPlugin(
+      [{ source: "/legacy/:path*", destination: "/current/:path*" }],
+      { i18n },
+    );
+    const rewriteRequest = createRequest("/fr/legacy/guide?view=full");
+    await runBeforeRequest(rewrite, rewriteRequest, createResponse());
+    expect(rewriteRequest.url).toBe("/fr/current/guide?view=full");
+
+    const headers = createHeadersPlugin(
+      [{ source: "/docs/:path*", headers: [{ key: "x-docs", value: "yes" }] }],
+      { i18n },
+    );
+    const headerResponse = createResponse();
+    await runBeforeRequest(headers, createRequest("/fr/docs/start"), headerResponse);
+    expect(headerResponse.getHeader("x-docs")).toBe("yes");
   });
 });

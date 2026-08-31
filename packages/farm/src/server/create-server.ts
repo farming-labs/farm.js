@@ -163,15 +163,15 @@ export async function createServer(config: FarmConfig = {}) {
       const rewrites = await resolvedConfig.rewrites();
 
       if (redirects.length > 0) {
-        pluginManager.addPlugin(createRedirectsPlugin(redirects));
+        pluginManager.addPlugin(createRedirectsPlugin(redirects, { i18n: resolvedConfig.i18n }));
       }
 
       if (headers.length > 0) {
-        pluginManager.addPlugin(createHeadersPlugin(headers));
+        pluginManager.addPlugin(createHeadersPlugin(headers, { i18n: resolvedConfig.i18n }));
       }
 
       if (rewrites.length > 0) {
-        pluginManager.addPlugin(createRewritesPlugin(rewrites));
+        pluginManager.addPlugin(createRewritesPlugin(rewrites, { i18n: resolvedConfig.i18n }));
       }
 
       // Compression is applied by production adapters. Its hook is a no-op in
