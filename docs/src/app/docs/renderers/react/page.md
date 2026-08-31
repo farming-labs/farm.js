@@ -373,7 +373,8 @@ the compiler proved a direct keyed array prepend and can hand the new prefix to 
 `keyedArraySliceHints` counts direct keyed-array slices whose build-time bounds identify one exact
 retained interval.
 `keyedArrayPositionHints` counts compiler-proven native keyed-array insertions, single or
-contiguous-range removals, and replacements with an exact guarded position.
+contiguous-range removals, single-row replacements, and exact-window replacements with a guarded
+position.
 `keyedArrayReorderHints` counts direct native keyed-array reversals whose complete permutation is
 known at build time.
 `keyedArraySortHints` counts direct native keyed-array sorts whose resulting permutation can be
@@ -1030,6 +1031,7 @@ setItems((current) => current.toSpliced(selectedIndex, 0, ...incomingItems));
 setItems((current) => current.toSpliced(selectedIndex, 1));
 setItems((current) => current.toSpliced(selectedIndex, 25));
 setItems((current) => current.toSpliced(selectedIndex, 1, replacement));
+setItems((current) => current.toSpliced(selectedIndex, 25, ...replacements));
 setItems((current) => current.with(selectedIndex, replacement));
 ```
 
@@ -1038,10 +1040,14 @@ safe-integer literal or a compiler-safe runtime expression. Identifiers, propert
 side-effect-free arithmetic and conditionals, and safe `Math` calls are supported. User-defined
 calls, assignments, update expressions, and other effectful forms are not transformed.
 `toSpliced()` must insert compiler-safe items with a zero delete count, remove one item or a
-contiguous range using a positive safe-integer literal delete count, or replace exactly one item
-with a delete count of one; `with()` must replace exactly one item. An explicit pair or a safe
-spread such as `...incomingItems` selects the batch path when at least two items are produced at
-runtime. Farm preserves the original method lookup,
+contiguous range using a positive safe-integer literal delete count, replace exactly one item with
+a delete count of one, or replace a positive safe-integer literal window with compiler-safe
+explicit items or a safe spread; `with()` must replace exactly one item. A zero delete count with
+an explicit pair or a safe spread such as `...incomingItems` selects the batch insertion path when
+at least two items are produced at runtime. A delete count above one with any incoming item, or a
+positive delete count with multiple items or a spread, selects exact-window replacement; the spread
+may evaluate to zero, one, or many items. Farm
+preserves the original method lookup,
 evaluates every argument once in its original order, and preserves the native call, return value,
 coercion, and thrown errors. If the method is not native, the evaluated position is not already a
 safe integer, or the removal count is dynamic or unsafe, the update still runs normally but no
@@ -1052,7 +1058,9 @@ position, clamped removal count, and any incoming key before changing the DOM. F
 computes every key, descriptor, binding snapshot, and detached host row before mutating the live
 tree. Duplicate incoming keys or collisions with existing keys therefore take complete
 reconciliation without a partial insertion. Valid rows are mounted in one document fragment;
-surrounding elements remain connected and only stored suffix indexes shift. A single insertion
+surrounding elements remain connected and only stored suffix indexes shift. Exact-window
+replacement removes only the proven old interval after every incoming row is prepared. A reused
+key takes complete reconciliation before mutation so React row identity is preserved. A single insertion
 creates one row at that position. A removal cleans up and removes only the known row or contiguous
 range while preserving every
 surviving element. A same-key replacement patches that row in place; a new-key replacement creates
@@ -1063,13 +1071,13 @@ The proof requires compiler-owned host rows whose render and key do not observe 
 Effectful position expressions, runtime values that are fractional or otherwise not safe integers,
 dynamic, zero, negative, or fractional removal counts, other `toSpliced()` shapes, block-bodied
 updaters, unsafe incoming expressions, custom methods, queued uncommitted position updates,
-duplicate or reused keys, collection-reading bindings, React-owned rows, nested host blocks, row
+duplicate or reused incoming keys, collection-reading bindings, React-owned rows, nested host blocks, row
 conditionals, unrelated dirty dependencies, and failed runtime checks keep complete keyed
 reconciliation. Negative safe-integer positions and counts larger than the remaining suffix use the
 native method's normal clamping rules. No new option or component is required. Reports expose
-emitted sites as `keyedArrayPositionHints`. Batch insertions select a separate optional runtime
-capability, so modules with only the existing single-row position operations retain their previous
-runtime size.
+emitted sites as `keyedArrayPositionHints`. Batch insertion and exact-window replacement select
+progressively separate optional runtime capabilities, so modules with only single-row operations
+or batch insertion retain no window-replacement runtime.
 
 #### Keyed array reorder hints
 
@@ -1944,12 +1952,14 @@ The package and example test suites verify more than generated code:
 - 2,000 deterministic randomized keyed-array removals match normal React; targeted tests require
   zero surviving descriptor and binding reads, preserve DOM identity, and cover queued filters,
   unhinted-chain fallback, collection-reading rows, StrictMode hydration, and unmount cleanup;
-- 1,000 deterministic exact-position insertions, single and contiguous-range removals, and
-  replacements match normal React; compiler tests cover literal counts and guarded runtime
+- 1,000 deterministic exact-position insertions, single and contiguous-range removals, single-row
+  replacements, and exact-window replacements match normal React; compiler tests cover literal counts and guarded runtime
   positions, while targeted removal tests require zero surviving key, descriptor, or binding reads,
   preserve focused input and surrounding DOM identity, and cover native evaluation and coercion,
   clamping, unsafe runtime positions and counts, custom methods, queued updates,
-  collection-reading rows, StrictMode hydration, and cleanup;
+  collection-reading rows, StrictMode hydration, and cleanup; targeted window tests additionally
+  require work to equal only the incoming window, preserve retained rows on both sides, and cover
+  empty spreads, key reuse, duplicate keys, delegated events, focus, selection, and queued fallback;
 - 2,000 deterministic randomized reversals match normal React; a 4,096-row targeted test requires
   exactly `n - 1` connected DOM moves and zero key, descriptor, or binding reads, while fallback
   tests cover custom methods, queued updates, collection-reading rows, StrictMode hydration, and

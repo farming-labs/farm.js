@@ -50,6 +50,7 @@ const testSource = String.raw`
     createCompilerKeyedArrayReorder,
     createCompilerKeyedArraySort,
     createCompilerKeyedArraySlice,
+    createCompilerKeyedArrayWindowReplace,
     createCompilerKeyedMapUpdate,
   } = await import(
     "@farm.js/react/compiler-runtime"
@@ -92,6 +93,7 @@ const testSource = String.raw`
   let reverseCompatibilityRows = () => undefined;
   let insertCompatibilityRows = () => undefined;
   let removeCompatibilityRow = () => undefined;
+  let replaceCompatibilityRows = () => undefined;
   let sortCompatibilityRows = () => undefined;
   let reorderExecutions = 0;
   const ReorderRows = createCompiledComponent({
@@ -126,6 +128,17 @@ const testSource = String.raw`
             1,
             { id: "d", label: "Delta", rank: 4 },
             { id: "e", label: "Epsilon", rank: 5 },
+          ),
+        );
+      replaceCompatibilityRows = () =>
+        state[0].set((previous) =>
+          createCompilerKeyedArrayWindowReplace(
+            previous,
+            previous.toSpliced,
+            1,
+            2,
+            { id: "f", label: "Phi", rank: 6 },
+            { id: "g", label: "Gamma two", rank: 7 },
           ),
         );
       sortCompatibilityRows = () =>
@@ -201,6 +214,15 @@ const testSource = String.raw`
   assert.equal(reorderContainer.querySelectorAll("li").length, 4);
   assert.equal(reorderContainer.querySelectorAll("li")[1].textContent, "Delta");
   assert.equal(reorderContainer.querySelectorAll("li")[2].textContent, "Epsilon");
+  assert.equal(reorderContainer.querySelector("li:first-child"), reorderBeta);
+  assert.equal(reorderContainer.querySelector("li:last-child"), reorderAlpha);
+  assert.equal(reorderExecutions, 1);
+  replaceCompatibilityRows();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(reorderContainer.querySelectorAll("li").length, 4);
+  assert.equal(reorderContainer.querySelectorAll("li")[1].textContent, "Phi");
+  assert.equal(reorderContainer.querySelectorAll("li")[2].textContent, "Gamma two");
   assert.equal(reorderContainer.querySelector("li:first-child"), reorderBeta);
   assert.equal(reorderContainer.querySelector("li:last-child"), reorderAlpha);
   assert.equal(reorderExecutions, 1);

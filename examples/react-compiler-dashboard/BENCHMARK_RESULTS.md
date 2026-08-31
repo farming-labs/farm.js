@@ -2,6 +2,28 @@
 
 Date: 2026-08-29
 
+## Exact-window keyed replacement follow-up — 2026-08-31
+
+The full bracketed production-browser run added an isolated 10,000-row workload for concise native
+`toSpliced(position, 64, ...replacements)` updates. Both compiler builds emitted all six expected
+`keyedArrayPositionHints` sites, preserved retained DOM nodes on both sides, disconnected the exact
+old window, produced zero owner executions, and passed every existing performance, persistence,
+correctness, and scalability gate without lowering a threshold.
+
+| Mode   | React median | Hinted window | Compiled control | vs React | vs control |
+| ------ | -----------: | ------------: | ---------------: | -------: | ---------: |
+| Static |     55.00 ms |       8.40 ms |         19.80 ms |    6.55x |      2.36x |
+| Hybrid |     55.00 ms |       7.80 ms |         19.10 ms |    7.05x |      2.45x |
+
+Package tests separately prove work proportional to the incoming window, preparation before live
+DOM mutation, retained-row identity, empty-spread removal, native negative-position and clamped
+count behavior, reused-key complete reconciliation, duplicate-key fallback, native custom-method
+results and errors, queued-update fallback, controlled-input focus and selection, delegated event
+indexes, 1,000 differential replacements, hydration, Strict Mode, and unmount cleanup. React
+18.3.1 and 19.2.8 both pass the packaged compatibility suite. The isolated window fixture has a
+12,860 B gzip compiler premium; direct and core-only fixtures remain unchanged, and single-row and
+batch-only output do not retain the window runtime feature.
+
 ## Exact-position batch insertion follow-up — 2026-08-30
 
 The full bracketed production-browser run added an isolated 10,000-row workload for concise native
