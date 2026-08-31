@@ -3,6 +3,50 @@ import type { HeaderConfig } from "../config";
 import type { FarmRequest, FarmResponse } from "../types";
 import { compileConfigRoutePattern } from "./route-pattern";
 
+const FARM_CONFIG_HEADERS_FINALIZER = Symbol.for("farm.configHeadersFinalizer");
+
+function appendConfiguredLinkHeader(res: FarmResponse, value: string): void {
+  const current = res.getHeader("Link");
+  if (current === undefined) {
+    res.setHeader("Link", value);
+    return;
+  }
+
+  const currentValue = Array.isArray(current) ? current.join(", ") : String(current);
+  if (currentValue !== value && !currentValue.endsWith(`, ${value}`)) {
+    res.setHeader("Link", `${currentValue}, ${value}`);
+  }
+}
+
+function applyResponseHeaders(
+  res: FarmResponse,
+  matchedHeaders: readonly HeaderConfig["headers"][],
+): void {
+  for (const headers of matchedHeaders) {
+    for (const header of headers) {
+      if (header.key.toLowerCase() === "link") {
+        appendConfiguredLinkHeader(res, header.value);
+      } else {
+        res.setHeader(header.key, header.value);
+      }
+    }
+  }
+}
+
+function applyWriteHeadHeaders(res: FarmResponse, headers: unknown): void {
+  if (Array.isArray(headers)) {
+    for (let index = 0; index + 1 < headers.length; index += 2) {
+      res.setHeader(String(headers[index]), headers[index + 1]);
+    }
+    return;
+  }
+
+  if (!headers || typeof headers !== "object") return;
+  for (const [key, value] of Object.entries(headers)) {
+    if (value !== undefined) res.setHeader(key, value);
+  }
+}
+
 export function createHeadersPlugin(
   headers: HeaderConfig[],
   {
@@ -36,14 +80,29 @@ export function createHeadersPlugin(
       }
       const url = new URL(req.url || "/", `http://${req.headers.host}`);
       const pathname = url.pathname;
+      const matchedHeaders = compiledHeaders
+        .filter(({ pattern }) => pattern.regex.test(pathname))
+        .map(({ config }) => config.headers);
 
-      for (const { config, pattern } of compiledHeaders) {
-        if (pattern.regex.test(pathname)) {
-          for (const header of config.headers) {
-            res.setHeader(header.key, header.value);
-          }
-        }
+      applyResponseHeaders(res, matchedHeaders);
+
+      const responseWithFinalizer = res as FarmResponse & {
+        [FARM_CONFIG_HEADERS_FINALIZER]?: boolean;
+      };
+      if (matchedHeaders.length === 0 || responseWithFinalizer[FARM_CONFIG_HEADERS_FINALIZER]) {
+        return;
       }
+
+      responseWithFinalizer[FARM_CONFIG_HEADERS_FINALIZER] = true;
+      const writeHead = res.writeHead;
+      res.writeHead = ((statusCode: number, ...args: unknown[]) => {
+        const statusMessage = typeof args[0] === "string" ? (args.shift() as string) : undefined;
+        applyWriteHeadHeaders(res, args[0]);
+        applyResponseHeaders(res, matchedHeaders);
+        return statusMessage === undefined
+          ? (writeHead as any).call(res, statusCode)
+          : (writeHead as any).call(res, statusCode, statusMessage);
+      }) as FarmResponse["writeHead"];
     },
 
     async afterResponse(req, res, context) {
