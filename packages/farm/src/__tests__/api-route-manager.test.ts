@@ -608,14 +608,14 @@ describe("APIRouteManager", () => {
       ssrLoadModule: async (filePath: string) => {
         expect(filePath).toBe(routeFile);
         return {
-          DELETE: async (ctx: { body: unknown }) => ({
+          DELETE: createEndpoint({ method: "DELETE" }, async (ctx) => ({
             method: "DELETE",
             body: ctx.body ?? null,
-          }),
-          POST: async (ctx: { body: unknown }) => ({
+          })),
+          POST: createEndpoint({ method: "POST" }, async (ctx) => ({
             method: "POST",
             body: ctx.body ?? null,
-          }),
+          })),
         };
       },
     } as any);
@@ -650,6 +650,35 @@ describe("APIRouteManager", () => {
     await expect(postResponse.json()).resolves.toEqual({
       method: "POST",
       body: { backend: "local", value: "hello" },
+    });
+  });
+
+  it("passes a Request to plain handlers regardless of the parameter name", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-api-route-"));
+    tempDirs.push(root);
+
+    const routeDir = path.join(root, "api", "native");
+    fs.mkdirSync(routeDir, { recursive: true });
+    const routeFile = path.join(routeDir, "route.js");
+    fs.writeFileSync(routeFile, "export {};\n");
+
+    const manager = new APIRouteManager(root, {
+      ssrLoadModule: async () => ({
+        GET: async (context: Request) =>
+          Response.json({
+            isRequest: context instanceof Request,
+            url: context.url,
+          }),
+      }),
+    } as any);
+    await manager.discoverRoutes();
+
+    const response = await manager.getHandler()!(
+      new Request("http://example.com/api/native?source=test"),
+    );
+    await expect(response.json()).resolves.toEqual({
+      isRequest: true,
+      url: "http://example.com/api/native?source=test",
     });
   });
 });

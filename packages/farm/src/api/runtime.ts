@@ -142,7 +142,11 @@ async function invokeAPIRouteEndpointInContext(
     return queryContentTypeError;
   }
 
-  const farmHandler = endpoint.__handler || (isFarmContextHandler(endpoint) ? endpoint : null);
+  // `createEndpoint` brands its parsed-context handler explicitly. Plain route
+  // exports always receive the Web Request regardless of their parameter name;
+  // inferring a calling convention from `Function#toString()` misclassified
+  // valid handlers named `context`, `ctx`, or using destructuring.
+  const farmHandler = endpoint.__handler || null;
 
   if (!farmHandler) {
     const result = await endpoint(request, {
@@ -297,21 +301,6 @@ export function createEndpointFailureResponse(failure: EndpointFailure<string, u
       },
     },
   );
-}
-
-function isFarmContextHandler(endpoint: unknown): boolean {
-  if (typeof endpoint !== "function") {
-    return false;
-  }
-
-  const source = Function.prototype.toString.call(endpoint).trim();
-  const arrowMatch = source.match(/^(?:async\s*)?(?:\(([^)]*)\)|([A-Za-z_$][\w$]*))\s*=>/);
-  const functionMatch = source.match(/^(?:async\s*)?function[^(]*\(([^)]*)\)/);
-  const firstParameter = (arrowMatch?.[1] || arrowMatch?.[2] || functionMatch?.[1] || "")
-    .split(",")[0]
-    .trim();
-
-  return firstParameter === "ctx" || firstParameter === "context" || firstParameter.startsWith("{");
 }
 
 interface RequestBodyParseResult {
