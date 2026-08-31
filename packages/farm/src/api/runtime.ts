@@ -163,7 +163,9 @@ async function invokeAPIRouteEndpointInContext(
 
   let body: any = undefined;
   if (request.method.toUpperCase() !== "GET" && request.method.toUpperCase() !== "HEAD") {
-    body = await readRequestBody(request);
+    const parsedBody = await readRequestBody(request);
+    if (parsedBody.error) return parsedBody.error;
+    body = parsedBody.body;
   }
 
   const headers = Object.fromEntries(request.headers.entries());
@@ -312,32 +314,51 @@ function isFarmContextHandler(endpoint: unknown): boolean {
   return firstParameter === "ctx" || firstParameter === "context" || firstParameter.startsWith("{");
 }
 
-async function readRequestBody(request: Request): Promise<unknown> {
+interface RequestBodyParseResult {
+  body?: unknown;
+  error?: Response;
+}
+
+async function readRequestBody(request: Request): Promise<RequestBodyParseResult> {
   const contentType = request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
 
   try {
     if (contentType === "multipart/form-data") {
-      return formDataToObject(await request.clone().formData());
+      return { body: formDataToObject(await request.clone().formData()) };
     }
 
     const text = await request.clone().text();
-    if (!text) return undefined;
+    if (!text) return { body: undefined };
     if (contentType === "application/x-www-form-urlencoded") {
-      return searchParamsToObject(new URLSearchParams(text));
+      return { body: searchParamsToObject(new URLSearchParams(text)) };
     }
     if (contentType === "application/json" || contentType?.endsWith("+json")) {
-      return JSON.parse(text);
+      return { body: JSON.parse(text) };
     }
 
     // Preserve the previous permissive behavior for callers that omit the
     // content type but still send JSON.
-    return JSON.parse(text);
+    return { body: JSON.parse(text) };
   } catch {
+    if (contentType === "application/json" || contentType?.endsWith("+json")) {
+      return {
+        error: new Response(
+          JSON.stringify({
+            error: "Invalid request body",
+            message: "The request body is not valid JSON.",
+          }),
+          {
+            status: 400,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      };
+    }
     // The body format is unsupported or malformed. Schema validation below
     // will turn the missing value into a typed 400 response when applicable.
   }
 
-  return undefined;
+  return { body: undefined };
 }
 
 function formDataToObject(

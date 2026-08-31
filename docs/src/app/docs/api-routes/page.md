@@ -86,6 +86,8 @@ export const GET = createEndpoint(
 ```
 
 Farm parses and validates `body`, `query`, and `headers` before middleware or handler code runs. Header schema keys use the lower-case names exposed by the Fetch `Headers` API. Invalid input returns a `400` response with structured validation issues.
+Malformed `application/json` and `application/*+json` bodies also return `400` before endpoint
+middleware or handler code executes, including when the endpoint does not declare a body schema.
 
 ## HTTP QUERY
 
