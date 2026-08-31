@@ -95,6 +95,7 @@ const testSource = String.raw`
   let removeCompatibilityRow = () => undefined;
   let replaceCompatibilityRows = () => undefined;
   let refreshCompatibilityRows = () => undefined;
+  let replaceQueuedCompatibilityRows = () => undefined;
   let sortCompatibilityRows = () => undefined;
   let reorderExecutions = 0;
   const ReorderRows = createCompiledComponent({
@@ -159,6 +160,26 @@ const testSource = String.raw`
             2,
             1,
             { id: "g", label: "Gamma refreshed", rank: 9 },
+          ),
+        );
+      };
+      replaceQueuedCompatibilityRows = () => {
+        state[0].set((previous) =>
+          createCompilerKeyedArrayWindowReplace(
+            previous,
+            previous.toSpliced,
+            1,
+            1,
+            { id: "h", label: "Eta", rank: 10 },
+          ),
+        );
+        state[0].set((previous) =>
+          createCompilerKeyedArrayWindowReplace(
+            previous,
+            previous.toSpliced,
+            2,
+            1,
+            { id: "i", label: "Iota", rank: 11 },
           ),
         );
       };
@@ -256,6 +277,14 @@ const testSource = String.raw`
   assert.equal(reorderContainer.querySelectorAll("li")[2], compatibilityGamma);
   assert.equal(reorderContainer.querySelectorAll("li")[1].textContent, "Phi refreshed");
   assert.equal(reorderContainer.querySelectorAll("li")[2].textContent, "Gamma refreshed");
+  assert.equal(reorderExecutions, 1);
+  replaceQueuedCompatibilityRows();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(compatibilityPhi.isConnected, false);
+  assert.equal(compatibilityGamma.isConnected, false);
+  assert.equal(reorderContainer.querySelectorAll("li")[1].textContent, "Eta");
+  assert.equal(reorderContainer.querySelectorAll("li")[2].textContent, "Iota");
   assert.equal(reorderExecutions, 1);
   flushSync(() => reorderRoot.unmount());
 

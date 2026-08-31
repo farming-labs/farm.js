@@ -333,16 +333,20 @@ updates the stored row objects used by later events. That path creates no descri
 and preserves row identity, focus, and selection. Multiple length-preserving same-key windows
 queued before one compiler flush compose into one atomic refresh. Disjoint and overlapping windows
 are both supported; overlapping positions use the last queued value. Farm validates the complete
-chain and prepares every touched key, binding value, and DOM target before applying any write. The
-runtime otherwise creates one inserted row,
+chain and prepares every touched key, binding value, and DOM target before applying any write.
+Disjoint fixed-length queued windows may also mix same-key refreshes with globally new keys. Farm
+prepares every new descriptor, binding snapshot, and disconnected DOM row first, then patches the
+same-key positions and swaps only the fresh-key positions. Untouched rows keep their identity and
+are not recreated. The runtime otherwise creates one inserted row,
 removes only the known row or range, or patches/replaces one row at that position without rereading
 every existing key, descriptor, and binding. Surviving rows keep their DOM identity. Index-aware or
 collection-reading rows, custom methods, position expressions with user calls or mutations,
 runtime positions that are not safe integers, dynamic, zero, negative, or fractional removal
 counts, other `toSpliced()` forms, block-bodied updaters, unsafe incoming expressions, queued
-chains containing a structural window or unhinted intermediate update, reordered or partially
-reused windows, duplicate keys, nested or React-owned rows, and failed checks use complete keyed
-reconciliation before the fast path mutates the DOM.
+chains containing a structural window or unhinted intermediate update, an overlapping window whose
+final key changes, existing keys moved from another position, partially reused windows, duplicate
+keys, nested or React-owned rows, and failed checks use complete keyed reconciliation before the
+fast path mutates the DOM.
 Reports expose the site count as `keyedArrayPositionHints`. Batch insertion and exact-window
 replacement use progressively separate optional runtime capabilities, so existing single-position
 and batch-only bundles do not retain window validation or replacement code.

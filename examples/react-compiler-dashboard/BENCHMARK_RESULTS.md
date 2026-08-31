@@ -2,6 +2,31 @@
 
 Date: 2026-08-29
 
+## Queued fresh-key exact-window replacement follow-up — 2026-09-01
+
+The full bracketed production-browser run added a separate 10,000-row workload that queues two
+disjoint 32-row fresh-key replacements before one compiler flush. Both compiler builds emitted all
+11 expected `keyedArrayPositionHints` sites, preserved the four surrounding anchor rows,
+disconnected all 64 replaced rows, mounted 64 rows with new keys, produced zero owner executions,
+and passed every existing correctness, performance, persistence, and scalability gate without
+lowering a threshold.
+
+| Mode   | React median | Queued replacement | Compiled control | vs React | vs control |
+| ------ | -----------: | -----------------: | ---------------: | -------: | ---------: |
+| Static |     68.15 ms |           10.00 ms |         21.10 ms |    6.81x |      2.11x |
+| Hybrid |     68.15 ms |            9.80 ms |         21.10 ms |    6.95x |      2.15x |
+
+The independent gate requires at least 4x versus React and 1.5x versus the block-bodied compiled
+control in both modes. Package tests separately prove exact 64-row preparation work across 4,096
+rows, mixed same-key patches and fresh-key replacements, complete preparation before the first DOM
+replacement, existing-key, duplicate-key, overlapping-window, and failed-validation fallback,
+1,000 deterministic differential updates, controlled-input focus and selection, delegated events,
+hydration, Strict Mode, React 18/19 compatibility, and unmount cleanup. The isolated exact-window
+fixture has a 13,525 B gzip compiler premium, 167 B above the previous result and inside its
+unchanged 256 B allowance. Every unrelated runtime-size fixture remains byte-for-byte unchanged;
+the isolated full-runtime bundle still removes 81.8% when the compiler is disabled. The measured
+environment was Chrome 145.0.7632.6, Node.js 23.11.0, and Apple M1 macOS arm64.
+
 ## Queued same-key exact-window refresh follow-up — 2026-08-31
 
 The full bracketed production-browser run added a separate 10,000-row workload that queues two

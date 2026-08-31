@@ -43,8 +43,5 @@ export function WindowPositionTable({ first, second }: WindowPositionTableProps)
 }
 
 createRoot(document.body).render(
-  <WindowPositionTable
-    first={[{ id: 2, label: "Beta refreshed" }]}
-    second={[{ id: 3, label: "Gamma refreshed" }]}
-  />,
+  <WindowPositionTable first={[{ id: 5, label: "Epsilon" }]} second={[{ id: 6, label: "Phi" }]} />,
 );
