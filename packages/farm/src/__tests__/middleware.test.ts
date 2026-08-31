@@ -1680,6 +1680,26 @@ describe("Named request middleware", () => {
     expect(ctx.headers.get("x-named-middleware")).toBe("yes");
   });
 
+  it("passes the Node request body to named middleware", async () => {
+    const normalized = normalizeMiddlewareModule(
+      {
+        async middleware(request: Request, context: RequestMiddlewareContext) {
+          context.set("payload", await request.json());
+        },
+      },
+      "/api",
+    );
+    const req = createMockRequest("/api/messages", "POST");
+    req.headers["content-type"] = "application/json";
+    req.push(JSON.stringify({ message: "hello" }));
+    req.push(null);
+    const ctx = createContext(req, createMockResponse());
+
+    await normalized!.handlers[0](ctx, async () => undefined);
+
+    expect(ctx.locals.get("payload")).toEqual({ message: "hello" });
+  });
+
   it("uses the same named-export runtime through the standalone Vite plugin", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-named-middleware-"));
     const middlewareFile = path.join(root, "src", "app", "dashboard", "middleware.ts");

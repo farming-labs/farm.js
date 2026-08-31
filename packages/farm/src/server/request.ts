@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { Readable } from "node:stream";
 import type { FarmRequest } from "../types";
 import { _setCurrentRequestResolver } from "./request-bridge";
 
@@ -45,10 +46,18 @@ export function createWebRequestFromFarmRequest(req: FarmRequest): Request {
     headers.set(key, value);
   }
 
-  return new Request(fullUrl, {
+  const method = (req.method || "GET").toUpperCase();
+  const init: RequestInit & { duplex?: "half" } = {
     method: req.method,
     headers,
-  });
+  };
+
+  if (method !== "GET" && method !== "HEAD") {
+    init.body = Readable.toWeb(req) as ReadableStream<Uint8Array>;
+    init.duplex = "half";
+  }
+
+  return new Request(fullUrl, init);
 }
 
 export async function _runWithCurrentRequest<T>(

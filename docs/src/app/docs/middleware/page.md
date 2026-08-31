@@ -78,6 +78,9 @@ export async function middleware(
 ```
 
 Use either a default Farm handler or a named `middleware` export in one file, not both. The exported `config.matcher` uses the same matcher syntax as config middleware.
+The request uses the standard Web body APIs in both development and production, so named
+middleware can call `request.json()`, `request.text()`, or `request.formData()` when the request
+method permits a body.
 
 ### Server Component context
 
