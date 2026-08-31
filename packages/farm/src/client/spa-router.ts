@@ -156,6 +156,11 @@ export class SPARouter {
   private currentHistoryPath: string | null = null;
   private currentHistoryIndex: number | null = null;
   private suppressNextPopState = false;
+  private navigationSequence = 0;
+  private activeNavigation?: {
+    id: number;
+    controller: AbortController;
+  };
   private scrollElements: Map<string, HTMLElement> = new Map();
   private options: Required<Omit<RouterOptions, "deploymentId">> &
     Pick<RouterOptions, "deploymentId">;
@@ -224,6 +229,7 @@ export class SPARouter {
   /** Remove global listeners. Intended for tests and teardown. */
   destroy(): void {
     if (typeof window === "undefined") return;
+    this.cancelActiveNavigation();
     window.removeEventListener("popstate", this.onPopState);
     window.removeEventListener("beforeunload", this.onBeforeUnload);
   }
@@ -265,6 +271,7 @@ export class SPARouter {
       isFarmLocaleChangeHref(url.toString()) ||
       this.options.shouldUseDocumentNavigation(pathname)
     ) {
+      this.cancelActiveNavigation();
       if (replace) window.location.replace(url.toString());
       else window.location.assign(url.toString());
       return;
@@ -272,6 +279,7 @@ export class SPARouter {
 
     // Same page navigation - update fragment history without fetching route data.
     if (!refresh && pathname === window.location.pathname && search === window.location.search) {
+      this.cancelActiveNavigation();
       if (url.hash === window.location.hash) return;
 
       this.writePageState(
@@ -305,7 +313,7 @@ export class SPARouter {
       this.saveScrollPosition(window.location.pathname + window.location.search);
     }
 
-    this.startNavigation({
+    const navigation = this.startNavigation({
       from,
       to: createNavigationLocation(url),
       action: replace ? "replace" : "push",
@@ -318,35 +326,48 @@ export class SPARouter {
         to: url,
         action: replace ? "replace" : "push",
       });
+      if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
 
       // Fetch page data (from cache or server)
-      const pageData = await this.fetchPageData(fullPath, true, from, refresh);
+      const pageData = await this.fetchPageData(
+        fullPath,
+        true,
+        from,
+        refresh,
+        navigation.controller.signal,
+      );
+      if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
       if (clientNavigation) {
         await this.clientPlugins?.markNavigationLoaded(clientNavigation, pageData);
       }
+      if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
 
       await this.runViewTransition(viewTransition, () =>
-        this.commitNavigation({
-          fullPath,
-          pageData,
-          pathname,
-          replace,
-          scroll,
-          state,
-          url,
-        }),
+        this.isCurrentNavigation(navigation, clientNavigation)
+          ? this.commitNavigation({
+              fullPath,
+              pageData,
+              pathname,
+              replace,
+              scroll,
+              state,
+              url,
+            })
+          : Promise.resolve(),
       );
+      if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
 
       if (clientNavigation) {
         await this.clientPlugins?.resolveNavigation(clientNavigation);
         void this.clientPlugins?.scheduleNavigationRendered(clientNavigation);
       }
-      this.finishNavigation();
+      this.finishNavigation(navigation);
     } catch (error) {
+      if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
       if (clientNavigation) {
         await this.clientPlugins?.failNavigation(clientNavigation, error);
       }
-      this.finishNavigation();
+      this.finishNavigation(navigation);
       console.error("[Farm.js] Navigation error:", error);
       // Fall back to full page navigation
       window.location.href = href;
@@ -570,6 +591,7 @@ export class SPARouter {
     recover = true,
     interceptFrom?: string,
     fresh = false,
+    signal?: AbortSignal,
   ): Promise<PageData> {
     const cacheKey = getPageDataCacheKey(path, interceptFrom);
     // Check cache first
@@ -582,6 +604,7 @@ export class SPARouter {
     // shell HTML from the fragment without inspecting component source.
     const activeLayoutChain = getActiveLayoutChainHeader();
     const response = await fetch(`/__farm/page-data?path=${encodeURIComponent(path)}`, {
+      signal,
       headers: createFarmDeploymentRequestHeaders(this.options.deploymentId, {
         Accept: "application/x-farm-deferred+json, application/json",
         "X-Farm-SPA": "1",
@@ -681,7 +704,7 @@ export class SPARouter {
     this.currentHistoryPath = path;
     this.currentHistoryIndex = readHistoryIndex(event.state);
 
-    this.startNavigation({
+    const navigation = this.startNavigation({
       from,
       to: createNavigationLocation(new URL(window.location.href)),
       action: "pop",
@@ -694,14 +717,23 @@ export class SPARouter {
         to: window.location.href,
         action: "pop",
       });
+      if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
       const interceptFrom =
         typeof event.state?.[FARM_INTERCEPT_FROM_KEY] === "string"
           ? event.state[FARM_INTERCEPT_FROM_KEY]
           : undefined;
-      const pageData = await this.fetchPageData(path, true, interceptFrom);
+      const pageData = await this.fetchPageData(
+        path,
+        true,
+        interceptFrom,
+        false,
+        navigation.controller.signal,
+      );
+      if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
       if (clientNavigation) {
         await this.clientPlugins?.markNavigationLoaded(clientNavigation, pageData);
       }
+      if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
 
       // Update document title
       if (pageData.metadata?.title) {
@@ -724,12 +756,13 @@ export class SPARouter {
         await this.clientPlugins?.resolveNavigation(clientNavigation);
         void this.clientPlugins?.scheduleNavigationRendered(clientNavigation);
       }
-      this.finishNavigation();
+      this.finishNavigation(navigation);
     } catch (error) {
+      if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
       if (clientNavigation) {
         await this.clientPlugins?.failNavigation(clientNavigation, error);
       }
-      this.finishNavigation();
+      this.finishNavigation(navigation);
       console.error("[Farm.js] Popstate navigation error:", error);
       // Reload the page as fallback
       window.location.reload();
@@ -764,7 +797,13 @@ export class SPARouter {
     from: string;
     to: FarmNavigationLocation;
     action: FarmNavigationBlockerContext["action"];
-  }): void {
+  }): { id: number; controller: AbortController } {
+    this.activeNavigation?.controller.abort("superseded");
+    const navigation = {
+      id: ++this.navigationSequence,
+      controller: new AbortController(),
+    };
+    this.activeNavigation = navigation;
     this.setNavigationState({
       state: "loading",
       pending: true,
@@ -773,9 +812,30 @@ export class SPARouter {
       action: options.action,
       startedAt: Date.now(),
     });
+    return navigation;
   }
 
-  private finishNavigation(): void {
+  private isCurrentNavigation(
+    navigation: { id: number; controller: AbortController },
+    clientNavigation?: FarmClientNavigationSession,
+  ): boolean {
+    return (
+      this.activeNavigation?.id === navigation.id &&
+      !navigation.controller.signal.aborted &&
+      !clientNavigation?.signal.aborted
+    );
+  }
+
+  private finishNavigation(navigation: { id: number; controller: AbortController }): void {
+    if (this.activeNavigation?.id !== navigation.id) return;
+    this.activeNavigation = undefined;
+    this.setNavigationState(IDLE_NAVIGATION_STATE);
+  }
+
+  private cancelActiveNavigation(): void {
+    if (!this.activeNavigation) return;
+    this.activeNavigation.controller.abort("superseded");
+    this.activeNavigation = undefined;
     this.setNavigationState(IDLE_NAVIGATION_STATE);
   }
 
