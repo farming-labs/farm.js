@@ -448,6 +448,7 @@ export function createAPIClient<
   // Create a simple fetch-based client (browser compatible)
   const fetchClient = async (path: string, requestOptions: any = {}) => {
     const url = resolveFarmAPIRequestURL(path, baseURL);
+    const method = String(requestOptions.method || "GET").toUpperCase();
 
     // Handle query parameters
     if (requestOptions.query) {
@@ -465,7 +466,7 @@ export function createAPIClient<
       ...requestOptions.headers,
     };
     const fetchOptions: RequestInit = {
-      method: requestOptions.method || "GET",
+      method,
       headers,
       credentials: options.credentials,
     };
@@ -485,7 +486,7 @@ export function createAPIClient<
       decodeFarmCacheInvalidations(response.headers?.get?.(FARM_CACHE_INVALIDATION_HEADER)),
     );
     let data: any = undefined;
-    if (response.status !== 204 && response.status !== 205) {
+    if (method !== "HEAD" && response.status !== 204 && response.status !== 205) {
       data = isJSONStreamResponse(response) ? readJSONStream(response) : await response.json();
     }
 

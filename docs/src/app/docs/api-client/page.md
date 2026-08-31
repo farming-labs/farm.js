@@ -67,6 +67,9 @@ if (result.error) {
 }
 ```
 
+A typed `HEAD` route is called with `.head()`. Its result keeps the same `{ data, error, key }`
+shape, with `data` set to `undefined` because HTTP HEAD responses do not have a body.
+
 ## Type-safe QUERY requests
 
 A route that exports `QUERY` becomes a `.query()` caller. Its body and response are inferred from

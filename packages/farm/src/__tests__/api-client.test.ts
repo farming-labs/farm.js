@@ -12,6 +12,15 @@ import { PluginManager } from "../plugin";
 import { _runWithCurrentRequest } from "../server/request";
 
 type APIRouter = {
+  status: {
+    head: {
+      __types: {
+        body: never;
+        query: never;
+        response: never;
+      };
+    };
+  };
   search: {
     query: {
       __types: {
@@ -130,6 +139,20 @@ describe("createAPIClient", () => {
       "https://api.example.com/api/users?limit=5",
       expect.objectContaining({ credentials: "include" }),
     );
+  });
+
+  it("does not parse an empty HEAD response as JSON", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
+    globalThis.fetch = fetchMock as any;
+    const api = createAPIClient<APIRouter>({ baseURL: "https://api.example.com" });
+
+    const result = await api.status.head();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.com/api/status",
+      expect.objectContaining({ method: "HEAD" }),
+    );
+    expect(result).toMatchObject({ data: undefined, error: null });
   });
 
   it("applies invalidations declared by the server response", async () => {
