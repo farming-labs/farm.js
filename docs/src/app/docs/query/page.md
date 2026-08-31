@@ -36,10 +36,15 @@ export default async function SearchPage({ searchParams }: PagePropsSafe) {
 import { asString, useQueryState } from "@farm.js/core/query/client";
 
 export function SearchControls() {
-  const [q, setQ] = useQueryState("q", asString.withDefault!(""));
+  const [q, setQ] = useQueryState("q", asString.withDefault!(""), {
+    throttleMs: 150,
+  });
   return <input value={q} onChange={(event) => setQ(event.target.value)} />;
 }
 ```
+
+`throttleMs` coalesces rapid writes to the same query key. Updates to different keys are
+composed against the latest URL, and returning a value to the current URL cancels its queued write.
 
 ## Multiple query values
 

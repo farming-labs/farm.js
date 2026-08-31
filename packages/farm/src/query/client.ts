@@ -73,6 +73,47 @@ const applyChange = (
   return newParams;
 };
 
+const commitURLUpdate = (
+  updates: Record<string, string | null>,
+  options: Options,
+  emitUpdate: boolean,
+) => {
+  const { history = "pushState", shallow = true, scroll = false } = options;
+  const url = new URL(window.location.href);
+  const newSearchParams = applyChange(url.searchParams, updates);
+  const newSearch = newSearchParams.toString();
+  const newUrl = url.pathname + (newSearch ? `?${newSearch}` : "") + url.hash;
+  const currentUrl = url.pathname + url.search + url.hash;
+
+  if (newUrl === currentUrl) return;
+
+  // Preserve Farm's history state (page state, interception markers) and
+  // keep its recorded path in sync with the new query string so pops
+  // report the entry's real location.
+  const historyState = window.history.state;
+  const nextHistoryState =
+    historyState && typeof historyState === "object" && "path" in historyState
+      ? { ...historyState, path: newUrl }
+      : historyState;
+
+  if (history === "replaceState") {
+    window.history.replaceState(nextHistoryState, "", newUrl);
+  } else {
+    window.history.pushState(nextHistoryState, "", newUrl);
+  }
+
+  if (emitUpdate) {
+    const actualSearchParams = new URLSearchParams(window.location.search);
+    emitter.emitUpdate(actualSearchParams);
+  }
+
+  if (shallow) notifyHistoryChange("url-search");
+
+  if (scroll) {
+    window.scrollTo(0, 0);
+  }
+};
+
 const updateURL = (
   updates: Record<string, string | null>,
   options: Options = {},
@@ -80,62 +121,31 @@ const updateURL = (
 ) => {
   if (typeof window === "undefined") return;
 
-  const { history = "pushState", shallow = true, scroll = false, throttleMs } = options;
-  const url = new URL(window.location.href);
-
-  const newSearchParams = applyChange(new URLSearchParams(url.search), updates);
-  const newSearch = newSearchParams.toString();
-  const newUrl = url.pathname + (newSearch ? `?${newSearch}` : "") + url.hash;
-  const currentUrl =
-    window.location.pathname + (window.location.search || "") + window.location.hash;
-
-  if (newUrl !== currentUrl) {
-    const update = () => {
-      // Preserve Farm's history state (page state, interception markers) and
-      // keep its recorded path in sync with the new query string so pops
-      // report the entry's real location.
-      const historyState = window.history.state;
-      const nextHistoryState =
-        historyState && typeof historyState === "object" && "path" in historyState
-          ? { ...historyState, path: newUrl }
-          : historyState;
-
-      if (history === "replaceState") {
-        window.history.replaceState(nextHistoryState, "", newUrl);
-      } else {
-        window.history.pushState(nextHistoryState, "", newUrl);
-      }
-
-      if (emitUpdate) {
-        const actualSearchParams = new URLSearchParams(window.location.search);
-        emitter.emitUpdate(actualSearchParams);
-      }
-
-      if (shallow) notifyHistoryChange("url-search");
-
-      if (scroll) {
-        window.scrollTo(0, 0);
-      }
-    };
-
-    if (throttleMs && throttleMs > 0) {
-      const throttleKey = Object.keys(updates).sort().join(",");
-
-      const existingTimeout = throttleTimers.get(throttleKey);
-      if (existingTimeout) {
-        clearTimeout(existingTimeout);
-      }
-
-      const timeout = setTimeout(() => {
-        update();
-        throttleTimers.delete(throttleKey);
-      }, throttleMs);
-
-      throttleTimers.set(throttleKey, timeout);
-    } else {
-      update();
-    }
+  const { throttleMs } = options;
+  if (!throttleMs || throttleMs <= 0) {
+    commitURLUpdate(updates, options, emitUpdate);
+    return;
   }
+
+  const throttleKey = Object.keys(updates).sort().join(",");
+  const existingTimeout = throttleTimers.get(throttleKey);
+  if (existingTimeout) {
+    clearTimeout(existingTimeout);
+    throttleTimers.delete(throttleKey);
+  }
+
+  const currentUrl = new URL(window.location.href);
+  const nextSearch = applyChange(currentUrl.searchParams, updates).toString();
+  if (nextSearch === currentUrl.searchParams.toString()) return;
+
+  const timeout = setTimeout(() => {
+    if (throttleTimers.get(throttleKey) === timeout) {
+      throttleTimers.delete(throttleKey);
+    }
+    commitURLUpdate(updates, options, emitUpdate);
+  }, throttleMs);
+
+  throttleTimers.set(throttleKey, timeout);
 };
 
 export function useQueryState<TParser extends Parser<any>>(
