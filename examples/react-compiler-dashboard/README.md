@@ -133,10 +133,19 @@ Queued same-key exact-window refresh has its own 10,000-row gate. One event queu
 32-row refreshes before the compiler flushes, and the benchmark requires all 64 DOM rows to retain
 identity while both changed labels and amounts reach the DOM. Static and hybrid modes must remain
 at least 4x faster than React and 1.5x faster than the equivalent block-bodied compiled control.
-Together with the existing position workloads, the compiler report must contain all nine dashboard
-`keyedArrayPositionHints`. Package tests compare 1,000 deterministic queued updates with React and
-cover disjoint windows, overlap with last-update-wins semantics, atomic preparation, structural and
-key-changing fallback, controlled-input selection, events, Strict Mode hydration, and cleanup.
+That workload contributes two of the dashboard `keyedArrayPositionHints`. Package tests compare
+1,000 deterministic queued updates with React and cover disjoint windows, overlap with
+last-update-wins semantics, atomic preparation, structural fallback, controlled-input selection,
+events, Strict Mode hydration, and cleanup.
+
+Queued fresh-key exact-window replacement has a separate 10,000-row gate. One event replaces two
+disjoint 32-row windows with globally new keys. The benchmark requires the 64 old rows to disconnect,
+all four surrounding anchors to retain identity, both new labels to reach the DOM, and zero compiled
+owner executions. Static and hybrid modes must remain at least 4x faster than React and 1.5x faster
+than the equivalent block-bodied compiled control. Together with the existing position workloads,
+the compiler report must contain all eleven dashboard `keyedArrayPositionHints`. Package tests also
+cover mixed same-key/fresh-key commits, atomic preparation, overlap and existing-key-move fallback,
+events, controlled-input selection, Strict Mode hydration, cleanup, and 1,000 differential updates.
 
 Native keyed-array reversal has a separate 10,000-row comparison. Concise `toReversed()` is
 measured against bracketed React and an equivalent block-bodied compiled control. Both compiler
@@ -215,6 +224,9 @@ The default JSON report is `/tmp/farm-react-dashboard-benchmark.json`; change it
 - The queued same-key control issues two concise native window replacements before one flush. Its
   block-bodied pair performs the same array and DOM-visible work through complete reconciliation,
   isolating the benefit of combining both validated windows into one targeted refresh.
+- The queued fresh-key control replaces two distant windows before one flush. Its block-bodied pair
+  creates the same 64 rows through complete reconciliation, isolating the saved untouched key,
+  descriptor, binding, and generic keyed-diff work.
 - The reverse control compares concise native `toReversed()` with an equivalent block-bodied
   compiled update. Both paths move the same keyed DOM rows; the hint isolates the saved key,
   descriptor, binding, and generic LIS work.

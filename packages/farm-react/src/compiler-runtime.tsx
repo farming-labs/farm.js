@@ -4792,9 +4792,11 @@ function reconcileCompilerKeyedArrayWindowReplace(
   const previousInstances = [...instances.values()];
   if (updates.length > 1) {
     const touchedIndices = new Set<number>();
+    let overlaps = false;
     for (const update of updates) {
       if (update.insertedCount !== update.removedCount) return undefined;
       for (let index = update.position; index < update.position + update.removedCount; index += 1) {
+        overlaps ||= touchedIndices.has(index);
         touchedIndices.add(index);
       }
     }
@@ -4813,30 +4815,67 @@ function reconcileCompilerKeyedArrayWindowReplace(
       }
     }
 
+    const knownKeys = new Set(instances.keys());
+    const incomingKeys = new Set<string>();
+    let replacesRows = false;
     const prepared: Array<
       readonly [
+        index: number,
         instance: CompilerKeyedRowInstance,
         item: unknown,
-        updates: readonly CompilerPreparedKeyedRowBindingUpdate[],
+        updates: readonly CompilerPreparedKeyedRowBindingUpdate[] | undefined,
+        replacement: CompilerKeyedRowInstance | undefined,
       ]
     > = [];
     try {
       for (const index of [...touchedIndices].sort((left, right) => left - right)) {
         const instance = previousInstances[index];
         const item = finalValue[index];
-        if (keyedRowIdentity(props.rowKey(item, index)) !== instance.key) return undefined;
+        const key = keyedRowIdentity(props.rowKey(item, index));
+        if (key !== instance.key) {
+          // Overlapping fresh-key windows can introduce and then remove an
+          // intermediate identity. Keep that edit history on complete keyed
+          // reconciliation until it has a separate proof.
+          if (overlaps || knownKeys.has(key) || incomingKeys.has(key)) return undefined;
+          incomingKeys.add(key);
+          replacesRows = true;
+          const descriptor = props.create(item, index);
+          prepared.push([
+            index,
+            instance,
+            item,
+            undefined,
+            {
+              key,
+              element: createCompilerHostElement(root.ownerDocument, descriptor),
+              values: readKeyedRowBindingValues(props, item, index),
+              item,
+              index,
+              conditionalValues: EMPTY_KEYED_ROW_CONDITIONAL_VALUES,
+            },
+          ]);
+          continue;
+        }
         const bindingUpdates = prepareKeyedRowBindingUpdates(props, instance, item, index);
         if (!bindingUpdates) return undefined;
-        prepared.push([instance, item, bindingUpdates]);
+        prepared.push([index, instance, item, bindingUpdates, undefined]);
       }
     } catch {
       return undefined;
     }
-    for (const [instance, item, bindingUpdates] of prepared) {
-      applyPreparedKeyedRowBindingUpdates(props, instance, bindingUpdates);
-      instance.item = item;
+    for (const [index, instance, item, bindingUpdates, replacement] of prepared) {
+      if (replacement) {
+        instance.scope?.cleanup();
+        instance.element.replaceWith(replacement.element);
+        previousInstances[index] = replacement;
+      } else {
+        applyPreparedKeyedRowBindingUpdates(props, instance, bindingUpdates!);
+        instance.item = item;
+      }
     }
-    return instances;
+    return replacesRows
+      ? new Map(previousInstances.map((instance) => [instance.key, instance]))
+      : instances;
   }
 
   const update = updates[0];
