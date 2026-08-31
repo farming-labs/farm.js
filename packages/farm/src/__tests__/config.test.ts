@@ -74,6 +74,14 @@ describe("config helpers", () => {
     });
   });
 
+  it("enables automatic production-site telemetry unless disabled", async () => {
+    const configured = await resolveConfig({}, "production");
+    const disabled = await resolveConfig({ telemetry: false }, "production");
+
+    expect(configured.telemetry).toBe(true);
+    expect(disabled.telemetry).toBe(false);
+  });
+
   it("warns instead of silently accepting TypeScript build settings", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 

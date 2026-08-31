@@ -3986,6 +3986,9 @@ function generateVirtualEntryCode(
   stripFarmLocaleFromPathname,
   withFarmRouteContext,
 } from "@farm.js/core/internal/production-runtime";`;
+  const productionSiteTelemetryImport = config.telemetry
+    ? `import { createFarmProductionSiteReporter } from "@farm.js/core/internal/product-telemetry-runtime";`
+    : "";
   const metadataImageRuntimeImport = hasGeneratedMetadataImages
     ? `import { createFarmMetadataImageResponse } from "@farm.js/core/internal/metadata-image-runtime";`
     : "";
@@ -4181,6 +4184,7 @@ ${middlewareImports.join("\n")}
 ${notFoundImport}
 ${apiRouteHelpersImport}
 ${productionRuntimeImport}
+${productionSiteTelemetryImport}
 ${metadataImageRuntimeImport}
 ${pluginRuntimeImport}
 ${i18nServerImport}
@@ -4198,6 +4202,14 @@ import { farmFontPreloadHeader } from "virtual:farm-font-runtime";
 ${rendererServerImports}
 
 const farmPreloadConfig = ${JSON.stringify(config.performance.preload)};
+const farmProductionSiteTelemetry = ${
+    config.telemetry
+      ? `createFarmProductionSiteReporter({
+  renderer: ${JSON.stringify(config.renderer.name)},
+  deployTarget: ${JSON.stringify(config.deploy.target || "custom")},
+})`
+      : "null"
+  };
 
 // Custom 404 page component (if provided)
 const hasCustomNotFound = ${notFoundPath ? "true" : "false"};
@@ -6937,6 +6949,11 @@ async function applyFarmPreloadBudget(response, pathname) {
 export async function fetch(request, context) {
   const healthResponse = await farmProductionLifecycle.handleHealthRequest(request);
   if (healthResponse) return healthResponse;
+
+  farmProductionSiteTelemetry?.report(
+    request.url,
+    typeof context?.waitUntil === "function" ? context.waitUntil.bind(context) : undefined,
+  );
 
   return farmProductionLifecycle.runRequest(
     () =>

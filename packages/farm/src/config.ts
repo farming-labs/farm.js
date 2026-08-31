@@ -316,7 +316,6 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs" | "
   md?: FarmMarkdownUserConfig | boolean;
   mdx?: FarmMdxUserConfig;
   observability?: FarmObservabilityUserConfig;
-
   trailingSlash?: boolean;
   redirects?: () => Promise<RedirectConfig[]> | RedirectConfig[];
   rewrites?: () => Promise<RewriteConfig[]> | RewriteConfig[];
@@ -953,6 +952,7 @@ export async function resolveConfig(
     workflows: resolveWorkflowsConfig(userConfig.workflows),
     api,
     observability: userConfig.observability ?? false,
+    telemetry: userConfig.telemetry !== false,
     devtools: resolveFarmDevtoolsConfig(userConfig.devtools, mode),
     storage: userConfig.storage || {},
     cache: userConfig.cache || {},

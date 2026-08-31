@@ -42,3 +42,17 @@ model FarmTelemetryEvent {
   @@index([identityHash, createdAt])
   @@index([packageVersion, createdAt])
 }
+
+model FarmProductionSite {
+  id             String   @id @default(cuid())
+  url            String   @unique
+  packageName    String
+  packageVersion String
+  renderer       String
+  deployTarget   String
+  firstSeenAt    DateTime @default(now())
+  lastSeenAt     DateTime @default(now())
+
+  @@index([lastSeenAt])
+  @@index([packageVersion, lastSeenAt])
+}
