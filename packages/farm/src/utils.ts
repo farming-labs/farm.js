@@ -135,6 +135,25 @@ export function matchRoute(
   return { params, matches };
 }
 
+/** Match a route segment chain as an owner of the pathname or one of its descendants. */
+export function matchRoutePrefix(url: string, segments: RouteSegment[]): boolean {
+  const urlParts = url.split("/").filter(Boolean);
+  let urlIndex = 0;
+
+  for (const segment of segments) {
+    if (segment.isCatchAll) {
+      return segment.isOptional || urlIndex < urlParts.length;
+    }
+
+    const urlPart = urlParts[urlIndex];
+    if (urlPart === undefined) return false;
+    if (!segment.isDynamic && segment.segment !== urlPart) return false;
+    urlIndex++;
+  }
+
+  return true;
+}
+
 export function resolveAppPath(root: string, ...paths: string[]): string {
   return path.resolve(root, ...paths);
 }

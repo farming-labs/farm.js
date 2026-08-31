@@ -3,6 +3,7 @@ import { describe, it, expect } from "vitest";
 import {
   parseRoutePath,
   matchRoute,
+  matchRoutePrefix,
   segmentsToPattern,
   toPosixPath,
   toRootRelativeUrlPath,
@@ -188,6 +189,14 @@ describe("matchRoute", () => {
     const result = matchRoute("/docs", segments);
     expect(result.matches).toBe(true);
     expect(result.params).toEqual({ slug: "" });
+  });
+
+  it("matches optional catch-all route owners at their empty parent path", () => {
+    const segments = parseRoutePath("docs/[[...slug]]/layout.tsx").segments;
+
+    expect(matchRoutePrefix("/docs", segments)).toBe(true);
+    expect(matchRoutePrefix("/docs/guides/getting-started", segments)).toBe(true);
+    expect(matchRoutePrefix("/blog", segments)).toBe(false);
   });
 
   it("should not match incorrect routes", () => {
