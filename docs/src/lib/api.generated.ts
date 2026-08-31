@@ -8,6 +8,7 @@
 
 import type { POST as POST_telemetry_dashboard_session } from "../app/api/telemetry/dashboard/session/route";
 import type { POST as POST_telemetry_v1_events } from "../app/api/telemetry/v1/events/route";
+import type { POST as POST_telemetry_v1_sites } from "../app/api/telemetry/v1/sites/route";
 import type { POST as POST_waitlist } from "../app/api/waitlist/route";
 
 // Type-only representation of your API routes
@@ -21,6 +22,9 @@ export type APIRouter = {
     v1: {
       events: {
         post: typeof POST_telemetry_v1_events;
+      };
+      sites: {
+        post: typeof POST_telemetry_v1_sites;
       };
     };
   };

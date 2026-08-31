@@ -222,6 +222,8 @@ export interface FarmConfig {
   md?: FarmMarkdownUserConfig | FarmMarkdownResolvedConfig | boolean;
   mdx?: FarmMdxUserConfig | FarmMdxResolvedConfig;
   observability?: FarmObservabilityUserConfig;
+  /** Farm product telemetry for deployed server runtimes. Set to false to disable. */
+  telemetry?: boolean;
   /** Development-only runtime inspector. Enabled by default during `farm dev`. */
   devtools?: FarmDevtoolsUserConfig;
   /** Development-only browser feedback for build and HMR activity. */

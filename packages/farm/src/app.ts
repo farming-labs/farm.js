@@ -189,6 +189,7 @@ export class FarmApp {
       md: resolveMarkdownConfig(config.md),
       mdx: resolveMdxConfig(config.mdx),
       observability: config.observability ?? false,
+      telemetry: config.telemetry !== false,
       devtools: resolveFarmDevtoolsConfig(
         config.devtools,
         process.env.NODE_ENV === "production" ? "production" : "development",

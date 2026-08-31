@@ -7,6 +7,7 @@ import {
   Boxes,
   Database,
   Fingerprint,
+  Globe2,
   PackageCheck,
   Terminal,
 } from "lucide-react";
@@ -17,7 +18,7 @@ export const revalidate = 0;
 
 export const metadata = {
   title: "Farm.js telemetry",
-  description: "Internal anonymous product-health metrics for Farm.js.",
+  description: "Internal product-health metrics and automatically detected production sites.",
 } satisfies Metadata;
 
 type TelemetryPageProps = {
@@ -46,6 +47,17 @@ type RecentEvent = {
   createdAt: Date;
 };
 
+type ProductionSite = {
+  id: string;
+  url: string;
+  packageName: string;
+  packageVersion: string;
+  renderer: string;
+  deployTarget: string;
+  firstSeenAt: Date;
+  lastSeenAt: Date;
+};
+
 type TelemetryData =
   | {
       status: "ready";
@@ -53,6 +65,8 @@ type TelemetryData =
       eventsLast24h: number;
       uniqueInstallations: number;
       projectsCreated: number;
+      productionSiteCount: number;
+      productionSites: ProductionSite[];
       recentEvents: RecentEvent[];
       eventTypes: GroupCount[];
       packages: GroupCount[];
@@ -144,6 +158,8 @@ async function loadTelemetryData(limit: number): Promise<TelemetryData> {
       eventsLast24h,
       uniqueInstallations,
       projectsCreated,
+      productionSiteCount,
+      productionSites,
       recentEvents,
       eventTypeRows,
       packageRows,
@@ -161,6 +177,21 @@ async function loadTelemetryData(limit: number): Promise<TelemetryData> {
         select: { identityHash: true },
       }),
       prisma.farmTelemetryEvent.count({ where: { eventType: "project_created" } }),
+      prisma.farmProductionSite.count(),
+      prisma.farmProductionSite.findMany({
+        orderBy: { lastSeenAt: "desc" },
+        take: 250,
+        select: {
+          id: true,
+          url: true,
+          packageName: true,
+          packageVersion: true,
+          renderer: true,
+          deployTarget: true,
+          firstSeenAt: true,
+          lastSeenAt: true,
+        },
+      }),
       prisma.farmTelemetryEvent.findMany({
         orderBy: { createdAt: "desc" },
         take: limit,
@@ -232,6 +263,8 @@ async function loadTelemetryData(limit: number): Promise<TelemetryData> {
       eventsLast24h,
       uniqueInstallations: uniqueInstallations.length,
       projectsCreated,
+      productionSiteCount,
+      productionSites,
       recentEvents,
       eventTypes: groups(
         eventTypeRows.map((row) => ({ ...row, key: row.eventType })) as GroupRow[],
@@ -359,6 +392,73 @@ function GroupTable({ title, rows }: { title: string; rows: GroupCount[] }) {
   );
 }
 
+function ProductionSitesTable({ sites }: { sites: ProductionSite[] }) {
+  return (
+    <section className="border border-white/10 bg-black">
+      <header className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+        <div className="flex items-center gap-2">
+          <Globe2 className="size-4 text-white/45" strokeWidth={1.7} aria-hidden="true" />
+          <h2 className="text-sm font-medium">Production websites</h2>
+        </div>
+        <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-white/35">
+          automatic detection
+        </span>
+      </header>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[900px] text-left">
+          <thead className="bg-white/[0.025] font-mono text-[10px] uppercase tracking-[0.14em] text-white/35">
+            <tr>
+              <th className="px-4 py-2 font-normal">Website</th>
+              <th className="px-4 py-2 font-normal">Framework</th>
+              <th className="px-4 py-2 font-normal">Renderer</th>
+              <th className="px-4 py-2 font-normal">Target</th>
+              <th className="px-4 py-2 text-right font-normal">First seen</th>
+              <th className="px-4 py-2 text-right font-normal">Last seen</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-white/10">
+            {sites.length ? (
+              sites.map((site) => (
+                <tr key={site.id}>
+                  <td className="px-4 py-2.5 font-mono text-xs">
+                    <a
+                      href={site.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-white/80 underline decoration-white/20 underline-offset-4 hover:text-white"
+                    >
+                      {site.url}
+                    </a>
+                  </td>
+                  <td className="px-4 py-2.5 font-mono text-xs text-white/65">
+                    {site.packageName}@{site.packageVersion}
+                  </td>
+                  <td className="px-4 py-2.5 font-mono text-xs text-white/55">{site.renderer}</td>
+                  <td className="px-4 py-2.5 font-mono text-xs text-white/55">
+                    {site.deployTarget}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-2.5 text-right font-mono text-[11px] text-white/40">
+                    {formatDate(site.firstSeenAt)}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-2.5 text-right font-mono text-[11px] text-white/40">
+                    {formatDate(site.lastSeenAt)}
+                  </td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan={6} className="px-4 py-8 text-center text-sm text-white/40">
+                  No production websites have been detected yet.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 function StatusPanel({ data }: { data: Exclude<TelemetryData, { status: "ready" }> }) {
   return (
     <main className="relative flex min-h-dvh items-center justify-center overflow-hidden bg-black px-5 py-16 text-white">
@@ -450,14 +550,15 @@ export default async function TelemetryPage({ searchParams }: TelemetryPageProps
             <div>
               <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-white/45">
                 <Activity className="size-3.5" strokeWidth={1.7} aria-hidden="true" />
-                Product health / anonymous
+                Product health / privacy-preserving
               </div>
               <h1 className="mt-4 text-3xl font-medium tracking-[-0.045em] sm:text-4xl">
                 Farm.js telemetry
               </h1>
               <p className="mt-3 max-w-2xl text-sm leading-6 text-white/50">
-                Coarse, anonymous CLI and project-creation signals. No paths, repositories, source,
-                credentials, user identities, IP addresses, or user-agent strings are stored.
+                Coarse, anonymous CLI signals plus public origins automatically detected by Farm
+                production server runtimes. No request paths, repositories, source, credentials,
+                visitor identities, IP addresses, or user-agent strings are stored.
               </p>
             </div>
             <p className="font-mono text-[11px] text-white/40">
@@ -477,7 +578,7 @@ export default async function TelemetryPage({ searchParams }: TelemetryPageProps
           </div>
         </header>
 
-        <section className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <section className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           <StatCard label="Total events" value={formatNumber(data.totalEvents)} icon={Database} />
           <StatCard
             label="Last 24 hours"
@@ -494,6 +595,15 @@ export default async function TelemetryPage({ searchParams }: TelemetryPageProps
             value={formatNumber(data.projectsCreated)}
             icon={PackageCheck}
           />
+          <StatCard
+            label="Production websites"
+            value={formatNumber(data.productionSiteCount)}
+            icon={Globe2}
+          />
+        </section>
+
+        <section className="mt-3">
+          <ProductionSitesTable sites={data.productionSites} />
         </section>
 
         <section className="mt-3 grid gap-3 xl:grid-cols-2 2xl:grid-cols-3">

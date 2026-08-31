@@ -157,6 +157,9 @@
       "internal/production-runtime": [
         "./dist/internal/production-runtime.d.ts"
       ],
+      "internal/product-telemetry-runtime": [
+        "./dist/internal/product-telemetry-runtime.d.ts"
+      ],
       "internal/metadata-image-runtime": [
         "./dist/internal/metadata-image-runtime.d.ts"
       ],
@@ -545,6 +548,11 @@
       "types": "./dist/internal/production-runtime.d.ts",
       "import": "./dist/internal/production-runtime.mjs",
       "require": "./dist/internal/production-runtime.cjs"
+    },
+    "./internal/product-telemetry-runtime": {
+      "types": "./dist/internal/product-telemetry-runtime.d.ts",
+      "import": "./dist/internal/product-telemetry-runtime.mjs",
+      "require": "./dist/internal/product-telemetry-runtime.cjs"
     },
     "./internal/metadata-image-runtime": {
       "types": "./dist/internal/metadata-image-runtime.d.ts",

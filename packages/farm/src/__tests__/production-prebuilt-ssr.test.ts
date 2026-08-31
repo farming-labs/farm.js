@@ -227,6 +227,73 @@ async function expectNitroFallback(root: string): Promise<void> {
 }
 
 describe("production prebuilt SSR output", () => {
+  it("bundles automatic production-site discovery on the server only", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          generateBuildId: () => "production-site-telemetry-test",
+        },
+        "production",
+      );
+
+      await build(config, { root, preset: "node-server" });
+
+      const serverDir = path.join(root, ".farm", ".output", "server");
+      const serverPackage = JSON.parse(
+        await fs.readFile(path.join(serverDir, "package.json"), "utf8"),
+      );
+      const mappedEntry = serverPackage.imports?.["#farm-ssr-entry"];
+      expect(mappedEntry).toMatch(/^\.\/farm-ssr\//);
+      const serverJavaScript = await fs.readFile(
+        path.join(serverDir, mappedEntry.slice("./".length)),
+        "utf8",
+      );
+      const clientJavaScript = await readAllClientJavaScript(root);
+      expect(serverJavaScript).toContain("production_site_active");
+      expect(clientJavaScript).not.toContain("production_site_active");
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("omits production-site discovery when product telemetry is disabled", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          telemetry: false,
+          generateBuildId: () => "production-site-telemetry-disabled-test",
+        },
+        "production",
+      );
+
+      await build(config, { root, preset: "node-server" });
+
+      const serverDir = path.join(root, ".farm", ".output", "server");
+      const serverPackage = JSON.parse(
+        await fs.readFile(path.join(serverDir, "package.json"), "utf8"),
+      );
+      const mappedEntry = serverPackage.imports?.["#farm-ssr-entry"];
+      expect(mappedEntry).toMatch(/^\.\/farm-ssr\//);
+      const serverJavaScript = await fs.readFile(
+        path.join(serverDir, mappedEntry.slice("./".length)),
+        "utf8",
+      );
+      expect(serverJavaScript).not.toContain("production_site_active");
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("isolates a client leaf without shipping its server layout", async () => {
     const root = await createProductionFixture();
     const baselineRoot = await createProductionFixture();

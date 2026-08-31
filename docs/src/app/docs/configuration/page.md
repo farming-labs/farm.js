@@ -261,6 +261,7 @@ mount, and shortcut together.
 | docs          | Serving the built-in docs runtime and docs API.                                   |
 | md            | Restricting or disabling automatic markdown mirrors like /pricing.md.             |
 | mdx           | Rendering `page.md` and `page.mdx` app routes, plus MDX components.               |
+| telemetry     | Controlling automatic production-site reporting to Farm's usage dashboard.        |
 | deploy        | Selecting a target, preset, and output directory.                                 |
 | deploymentId  | Detecting stale browser requests during rolling deployments.                      |
 | trailingSlash | Choosing the canonical URL shape for application page routes and links.           |
@@ -690,6 +691,23 @@ farm migrate
 ```
 
 Each command runs from the project root unless it sets `cwd`. Commands run in order and the CLI stops on the first failure.
+
+## Production-site telemetry
+
+Farm production server runtimes automatically detect their public HTTPS origin from incoming
+requests and report it to Farm's production-sites dashboard. No URL configuration is required. To
+disable this product telemetry for a deployment:
+
+```ts title="farm.config.ts"
+export default defineConfig({
+  telemetry: false,
+});
+```
+
+Farm schedules a small check-in after the first non-health production request and never waits for it
+before returning the application response. Only the detected origin, Farm version, renderer, and
+deployment target are sent. See [Product telemetry](/docs/telemetry) for validation, privacy,
+retention, preview-environment, opt-out, and static-export details.
 
 ## Deployment config
 
