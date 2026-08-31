@@ -278,6 +278,10 @@ const product = await api.products.get(
 
 Structured keys use Farm's route-data key contract. Default API cache keys include the API origin and remain isolated from other clients.
 
+Set `cache.dedupeMs` to join identical requests started within that window. If an older request is
+still running after the window expires, the newer request becomes the cache owner; the older result
+still returns to its original caller but cannot replace the newer cached value.
+
 ## Optimistic cache updates
 
 Farm's cache lifecycle is intentionally familiar to React Query and TanStack Query users, but it is

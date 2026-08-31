@@ -119,6 +119,57 @@ describe("createAPIClient", () => {
     );
   });
 
+  it("keeps a newer in-flight request registered after an older request settles", async () => {
+    let now = 0;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    const firstResponse = createDeferred<ReturnType<typeof buildResponse>>();
+    const secondResponse = createDeferred<ReturnType<typeof buildResponse>>();
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() => firstResponse.promise)
+      .mockImplementationOnce(() => secondResponse.promise);
+    globalThis.fetch = fetchMock as any;
+    const api = createAPIClient<APIRouter>({ baseURL: "http://example.com" });
+    const requestOptions = {
+      cache: {
+        policy: "network-only" as const,
+        dedupeMs: 10,
+        staleTime: 1_000,
+      },
+    };
+
+    const first = api.users.get({ query: { limit: "5" } }, requestOptions);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    now = 20;
+    const second = api.users.get({ query: { limit: "5" } }, requestOptions);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    firstResponse.resolve(buildResponse({ users: [{ id: "old" }], total: 1, limit: 5, offset: 0 }));
+    await expect(first).resolves.toMatchObject({ data: { users: [{ id: "old" }] } });
+
+    now = 21;
+    const deduped = api.users.get({ query: { limit: "5" } }, requestOptions);
+    await Promise.resolve();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    secondResponse.resolve(
+      buildResponse({ users: [{ id: "new" }], total: 1, limit: 5, offset: 0 }),
+    );
+    await expect(Promise.all([second, deduped])).resolves.toEqual([
+      expect.objectContaining({ data: expect.objectContaining({ users: [{ id: "new" }] }) }),
+      expect.objectContaining({ data: expect.objectContaining({ users: [{ id: "new" }] }) }),
+    ]);
+
+    now = 22;
+    await expect(
+      api.users.get(
+        { query: { limit: "5" } },
+        { cache: { policy: "cache-first", staleTime: 1_000 } },
+      ),
+    ).resolves.toMatchObject({ data: { users: [{ id: "new" }] } });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("uses a baseURL path as the API root", async () => {
     const fetchMock = vi.fn(async () => buildResponse({ users: [], total: 0 }));
     globalThis.fetch = fetchMock as any;
