@@ -331,22 +331,21 @@ has the same length and the same keys in the same order, Farm prepares every bin
 changed DOM target across the complete window first, patches the existing rows in place, and
 updates the stored row objects used by later events. That path creates no descriptors or DOM rows,
 and preserves row identity, focus, and selection. Multiple length-preserving same-key windows
-queued before one compiler flush compose into one atomic refresh. Disjoint and overlapping windows
-are both supported; overlapping positions use the last queued value. Farm validates the complete
-chain and prepares every touched key, binding value, and DOM target before applying any write.
-Disjoint fixed-length queued windows may also mix same-key refreshes with globally new keys. Farm
-prepares every new descriptor, binding snapshot, and disconnected DOM row first, then patches the
-same-key positions and swaps only the fresh-key positions. Untouched rows keep their identity and
-are not recreated. The runtime otherwise creates one inserted row,
+queued before one compiler flush compose into one atomic refresh. Fixed-length queued windows may
+mix same-key refreshes with globally new final keys, and both disjoint and overlapping windows are
+supported. An overlapping position uses the last queued value; intermediate identities are never
+mounted. Farm validates the complete chain and final key set, then prepares every touched key,
+binding value, DOM target, new descriptor, binding snapshot, and disconnected DOM row before the
+first write. It patches same-key positions and swaps only final fresh-key positions. Untouched rows
+keep their identity and are not recreated. The runtime otherwise creates one inserted row,
 removes only the known row or range, or patches/replaces one row at that position without rereading
 every existing key, descriptor, and binding. Surviving rows keep their DOM identity. Index-aware or
 collection-reading rows, custom methods, position expressions with user calls or mutations,
 runtime positions that are not safe integers, dynamic, zero, negative, or fractional removal
 counts, other `toSpliced()` forms, block-bodied updaters, unsafe incoming expressions, queued
-chains containing a structural window or unhinted intermediate update, an overlapping window whose
-final key changes, existing keys moved from another position, partially reused windows, duplicate
-keys, nested or React-owned rows, and failed checks use complete keyed reconciliation before the
-fast path mutates the DOM.
+chains containing a structural window or unhinted intermediate update, existing keys moved from
+another position, partially reused windows, duplicate final keys, nested or React-owned rows, and
+failed checks use complete keyed reconciliation before the fast path mutates the DOM.
 Reports expose the site count as `keyedArrayPositionHints`. Batch insertion and exact-window
 replacement use progressively separate optional runtime capabilities, so existing single-position
 and batch-only bundles do not retain window validation or replacement code.

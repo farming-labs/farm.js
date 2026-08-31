@@ -139,13 +139,15 @@ last-update-wins semantics, atomic preparation, structural fallback, controlled-
 events, Strict Mode hydration, and cleanup.
 
 Queued fresh-key exact-window replacement has a separate 10,000-row gate. One event replaces two
-disjoint 32-row windows with globally new keys. The benchmark requires the 64 old rows to disconnect,
-all four surrounding anchors to retain identity, both new labels to reach the DOM, and zero compiled
-owner executions. Static and hybrid modes must remain at least 4x faster than React and 1.5x faster
-than the equivalent block-bodied compiled control. Together with the existing position workloads,
-the compiler report must contain all eleven dashboard `keyedArrayPositionHints`. Package tests also
-cover mixed same-key/fresh-key commits, atomic preparation, overlap and existing-key-move fallback,
-events, controlled-input selection, Strict Mode hydration, cleanup, and 1,000 differential updates.
+overlapping 32-row windows with globally new final keys; their 16-row overlap leaves one 48-row
+final union. The benchmark requires the 48 old rows to disconnect, both surrounding anchors to
+retain identity, both final labels to reach the DOM, and zero compiled owner executions. Static and
+hybrid modes must remain at least 4x faster than React and 1.5x faster than the equivalent
+block-bodied compiled control. Together with the existing position workloads, the compiler report
+must contain all eleven dashboard `keyedArrayPositionHints`. Package tests also cover disjoint and
+overlapping fresh-key commits, mixed same-key/fresh-key commits, atomic preparation,
+existing-key-move fallback, events, controlled-input selection, Strict Mode hydration, cleanup,
+and 1,000 differential overlapping updates.
 
 Native keyed-array reversal has a separate 10,000-row comparison. Concise `toReversed()` is
 measured against bracketed React and an equivalent block-bodied compiled control. Both compiler

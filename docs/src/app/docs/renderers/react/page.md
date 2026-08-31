@@ -1069,13 +1069,14 @@ Farm first evaluates all keys and binding snapshots and resolves every changed t
 complete interval. It then patches only changed bindings in place and updates each stored row
 object, so later delegated or cached handlers observe the latest data. No descriptor or DOM row is
 created, and every row keeps its identity, focus, and text selection. Multiple length-preserving
-same-key windows queued before one compiler flush compose into one atomic refresh. Disjoint and
-overlapping windows are supported; an overlapping position uses the last queued value. Farm
-validates the complete chain and prepares every touched key, binding value, and DOM target before
-applying any write. Disjoint fixed-length queued windows may also mix same-key rows with globally
-new keys. Farm prepares every new descriptor, binding snapshot, and disconnected DOM row before
-the first write, then patches the same-key positions and swaps only the fresh-key positions.
-Untouched rows retain their identity. Reordered, partially reused, or duplicate keys take complete
+same-key windows queued before one compiler flush compose into one atomic refresh. Fixed-length
+queued windows may mix same-key rows with globally new final keys, and both disjoint and
+overlapping windows are supported. An overlapping position uses the last queued value;
+intermediate identities are never mounted. Farm validates the complete chain and final key set,
+then prepares every touched key, binding value, DOM target, new descriptor, binding snapshot, and
+disconnected DOM row before the first write. It patches same-key positions and swaps only final
+fresh-key positions. Untouched rows retain their identity. Reordered, partially reused, or
+duplicate final keys take complete
 reconciliation before fast-path mutation. A single insertion
 creates one row at that position. A removal cleans up and removes only the known row or contiguous
 range while preserving every
@@ -1087,10 +1088,10 @@ The proof requires compiler-owned host rows whose render and key do not observe 
 Effectful position expressions, runtime values that are fractional or otherwise not safe integers,
 dynamic, zero, negative, or fractional removal counts, other `toSpliced()` shapes, block-bodied
 updaters, unsafe incoming expressions, custom methods, queued chains containing a structural
-window or unhinted intermediate update, an overlapping window whose final key changes, an existing
-key moved from another position, duplicate or partially reused incoming keys, collection-reading
-bindings, React-owned rows, nested host blocks, row conditionals, unrelated dirty dependencies, and
-failed runtime checks keep complete keyed reconciliation.
+window or unhinted intermediate update, an existing key moved from another position, duplicate or
+partially reused final keys, collection-reading bindings, React-owned rows, nested host blocks, row
+conditionals, unrelated dirty dependencies, and failed runtime checks keep complete keyed
+reconciliation.
 Negative safe-integer positions and counts larger than the remaining suffix use the native
 method's normal clamping rules. No new option or component is required. Reports expose emitted
 sites as `keyedArrayPositionHints`. Batch insertion and exact-window replacement select
@@ -1983,8 +1984,10 @@ The package and example test suites verify more than generated code:
   1,000 deterministic queued same-key window refreshes match normal React while disjoint and
   overlapping targeted tests preserve row identity and perform no descriptor work; 1,000 queued
   mixed fresh-key and same-key replacements also match React while targeted tests require only the
-  64 incoming descriptors, preserve every untouched row, prepare all new rows before mutation, and
-  cover overlapping-key-change and existing-key-move fallback;
+  64 incoming descriptors, preserve every untouched row, and prepare all new rows before mutation;
+  another 1,000 queued overlapping fresh-key replacements match React while targeted tests require
+  work to equal only the final touched union, preserve untouched DOM identity, and cover atomic
+  preparation, existing-key-move fallback, Strict Mode hydration, and unmount cleanup;
 - 2,000 deterministic randomized reversals match normal React; a 4,096-row targeted test requires
   exactly `n - 1` connected DOM moves and zero key, descriptor, or binding reads, while fallback
   tests cover custom methods, queued updates, collection-reading rows, StrictMode hydration, and

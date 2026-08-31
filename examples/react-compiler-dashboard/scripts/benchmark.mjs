@@ -766,32 +766,24 @@ async function measureTrial(browser, trial, compilerMode, port) {
 
         const measureQueuedWindowReplacement = async (action) => {
           const rows = table.querySelectorAll("tbody tr");
-          const firstRemoved = [...rows].slice(2_500, 2_532);
-          const secondRemoved = [...rows].slice(7_500, 7_532);
-          const beforeFirst = rows[2_499];
-          const afterFirst = rows[2_532];
-          const beforeSecond = rows[7_499];
-          const afterSecond = rows[7_532];
-          const firstOldKey = firstRemoved[16]?.getAttribute("data-row-id");
-          const secondOldKey = secondRemoved[16]?.getAttribute("data-row-id");
+          const removed = [...rows].slice(2_500, 2_548);
+          const before = rows[2_499];
+          const after = rows[2_548];
+          const firstOldKey = removed[8]?.getAttribute("data-row-id");
+          const secondOldKey = removed[32]?.getAttribute("data-row-id");
           await runTableAction(action, () => {
             const nextRows = table.querySelectorAll("tbody tr");
             return (
               rowCount() === 10_000 &&
-              nextRows[2_499] === beforeFirst &&
-              nextRows[2_532] === afterFirst &&
-              nextRows[7_499] === beforeSecond &&
-              nextRows[7_532] === afterSecond &&
-              firstRemoved.every((row, offset) =>
+              nextRows[2_499] === before &&
+              nextRows[2_548] === after &&
+              removed.every((row, offset) =>
                 Boolean(!row.isConnected && nextRows[2_500 + offset] !== row),
               ) &&
-              secondRemoved.every((row, offset) =>
-                Boolean(!row.isConnected && nextRows[7_500 + offset] !== row),
-              ) &&
-              nextRows[2_516]?.getAttribute("data-row-id") !== firstOldKey &&
-              nextRows[7_516]?.getAttribute("data-row-id") !== secondOldKey &&
-              nextRows[2_516]?.children[1]?.textContent?.endsWith(" queued replacement") &&
-              nextRows[7_516]?.children[1]?.textContent?.endsWith(" queued replacement")
+              nextRows[2_508]?.getAttribute("data-row-id") !== firstOldKey &&
+              nextRows[2_532]?.getAttribute("data-row-id") !== secondOldKey &&
+              nextRows[2_508]?.children[1]?.textContent?.endsWith(" queued replacement") &&
+              nextRows[2_532]?.children[1]?.textContent?.endsWith(" queued replacement")
             );
           });
         };
@@ -1915,7 +1907,7 @@ const keyedQueuedWindowRefreshRegressions = keyedQueuedWindowRefreshResults.filt
     !Number.isFinite(snapshotSpeedup) ||
     snapshotSpeedup < keyedQueuedWindowRefreshMinimumSnapshotSpeedup,
 );
-// Two disjoint fixed-length fresh-key windows should create and swap only their incoming rows.
+// Two overlapping fixed-length fresh-key windows should create and swap only the final union.
 // Protect the queued replacement path separately from both the single-window replacement and the
 // queued same-key refresh so neither can hide a regression to complete reconciliation.
 const keyedQueuedWindowReplaceMinimumSpeedup = 4;
