@@ -68,6 +68,7 @@ import type { ResolvedFarmI18nConfig } from "../i18n/types";
 import { createRouteSlotContainerId, parseRouteSlotFile } from "./route-slots";
 import { getFarmRendererComponentExtensions } from "../renderer";
 import type { ApplicationMetadataRouteKind } from "../metadata-route";
+import { compareRouteSpecificity, type RouteSegmentSpecificity } from "./specificity";
 
 interface RouteEntry {
   route: ParsedRoute;
@@ -167,15 +168,16 @@ interface RedirectEntry {
   definition: ProgrammaticRedirectRoute;
 }
 
-function routeSpecificity(entry: RouteEntry): number {
-  return entry.route.segments.reduce((score, segment) => {
-    if (!segment.isDynamic) return score + 100;
-    if (!segment.isCatchAll) return score + 50;
-    // An optional catch-all also matches its parent path (the empty case), so
-    // it must rank just below a page defined at that exact path: -2 nets out
-    // this segment's share of the length seed and one point more.
-    return score + (segment.isOptional ? -2 : 10);
-  }, entry.route.segments.length);
+function getRouteSpecificity(entry: RouteEntry): RouteSegmentSpecificity[] {
+  return entry.route.segments.map((segment) => {
+    if (!segment.isDynamic) return "static";
+    if (!segment.isCatchAll) return "dynamic";
+    return segment.isOptional ? "optional-catch-all" : "catch-all";
+  });
+}
+
+function compareRouteEntries(left: RouteEntry, right: RouteEntry): number {
+  return compareRouteSpecificity(getRouteSpecificity(left), getRouteSpecificity(right));
 }
 
 /**
@@ -239,13 +241,13 @@ export class RouteManager {
     }
 
     this.routes = new Map(
-      Array.from(this.routes.entries()).sort(
-        ([, left], [, right]) => routeSpecificity(right) - routeSpecificity(left),
+      Array.from(this.routes.entries()).sort(([, left], [, right]) =>
+        compareRouteEntries(left, right),
       ),
     );
     this.metadataRoutes = new Map(
-      Array.from(this.metadataRoutes.entries()).sort(
-        ([, left], [, right]) => routeSpecificity(right) - routeSpecificity(left),
+      Array.from(this.metadataRoutes.entries()).sort(([, left], [, right]) =>
+        compareRouteEntries(left, right),
       ),
     );
 
@@ -1143,7 +1145,7 @@ export class RouteManager {
           if (left.entry.interception !== right.entry.interception) {
             return left.entry.interception ? -1 : 1;
           }
-          return routeSpecificity(right.entry) - routeSpecificity(left.entry);
+          return compareRouteEntries(left.entry, right.entry);
         });
 
       const selected = candidates[0];

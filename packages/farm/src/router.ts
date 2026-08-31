@@ -1,3 +1,5 @@
+import { compareRouteSpecificity, type RouteSegmentSpecificity } from "./routing/specificity";
+
 export type FarmRouterPrimitiveParam = string | number | boolean;
 export type FarmRouterPathParam =
   | FarmRouterPrimitiveParam
@@ -59,7 +61,7 @@ type RouterSegment =
 interface NormalizedRouterRoute<TMeta> {
   route: FarmRouterRoute<TMeta>;
   segments: RouterSegment[];
-  score: number;
+  specificity: RouteSegmentSpecificity[];
   index: number;
 }
 
@@ -169,7 +171,7 @@ function normalizeRouteInput<TMeta>(
       path,
     },
     segments,
-    score: scoreSegments(segments),
+    specificity: segments.map(getRouterSegmentSpecificity),
     index,
   };
 }
@@ -267,16 +269,15 @@ function compareRoutes<TMeta>(
   left: NormalizedRouterRoute<TMeta>,
   right: NormalizedRouterRoute<TMeta>,
 ) {
-  if (right.score !== left.score) return right.score - left.score;
+  const specificity = compareRouteSpecificity(left.specificity, right.specificity);
+  if (specificity !== 0) return specificity;
   return left.index - right.index;
 }
 
-function scoreSegments(segments: RouterSegment[]) {
-  return segments.reduce((score, segment) => {
-    if (segment.type === "static") return score + 100;
-    if (!segment.catchAll) return score + 50;
-    return score + (segment.optional ? 5 : 10);
-  }, segments.length);
+function getRouterSegmentSpecificity(segment: RouterSegment): RouteSegmentSpecificity {
+  if (segment.type === "static") return "static";
+  if (!segment.catchAll) return "dynamic";
+  return segment.optional ? "optional-catch-all" : "catch-all";
 }
 
 function normalizePathname(value: string) {

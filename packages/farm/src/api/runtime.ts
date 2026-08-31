@@ -12,6 +12,7 @@ import {
 } from "../server-http";
 import { DEFAULT_FARM_API_BASE_PATH, normalizeFarmAPIBasePath } from "./config";
 import { resolveFarmAPICanonicalPathname } from "./server-path";
+import { compareRouteSpecificity, type RouteSegmentSpecificity } from "../routing/specificity";
 
 export type APIRouteParamValue = string | string[];
 export type APIRouteParams = Record<string, APIRouteParamValue>;
@@ -63,14 +64,21 @@ export function matchAPIRoute<T extends { path: string }>(
     }
   }
 
+  let bestMatch: APIRouteMatch<T> | null = null;
+  let bestSpecificity: RouteSegmentSpecificity[] | null = null;
+
   for (const route of routes.values()) {
     const params = matchRoutePath(route.path, pathname);
-    if (params) {
-      return { route, params };
+    if (!params) continue;
+
+    const specificity = getAPIRouteSpecificity(route.path);
+    if (bestSpecificity === null || compareRouteSpecificity(specificity, bestSpecificity) < 0) {
+      bestMatch = { route, params };
+      bestSpecificity = specificity;
     }
   }
 
-  return null;
+  return bestMatch;
 }
 
 /** Match canonical routes through a configurable same-origin public API path. */
@@ -427,6 +435,15 @@ function getPathSegments(pathname: string): string[] {
   return normalizePathname(pathname)
     .split("/")
     .filter((segment) => segment.length > 0);
+}
+
+function getAPIRouteSpecificity(routePath: string): RouteSegmentSpecificity[] {
+  return getPathSegments(routePath).map((segment) => {
+    const dynamic = parseDynamicSegment(segment);
+    if (!dynamic) return "static";
+    if (!dynamic.catchAll) return "dynamic";
+    return dynamic.optional ? "optional-catch-all" : "catch-all";
+  });
 }
 
 function normalizePathname(pathname: string): string {

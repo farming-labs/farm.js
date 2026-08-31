@@ -137,6 +137,19 @@ describe("RouteManager", () => {
       expect(routeManager.matchRoute("/contact").route?.pattern).toBe("/[slug]");
     });
 
+    it("compares specificity at each route segment", async () => {
+      const { globFiles } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) {
+          return ["[category]/settings/page.tsx", "shop/[item]/page.tsx"];
+        }
+        return [];
+      });
+      await routeManager.discoverRoutes();
+
+      expect(routeManager.matchRoute("/shop/settings").route?.pattern).toBe("/shop/[item]");
+    });
+
     it("prefers an exact page over an optional catch-all matching its empty case", async () => {
       const { globFiles } = await import("../utils");
       vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
