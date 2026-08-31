@@ -130,6 +130,9 @@ Endpoints accept the same `{ key }`, `{ tag }`, and `{ path }` targets. Imperati
 when calling outside a Farm action/endpoint request; Farm action requests automatically wait for
 registered distributed invalidations before completing.
 
+If a tag is invalidated while its value is still being generated, that caller can finish with the
+generated value, but Farm keeps the stored entry stale so the next read regenerates it.
+
 ## Adapter contract
 
 Custom adapters implement asynchronous entry persistence plus optional shared tag versions:

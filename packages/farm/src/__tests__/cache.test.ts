@@ -346,6 +346,34 @@ describe("server cache primitives", () => {
     expect(calls).toBe(1);
   });
 
+  it("does not make a local value fresh when its tag is invalidated during generation", async () => {
+    const cache = new FarmDataCache();
+    let finishGeneration!: () => void;
+    const generationGate = new Promise<void>((resolve) => {
+      finishGeneration = resolve;
+    });
+    let calls = 0;
+
+    const firstGeneration = cache.getOrSet(
+      "featured",
+      async () => {
+        calls++;
+        await generationGate;
+        return { calls };
+      },
+      { tags: ["products"] },
+    );
+
+    await vi.waitFor(() => expect(calls).toBe(1));
+    cache.revalidateTag("products");
+    finishGeneration();
+    await expect(firstGeneration).resolves.toEqual({ calls: 1 });
+
+    await expect(
+      cache.getOrSet("featured", async () => ({ calls: ++calls }), { tags: ["products"] }),
+    ).resolves.toEqual({ calls: 2 });
+  });
+
   it("shares entries and tag invalidation through a distributed adapter", async () => {
     const adapter = new TestSharedCacheAdapter();
     const first = new FarmDataCache({ adapter, namespace: "catalog" });

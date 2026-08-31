@@ -411,6 +411,16 @@ export class FarmDataCache {
     options: FarmCacheSetOptions = {},
     tagVersions?: Readonly<Record<string, number>>,
   ): Promise<FarmCacheEntry<T>> {
+    return this.writeAsync(key, value, options, tagVersions);
+  }
+
+  private async writeAsync<T>(
+    key: string,
+    value: T,
+    options: FarmCacheSetOptions,
+    tagVersions?: Readonly<Record<string, number>>,
+    createdVersion?: number,
+  ): Promise<FarmCacheEntry<T>> {
     const tags = normalizeCacheOptionsTags(options);
     const capturedVersions =
       tagVersions ?? (await this.getAdapterTagVersions(Array.from(tags.values())));
@@ -420,7 +430,7 @@ export class FarmDataCache {
       tags: Array.from(tags),
       tagVersions: capturedVersions,
       createdAt: options.createdAt ?? Date.now(),
-      createdVersion: ++this.version,
+      createdVersion: createdVersion ?? ++this.version,
       revalidate: normalizeRevalidate(options.revalidate),
     };
 
@@ -619,9 +629,10 @@ export class FarmDataCache {
     }
 
     try {
+      const initialCreatedVersion = this.version;
       const initialTagVersions = await this.getAdapterTagVersions(tags);
       const value = await producer();
-      await this.setAsync(key, value, options, initialTagVersions);
+      await this.writeAsync(key, value, options, initialTagVersions, initialCreatedVersion);
       return value;
     } finally {
       if (leaseToken && this.adapter?.releaseLease) {
