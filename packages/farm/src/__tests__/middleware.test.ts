@@ -1381,6 +1381,26 @@ describe("Header Management Advanced", () => {
 });
 
 describe("Cookie Management Advanced", () => {
+  it("preserves cookies set by earlier middleware contexts", () => {
+    const req = createMockRequest("/test");
+    const res = createMockResponse();
+    let setCookieHeader: string | string[] | undefined;
+    vi.mocked(res.setHeader).mockImplementation((name, value) => {
+      if (String(name).toLowerCase() === "set-cookie") {
+        setCookieHeader = value as string | string[];
+      }
+      return res;
+    });
+    vi.spyOn(res, "getHeader").mockImplementation((name) =>
+      String(name).toLowerCase() === "set-cookie" ? setCookieHeader : undefined,
+    );
+
+    createContext(req, res).cookies.set("first", "1");
+    createContext(req, res).cookies.set("second", "2");
+
+    expect(setCookieHeader).toEqual(["first=1; Path=/", "second=2; Path=/"]);
+  });
+
   it("should preserve Max-Age=0 when expiring a cookie", () => {
     const req = createMockRequest("/test");
     const res = createMockResponse();

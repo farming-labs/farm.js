@@ -25,6 +25,9 @@ Data and headers written during middleware are request-scoped:
 | `ctx.params` or `context.params`                                     | Contains params from the matched config matcher or route-scoped middleware path.              |
 | `return new Response(...)`                                           | Stops the chain and sends that response immediately.                                          |
 
+Cookies set by multiple matching middleware handlers are accumulated into separate `Set-Cookie`
+headers; a later handler does not replace cookies already written by an earlier handler.
+
 ## Route middleware
 
 Middleware can live near the routes it protects. Use it for auth, request metadata, A/B flags, rate limit checks, or headers that belong to an area of the app.
