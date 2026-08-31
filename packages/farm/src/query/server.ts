@@ -122,8 +122,15 @@ export async function createPaginationMeta(
   }
 
   const pageParam = options.pageParam || "page";
-  const itemsPerPage = options.itemsPerPage || 10;
-  const currentPage = Number.parseInt(urlParams.get(pageParam) || "1", 10);
+  const itemsPerPage = options.itemsPerPage ?? 10;
+  assertPaginationInteger(options.totalItems, "totalItems", true);
+  assertPaginationInteger(itemsPerPage, "itemsPerPage", false);
+
+  const requestedPage = parsePositivePaginationInteger(urlParams.get(pageParam));
+  const currentPage =
+    requestedPage !== null && Number.isSafeInteger((requestedPage - 1) * itemsPerPage)
+      ? requestedPage
+      : 1;
 
   const totalPages = Math.ceil(options.totalItems / itemsPerPage);
   const offset = (currentPage - 1) * itemsPerPage;
@@ -139,4 +146,19 @@ export async function createPaginationMeta(
     hasNextPage: currentPage < totalPages,
     hasPreviousPage: currentPage > 1,
   };
+}
+
+function parsePositivePaginationInteger(value: string | null): number | null {
+  if (!value || !/^[+]?[0-9]+$/.test(value)) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 1 ? parsed : null;
+}
+
+function assertPaginationInteger(value: number, name: string, allowZero: boolean): void {
+  const minimum = allowZero ? 0 : 1;
+  if (!Number.isSafeInteger(value) || value < minimum) {
+    throw new RangeError(
+      `Pagination ${name} must be a safe integer greater than or equal to ${minimum}.`,
+    );
+  }
 }
