@@ -45,7 +45,14 @@ export function createRewritesPlugin(
             match,
             pattern.tokens,
           );
-          req.url = newPath + url.search;
+          const destinationUrl = new URL(newPath, url);
+          if (!destinationUrl.search && url.search) {
+            destinationUrl.search = url.search;
+          }
+          req.url =
+            destinationUrl.origin === url.origin
+              ? destinationUrl.pathname + destinationUrl.search
+              : destinationUrl.href;
           break;
         }
       }

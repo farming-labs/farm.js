@@ -90,4 +90,18 @@ describe("config route plugins", () => {
 
     expect(numberedRequest.url).toBe("/current/guide");
   });
+
+  it("uses a rewrite destination query instead of appending the source query", async () => {
+    const plugin = createRewritesPlugin([
+      {
+        source: "/legacy",
+        destination: "/current?view=compact",
+      },
+    ]);
+    const req = createRequest("/legacy?view=full&page=2");
+
+    await runBeforeRequest(plugin, req, createResponse());
+
+    expect(req.url).toBe("/current?view=compact");
+  });
 });
