@@ -1364,6 +1364,20 @@ describe("Header Management Advanced", () => {
     expect(ctx.request.headers["existing-header"]).toBe("existing-value");
     expect(ctx.headers.has("existing-header")).toBe(false);
   });
+
+  it("applies response headers before a helper short-circuits", () => {
+    const req = createMockRequest("/test");
+    const res = createMockResponse();
+    const ctx = createContext(req, res);
+    ctx.headers.set("x-request-id", "req-123");
+
+    ctx.json({ ok: true });
+
+    expect(res.setHeader).toHaveBeenCalledWith("x-request-id", "req-123");
+    expect(res.writeHead).toHaveBeenCalledWith(200, {
+      "Content-Type": "application/json",
+    });
+  });
 });
 
 describe("Cookie Management Advanced", () => {
