@@ -116,6 +116,22 @@ describe("createAPIClient", () => {
     );
   });
 
+  it("forwards configured credentials to fetch", async () => {
+    const fetchMock = vi.fn(async () => buildResponse({ users: [], total: 0 }));
+    globalThis.fetch = fetchMock as any;
+    const api = createAPIClient<APIRouter>({
+      baseURL: "https://api.example.com",
+      credentials: "include",
+    });
+
+    await api.users.get({ query: { limit: "5" } });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.com/api/users?limit=5",
+      expect.objectContaining({ credentials: "include" }),
+    );
+  });
+
   it("applies invalidations declared by the server response", async () => {
     const key = '["products","list"]';
     const cache = getFarmClientDataCache();

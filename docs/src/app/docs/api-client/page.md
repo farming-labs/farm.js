@@ -38,6 +38,19 @@ such as `https://api.example.com/v1`, uses that path directly. `baseURL` and `ba
 or async resolver functions; Farm evaluates them during config resolution and embeds only the
 resulting public URL.
 
+For a cross-origin API that uses cookies or HTTP authentication, pass the browser fetch credential
+mode when creating the client:
+
+```ts
+export const api = createAPIClient<APIRouter>({
+  baseURL: "https://api.example.com/v1",
+  credentials: "include",
+});
+```
+
+Farm forwards `credentials` to every route request from that client. The API must also allow the
+calling origin and credentialed requests through its CORS policy.
+
 ## Call a route
 
 **Browser usage**
