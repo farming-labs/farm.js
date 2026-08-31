@@ -76,6 +76,29 @@ describe("typed endpoint errors", () => {
     });
   });
 
+  it("rejects malformed JSON before an endpoint handler executes", async () => {
+    let executed = false;
+    const handler = (ctx: { body: unknown }) => {
+      executed = true;
+      return { body: ctx.body };
+    };
+    const response = await invokeAPIRouteEndpoint(
+      handler,
+      new Request("https://farm.test/api/products", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{",
+      }),
+    );
+
+    expect(executed).toBe(false);
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Invalid request body",
+      message: "The request body is not valid JSON.",
+    });
+  });
+
   it("validates native urlencoded form submissions", async () => {
     const response = await invokeAPIRouteEndpoint(
       createProduct,
