@@ -2,6 +2,30 @@
 
 Date: 2026-08-29
 
+## Same-key exact-window refresh follow-up — 2026-08-31
+
+The full bracketed production-browser run added a separate 10,000-row workload for refreshing 64
+new row objects whose keys remain identical and in the same order. One visible row changes so the
+run proves both data-to-DOM patching and the avoided 10,000-key scan. Both compiler builds emitted
+all seven expected `keyedArrayPositionHints` sites, preserved every one of the 64 row elements,
+updated the changed label and amount, produced zero owner executions, and passed every existing
+correctness, performance, persistence, and scalability gate without lowering a threshold.
+
+| Mode   | React median | Hinted refresh | Compiled control | vs React | vs control |
+| ------ | -----------: | -------------: | ---------------: | -------: | ---------: |
+| Static |     59.00 ms |        9.30 ms |         16.90 ms |    6.34x |      1.82x |
+| Hybrid |     59.00 ms |        7.40 ms |         16.40 ms |    7.97x |      2.22x |
+
+The package suite separately proves zero descriptors for a 64-row same-key refresh, retained DOM
+identity for every row, changed text and controlled-input value bindings, focus and selection,
+latest delegated event data, complete-window key/binding/target preparation before mutation,
+mixed/reordered/duplicate-key fallback, 1,000 differential updates, hydration, Strict Mode,
+queued-update fallback, unmount cleanup, native method behavior, and packaged React 18.3.1 and
+19.2.8 compatibility. The isolated exact-window
+fixture has a 13,104 B gzip compiler premium, 244 B above the previous recorded window runtime and
+inside its unchanged 256 B limit; direct and core-only output remain unchanged. The measured
+environment was Chrome 145.0.7632.6, Node.js 23.11.0, and Apple M1 macOS arm64.
+
 ## Exact-window keyed replacement follow-up — 2026-08-31
 
 The full bracketed production-browser run added an isolated 10,000-row workload for concise native

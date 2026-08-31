@@ -349,6 +349,42 @@ export function StandardTableBenchmark() {
           Replace 64-row runtime window (snapshot control)
         </button>
         <button
+          data-action="table-position-window-refresh"
+          type="button"
+          onClick={() => {
+            const position = 5_000;
+            const replacements = rows.slice(position, position + 64).map((row, offset) =>
+              offset === 32
+                ? { ...row, amount: row.amount + 1, label: `${row.label} refreshed` }
+                : { ...row },
+            );
+            setRows((current) => current.toSpliced(position, 64, ...replacements));
+            setOperation("refresh 64-row same-key window");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Refresh 64-row same-key window
+        </button>
+        <button
+          data-action="table-position-window-refresh-snapshot"
+          type="button"
+          onClick={() => {
+            const position = 5_000;
+            const replacements = rows.slice(position, position + 64).map((row, offset) =>
+              offset === 32
+                ? { ...row, amount: row.amount + 1, label: `${row.label} refreshed` }
+                : { ...row },
+            );
+            setRows((current) => {
+              return current.toSpliced(position, 64, ...replacements);
+            });
+            setOperation("refresh 64-row same-key window (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Refresh 64-row same-key window (snapshot control)
+        </button>
+        <button
           data-action="table-position-remove"
           type="button"
           onClick={() => {

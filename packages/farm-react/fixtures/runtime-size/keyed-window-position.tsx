@@ -39,8 +39,8 @@ export function WindowPositionTable({ incoming }: WindowPositionTableProps) {
 createRoot(document.body).render(
   <WindowPositionTable
     incoming={[
-      { id: 4, label: "Delta" },
-      { id: 5, label: "Epsilon" },
+      { id: 2, label: "Beta refreshed" },
+      { id: 3, label: "Gamma refreshed" },
     ]}
   />,
 );

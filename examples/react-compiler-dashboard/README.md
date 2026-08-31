@@ -100,7 +100,7 @@ native `toSpliced(position, 0, item)`, `toSpliced(position, 0, ...items)`, `toSp
 `toSpliced(position, 64)`, `toSpliced(position, 1, replacement)`, and
 `toSpliced(position, 64, ...replacements)` and `with(position, replacement)` updates use event-local
 runtime position variables and are measured against bracketed React and equivalent block-bodied
-compiled controls. The compiler report must contain all six dashboard `keyedArrayPositionHints`;
+compiled controls. The compiler report must contain all seven dashboard `keyedArrayPositionHints`;
 package tests separately require zero
 surviving key/descriptor/binding reads for removal, surrounding DOM identity, randomized
 differential correctness, runtime-position and count fallback, hydration, and cleanup. Both the
@@ -119,6 +119,15 @@ block-bodied compiled control. Package tests require work proportional only to t
 rows and cover empty spreads, negative positions, clamped counts, reused and duplicate keys,
 native custom-method behavior, queued fallback, controlled-input focus and selection, delegated
 events, 1,000 differential replacements, hydration, Strict Mode, and unmount cleanup.
+
+Same-key exact-window refresh has a separate 10,000-row gate. The benchmark replaces a 64-row
+snapshot with 64 new objects carrying the same keys in the same order and changes one visible row,
+which isolates the avoided full-list key scan without hiding the required binding update. All 64
+DOM rows must keep their identity and the changed label and amount must reach the DOM. Static and
+hybrid modes must remain at least 4x faster than React and 1.5x faster than the block-bodied
+compiled control. Package tests also require zero descriptors for a 64-row refresh, latest event
+data, focused-input selection, atomic preparation before mutation, hydration, Strict Mode, and
+mixed/reordered/duplicate-key fallback.
 
 Native keyed-array reversal has a separate 10,000-row comparison. Concise `toReversed()` is
 measured against bracketed React and an equivalent block-bodied compiled control. Both compiler
