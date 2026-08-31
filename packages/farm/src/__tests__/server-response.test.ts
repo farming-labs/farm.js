@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { sendWebResponse } from "../server/response";
 
 describe("sendWebResponse", () => {
-  it("streams Web Response bodies to Node-style responses", async () => {
+  it("streams bodies to Node-compatible response adapters without EventEmitter internals", async () => {
     const chunks: Buffer[] = [];
     const headers = new Map<string, string | string[]>();
     const res = {

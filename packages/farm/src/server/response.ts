@@ -1,5 +1,49 @@
-import { once } from "node:events";
 import type { ServerResponse } from "node:http";
+
+interface ResponseEventWatcher<T> {
+  promise: Promise<T>;
+  dispose(): void;
+}
+
+/**
+ * Watch a real Node response without requiring every Node-compatible response
+ * adapter or test double to extend EventEmitter. The framework only needs
+ * disconnect handling when the response exposes both halves of the listener
+ * lifecycle; otherwise callers can still send ordinary non-blocked bodies.
+ */
+function watchResponseEvent<T>(
+  res: ServerResponse,
+  events: ReadonlyArray<readonly [event: string, value: T]>,
+): ResponseEventWatcher<T> | null {
+  if (typeof res.once !== "function" || typeof res.removeListener !== "function") {
+    return null;
+  }
+
+  let settled = false;
+  const listeners = events.map(([event, value]) => {
+    const listener = () => {
+      if (settled) return;
+      settled = true;
+      dispose();
+      resolvePromise(value);
+    };
+    return { event, listener };
+  });
+  let resolvePromise!: (value: T) => void;
+  const promise = new Promise<T>((resolve) => {
+    resolvePromise = resolve;
+    for (const { event, listener } of listeners) {
+      res.once(event, listener);
+    }
+  });
+  const dispose = () => {
+    for (const { event, listener } of listeners) {
+      res.removeListener(event, listener);
+    }
+  };
+
+  return { promise, dispose };
+}
 
 /**
  * Waits until the response can accept more writes. Resolves false when the
@@ -12,17 +56,19 @@ async function waitForWritable(res: ServerResponse): Promise<boolean> {
     return false;
   }
 
-  const abort = new AbortController();
-  try {
-    return await Promise.race([
-      once(res, "drain", { signal: abort.signal }).then(() => true),
-      once(res, "close", { signal: abort.signal }).then(() => false),
-    ]);
-  } catch {
-    // events.once rejects when the emitter emits "error".
+  const watcher = watchResponseEvent(res, [
+    ["drain", true],
+    ["close", false],
+    ["error", false],
+  ]);
+  if (!watcher) {
     return false;
+  }
+
+  try {
+    return await watcher.promise;
   } finally {
-    abort.abort();
+    watcher.dispose();
   }
 }
 
@@ -56,11 +102,10 @@ export async function sendWebResponse(res: ServerResponse, response: Response): 
   }
 
   const reader = response.body.getReader();
-  const disconnectAbort = new AbortController();
-  const disconnected = once(res, "close", { signal: disconnectAbort.signal }).then(
-    () => true,
-    (error) => error?.name !== "AbortError",
-  );
+  const disconnectWatcher = watchResponseEvent(res, [
+    ["close", true],
+    ["error", true],
+  ]);
 
   try {
     while (true) {
@@ -71,16 +116,16 @@ export async function sendWebResponse(res: ServerResponse, response: Response): 
         return;
       }
 
-      const next = await Promise.race([
-        reader.read().then((result) => ({ type: "read" as const, result })),
-        disconnected.then((closed) => ({ type: "disconnect" as const, closed })),
-      ]);
-      if (next.type === "disconnect" && next.closed) {
+      const read = reader.read().then((result) => ({ type: "read" as const, result }));
+      const next = disconnectWatcher
+        ? await Promise.race([
+            read,
+            disconnectWatcher.promise.then(() => ({ type: "disconnect" as const })),
+          ])
+        : await read;
+      if (next.type === "disconnect") {
         void reader.cancel().catch(() => {});
         return;
-      }
-      if (next.type !== "read") {
-        continue;
       }
 
       const { done, value } = next.result;
@@ -112,7 +157,7 @@ export async function sendWebResponse(res: ServerResponse, response: Response): 
     }
     throw error;
   } finally {
-    disconnectAbort.abort();
+    disconnectWatcher?.dispose();
     try {
       reader.releaseLock();
     } catch {
