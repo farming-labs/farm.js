@@ -431,7 +431,7 @@ function matchRoutePath(routePath: string, pathname: string): APIRouteParams | n
       continue;
     }
 
-    if (routeSegment !== pathnameSegment) {
+    if (decodePathSegment(routeSegment) !== decodePathSegment(pathnameSegment)) {
       return null;
     }
 
