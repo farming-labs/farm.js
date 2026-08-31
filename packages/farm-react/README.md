@@ -320,20 +320,23 @@ evaluates the position and remaining arguments once in their original order, exe
 native call, and records metadata only after validating the committed native source, result, and
 actual safe-integer position and clamped removal count. A batch requires at least two evaluated
 items at runtime. Exact-window replacement supports a safe spread that evaluates to zero, one, or
-many items. Farm creates every incoming key, descriptor, binding snapshot, and detached row before
-changing the live DOM, rejects key collisions, and mounts the complete incoming batch through one
-document fragment. It then removes only the replaced window. The runtime otherwise creates one inserted row,
+many items. A fresh-key window creates every incoming key, descriptor, binding snapshot, and
+detached row before changing the live DOM, rejects key collisions, and mounts the complete batch
+through one document fragment. It then removes only the replaced window. When the incoming window
+has the same length and the same keys in the same order, Farm prepares every binding read and
+changed DOM target across the complete window first, patches the existing rows in place, and
+updates the stored row objects used by later events. That path creates no descriptors or DOM rows,
+and preserves row identity, focus, and selection. The runtime otherwise creates one inserted row,
 removes only the known row or range, or patches/replaces one row at that position without rereading
 every existing key, descriptor, and binding. Surviving rows keep their DOM identity. Index-aware or
 collection-reading rows, custom methods, position expressions with user calls or mutations,
 runtime positions that are not safe integers, dynamic, zero, negative, or fractional removal
 counts, other `toSpliced()` forms, block-bodied updaters, unsafe incoming expressions, queued
-uncommitted updates, reused keys, nested or React-owned rows, and failed checks use complete keyed
-reconciliation. Reusing a key from the replaced window is valid React behavior, so it takes the
-complete keyed reconciliation path and preserves that row instance. Reports expose the site count
-as `keyedArrayPositionHints`. Batch insertion and exact-window replacement use progressively
-separate optional runtime capabilities, so existing single-position and batch-only bundles do not
-retain window validation or replacement code.
+uncommitted updates, reordered or partially reused windows, duplicate keys, nested or React-owned
+rows, and failed checks use complete keyed reconciliation before the fast path mutates the DOM.
+Reports expose the site count as `keyedArrayPositionHints`. Batch insertion and exact-window
+replacement use progressively separate optional runtime capabilities, so existing single-position
+and batch-only bundles do not retain window validation or replacement code.
 
 A direct native reverse can carry its complete permutation to a separate optional runtime:
 

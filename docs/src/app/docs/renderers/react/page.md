@@ -1059,8 +1059,13 @@ computes every key, descriptor, binding snapshot, and detached host row before m
 tree. Duplicate incoming keys or collisions with existing keys therefore take complete
 reconciliation without a partial insertion. Valid rows are mounted in one document fragment;
 surrounding elements remain connected and only stored suffix indexes shift. Exact-window
-replacement removes only the proven old interval after every incoming row is prepared. A reused
-key takes complete reconciliation before mutation so React row identity is preserved. A single insertion
+replacement with fresh keys removes only the proven old interval after every incoming row is
+prepared. If the incoming interval has the same length and exactly the same keys in the same order,
+Farm first evaluates all keys and binding snapshots and resolves every changed target across the
+complete interval. It then patches only changed bindings in place and updates each stored row
+object, so later delegated or cached handlers observe the latest data. No descriptor or DOM row is
+created, and every row keeps its identity, focus, and text selection. Reordered, partially reused,
+mixed, or duplicate keys take complete reconciliation before fast-path mutation. A single insertion
 creates one row at that position. A removal cleans up and removes only the known row or contiguous
 range while preserving every
 surviving element. A same-key replacement patches that row in place; a new-key replacement creates
@@ -1071,9 +1076,9 @@ The proof requires compiler-owned host rows whose render and key do not observe 
 Effectful position expressions, runtime values that are fractional or otherwise not safe integers,
 dynamic, zero, negative, or fractional removal counts, other `toSpliced()` shapes, block-bodied
 updaters, unsafe incoming expressions, custom methods, queued uncommitted position updates,
-duplicate or reused incoming keys, collection-reading bindings, React-owned rows, nested host blocks, row
-conditionals, unrelated dirty dependencies, and failed runtime checks keep complete keyed
-reconciliation. Negative safe-integer positions and counts larger than the remaining suffix use the
+duplicate, reordered, mixed, or partially reused incoming keys, collection-reading bindings,
+React-owned rows, nested host blocks, row conditionals, unrelated dirty dependencies, and failed
+runtime checks keep complete keyed reconciliation. Negative safe-integer positions and counts larger than the remaining suffix use the
 native method's normal clamping rules. No new option or component is required. Reports expose
 emitted sites as `keyedArrayPositionHints`. Batch insertion and exact-window replacement select
 progressively separate optional runtime capabilities, so modules with only single-row operations
@@ -1958,8 +1963,10 @@ The package and example test suites verify more than generated code:
   preserve focused input and surrounding DOM identity, and cover native evaluation and coercion,
   clamping, unsafe runtime positions and counts, custom methods, queued updates,
   collection-reading rows, StrictMode hydration, and cleanup; targeted window tests additionally
-  require work to equal only the incoming window, preserve retained rows on both sides, and cover
-  empty spreads, key reuse, duplicate keys, delegated events, focus, selection, and queued fallback;
+  require fresh-key work to equal only the incoming window and a 4,096-row same-key refresh to
+  perform zero descriptor creation while preserving all 64 refreshed DOM rows; they also cover
+  atomic binding preparation, empty spreads, reordered and duplicate key fallback, latest delegated
+  event data, focus, selection, hydration, Strict Mode, and queued fallback;
 - 2,000 deterministic randomized reversals match normal React; a 4,096-row targeted test requires
   exactly `n - 1` connected DOM moves and zero key, descriptor, or binding reads, while fallback
   tests cover custom methods, queued updates, collection-reading rows, StrictMode hydration, and

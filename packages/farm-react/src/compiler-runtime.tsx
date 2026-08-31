@@ -2340,6 +2340,50 @@ function applyKeyedRowBinding(
   }
 }
 
+type CompilerPreparedKeyedRowBindingUpdate = readonly [
+  bindingIndex: number,
+  rawValue: unknown,
+  target: Element,
+  value: unknown,
+];
+
+function prepareKeyedRowBindingUpdates(
+  props: CompilerKeyedRowBindingSource,
+  instance: CompilerKeyedRowInstance,
+  item: unknown,
+  index: number,
+): CompilerPreparedKeyedRowBindingUpdate[] | undefined {
+  const updates: CompilerPreparedKeyedRowBindingUpdate[] = [];
+  for (let bindingIndex = 0; bindingIndex < props.bindings.length; bindingIndex += 1) {
+    const binding = props.bindings[bindingIndex];
+    const rawValue = binding.read(item, index);
+    const value = normalizedKeyedRowBindingValue(binding, rawValue);
+    if (Object.is(instance.values[bindingIndex], value)) continue;
+    const target = findCompilerHostTarget(instance.element, binding.path);
+    if (!target || (binding.kind !== "text" && !binding.name)) return undefined;
+    updates.push([bindingIndex, rawValue, target, value]);
+  }
+  return updates;
+}
+
+function applyPreparedKeyedRowBindingUpdates(
+  props: CompilerKeyedRowBindingSource,
+  instance: CompilerKeyedRowInstance,
+  updates: readonly CompilerPreparedKeyedRowBindingUpdate[],
+): void {
+  for (const [bindingIndex, rawValue, target, value] of updates) {
+    const binding = props.bindings[bindingIndex];
+    instance.values[bindingIndex] = value;
+    if (binding.kind === "text") {
+      target.textContent = value as string;
+    } else if (binding.kind === "style") {
+      updateStyle(target, binding.name!, rawValue);
+    } else {
+      updateAttribute(target, binding.name!, rawValue);
+    }
+  }
+}
+
 function keyedRowConditionalSnapshot(
   conditional: CompilerKeyedRowConditional,
   item: unknown,
@@ -4749,15 +4793,55 @@ function reconcileCompilerKeyedArrayWindowReplace(
     return undefined;
   }
 
-  const knownKeys = new Set(instances.keys());
-  const incoming: CompilerKeyedRowInstance[] = [];
+  const incomingItems: unknown[] = [];
+  const incomingKeys: string[] = [];
   try {
     for (let offset = 0; offset < update.insertedCount; offset += 1) {
       const index = update.position + offset;
       const item = finalValue[index];
       const key = keyedRowIdentity(props.rowKey(item, index));
-      // Reusing an existing key is valid React behavior, but it needs the
-      // complete keyed reconciliation path to preserve that row instance.
+      incomingItems.push(item);
+      incomingKeys.push(key);
+    }
+  } catch {
+    return undefined;
+  }
+
+  if (
+    update.insertedCount === update.removedCount &&
+    incomingKeys.every((key, offset) => key === removed[offset].key)
+  ) {
+    const prepared: CompilerPreparedKeyedRowBindingUpdate[][] = [];
+    try {
+      for (let offset = 0; offset < update.insertedCount; offset += 1) {
+        const updates = prepareKeyedRowBindingUpdates(
+          props,
+          removed[offset],
+          incomingItems[offset],
+          update.position + offset,
+        );
+        if (!updates) return undefined;
+        prepared.push(updates);
+      }
+    } catch {
+      return undefined;
+    }
+    for (let offset = 0; offset < update.insertedCount; offset += 1) {
+      applyPreparedKeyedRowBindingUpdates(props, removed[offset], prepared[offset]);
+      removed[offset].item = incomingItems[offset];
+    }
+    return instances;
+  }
+
+  const knownKeys = new Set(instances.keys());
+  const incoming: CompilerKeyedRowInstance[] = [];
+  try {
+    for (let offset = 0; offset < update.insertedCount; offset += 1) {
+      const index = update.position + offset;
+      const item = incomingItems[offset];
+      const key = incomingKeys[offset];
+      // Exact same-order reuse already returned above. Any remaining reuse is
+      // reordered or mixed and needs complete keyed reconciliation.
       if (knownKeys.has(key)) return undefined;
       knownKeys.add(key);
       const descriptor = props.create(item, index);

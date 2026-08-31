@@ -143,7 +143,7 @@ async function inspectBuild(compilerMode) {
       "The compiler build did not emit a keyed-array prepend hint.",
     );
     assert(
-      compilerReport.summary.keyedArrayPositionHints >= 6,
+      compilerReport.summary.keyedArrayPositionHints >= 7,
       "The compiler build did not emit the keyed-array exact-position hints.",
     );
     assert(
@@ -678,6 +678,50 @@ async function measureTrial(browser, trial, compilerMode, port) {
                 table.querySelectorAll("tbody tr")[5_064] === after &&
                 !firstRemoved?.isConnected &&
                 !lastRemoved?.isConnected,
+            );
+          },
+        );
+
+        const tablePositionWindowRefresh = await measureTable(
+          async () => ensure10000(),
+          async () => {
+            const rows = table.querySelectorAll("tbody tr");
+            const retained = [...rows].slice(5_000, 5_064);
+            const changedLabel = retained[32]?.children[1]?.textContent;
+            const changedAmount = retained[32]?.children[3]?.textContent;
+            await runTableAction(
+              () => tableButton("table-position-window-refresh").click(),
+              () => {
+                const nextRows = table.querySelectorAll("tbody tr");
+                return (
+                  rowCount() === 10_000 &&
+                  retained.every((row, offset) => nextRows[5_000 + offset] === row) &&
+                  nextRows[5_032]?.children[1]?.textContent === `${changedLabel} refreshed` &&
+                  nextRows[5_032]?.children[3]?.textContent !== changedAmount
+                );
+              },
+            );
+          },
+        );
+
+        const tablePositionWindowRefreshSnapshot = await measureTable(
+          async () => ensure10000(),
+          async () => {
+            const rows = table.querySelectorAll("tbody tr");
+            const retained = [...rows].slice(5_000, 5_064);
+            const changedLabel = retained[32]?.children[1]?.textContent;
+            const changedAmount = retained[32]?.children[3]?.textContent;
+            await runTableAction(
+              () => tableButton("table-position-window-refresh-snapshot").click(),
+              () => {
+                const nextRows = table.querySelectorAll("tbody tr");
+                return (
+                  rowCount() === 10_000 &&
+                  retained.every((row, offset) => nextRows[5_000 + offset] === row) &&
+                  nextRows[5_032]?.children[1]?.textContent === `${changedLabel} refreshed` &&
+                  nextRows[5_032]?.children[3]?.textContent !== changedAmount
+                );
+              },
             );
           },
         );
@@ -1218,6 +1262,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
             positionBatchInsertSnapshot: tablePositionBatchInsertSnapshot,
             positionWindowReplace: tablePositionWindowReplace,
             positionWindowReplaceSnapshot: tablePositionWindowReplaceSnapshot,
+            positionWindowRefresh: tablePositionWindowRefresh,
+            positionWindowRefreshSnapshot: tablePositionWindowRefreshSnapshot,
             positionInsert: tablePositionInsert,
             positionInsertSnapshot: tablePositionInsertSnapshot,
             positionRemove: tablePositionRemove,
@@ -1322,6 +1368,10 @@ async function measureTrial(browser, trial, compilerMode, port) {
         positionWindowReplaceSnapshot: timingSummary(
           result.table.positionWindowReplaceSnapshot,
         ),
+        positionWindowRefresh: timingSummary(result.table.positionWindowRefresh),
+        positionWindowRefreshSnapshot: timingSummary(
+          result.table.positionWindowRefreshSnapshot,
+        ),
         positionInsert: timingSummary(result.table.positionInsert),
         positionInsertSnapshot: timingSummary(result.table.positionInsertSnapshot),
         positionRemove: timingSummary(result.table.positionRemove),
@@ -1420,6 +1470,8 @@ const tableMetrics = [
   "positionBatchInsertSnapshot",
   "positionWindowReplace",
   "positionWindowReplaceSnapshot",
+  "positionWindowRefresh",
+  "positionWindowRefreshSnapshot",
   "positionInsert",
   "positionInsertSnapshot",
   "positionRemove",
@@ -1715,6 +1767,28 @@ const keyedWindowReplaceRegressions = keyedWindowReplaceResults.filter(
     !Number.isFinite(snapshotSpeedup) ||
     snapshotSpeedup < keyedWindowReplaceMinimumSnapshotSpeedup,
 );
+// A same-key exact window should retain every row and patch only the changed bindings. Keep this
+// gate separate from fresh-key replacement so descriptor/DOM work cannot hide a refresh regression.
+const keyedWindowRefreshMinimumSpeedup = 4;
+const keyedWindowRefreshMinimumSnapshotSpeedup = 1.5;
+const keyedWindowRefreshResults = ["static", "hybrid"].map((mode) => {
+  const refreshMedianMs = comparisons.table.positionWindowRefresh[mode].medianMs;
+  const snapshotMedianMs = comparisons.table.positionWindowRefreshSnapshot[mode].medianMs;
+  return {
+    mode,
+    refreshMedianMs,
+    snapshotMedianMs,
+    snapshotSpeedup: snapshotMedianMs / refreshMedianMs,
+    speedup: comparisons.table.positionWindowRefresh[`${mode}VsBaseline`].speedup,
+  };
+});
+const keyedWindowRefreshRegressions = keyedWindowRefreshResults.filter(
+  ({ snapshotSpeedup, speedup }) =>
+    !Number.isFinite(speedup) ||
+    speedup < keyedWindowRefreshMinimumSpeedup ||
+    !Number.isFinite(snapshotSpeedup) ||
+    snapshotSpeedup < keyedWindowRefreshMinimumSnapshotSpeedup,
+);
 // Native toSpliced()/with() calls with event-local runtime positions expose one exact insertion,
 // removal, or replacement position. The hinted runtime should beat both React and an equivalent
 // block-bodied compiled control while preserving the same row identities around the changed position.
@@ -1989,6 +2063,7 @@ const passed =
   keyedRollingWindowRegressions.length === 0 &&
   keyedBatchInsertRegressions.length === 0 &&
   keyedWindowReplaceRegressions.length === 0 &&
+  keyedWindowRefreshRegressions.length === 0 &&
   keyedPositionRegressions.length === 0 &&
   keyedRangeRemovalRegressions.length === 0 &&
   keyedReorderRegressions.length === 0 &&
@@ -2055,6 +2130,13 @@ const report = {
     regressions: keyedWindowReplaceRegressions,
     results: keyedWindowReplaceResults,
     status: keyedWindowReplaceRegressions.length === 0 ? "PASS" : "FAIL",
+  },
+  keyedWindowRefreshHintGate: {
+    minimumSnapshotSpeedup: keyedWindowRefreshMinimumSnapshotSpeedup,
+    minimumSpeedup: keyedWindowRefreshMinimumSpeedup,
+    regressions: keyedWindowRefreshRegressions,
+    results: keyedWindowRefreshResults,
+    status: keyedWindowRefreshRegressions.length === 0 ? "PASS" : "FAIL",
   },
   keyedPositionHintGate: {
     insertMinimumSnapshotSpeedup: keyedPositionInsertMinimumSnapshotSpeedup,

@@ -94,6 +94,7 @@ const testSource = String.raw`
   let insertCompatibilityRows = () => undefined;
   let removeCompatibilityRow = () => undefined;
   let replaceCompatibilityRows = () => undefined;
+  let refreshCompatibilityRows = () => undefined;
   let sortCompatibilityRows = () => undefined;
   let reorderExecutions = 0;
   const ReorderRows = createCompiledComponent({
@@ -139,6 +140,17 @@ const testSource = String.raw`
             2,
             { id: "f", label: "Phi", rank: 6 },
             { id: "g", label: "Gamma two", rank: 7 },
+          ),
+        );
+      refreshCompatibilityRows = () =>
+        state[0].set((previous) =>
+          createCompilerKeyedArrayWindowReplace(
+            previous,
+            previous.toSpliced,
+            1,
+            2,
+            { id: "f", label: "Phi refreshed", rank: 8 },
+            { id: "g", label: "Gamma refreshed", rank: 9 },
           ),
         );
       sortCompatibilityRows = () =>
@@ -225,6 +237,16 @@ const testSource = String.raw`
   assert.equal(reorderContainer.querySelectorAll("li")[2].textContent, "Gamma two");
   assert.equal(reorderContainer.querySelector("li:first-child"), reorderBeta);
   assert.equal(reorderContainer.querySelector("li:last-child"), reorderAlpha);
+  assert.equal(reorderExecutions, 1);
+  const compatibilityPhi = reorderContainer.querySelector("[data-key='f']");
+  const compatibilityGamma = reorderContainer.querySelector("[data-key='g']");
+  refreshCompatibilityRows();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(reorderContainer.querySelectorAll("li")[1], compatibilityPhi);
+  assert.equal(reorderContainer.querySelectorAll("li")[2], compatibilityGamma);
+  assert.equal(reorderContainer.querySelectorAll("li")[1].textContent, "Phi refreshed");
+  assert.equal(reorderContainer.querySelectorAll("li")[2].textContent, "Gamma refreshed");
   assert.equal(reorderExecutions, 1);
   flushSync(() => reorderRoot.unmount());
 

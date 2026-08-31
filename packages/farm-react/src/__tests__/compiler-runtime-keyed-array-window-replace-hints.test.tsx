@@ -70,6 +70,8 @@ function rowDescriptor(item: Item): CompilerKeyedRowElement {
 
 function createWindowHarness(initialItems: Item[]) {
   const counters = { executions: 0, renders: 0, keys: 0, descriptors: 0, bindings: 0 };
+  let bindingFailure: string | undefined;
+  let bindingTrace: string[] | undefined;
   let replace: (position: number, deleteCount: number, items: readonly Item[]) => void = () =>
     undefined;
   let queueTwo: (first: readonly Item[], second: readonly Item[]) => void = () => undefined;
@@ -132,7 +134,13 @@ function createWindowHarness(initialItems: Item[]) {
                   path: [],
                   read: (item) => {
                     counters.bindings += 1;
-                    return [(item as Item).label];
+                    const row = item as Item;
+                    bindingTrace?.push(`read:${row.id}`);
+                    if (bindingFailure === row.id) {
+                      bindingFailure = undefined;
+                      throw new Error(`binding failure for ${row.id}`);
+                    }
+                    return [row.label];
                   },
                 },
               ]}
@@ -148,9 +156,15 @@ function createWindowHarness(initialItems: Item[]) {
     Table,
     counters,
     customReplace: (items: readonly Item[]) => customReplace(items),
+    failNextBindingFor: (key: string) => {
+      bindingFailure = key;
+    },
     queueTwo: (first: readonly Item[], second: readonly Item[]) => queueTwo(first, second),
     replace: (position: number, deleteCount: number, items: readonly Item[]) =>
       replace(position, deleteCount, items),
+    traceBindings: (trace: string[] | undefined) => {
+      bindingTrace = trace;
+    },
   };
 }
 
@@ -232,6 +246,91 @@ describe("compiled keyed-array window replacement hints", () => {
     });
   });
 
+  it("refreshes a same-key exact window without descriptors or DOM replacement", async () => {
+    const initialItems = Array.from(
+      { length: 4_096 },
+      (_, index): Item => ({ id: `row-${index}`, label: `Row ${index}` }),
+    );
+    const harness = createWindowHarness(initialItems);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Table />));
+    const before = container.querySelector('[data-key="row-2047"]');
+    const refreshed = Array.from({ length: 64 }, (_, offset) =>
+      container.querySelector(`[data-key="row-${2_048 + offset}"]`),
+    );
+    const after = container.querySelector('[data-key="row-2112"]');
+    harness.counters.keys = 0;
+    harness.counters.descriptors = 0;
+    harness.counters.bindings = 0;
+    const incoming = initialItems.slice(2_048, 2_112).map((item, index) => ({
+      ...item,
+      label: `Refreshed ${index}`,
+    }));
+
+    await act(async () => {
+      harness.replace(2_048, 64, incoming);
+      await flushCompilerUpdates();
+    });
+
+    const rows = [...container.querySelectorAll("li")];
+    expect(rows[2_047]).toBe(before);
+    for (let offset = 0; offset < 64; offset += 1) {
+      expect(rows[2_048 + offset]).toBe(refreshed[offset]);
+      expect(rows[2_048 + offset]?.textContent).toBe(`Refreshed ${offset}`);
+    }
+    expect(rows[2_112]).toBe(after);
+    expect(rows).toHaveLength(4_096);
+    expect(harness.counters).toEqual({
+      executions: 1,
+      renders: 1,
+      keys: 64,
+      descriptors: 0,
+      bindings: 64,
+    });
+  });
+
+  it("prepares the complete same-key window before committing any binding", async () => {
+    const harness = createWindowHarness([
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+      { id: "c", label: "Gamma" },
+    ]);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Table />));
+    const trace: string[] = [];
+    const textContent = Object.getOwnPropertyDescriptor(Node.prototype, "textContent")!;
+    vi.spyOn(Node.prototype, "textContent", "set").mockImplementation(function (
+      this: Node,
+      value: string | null,
+    ) {
+      trace.push(`write:${value}`);
+      textContent.set!.call(this, value);
+    });
+    harness.traceBindings(trace);
+    harness.failNextBindingFor("b");
+
+    await act(async () => {
+      harness.replace(0, 3, [
+        { id: "a", label: "Alpha refreshed" },
+        { id: "b", label: "Beta refreshed" },
+        { id: "c", label: "Gamma refreshed" },
+      ]);
+      await flushCompilerUpdates();
+    });
+
+    const failedRead = trace.indexOf("read:b");
+    const firstWrite = trace.findIndex((entry) => entry.startsWith("write:"));
+    expect(failedRead).toBeGreaterThanOrEqual(0);
+    expect(firstWrite === -1 || firstWrite > failedRead).toBe(true);
+    expect(container.textContent).toBe("Alpha refreshedBeta refreshedGamma refreshed");
+  });
+
   it("supports empty incoming spreads, negative positions, and clamped delete counts", async () => {
     const harness = createWindowHarness([
       { id: "a", label: "Alpha" },
@@ -264,7 +363,7 @@ describe("compiled keyed-array window replacement hints", () => {
     expect(harness.counters.bindings).toBe(0);
   });
 
-  it("takes complete reconciliation before mutation for reused or duplicate keys", async () => {
+  it("takes complete reconciliation for reordered, mixed, or duplicate reused keys", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const harness = createWindowHarness([
       { id: "a", label: "Alpha" },
@@ -351,6 +450,7 @@ describe("compiled keyed-array window replacement hints", () => {
     ];
     const calls: string[] = [];
     let replace = () => undefined;
+    let refresh = () => undefined;
     const InteractiveRows = createCompiledComponentWithFeatures(
       {
         displayName: "WindowInteractiveRows",
@@ -361,6 +461,13 @@ describe("compiled keyed-array window replacement hints", () => {
             state[0].set((previous) =>
               hintedWindowReplace(previous as Item[], 1, 2, [{ id: "e", label: "Epsilon" }]),
             );
+          refresh = () =>
+            state[0].set((previous) =>
+              hintedWindowReplace(previous as Item[], 1, 2, [
+                { id: "e", label: "Epsilon refreshed" },
+                { id: "d", label: "Delta refreshed" },
+              ]),
+            );
           return (
             <main>
               <blocks.KeyedRows
@@ -369,7 +476,8 @@ describe("compiled keyed-array window replacement hints", () => {
                 dependencies={[0]}
                 events={[
                   {
-                    invoke: (item, index) => calls.push(`${(item as Item).id}:${index}`),
+                    invoke: (item, index) =>
+                      calls.push(`${(item as Item).id}:${(item as Item).label}:${index}`),
                     name: "onClick",
                     path: [1],
                   },
@@ -384,7 +492,7 @@ describe("compiled keyed-array window replacement hints", () => {
                       <li data-key={item.id} key={item.id}>
                         <input aria-label={`Edit ${item.id}`} value={item.label} readOnly />
                         <button data-row-button={item.id} onClick={event(item, index, 0)}>
-                          Select
+                          Select {item.label}
                         </button>
                       </li>
                     ))}
@@ -415,12 +523,24 @@ describe("compiled keyed-array window replacement hints", () => {
                         tag: "button",
                         attributes: [{ name: "data-row-button", value: row.id }],
                         styles: [],
-                        children: ["Select"],
+                        children: [`Select ${row.label}`],
                       },
                     ],
                   };
                 }}
-                bindings={[]}
+                bindings={[
+                  {
+                    kind: "attribute",
+                    name: "value",
+                    path: [0],
+                    read: (item) => (item as Item).label,
+                  },
+                  {
+                    kind: "text",
+                    path: [1],
+                    read: (item) => ["Select ", (item as Item).label],
+                  },
+                ]}
               />
             </main>
           );
@@ -445,12 +565,28 @@ describe("compiled keyed-array window replacement hints", () => {
     expect(container.querySelector('[aria-label="Edit d"]')).toBe(input);
     expect(document.activeElement).toBe(input);
     expect([input.selectionStart, input.selectionEnd]).toEqual([1, 3]);
+    const epsilonRow = container.querySelector('[data-key="e"]');
+    const deltaRow = container.querySelector('[data-key="d"]');
+
+    await act(async () => {
+      refresh();
+      await flushCompilerUpdates();
+    });
+    expect(container.querySelector('[data-key="e"]')).toBe(epsilonRow);
+    expect(container.querySelector('[data-key="d"]')).toBe(deltaRow);
+    expect(container.querySelector('[aria-label="Edit d"]')).toBe(input);
+    expect(input.value).toBe("Delta refreshed");
+    expect(container.querySelector('[data-row-button="e"]')?.textContent).toBe(
+      "Select Epsilon refreshed",
+    );
+    expect(document.activeElement).toBe(input);
+    expect([input.selectionStart, input.selectionEnd]).toEqual([1, 3]);
 
     await act(async () => {
       (container.querySelector('[data-row-button="e"]') as HTMLButtonElement).click();
       (container.querySelector('[data-row-button="d"]') as HTMLButtonElement).click();
     });
-    expect(calls).toEqual(["e:1", "d:2"]);
+    expect(calls).toEqual(["e:Epsilon refreshed:1", "d:Delta refreshed:2"]);
   });
 
   it("matches normal React through 1,000 deterministic bounded replacements", async () => {
@@ -484,18 +620,25 @@ describe("compiled keyed-array window replacement hints", () => {
       reactRoot.render(<NormalTable />);
     });
 
-    // Each cycle performs and verifies two replacements: the fresh window and
-    // its restoration. Five hundred cycles therefore cover 1,000 updates.
+    // Each cycle performs and verifies two replacements. Even cycles refresh
+    // the same keys in place; odd cycles replace fresh keys. Their matching
+    // restorations exercise both paths again for 1,000 differential updates.
     for (let step = 0; step < 500; step += 1) {
       const count = (step % 5) + 1;
       const position = (step * 37) % (initialItems.length - count + 1);
-      const incoming = Array.from(
-        { length: (step % 4) + 1 },
-        (_, offset): Item => ({
-          id: `replace-${step}-${offset}`,
-          label: `Replace ${step}.${offset}`,
-        }),
-      );
+      const incoming =
+        step % 2 === 0
+          ? initialItems.slice(position, position + count).map((item, offset) => ({
+              ...item,
+              label: `Refresh ${step}.${offset}`,
+            }))
+          : Array.from(
+              { length: (step % 4) + 1 },
+              (_, offset): Item => ({
+                id: `replace-${step}-${offset}`,
+                label: `Replace ${step}.${offset}`,
+              }),
+            );
       const removed = initialItems.slice(position, position + count);
       await act(async () => {
         harness.replace(position, count, incoming);
@@ -543,15 +686,19 @@ describe("compiled keyed-array window replacement hints", () => {
       );
     });
     roots.push(root);
+    const beta = container.querySelector('[data-key="b"]');
+    const gamma = container.querySelector('[data-key="c"]');
 
     await act(async () => {
       harness.replace(1, 2, [
-        { id: "d", label: "Delta" },
-        { id: "e", label: "Epsilon" },
+        { id: "b", label: "Beta hydrated" },
+        { id: "c", label: "Gamma hydrated" },
       ]);
       await flushCompilerUpdates();
     });
-    expect(container.textContent).toBe("AlphaDeltaEpsilon");
+    expect(container.textContent).toBe("AlphaBeta hydratedGamma hydrated");
+    expect(container.querySelector('[data-key="b"]')).toBe(beta);
+    expect(container.querySelector('[data-key="c"]')).toBe(gamma);
     expect(recoverable).toEqual([]);
 
     roots.pop();
