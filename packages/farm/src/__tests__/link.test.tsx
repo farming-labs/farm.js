@@ -208,6 +208,34 @@ describe("Link", () => {
       });
     });
 
+    it("leaves internal download links to the browser", () => {
+      const el = render(
+        createElement(Link, { href: "/reports/latest.csv", download: "report.csv" }),
+      ) as HTMLAnchorElement;
+      const event = new MouseEvent("click", {
+        bubbles: true,
+        button: 0,
+        cancelable: true,
+      });
+      let farmPreventedDefault: boolean | undefined;
+      container.addEventListener(
+        "click",
+        (nativeEvent) => {
+          farmPreventedDefault = nativeEvent.defaultPrevented;
+          nativeEvent.preventDefault();
+        },
+        { once: true },
+      );
+
+      act(() => {
+        el.dispatchEvent(event);
+      });
+
+      expect(el.getAttribute("download")).toBe("report.csv");
+      expect(farmPreventedDefault).toBe(false);
+      expect(navigate).not.toHaveBeenCalled();
+    });
+
     it("replace and scroll false passed to navigate", () => {
       const el = render(
         createElement(Link, { href: "/settings", replace: true, scroll: false }),
