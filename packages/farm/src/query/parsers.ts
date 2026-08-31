@@ -12,6 +12,9 @@ export interface Parser<T> {
 
 const INTEGER_PATTERN = /^[+-]?\d+$/;
 const FLOAT_PATTERN = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
+const ISO_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+const ISO_DATE_TIME_PATTERN =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
 
 function parseInteger(value: string): number | null {
   if (!INTEGER_PATTERN.test(value)) return null;
@@ -23,6 +26,52 @@ function parseFloatValue(value: string): number | null {
   if (!FLOAT_PATTERN.test(value)) return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isValidCalendarDate(year: number, month: number, day: number): boolean {
+  if (month < 1 || month > 12 || day < 1) return false;
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return day <= daysInMonth[month - 1];
+}
+
+function parseIsoDate(value: string): Date | null {
+  const match = value.match(ISO_DATE_PATTERN);
+  if (!match) return null;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (!isValidCalendarDate(year, month, day)) return null;
+
+  const date = new Date(0);
+  date.setUTCHours(0, 0, 0, 0);
+  date.setUTCFullYear(year, month - 1, day);
+  return date;
+}
+
+function parseIsoDateTime(value: string): Date | null {
+  const match = value.match(ISO_DATE_TIME_PATTERN);
+  if (!match) return null;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6]);
+  const timezone = match[7];
+  if (!isValidCalendarDate(year, month, day) || hour > 23 || minute > 59 || second > 59) {
+    return null;
+  }
+
+  if (timezone !== "Z") {
+    const [offsetHour, offsetMinute] = timezone.slice(1).split(":").map(Number);
+    if (offsetHour > 23 || offsetMinute > 59) return null;
+  }
+
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date : null;
 }
 
 // String parser
@@ -125,32 +174,20 @@ export function asJson<T>(): Parser<T> {
 
 // ISO Date parser
 export const asIsoDate: Parser<Date> = {
-  parse: (value: string) => {
-    const date = new Date(value);
-    return isNaN(date.getTime()) ? null : date;
-  },
-  serialize: (value: Date) => value.toISOString(),
+  parse: parseIsoDate,
+  serialize: (value: Date) => value.toISOString().slice(0, 10),
   withDefault: (defaultValue: Date) => ({
-    parse: (value: string) => {
-      const date = new Date(value);
-      return isNaN(date.getTime()) ? defaultValue : date;
-    },
-    serialize: (value: Date) => value.toISOString(),
+    parse: (value: string) => parseIsoDate(value) ?? defaultValue,
+    serialize: (value: Date) => value.toISOString().slice(0, 10),
   }),
 };
 
 // ISO DateTime parser
 export const asIsoDateTime: Parser<Date> = {
-  parse: (value: string) => {
-    const date = new Date(value);
-    return isNaN(date.getTime()) ? null : date;
-  },
+  parse: parseIsoDateTime,
   serialize: (value: Date) => value.toISOString(),
   withDefault: (defaultValue: Date) => ({
-    parse: (value: string) => {
-      const date = new Date(value);
-      return isNaN(date.getTime()) ? defaultValue : date;
-    },
+    parse: (value: string) => parseIsoDateTime(value) ?? defaultValue,
     serialize: (value: Date) => value.toISOString(),
   }),
 };

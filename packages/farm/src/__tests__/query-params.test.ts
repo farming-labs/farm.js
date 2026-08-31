@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { asFloat, asInteger, asString } from "../query/parsers";
+import { asFloat, asInteger, asIsoDate, asIsoDateTime, asString } from "../query/parsers";
 import { loadRouteParams, parseRouteParams } from "../query/params";
 
 describe("query route params parsing", () => {
@@ -50,5 +50,24 @@ describe("query route params parsing", () => {
     expect(asFloat.parse("Infinity")).toBeNull();
     expect(asFloat.parse(" 1.5 ")).toBeNull();
     expect(asFloat.withDefault!(0.5).parse("4.2px")).toBe(0.5);
+  });
+
+  it("keeps ISO dates and date-times distinct and calendar-valid", () => {
+    expect(asIsoDate.parse("2024-02-29")?.toISOString()).toBe("2024-02-29T00:00:00.000Z");
+    expect(asIsoDate.serialize(new Date("2024-02-29T18:00:00.000Z"))).toBe("2024-02-29");
+    expect(asIsoDate.parse("2023-02-29")).toBeNull();
+    expect(asIsoDate.parse("2024-02-29T00:00:00Z")).toBeNull();
+    expect(asIsoDate.parse("February 29, 2024")).toBeNull();
+
+    expect(asIsoDateTime.parse("2024-02-29T23:30:00+02:00")?.toISOString()).toBe(
+      "2024-02-29T21:30:00.000Z",
+    );
+    expect(asIsoDateTime.parse("2024-02-30T12:00:00Z")).toBeNull();
+    expect(asIsoDateTime.parse("2024-02-29T12:00:00")).toBeNull();
+    expect(asIsoDateTime.parse("2024-02-29")).toBeNull();
+    expect(asIsoDateTime.parse("2024-02-29T24:00:00Z")).toBeNull();
+
+    const fallback = new Date("2000-01-01T00:00:00.000Z");
+    expect(asIsoDateTime.withDefault!(fallback).parse("tomorrow")).toBe(fallback);
   });
 });
