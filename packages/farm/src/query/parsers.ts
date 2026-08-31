@@ -10,6 +10,21 @@ export interface Parser<T> {
   withDefault?: (defaultValue: T) => Parser<T>;
 }
 
+const INTEGER_PATTERN = /^[+-]?\d+$/;
+const FLOAT_PATTERN = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
+
+function parseInteger(value: string): number | null {
+  if (!INTEGER_PATTERN.test(value)) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+function parseFloatValue(value: string): number | null {
+  if (!FLOAT_PATTERN.test(value)) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 // String parser
 export const asString: Parser<string> = {
   parse: (value: string) => (value && value.trim()) || null,
@@ -22,32 +37,20 @@ export const asString: Parser<string> = {
 
 // Integer parser
 export const asInteger: Parser<number> = {
-  parse: (value: string) => {
-    const parsed = Number.parseInt(value, 10);
-    return isNaN(parsed) ? null : parsed;
-  },
+  parse: parseInteger,
   serialize: (value: number) => value.toString(),
   withDefault: (defaultValue: number) => ({
-    parse: (value: string) => {
-      const parsed = Number.parseInt(value, 10);
-      return isNaN(parsed) ? defaultValue : parsed;
-    },
+    parse: (value: string) => parseInteger(value) ?? defaultValue,
     serialize: (value: number) => value.toString(),
   }),
 };
 
 // Float parser
 export const asFloat: Parser<number> = {
-  parse: (value: string) => {
-    const parsed = Number.parseFloat(value);
-    return isNaN(parsed) ? null : parsed;
-  },
+  parse: parseFloatValue,
   serialize: (value: number) => value.toString(),
   withDefault: (defaultValue: number) => ({
-    parse: (value: string) => {
-      const parsed = Number.parseFloat(value);
-      return isNaN(parsed) ? defaultValue : parsed;
-    },
+    parse: (value: string) => parseFloatValue(value) ?? defaultValue,
     serialize: (value: number) => value.toString(),
   }),
 };
