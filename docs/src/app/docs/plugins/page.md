@@ -342,6 +342,11 @@ Each plugin owns its private `state`. At runtime, `ctx` is the read-only aggrega
 
 Farm includes plugins for logging, compression, redirects, rewrites, headers, and environment helpers. Register them from `@farm.js/core/plugin/server`.
 
+The production compression plugin negotiates Brotli or gzip from `Accept-Encoding`, streams the
+encoded response body, adds `Vary: Accept-Encoding`, and removes the identity `Content-Length`.
+Responses that are already encoded, partial, marked `no-transform`, or sent as server-sent events
+are left unchanged.
+
 ## Legacy hooks
 
 Existing flat hooks such as `beforeRequest`, `afterResponse`, `beforeApiHandler`, `afterRender`, `beforeBundle`, and `shutdown` remain supported. They are deprecated where a structured equivalent exists. New plugins should use the grouped interface; do not define both versions of the same phase in one plugin because Farm will run both.
