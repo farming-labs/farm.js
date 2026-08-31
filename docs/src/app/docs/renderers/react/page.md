@@ -1033,6 +1033,10 @@ setItems((current) => current.toSpliced(selectedIndex, 25));
 setItems((current) => current.toSpliced(selectedIndex, 1, replacement));
 setItems((current) => current.toSpliced(selectedIndex, 25, ...replacements));
 setItems((current) => current.with(selectedIndex, replacement));
+
+// Two same-key windows may be queued before one compiler flush.
+setItems((current) => current.toSpliced(firstIndex, 25, ...firstRefresh));
+setItems((current) => current.toSpliced(secondIndex, 25, ...secondRefresh));
 ```
 
 At build time, Farm recognizes only concise functional setters whose position is either a
@@ -1064,8 +1068,12 @@ prepared. If the incoming interval has the same length and exactly the same keys
 Farm first evaluates all keys and binding snapshots and resolves every changed target across the
 complete interval. It then patches only changed bindings in place and updates each stored row
 object, so later delegated or cached handlers observe the latest data. No descriptor or DOM row is
-created, and every row keeps its identity, focus, and text selection. Reordered, partially reused,
-mixed, or duplicate keys take complete reconciliation before fast-path mutation. A single insertion
+created, and every row keeps its identity, focus, and text selection. Multiple length-preserving
+same-key windows queued before one compiler flush compose into one atomic refresh. Disjoint and
+overlapping windows are supported; an overlapping position uses the last queued value. Farm
+validates the complete chain and prepares every touched key, binding value, and DOM target before
+applying any write. Reordered, partially reused, mixed, or duplicate keys take complete
+reconciliation before fast-path mutation. A single insertion
 creates one row at that position. A removal cleans up and removes only the known row or contiguous
 range while preserving every
 surviving element. A same-key replacement patches that row in place; a new-key replacement creates
@@ -1075,12 +1083,13 @@ and bindings are not reread.
 The proof requires compiler-owned host rows whose render and key do not observe the row index.
 Effectful position expressions, runtime values that are fractional or otherwise not safe integers,
 dynamic, zero, negative, or fractional removal counts, other `toSpliced()` shapes, block-bodied
-updaters, unsafe incoming expressions, custom methods, queued uncommitted position updates,
-duplicate, reordered, mixed, or partially reused incoming keys, collection-reading bindings,
-React-owned rows, nested host blocks, row conditionals, unrelated dirty dependencies, and failed
-runtime checks keep complete keyed reconciliation. Negative safe-integer positions and counts larger than the remaining suffix use the
-native method's normal clamping rules. No new option or component is required. Reports expose
-emitted sites as `keyedArrayPositionHints`. Batch insertion and exact-window replacement select
+updaters, unsafe incoming expressions, custom methods, queued chains containing a structural
+window or unhinted intermediate update, duplicate, reordered, mixed, or partially reused incoming
+keys, collection-reading bindings, React-owned rows, nested host blocks, row conditionals,
+unrelated dirty dependencies, and failed runtime checks keep complete keyed reconciliation.
+Negative safe-integer positions and counts larger than the remaining suffix use the native
+method's normal clamping rules. No new option or component is required. Reports expose emitted
+sites as `keyedArrayPositionHints`. Batch insertion and exact-window replacement select
 progressively separate optional runtime capabilities, so modules with only single-row operations
 or batch insertion retain no window-replacement runtime.
 
@@ -1966,7 +1975,9 @@ The package and example test suites verify more than generated code:
   require fresh-key work to equal only the incoming window and a 4,096-row same-key refresh to
   perform zero descriptor creation while preserving all 64 refreshed DOM rows; they also cover
   atomic binding preparation, empty spreads, reordered and duplicate key fallback, latest delegated
-  event data, focus, selection, hydration, Strict Mode, and queued fallback;
+  event data, focus, selection, hydration, Strict Mode, and queued structural fallback; another
+  1,000 deterministic queued same-key window refreshes match normal React while disjoint and
+  overlapping targeted tests preserve row identity and perform no descriptor work;
 - 2,000 deterministic randomized reversals match normal React; a 4,096-row targeted test requires
   exactly `n - 1` connected DOM moves and zero key, descriptor, or binding reads, while fallback
   tests cover custom methods, queued updates, collection-reading rows, StrictMode hydration, and

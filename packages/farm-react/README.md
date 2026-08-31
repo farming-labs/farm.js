@@ -308,6 +308,10 @@ setItems((current) => current.toSpliced(selectedIndex, 25));
 setItems((current) => current.toSpliced(selectedIndex, 1, replacement));
 setItems((current) => current.toSpliced(selectedIndex, 25, ...replacements));
 setItems((current) => current.with(selectedIndex, replacement));
+
+// Two same-key windows may be queued before one compiler flush.
+setItems((current) => current.toSpliced(firstIndex, 25, ...firstRefresh));
+setItems((current) => current.toSpliced(secondIndex, 25, ...secondRefresh));
 ```
 
 The compiler recognizes only a concise functional setter and either a safe-integer literal or a
@@ -326,14 +330,19 @@ through one document fragment. It then removes only the replaced window. When th
 has the same length and the same keys in the same order, Farm prepares every binding read and
 changed DOM target across the complete window first, patches the existing rows in place, and
 updates the stored row objects used by later events. That path creates no descriptors or DOM rows,
-and preserves row identity, focus, and selection. The runtime otherwise creates one inserted row,
+and preserves row identity, focus, and selection. Multiple length-preserving same-key windows
+queued before one compiler flush compose into one atomic refresh. Disjoint and overlapping windows
+are both supported; overlapping positions use the last queued value. Farm validates the complete
+chain and prepares every touched key, binding value, and DOM target before applying any write. The
+runtime otherwise creates one inserted row,
 removes only the known row or range, or patches/replaces one row at that position without rereading
 every existing key, descriptor, and binding. Surviving rows keep their DOM identity. Index-aware or
 collection-reading rows, custom methods, position expressions with user calls or mutations,
 runtime positions that are not safe integers, dynamic, zero, negative, or fractional removal
 counts, other `toSpliced()` forms, block-bodied updaters, unsafe incoming expressions, queued
-uncommitted updates, reordered or partially reused windows, duplicate keys, nested or React-owned
-rows, and failed checks use complete keyed reconciliation before the fast path mutates the DOM.
+chains containing a structural window or unhinted intermediate update, reordered or partially
+reused windows, duplicate keys, nested or React-owned rows, and failed checks use complete keyed
+reconciliation before the fast path mutates the DOM.
 Reports expose the site count as `keyedArrayPositionHints`. Batch insertion and exact-window
 replacement use progressively separate optional runtime capabilities, so existing single-position
 and batch-only bundles do not retain window validation or replacement code.

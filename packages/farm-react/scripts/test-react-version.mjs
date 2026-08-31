@@ -142,17 +142,26 @@ const testSource = String.raw`
             { id: "g", label: "Gamma two", rank: 7 },
           ),
         );
-      refreshCompatibilityRows = () =>
+      refreshCompatibilityRows = () => {
         state[0].set((previous) =>
           createCompilerKeyedArrayWindowReplace(
             previous,
             previous.toSpliced,
             1,
-            2,
+            1,
             { id: "f", label: "Phi refreshed", rank: 8 },
+          ),
+        );
+        state[0].set((previous) =>
+          createCompilerKeyedArrayWindowReplace(
+            previous,
+            previous.toSpliced,
+            2,
+            1,
             { id: "g", label: "Gamma refreshed", rank: 9 },
           ),
         );
+      };
       sortCompatibilityRows = () =>
         state[0].set((previous) =>
           createCompilerKeyedArraySort(

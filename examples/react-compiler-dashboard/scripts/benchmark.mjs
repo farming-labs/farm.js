@@ -143,7 +143,7 @@ async function inspectBuild(compilerMode) {
       "The compiler build did not emit a keyed-array prepend hint.",
     );
     assert(
-      compilerReport.summary.keyedArrayPositionHints >= 7,
+      compilerReport.summary.keyedArrayPositionHints >= 9,
       "The compiler build did not emit the keyed-array exact-position hints.",
     );
     assert(
@@ -726,6 +726,44 @@ async function measureTrial(browser, trial, compilerMode, port) {
           },
         );
 
+        const measureQueuedWindowRefresh = async (action) => {
+          const rows = table.querySelectorAll("tbody tr");
+          const firstRetained = [...rows].slice(2_500, 2_532);
+          const secondRetained = [...rows].slice(7_500, 7_532);
+          const firstLabel = firstRetained[16]?.children[1]?.textContent;
+          const firstAmount = firstRetained[16]?.children[3]?.textContent;
+          const secondLabel = secondRetained[16]?.children[1]?.textContent;
+          const secondAmount = secondRetained[16]?.children[3]?.textContent;
+          await runTableAction(action, () => {
+            const nextRows = table.querySelectorAll("tbody tr");
+            return (
+              rowCount() === 10_000 &&
+              firstRetained.every((row, offset) => nextRows[2_500 + offset] === row) &&
+              secondRetained.every((row, offset) => nextRows[7_500 + offset] === row) &&
+              nextRows[2_516]?.children[1]?.textContent === `${firstLabel} queued` &&
+              nextRows[2_516]?.children[3]?.textContent !== firstAmount &&
+              nextRows[7_516]?.children[1]?.textContent === `${secondLabel} queued` &&
+              nextRows[7_516]?.children[3]?.textContent !== secondAmount
+            );
+          });
+        };
+
+        const tablePositionWindowRefreshQueued = await measureTable(
+          async () => ensure10000(),
+          async () =>
+            measureQueuedWindowRefresh(() =>
+              tableButton("table-position-window-refresh-queued").click(),
+            ),
+        );
+
+        const tablePositionWindowRefreshQueuedSnapshot = await measureTable(
+          async () => ensure10000(),
+          async () =>
+            measureQueuedWindowRefresh(() =>
+              tableButton("table-position-window-refresh-queued-snapshot").click(),
+            ),
+        );
+
         const tablePositionRemove = await measureTable(
           async () => ensure10000(),
           async () => {
@@ -1263,6 +1301,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
             positionWindowReplace: tablePositionWindowReplace,
             positionWindowReplaceSnapshot: tablePositionWindowReplaceSnapshot,
             positionWindowRefresh: tablePositionWindowRefresh,
+            positionWindowRefreshQueued: tablePositionWindowRefreshQueued,
+            positionWindowRefreshQueuedSnapshot: tablePositionWindowRefreshQueuedSnapshot,
             positionWindowRefreshSnapshot: tablePositionWindowRefreshSnapshot,
             positionInsert: tablePositionInsert,
             positionInsertSnapshot: tablePositionInsertSnapshot,
@@ -1369,6 +1409,10 @@ async function measureTrial(browser, trial, compilerMode, port) {
           result.table.positionWindowReplaceSnapshot,
         ),
         positionWindowRefresh: timingSummary(result.table.positionWindowRefresh),
+        positionWindowRefreshQueued: timingSummary(result.table.positionWindowRefreshQueued),
+        positionWindowRefreshQueuedSnapshot: timingSummary(
+          result.table.positionWindowRefreshQueuedSnapshot,
+        ),
         positionWindowRefreshSnapshot: timingSummary(
           result.table.positionWindowRefreshSnapshot,
         ),
@@ -1471,6 +1515,8 @@ const tableMetrics = [
   "positionWindowReplace",
   "positionWindowReplaceSnapshot",
   "positionWindowRefresh",
+  "positionWindowRefreshQueued",
+  "positionWindowRefreshQueuedSnapshot",
   "positionWindowRefreshSnapshot",
   "positionInsert",
   "positionInsertSnapshot",
@@ -1789,6 +1835,30 @@ const keyedWindowRefreshRegressions = keyedWindowRefreshResults.filter(
     !Number.isFinite(snapshotSpeedup) ||
     snapshotSpeedup < keyedWindowRefreshMinimumSnapshotSpeedup,
 );
+// Two length-preserving same-key windows queued before one flush should compose into one atomic
+// targeted refresh. Protect this batched path independently so it cannot regress to complete list
+// reconciliation while the existing single-window gate continues to pass.
+const keyedQueuedWindowRefreshMinimumSpeedup = 4;
+const keyedQueuedWindowRefreshMinimumSnapshotSpeedup = 1.5;
+const keyedQueuedWindowRefreshResults = ["static", "hybrid"].map((mode) => {
+  const refreshMedianMs = comparisons.table.positionWindowRefreshQueued[mode].medianMs;
+  const snapshotMedianMs =
+    comparisons.table.positionWindowRefreshQueuedSnapshot[mode].medianMs;
+  return {
+    mode,
+    refreshMedianMs,
+    snapshotMedianMs,
+    snapshotSpeedup: snapshotMedianMs / refreshMedianMs,
+    speedup: comparisons.table.positionWindowRefreshQueued[`${mode}VsBaseline`].speedup,
+  };
+});
+const keyedQueuedWindowRefreshRegressions = keyedQueuedWindowRefreshResults.filter(
+  ({ snapshotSpeedup, speedup }) =>
+    !Number.isFinite(speedup) ||
+    speedup < keyedQueuedWindowRefreshMinimumSpeedup ||
+    !Number.isFinite(snapshotSpeedup) ||
+    snapshotSpeedup < keyedQueuedWindowRefreshMinimumSnapshotSpeedup,
+);
 // Native toSpliced()/with() calls with event-local runtime positions expose one exact insertion,
 // removal, or replacement position. The hinted runtime should beat both React and an equivalent
 // block-bodied compiled control while preserving the same row identities around the changed position.
@@ -2064,6 +2134,7 @@ const passed =
   keyedBatchInsertRegressions.length === 0 &&
   keyedWindowReplaceRegressions.length === 0 &&
   keyedWindowRefreshRegressions.length === 0 &&
+  keyedQueuedWindowRefreshRegressions.length === 0 &&
   keyedPositionRegressions.length === 0 &&
   keyedRangeRemovalRegressions.length === 0 &&
   keyedReorderRegressions.length === 0 &&
@@ -2137,6 +2208,13 @@ const report = {
     regressions: keyedWindowRefreshRegressions,
     results: keyedWindowRefreshResults,
     status: keyedWindowRefreshRegressions.length === 0 ? "PASS" : "FAIL",
+  },
+  keyedQueuedWindowRefreshHintGate: {
+    minimumSnapshotSpeedup: keyedQueuedWindowRefreshMinimumSnapshotSpeedup,
+    minimumSpeedup: keyedQueuedWindowRefreshMinimumSpeedup,
+    regressions: keyedQueuedWindowRefreshRegressions,
+    results: keyedQueuedWindowRefreshResults,
+    status: keyedQueuedWindowRefreshRegressions.length === 0 ? "PASS" : "FAIL",
   },
   keyedPositionHintGate: {
     insertMinimumSnapshotSpeedup: keyedPositionInsertMinimumSnapshotSpeedup,

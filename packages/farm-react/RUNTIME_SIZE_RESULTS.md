@@ -31,13 +31,13 @@ is enforced on every pull request instead of serving only as a manually recorded
 | Keyed rows with slice hints                       |          60,075 B |         72,335 B |         12,260 B |
 | Keyed rows with known-position hints              |          60,076 B |         72,361 B |         12,285 B |
 | Keyed rows with batch-position hints              |          60,091 B |         72,561 B |         12,470 B |
-| Keyed rows with exact-window hints                |          60,097 B |         73,201 B |         13,104 B |
+| Keyed rows with exact-window hints                |          60,119 B |         73,477 B |         13,358 B |
 | Keyed rows with reverse hints                     |          60,058 B |         72,164 B |         12,106 B |
 | Keyed rows with sort hints                        |          60,077 B |         72,219 B |         12,142 B |
 | Keyed rows with rolling-window hints              |          60,098 B |         73,082 B |         12,984 B |
 
-The isolated compatibility runtime contributes 20,307 B gzip over the React control. The
-compiler-selected core contributes 3,766 B, an **81.5% reduction**. This comparison uses the same
+The isolated compatibility runtime contributes 20,551 B gzip over the React control. The
+compiler-selected core contributes 3,766 B, an **81.7% reduction**. This comparison uses the same
 hand-authored compiled definition and changes only the runtime entry used to create it.
 
 The keyed fixture retains `FarmCompiledKeyedRows` plus compiler-emitted `identityTarget`,
@@ -48,11 +48,12 @@ reuses the filter removal capability. Position-only, batch-position, exact-windo
 rolling-window modules select separate hint runtimes only when the compiler emits those update
 shapes. Reverse and sort share the optional reorder capability; the direct and isolated core
 results remain byte-for-byte unchanged. Over the ordinary keyed fixture, position pays 1,092 B
-gzip, batch-position pays 1,277 B, exact-window pays 1,911 B, reverse pays 913 B, sort pays 949 B,
+gzip, batch-position pays 1,277 B, exact-window pays 2,155 B, reverse pays 913 B, sort pays 949 B,
 slice pays 1,067 B, and rolling-window pays 1,791 B. The exact-window figure includes fresh-key
-replacement and atomic same-key binding refresh. Unrelated bundles reject the optional position
-and reorder runtime markers, and the direct fixture rejects every structural runtime marker. The checked
-machine-readable result is [`RUNTIME_SIZE_RESULTS.json`](./RUNTIME_SIZE_RESULTS.json).
+replacement, atomic same-key binding refresh, and queued same-key window composition. Unrelated
+bundles reject the optional position and reorder runtime markers, and the direct fixture rejects
+every structural runtime marker. The checked machine-readable result is
+[`RUNTIME_SIZE_RESULTS.json`](./RUNTIME_SIZE_RESULTS.json).
 
 ## Existing production benchmark audit
 

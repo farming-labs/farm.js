@@ -67,6 +67,7 @@ interface CompilerKeyedArrayWindowReplaceHint {
   readonly position: number;
   readonly removedCount: number;
   readonly insertedCount: number;
+  readonly previous?: CompilerKeyedArrayWindowReplaceHint;
 }
 
 interface CompilerKeyedArrayReorderHint {
@@ -386,29 +387,42 @@ function compilerKeyedArrayBatchInsert(
   return update;
 }
 
-function compilerKeyedArrayWindowReplace(
+function compilerKeyedArrayWindowReplacements(
   value: unknown,
   sourceToken: object | undefined,
   expectedLength: number,
-): CompilerKeyedArrayWindowReplaceHint | undefined {
+): readonly CompilerKeyedArrayWindowReplaceHint[] | undefined {
   const target = compilerObject(value);
   if (!target || !sourceToken || !Array.isArray(value)) return undefined;
   const update = COMPILER_KEYED_ARRAY_WINDOW_REPLACEMENTS.get(target);
-  if (
-    !update ||
-    update.sourceToken !== sourceToken ||
-    update.sourceLength !== expectedLength ||
-    update.resultLength !== value.length ||
-    update.position < 0 ||
-    update.position >= expectedLength ||
-    update.removedCount < 1 ||
-    update.position + update.removedCount > expectedLength ||
-    update.insertedCount < 0 ||
-    update.resultLength !== expectedLength - update.removedCount + update.insertedCount
+  if (!update || update.sourceToken !== sourceToken) return undefined;
+  const updates: CompilerKeyedArrayWindowReplaceHint[] = [];
+  for (
+    let current: CompilerKeyedArrayWindowReplaceHint | undefined = update;
+    current;
+    current = current.previous
   ) {
-    return undefined;
+    if (current.sourceToken !== sourceToken) return undefined;
+    updates.push(current);
   }
-  return update;
+  updates.reverse();
+
+  let length = expectedLength;
+  for (const current of updates) {
+    if (
+      current.sourceLength !== length ||
+      current.position < 0 ||
+      current.position >= current.sourceLength ||
+      current.removedCount < 1 ||
+      current.position + current.removedCount > current.sourceLength ||
+      current.insertedCount < 0 ||
+      current.resultLength !== current.sourceLength - current.removedCount + current.insertedCount
+    ) {
+      return undefined;
+    }
+    length = current.resultLength;
+  }
+  return length === value.length ? updates : undefined;
 }
 
 function compilerKeyedArrayReorder(
@@ -892,7 +906,6 @@ export function createCompilerKeyedArrayWindowReplace(
     if (
       !previousTarget ||
       !valueTarget ||
-      !COMPILER_KEYED_COMMITTED_COLLECTIONS.has(previousTarget) ||
       !Array.isArray(previous) ||
       !Array.isArray(value) ||
       Object.getPrototypeOf(previous) !== NATIVE_ARRAY_PROTOTYPE ||
@@ -913,7 +926,12 @@ export function createCompilerKeyedArrayWindowReplace(
     if (removedCount < 1 || value.length !== previous.length - removedCount + items.length) {
       return value;
     }
-    const sourceToken = compilerKeyedCollectionToken(previousTarget);
+    const committedSource = COMPILER_KEYED_COMMITTED_COLLECTIONS.has(previousTarget);
+    const previousUpdate = committedSource
+      ? undefined
+      : COMPILER_KEYED_ARRAY_WINDOW_REPLACEMENTS.get(previousTarget);
+    if (!committedSource && !previousUpdate) return value;
+    const sourceToken = previousUpdate?.sourceToken || compilerKeyedCollectionToken(previousTarget);
     if (!sourceToken) return value;
     COMPILER_KEYED_ARRAY_WINDOW_REPLACEMENTS.set(valueTarget, {
       sourceToken,
@@ -922,6 +940,7 @@ export function createCompilerKeyedArrayWindowReplace(
       position: normalizedPosition,
       removedCount,
       insertedCount: items.length,
+      ...(previousUpdate ? { previous: previousUpdate } : {}),
     });
   } catch {
     // Metadata must never change the result of a successful native update.
@@ -4768,9 +4787,59 @@ function reconcileCompilerKeyedArrayWindowReplace(
   }
 
   const finalValue = props.items();
-  const update = compilerKeyedArrayWindowReplace(finalValue, collectionToken, instances.size);
-  if (!update || !Array.isArray(finalValue)) return undefined;
+  const updates = compilerKeyedArrayWindowReplacements(finalValue, collectionToken, instances.size);
+  if (!updates || !Array.isArray(finalValue)) return undefined;
   const previousInstances = [...instances.values()];
+  if (updates.length > 1) {
+    const touchedIndices = new Set<number>();
+    for (const update of updates) {
+      if (update.insertedCount !== update.removedCount) return undefined;
+      for (let index = update.position; index < update.position + update.removedCount; index += 1) {
+        touchedIndices.add(index);
+      }
+    }
+
+    for (let index = 0; index < previousInstances.length; index += 1) {
+      const instance = previousInstances[index];
+      const touched = touchedIndices.has(index);
+      if (
+        !instance ||
+        instance.index !== index ||
+        (touched
+          ? instance.element.parentNode !== root
+          : !Object.is(instance.item, finalValue[index]))
+      ) {
+        return undefined;
+      }
+    }
+
+    const prepared: Array<
+      readonly [
+        instance: CompilerKeyedRowInstance,
+        item: unknown,
+        updates: readonly CompilerPreparedKeyedRowBindingUpdate[],
+      ]
+    > = [];
+    try {
+      for (const index of [...touchedIndices].sort((left, right) => left - right)) {
+        const instance = previousInstances[index];
+        const item = finalValue[index];
+        if (keyedRowIdentity(props.rowKey(item, index)) !== instance.key) return undefined;
+        const bindingUpdates = prepareKeyedRowBindingUpdates(props, instance, item, index);
+        if (!bindingUpdates) return undefined;
+        prepared.push([instance, item, bindingUpdates]);
+      }
+    } catch {
+      return undefined;
+    }
+    for (const [instance, item, bindingUpdates] of prepared) {
+      applyPreparedKeyedRowBindingUpdates(props, instance, bindingUpdates);
+      instance.item = item;
+    }
+    return instances;
+  }
+
+  const update = updates[0];
   const removedEnd = update.position + update.removedCount;
   for (let sourceIndex = 0; sourceIndex < update.sourceLength; sourceIndex += 1) {
     const instance = previousInstances[sourceIndex];
