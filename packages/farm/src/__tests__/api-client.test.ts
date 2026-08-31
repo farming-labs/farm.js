@@ -12,6 +12,15 @@ import { PluginManager } from "../plugin";
 import { _runWithCurrentRequest } from "../server/request";
 
 type APIRouter = {
+  posts: {
+    get: {
+      __types: {
+        body: never;
+        query: { tag: string[] };
+        response: { posts: unknown[] };
+      };
+    };
+  };
   status: {
     head: {
       __types: {
@@ -121,6 +130,19 @@ describe("createAPIClient", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       "https://api.example.com/gateway/v1/users?limit=5",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("serializes array query inputs as repeated parameters", async () => {
+    const fetchMock = vi.fn(async () => buildResponse({ posts: [] }));
+    globalThis.fetch = fetchMock as any;
+    const api = createAPIClient<APIRouter>({ baseURL: "https://api.example.com" });
+
+    await api.posts.get({ query: { tag: ["react", "vite"] } });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.com/api/posts?tag=react&tag=vite",
       expect.objectContaining({ method: "GET" }),
     );
   });
