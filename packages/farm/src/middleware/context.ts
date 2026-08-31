@@ -51,13 +51,19 @@ function serializeCookie(name: string, value: string, options: CookieOptions = {
  */
 class CookieJarImpl implements CookieJar {
   private cookies: Record<string, string>;
-  private setCookies: string[] = [];
+  private setCookies: string[];
 
   constructor(
     private req: IncomingMessage,
     private res: ServerResponse,
   ) {
     this.cookies = parseMiddlewareCookieHeader(req.headers.cookie);
+    const existing = res.getHeader("Set-Cookie");
+    this.setCookies = Array.isArray(existing)
+      ? existing.map(String)
+      : existing === undefined
+        ? []
+        : [String(existing)];
   }
 
   get(name: string): string | undefined {
