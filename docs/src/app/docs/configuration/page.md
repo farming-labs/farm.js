@@ -569,6 +569,9 @@ For rewrites, the incoming query string is preserved when the destination has no
 written in the destination replaces the incoming query string.
 Rewrites use after-files semantics in development and production: an existing Farm page, API,
 integration, docs, image, or metadata route wins, and the rewrite is considered only as a fallback.
+Configured response headers are applied after route handlers in both modes, so they win when the
+same header is returned by a handler. `Link` is additive: handler and configured link values are
+merged instead of replacing one another.
 
 ```ts
 export default defineConfig({

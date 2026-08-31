@@ -12,8 +12,12 @@ function createRequest(url: string): IncomingMessage {
 }
 
 function createResponse(): ServerResponse {
+  const headers = new Map<string, number | string | string[]>();
   return {
-    setHeader: vi.fn(),
+    setHeader: vi.fn((key: string, value: number | string | readonly string[]) => {
+      headers.set(key.toLowerCase(), Array.isArray(value) ? [...value] : value);
+    }),
+    getHeader: vi.fn((key: string) => headers.get(key.toLowerCase())),
     writeHead: vi.fn(),
     end: vi.fn(),
   } as unknown as ServerResponse;
@@ -68,6 +72,32 @@ describe("config route plugins", () => {
     await runBeforeRequest(plugin, req, res);
 
     expect(res.setHeader).toHaveBeenCalledWith("x-docs", "yes");
+  });
+
+  it("finalizes configured headers after handler headers like production", async () => {
+    const plugin = createHeadersPlugin([
+      {
+        source: "/docs/:path*",
+        headers: [
+          { key: "cache-control", value: "public, max-age=60" },
+          { key: "Link", value: "</configured.css>; rel=preload; as=style" },
+        ],
+      },
+    ]);
+    const req = createRequest("/docs/start");
+    const res = createResponse();
+
+    await runBeforeRequest(plugin, req, res);
+    res.setHeader("cache-control", "private");
+    res.writeHead(200, {
+      "cache-control": "no-store",
+      Link: "</handler.js>; rel=preload; as=script",
+    });
+
+    expect(res.getHeader("cache-control")).toBe("public, max-age=60");
+    expect(res.getHeader("Link")).toBe(
+      "</handler.js>; rel=preload; as=script, </configured.css>; rel=preload; as=style",
+    );
   });
 
   it("interpolates named and numbered rewrite captures", async () => {
