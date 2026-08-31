@@ -701,12 +701,18 @@ export function createAPIClient<
         }
       })();
 
-      inflightState.set(cacheKey, { promise, startedAt: now });
+      const inflightEntry = { promise, startedAt: now };
+      inflightState.set(cacheKey, inflightEntry);
 
       try {
         const result = await promise;
 
-        if (!result.error && isCacheEnabled && !isFarmAPIStream(result.data)) {
+        if (
+          inflightState.get(cacheKey) === inflightEntry &&
+          !result.error &&
+          isCacheEnabled &&
+          !isFarmAPIStream(result.data)
+        ) {
           const updatedAt = Date.now();
           cacheState.set(cacheKey, {
             data: result.data,
@@ -731,7 +737,9 @@ export function createAPIClient<
 
         return result;
       } finally {
-        inflightState.delete(cacheKey);
+        if (inflightState.get(cacheKey) === inflightEntry) {
+          inflightState.delete(cacheKey);
+        }
       }
     };
 
