@@ -3,6 +3,8 @@ import type { RewriteConfig } from "../config";
 import type { FarmRequest, FarmResponse } from "../types";
 import { compileConfigRoutePattern, interpolateConfigRouteDestination } from "./route-pattern";
 
+export const FARM_CONFIG_REWRITES_PLUGIN_NAME = "farm:rewrites";
+
 export function createRewritesPlugin(
   rewrites: RewriteConfig[],
   {
@@ -27,7 +29,7 @@ export function createRewritesPlugin(
   }));
 
   return {
-    name: "farm:rewrites",
+    name: FARM_CONFIG_REWRITES_PLUGIN_NAME,
     enforce: "pre",
 
     async beforeRequest(req, res, context) {
