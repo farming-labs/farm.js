@@ -8,6 +8,7 @@ import type {
 import {
   parseRoutePath,
   matchRoute,
+  matchRoutePrefix,
   resolveAppPath,
   globFiles,
   logger,
@@ -1084,27 +1085,13 @@ export class RouteManager {
    */
   private findMatchingLayouts(pathname: string): RouteEntry[] {
     const matchingLayouts: RouteEntry[] = [];
-    const pathSegments = pathname.split("/").filter(Boolean);
 
     const sortedLayouts = Array.from(this.layouts.values()).sort((a, b) => {
       return a.route.segments.length - b.route.segments.length;
     });
 
     for (const layoutEntry of sortedLayouts) {
-      if (layoutEntry.route.segments.length > pathSegments.length) {
-        continue;
-      }
-
-      let matches = true;
-      for (let i = 0; i < layoutEntry.route.segments.length; i++) {
-        const segment = layoutEntry.route.segments[i];
-        if (!segment.isDynamic && segment.segment !== pathSegments[i]) {
-          matches = false;
-          break;
-        }
-      }
-
-      if (matches) {
+      if (matchRoutePrefix(pathname, layoutEntry.route.segments)) {
         matchingLayouts.push(layoutEntry);
       }
     }
@@ -1185,14 +1172,7 @@ export class RouteManager {
   private matchesRoutePrefix(pathname: string, pattern: string): boolean {
     if (pattern === "/") return true;
     const patternSegments = parseRoutePath(`${pattern}/page.tsx`).segments;
-    const pathSegments = pathname.split("/").filter(Boolean);
-    if (patternSegments.length > pathSegments.length) return false;
-
-    for (let index = 0; index < patternSegments.length; index++) {
-      const segment = patternSegments[index]!;
-      if (!segment.isDynamic && segment.segment !== pathSegments[index]) return false;
-    }
-    return true;
+    return matchRoutePrefix(pathname, patternSegments);
   }
 
   private findNearestBoundary(
@@ -1200,33 +1180,10 @@ export class RouteManager {
     boundaries: Map<string, RouteEntry>,
   ): RouteEntry | null {
     const normalizedPath = pathname === "/" ? "/" : pathname.replace(/\/$/, "");
-    const pathSegments = normalizedPath.split("/").filter(Boolean);
     let bestMatch: RouteEntry | null = null;
 
     for (const boundaryEntry of boundaries.values()) {
-      if (boundaryEntry.route.segments.length > pathSegments.length) {
-        continue;
-      }
-
-      let matches = true;
-      for (let i = 0; i < boundaryEntry.route.segments.length; i++) {
-        const segment = boundaryEntry.route.segments[i];
-        const pathSegment = pathSegments[i];
-
-        if (!pathSegment) {
-          matches = false;
-          break;
-        }
-
-        if (!segment.isDynamic && segment.segment !== pathSegment) {
-          matches = false;
-          break;
-        }
-      }
-
-      if (!matches) {
-        continue;
-      }
+      if (!matchRoutePrefix(normalizedPath, boundaryEntry.route.segments)) continue;
 
       if (!bestMatch || boundaryEntry.route.segments.length > bestMatch.route.segments.length) {
         bestMatch = boundaryEntry;

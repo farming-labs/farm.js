@@ -119,6 +119,30 @@ describe("RouteManager", () => {
       expect(result.layouts.length).toBeGreaterThan(0);
     });
 
+    it("includes optional catch-all layouts, boundaries, and slot owners at the parent path", async () => {
+      const { globFiles } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) return ["docs/[[...slug]]/page.tsx"];
+        if (pattern.includes("layout")) {
+          return ["layout.tsx", "docs/[[...slug]]/layout.tsx"];
+        }
+        if (pattern.includes("loading")) return ["docs/[[...slug]]/loading.tsx"];
+        if (pattern.includes("error")) return ["docs/[[...slug]]/error.tsx"];
+        if (pattern.includes("default")) {
+          return ["docs/[[...slug]]/@panel/default.tsx"];
+        }
+        return [];
+      });
+      await routeManager.discoverRoutes();
+
+      expect(routeManager.matchRoute("/docs").layouts.map((layout) => layout.pattern)).toContain(
+        "/docs/[[...slug]]",
+      );
+      expect(routeManager.getMatchingLoading("/docs")?.pattern).toBe("/docs/[[...slug]]");
+      expect(routeManager.getMatchingError("/docs")?.pattern).toBe("/docs/[[...slug]]");
+      expect(routeManager.matchRoute("/docs").slots.map((slot) => slot.name)).toContain("panel");
+    });
+
     it("prefers exact and more specific dynamic routes regardless of discovery order", async () => {
       const { globFiles } = await import("../utils");
       vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
