@@ -56,6 +56,11 @@ export async function sendWebResponse(res: ServerResponse, response: Response): 
   }
 
   const reader = response.body.getReader();
+  const disconnectAbort = new AbortController();
+  const disconnected = once(res, "close", { signal: disconnectAbort.signal }).then(
+    () => true,
+    (error) => error?.name !== "AbortError",
+  );
 
   try {
     while (true) {
@@ -66,7 +71,19 @@ export async function sendWebResponse(res: ServerResponse, response: Response): 
         return;
       }
 
-      const { done, value } = await reader.read();
+      const next = await Promise.race([
+        reader.read().then((result) => ({ type: "read" as const, result })),
+        disconnected.then((closed) => ({ type: "disconnect" as const, closed })),
+      ]);
+      if (next.type === "disconnect" && next.closed) {
+        void reader.cancel().catch(() => {});
+        return;
+      }
+      if (next.type !== "read") {
+        continue;
+      }
+
+      const { done, value } = next.result;
       if (done) {
         break;
       }
@@ -95,6 +112,13 @@ export async function sendWebResponse(res: ServerResponse, response: Response): 
     }
     throw error;
   } finally {
-    reader.releaseLock();
+    disconnectAbort.abort();
+    try {
+      reader.releaseLock();
+    } catch {
+      // A disconnect can win the race with a pending read. Cancelling the
+      // reader settles it asynchronously, so there may be no lock to release
+      // synchronously here.
+    }
   }
 }

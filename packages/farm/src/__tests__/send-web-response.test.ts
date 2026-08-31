@@ -41,6 +41,44 @@ async function listen(server: Server): Promise<number> {
 }
 
 describe("sendWebResponse", () => {
+  it("settles when the client disconnects while the body is waiting for data", async () => {
+    let bodyCancelled = false;
+    let settleHandler!: (result: "returned" | "threw") => void;
+    const handlerSettled = new Promise<"returned" | "threw">((resolve) => {
+      settleHandler = resolve;
+    });
+    const server = createServer((_req, res) => {
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("ready"));
+        },
+        cancel() {
+          bodyCancelled = true;
+        },
+      });
+
+      void sendWebResponse(res, new Response(stream)).then(
+        () => settleHandler("returned"),
+        () => settleHandler("threw"),
+      );
+    });
+    const port = await listen(server);
+
+    await new Promise<void>((resolve, reject) => {
+      const socket = connect(port, "127.0.0.1", () => {
+        socket.write("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: keep-alive\r\n\r\n");
+      });
+      socket.once("data", () => {
+        socket.destroy();
+        resolve();
+      });
+      socket.once("error", reject);
+    });
+
+    await expect(handlerSettled).resolves.toBe("returned");
+    expect(bodyCancelled).toBe(true);
+  });
+
   it("settles when the client disconnects mid-stream under backpressure", async () => {
     let handlerSettled: "pending" | "returned" | "threw" = "pending";
     const server = createServer((_req, res) => {
