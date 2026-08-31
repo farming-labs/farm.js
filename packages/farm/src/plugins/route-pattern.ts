@@ -1,3 +1,6 @@
+import { localizeFarmHref, resolveFarmLocalePath } from "../i18n/routing";
+import type { ResolvedFarmI18nConfig } from "../i18n/types";
+
 type ConfigRoutePatternToken =
   | { kind: "param"; name: string; captureIndex: number }
   | { kind: "wildcard"; captureIndex: number };
@@ -5,6 +8,23 @@ type ConfigRoutePatternToken =
 export interface CompiledConfigRoutePattern {
   regex: RegExp;
   tokens: ConfigRoutePatternToken[];
+}
+
+export function resolveConfigRoutePathname(
+  pathname: string,
+  i18n?: ResolvedFarmI18nConfig,
+): { pathname: string; locale?: string } {
+  if (!i18n?.enabled) return { pathname };
+  const match = resolveFarmLocalePath(pathname, i18n);
+  return { pathname: match.pathname, locale: match.locale };
+}
+
+export function localizeConfigRouteDestination(
+  destination: string,
+  locale: string | undefined,
+  i18n?: ResolvedFarmI18nConfig,
+): string {
+  return locale && i18n?.enabled ? localizeFarmHref(destination, locale, i18n) : destination;
 }
 
 function escapeRegexCharacter(character: string): string {

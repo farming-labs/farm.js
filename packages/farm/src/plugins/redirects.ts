@@ -1,13 +1,20 @@
 import type { FarmPlugin, FarmPluginContext } from "../plugin";
 import type { RedirectConfig } from "../config";
 import type { FarmRequest, FarmResponse } from "../types";
-import { compileConfigRoutePattern, interpolateConfigRouteDestination } from "./route-pattern";
+import type { ResolvedFarmI18nConfig } from "../i18n/types";
+import {
+  compileConfigRoutePattern,
+  interpolateConfigRouteDestination,
+  localizeConfigRouteDestination,
+  resolveConfigRoutePathname,
+} from "./route-pattern";
 
 export function createRedirectsPlugin(
   redirects: RedirectConfig[],
   {
     beforeRequest: overrideBeforeRequest,
     afterResponse: overrideAfterResponse,
+    i18n,
   }: {
     beforeRequest?: (
       req: FarmRequest,
@@ -19,6 +26,7 @@ export function createRedirectsPlugin(
       res: FarmResponse,
       context: FarmPluginContext,
     ) => void | Promise<void>;
+    i18n?: ResolvedFarmI18nConfig;
   } = {},
 ): FarmPlugin {
   const compiledRedirects = redirects.map((redirect) => ({
@@ -34,15 +42,16 @@ export function createRedirectsPlugin(
         await overrideBeforeRequest(req, res, context);
       }
       const url = new URL(req.url || "/", `http://${req.headers.host}`);
-      const pathname = url.pathname;
+      const routePath = resolveConfigRoutePathname(url.pathname, i18n);
+      const pathname = routePath.pathname;
 
       for (const { redirect, pattern } of compiledRedirects) {
         const match = pathname.match(pattern.regex);
         if (match) {
-          const destination = interpolateConfigRouteDestination(
-            redirect.destination,
-            match,
-            pattern.tokens,
+          const destination = localizeConfigRouteDestination(
+            interpolateConfigRouteDestination(redirect.destination, match, pattern.tokens),
+            routePath.locale,
+            i18n,
           );
 
           const statusCode = redirect.statusCode || (redirect.permanent ? 308 : 307);
