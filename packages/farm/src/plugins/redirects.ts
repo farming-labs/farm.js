@@ -2,6 +2,7 @@ import type { FarmPlugin, FarmPluginContext } from "../plugin";
 import type { RedirectConfig } from "../config";
 import type { FarmRequest, FarmResponse } from "../types";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
+import { isFarmRedirectStatus } from "../navigation-errors";
 import {
   compileConfigRoutePattern,
   interpolateConfigRouteDestination,
@@ -29,6 +30,13 @@ export function createRedirectsPlugin(
     i18n?: ResolvedFarmI18nConfig;
   } = {},
 ): FarmPlugin {
+  for (const redirect of redirects) {
+    if (redirect.statusCode !== undefined && !isFarmRedirectStatus(redirect.statusCode)) {
+      throw new RangeError(
+        `Redirect "${redirect.source}" statusCode must be one of 301, 302, 303, 307, or 308.`,
+      );
+    }
+  }
   const compiledRedirects = redirects.map((redirect) => ({
     redirect,
     pattern: compileConfigRoutePattern(redirect.source),
@@ -54,7 +62,7 @@ export function createRedirectsPlugin(
             i18n,
           );
 
-          const statusCode = redirect.statusCode || (redirect.permanent ? 308 : 307);
+          const statusCode = redirect.statusCode ?? (redirect.permanent ? 308 : 307);
 
           res.writeHead(statusCode, {
             Location: destination,

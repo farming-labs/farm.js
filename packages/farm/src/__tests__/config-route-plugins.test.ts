@@ -42,6 +42,12 @@ describe("config route plugins", () => {
     { root: "/tmp/farm-config-route-i18n", mode: "development" },
   );
 
+  it("rejects invalid redirect statuses when the plugin is used directly", () => {
+    expect(() =>
+      createRedirectsPlugin([{ source: "/old", destination: "/new", statusCode: 201 as any }]),
+    ).toThrow('Redirect "/old" statusCode must be one of 301, 302, 303, 307, or 308');
+  });
+
   it("keeps named and plain redirect captures in source order", async () => {
     const plugin = createRedirectsPlugin([
       {

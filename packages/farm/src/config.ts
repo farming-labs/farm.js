@@ -83,6 +83,7 @@ import {
   type ResolvedFarmCspConfig,
   type ResolvedFarmSecurityConfig,
 } from "./security";
+import { isFarmRedirectStatus } from "./navigation-errors";
 import { resolveFarmThemeConfig } from "./theme/config";
 import type { ResolvedFarmThemeConfig } from "./theme/types";
 import { isReactRenderer, resolveFarmRenderer } from "./renderer";
@@ -204,7 +205,7 @@ export interface RedirectConfig {
   source: string;
   destination: string;
   permanent?: boolean;
-  statusCode?: number;
+  statusCode?: import("./navigation-errors").FarmRedirectStatus;
 }
 
 export interface HeaderConfig {
@@ -851,6 +852,17 @@ export async function resolveDocsConfig(
   };
 }
 
+function validateRedirectConfigs(redirects: RedirectConfig[], field: string): RedirectConfig[] {
+  for (const [index, redirect] of redirects.entries()) {
+    if (redirect.statusCode !== undefined && !isFarmRedirectStatus(redirect.statusCode)) {
+      throw new RangeError(
+        `${field}[${index}].statusCode must be one of 301, 302, 303, 307, or 308.`,
+      );
+    }
+  }
+  return redirects;
+}
+
 export async function resolveConfig(
   userConfig: FarmUserConfig,
   mode: "development" | "production",
@@ -882,10 +894,12 @@ export async function resolveConfig(
     });
   }
 
-  const redirects =
+  const redirects = validateRedirectConfigs(
     typeof userConfig.redirects === "function"
       ? await userConfig.redirects()
-      : userConfig.redirects || [];
+      : userConfig.redirects || [],
+    "redirects",
+  );
 
   const rewrites =
     typeof userConfig.rewrites === "function"

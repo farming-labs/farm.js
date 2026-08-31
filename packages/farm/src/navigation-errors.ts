@@ -48,7 +48,7 @@ export function getFarmRedirectError(error: unknown): FarmRedirectSignal | null 
   ) {
     const [, status, ...urlParts] = candidate.digest.split(";");
     const parsedStatus = Number(status);
-    if (isRedirectStatus(parsedStatus)) {
+    if (isFarmRedirectStatus(parsedStatus)) {
       return {
         status: parsedStatus,
         url: urlParts.join(";"),
@@ -72,6 +72,6 @@ function createRedirectError(url: string, status: FarmRedirectStatus): FarmNavig
   return error;
 }
 
-function isRedirectStatus(status: number): status is FarmRedirectStatus {
+export function isFarmRedirectStatus(status: unknown): status is FarmRedirectStatus {
   return status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
 }
