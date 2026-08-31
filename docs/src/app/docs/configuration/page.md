@@ -581,6 +581,11 @@ export default defineConfig({
 });
 ```
 
+Redirect `statusCode` accepts only HTTP redirect statuses `301`, `302`, `303`, `307`, or `308`.
+Use `permanent: true` for the default permanent `308`; otherwise Farm defaults to temporary `307`.
+Invalid values fail config resolution instead of producing a non-redirect response with a Location
+header.
+
 Use `routeRules` when behavior belongs to a URL pattern instead of one page file. Rules are normalized into Farm redirects/headers and passed to Nitro route rules for production adapters.
 
 ```ts

@@ -712,6 +712,40 @@ describe("resolveConfig", () => {
     });
   });
 
+  it("rejects non-redirect status codes in configured redirects", async () => {
+    await expect(
+      resolveConfig(
+        {
+          redirects: [{ source: "/old", destination: "/new", statusCode: 200 as any }],
+        },
+        "production",
+      ),
+    ).rejects.toThrow("redirects[0].statusCode must be one of 301, 302, 303, 307, or 308");
+
+    await expect(
+      resolveConfig(
+        {
+          routeRules: {
+            "/old": { redirect: { to: "/new", statusCode: 404 as any } },
+          },
+        },
+        "production",
+      ),
+    ).rejects.toThrow(
+      'Route rule "/old" redirect.statusCode must be one of 301, 302, 303, 307, or 308',
+    );
+
+    const config = await resolveConfig(
+      {
+        redirects: [{ source: "/see-other", destination: "/next", statusCode: 303 }],
+      },
+      "production",
+    );
+    expect(config.redirects()).toEqual([
+      { source: "/see-other", destination: "/next", statusCode: 303 },
+    ]);
+  });
+
   it("applies security.csp after ordinary and route-rule headers", async () => {
     const config = await resolveConfig(
       {

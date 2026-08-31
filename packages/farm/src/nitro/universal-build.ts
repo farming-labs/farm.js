@@ -5164,7 +5164,7 @@ function matchRedirectRoute(pathname, locale) {
         locale && destination.startsWith("/") && !destination.startsWith("//")
           ? localizeFarmHref(destination, locale, farmI18nConfig)
           : destination,
-      statusCode: redirect.statusCode || (redirect.permanent ? 308 : 307),
+      statusCode: redirect.statusCode ?? (redirect.permanent ? 308 : 307),
     };
   }
   return null;

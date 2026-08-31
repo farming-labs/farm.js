@@ -1,4 +1,5 @@
 import type { HeaderConfig, RedirectConfig } from "./config";
+import { isFarmRedirectStatus, type FarmRedirectStatus } from "./navigation-errors";
 import type { FarmRouteRuntimeConfig } from "./route-runtime";
 import { normalizeFarmRouteRuntimeConfig } from "./route-runtime";
 
@@ -8,7 +9,7 @@ export type FarmRouteRuleRedirect =
   | string
   | {
       to: string;
-      statusCode?: number;
+      statusCode?: FarmRedirectStatus;
       permanent?: boolean;
     };
 
@@ -40,6 +41,15 @@ export function normalizeRouteRules(routeRules: FarmRouteRules | undefined): Far
   for (const [source, rule] of Object.entries(routeRules)) {
     if (!source || !rule) continue;
     const normalizedSource = normalizeRuleSource(source);
+    if (
+      typeof rule.redirect === "object" &&
+      rule.redirect.statusCode !== undefined &&
+      !isFarmRedirectStatus(rule.redirect.statusCode)
+    ) {
+      throw new RangeError(
+        `Route rule "${normalizedSource}" redirect.statusCode must be one of 301, 302, 303, 307, or 308.`,
+      );
+    }
     normalized[normalizedSource] = {
       ...rule,
       ...normalizeFarmRouteRuntimeConfig(rule, `Route rule "${normalizedSource}"`),
