@@ -183,6 +183,9 @@ For a request without an explicit locale prefix, Farm resolves the locale in thi
 4. `defaultLocale`.
 
 Regional values match a supported base language, so `fr-CA` can resolve to `fr`. Explicit URLs always win because they are canonical, shareable, and safe to cache.
+`Accept-Language` quality values must be between 0 and 1 with at most three decimal places. Farm
+honors `q=0` exclusions when expanding a positive `*` wildcard; an invalid quality is treated as
+unacceptable rather than outranking a valid language.
 
 Change the fallback signals with `detection`:
 

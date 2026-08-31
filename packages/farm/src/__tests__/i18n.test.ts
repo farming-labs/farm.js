@@ -146,6 +146,35 @@ describe("Farm locale request signals", () => {
     });
   });
 
+  it("validates Accept-Language quality values and honors wildcard exclusions", () => {
+    expect(
+      resolveFarmLocaleRequest(
+        new Request("https://farm.test/", {
+          headers: { "accept-language": "fr;q=2,am;q=0.8" },
+        }),
+        config,
+      ),
+    ).toMatchObject({ locale: "am", source: "accept-language", redirect: "/am" });
+
+    expect(
+      resolveFarmLocaleRequest(
+        new Request("https://farm.test/", {
+          headers: { "accept-language": "*;q=0.8,en;q=0" },
+        }),
+        config,
+      ),
+    ).toMatchObject({ locale: "am", source: "accept-language", redirect: "/am" });
+
+    expect(
+      resolveFarmLocaleRequest(
+        new Request("https://farm.test/", {
+          headers: { "accept-language": "*;q=0" },
+        }),
+        config,
+      ),
+    ).toMatchObject({ locale: "en", source: "default" });
+  });
+
   it("ignores malformed cookie names instead of failing the request", () => {
     expect(
       resolveFarmLocaleRequest(
