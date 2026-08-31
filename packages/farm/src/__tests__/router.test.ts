@@ -14,10 +14,16 @@ describe("createFarmRouter", () => {
   });
 
   it("prefers more specific routes before dynamic routes", () => {
-    const router = createFarmRouter(["/users/[id]", "/users/settings"]);
+    const router = createFarmRouter([
+      "/users/[id]",
+      "/users/settings",
+      "/[category]/settings",
+      "/shop/[item]",
+    ]);
 
     expect(router.match("/users/settings")?.route.path).toBe("/users/settings");
     expect(router.match("/users/123")?.route.path).toBe("/users/[id]");
+    expect(router.match("/shop/settings")?.route.path).toBe("/shop/[item]");
   });
 
   it("supports optional catch-all and route group patterns", () => {

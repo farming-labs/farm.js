@@ -69,6 +69,24 @@ describe("APIRouteManager", () => {
     expect(manager.matchRoute("/v2/api/users/42")?.route.path).toBe("/v2/api/users/[id]");
   });
 
+  it("prefers an earlier static segment when dynamic routes overlap", () => {
+    const manager = new APIRouteManager("/tmp/farm-api-specificity-test");
+    manager.getRoutes().set("/api/[category]/settings", {
+      path: "/api/[category]/settings",
+      filePath: "/tmp/farm-api-specificity-test/[category]/settings/route.ts",
+      methods: ["GET"],
+      endpoints: { GET: async () => Response.json({ source: "category" }) },
+    });
+    manager.getRoutes().set("/api/shop/[item]", {
+      path: "/api/shop/[item]",
+      filePath: "/tmp/farm-api-specificity-test/shop/[item]/route.ts",
+      methods: ["GET"],
+      endpoints: { GET: async () => Response.json({ source: "shop" }) },
+    });
+
+    expect(manager.matchRoute("/api/shop/settings")?.route.path).toBe("/api/shop/[item]");
+  });
+
   it("uses GET for HEAD requests and strips the response body", async () => {
     const manager = new APIRouteManager("/tmp/farm-api-head-test");
     const getHandler = async () =>
