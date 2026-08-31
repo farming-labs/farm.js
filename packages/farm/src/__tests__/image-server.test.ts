@@ -6,6 +6,7 @@ import {
   createCloudflareImageTransformer,
   createFarmImageHandler,
   isPrivateImageAddress,
+  selectOutputFormat,
   type FarmImageTransformer,
 } from "../image-server";
 
@@ -242,6 +243,15 @@ describe("Farm image optimizer", () => {
 });
 
 describe("image runtime adapters", () => {
+  it("honors Accept quality values when selecting an output format", () => {
+    const formats = ["image/avif", "image/webp"] as const;
+
+    expect(selectOutputFormat("image/avif;q=0, image/webp;q=0.8", formats)).toBe("image/webp");
+    expect(selectOutputFormat("image/avif;q=0.5, image/webp;q=1", formats)).toBe("image/webp");
+    expect(selectOutputFormat("IMAGE/AVIF;Q=0.8, image/webp;q=0.8", formats)).toBe("image/avif");
+    expect(selectOutputFormat("image/*,*/*;q=0.8", formats)).toBeUndefined();
+  });
+
   it("uses Cloudflare's native image transform options", async () => {
     const fetcher = vi.fn(
       async () => new Response(PNG, { headers: { "content-type": "image/webp" } }),
