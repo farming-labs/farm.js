@@ -565,6 +565,8 @@ Farm's `redirects()`, `rewrites()`, and `headers()` config functions use the sam
 syntax. `:name` captures one path segment, while `:name*` and plain `*` capture the remaining
 characters. Redirect and rewrite destinations can reuse named captures or use numbered captures
 such as `$1`. All other source characters are matched literally.
+For rewrites, the incoming query string is preserved when the destination has no query. A query
+written in the destination replaces the incoming query string.
 
 ```ts
 export default defineConfig({
