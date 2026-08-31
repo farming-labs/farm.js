@@ -98,6 +98,7 @@ import {
   parseFarmLayoutChainHeader,
 } from "./navigation/render-plan";
 import { resolveFarmPageDataFailure } from "./navigation/page-data-error";
+import { FARM_CONFIG_REWRITES_PLUGIN_NAME } from "./plugins/rewrites";
 
 interface FarmVitePluginOptions extends FarmConfig {
   openapi?: FarmUserConfig["openapi"];
@@ -1530,7 +1531,10 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   "beforeRequest",
                   (plugin) => {
                     const owner = getFarmIntegrationPluginOwner(plugin);
-                    return owner?.source !== "lifecycle" || owner.key !== matchedRoute.key;
+                    return (
+                      plugin.name !== FARM_CONFIG_REWRITES_PLUGIN_NAME &&
+                      (owner?.source !== "lifecycle" || owner.key !== matchedRoute.key)
+                    );
                   },
                   req,
                   res,
@@ -1643,7 +1647,16 @@ window.__FARM_MANIFEST__ = ${inlineValue({
 
             try {
               if (pm) {
-                await pm.runHookParallel("beforeRequest", req, res);
+                if (hasMatchedApiRoute) {
+                  await pm.runHookParallelFiltered(
+                    "beforeRequest",
+                    (plugin) => plugin.name !== FARM_CONFIG_REWRITES_PLUGIN_NAME,
+                    req,
+                    res,
+                  );
+                } else {
+                  await pm.runHookParallel("beforeRequest", req, res);
+                }
               }
 
               if (res.writableEnded) {
@@ -2313,7 +2326,17 @@ window.__FARM_MANIFEST__ = ${inlineValue({
 
             // Run beforeRequest hooks
             if (pm && hasBeforeRequestHook) {
-              await pm.runHookParallel("beforeRequest", req, res);
+              const currentPathname = new URL(
+                req.url || "/",
+                `http://${req.headers.host || "localhost:3000"}`,
+              ).pathname;
+              const hasLocalPageRoute = Boolean(routeManager.matchRoute(currentPathname)?.route);
+              await pm.runHookParallelFiltered(
+                "beforeRequest",
+                (plugin) => !hasLocalPageRoute || plugin.name !== FARM_CONFIG_REWRITES_PLUGIN_NAME,
+                req,
+                res,
+              );
             }
 
             if (res.writableEnded) {

@@ -567,6 +567,8 @@ characters. Redirect and rewrite destinations can reuse named captures or use nu
 such as `$1`. All other source characters are matched literally.
 For rewrites, the incoming query string is preserved when the destination has no query. A query
 written in the destination replaces the incoming query string.
+Rewrites use after-files semantics in development and production: an existing Farm page, API,
+integration, docs, image, or metadata route wins, and the rewrite is considered only as a fallback.
 
 ```ts
 export default defineConfig({
