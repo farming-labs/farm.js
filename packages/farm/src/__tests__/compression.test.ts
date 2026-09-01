@@ -50,6 +50,23 @@ describe("compression plugin", () => {
     expect(brotliDecompressSync(Buffer.from(await response.arrayBuffer())).toString()).toBe(body);
   });
 
+  it("varies eligible identity responses by Accept-Encoding", async () => {
+    const manager = createManager();
+    const response = await manager.runRuntimeRequest(
+      new Request("https://farm.test/", {
+        headers: { "accept-encoding": "br;q=0, gzip;q=0" },
+      }),
+      () =>
+        new Response("identity", {
+          headers: { vary: "Accept-Language" },
+        }),
+    );
+
+    expect(response.headers.get("content-encoding")).toBeNull();
+    expect(response.headers.get("vary")).toBe("Accept-Language, Accept-Encoding");
+    expect(await response.text()).toBe("identity");
+  });
+
   it("leaves existing encodings and streaming event responses untouched", async () => {
     const manager = createManager();
     const encoded = await manager.runRuntimeRequest(

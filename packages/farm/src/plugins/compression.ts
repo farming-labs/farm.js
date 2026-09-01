@@ -97,6 +97,17 @@ function compressResponse(response: Response, encoding: SupportedEncoding): Resp
   });
 }
 
+function varyIdentityResponse(response: Response): Response {
+  const headers = new Headers(response.headers);
+  appendVary(headers, "Accept-Encoding");
+
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 export function createCompressionPlugin({
   beforeRequest: overrideBeforeRequest,
   afterResponse: overrideAfterResponse,
@@ -121,7 +132,7 @@ export function createCompressionPlugin({
         if (!isProd || !canCompress(request, response)) return;
 
         const encoding = selectEncoding(request.headers.get("accept-encoding") ?? "");
-        if (!encoding) return;
+        if (!encoding) return varyIdentityResponse(response);
         return compressResponse(response, encoding);
       },
     },
