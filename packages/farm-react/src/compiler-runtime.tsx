@@ -4167,6 +4167,44 @@ function longestIncreasingSubsequencePositions(sequence: readonly number[]): Set
   return positions;
 }
 
+function reorderCompilerKeyedRows(
+  root: Element,
+  instances: readonly CompilerKeyedRowInstance[],
+  sequence: readonly number[],
+  anchor: ChildNode | null,
+): void {
+  const activeElement = root.ownerDocument.activeElement;
+  const restoreFocus = Boolean(activeElement && root.contains(activeElement));
+  const stablePositions = longestIncreasingSubsequencePositions(sequence);
+  for (let index = instances.length - 1; index >= 0; index -= 1) {
+    const instance = instances[index];
+    if (sequence[index] < 0) {
+      let start = index;
+      while (start > 0 && sequence[start - 1] < 0) start -= 1;
+      const fragment = root.ownerDocument.createDocumentFragment();
+      for (let itemIndex = start; itemIndex <= index; itemIndex += 1) {
+        fragment.append(instances[itemIndex].element);
+      }
+      root.insertBefore(fragment, anchor);
+      anchor = instances[start].element;
+      index = start;
+    } else {
+      if (!stablePositions.has(index) && instance.element.nextSibling !== anchor) {
+        root.insertBefore(instance.element, anchor);
+      }
+      anchor = instance.element;
+    }
+  }
+  if (
+    restoreFocus &&
+    activeElement?.isConnected &&
+    activeElement.ownerDocument.activeElement !== activeElement &&
+    "focus" in activeElement
+  ) {
+    (activeElement as HTMLElement).focus({ preventScroll: true });
+  }
+}
+
 type RowConditionalRefresh = (item: unknown, index: number, afterCommit?: () => void) => void;
 
 interface RowConditionalOwner {
@@ -4938,6 +4976,77 @@ function reconcileCompilerKeyedArrayWindowReplace(
       removed[offset].item = incomingItems[offset];
     }
     return instances;
+  }
+
+  if (update.insertedCount === update.removedCount) {
+    const incomingKeySet = new Set(incomingKeys);
+    if (incomingKeySet.size !== incomingKeys.length) return undefined;
+    const removedByKey = new Map(
+      removed.map((instance, offset) => [instance.key, { instance, offset }] as const),
+    );
+    if (incomingKeys.some((key) => removedByKey.has(key))) {
+      const nextWindow: CompilerKeyedRowInstance[] = [];
+      const sequence: number[] = [];
+      const preparedBindings: Array<readonly CompilerPreparedKeyedRowBindingUpdate[] | undefined> =
+        [];
+      try {
+        for (let offset = 0; offset < update.insertedCount; offset += 1) {
+          const index = update.position + offset;
+          const item = incomingItems[offset];
+          const key = incomingKeys[offset];
+          const retained = removedByKey.get(key);
+          if (retained) {
+            const bindingUpdates = prepareKeyedRowBindingUpdates(
+              props,
+              retained.instance,
+              item,
+              index,
+            );
+            if (!bindingUpdates) return undefined;
+            nextWindow.push(retained.instance);
+            sequence.push(retained.offset);
+            preparedBindings.push(bindingUpdates);
+            continue;
+          }
+          // A key owned outside this exact window would duplicate or move a
+          // row across the proven boundary. Complete keyed reconciliation
+          // remains responsible for that case.
+          if (instances.has(key)) return undefined;
+          const descriptor = props.create(item, index);
+          nextWindow.push({
+            key,
+            element: createCompilerHostElement(root.ownerDocument, descriptor),
+            values: readKeyedRowBindingValues(props, item, index),
+            item,
+            index,
+            conditionalValues: EMPTY_KEYED_ROW_CONDITIONAL_VALUES,
+          });
+          sequence.push(-1);
+          preparedBindings.push(undefined);
+        }
+      } catch {
+        return undefined;
+      }
+
+      for (const instance of removed) {
+        if (incomingKeySet.has(instance.key)) continue;
+        instance.scope?.cleanup();
+        instance.element.remove();
+      }
+      for (let offset = 0; offset < nextWindow.length; offset += 1) {
+        const bindingUpdates = preparedBindings[offset];
+        if (bindingUpdates) {
+          const instance = nextWindow[offset];
+          applyPreparedKeyedRowBindingUpdates(props, instance, bindingUpdates);
+          instance.item = incomingItems[offset];
+          instance.index = update.position + offset;
+        }
+      }
+
+      reorderCompilerKeyedRows(root, nextWindow, sequence, anchor || null);
+      previousInstances.splice(update.position, update.removedCount, ...nextWindow);
+      return new Map(previousInstances.map((instance) => [instance.key, instance]));
+    }
   }
 
   const knownKeys = new Set(instances.keys());
@@ -6140,8 +6249,6 @@ function createKeyedRowsBlockComponent(
       if (this.reconcileStableRows(rows, afterCommit, dirtyState)) return;
       if (this.reconcileSingleRemoval(rows, afterCommit, dirtyState)) return;
 
-      const activeElement = this.root.ownerDocument.activeElement;
-      const restoreFocus = Boolean(activeElement && this.root.contains(activeElement));
       const nextKeys = new Set(rows.keys);
       const hasSurvivingRows = rows.keys.some((key) => this.instances.has(key));
       const oldIndices = new Map<string, number>();
@@ -6158,9 +6265,6 @@ function createKeyedRowsBlockComponent(
       const sequence = hasSurvivingRows
         ? rows.keys.map((key) => oldIndices.get(key) ?? -1)
         : rows.keys.map(() => -1);
-      const stablePositions = hasSurvivingRows
-        ? longestIncreasingSubsequencePositions(sequence)
-        : new Set<number>();
       const nextInstances: CompilerKeyedRowInstance[] = [];
       const conditionalChanges: Array<{
         key: string;
@@ -6231,39 +6335,12 @@ function createKeyedRowsBlockComponent(
         for (const instance of nextInstances) fragment.append(instance.element);
         this.root.replaceChildren(fragment);
       } else {
-        let anchor: ChildNode | null = null;
-        for (let index = nextInstances.length - 1; index >= 0; index -= 1) {
-          const instance = nextInstances[index];
-          if (sequence[index] < 0) {
-            let start = index;
-            while (start > 0 && sequence[start - 1] < 0) start -= 1;
-            const fragment = this.root.ownerDocument.createDocumentFragment();
-            for (let itemIndex = start; itemIndex <= index; itemIndex += 1) {
-              fragment.append(nextInstances[itemIndex].element);
-            }
-            this.root.insertBefore(fragment, anchor);
-            anchor = nextInstances[start].element;
-            index = start;
-          } else {
-            if (!stablePositions.has(index) && instance.element.nextSibling !== anchor) {
-              this.root.insertBefore(instance.element, anchor);
-            }
-            anchor = instance.element;
-          }
-        }
+        reorderCompilerKeyedRows(this.root, nextInstances, sequence, null);
       }
       this.instances = new Map(nextInstances.map((instance) => [instance.key, instance]));
       this.rebuildElementIndex(this.instances);
       this.pruneEventHandlers(rows.keys);
       this.pruneConditionalListeners(rows.keys);
-      if (
-        restoreFocus &&
-        activeElement?.isConnected &&
-        activeElement.ownerDocument.activeElement !== activeElement &&
-        "focus" in activeElement
-      ) {
-        (activeElement as HTMLElement).focus({ preventScroll: true });
-      }
       this.commitCurrentCollection(dirtyState);
       this.notifyConditionalChanges(conditionalChanges, afterCommit);
     }

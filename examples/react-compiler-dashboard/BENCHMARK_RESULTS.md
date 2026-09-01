@@ -2,6 +2,32 @@
 
 Date: 2026-08-29
 
+## Mixed local-key exact-window replacement follow-up — 2026-09-01
+
+The full bracketed production-browser run added a separate 10,000-row workload for one fixed
+64-row window. The update reverses and changes 48 keys reused from inside that removed interval,
+retires 16 old keys, and inserts 16 globally new keys. Both compiler builds emitted all 12 expected
+`keyedArrayPositionHints` sites, retained all 48 reused DOM rows, disconnected all 16 retired rows,
+created all 16 fresh rows without borrowing any of the 10,000 pre-update DOM nodes, preserved both
+surrounding anchors, produced zero owner executions, and passed every existing correctness,
+performance, persistence, and scalability gate without lowering a threshold.
+
+| Mode   | React median | Mixed local window | Compiled control | vs React | vs control |
+| ------ | -----------: | -----------------: | ---------------: | -------: | ---------: |
+| Static |     57.70 ms |           10.80 ms |         22.50 ms |    5.34x |      2.08x |
+| Hybrid |     57.70 ms |           10.80 ms |         23.10 ms |    5.34x |      2.14x |
+
+The independent gate requires at least 4x versus React and 1.5x versus the equivalent block-bodied
+compiled control in both modes. Package tests separately prove bounded work across 4,096 rows: 64
+key reads, 64 binding snapshots, 16 fresh descriptors, 47 local LIS moves, and one fragment mount.
+They also cover complete preparation before mutation, duplicate and outside-window key fallback,
+1,000 deterministic differential updates, controlled-input focus and selection, delegated events,
+hydration, Strict Mode, React 18/19 compatibility, and unmount cleanup. The isolated exact-window
+fixture has a 13,744 B gzip compiler premium, 219 B above the previous result and inside the
+unchanged 256 B allowance. Sharing the LIS/focus mover with ordinary keyed reconciliation also
+reduces the other hinted keyed fixtures by up to 49 B gzip. The measured environment was Chrome
+145.0.7632.6, Node.js 23.11.0, and Apple M1 macOS arm64.
+
 ## Overlapping fresh-key exact-window replacement follow-up — 2026-09-01
 
 The full bracketed production-browser run changed the 10,000-row queued replacement workload to
