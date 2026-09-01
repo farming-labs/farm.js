@@ -683,9 +683,10 @@ async function measureTrial(browser, trial, compilerMode, port) {
         );
 
         const measureWindowReuse = async (action) => {
-          const rows = table.querySelectorAll("tbody tr");
+          const rows = [...table.querySelectorAll("tbody tr")];
+          const previousRows = new Set(rows);
           const before = rows[2_499];
-          const windowRows = [...rows].slice(2_500, 2_564);
+          const windowRows = rows.slice(2_500, 2_564);
           const after = rows[2_564];
           const retained = windowRows.slice(0, 48).reverse();
           const retired = windowRows.slice(48);
@@ -702,7 +703,7 @@ async function measureTrial(browser, trial, compilerMode, port) {
                   row.children[1]?.textContent?.endsWith(" retained"),
               ) &&
               retired.every((row) => !row.isConnected) &&
-              nextWindow.slice(48).every((row) => !windowRows.includes(row))
+              nextWindow.slice(48).every((row) => !previousRows.has(row))
             );
           });
         };
