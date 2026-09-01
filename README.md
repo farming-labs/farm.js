@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  Farm.js combines Vite's instant development experience with a purpose-built React Server Components renderer, secure Server Actions, typed app-directory routing, and production-ready deployment output.
+  Farm.js combines Vite's instant development experience with typed app-directory routing, secure Server Actions, streaming SSR, and production-ready deployment output. React is the default renderer, with first-class Preact, Solid, Vue, and Svelte support behind the same routing and server contracts.
 </p>
 
 <p align="center">
@@ -41,6 +41,8 @@
 | 🧩 **Flexible rendering**          | Choose streaming SSR, static generation, ISR, PPR, or deferred hydration islands route by route.                                                                                                |
 | 🛠️ **Full-stack primitives**       | Build with API routes, server functions, middleware, caching, KV storage, cron handlers, OpenAPI, and post-response work.                                                                       |
 | 🔌 **First-party integrations**    | Add authentication, billing, email, jobs, AI, API keys, databases, and provider-owned routes through one typed integration model.                                                               |
+| 🎭 **Renderer choice**             | React by default, with Preact, Solid, Vue, and Svelte renderers selected by one line of config — same routes, server functions, and integrations everywhere.                                    |
+| 🧪 **AOT React compiler**          | An experimental compiler turns eligible components into direct DOM updates that skip reconciliation (~6.8x faster keyed swaps, ~2x less CPU in the [benchmark](./benchmarks/compiler)), falling back to normal React whenever eligibility can't be proven. |
 | 🚀 **Production-ready output**     | Build deployable server and client output with Nitro-powered adapters and per-route runtime controls.                                                                                           |
 | 🎨 **Great defaults**              | Start with TypeScript, Tailwind CSS, sensible conventions, and a clean project structure—without assembling the framework yourself.                                                             |
 
@@ -319,7 +321,7 @@ export default function Counter() {
 
 ## 📚 Documentation
 
-Visit [farm.js.dev](https://farm.js.dev) for comprehensive documentation, guides, and API reference.
+Visit [farmjs.dev](https://farmjs.dev) for comprehensive documentation, guides, and API reference.
 
 ## 🏗️ Development
 
@@ -373,11 +375,12 @@ farm.js/
 │   ├── farm/              # Core framework
 │   ├── farm-cli/          # @farm.js/cli tools
 │   ├── create-farm-app/   # App creation tool
-│   └── farm-types/        # TypeScript definitions
+│   ├── farm-react/        # React renderer + AOT compiler
+│   └── farm-{preact,solid,vue,svelte}/  # Other renderers
 ├── examples/
 │   ├── basic/             # Basic example
-│   ├── with-database/     # Database integration
-│   └── e-commerce/        # E-commerce example
+│   ├── rsc-demo/          # Server components, actions, and queries
+│   └── stripe-integration/ # Typed integration usage
 ├── docs/                  # Documentation (Farm.js)
 ├── playground/            # Development testing
 └── tests/                 # Integration tests
@@ -396,9 +399,11 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 
 ## 🌟 Examples
 
-- **[Basic Example](./examples/basic)** - Simple Farm.js application
-- **[With Database](./examples/with-database)** - Database integration patterns
-- **[E-commerce](./examples/e-commerce)** - Full-featured online store
+- **[Basic Example](./examples/basic)** - Routing, boundaries, middleware, storage, and rendering modes in one app
+- **[RSC Demo](./examples/rsc-demo)** - Server components, server actions, and server queries
+- **[React Compiler](./examples/react-compiler)** - The experimental AOT compiler side by side with baseline React
+- **[Stripe Integration](./examples/stripe-integration)** - Typed billing integration with provider-owned routes
+- **[Renderers](./examples/solid-renderer)** - Preact, Solid, Vue, and Svelte apps on the same framework contracts
 
 ## 🔗 Ecosystem
 
@@ -408,7 +413,7 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 
 ## 📄 License
 
-MIT © [Farm.js Team](https://github.com/farm-js)
+MIT © [Farming Labs](https://github.com/farming-labs)
 
 ## 🙏 Acknowledgments
 
@@ -423,7 +428,7 @@ Farm.js is inspired by:
 
 <div align="center">
 
-**[Documentation](https://farm.js.dev)** • **[Examples](./examples)** • **[Contributing](CONTRIBUTING.md)**
+**[Documentation](https://farmjs.dev)** • **[Examples](./examples)** • **[Contributing](CONTRIBUTING.md)**
 
 Made with ❤️ by&ensp;<a href="https://www.farming-labs.dev"><img src="./.github/assets/farming-labs-mark.svg" alt="" height="18" align="center" />&nbsp;Farming Labs</a> team
 
