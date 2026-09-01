@@ -130,6 +130,15 @@ binding work, descriptors only for fresh rows, exact local LIS moves, preparatio
 DOM write, controlled-input focus and selection, current delegated event data, hydration, Strict
 Mode, cleanup, and 1,000 randomized differential updates.
 
+Variable-length local-key reuse has a separate 10,000-row gate. It grows one 64-row interval to 80
+rows while reversing and refreshing 48 retained keys and adding 32 fresh keys. The benchmark
+requires every retained DOM row to keep its identity, every retired row to disconnect, every fresh
+row to be globally new, and both surrounding anchors to remain attached after the untouched suffix
+shifts. Static and hybrid modes must remain at least 4x faster than React and 1.5x faster than the
+equivalent block-bodied compiled control. Package tests additionally cover shrinking windows,
+exact local LIS moves, atomic preparation, delegated event indexes, focused-input selection,
+Strict Mode hydration, and 1,000 randomized grow/shrink differential updates.
+
 Same-key exact-window refresh has a separate 10,000-row gate. The benchmark replaces a 64-row
 snapshot with 64 new objects carrying the same keys in the same order and changes one visible row,
 which isolates the avoided full-list key scan without hiding the required binding update. All 64
@@ -154,7 +163,7 @@ final union. The benchmark requires the 48 old rows to disconnect, both surround
 retain identity, both final labels to reach the DOM, and zero compiled owner executions. Static and
 hybrid modes must remain at least 4x faster than React and 1.5x faster than the equivalent
 block-bodied compiled control. Together with the existing position workloads, the compiler report
-must contain all twelve dashboard `keyedArrayPositionHints`. Package tests also cover disjoint and
+must contain all thirteen dashboard `keyedArrayPositionHints`. Package tests also cover disjoint and
 overlapping fresh-key commits, mixed same-key/fresh-key commits, atomic preparation,
 existing-key-move fallback, events, controlled-input selection, Strict Mode hydration, cleanup,
 and 1,000 differential overlapping updates.

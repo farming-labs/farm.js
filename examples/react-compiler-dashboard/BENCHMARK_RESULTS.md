@@ -2,6 +2,32 @@
 
 Date: 2026-08-29
 
+## Variable-length local-key window reuse follow-up — 2026-09-02
+
+The full bracketed production-browser run added a separate 10,000-row workload that grows one
+64-row window to 80 rows. The update reverses and refreshes 48 keys retained from that interval,
+retires 16 old keys, adds 32 globally fresh keys, and shifts the untouched suffix without
+recreating either surrounding anchor. Both compiler builds emitted all 13 expected
+`keyedArrayPositionHints` sites, produced zero owner executions, and passed every existing
+correctness, performance, persistence, and scalability gate without lowering a threshold.
+
+| Mode   | React median | Variable local window | Compiled control | vs React | vs control |
+| ------ | -----------: | --------------------: | ---------------: | -------: | ---------: |
+| Static |    114.75 ms |              15.90 ms |         31.90 ms |    7.22x |      2.01x |
+| Hybrid |    114.75 ms |              19.10 ms |         34.80 ms |    6.01x |      1.82x |
+
+The independent gate requires at least 4x versus React and 1.5x versus the equivalent block-bodied
+compiled control in both modes. Package tests separately grow a 4,096-row table from a 64-row
+window to 80 rows and shrink it to 40, requiring exact local LIS moves, retained DOM identity,
+fresh-row-only descriptor work, retired-row cleanup, and preserved surrounding anchors. Another
+1,000 deterministic randomized variable-length updates match normal React. Atomic preparation,
+outside-window and duplicate-key fallback, controlled-input focus and selection, delegated event
+indexes, hydration, Strict Mode, unmount cleanup, and packaged React 18.3.1/19.2.8 compatibility
+also pass. The isolated exact-window runtime grows by 13 B gzip to a 13,757 B compiler premium,
+inside the unchanged 256 B allowance; the compiler-selected core still removes 82.2% of the full
+compatibility runtime. The measured environment was Chrome 145.0.7632.6, Node.js 23.11.0, and
+Apple M1 macOS arm64.
+
 ## Mixed local-key exact-window replacement follow-up — 2026-09-01
 
 The full bracketed production-browser run added a separate 10,000-row workload for one fixed

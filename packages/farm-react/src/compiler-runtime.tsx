@@ -4978,75 +4978,80 @@ function reconcileCompilerKeyedArrayWindowReplace(
     return instances;
   }
 
-  if (update.insertedCount === update.removedCount) {
-    const incomingKeySet = new Set(incomingKeys);
-    if (incomingKeySet.size !== incomingKeys.length) return undefined;
+  const incomingKeySet = new Set(incomingKeys);
+  if (incomingKeySet.size !== incomingKeys.length) return undefined;
+  if (removed.some((instance) => incomingKeySet.has(instance.key))) {
     const removedByKey = new Map(
       removed.map((instance, offset) => [instance.key, { instance, offset }] as const),
     );
-    if (incomingKeys.some((key) => removedByKey.has(key))) {
-      const nextWindow: CompilerKeyedRowInstance[] = [];
-      const sequence: number[] = [];
-      const preparedBindings: Array<readonly CompilerPreparedKeyedRowBindingUpdate[] | undefined> =
-        [];
-      try {
-        for (let offset = 0; offset < update.insertedCount; offset += 1) {
-          const index = update.position + offset;
-          const item = incomingItems[offset];
-          const key = incomingKeys[offset];
-          const retained = removedByKey.get(key);
-          if (retained) {
-            const bindingUpdates = prepareKeyedRowBindingUpdates(
-              props,
-              retained.instance,
-              item,
-              index,
-            );
-            if (!bindingUpdates) return undefined;
-            nextWindow.push(retained.instance);
-            sequence.push(retained.offset);
-            preparedBindings.push(bindingUpdates);
-            continue;
-          }
-          // A key owned outside this exact window would duplicate or move a
-          // row across the proven boundary. Complete keyed reconciliation
-          // remains responsible for that case.
-          if (instances.has(key)) return undefined;
-          const descriptor = props.create(item, index);
-          nextWindow.push({
-            key,
-            element: createCompilerHostElement(root.ownerDocument, descriptor),
-            values: readKeyedRowBindingValues(props, item, index),
+    const nextWindow: CompilerKeyedRowInstance[] = [];
+    const sequence: number[] = [];
+    const preparedBindings: Array<readonly CompilerPreparedKeyedRowBindingUpdate[] | undefined> =
+      [];
+    try {
+      for (let offset = 0; offset < update.insertedCount; offset += 1) {
+        const index = update.position + offset;
+        const item = incomingItems[offset];
+        const key = incomingKeys[offset];
+        const retained = removedByKey.get(key);
+        if (retained) {
+          const bindingUpdates = prepareKeyedRowBindingUpdates(
+            props,
+            retained.instance,
             item,
             index,
-            conditionalValues: EMPTY_KEYED_ROW_CONDITIONAL_VALUES,
-          });
-          sequence.push(-1);
-          preparedBindings.push(undefined);
+          );
+          if (!bindingUpdates) return undefined;
+          nextWindow.push(retained.instance);
+          sequence.push(retained.offset);
+          preparedBindings.push(bindingUpdates);
+          continue;
         }
-      } catch {
-        return undefined;
+        // A key owned outside this exact window would duplicate or move a
+        // row across the proven boundary. Complete keyed reconciliation
+        // remains responsible for that case.
+        if (instances.has(key)) return undefined;
+        const descriptor = props.create(item, index);
+        nextWindow.push({
+          key,
+          element: createCompilerHostElement(root.ownerDocument, descriptor),
+          values: readKeyedRowBindingValues(props, item, index),
+          item,
+          index,
+          conditionalValues: EMPTY_KEYED_ROW_CONDITIONAL_VALUES,
+        });
+        sequence.push(-1);
+        preparedBindings.push(undefined);
       }
-
-      for (const instance of removed) {
-        if (incomingKeySet.has(instance.key)) continue;
-        instance.scope?.cleanup();
-        instance.element.remove();
-      }
-      for (let offset = 0; offset < nextWindow.length; offset += 1) {
-        const bindingUpdates = preparedBindings[offset];
-        if (bindingUpdates) {
-          const instance = nextWindow[offset];
-          applyPreparedKeyedRowBindingUpdates(props, instance, bindingUpdates);
-          instance.item = incomingItems[offset];
-          instance.index = update.position + offset;
-        }
-      }
-
-      reorderCompilerKeyedRows(root, nextWindow, sequence, anchor || null);
-      previousInstances.splice(update.position, update.removedCount, ...nextWindow);
-      return new Map(previousInstances.map((instance) => [instance.key, instance]));
+    } catch {
+      return undefined;
     }
+
+    for (const instance of removed) {
+      if (incomingKeySet.has(instance.key)) continue;
+      instance.scope?.cleanup();
+      instance.element.remove();
+    }
+    for (let offset = 0; offset < nextWindow.length; offset += 1) {
+      const bindingUpdates = preparedBindings[offset];
+      if (bindingUpdates) {
+        const instance = nextWindow[offset];
+        applyPreparedKeyedRowBindingUpdates(props, instance, bindingUpdates);
+        instance.item = incomingItems[offset];
+        instance.index = update.position + offset;
+      }
+    }
+
+    reorderCompilerKeyedRows(root, nextWindow, sequence, anchor || null);
+    previousInstances.splice(update.position, update.removedCount, ...nextWindow);
+    for (
+      let index = update.position + update.insertedCount;
+      index < previousInstances.length;
+      index += 1
+    ) {
+      previousInstances[index].index = index;
+    }
+    return new Map(previousInstances.map((instance) => [instance.key, instance]));
   }
 
   const knownKeys = new Set(instances.keys());

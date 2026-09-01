@@ -330,12 +330,13 @@ through one document fragment. It then removes only the replaced window. When th
 has the same length and the same keys in the same order, Farm prepares every binding read and
 changed DOM target across the complete window first, patches the existing rows in place, and
 updates the stored row objects used by later events. That path creates no descriptors or DOM rows,
-and preserves row identity, focus, and selection. A fixed-length window may instead reorder keys
-from inside its own removed interval and mix them with globally fresh keys. Farm prepares all
-reused binding updates, new descriptors, binding snapshots, and detached rows before the first DOM
-write. It removes only retired rows, preserves each reused row, batches adjacent new rows in a
-fragment, and applies LIS only to the reused part of that interval so it moves the fewest connected
-rows needed by the local permutation. Rows outside the interval are not rerendered or rebound.
+and preserves row identity, focus, and selection. A window may instead grow or shrink while it
+reorders keys from inside its own removed interval and mixes them with globally fresh keys. Farm
+prepares all reused binding updates, new descriptors, binding snapshots, and detached rows before
+the first DOM write. It removes only retired rows, preserves each reused row, batches adjacent new
+rows in a fragment, updates shifted suffix indexes, and applies LIS only to the reused part of that
+interval so it moves the fewest connected rows needed by the local permutation. Rows outside the
+interval are not rerendered or rebound.
 Multiple length-preserving same-key windows
 queued before one compiler flush compose into one atomic refresh. Fixed-length queued windows may
 mix same-key refreshes with globally new final keys, and both disjoint and overlapping windows are
@@ -350,9 +351,8 @@ collection-reading rows, custom methods, position expressions with user calls or
 runtime positions that are not safe integers, dynamic, zero, negative, or fractional removal
 counts, other `toSpliced()` forms, block-bodied updaters, unsafe incoming expressions, queued
 chains containing a structural window or unhinted intermediate update, existing keys moved from
-outside the removed interval, length-changing partially reused windows, duplicate final keys,
-nested or React-owned rows, and failed checks use complete keyed reconciliation before the fast
-path mutates the DOM.
+outside the removed interval, duplicate final keys, nested or React-owned rows, and failed checks
+use complete keyed reconciliation before the fast path mutates the DOM.
 Reports expose the site count as `keyedArrayPositionHints`. Batch insertion and exact-window
 replacement use progressively separate optional runtime capabilities, so existing single-position
 and batch-only bundles do not retain window validation or replacement code.
