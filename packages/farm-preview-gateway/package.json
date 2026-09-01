@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/preview-gateway",
-  "version": "0.1.0-beta.75",
+  "version": "0.1.0-beta.76",
   "description": "Farm.js preview gateway for Vercel-hosted instant preview URLs",
   "license": "MIT",
   "repository": {
