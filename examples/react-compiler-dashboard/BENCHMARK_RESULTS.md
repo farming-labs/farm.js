@@ -8,14 +8,14 @@ The full bracketed production-browser run added a separate 10,000-row workload f
 64-row window. The update reverses and changes 48 keys reused from inside that removed interval,
 retires 16 old keys, and inserts 16 globally new keys. Both compiler builds emitted all 12 expected
 `keyedArrayPositionHints` sites, retained all 48 reused DOM rows, disconnected all 16 retired rows,
-created all 16 fresh rows, preserved both surrounding anchors, produced zero owner executions, and
-passed every existing correctness, performance, persistence, and scalability gate without lowering
-a threshold.
+created all 16 fresh rows without borrowing any of the 10,000 pre-update DOM nodes, preserved both
+surrounding anchors, produced zero owner executions, and passed every existing correctness,
+performance, persistence, and scalability gate without lowering a threshold.
 
 | Mode   | React median | Mixed local window | Compiled control | vs React | vs control |
 | ------ | -----------: | -----------------: | ---------------: | -------: | ---------: |
-| Static |     75.15 ms |           10.60 ms |         23.90 ms |    7.09x |      2.25x |
-| Hybrid |     75.15 ms |           12.50 ms |         25.10 ms |    6.01x |      2.01x |
+| Static |     57.70 ms |           10.80 ms |         22.50 ms |    5.34x |      2.08x |
+| Hybrid |     57.70 ms |           10.80 ms |         23.10 ms |    5.34x |      2.14x |
 
 The independent gate requires at least 4x versus React and 1.5x versus the equivalent block-bodied
 compiled control in both modes. Package tests separately prove bounded work across 4,096 rows: 64
