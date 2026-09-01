@@ -68,6 +68,7 @@ function appendVary(headers: Headers, value: string): void {
         .map((item) => item.trim())
         .filter(Boolean)
     : [];
+  if (values.includes("*")) return;
   if (!values.some((item) => item.toLowerCase() === value.toLowerCase())) {
     values.push(value);
   }

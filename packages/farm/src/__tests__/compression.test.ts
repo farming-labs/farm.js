@@ -67,6 +67,20 @@ describe("compression plugin", () => {
     expect(await response.text()).toBe("identity");
   });
 
+  it("preserves a wildcard Vary value", async () => {
+    const manager = createManager();
+    const response = await manager.runRuntimeRequest(
+      new Request("https://farm.test/", {
+        headers: { "accept-encoding": "gzip" },
+      }),
+      () => new Response("wildcard", { headers: { vary: "*" } }),
+    );
+
+    expect(response.headers.get("content-encoding")).toBe("gzip");
+    expect(response.headers.get("vary")).toBe("*");
+    expect(gunzipSync(Buffer.from(await response.arrayBuffer())).toString()).toBe("wildcard");
+  });
+
   it("leaves existing encodings and streaming event responses untouched", async () => {
     const manager = createManager();
     const encoded = await manager.runRuntimeRequest(
