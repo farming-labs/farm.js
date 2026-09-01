@@ -158,7 +158,7 @@ describe("agent runtime proxy", () => {
       forwardedHeaders = new Headers(init?.headers);
       return new Response("ok", {
         headers: {
-          connection: "x-response-hop, x-response-second",
+          connection: "x-response-hop, invalid response token, x-response-second",
           "x-response-hop": "private",
           "x-response-second": "private",
         },
@@ -168,7 +168,7 @@ describe("agent runtime proxy", () => {
     const response = await proxyAgentRuntimeRequest(
       new Request("https://farm.test/agents/demo", {
         headers: {
-          connection: "x-request-hop, x-request-second",
+          connection: "x-request-hop, invalid request token, x-request-second",
           "x-request-hop": "private",
           "x-request-second": "private",
         },
