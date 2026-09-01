@@ -143,7 +143,7 @@ async function inspectBuild(compilerMode) {
       "The compiler build did not emit a keyed-array prepend hint.",
     );
     assert(
-      compilerReport.summary.keyedArrayPositionHints >= 12,
+      compilerReport.summary.keyedArrayPositionHints >= 13,
       "The compiler build did not emit the keyed-array exact-position hints.",
     );
     assert(
@@ -719,6 +719,47 @@ async function measureTrial(browser, trial, compilerMode, port) {
           async () =>
             measureWindowReuse(() =>
               tableButton("table-position-window-reuse-snapshot").click(),
+            ),
+        );
+
+        const measureWindowResizeReuse = async (action) => {
+          const rows = [...table.querySelectorAll("tbody tr")];
+          const previousRows = new Set(rows);
+          const before = rows[2_499];
+          const windowRows = rows.slice(2_500, 2_564);
+          const after = rows[2_564];
+          const retained = windowRows.slice(0, 48).reverse();
+          const retired = windowRows.slice(48);
+          await runTableAction(action, () => {
+            const nextRows = table.querySelectorAll("tbody tr");
+            const nextWindow = [...nextRows].slice(2_500, 2_580);
+            return (
+              rowCount() === 10_016 &&
+              nextRows[2_499] === before &&
+              nextRows[2_580] === after &&
+              retained.every(
+                (row, offset) =>
+                  nextWindow[offset] === row && row.children[1]?.textContent?.endsWith(" resized"),
+              ) &&
+              retired.every((row) => !row.isConnected) &&
+              nextWindow.slice(48).every((row) => !previousRows.has(row))
+            );
+          });
+        };
+
+        const tablePositionWindowResizeReuse = await measureTable(
+          async () => ensure10000(),
+          async () =>
+            measureWindowResizeReuse(() =>
+              tableButton("table-position-window-resize-reuse").click(),
+            ),
+        );
+
+        const tablePositionWindowResizeReuseSnapshot = await measureTable(
+          async () => ensure10000(),
+          async () =>
+            measureWindowResizeReuse(() =>
+              tableButton("table-position-window-resize-reuse-snapshot").click(),
             ),
         );
 
@@ -1384,6 +1425,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
             positionWindowReplaceSnapshot: tablePositionWindowReplaceSnapshot,
             positionWindowReuse: tablePositionWindowReuse,
             positionWindowReuseSnapshot: tablePositionWindowReuseSnapshot,
+            positionWindowResizeReuse: tablePositionWindowResizeReuse,
+            positionWindowResizeReuseSnapshot: tablePositionWindowResizeReuseSnapshot,
             positionWindowRefresh: tablePositionWindowRefresh,
             positionWindowRefreshQueued: tablePositionWindowRefreshQueued,
             positionWindowRefreshQueuedSnapshot: tablePositionWindowRefreshQueuedSnapshot,
@@ -1498,6 +1541,10 @@ async function measureTrial(browser, trial, compilerMode, port) {
         ),
         positionWindowReuse: timingSummary(result.table.positionWindowReuse),
         positionWindowReuseSnapshot: timingSummary(result.table.positionWindowReuseSnapshot),
+        positionWindowResizeReuse: timingSummary(result.table.positionWindowResizeReuse),
+        positionWindowResizeReuseSnapshot: timingSummary(
+          result.table.positionWindowResizeReuseSnapshot,
+        ),
         positionWindowRefresh: timingSummary(result.table.positionWindowRefresh),
         positionWindowRefreshQueued: timingSummary(result.table.positionWindowRefreshQueued),
         positionWindowRefreshQueuedSnapshot: timingSummary(
@@ -1608,6 +1655,8 @@ const tableMetrics = [
   "positionWindowReplaceSnapshot",
   "positionWindowReuse",
   "positionWindowReuseSnapshot",
+  "positionWindowResizeReuse",
+  "positionWindowResizeReuseSnapshot",
   "positionWindowRefresh",
   "positionWindowRefreshQueued",
   "positionWindowRefreshQueuedSnapshot",
@@ -1929,6 +1978,29 @@ const keyedWindowReuseRegressions = keyedWindowReuseResults.filter(
     speedup < keyedWindowReuseMinimumSpeedup ||
     !Number.isFinite(snapshotSpeedup) ||
     snapshotSpeedup < keyedWindowReuseMinimumSnapshotSpeedup,
+);
+// A variable-length exact window can retain and reorder keys from its own removed interval while
+// adding fresh rows and shifting the untouched suffix. Keep this separate from fixed-length reuse
+// so a fallback to complete list reconciliation cannot hide behind the existing gate.
+const keyedWindowResizeReuseMinimumSpeedup = 4;
+const keyedWindowResizeReuseMinimumSnapshotSpeedup = 1.5;
+const keyedWindowResizeReuseResults = ["static", "hybrid"].map((mode) => {
+  const reuseMedianMs = comparisons.table.positionWindowResizeReuse[mode].medianMs;
+  const snapshotMedianMs = comparisons.table.positionWindowResizeReuseSnapshot[mode].medianMs;
+  return {
+    mode,
+    reuseMedianMs,
+    snapshotMedianMs,
+    snapshotSpeedup: snapshotMedianMs / reuseMedianMs,
+    speedup: comparisons.table.positionWindowResizeReuse[`${mode}VsBaseline`].speedup,
+  };
+});
+const keyedWindowResizeReuseRegressions = keyedWindowResizeReuseResults.filter(
+  ({ snapshotSpeedup, speedup }) =>
+    !Number.isFinite(speedup) ||
+    speedup < keyedWindowResizeReuseMinimumSpeedup ||
+    !Number.isFinite(snapshotSpeedup) ||
+    snapshotSpeedup < keyedWindowResizeReuseMinimumSnapshotSpeedup,
 );
 // A same-key exact window should retain every row and patch only the changed bindings. Keep this
 // gate separate from fresh-key replacement so descriptor/DOM work cannot hide a refresh regression.
@@ -2275,6 +2347,7 @@ const passed =
   keyedBatchInsertRegressions.length === 0 &&
   keyedWindowReplaceRegressions.length === 0 &&
   keyedWindowReuseRegressions.length === 0 &&
+  keyedWindowResizeReuseRegressions.length === 0 &&
   keyedWindowRefreshRegressions.length === 0 &&
   keyedQueuedWindowRefreshRegressions.length === 0 &&
   keyedQueuedWindowReplaceRegressions.length === 0 &&
@@ -2351,6 +2424,13 @@ const report = {
     regressions: keyedWindowReuseRegressions,
     results: keyedWindowReuseResults,
     status: keyedWindowReuseRegressions.length === 0 ? "PASS" : "FAIL",
+  },
+  keyedWindowResizeReuseHintGate: {
+    minimumSnapshotSpeedup: keyedWindowResizeReuseMinimumSnapshotSpeedup,
+    minimumSpeedup: keyedWindowResizeReuseMinimumSpeedup,
+    regressions: keyedWindowResizeReuseRegressions,
+    results: keyedWindowResizeReuseResults,
+    status: keyedWindowResizeReuseRegressions.length === 0 ? "PASS" : "FAIL",
   },
   keyedWindowRefreshHintGate: {
     minimumSnapshotSpeedup: keyedWindowRefreshMinimumSnapshotSpeedup,

@@ -391,6 +391,48 @@ export function StandardTableBenchmark() {
           Reuse and reorder a 64-row runtime window (snapshot control)
         </button>
         <button
+          data-action="table-position-window-resize-reuse"
+          type="button"
+          onClick={() => {
+            const nextSeed = seed + 1;
+            const position = 2_500;
+            const retained = rows
+              .slice(position, position + 48)
+              .toReversed()
+              .map((row) => ({ ...row, label: `${row.label} resized` }));
+            const additions = buildRows(32, nextSeed);
+            const replacements = [...retained, ...additions];
+            setSeed(nextSeed);
+            setRows((current) => current.toSpliced(position, 64, ...replacements));
+            setOperation("grow and reuse a runtime window");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Grow and reuse a runtime window
+        </button>
+        <button
+          data-action="table-position-window-resize-reuse-snapshot"
+          type="button"
+          onClick={() => {
+            const nextSeed = seed + 1;
+            const position = 2_500;
+            const retained = rows
+              .slice(position, position + 48)
+              .toReversed()
+              .map((row) => ({ ...row, label: `${row.label} resized` }));
+            const additions = buildRows(32, nextSeed);
+            const replacements = [...retained, ...additions];
+            setSeed(nextSeed);
+            setRows((current) => {
+              return current.toSpliced(position, 64, ...replacements);
+            });
+            setOperation("grow and reuse a runtime window (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Grow and reuse a runtime window (snapshot control)
+        </button>
+        <button
           data-action="table-position-window-refresh"
           type="button"
           onClick={() => {
