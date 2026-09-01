@@ -42,10 +42,9 @@ function selectEncoding(header: string): SupportedEncoding | undefined {
   return brotli >= gzip ? "br" : "gzip";
 }
 
-function canCompress(request: Request, response: Response): boolean {
+function isCompressionEligible(request: Request, response: Response): boolean {
   if (
-    request.method === "HEAD" ||
-    !response.body ||
+    (request.method !== "HEAD" && !response.body) ||
     response.status === 204 ||
     response.status === 205 ||
     response.status === 304 ||
@@ -130,7 +129,9 @@ export function createCompressionPlugin({
 
     runtime: {
       after({ request, response, isProd }) {
-        if (!isProd || !canCompress(request, response)) return;
+        if (!isProd || !isCompressionEligible(request, response)) return;
+
+        if (request.method === "HEAD") return varyIdentityResponse(response);
 
         const encoding = selectEncoding(request.headers.get("accept-encoding") ?? "");
         if (!encoding) return varyIdentityResponse(response);

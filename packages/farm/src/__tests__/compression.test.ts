@@ -81,6 +81,27 @@ describe("compression plugin", () => {
     expect(gunzipSync(Buffer.from(await response.arrayBuffer())).toString()).toBe("wildcard");
   });
 
+  it("varies eligible HEAD responses without compressing them", async () => {
+    const manager = createManager();
+    const response = await manager.runRuntimeRequest(
+      new Request("https://farm.test/", {
+        method: "HEAD",
+        headers: { "accept-encoding": "gzip" },
+      }),
+      () =>
+        new Response(null, {
+          headers: {
+            "content-type": "text/plain",
+            vary: "Accept-Language",
+          },
+        }),
+    );
+
+    expect(response.body).toBeNull();
+    expect(response.headers.get("content-encoding")).toBeNull();
+    expect(response.headers.get("vary")).toBe("Accept-Language, Accept-Encoding");
+  });
+
   it("leaves existing encodings and streaming event responses untouched", async () => {
     const manager = createManager();
     const encoded = await manager.runRuntimeRequest(
