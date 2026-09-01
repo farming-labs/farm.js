@@ -11,6 +11,7 @@ import type {
 } from "../types";
 import type { MatchedRouteSlot, RouteManager } from "../routing/route-manager";
 import { logger, toRootRelativeUrlPath } from "../utils";
+import { collectDevStylesheetUrls } from "./dev-styles";
 import {
   composeFarmFullDocument,
   extractFarmFullDocument,
@@ -525,6 +526,20 @@ export class ServerRenderer {
         "data-farm-island-strategy": options.islandStrategy || "load",
       },
       pageElement,
+    );
+  }
+
+  /// Stylesheets the app imported through JS (fontsource packages, component
+  /// CSS) that the document must link alongside globals.css — see #658.
+  private collectDevStyleHrefs(): string[] {
+    const graph = this.viteServer?.moduleGraph;
+    if (!graph) return [];
+    return collectDevStylesheetUrls(graph.idToModuleMap.values());
+  }
+
+  private collectDevStyleLinks(): string[] {
+    return this.collectDevStyleHrefs().map(
+      (href) => `<link rel="stylesheet" href="${escapeHtmlAttribute(href)}">`,
     );
   }
 
@@ -2058,6 +2073,10 @@ export class ServerRenderer {
             tag: "link",
             attrs: { rel: "stylesheet", href: "/src/app/globals.css" },
           },
+          ...this.collectDevStyleHrefs().map((href) => ({
+            tag: "link",
+            attrs: { rel: "stylesheet", href },
+          })),
         ],
       };
 
@@ -2176,6 +2195,7 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
             rendererHead,
             renderFarmFontDevHead(this.config.root || process.cwd()),
             `<link rel="stylesheet" href="/src/app/globals.css">`,
+            ...this.collectDevStyleLinks(),
             `<script type="module" src="/@vite/client"></script>`,
             rendererHydrationScript,
             bootstrapScript,
@@ -2199,7 +2219,9 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
   ${hasFavicon ? "" : '<link rel="icon" href="data:,">'}
   ${documentTitleTag}${metaTags}${alternateTags}${rendererHead ? `\n  ${rendererHead}` : ""}
   ${renderFarmFontDevHead(this.config.root || process.cwd())}
-  <link rel="stylesheet" href="/src/app/globals.css">
+  <link rel="stylesheet" href="/src/app/globals.css">${this.collectDevStyleLinks()
+    .map((l) => `\n  ${l}`)
+    .join("")}
   <script type="module" src="/@vite/client"></script>
   ${rendererHydrationScript}
   ${bootstrapScript}
@@ -2296,6 +2318,10 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
             tag: "link",
             attrs: { rel: "stylesheet", href: "/src/app/globals.css" },
           },
+          ...this.collectDevStyleHrefs().map((href) => ({
+            tag: "link",
+            attrs: { rel: "stylesheet", href },
+          })),
         ],
       };
 
@@ -2407,6 +2433,7 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
         { style: { display: "contents" } },
         element,
       );
+      const devStyleLinks = this.collectDevStyleLinks();
       const { pipe } = renderToPipeableStream(streamRoot, {
         onShellReady() {
           const shellReadyMs = Date.now() - streamStartTime;
@@ -2430,7 +2457,9 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
   ${hasFavicon ? "" : '<link rel="icon" href="data:,">'}
   <title>${title}</title>${metaTags}${i18nAlternateTags}
   ${fontHead}
-  <link rel="stylesheet" href="/src/app/globals.css" />
+  <link rel="stylesheet" href="/src/app/globals.css" />${devStyleLinks
+    .map((l) => `\n  ${l}`)
+    .join("")}
   <script type="module" src="/@vite/client"></script>
   ${propsScript}
   ${hydrationClickQueueScript}
@@ -2714,6 +2743,7 @@ ${i18nSnapshot ? `window.__FARM_I18N__ = ${serializeInlineValue(i18nSnapshot)};`
           alternateLinks,
           fontHead,
           `<link rel="stylesheet" href="/src/app/globals.css" />`,
+          ...this.collectDevStyleLinks(),
           `<script type="module" src="/@vite/client"></script>`,
           rendererHydrationScript,
           integrationManifestScript,
@@ -2736,7 +2766,9 @@ ${i18nSnapshot ? `window.__FARM_I18N__ = ${serializeInlineValue(i18nSnapshot)};`
   <link rel="icon" href="data:,">
   <title>${escapeHtmlAttribute(documentTitle)}</title>${alternateLinks}
   ${fontHead}
-  <link rel="stylesheet" href="/src/app/globals.css" />
+  <link rel="stylesheet" href="/src/app/globals.css" />${this.collectDevStyleLinks()
+    .map((l) => `\n  ${l}`)
+    .join("")}
   <script type="module" src="/@vite/client"></script>
   ${rendererHydrationScript}
   ${integrationManifestScript}
