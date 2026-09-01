@@ -42,10 +42,9 @@ function selectEncoding(header: string): SupportedEncoding | undefined {
   return brotli >= gzip ? "br" : "gzip";
 }
 
-function canCompress(request: Request, response: Response): boolean {
+function isCompressionEligible(request: Request, response: Response): boolean {
   if (
-    request.method === "HEAD" ||
-    !response.body ||
+    (request.method !== "HEAD" && !response.body) ||
     response.status === 204 ||
     response.status === 205 ||
     response.status === 304 ||
@@ -68,6 +67,7 @@ function appendVary(headers: Headers, value: string): void {
         .map((item) => item.trim())
         .filter(Boolean)
     : [];
+  if (values.includes("*")) return;
   if (!values.some((item) => item.toLowerCase() === value.toLowerCase())) {
     values.push(value);
   }
@@ -97,6 +97,17 @@ function compressResponse(response: Response, encoding: SupportedEncoding): Resp
   });
 }
 
+function varyIdentityResponse(response: Response): Response {
+  const headers = new Headers(response.headers);
+  appendVary(headers, "Accept-Encoding");
+
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 export function createCompressionPlugin({
   beforeRequest: overrideBeforeRequest,
   afterResponse: overrideAfterResponse,
@@ -118,10 +129,12 @@ export function createCompressionPlugin({
 
     runtime: {
       after({ request, response, isProd }) {
-        if (!isProd || !canCompress(request, response)) return;
+        if (!isProd || !isCompressionEligible(request, response)) return;
+
+        if (request.method === "HEAD") return varyIdentityResponse(response);
 
         const encoding = selectEncoding(request.headers.get("accept-encoding") ?? "");
-        if (!encoding) return;
+        if (!encoding) return varyIdentityResponse(response);
         return compressResponse(response, encoding);
       },
     },
