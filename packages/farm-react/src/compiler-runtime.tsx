@@ -4980,10 +4980,10 @@ function reconcileCompilerKeyedArrayWindowReplace(
 
   const incomingKeySet = new Set(incomingKeys);
   if (incomingKeySet.size !== incomingKeys.length) return undefined;
-  const removedByKey = new Map(
-    removed.map((instance, offset) => [instance.key, { instance, offset }] as const),
-  );
-  if (incomingKeys.some((key) => removedByKey.has(key))) {
+  if (removed.some((instance) => incomingKeySet.has(instance.key))) {
+    const removedByKey = new Map(
+      removed.map((instance, offset) => [instance.key, { instance, offset }] as const),
+    );
     const nextWindow: CompilerKeyedRowInstance[] = [];
     const sequence: number[] = [];
     const preparedBindings: Array<readonly CompilerPreparedKeyedRowBindingUpdate[] | undefined> =

@@ -682,7 +682,10 @@ async function measureTrial(browser, trial, compilerMode, port) {
           },
         );
 
-        const measureWindowReuse = async (action) => {
+        const measureWindowReuse = async (
+          action,
+          { expectedRows, windowEnd, afterIndex, labelSuffix },
+        ) => {
           const rows = [...table.querySelectorAll("tbody tr")];
           const previousRows = new Set(rows);
           const before = rows[2_499];
@@ -692,15 +695,15 @@ async function measureTrial(browser, trial, compilerMode, port) {
           const retired = windowRows.slice(48);
           await runTableAction(action, () => {
             const nextRows = table.querySelectorAll("tbody tr");
-            const nextWindow = [...nextRows].slice(2_500, 2_564);
+            const nextWindow = [...nextRows].slice(2_500, windowEnd);
             return (
-              rowCount() === 10_000 &&
+              rowCount() === expectedRows &&
               nextRows[2_499] === before &&
-              nextRows[2_564] === after &&
+              nextRows[afterIndex] === after &&
               retained.every(
                 (row, offset) =>
                   nextWindow[offset] === row &&
-                  row.children[1]?.textContent?.endsWith(" retained"),
+                  row.children[1]?.textContent?.endsWith(labelSuffix),
               ) &&
               retired.every((row) => !row.isConnected) &&
               nextWindow.slice(48).every((row) => !previousRows.has(row))
@@ -711,55 +714,53 @@ async function measureTrial(browser, trial, compilerMode, port) {
         const tablePositionWindowReuse = await measureTable(
           async () => ensure10000(),
           async () =>
-            measureWindowReuse(() => tableButton("table-position-window-reuse").click()),
+            measureWindowReuse(() => tableButton("table-position-window-reuse").click(), {
+              expectedRows: 10_000,
+              windowEnd: 2_564,
+              afterIndex: 2_564,
+              labelSuffix: " retained",
+            }),
         );
 
         const tablePositionWindowReuseSnapshot = await measureTable(
           async () => ensure10000(),
           async () =>
-            measureWindowReuse(() =>
-              tableButton("table-position-window-reuse-snapshot").click(),
+            measureWindowReuse(
+              () => tableButton("table-position-window-reuse-snapshot").click(),
+              {
+                expectedRows: 10_000,
+                windowEnd: 2_564,
+                afterIndex: 2_564,
+                labelSuffix: " retained",
+              },
             ),
         );
-
-        const measureWindowResizeReuse = async (action) => {
-          const rows = [...table.querySelectorAll("tbody tr")];
-          const previousRows = new Set(rows);
-          const before = rows[2_499];
-          const windowRows = rows.slice(2_500, 2_564);
-          const after = rows[2_564];
-          const retained = windowRows.slice(0, 48).reverse();
-          const retired = windowRows.slice(48);
-          await runTableAction(action, () => {
-            const nextRows = table.querySelectorAll("tbody tr");
-            const nextWindow = [...nextRows].slice(2_500, 2_580);
-            return (
-              rowCount() === 10_016 &&
-              nextRows[2_499] === before &&
-              nextRows[2_580] === after &&
-              retained.every(
-                (row, offset) =>
-                  nextWindow[offset] === row && row.children[1]?.textContent?.endsWith(" resized"),
-              ) &&
-              retired.every((row) => !row.isConnected) &&
-              nextWindow.slice(48).every((row) => !previousRows.has(row))
-            );
-          });
-        };
 
         const tablePositionWindowResizeReuse = await measureTable(
           async () => ensure10000(),
           async () =>
-            measureWindowResizeReuse(() =>
-              tableButton("table-position-window-resize-reuse").click(),
+            measureWindowReuse(
+              () => tableButton("table-position-window-resize-reuse").click(),
+              {
+                expectedRows: 10_016,
+                windowEnd: 2_580,
+                afterIndex: 2_580,
+                labelSuffix: " resized",
+              },
             ),
         );
 
         const tablePositionWindowResizeReuseSnapshot = await measureTable(
           async () => ensure10000(),
           async () =>
-            measureWindowResizeReuse(() =>
-              tableButton("table-position-window-resize-reuse-snapshot").click(),
+            measureWindowReuse(
+              () => tableButton("table-position-window-resize-reuse-snapshot").click(),
+              {
+                expectedRows: 10_016,
+                windowEnd: 2_580,
+                afterIndex: 2_580,
+                labelSuffix: " resized",
+              },
             ),
         );
 

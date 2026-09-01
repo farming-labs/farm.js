@@ -163,7 +163,7 @@ final union. The benchmark requires the 48 old rows to disconnect, both surround
 retain identity, both final labels to reach the DOM, and zero compiled owner executions. Static and
 hybrid modes must remain at least 4x faster than React and 1.5x faster than the equivalent
 block-bodied compiled control. Together with the existing position workloads, the compiler report
-must contain all twelve dashboard `keyedArrayPositionHints`. Package tests also cover disjoint and
+must contain all thirteen dashboard `keyedArrayPositionHints`. Package tests also cover disjoint and
 overlapping fresh-key commits, mixed same-key/fresh-key commits, atomic preparation,
 existing-key-move fallback, events, controlled-input selection, Strict Mode hydration, cleanup,
 and 1,000 differential overlapping updates.
