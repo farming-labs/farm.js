@@ -152,6 +152,40 @@ describe("agent runtime proxy", () => {
     expect(await response.text()).toBe("POST:hello:done");
   });
 
+  it("removes headers named by Connection in both proxy directions", async () => {
+    let forwardedHeaders: Headers | undefined;
+    const fetch = async (_input: string | URL | Request, init?: RequestInit) => {
+      forwardedHeaders = new Headers(init?.headers);
+      return new Response("ok", {
+        headers: {
+          connection: "x-response-hop, x-response-second",
+          "x-response-hop": "private",
+          "x-response-second": "private",
+        },
+      });
+    };
+
+    const response = await proxyAgentRuntimeRequest(
+      new Request("https://farm.test/agents/demo", {
+        headers: {
+          connection: "x-request-hop, x-request-second",
+          "x-request-hop": "private",
+          "x-request-second": "private",
+        },
+      }),
+      "https://runtime.test",
+      { fetch },
+    );
+
+    expect(response.status).toBe(200);
+    expect(forwardedHeaders?.get("connection")).toBeNull();
+    expect(forwardedHeaders?.get("x-request-hop")).toBeNull();
+    expect(forwardedHeaders?.get("x-request-second")).toBeNull();
+    expect(response.headers.get("connection")).toBeNull();
+    expect(response.headers.get("x-response-hop")).toBeNull();
+    expect(response.headers.get("x-response-second")).toBeNull();
+  });
+
   it("rewrites upstream redirects and sanitizes connection failures", async () => {
     const server = createServer((_request, response) => {
       response.writeHead(302, { location: "/agents/next" });

@@ -27,6 +27,7 @@ const HOP_BY_HOP_HEADERS = [
   "transfer-encoding",
   "upgrade",
 ] as const;
+const HTTP_HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 
 export interface FarmAgentRuntimeInstance {
   readonly provider: string;
@@ -525,6 +526,16 @@ function createProxyRequestHeaders(input: Headers, incomingUrl: URL): Headers {
 }
 
 function removeHopByHopHeaders(headers: Headers): void {
+  const connection = headers.get("connection");
+  if (connection) {
+    for (const value of connection.split(",")) {
+      const header = value.trim();
+      if (HTTP_HEADER_NAME.test(header)) {
+        headers.delete(header);
+      }
+    }
+  }
+
   for (const header of HOP_BY_HOP_HEADERS) {
     headers.delete(header);
   }
