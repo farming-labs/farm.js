@@ -525,6 +525,14 @@ function createProxyRequestHeaders(input: Headers, incomingUrl: URL): Headers {
 }
 
 function removeHopByHopHeaders(headers: Headers): void {
+  const connectionOptions = headers.get("connection")?.split(",") ?? [];
+  for (const option of connectionOptions) {
+    const header = option.trim();
+    if (/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(header)) {
+      headers.delete(header);
+    }
+  }
+
   for (const header of HOP_BY_HOP_HEADERS) {
     headers.delete(header);
   }
