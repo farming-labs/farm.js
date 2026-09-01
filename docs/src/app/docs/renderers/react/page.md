@@ -1068,15 +1068,21 @@ prepared. If the incoming interval has the same length and exactly the same keys
 Farm first evaluates all keys and binding snapshots and resolves every changed target across the
 complete interval. It then patches only changed bindings in place and updates each stored row
 object, so later delegated or cached handlers observe the latest data. No descriptor or DOM row is
-created, and every row keeps its identity, focus, and text selection. Multiple length-preserving
+created, and every row keeps its identity, focus, and text selection. A fixed-length window may
+instead reorder keys from inside its own removed interval and mix them with globally fresh keys.
+Farm prepares all reused binding updates, new descriptors, binding snapshots, and detached rows
+before the first DOM write. It removes only retired rows, preserves each reused row, batches
+adjacent new rows in a fragment, and applies LIS only to the reused part of that interval so it
+moves the fewest connected rows needed by the local permutation. Rows outside the interval are not
+rerendered or rebound. Multiple length-preserving
 same-key windows queued before one compiler flush compose into one atomic refresh. Fixed-length
 queued windows may mix same-key rows with globally new final keys, and both disjoint and
 overlapping windows are supported. An overlapping position uses the last queued value;
 intermediate identities are never mounted. Farm validates the complete chain and final key set,
 then prepares every touched key, binding value, DOM target, new descriptor, binding snapshot, and
 disconnected DOM row before the first write. It patches same-key positions and swaps only final
-fresh-key positions. Untouched rows retain their identity. Reordered, partially reused, or
-duplicate final keys take complete
+fresh-key positions. Untouched rows retain their identity. Duplicate final keys, keys reused from
+outside a single removed interval, and length-changing partially reused windows take complete
 reconciliation before fast-path mutation. A single insertion
 creates one row at that position. A removal cleans up and removes only the known row or contiguous
 range while preserving every
@@ -1088,8 +1094,9 @@ The proof requires compiler-owned host rows whose render and key do not observe 
 Effectful position expressions, runtime values that are fractional or otherwise not safe integers,
 dynamic, zero, negative, or fractional removal counts, other `toSpliced()` shapes, block-bodied
 updaters, unsafe incoming expressions, custom methods, queued chains containing a structural
-window or unhinted intermediate update, an existing key moved from another position, duplicate or
-partially reused final keys, collection-reading bindings, React-owned rows, nested host blocks, row
+window or unhinted intermediate update, an existing key moved from outside the removed interval,
+duplicate or length-changing partially reused final keys, collection-reading bindings, React-owned
+rows, nested host blocks, row
 conditionals, unrelated dirty dependencies, and failed runtime checks keep complete keyed
 reconciliation.
 Negative safe-integer positions and counts larger than the remaining suffix use the native
@@ -1978,8 +1985,11 @@ The package and example test suites verify more than generated code:
   clamping, unsafe runtime positions and counts, custom methods, queued updates,
   collection-reading rows, StrictMode hydration, and cleanup; targeted window tests additionally
   require fresh-key work to equal only the incoming window and a 4,096-row same-key refresh to
-  perform zero descriptor creation while preserving all 64 refreshed DOM rows; they also cover
-  atomic binding preparation, empty spreads, reordered and duplicate key fallback, latest delegated
+  perform zero descriptor creation while preserving all 64 refreshed DOM rows; a 4,096-row mixed
+  window reuses and reorders 48 keyed rows, creates only 16 descriptors, evaluates only the 64
+  local keys and bindings, and performs the exact 47 local LIS moves plus one fresh-row fragment;
+  another 1,000 randomized mixed local-window updates match normal React; tests also cover atomic
+  binding preparation, empty spreads, duplicate and outside-window key fallback, latest delegated
   event data, focus, selection, hydration, Strict Mode, and queued structural fallback; another
   1,000 deterministic queued same-key window refreshes match normal React while disjoint and
   overlapping targeted tests preserve row identity and perform no descriptor work; 1,000 queued
@@ -2018,8 +2028,9 @@ The package and example test suites verify more than generated code:
   preserves the keyed-update speedup floor, checks that scalar selection, Set membership, and Map
   lookups remain key-directed at scale, compares dense hinted Set/Map updates with equivalent
   compiled snapshot controls, requires separate single-row and contiguous-range removal speedup
-  floors, and passes DOM correctness, React-relative regression, direct-delta, and normalized
-  scalability gates;
+  floors, requires a mixed local-window reuse/reorder gate to remain at least 4× faster than React
+  and 1.5× faster than its compiled snapshot control, and passes DOM correctness, React-relative
+  regression, direct-delta, and normalized scalability gates;
 - the public `List` renders iterable and nullish collections correctly with the compiler off;
 - the packaged runtime, including a keyed-range component root, editable and interactive keyed-row
   events, row-local conditions, reorders, identity, selection, and hydration, is exercised
