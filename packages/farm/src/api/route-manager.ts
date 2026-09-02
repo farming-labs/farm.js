@@ -41,6 +41,15 @@ export interface APIRouteHandlerOptions {
   throwOnError?: boolean;
 }
 
+export class APIRouteConflictError extends Error {
+  constructor(routePath: string, method: string, existingFile: string, conflictingFile: string) {
+    super(
+      `Duplicate API route for ${method.toUpperCase()} ${routePath}: ${existingFile} conflicts with ${conflictingFile}`,
+    );
+    this.name = "APIRouteConflictError";
+  }
+}
+
 export const API_ROUTE_METHODS = [
   "GET",
   "HEAD",
@@ -54,6 +63,8 @@ export const API_ROUTE_METHODS = [
 
 export class APIRouteManager {
   private routes: Map<string, APIRoute> = new Map();
+  private endpointSources: Map<string, Map<string, { appDir: string; filePath: string }>> =
+    new Map();
   private viteServer?: ViteDevServer;
   private appDirs: string[];
   private throwOnLoadError: boolean;
@@ -78,22 +89,31 @@ export class APIRouteManager {
    * Discover route.ts files in /app/api and explicit endpoints in root routes.ts
    */
   async discoverRoutes(): Promise<void> {
-    this.routes.clear();
+    const previousRoutes = this.routes;
+    const previousEndpointSources = this.endpointSources;
+    this.routes = new Map();
+    this.endpointSources = new Map();
 
-    for (const appDir of this.appDirs) {
-      const apiDir = path.join(appDir, "api");
-      let routeFiles: string[] = [];
+    try {
+      for (const appDir of this.appDirs) {
+        const apiDir = path.join(appDir, "api");
+        let routeFiles: string[] = [];
 
-      if (fs.existsSync(apiDir)) {
-        routeFiles = this.findRouteFiles(apiDir);
+        if (fs.existsSync(apiDir)) {
+          routeFiles = this.findRouteFiles(apiDir);
+        }
+
+        for (const filePath of routeFiles) {
+          await this.loadRoute(filePath, appDir);
+        }
+
+        await this.loadRootRoutes(appDir);
+        await this.loadProgrammaticApiRoutes(appDir);
       }
-
-      for (const filePath of routeFiles) {
-        await this.loadRoute(filePath, appDir);
-      }
-
-      await this.loadRootRoutes(appDir);
-      await this.loadProgrammaticApiRoutes(appDir);
+    } catch (error) {
+      this.routes = previousRoutes;
+      this.endpointSources = previousEndpointSources;
+      throw error;
     }
 
     if (process.env.FARM_VERBOSE) {
@@ -153,17 +173,38 @@ export class APIRouteManager {
       }
 
       if (availableMethods.length > 0) {
+        const existingSources = this.endpointSources.get(routePath);
+        if (existingSources) {
+          for (const method of availableMethods) {
+            const existingSource = existingSources.get(method);
+            if (existingSource?.appDir === appDir) {
+              throw new APIRouteConflictError(routePath, method, existingSource.filePath, filePath);
+            }
+          }
+        }
+
         const runtimeConfig = normalizeFarmRouteRuntimeConfig(
           getFarmRouteRuntimeConfig(routeModule),
           `API route "${routePath}"`,
         );
+        const existingRoute = this.routes.get(routePath);
+        const mergedMethods = existingRoute ? [...existingRoute.methods] : [];
+        for (const method of availableMethods) {
+          if (!mergedMethods.includes(method)) mergedMethods.push(method);
+        }
         this.routes.set(routePath, {
+          ...existingRoute,
           path: routePath,
           filePath,
-          methods: availableMethods,
-          endpoints,
+          methods: mergedMethods,
+          endpoints: { ...existingRoute?.endpoints, ...endpoints },
           ...runtimeConfig,
         });
+        const nextSources = new Map(existingSources);
+        for (const method of availableMethods) {
+          nextSources.set(method, { appDir, filePath });
+        }
+        this.endpointSources.set(routePath, nextSources);
       }
     } catch (error) {
       this.handleLoadError(`Error loading route ${filePath}`, error);
@@ -189,7 +230,7 @@ export class APIRouteManager {
         }
 
         const method = String(endpoint.__method || "GET").toUpperCase();
-        this.addEndpoint(endpoint.__path, routesFile, method, endpoint);
+        this.addEndpoint(endpoint.__path, routesFile, method, endpoint, appDir);
       }
     } catch (error) {
       this.handleLoadError(`Error loading root API routes ${routesFile}`, error);
@@ -213,7 +254,7 @@ export class APIRouteManager {
 
         for (const definition of manifest.routes) {
           if (definition.kind !== "api") continue;
-          this.addProgrammaticApiRoute(routeFile, definition);
+          this.addProgrammaticApiRoute(routeFile, definition, appDir);
         }
       } catch (error) {
         this.handleLoadError(`Error loading programmatic API routes ${routeFile}`, error);
@@ -223,7 +264,7 @@ export class APIRouteManager {
 
   private handleLoadError(message: string, error: unknown): void {
     logger.error(`${message}: ${error}`);
-    if (this.throwOnLoadError) {
+    if (this.throwOnLoadError || error instanceof APIRouteConflictError) {
       throw error;
     }
   }
@@ -264,10 +305,21 @@ export class APIRouteManager {
     filePath: string,
     method: string,
     endpoint: any,
+    appDir: string,
     runtimeConfig: FarmRouteRuntimeConfig = {},
   ): void {
     const normalizedMethod = method.toUpperCase();
     const existingRoute = this.routes.get(routePath);
+    const existingSource = this.endpointSources.get(routePath)?.get(normalizedMethod);
+
+    if (existingSource?.appDir === appDir) {
+      throw new APIRouteConflictError(
+        routePath,
+        normalizedMethod,
+        existingSource.filePath,
+        filePath,
+      );
+    }
 
     if (existingRoute) {
       if (!existingRoute.methods.includes(normalizedMethod)) {
@@ -275,6 +327,9 @@ export class APIRouteManager {
       }
       existingRoute.endpoints[normalizedMethod] = endpoint;
       Object.assign(existingRoute, runtimeConfig);
+      const sources = this.endpointSources.get(routePath) ?? new Map();
+      sources.set(normalizedMethod, { appDir, filePath });
+      this.endpointSources.set(routePath, sources);
       return;
     }
 
@@ -285,14 +340,19 @@ export class APIRouteManager {
       endpoints: { [normalizedMethod]: endpoint },
       ...runtimeConfig,
     });
+    this.endpointSources.set(routePath, new Map([[normalizedMethod, { appDir, filePath }]]));
   }
 
-  private addProgrammaticApiRoute(filePath: string, route: ProgrammaticApiRoute): void {
+  private addProgrammaticApiRoute(
+    filePath: string,
+    route: ProgrammaticApiRoute,
+    appDir: string,
+  ): void {
     const modulePath = createProgrammaticRouteModuleId(filePath, "api", route.path);
     const runtimeConfig = normalizeFarmRouteRuntimeConfig(route, `API route "${route.path}"`);
     for (const [method, endpoint] of Object.entries(route.methods)) {
       if (endpoint) {
-        this.addEndpoint(route.path, modulePath, method, endpoint, runtimeConfig);
+        this.addEndpoint(route.path, modulePath, method, endpoint, appDir, runtimeConfig);
       }
     }
   }
