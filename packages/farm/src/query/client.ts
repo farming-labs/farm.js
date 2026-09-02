@@ -55,6 +55,72 @@ const getCurrentSearchParams = (): URLSearchParams => {
 
 const throttleTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+const compareStructuredValues = (
+  current: unknown,
+  next: unknown,
+  seen = new WeakMap<object, object>(),
+): boolean | undefined => {
+  if (Object.is(current, next)) return true;
+  if (current === null || next === null || typeof current !== typeof next) return false;
+  if (typeof current !== "object" || typeof next !== "object") return false;
+  if (current instanceof Date || next instanceof Date) {
+    return current instanceof Date && next instanceof Date && current.getTime() === next.getTime();
+  }
+  if (Array.isArray(current) || Array.isArray(next)) {
+    if (!Array.isArray(current) || !Array.isArray(next) || current.length !== next.length) {
+      return false;
+    }
+    const knownNext = seen.get(current);
+    if (knownNext) return knownNext === next;
+    seen.set(current, next);
+    for (let index = 0; index < current.length; index++) {
+      const equal = compareStructuredValues(current[index], next[index], seen);
+      if (equal !== true) return equal;
+    }
+    return true;
+  }
+
+  const currentPrototype = Object.getPrototypeOf(current);
+  const nextPrototype = Object.getPrototypeOf(next);
+  if (currentPrototype !== nextPrototype) return false;
+  if (currentPrototype !== Object.prototype && currentPrototype !== null) return undefined;
+
+  const knownNext = seen.get(current);
+  if (knownNext) return knownNext === next;
+  seen.set(current, next);
+
+  const currentKeys = Object.keys(current);
+  const nextKeys = Object.keys(next);
+  if (
+    currentKeys.length !== nextKeys.length ||
+    currentKeys.some((key) => !Object.prototype.hasOwnProperty.call(next, key))
+  ) {
+    return false;
+  }
+  for (const key of currentKeys) {
+    const equal = compareStructuredValues(
+      (current as Record<string, unknown>)[key],
+      (next as Record<string, unknown>)[key],
+      seen,
+    );
+    if (equal !== true) return equal;
+  }
+  return true;
+};
+
+const areParsedValuesEqual = <T>(parser: Parser<T>, current: T | null, next: T | null) => {
+  if (Object.is(current, next)) return true;
+  const structuredResult = compareStructuredValues(current, next);
+  if (structuredResult === false) return false;
+  if (current === null || next === null) return false;
+
+  try {
+    return parser.serialize(current) === parser.serialize(next);
+  } catch {
+    return structuredResult === true;
+  }
+};
+
 const applyChange = (
   searchParams: URLSearchParams,
   updates: Record<string, string | null>,
@@ -178,6 +244,7 @@ export function useQueryState<TParser extends Parser<any>>(
   });
 
   const stateRef = useRef(state);
+  const stateKeyRef = useRef(key);
   const isInternalUpdateRef = useRef(false);
   stateRef.current = state;
 
@@ -208,7 +275,9 @@ export function useQueryState<TParser extends Parser<any>>(
       const searchParams = getCurrentSearchParams();
       const value = searchParams.get(key);
       const parsed = parser.parse(value ?? "");
-      if (!Object.is(stateRef.current, parsed)) {
+      const sourceChanged = stateKeyRef.current !== key;
+      stateKeyRef.current = key;
+      if (sourceChanged || !areParsedValuesEqual(parser, stateRef.current, parsed)) {
         setState(parsed);
         stateRef.current = parsed;
       }
@@ -221,7 +290,7 @@ export function useQueryState<TParser extends Parser<any>>(
 
       const value = searchParams.get(key);
       const parsed = parser.parse(value ?? "");
-      if (!Object.is(stateRef.current, parsed)) {
+      if (!areParsedValuesEqual(parser, stateRef.current, parsed)) {
         setState(parsed);
         stateRef.current = parsed;
       }
@@ -232,7 +301,7 @@ export function useQueryState<TParser extends Parser<any>>(
         return;
       }
 
-      if (!Object.is(stateRef.current, payload.state)) {
+      if (!areParsedValuesEqual(parser, stateRef.current, payload.state)) {
         setState(payload.state);
         stateRef.current = payload.state;
       }
@@ -242,6 +311,7 @@ export function useQueryState<TParser extends Parser<any>>(
     // popstate, so listen through the shared history channel (real
     // back/forward events included). Self-updates no-op via the Object.is
     // comparison above.
+    onPopState();
     const unsubscribeHistory = subscribeHistoryChange(onPopState);
     emitter.on("update", onEmitterUpdate);
     emitter.onKey(key, onKeyUpdate);
@@ -264,7 +334,7 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
   (updates: Partial<{ [K in keyof T]: ReturnType<T[K]["parse"]> | null }>) => void,
 ] {
   const keys = Object.keys(parsers);
-  const watchKeys = keys.join("&");
+  const watchKeys = JSON.stringify(keys);
 
   const [state, setState] = useState<{ [K in keyof T]: ReturnType<T[K]["parse"]> }>(() => {
     const searchParams = getCurrentSearchParams();
@@ -312,16 +382,19 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    const applyChange = (searchParams: URLSearchParams, fromEmitter = false) => {
+    const applyChange = (searchParams: URLSearchParams) => {
       const result = {} as { [K in keyof T]: ReturnType<T[K]["parse"]> };
-      let hasChanged = false;
+      const currentKeys = Object.keys(stateRef.current);
+      let hasChanged =
+        currentKeys.length !== keys.length ||
+        currentKeys.some((key) => !Object.prototype.hasOwnProperty.call(parsers, key));
 
       Object.entries(parsers).forEach(([key, parser]) => {
         const value = searchParams.get(key);
         const parsed = parser.parse(value ?? "");
         const currentValue = stateRef.current[key as keyof T];
 
-        if (!Object.is(currentValue, parsed)) {
+        if (!areParsedValuesEqual(parser, currentValue, parsed)) {
           hasChanged = true;
         }
         result[key as keyof T] = parsed;
@@ -335,13 +408,14 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
 
     const onPopState = () => {
       const searchParams = getCurrentSearchParams();
-      applyChange(searchParams, false);
+      applyChange(searchParams);
     };
 
     const onEmitterUpdate = (searchParams: URLSearchParams) => {
-      applyChange(searchParams, true);
+      applyChange(searchParams);
     };
 
+    applyChange(getCurrentSearchParams());
     const unsubscribeHistory = subscribeHistoryChange(onPopState);
     emitter.on("update", onEmitterUpdate);
 
