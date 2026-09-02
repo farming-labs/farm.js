@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, createElement } from "react";
 import { expectTypeOf } from "vitest";
 import { createRoot } from "react-dom/client";
-import { Link, type LinkProps, type RouteHref } from "../client/link";
+import { Link, type ExternalHref, type LinkProps, type RouteHref } from "../client/link";
 import { setFarmTrailingSlashPreference } from "../trailing-slash";
 
 const prefetch = vi.fn().mockResolvedValue(undefined);
@@ -441,8 +441,14 @@ describe("Link", () => {
         | `/users/${string}#${string}`
         | `/users/${string}?${string}#${string}`
         | `//${string}`
-        | `${string}:${string}`
+        | ExternalHref
       >();
+
+      expectTypeOf<"/search?q=a:b">().not.toMatchTypeOf<ExternalHref>();
+      expectTypeOf<"/users/:id">().not.toMatchTypeOf<ExternalHref>();
+      expectTypeOf<"/about#sec:1">().not.toMatchTypeOf<ExternalHref>();
+      expectTypeOf<"tel:+15551234567">().toMatchTypeOf<ExternalHref>();
+      expectTypeOf<"web+farm:preview">().toMatchTypeOf<ExternalHref>();
     });
 
     it("accepts a union variable of routes whose params are already resolved", () => {

@@ -215,12 +215,37 @@ declare module "@farm.js/core/client" {
 
   export type PrefetchBehavior = false | "intent" | "viewport" | "render" | "none";
 
+  type LowercaseUriSchemeInitial =
+    | "a"
+    | "b"
+    | "c"
+    | "d"
+    | "e"
+    | "f"
+    | "g"
+    | "h"
+    | "i"
+    | "j"
+    | "k"
+    | "l"
+    | "m"
+    | "n"
+    | "o"
+    | "p"
+    | "q"
+    | "r"
+    | "s"
+    | "t"
+    | "u"
+    | "v"
+    | "w"
+    | "x"
+    | "y"
+    | "z";
+  type UriSchemeInitial = LowercaseUriSchemeInitial | Uppercase<LowercaseUriSchemeInitial>;
+
   /** External URLs are never type-checked as routes; use for http/https/mailto etc. */
-  export type ExternalHref =
-    | `http://${string}`
-    | `https://${string}`
-    | `//${string}`
-    | `mailto:${string}`;
+  export type ExternalHref = `//${string}` | `${UriSchemeInitial}${string}:${string}`;
 
   export interface LinkDefaultRoute {}
 

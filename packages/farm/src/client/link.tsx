@@ -58,8 +58,37 @@ export type RouteParams<TRoute extends string> = string extends TRoute
   ? FarmRouterPathParams
   : ExtractRouteParams<StripRouteSuffix<TRoute>>;
 
+type LowercaseUriSchemeInitial =
+  | "a"
+  | "b"
+  | "c"
+  | "d"
+  | "e"
+  | "f"
+  | "g"
+  | "h"
+  | "i"
+  | "j"
+  | "k"
+  | "l"
+  | "m"
+  | "n"
+  | "o"
+  | "p"
+  | "q"
+  | "r"
+  | "s"
+  | "t"
+  | "u"
+  | "v"
+  | "w"
+  | "x"
+  | "y"
+  | "z";
+type UriSchemeInitial = LowercaseUriSchemeInitial | Uppercase<LowercaseUriSchemeInitial>;
+
 /** External URLs; these are never type-checked as routes. */
-export type ExternalHref = `//${string}` | `${string}:${string}`;
+export type ExternalHref = `//${string}` | `${UriSchemeInitial}${string}:${string}`;
 
 type StripRouteSuffix<TRoute extends string> = TRoute extends `${infer Path}?${string}`
   ? StripRouteSuffix<Path>
