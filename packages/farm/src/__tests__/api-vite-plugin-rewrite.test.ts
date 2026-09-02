@@ -129,6 +129,61 @@ async function createDevHarness(
 }
 
 describe("dev API dispatch after middleware rewrites", () => {
+  it("rejects dynamic routes that have the same URL shape", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(
+      createDevHarness({
+        "users/[id]": `export const GET = async () => new Response("id");\n`,
+        "users/[slug]": `export const GET = async () => new Response("slug");\n`,
+      }),
+    ).rejects.toThrow("Ambiguous API routes");
+  });
+
+  it("reports ambiguous routes introduced by HMR", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "farm-api-ambiguous-hmr-"));
+    tempDirs.add(root);
+    const idDir = path.join(root, "src", "api", "users", "[id]");
+    const slugDir = path.join(root, "src", "api", "users", "[slug]");
+    const idFile = path.join(idDir, "route.ts");
+    const slugFile = path.join(slugDir, "route.ts");
+    const routesFile = path.join(root, "src", "routes.ts");
+    await mkdir(idDir, { recursive: true });
+    await writeFile(idFile, "export {};\n");
+    await writeFile(routesFile, "export {};\n");
+
+    let rootModule: Record<string, unknown> = {};
+    const server: any = {
+      config: { root },
+      ssrLoadModule: async (filePath: string) =>
+        filePath === routesFile ? rootModule : { GET: async () => new Response("ok") },
+      moduleGraph: { invalidateModule() {} },
+      middlewares: { use() {} },
+      watcher: { on() {} },
+    };
+    const plugin = farmApiPlugin() as any;
+    await plugin.configureServer(server);
+    await server.__farmApi__.waitForDiscovery();
+
+    rootModule = {
+      slug: {
+        __path: "/api/users/[slug]",
+        __method: "GET",
+        handler: async () => new Response("slug"),
+      },
+    };
+    await expect(plugin.handleHotUpdate({ file: routesFile, modules: [], server })).rejects.toThrow(
+      "Ambiguous API routes",
+    );
+
+    rootModule = {};
+    await mkdir(slugDir, { recursive: true });
+    await writeFile(slugFile, "export {};\n");
+    await expect(plugin.handleHotUpdate({ file: slugFile, modules: [], server })).rejects.toThrow(
+      "Ambiguous API routes",
+    );
+  });
+
   it("reports duplicate methods across file and explicit routes", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "farm-api-conflict-"));
     tempDirs.add(root);

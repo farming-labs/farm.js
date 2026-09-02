@@ -349,6 +349,35 @@ describe("RouteManager", () => {
       await expect(routeManager.discoverRoutes()).rejects.toThrow('Duplicate page route "/about"');
     });
 
+    it("rejects dynamic page routes that match the same URL shape", async () => {
+      const { globFiles } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) {
+          return ["users/[id]/page.tsx", "users/[slug]/page.tsx"];
+        }
+        return [];
+      });
+
+      await expect(routeManager.discoverRoutes()).rejects.toThrow(
+        'Ambiguous page routes "/users/[id]" and "/users/[slug]" match the same URLs.',
+      );
+    });
+
+    it("keeps colon and star page segments literal", async () => {
+      const { globFiles } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) {
+          return ["users/:id/page.tsx", "users/[id]/page.tsx", "files/*path/page.tsx"];
+        }
+        return [];
+      });
+
+      await expect(routeManager.discoverRoutes()).resolves.toBeUndefined();
+      expect(Array.from(routeManager.getRoutes().keys())).toEqual(
+        expect.arrayContaining(["/users/:id", "/users/[id]", "/files/*path"]),
+      );
+    });
+
     it("rejects ambiguous markdown representations for one page", async () => {
       const { globFiles } = await import("../utils");
       vi.mocked(globFiles).mockImplementation(async (pattern: string) => {

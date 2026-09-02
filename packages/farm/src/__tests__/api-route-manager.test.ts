@@ -40,6 +40,88 @@ describe("APIRouteManager", () => {
     expect(manager.getRoutes().get("/api/jsx")?.methods).toEqual(["GET"]);
   });
 
+  it("rejects dynamic API routes that match the same URL shape", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-api-route-"));
+    tempDirs.push(root);
+    const firstDir = path.join(root, "api", "users", "[id]");
+    const secondDir = path.join(root, "api", "users", "[slug]");
+    fs.mkdirSync(firstDir, { recursive: true });
+    fs.mkdirSync(secondDir, { recursive: true });
+    fs.writeFileSync(path.join(firstDir, "route.ts"), "export const GET = () => new Response();\n");
+    fs.writeFileSync(
+      path.join(secondDir, "route.ts"),
+      "export const GET = () => new Response();\n",
+    );
+
+    const manager = new APIRouteManager(root, {
+      ssrLoadModule: async () => ({ GET: async () => new Response() }),
+    } as any);
+
+    const error = await manager.discoverRoutes().catch((cause) => cause);
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toContain("Ambiguous API routes");
+    expect(error.message).toContain("/api/users/[id]");
+    expect(error.message).toContain("/api/users/[slug]");
+  });
+
+  it("ignores empty programmatic routes and preserves API-literal syntax", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-api-route-"));
+    tempDirs.push(root);
+    const srcDir = path.join(root, "src");
+    const appDir = path.join(srcDir, "app");
+    const routesFile = path.join(srcDir, "farm.routes.js");
+    fs.mkdirSync(appDir, { recursive: true });
+    fs.writeFileSync(routesFile, "export {};\n");
+
+    const handler = async () => new Response("ok");
+    const manager = new APIRouteManager(appDir, {
+      ssrLoadModule: async () => ({
+        default: defineRoutes(({ api }) => [
+          api("/api/items/[id]", {}),
+          api("/api/items/[slug]", { GET: handler }),
+          api("/api/literal/:id", { GET: handler }),
+          api("/api/literal/[id]", { GET: handler }),
+          api("/api/(group)/items", { GET: handler }),
+          api("/api/items", { GET: handler }),
+        ]),
+      }),
+    } as any);
+
+    await manager.discoverRoutes();
+
+    expect(manager.getRoutes().has("/api/items/[id]")).toBe(false);
+    expect(manager.getRoutes().has("/api/items/[slug]")).toBe(true);
+    expect(manager.getRoutes().has("/api/literal/:id")).toBe(true);
+    expect(manager.getRoutes().has("/api/literal/[id]")).toBe(true);
+    expect(manager.getRoutes().has("/api/(group)/items")).toBe(true);
+    expect(manager.getRoutes().has("/api/items")).toBe(true);
+  });
+
+  it("does not let an invalid route config reserve a dynamic URL shape", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-api-route-"));
+    tempDirs.push(root);
+    const idDir = path.join(root, "api", "users", "[id]");
+    const slugDir = path.join(root, "api", "users", "[slug]");
+    const idFile = path.join(idDir, "route.ts");
+    const slugFile = path.join(slugDir, "route.ts");
+    fs.mkdirSync(idDir, { recursive: true });
+    fs.mkdirSync(slugDir, { recursive: true });
+    fs.writeFileSync(idFile, "export {};\n");
+    fs.writeFileSync(slugFile, "export {};\n");
+
+    const manager = new APIRouteManager(root, {
+      ssrLoadModule: async (filePath: string) => ({
+        GET: async () => new Response("ok"),
+        ...(filePath === idFile ? { runtime: "invalid" } : {}),
+      }),
+    } as any);
+
+    await manager.discoverRoutes();
+
+    expect(manager.getRoutes().has("/api/users/[id]")).toBe(false);
+    expect(manager.getRoutes().has("/api/users/[slug]")).toBe(true);
+  });
+
   it("rejects duplicate methods for the same API path in one app source", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-api-route-"));
     tempDirs.push(root);

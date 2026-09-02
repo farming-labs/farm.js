@@ -36,6 +36,7 @@ import {
   resolveFarmServerConfig,
 } from "../server-http";
 import { createCliColors } from "../cli-colors";
+import { AmbiguousRouteError, getRoutePatternShape } from "../routing/specificity";
 
 export interface FarmApiPluginOptions {
   /** Source directory containing the api folder (default: 'src') */
@@ -74,6 +75,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
   let discoveryError: unknown;
   let recoverFailedDiscovery: (() => Promise<boolean>) | undefined;
   const endpointSources = new Map<string, Map<string, string>>();
+  const routeShapes = new Map<string, { routePath: string; filePath: string }>();
 
   const log = (_message: string) => {};
   const logResponse = (method: string, urlPath: string, status: number, duration: number) => {
@@ -95,12 +97,24 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
     console.log(logMsg);
   };
 
+  const registerRouteShape = (routePath: string, filePath: string): void => {
+    const shape = getRoutePatternShape(routePath, "api");
+    const existing = routeShapes.get(shape);
+    if (existing && existing.routePath !== routePath) {
+      throw new AmbiguousRouteError(
+        `Ambiguous API routes "${existing.routePath}" and "${routePath}" match the same URLs. Found ${existing.filePath} and ${filePath}. Keep only one route for this URL shape.`,
+      );
+    }
+    routeShapes.set(shape, { routePath, filePath });
+  };
+
   const addEndpoint = (
     routePath: string,
     filePath: string,
     method: string,
     endpoint: any,
   ): void => {
+    registerRouteShape(routePath, filePath);
     const normalizedMethod = method.toUpperCase();
     const existing = apiRoutesCache.get(routePath);
     const existingFile = endpointSources.get(routePath)?.get(normalizedMethod);
@@ -144,8 +158,16 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
       if (route.methods.length === 0) {
         apiRoutesCache.delete(routePath);
         endpointSources.delete(routePath);
-      } else if (route.filePath === filePath) {
-        route.filePath = sources.values().next().value ?? route.filePath;
+        routeShapes.delete(getRoutePatternShape(routePath, "api"));
+      } else {
+        const currentSource = sources.values().next().value;
+        if (route.filePath === filePath && currentSource) {
+          route.filePath = currentSource;
+        }
+        routeShapes.set(getRoutePatternShape(routePath, "api"), {
+          routePath,
+          filePath: currentSource ?? route.filePath,
+        });
       }
     }
   };
@@ -164,6 +186,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
     sources: new Map(
       [...endpointSources].map(([routePath, sources]) => [routePath, new Map(sources)]),
     ),
+    shapes: new Map(routeShapes),
   });
 
   const restoreRouteState = (snapshot: ReturnType<typeof snapshotRouteState>): void => {
@@ -171,6 +194,10 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
     endpointSources.clear();
     for (const [routePath, sources] of snapshot.sources) {
       endpointSources.set(routePath, sources);
+    }
+    routeShapes.clear();
+    for (const [shape, route] of snapshot.shapes) {
+      routeShapes.set(shape, route);
     }
   };
 
@@ -257,6 +284,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
         const routeFiles = findRouteFiles(apiDir);
         apiRoutesCache.clear();
         endpointSources.clear();
+        routeShapes.clear();
 
         for (const filePath of routeFiles) {
           try {
@@ -282,7 +310,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
               log(`API route discovered: ${availableMethods.join(", ")} ${routePath}`);
             }
           } catch (e: any) {
-            if (e instanceof APIRouteConflictError) throw e;
+            if (e instanceof APIRouteConflictError || e instanceof AmbiguousRouteError) throw e;
             log(`API route load failed at ${filePath}: ${e.message}`);
           }
         }
@@ -316,7 +344,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
                 }
               }
             } catch (e: any) {
-              if (e instanceof APIRouteConflictError) throw e;
+              if (e instanceof APIRouteConflictError || e instanceof AmbiguousRouteError) throw e;
               log(`Root routes.ts load failed: ${e.message}`);
             }
             break;
@@ -350,7 +378,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
               }
             }
           } catch (e: any) {
-            if (e instanceof APIRouteConflictError) throw e;
+            if (e instanceof APIRouteConflictError || e instanceof AmbiguousRouteError) throw e;
             log(`Programmatic routes file load failed at ${routeFile}: ${e.message}`);
           }
         }
@@ -560,7 +588,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
           log(`API router recreated`);
         } catch (e: any) {
           restoreRouteState(previousState);
-          if (e instanceof APIRouteConflictError) throw e;
+          if (e instanceof APIRouteConflictError || e instanceof AmbiguousRouteError) throw e;
           log(`Root routes.ts HMR failed: ${e.message}`);
         }
 
@@ -600,7 +628,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
           log(`API router recreated`);
         } catch (e: any) {
           restoreRouteState(previousState);
-          if (e instanceof APIRouteConflictError) throw e;
+          if (e instanceof APIRouteConflictError || e instanceof AmbiguousRouteError) throw e;
           log(`API route HMR failed: ${e.message}`);
         }
 

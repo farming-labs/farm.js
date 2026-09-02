@@ -20,6 +20,7 @@ import {
   type APIRouteMatch,
 } from "./runtime";
 import { isFarmAPIRouteFileName } from "./route-files";
+import { AmbiguousRouteError, getRoutePatternShape } from "../routing/specificity";
 
 export interface APIRoute extends FarmRouteRuntimeConfig {
   path: string;
@@ -65,6 +66,7 @@ export class APIRouteManager {
   private routes: Map<string, APIRoute> = new Map();
   private endpointSources: Map<string, Map<string, { appDir: string; filePath: string }>> =
     new Map();
+  private routeShapes = new Map<string, { routePath: string; appDir: string; filePath: string }>();
   private viteServer?: ViteDevServer;
   private appDirs: string[];
   private throwOnLoadError: boolean;
@@ -91,8 +93,10 @@ export class APIRouteManager {
   async discoverRoutes(): Promise<void> {
     const previousRoutes = this.routes;
     const previousEndpointSources = this.endpointSources;
+    const previousRouteShapes = this.routeShapes;
     this.routes = new Map();
     this.endpointSources = new Map();
+    this.routeShapes = new Map();
 
     try {
       for (const appDir of this.appDirs) {
@@ -113,6 +117,7 @@ export class APIRouteManager {
     } catch (error) {
       this.routes = previousRoutes;
       this.endpointSources = previousEndpointSources;
+      this.routeShapes = previousRouteShapes;
       throw error;
     }
 
@@ -182,11 +187,11 @@ export class APIRouteManager {
             }
           }
         }
-
         const runtimeConfig = normalizeFarmRouteRuntimeConfig(
           getFarmRouteRuntimeConfig(routeModule),
           `API route "${routePath}"`,
         );
+        this.registerRouteShape(routePath, filePath, appDir);
         const existingRoute = this.routes.get(routePath);
         const mergedMethods = existingRoute ? [...existingRoute.methods] : [];
         for (const method of availableMethods) {
@@ -230,6 +235,7 @@ export class APIRouteManager {
         }
 
         const method = String(endpoint.__method || "GET").toUpperCase();
+        this.registerRouteShape(endpoint.__path, routesFile, appDir);
         this.addEndpoint(endpoint.__path, routesFile, method, endpoint, appDir);
       }
     } catch (error) {
@@ -254,6 +260,7 @@ export class APIRouteManager {
 
         for (const definition of manifest.routes) {
           if (definition.kind !== "api") continue;
+          if (!Object.values(definition.methods).some(Boolean)) continue;
           this.addProgrammaticApiRoute(routeFile, definition, appDir);
         }
       } catch (error) {
@@ -264,7 +271,11 @@ export class APIRouteManager {
 
   private handleLoadError(message: string, error: unknown): void {
     logger.error(`${message}: ${error}`);
-    if (this.throwOnLoadError || error instanceof APIRouteConflictError) {
+    if (
+      this.throwOnLoadError ||
+      error instanceof APIRouteConflictError ||
+      error instanceof AmbiguousRouteError
+    ) {
       throw error;
     }
   }
@@ -355,6 +366,23 @@ export class APIRouteManager {
         this.addEndpoint(route.path, modulePath, method, endpoint, appDir, runtimeConfig);
       }
     }
+  }
+
+  private registerRouteShape(routePath: string, filePath: string, appDir: string): void {
+    const shape = getRoutePatternShape(routePath, "api");
+    const existing = this.routeShapes.get(shape);
+
+    if (existing && existing.routePath !== routePath) {
+      if (existing.appDir === appDir) {
+        throw new AmbiguousRouteError(
+          `Ambiguous API routes "${existing.routePath}" and "${routePath}" match the same URLs. Found ${existing.filePath} and ${filePath}. Keep only one route for this URL shape.`,
+        );
+      }
+      this.routes.delete(existing.routePath);
+      this.endpointSources.delete(existing.routePath);
+    }
+
+    this.routeShapes.set(shape, { routePath, appDir, filePath });
   }
 
   /**

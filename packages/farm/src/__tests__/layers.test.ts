@@ -237,7 +237,10 @@ describe("Farm layers", () => {
     writeSource(baseRoot, "src/app/products/page.tsx");
     writeSource(baseRoot, "src/app/admin/page.tsx");
     writeSource(baseRoot, "src/app/products/loading.tsx");
+    writeSource(baseRoot, "src/app/users/[id]/page.tsx");
+    writeSource(baseRoot, "src/app/@modal/(.)users/[id]/page.tsx");
     writeSource(root, "src/app/products/page.tsx");
+    writeSource(root, "src/app/users/[slug]/page.tsx");
 
     const config = await resolveConfig({ root, extends: ["./layers/base"] }, "development");
     const manager = new RouteManager(config as any);
@@ -255,6 +258,15 @@ describe("Farm layers", () => {
     expect(manager.getLoadings().get("/products")?.modulePath).toBe(
       path.join(baseRoot, "src/app/products/loading.tsx"),
     );
+    expect(manager.getRoutes().has("/users/[id]")).toBe(false);
+    expect(manager.getRoutes().get("/users/[slug]")?.modulePath).toBe(
+      path.join(root, "src/app/users/[slug]/page.tsx"),
+    );
+    expect(
+      [...manager.getRouteSlots().values()].some(
+        (slot) => slot.interception && slot.pattern === "/users/[id]",
+      ),
+    ).toBe(true);
     expect(
       manager.generateClientManifest(root).routes.find((route) => route.pattern === "/admin")
         ?.modulePath,
