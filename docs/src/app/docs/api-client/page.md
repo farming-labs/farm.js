@@ -125,6 +125,10 @@ path, URL query parameters, request body, `Content-Type`, and `Content-Encoding`
 requests need an explicit cache key because a generated multipart boundary cannot be represented
 reliably before `fetch` sends the request.
 
+Farm adds `Content-Type: application/json` when it serializes a JSON request body. Bodyless
+requests do not receive that header, and an explicitly configured content type takes precedence
+regardless of header casing.
+
 ## Upload files and consume progress streams
 
 `toFormData()` retains the endpoint's body shape while sending files as real multipart fields. When

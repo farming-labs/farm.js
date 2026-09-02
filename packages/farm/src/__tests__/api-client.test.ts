@@ -237,6 +237,45 @@ describe("createAPIClient", () => {
     );
   });
 
+  it("does not add a JSON content type to bodyless requests", async () => {
+    const fetchMock = vi.fn(async () => buildResponse({ users: [], total: 0 }));
+    globalThis.fetch = fetchMock as any;
+    const api = createAPIClient<APIRouter>({ baseURL: "https://api.example.com" });
+
+    await api.users.get({ query: { limit: "5" } });
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(new Headers(init.headers).has("content-type")).toBe(false);
+  });
+
+  it("normalizes header overrides without combining duplicate casing", async () => {
+    const fetchMock = vi.fn(async () => buildResponse({ success: true }));
+    globalThis.fetch = fetchMock as any;
+    const api = createAPIClient<APIRouter>({
+      baseURL: "https://api.example.com",
+      headers: { "Content-Type": "application/json" },
+    });
+
+    await api.users.post({
+      body: { name: "Ada", email: "ada@example.com" },
+      headers: { "content-type": "application/problem+json" },
+    });
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(new Headers(init.headers).get("content-type")).toBe("application/problem+json");
+  });
+
+  it("adds JSON content type when serializing a request body", async () => {
+    const fetchMock = vi.fn(async () => buildResponse({ success: true }));
+    globalThis.fetch = fetchMock as any;
+    const api = createAPIClient<APIRouter>({ baseURL: "https://api.example.com" });
+
+    await api.users.post({ body: { name: "Ada", email: "ada@example.com" } });
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(new Headers(init.headers).get("content-type")).toBe("application/json");
+  });
+
   it("does not parse an empty HEAD response as JSON", async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
     globalThis.fetch = fetchMock as any;
