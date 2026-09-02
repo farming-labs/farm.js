@@ -75,6 +75,10 @@ describe("generated server action security", () => {
     expect(entry).toContain("Symbol.for('farm.server-fn.failure')");
     expect(entry).toContain("throw createFarmServerFnTransportError(p.returnValue?.data)");
     expect(entry).not.toContain("throw p.returnValue?.data");
+    expect(entry).toContain("shouldApplyFarmServerQueryActionResult(serverQueryInvocation)");
+    expect(entry.indexOf("if (shouldApplyFarmServerQueryActionResult")).toBeLessThan(
+      entry.indexOf("setPayloadRef.current?.(p)"),
+    );
   });
 
   it("emits the resolved global stylesheet URL for every routes directory shape", () => {

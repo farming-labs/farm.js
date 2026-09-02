@@ -92,11 +92,7 @@ export function completeFarmServerQueryAction<TData>(
 
   const cache = getFarmClientDataCache();
   const metadata = value.__farmServerQuery;
-  if (
-    invocation.provisionalKey &&
-    invocation.owner &&
-    serverQueryClientState.latestOwners.get(invocation.provisionalKey) !== invocation.owner
-  ) {
+  if (!shouldApplyFarmServerQueryActionResult(invocation)) {
     return value.data as TData;
   }
   if (invocation.provisionalKey) {
@@ -116,6 +112,13 @@ export function completeFarmServerQueryAction<TData>(
   });
 
   return value.data as TData;
+}
+
+export function shouldApplyFarmServerQueryActionResult(
+  invocation: FarmServerQueryActionInvocation,
+): boolean {
+  if (!invocation.provisionalKey || !invocation.owner) return true;
+  return serverQueryClientState.latestOwners.get(invocation.provisionalKey) === invocation.owner;
 }
 
 export function createServerQueryCallKey<TInput, TData>(
@@ -195,6 +198,9 @@ async function executeServerQuery<TInput, TData>(
 
   let promise!: Promise<TData>;
   promise = (async () => {
+    // Let the promise be assigned and registered before a query implementation
+    // can throw synchronously and enter the cleanup path.
+    await Promise.resolve();
     try {
       serverQueryClientState.active.push({ provisionalKey, owner });
       let pending: Promise<TData>;

@@ -13,6 +13,7 @@ import {
   completeFarmServerQueryAction,
   fetchServerQuery,
   prefetchServerQuery,
+  shouldApplyFarmServerQueryActionResult,
   useServerQuery,
 } from "../server-query-client";
 import { createFarmServerQueryResult } from "../server-query-protocol";
@@ -33,10 +34,12 @@ type ProductAPI = {
 function createTransportedQuery(
   handler: (input: { id: string }) => Product | Promise<Product>,
   staleTime: number | false = 10_000,
+  onAccepted?: (data: Product) => void,
 ): ServerQuery<{ id: string }, Product> {
   return (async (input: { id: string }) => {
     const invocation = beginFarmServerQueryAction("product-query", [input]);
     const data = await handler(input);
+    if (shouldApplyFarmServerQueryActionResult(invocation)) onAccepted?.(data);
     return completeFarmServerQueryAction(
       invocation,
       createFarmServerQueryResult(data, {
@@ -112,11 +115,16 @@ describe("server query client", () => {
   it("starts forced work and keeps an older result from replacing it", async () => {
     const firstResult = createDeferred<Product>();
     const secondResult = createDeferred<Product>();
+    const acceptedVersions: number[] = [];
     let calls = 0;
-    const product = createTransportedQuery(() => {
-      calls++;
-      return calls === 1 ? firstResult.promise : secondResult.promise;
-    });
+    const product = createTransportedQuery(
+      () => {
+        calls++;
+        return calls === 1 ? firstResult.promise : secondResult.promise;
+      },
+      10_000,
+      (data) => acceptedVersions.push(data.version),
+    );
 
     const first = fetchServerQuery(product, { id: "123" }, { force: true });
     await vi.waitFor(() => expect(calls).toBe(1));
@@ -127,7 +135,24 @@ describe("server query client", () => {
     await expect(second).resolves.toEqual({ id: "123", version: 2 });
     firstResult.resolve({ id: "123", version: 1 });
     await expect(first).resolves.toEqual({ id: "123", version: 1 });
+    expect(acceptedVersions).toEqual([2]);
 
+    await expect(fetchServerQuery(product, { id: "123" })).resolves.toEqual({
+      id: "123",
+      version: 2,
+    });
+    expect(calls).toBe(2);
+  });
+
+  it("clears rejected synchronous queries from the in-flight registry", async () => {
+    let calls = 0;
+    const product = (({ id }: { id: string }) => {
+      calls++;
+      if (calls === 1) throw new Error("synchronous failure");
+      return Promise.resolve({ id, version: calls });
+    }) as ServerQuery<{ id: string }, Product>;
+
+    await expect(fetchServerQuery(product, { id: "123" })).rejects.toThrow("synchronous failure");
     await expect(fetchServerQuery(product, { id: "123" })).resolves.toEqual({
       id: "123",
       version: 2,
