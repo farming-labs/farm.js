@@ -448,7 +448,8 @@ describe("Link", () => {
       expectTypeOf<"/users/:id">().not.toMatchTypeOf<ExternalHref>();
       expectTypeOf<"/about#sec:1">().not.toMatchTypeOf<ExternalHref>();
       expectTypeOf<"tel:+15551234567">().toMatchTypeOf<ExternalHref>();
-      expectTypeOf<"web+farm:preview">().toMatchTypeOf<ExternalHref>();
+      expectTypeOf<"vscode://file/app.ts">().toMatchTypeOf<ExternalHref>();
+      expectTypeOf<"not a scheme:value">().not.toMatchTypeOf<ExternalHref>();
     });
 
     it("accepts a union variable of routes whose params are already resolved", () => {

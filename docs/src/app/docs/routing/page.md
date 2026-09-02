@@ -118,6 +118,9 @@ request route data again.
 Native anchor behavior still takes precedence: for example, a `Link` with a `download` attribute is
 handled by the browser instead of Farm's SPA router. Absolute URI schemes such as `mailto:`, `tel:`,
 and `sms:` are also passed through unchanged and are never prefetched as app routes.
+For an app-specific scheme, declaration-merge `LinkExternalUriSchemes` from
+`@farm.js/core/client`; the runtime already delegates every syntactically valid URI scheme to the
+browser.
 
 **Client navigation**
 

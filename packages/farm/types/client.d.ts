@@ -215,37 +215,39 @@ declare module "@farm.js/core/client" {
 
   export type PrefetchBehavior = false | "intent" | "viewport" | "render" | "none";
 
-  type LowercaseUriSchemeInitial =
-    | "a"
-    | "b"
-    | "c"
-    | "d"
-    | "e"
-    | "f"
-    | "g"
-    | "h"
-    | "i"
-    | "j"
-    | "k"
-    | "l"
-    | "m"
-    | "n"
-    | "o"
-    | "p"
-    | "q"
-    | "r"
-    | "s"
-    | "t"
-    | "u"
-    | "v"
-    | "w"
-    | "x"
-    | "y"
-    | "z";
-  type UriSchemeInitial = LowercaseUriSchemeInitial | Uppercase<LowercaseUriSchemeInitial>;
+  /** URI schemes recognized as typed external Link targets. Apps may augment this interface. */
+  export interface LinkExternalUriSchemes {
+    about: true;
+    blob: true;
+    data: true;
+    file: true;
+    ftp: true;
+    ftps: true;
+    geo: true;
+    git: true;
+    http: true;
+    https: true;
+    im: true;
+    intent: true;
+    irc: true;
+    ircs: true;
+    magnet: true;
+    mailto: true;
+    market: true;
+    sms: true;
+    ssh: true;
+    tel: true;
+    urn: true;
+    vscode: true;
+    webcal: true;
+    ws: true;
+    wss: true;
+  }
+
+  type ExternalUriScheme = Extract<keyof LinkExternalUriSchemes, string>;
 
   /** External URLs are never type-checked as routes; use for http/https/mailto etc. */
-  export type ExternalHref = `//${string}` | `${UriSchemeInitial}${string}:${string}`;
+  export type ExternalHref = `//${string}` | `${ExternalUriScheme}:${string}`;
 
   export interface LinkDefaultRoute {}
 
