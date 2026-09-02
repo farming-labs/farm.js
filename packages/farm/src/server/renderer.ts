@@ -27,7 +27,11 @@ import {
 } from "../middleware/server";
 import { getRequestContextSnapshot } from "../request-context";
 import { matchSSGPage, resolveRouteRenderingConfigFromFile } from "../ssg";
-import { getIntegrationProviders, getRegisteredIntegrationAPIManifest } from "../integrations";
+import {
+  getIntegrationProviders,
+  getRegisteredIntegrationAPIManifest,
+  isFarmIntegrationProviderComponentReference,
+} from "../integrations";
 import { _runWithCurrentRequest, createWebRequestFromFarmRequest } from "./request";
 import { createFarmCacheKey, getFarmDataCache, normalizeRevalidatePath } from "../cache";
 import { resolveFarmNotFoundComponentPath } from "../not-found";
@@ -1698,18 +1702,42 @@ export class ServerRenderer {
 
     for (let i = providers.length - 1; i >= 0; i--) {
       const provider = providers[i];
-      if (provider.type === "clerk") {
+      if (provider.component || provider.type === "clerk") {
         if (!isReactRenderer(this.config.renderer)) {
           throw new Error(
             `Integration provider \`${provider.type}\` currently requires the React renderer.`,
           );
         }
-        if (!cachedClerkProvider) {
-          cachedClerkProvider = await importRuntimeModule("@clerk/react");
+        let ProviderComponent;
+        if (isFarmIntegrationProviderComponentReference(provider.component)) {
+          const providerModule = this.viteServer
+            ? await this.viteServer.ssrLoadModule(provider.component.module)
+            : await importRuntimeModule(
+                provider.component.module.startsWith(".")
+                  ? pathToFileURL(path.resolve(this.config.root, provider.component.module)).href
+                  : provider.component.module,
+              );
+          ProviderComponent = providerModule[provider.component.export || "default"];
+        } else if (typeof provider.component === "function") {
+          ProviderComponent = provider.component;
+        } else if (provider.type === "clerk") {
+          if (!cachedClerkProvider) {
+            cachedClerkProvider = await importRuntimeModule("@clerk/react");
+          }
+          ProviderComponent = cachedClerkProvider!.ClerkProvider;
+        } else {
+          throw new Error(
+            `Integration provider \`${provider.name}\` has an invalid component reference.`,
+          );
+        }
+        if (!ProviderComponent) {
+          throw new Error(
+            `Integration provider \`${provider.name}\` did not export its configured component.`,
+          );
         }
 
         wrapped = this.rendererRuntime.createElement(
-          cachedClerkProvider!.ClerkProvider,
+          ProviderComponent,
           provider.props || {},
           wrapped,
         );

@@ -68,7 +68,11 @@ import { createFarmNodeServerEntry } from "./node-server-entry";
 import { resolveFarmNotFoundComponentPath } from "../not-found";
 import { readFarmI18nCatalogs } from "../i18n/catalog";
 import type { FarmI18nCatalogs } from "../i18n/types";
-import { getFarmIntegrationPluginServerRuntime } from "../integrations";
+import { getFarmIntegrationPluginServerRuntime, getIntegrationProviders } from "../integrations";
+import {
+  generateFarmIntegrationProviderClientCode,
+  generateFarmIntegrationProviderServerModules,
+} from "../integration-provider-build";
 import type { TransformOptions } from "esbuild";
 import { loadFarmProductionVite, type FarmProductionViteRuntime } from "../build/production-vite";
 import { adaptTailwindVitePlugin } from "../build/vite-plugin-compat";
@@ -1338,6 +1342,7 @@ async function buildClient(
     config.renderer,
     config.publicRuntimeConfig,
     config.trailingSlash,
+    getIntegrationProviders(config.integrations),
   );
 
   // Write the client entry to a temporary file
@@ -1524,6 +1529,7 @@ async function buildClient(
         : undefined,
       // Ensure React is bundled for client
       resolve: {
+        alias: createFarmSourceAlias(root, config.srcDir),
         dedupe: [...(config.renderer.dedupe || [])],
       },
       // Optimize dependencies - exclude server-side code from client bundle
@@ -1853,6 +1859,7 @@ function generateClientHydrationEntry(
   renderer: FarmRenderer = REACT_RENDERER,
   publicRuntimeConfig: Record<string, unknown> | undefined = undefined,
   trailingSlash = false,
+  integrationProviders: ReturnType<typeof getIntegrationProviders> = [],
 ): string {
   const toImportPath = (targetPath: string) => targetPath.replace(/\\/g, "/");
   const clientPluginEntry: FarmClientPluginEntryCode = generateFarmClientPluginEntryCode(
@@ -1864,6 +1871,7 @@ function generateClientHydrationEntry(
   const rendererClientImports = isReactRenderer(renderer)
     ? `import React from "react";\nimport { createRoot, hydrateRoot } from "react-dom/client";`
     : `import React, { createRoot, hydrateRoot } from ${JSON.stringify(renderer.client)};`;
+  const providerClientCode = generateFarmIntegrationProviderClientCode(integrationProviders, root);
 
   // Always import global CSS for Tailwind
   const globalsCssPath = path.join(root, srcDir, "app", "globals.css");
@@ -1955,7 +1963,11 @@ async function hydrateFarmDocsAdapterRuntime() {
 }
 `;
 
-  if (clientPages.length === 0 && clientRouteSlots.length === 0) {
+  if (
+    clientPages.length === 0 &&
+    clientRouteSlots.length === 0 &&
+    !providerClientCode.hasProviders
+  ) {
     // No client pages - just basic runtime with CSS and SPA navigation
     return `
 // Farm.js Client Runtime (no client components)
@@ -2312,7 +2324,10 @@ async function hydrateFarmIsolatedClientBoundaries(scope = document) {
             throw new Error("compiled original export was not found");
           }
           const props = JSON.parse(container.getAttribute("data-farm-client-props") || "{}");
-          const root = hydrateRoot(container, React.createElement(Component, props));
+          const root = hydrateRoot(
+            container,
+            wrapWithIntegrationProviders(React.createElement(Component, props)),
+          );
           farmIsolatedBoundaryRoots.set(container, root);
         } catch (error) {
           console.warn(
@@ -2347,6 +2362,7 @@ async function hydrateFarmIsolatedClientBoundaries(scope = document) {
 ${cssImport}
 ${layoutImports}
 ${rendererClientImports}
+${providerClientCode.imports}
 import { createClientPluginManager, installChunkErrorRecovery, scheduleFarmIslandHydration, searchParamsToObject, setFarmTrailingSlashPreference } from "@farm.js/core/internal/client-runtime";
 import { matchFarmRoute } from "@farm.js/core/router";
 ${clientPluginEntry.imports}
@@ -2356,6 +2372,8 @@ ${docsAdapterRuntime}
 
 ${imports.join("\n")}
 ${generateFarmDocsSearchClientRuntime(docsSearchEnabled, docsSearchModuleId)}
+
+${providerClientCode.runtime}
 
 setFarmTrailingSlashPreference(${JSON.stringify(trailingSlash)});
 installChunkErrorRecovery();
@@ -2491,11 +2509,11 @@ async function createMatchedHydrationElement(matched, pathname, searchParams, se
   }
 
   if (!pageElement) return null;
-  if (!hydrateLayouts) return pageElement;
+  if (!hydrateLayouts) return wrapWithIntegrationProviders(pageElement);
   if (matched.route.pageShouldHydrate) {
     pageElement = createLayoutPageBoundary(matched.route, pageElement);
   }
-  return wrapWithLayouts(pageElement, pathname, params);
+  return wrapWithIntegrationProviders(wrapWithLayouts(pageElement, pathname, params));
 }
 
 function matchesRoutePrefix(pathname, pattern) {
@@ -2558,7 +2576,7 @@ function renderClientRouteSlot(slot, registration, mode) {
   const key = routeSlotKey(slot);
   const existingRoot = routeSlotRoots.get(key);
   const props = slot.props && typeof slot.props === "object" ? slot.props : {};
-  const element = React.createElement(registration.Component, props);
+  const element = wrapWithIntegrationProviders(React.createElement(registration.Component, props));
 
   if (mode === "hydrate") {
     if (existingRoot) return true;
@@ -2941,7 +2959,9 @@ ${generateUniversalRouterStateProperties()}
         if (hasHydratableLayout(pathname)) {
           pageElement = createLayoutPageBoundary(matched.route, pageElement);
         }
-        const wrappedElement = wrapWithLayouts(pageElement, pathname, params);
+        const wrappedElement = wrapWithIntegrationProviders(
+          wrapWithLayouts(pageElement, pathname, params),
+        );
 
         await farmClientRuntime.markNavigationLoaded(clientNavigation, {
           route: matched.route.pattern,
@@ -3418,6 +3438,9 @@ async function buildSSRInMemory(
       integration !== null &&
       (!("serverRuntime" in integration) || integration.serverRuntime !== false),
   );
+  const hasIntegrationProviders = getIntegrationProviders(config.integrations).some(
+    (provider) => provider.component || provider.type === "clerk",
+  );
   const hasObservabilityHandler =
     !!config.observability &&
     typeof config.observability === "object" &&
@@ -3432,7 +3455,8 @@ async function buildSSRInMemory(
     hasMdxComponentConfig ||
     hasMiddlewareConfig ||
     hasRouteContextConfig ||
-    hasServerRuntimePlugins
+    hasServerRuntimePlugins ||
+    hasIntegrationProviders
       ? await findFarmConfigPath(root)
       : null;
   const hasRuntimeConfigModule = hasFarmRuntimeConfigModule(config, configModulePath);
@@ -3750,6 +3774,25 @@ function generateVirtualEntryCode(
   const farmDocsFontAssets = config.docs?.enabled
     ? toFarmDocsPublicFontAssets(resolveFarmDocsFontAssets(config.root))
     : [];
+  const integrationProviders = getIntegrationProviders(config.integrations);
+  const renderedIntegrationProviders = integrationProviders.filter(
+    (provider) => provider.component || provider.type === "clerk",
+  );
+  if (renderedIntegrationProviders.length > 0 && !isReactRenderer(config.renderer)) {
+    throw new Error("Integration provider components currently require the React renderer.");
+  }
+  const providerServerModules = generateFarmIntegrationProviderServerModules(
+    renderedIntegrationProviders,
+    config.root,
+  );
+  const providerServerImports = [
+    providerServerModules.hasClerkProvider
+      ? `import { ClerkProvider as FarmClerkProvider } from "@clerk/react";`
+      : "",
+    providerServerModules.imports,
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   // Generate imports for all API routes
   const apiImports: string[] = [];
@@ -4195,6 +4238,7 @@ ${markdownHandlerImport}
 ${appMarkdownImport}
 ${mdxComponentsImport}
 ${integrationImports}
+${providerServerImports}
 ${instrumentationImport}
 ${imageRuntimeImport}
 ${imageNodeRuntimeImport}
@@ -4225,6 +4269,34 @@ const configuredIntegrations = Object.assign(
   {},
   ...farmRuntimeConfigs.map((runtimeConfig) => runtimeConfig.integrations || {}),
 );
+const farmIntegrationProviderModuleComponents = new Map([
+${providerServerModules.entries}
+]);
+
+function wrapWithFarmIntegrationProviders(element) {
+  const providers = Object.values(configuredIntegrations).flatMap(function(integration) {
+    return Array.isArray(integration?.providers) ? integration.providers : [];
+  });
+  let wrapped = element;
+  for (let index = providers.length - 1; index >= 0; index--) {
+    const provider = providers[index];
+    let Component = null;
+    if (typeof provider.component === "function") {
+      Component = provider.component;
+    } else if (provider.component?.module) {
+      const componentKey = provider.component.module + "\\0" + (provider.component.export || "default");
+      Component = farmIntegrationProviderModuleComponents.get(componentKey);
+    } else if (provider.type === "clerk") {
+      Component = ${providerServerModules.hasClerkProvider ? "FarmClerkProvider" : "null"};
+    }
+    if (!Component) {
+      if (!provider.component && provider.type !== "clerk") continue;
+      throw new Error("Integration provider " + provider.name + " did not export its configured component.");
+    }
+    wrapped = React.createElement(Component, provider.props || {}, wrapped);
+  }
+  return wrapped;
+}
 const serverRuntimeIntegrations = Object.fromEntries(
   Object.entries(configuredIntegrations).filter(([, integration]) =>
     integration && typeof integration === "object" && integration.serverRuntime !== false
@@ -5553,7 +5625,11 @@ ${
 
   const renderedRoot = await renderFarmElement(
     ReactDOMServer,
-    React.createElement("div", { id: "root" }, wrappedElement),
+    React.createElement(
+      "div",
+      { id: "root" },
+      wrapWithFarmIntegrationProviders(wrappedElement),
+    ),
   );
   let rootMarkup = renderedRoot.html;
   if (rootMarkup === undefined) {
@@ -6294,6 +6370,7 @@ async function handleFarmRequestInContext(
               }
             }
 
+          wrappedElement = wrapWithFarmIntegrationProviders(wrappedElement);
           return renderFarmElement(ReactDOMServer, wrappedElement);
         };
         const renderedPage = ${
@@ -6641,6 +6718,8 @@ async function handleFarmRequestInContext(
             }
           }
 
+          errorElement = wrapWithFarmIntegrationProviders(errorElement);
+
           const renderErrorElement = () =>
             renderFarmElementToString(ReactDOMServer, errorElement);
           const errorHtml = ${
@@ -6760,6 +6839,7 @@ async function handleFarmRequestInContext(
         notFoundElement = React.createElement(LayoutComponent, { children: notFoundElement, params: {} });
       }
     }
+    notFoundElement = wrapWithFarmIntegrationProviders(notFoundElement);
     
     const html = await ReactDOMServer.renderToString(notFoundElement);
     

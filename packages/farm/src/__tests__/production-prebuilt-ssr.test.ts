@@ -294,6 +294,85 @@ describe("production prebuilt SSR output", () => {
     }
   }, 120_000);
 
+  it("renders custom integration providers in production and ships them for hydration", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      await fs.mkdir(path.join(root, "src", "components"), { recursive: true });
+      await fs.writeFile(
+        path.join(root, "src", "components", "acme-provider.tsx"),
+        `
+"use client";
+
+export function AcmeProvider({ children, label }) {
+  return <section data-acme-provider={label}>{children}</section>;
+}
+`.trim(),
+      );
+      await fs.writeFile(
+        path.join(root, "farm.config.ts"),
+        `
+import { defineConfig, defineIntegration } from "@farm.js/core";
+
+const acme = defineIntegration({
+  category: "custom",
+  type: "acme",
+  instance: {},
+  providers: [{
+    name: "acme",
+    type: "client",
+    props: { label: "production-provider" },
+    component: { module: "@/components/acme-provider", export: "AcmeProvider" },
+  }],
+});
+
+export default defineConfig({ integrations: { acme } });
+`.trim(),
+      );
+
+      const acme = defineIntegration({
+        category: "custom",
+        type: "acme",
+        instance: {},
+        providers: [
+          {
+            name: "acme",
+            type: "client",
+            props: { label: "production-provider" },
+            component: { module: "@/components/acme-provider", export: "AcmeProvider" },
+          },
+        ],
+      });
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          telemetry: false,
+          integrations: { acme },
+          generateBuildId: () => "custom-integration-provider-test",
+        },
+        "production",
+      );
+
+      await build(config, { root, preset: "node-server" });
+
+      const clientJavaScript = await readAllClientJavaScript(root);
+      expect(clientJavaScript).toContain("data-acme-provider");
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          await expect(response.text()).resolves.toContain(
+            'data-acme-provider="production-provider"',
+          );
+        },
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("isolates a client leaf without shipping its server layout", async () => {
     const root = await createProductionFixture();
     const baselineRoot = await createProductionFixture();
