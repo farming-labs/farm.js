@@ -276,6 +276,33 @@ describe("compiled keyed-array window replacement hints", () => {
     ).toThrow(error);
   });
 
+  it("preserves native runtime count coercion exactly once", () => {
+    const source = [
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+      { id: "c", label: "Gamma" },
+    ] as WindowArray;
+    const replacement = { id: "x", label: "Xi" };
+    const coercions: string[] = [];
+    const runtimeCount = {
+      valueOf() {
+        coercions.push("count");
+        return 2;
+      },
+    };
+
+    const result = createCompilerKeyedArrayWindowReplace(
+      source,
+      source.toSpliced,
+      1,
+      runtimeCount as unknown as number,
+      replacement,
+    ) as Item[];
+
+    expect(result).toEqual([source[0], replacement]);
+    expect(coercions).toEqual(["count"]);
+  });
+
   it("replaces one exact window without reading or replacing retained rows", async () => {
     const initialItems = Array.from(
       { length: 4_096 },
@@ -661,6 +688,46 @@ describe("compiled keyed-array window replacement hints", () => {
     expect(harness.counters.keys).toBe(0);
     expect(harness.counters.descriptors).toBe(0);
     expect(harness.counters.bindings).toBe(0);
+  });
+
+  it("falls back without changing native results for unsafe runtime counts", async () => {
+    const harness = createWindowHarness([
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+      { id: "c", label: "Gamma" },
+      { id: "d", label: "Delta" },
+    ]);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Table />));
+    const alpha = container.querySelector('[data-key="a"]');
+    const gamma = container.querySelector('[data-key="c"]');
+    harness.counters.keys = 0;
+
+    await act(async () => {
+      harness.replace(1, 1.5, [{ id: "x", label: "Xi" }]);
+      await flushCompilerUpdates();
+    });
+
+    expect(container.textContent).toBe("AlphaXiGammaDelta");
+    expect(container.querySelector('[data-key="a"]')).toBe(alpha);
+    expect(container.querySelector('[data-key="c"]')).toBe(gamma);
+    expect(harness.counters.keys).toBeGreaterThan(1);
+
+    harness.counters.keys = 0;
+    await act(async () => {
+      harness.replace(1, 0, [{ id: "y", label: "Upsilon" }]);
+      await flushCompilerUpdates();
+    });
+
+    expect(container.textContent).toBe("AlphaUpsilonXiGammaDelta");
+    expect(container.querySelector('[data-key="a"]')).toBe(alpha);
+    expect(container.querySelector('[data-key="c"]')).toBe(gamma);
+    expect(harness.counters.keys).toBeGreaterThan(1);
+    expect(harness.counters.executions).toBe(1);
+    expect(harness.counters.renders).toBe(1);
   });
 
   it("reuses, reorders, and creates only rows inside one fixed-length window", async () => {

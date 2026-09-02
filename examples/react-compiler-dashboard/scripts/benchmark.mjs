@@ -1999,9 +1999,10 @@ const keyedBatchInsertRegressions = keyedBatchInsertResults.filter(
     !Number.isFinite(snapshotSpeedup) ||
     snapshotSpeedup < keyedBatchInsertMinimumSnapshotSpeedup,
 );
-// A compiler-proven toSpliced(position, count, ...items) replacement can validate the retained
-// prefix and suffix, prepare the incoming rows, and swap only that exact DOM window. Keep this
-// 10,000-row/64-row workload independent from the insertion and single-position gates.
+// A compiler-proven toSpliced(position, runtimeCount, ...items) replacement can validate the
+// evaluated count, retained prefix and suffix, prepare the incoming rows, and swap only that exact
+// DOM window. Keep this 10,000-row/64-row workload independent from the literal-count, insertion,
+// and single-position gates.
 const keyedWindowReplaceMinimumSpeedup = 4;
 const keyedWindowReplaceMinimumSnapshotSpeedup = 1.5;
 const keyedWindowReplaceResults = ["static", "hybrid"].map((mode) => {
