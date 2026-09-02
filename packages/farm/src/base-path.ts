@@ -15,12 +15,20 @@ export function getFarmBasePath(): string {
 }
 
 export function applyFarmBasePath(href: string, basePath = getFarmBasePath()): string {
-  if (!basePath || !href.startsWith("/")) return href;
-  if (href === basePath || href.startsWith(`${basePath}/`)) return href;
-  return `${basePath}${href}`;
+  const normalizedBasePath = normalizeFarmBasePath(basePath);
+  if (!normalizedBasePath || !href.startsWith("/")) return href;
+  if (
+    href === normalizedBasePath ||
+    href.startsWith(`${normalizedBasePath}/`) ||
+    href.startsWith(`${normalizedBasePath}?`) ||
+    href.startsWith(`${normalizedBasePath}#`)
+  ) {
+    return href;
+  }
+  return `${normalizedBasePath}${href}`;
 }
 
-function normalizeFarmBasePath(basePath: string | undefined): string {
+export function normalizeFarmBasePath(basePath: string | undefined): string {
   if (!basePath || basePath === "/") return "";
   return `/${basePath}`.replace(/\/{2,}/g, "/").replace(/\/+$/, "");
 }

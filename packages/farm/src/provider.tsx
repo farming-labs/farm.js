@@ -1,5 +1,6 @@
 import React, { createContext, useContext, type ReactNode } from "react";
 import type { FarmConfig } from "./types";
+import { normalizeFarmBasePath } from "./base-path";
 
 interface FarmContextValue {
   config: FarmConfig;
@@ -19,7 +20,7 @@ interface FarmProviderProps {
 export function FarmProvider({ children, config }: FarmProviderProps) {
   const value: FarmContextValue = {
     config,
-    basePath: config.basePath || "/",
+    basePath: normalizeFarmBasePath(config.basePath),
   };
 
   return <FarmContext.Provider value={value}>{children}</FarmContext.Provider>;

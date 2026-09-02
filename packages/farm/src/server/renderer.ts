@@ -628,6 +628,8 @@ export class ServerRenderer {
    */
   async renderNavigationFragment(input: FarmNavigationFragmentInput): Promise<string> {
     await this.initialize();
+    setFarmBasePath(this.config.basePath);
+    setFarmTrailingSlashPreference(this.config.trailingSlash);
     let element = this.rendererRuntime.createElement(input.PageComponent, input.pageProps);
     if (input.LoadingComponent) {
       element = this.rendererRuntime.createElement(

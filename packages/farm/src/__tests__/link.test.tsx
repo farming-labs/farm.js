@@ -187,7 +187,19 @@ describe("Link", () => {
       expect(prefetch).toHaveBeenCalledWith("/console/dashboard");
     });
 
-    it("uses an explicit FarmProvider base path without prefixing it twice", () => {
+    it("normalizes and uses an explicit FarmProvider base path", () => {
+      const el = render(
+        createElement(
+          FarmProvider,
+          { config: { basePath: "workspace/" } as any },
+          createElement(Link, { href: "/settings" }),
+        ),
+      );
+
+      expect(el?.getAttribute("href")).toBe("/workspace/settings");
+    });
+
+    it("does not prefix an already-prefixed FarmProvider link twice", () => {
       const el = render(
         createElement(
           FarmProvider,
@@ -197,6 +209,28 @@ describe("Link", () => {
       );
 
       expect(el?.getAttribute("href")).toBe("/workspace/settings");
+    });
+
+    it("treats a root FarmProvider base path as unprefixed", () => {
+      const el = render(
+        createElement(
+          FarmProvider,
+          { config: { basePath: "/" } as any },
+          createElement(Link, { href: "/about" }),
+        ),
+      );
+
+      expect(el?.getAttribute("href")).toBe("/about");
+    });
+
+    it("recognizes an already-prefixed base path before a query or hash", () => {
+      setFarmBasePath("/console");
+      const queryLink = render(createElement(Link, { href: "/console?tab=activity" }));
+      expect(queryLink?.getAttribute("href")).toBe("/console?tab=activity");
+
+      act(() => root.unmount());
+      const hashLink = render(createElement(Link, { href: "/console#activity" }));
+      expect(hashLink?.getAttribute("href")).toBe("/console#activity");
     });
 
     it("inherits the app trailing-slash preference", () => {
