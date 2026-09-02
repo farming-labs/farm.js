@@ -368,6 +368,31 @@ describe("Link", () => {
       expect(prefetch).not.toHaveBeenCalled();
       expect(navigate).not.toHaveBeenCalled();
     });
+
+    it("leaves native URI schemes to the browser", () => {
+      const el = render(
+        createElement(Link, { href: "tel:+15551234567", prefetch: "render" }),
+      ) as HTMLAnchorElement;
+      const event = new MouseEvent("click", { bubbles: true, button: 0, cancelable: true });
+      let farmPreventedDefault: boolean | undefined;
+      container.addEventListener(
+        "click",
+        (nativeEvent) => {
+          farmPreventedDefault = nativeEvent.defaultPrevented;
+          nativeEvent.preventDefault();
+        },
+        { once: true },
+      );
+
+      act(() => {
+        el.dispatchEvent(event);
+      });
+
+      expect(el.getAttribute("href")).toBe("tel:+15551234567");
+      expect(farmPreventedDefault).toBe(false);
+      expect(prefetch).not.toHaveBeenCalled();
+      expect(navigate).not.toHaveBeenCalled();
+    });
   });
 
   describe("typed href", () => {
@@ -415,10 +440,8 @@ describe("Link", () => {
         | `/users/${string}?${string}`
         | `/users/${string}#${string}`
         | `/users/${string}?${string}#${string}`
-        | `http://${string}`
-        | `https://${string}`
         | `//${string}`
-        | `mailto:${string}`
+        | `${string}:${string}`
       >();
     });
 

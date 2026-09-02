@@ -59,11 +59,7 @@ export type RouteParams<TRoute extends string> = string extends TRoute
   : ExtractRouteParams<StripRouteSuffix<TRoute>>;
 
 /** External URLs; these are never type-checked as routes. */
-export type ExternalHref =
-  | `http://${string}`
-  | `https://${string}`
-  | `//${string}`
-  | `mailto:${string}`;
+export type ExternalHref = `//${string}` | `${string}:${string}`;
 
 type StripRouteSuffix<TRoute extends string> = TRoute extends `${infer Path}?${string}`
   ? StripRouteSuffix<Path>
@@ -170,13 +166,7 @@ function isModifierEvent(e: React.MouseEvent): boolean {
 }
 
 function isExternalUrl(href: string): boolean {
-  const normalizedHref = href.toLowerCase();
-  return (
-    normalizedHref.startsWith("http://") ||
-    normalizedHref.startsWith("https://") ||
-    href.startsWith("//") ||
-    normalizedHref.startsWith("mailto:")
-  );
+  return href.startsWith("//") || /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(href);
 }
 
 function getRouter(): {

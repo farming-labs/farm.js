@@ -116,7 +116,8 @@ Farm writes the route union into the consolidated `src/farm.d.ts` declaration fi
 Changing only the fragment preserves SPA state, honors push versus replace history, and does not
 request route data again.
 Native anchor behavior still takes precedence: for example, a `Link` with a `download` attribute is
-handled by the browser instead of Farm's SPA router.
+handled by the browser instead of Farm's SPA router. Absolute URI schemes such as `mailto:`, `tel:`,
+and `sms:` are also passed through unchanged and are never prefetched as app routes.
 
 **Client navigation**
 
