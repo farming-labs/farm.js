@@ -55,6 +55,7 @@ export {
   reportFarmPreloadWarnings,
 } from "../preload";
 export { searchParamsToObject } from "../search-params";
+export { createFarmLegacyRequest } from "./legacy-request";
 export {
   renderFarmLegacyErrorHtml,
   renderFarmLegacyHtml,
