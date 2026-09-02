@@ -656,7 +656,12 @@ export function createAPIClient<
               status: response.status,
             };
 
-            clientOptions?.onResponse?.(response.ok ? data : undefined, error, responseEvent);
+            notifyResponseObserver(
+              clientOptions?.onResponse,
+              response.ok ? data : undefined,
+              error,
+              responseEvent,
+            );
 
             if (!error) {
               return { data, error: null, key: cacheKey } as APIResult<any, Error>;
@@ -679,7 +684,7 @@ export function createAPIClient<
               ok: false,
             };
 
-            clientOptions?.onResponse?.(undefined, error, responseEvent);
+            notifyResponseObserver(clientOptions?.onResponse, undefined, error, responseEvent);
 
             if (attempt >= maxRetries) {
               return { data: undefined, error, key: cacheKey } as APIResult<any, Error>;
@@ -1235,6 +1240,38 @@ function normalizeError(error: unknown): Error {
   });
   (normalized as Error & { cause?: unknown }).cause = error;
   return normalized;
+}
+
+function notifyResponseObserver(
+  observer: ClientOptions<any, any>["onResponse"],
+  data: unknown,
+  error: unknown,
+  event: ResponseEvent<any, any>,
+): void {
+  if (!observer) return;
+
+  try {
+    const result = observer(data, error, event) as unknown;
+    if (result && typeof (result as PromiseLike<unknown>).then === "function") {
+      void Promise.resolve(result).catch(reportResponseObserverError);
+    }
+  } catch (observerError) {
+    reportResponseObserverError(observerError);
+  }
+}
+
+function reportResponseObserverError(error: unknown): void {
+  const reportError = (globalThis as typeof globalThis & { reportError?: (error: unknown) => void })
+    .reportError;
+  if (typeof reportError === "function") {
+    try {
+      reportError.call(globalThis, error);
+      return;
+    } catch {
+      // Fall through to the console when the platform reporter itself fails.
+    }
+  }
+  console.error("[Farm.js] API client onResponse callback failed:", error);
 }
 
 function isFormData(value: unknown): value is FormData {

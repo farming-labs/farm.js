@@ -274,6 +274,10 @@ while the hydrated fetcher stays on the page.
 - optimistic: update cached query data before the server response returns.
 - onRequest, onResponse, onSuccess, onError, onSettled, and onStatus: observe the full client lifecycle.
 
+`onResponse` is a transport observer. If it throws or returns a rejected promise, Farm reports that
+failure through the platform `reportError` hook (or the console fallback) without retrying or
+changing the completed API result.
+
 Use a structured cache key when an API response intentionally shares data with route data or a [`createServerQuery`](/docs/server-queries):
 
 ```ts
