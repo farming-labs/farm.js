@@ -86,6 +86,9 @@ read and keeps the route dynamic instead of freezing request-specific HTML into 
 This check covers the route module itself; continue reviewing imported components and data loaders,
 because request-bound work in transitive imports cannot be proven safe from the route source alone.
 
+Farm serves generated HTML only for `GET` and `HEAD` requests. Other request methods continue through
+the live route instead of receiving a cached page document.
+
 **src/app/about/page.tsx**
 
 ```tsx
