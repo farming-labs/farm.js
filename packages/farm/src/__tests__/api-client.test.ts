@@ -273,6 +273,26 @@ describe("createAPIClient", () => {
     });
   });
 
+  it("preserves the HTTP response when an error body cannot be decoded", async () => {
+    const response = new Response("{broken", {
+      status: 500,
+      statusText: "Internal Server Error",
+      headers: { "content-type": "application/json" },
+    });
+    globalThis.fetch = vi.fn(async () => response) as any;
+    const api = createAPIClient<APIRouter>({ baseURL: "https://api.example.com" });
+
+    const result = await api.status.get();
+
+    expect(result.error).toMatchObject({
+      code: "http_error",
+      status: 500,
+      response,
+      cause: expect.any(SyntaxError),
+    });
+    expect(result.error).not.toMatchObject({ code: "network_error", status: 0 });
+  });
+
   it("supports empty and binary successful responses", async () => {
     const responses = [
       new Response("", { status: 200 }),

@@ -488,7 +488,13 @@ export function createAPIClient<
     applyFarmCacheInvalidations(
       decodeFarmCacheInvalidations(response.headers?.get?.(FARM_CACHE_INVALIDATION_HEADER)),
     );
-    const data = await readAPIResponseData(response, method);
+    let data: unknown;
+    try {
+      data = await readAPIResponseData(response, method);
+    } catch (decodeError) {
+      if (response.ok) throw decodeError;
+      return { response, data: undefined, decodeError };
+    }
 
     return { response, data };
   };
@@ -634,12 +640,12 @@ export function createAPIClient<
           });
 
           try {
-            const { response, data } = await fetchClient(path, {
+            const { response, data, decodeError } = await fetchClient(path, {
               ...input,
               method: methodUpper,
             });
 
-            const error = response.ok ? null : createResponseError(response, data);
+            const error = response.ok ? null : createResponseError(response, data, decodeError);
 
             const responseEvent: ResponseEvent<any, Error> = {
               requestId,
@@ -1254,7 +1260,7 @@ function deleteHeader(headers: Record<string, string>, name: string): void {
   }
 }
 
-function createResponseError(response: Response, data: any): Error {
+function createResponseError(response: Response, data: any, cause?: unknown): Error {
   const expected = readEndpointErrorEnvelope(data);
   if (expected) {
     return new APIClientError(expected.code, expected.data, {
@@ -1264,11 +1270,13 @@ function createResponseError(response: Response, data: any): Error {
     });
   }
 
-  return new APIClientError("http_error", data, {
+  const error = new APIClientError("http_error", data, {
     status: response.status,
     message: `HTTP ${response.status}: ${response.statusText}`,
     response,
   });
+  if (cause !== undefined) (error as Error & { cause?: unknown }).cause = cause;
+  return error;
 }
 
 function readEndpointErrorEnvelope(data: unknown): {
