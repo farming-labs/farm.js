@@ -116,9 +116,13 @@ Farm writes the route union into the consolidated `src/farm.d.ts` declaration fi
 Changing only the fragment preserves SPA state, honors push versus replace history, and does not
 request route data again.
 Native anchor behavior still takes precedence: for example, a `Link` with a `download` attribute is
-handled by the browser instead of Farm's SPA router.
+handled by the browser instead of Farm's SPA router. Absolute URI schemes such as `mailto:`, `tel:`,
+and `sms:` are also passed through unchanged and are never prefetched as app routes. Literal custom
+schemes such as `customapp:open` are validated from their URI grammar and work without registration.
 Internal `Link` hrefs stay app-relative: when `basePath: "/console"` is configured, `href="/about"`
 renders and navigates to `/console/about`. Do not add the base path to route hrefs yourself.
+For a reusable custom-scheme type, use `ExternalHref<\`customapp:${string}\>` (or declaration-merge
+`LinkExternalUriSchemes` when the scheme should belong to the default `ExternalHref` union).
 
 **Client navigation**
 

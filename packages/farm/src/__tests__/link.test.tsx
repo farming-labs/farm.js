@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, createElement } from "react";
 import { expectTypeOf } from "vitest";
 import { createRoot } from "react-dom/client";
-import { Link, type LinkProps, type RouteHref } from "../client/link";
+import { Link, type ExternalHref, type LinkProps, type RouteHref } from "../client/link";
 import { setFarmTrailingSlashPreference } from "../trailing-slash";
 import { setFarmBasePath } from "../base-path";
 import { FarmProvider } from "../provider";
@@ -425,6 +425,56 @@ describe("Link", () => {
       expect(prefetch).not.toHaveBeenCalled();
       expect(navigate).not.toHaveBeenCalled();
     });
+
+    it("leaves native URI schemes to the browser", () => {
+      const el = render(
+        createElement(Link, { href: "tel:+15551234567", prefetch: "render" }),
+      ) as HTMLAnchorElement;
+      const event = new MouseEvent("click", { bubbles: true, button: 0, cancelable: true });
+      let farmPreventedDefault: boolean | undefined;
+      container.addEventListener(
+        "click",
+        (nativeEvent) => {
+          farmPreventedDefault = nativeEvent.defaultPrevented;
+          nativeEvent.preventDefault();
+        },
+        { once: true },
+      );
+
+      act(() => {
+        el.dispatchEvent(event);
+      });
+
+      expect(el.getAttribute("href")).toBe("tel:+15551234567");
+      expect(farmPreventedDefault).toBe(false);
+      expect(prefetch).not.toHaveBeenCalled();
+      expect(navigate).not.toHaveBeenCalled();
+    });
+
+    it("leaves custom URI schemes to the browser", () => {
+      const el = render(
+        createElement(Link, { href: "customapp:open/settings", prefetch: "render" }),
+      ) as HTMLAnchorElement;
+      const event = new MouseEvent("click", { bubbles: true, button: 0, cancelable: true });
+      let farmPreventedDefault: boolean | undefined;
+      container.addEventListener(
+        "click",
+        (nativeEvent) => {
+          farmPreventedDefault = nativeEvent.defaultPrevented;
+          nativeEvent.preventDefault();
+        },
+        { once: true },
+      );
+
+      act(() => {
+        el.dispatchEvent(event);
+      });
+
+      expect(el.getAttribute("href")).toBe("customapp:open/settings");
+      expect(farmPreventedDefault).toBe(false);
+      expect(prefetch).not.toHaveBeenCalled();
+      expect(navigate).not.toHaveBeenCalled();
+    });
   });
 
   describe("typed href", () => {
@@ -472,11 +522,26 @@ describe("Link", () => {
         | `/users/${string}?${string}`
         | `/users/${string}#${string}`
         | `/users/${string}?${string}#${string}`
-        | `http://${string}`
-        | `https://${string}`
         | `//${string}`
-        | `mailto:${string}`
+        | ExternalHref
       >();
+
+      expectTypeOf<"/search?q=a:b">().not.toMatchTypeOf<ExternalHref>();
+      expectTypeOf<"/users/:id">().not.toMatchTypeOf<ExternalHref>();
+      expectTypeOf<"/about#sec:1">().not.toMatchTypeOf<ExternalHref>();
+      expectTypeOf<"tel:+15551234567">().toMatchTypeOf<ExternalHref>();
+      expectTypeOf<"vscode://file/app.ts">().toMatchTypeOf<ExternalHref>();
+      expectTypeOf<"customapp:open/settings">().toMatchTypeOf<
+        ExternalHref<"customapp:open/settings">
+      >();
+      expectTypeOf<"1custom:value">().not.toMatchTypeOf<ExternalHref<"1custom:value">>();
+      expectTypeOf<"custom app:value">().not.toMatchTypeOf<ExternalHref<"custom app:value">>();
+      expectTypeOf<"not a scheme:value">().not.toMatchTypeOf<ExternalHref>();
+
+      const customSchemeProps = {
+        href: "customapp:open/settings",
+      } satisfies LinkProps<"/about", "customapp:open/settings">;
+      expect(customSchemeProps.href).toBe("customapp:open/settings");
     });
 
     it("accepts a union variable of routes whose params are already resolved", () => {
