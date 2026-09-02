@@ -125,6 +125,10 @@ path, URL query parameters, request body, `Content-Type`, and `Content-Encoding`
 requests need an explicit cache key because a generated multipart boundary cannot be represented
 reliably before `fetch` sends the request.
 
+Farm adds `Content-Type: application/json` when it serializes a JSON request body. Bodyless
+requests do not receive that header, and an explicitly configured content type takes precedence
+regardless of header casing.
+
 ## Upload files and consume progress streams
 
 `toFormData()` retains the endpoint's body shape while sending files as real multipart fields. When
@@ -289,7 +293,12 @@ const product = await api.products.get(
 );
 ```
 
-Structured keys use Farm's route-data key contract. Default API cache keys include the API origin and remain isolated from other clients.
+Structured keys use Farm's route-data key contract. Default API cache keys include the API origin.
+Clients that configure headers or non-default credentials keep their cache private to that client,
+and changing that request context clears the private cache. This prevents an authenticated response
+from being reused by a client with a different identity without placing credential values in a
+public cache key. Clients using the default same-origin request context can still share structured
+keys with Farm's route-data cache.
 
 Set `cache.dedupeMs` to join identical requests started within that window. If an older request is
 still running after the window expires, the newer request becomes the cache owner; the older result
@@ -368,6 +377,8 @@ console.log(result.data.message);
 ```
 
 This makes client components easier to write because failed responses do not need to be caught with `try/catch` unless you want that behavior.
+If an HTTP error body is malformed, Farm still returns an `http_error` with the real status and
+`Response`; the decoding failure is available as `error.cause`.
 
 ## Server callers
 

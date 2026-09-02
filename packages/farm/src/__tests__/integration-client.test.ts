@@ -124,6 +124,43 @@ describe("integration client", () => {
     } satisfies Partial<IntegrationClientError>);
   });
 
+  it("decodes structured JSON media types", async () => {
+    stubBrowser();
+
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ authenticated: true }), {
+          headers: { "content-type": "application/vnd.farm.session+json; charset=utf-8" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: "Session expired", code: "expired" }), {
+          status: 401,
+          headers: { "content-type": "application/problem+json" },
+        }),
+      );
+
+    const api = createIntegrationClient({
+      auth: {
+        session: endpoint.get<{ authenticated: boolean }>("/auth/session", {
+          responseFormat: "json",
+        }),
+      },
+    });
+
+    await expect(api.auth.session()).resolves.toMatchObject({
+      data: { authenticated: true },
+      error: null,
+    });
+    const failed = await api.auth.session();
+    expect(failed.error).toMatchObject({
+      name: "IntegrationClientError",
+      status: 401,
+      message: "Session expired",
+      data: { error: "Session expired", code: "expired" },
+    });
+  });
+
   it("supports nesting namespaces under an integrations key", async () => {
     stubBrowser();
 
