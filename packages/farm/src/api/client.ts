@@ -7,11 +7,11 @@ import {
   type IntegrationServerClientRoot,
 } from "../integration-client";
 import {
+  FarmClientDataCache,
   getFarmClientDataCache,
   normalizeFarmClientCacheKey,
   type FarmClientCacheEntry,
   type FarmClientCacheKey,
-  type FarmClientDataCache,
 } from "../client-cache";
 import {
   applyFarmCacheInvalidations,
@@ -440,7 +440,9 @@ export function createAPIClient<
           integrations: integrationsClient<TIntegrations>(integrationOptions),
         };
 
-  const cacheState = getFarmClientDataCache();
+  const sharedCacheState = getFarmClientDataCache();
+  let scopedCacheState: FarmClientDataCache | undefined;
+  let scopedCacheContext: string | undefined;
   const inflightState = new Map<string, InflightEntry>();
   const routeMeta = new WeakMap<AnyRouteRef, RouteMeta>();
   let requestCounter = 0;
@@ -499,6 +501,17 @@ export function createAPIClient<
     input: any = {},
     clientOptions?: ClientOptions<any, any>,
   ): Promise<APIResult<any, Error>> => {
+    const requestCacheContext = getRequestCacheContext(options, input);
+    let cacheState = sharedCacheState;
+    if (requestCacheContext !== undefined) {
+      scopedCacheState ??= new FarmClientDataCache();
+      if (scopedCacheContext !== requestCacheContext) {
+        scopedCacheState.clear();
+        scopedCacheContext = requestCacheContext;
+      }
+      cacheState = scopedCacheState;
+    }
+
     const methodUpper = method.toUpperCase() as StatusEvent["method"];
     const requestId = `${Date.now()}-${++requestCounter}`;
     const cacheOptions = clientOptions?.cache
@@ -1139,6 +1152,27 @@ function getHeader(headers: unknown, name: string): string | undefined {
 
   const entry = Object.entries(headers).find(([key]) => key.toLowerCase() === name);
   return entry?.[1] === undefined ? undefined : String(entry[1]);
+}
+
+function getRequestCacheContext(
+  options: Pick<APIClientOptions, "headers" | "credentials">,
+  input: unknown,
+): string | undefined {
+  const credentials = options.credentials ?? "same-origin";
+  const headers = new Headers(options.headers);
+  const requestHeaders =
+    input && typeof input === "object" && "headers" in input ? input.headers : undefined;
+
+  if (requestHeaders) {
+    new Headers(requestHeaders as HeadersInit).forEach((value, key) => headers.set(key, value));
+  }
+
+  if (credentials === "same-origin" && [...headers].length === 0) return undefined;
+
+  return stableStringify({
+    credentials,
+    headers: [...headers].sort(([left], [right]) => left.localeCompare(right)),
+  });
 }
 
 function getGcAt(now: number, gcTime?: number): number | undefined {

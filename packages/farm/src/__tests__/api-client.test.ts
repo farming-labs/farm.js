@@ -367,6 +367,50 @@ describe("createAPIClient", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("isolates cached responses between clients with different request contexts", async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const authorization = (init?.headers as Record<string, string>)?.Authorization;
+      return buildResponse({ user: authorization });
+    });
+    globalThis.fetch = fetchMock as any;
+
+    const first = createAPIClient<APIRouter>({
+      baseURL: "http://example.com",
+      headers: { Authorization: "Bearer user-a" },
+    });
+    const second = createAPIClient<APIRouter>({
+      baseURL: "http://example.com",
+      headers: { Authorization: "Bearer user-b" },
+    });
+    const cache = { policy: "cache-first" as const, staleTime: 10_000 };
+
+    const firstResult = await first.users.get({}, { cache });
+    const secondResult = await second.users.get({}, { cache });
+
+    expect(firstResult.data).toEqual({ user: "Bearer user-a" });
+    expect(secondResult.data).toEqual({ user: "Bearer user-b" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("drops a client cache when its request context changes", async () => {
+    const headers = { Authorization: "Bearer user-a" };
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const authorization = (init?.headers as Record<string, string>)?.Authorization;
+      return buildResponse({ user: authorization });
+    });
+    globalThis.fetch = fetchMock as any;
+    const api = createAPIClient<APIRouter>({ baseURL: "http://example.com", headers });
+    const cache = { policy: "cache-first" as const, staleTime: 10_000 };
+
+    const first = await api.users.get({}, { cache });
+    headers.Authorization = "Bearer user-b";
+    const second = await api.users.get({}, { cache });
+
+    expect(first.data).toEqual({ user: "Bearer user-a" });
+    expect(second.data).toEqual({ user: "Bearer user-b" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("uses defined structured keys directly for optimistic updates and invalidation", async () => {
     let getCount = 0;
     const mutationResponse = createDeferred<any>();
