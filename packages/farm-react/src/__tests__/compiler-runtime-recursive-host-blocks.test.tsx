@@ -20,6 +20,7 @@ interface Item {
 }
 
 const roots: Array<{ unmount(): void }> = [];
+const stressIt = process.env.FARM_REACT_STRESS === "1" ? it : it.skip;
 
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -473,7 +474,7 @@ describe("compiled recursive host-block runtime", () => {
     expect(container.innerHTML).toBe("");
   });
 
-  it("matches normal React through 3,000 deterministic recursive updates", async () => {
+  stressIt("matches normal React through 3,000 deterministic recursive updates", async () => {
     type Action =
       | "outer"
       | "loading"

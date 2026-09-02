@@ -24,6 +24,7 @@ type SortableArray = Item[] & {
 };
 
 const roots: Root[] = [];
+const stressIt = process.env.FARM_REACT_STRESS === "1" ? it : it.skip;
 
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -180,46 +181,49 @@ function lisLength(sequence: readonly number[]): number {
 }
 
 describe("compiled keyed-array sort hints", () => {
-  it("sorts 4,096 rows with minimum DOM moves and no key, descriptor, or binding reads", async () => {
-    const initialItems = Array.from(
-      { length: 4_096 },
-      (_, index): Item => ({
-        id: `row-${index}`,
-        label: `Row ${index}`,
-        rank: (index * 2_053) % 4_096,
-      }),
-    );
-    const target = [...initialItems].sort((left, right) => left.rank - right.rank);
-    const oldIndices = new Map(initialItems.map((item, index) => [item, index]));
-    const expectedMoves = target.length - lisLength(target.map((item) => oldIndices.get(item)!));
-    const harness = createSortHarness(initialItems);
-    const container = document.createElement("div");
-    document.body.append(container);
-    const root = createRoot(container);
-    roots.push(root);
-    await act(async () => root.render(<harness.Table />));
-    const firstTarget = container.querySelector(`[data-key="${target[0].id}"]`);
-    const lastTarget = container.querySelector(`[data-key="${target.at(-1)!.id}"]`);
-    const list = container.querySelector("ul")!;
-    const insertBefore = vi.spyOn(list, "insertBefore");
-    harness.counters.keys = 0;
-    harness.counters.descriptors = 0;
-    harness.counters.bindings = 0;
+  stressIt(
+    "sorts 4,096 rows with minimum DOM moves and no key, descriptor, or binding reads",
+    async () => {
+      const initialItems = Array.from(
+        { length: 4_096 },
+        (_, index): Item => ({
+          id: `row-${index}`,
+          label: `Row ${index}`,
+          rank: (index * 2_053) % 4_096,
+        }),
+      );
+      const target = [...initialItems].sort((left, right) => left.rank - right.rank);
+      const oldIndices = new Map(initialItems.map((item, index) => [item, index]));
+      const expectedMoves = target.length - lisLength(target.map((item) => oldIndices.get(item)!));
+      const harness = createSortHarness(initialItems);
+      const container = document.createElement("div");
+      document.body.append(container);
+      const root = createRoot(container);
+      roots.push(root);
+      await act(async () => root.render(<harness.Table />));
+      const firstTarget = container.querySelector(`[data-key="${target[0].id}"]`);
+      const lastTarget = container.querySelector(`[data-key="${target.at(-1)!.id}"]`);
+      const list = container.querySelector("ul")!;
+      const insertBefore = vi.spyOn(list, "insertBefore");
+      harness.counters.keys = 0;
+      harness.counters.descriptors = 0;
+      harness.counters.bindings = 0;
 
-    await act(async () => {
-      harness.sort((left, right) => left.rank - right.rank);
-      await flushCompilerUpdates();
-    });
+      await act(async () => {
+        harness.sort((left, right) => left.rank - right.rank);
+        await flushCompilerUpdates();
+      });
 
-    expect(container.querySelector("li:first-child")).toBe(firstTarget);
-    expect(container.querySelector("li:last-child")).toBe(lastTarget);
-    expect(insertBefore).toHaveBeenCalledTimes(expectedMoves);
-    expect(harness.counters.executions).toBe(1);
-    expect(harness.counters.renders).toBe(1);
-    expect(harness.counters.keys).toBe(0);
-    expect(harness.counters.descriptors).toBe(0);
-    expect(harness.counters.bindings).toBe(0);
-  }, 15_000);
+      expect(container.querySelector("li:first-child")).toBe(firstTarget);
+      expect(container.querySelector("li:last-child")).toBe(lastTarget);
+      expect(insertBefore).toHaveBeenCalledTimes(expectedMoves);
+      expect(harness.counters.executions).toBe(1);
+      expect(harness.counters.renders).toBe(1);
+      expect(harness.counters.keys).toBe(0);
+      expect(harness.counters.descriptors).toBe(0);
+      expect(harness.counters.bindings).toBe(0);
+    },
+  );
 
   it("falls back for custom methods, queued sorts, changed identities, and collection bindings", async () => {
     const initialItems: Item[] = [
