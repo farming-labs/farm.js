@@ -4,7 +4,8 @@ const os = require("node:os");
 const path = require("node:path");
 const { test } = require("node:test");
 
-const { packPublicPackages, readPublicPackages } = require("./pack-public-packages");
+const { packPublicPackages } = require("./pack-public-packages");
+const { readPublicPackages } = require("./public-packages");
 
 test("discovers every public package without consulting the registry", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-public-packages-"));
@@ -62,12 +63,17 @@ test("packs each public package into an isolated temporary directory", () => {
 });
 
 test("fails when a package does not produce an archive", () => {
+  let packDirectory;
   assert.throws(
     () =>
       packPublicPackages({
         packages: [{ dir: "/workspace/a", name: "@farm.js/a", version: "1.0.0" }],
-        run() {},
+        run(_command, args) {
+          packDirectory = args.at(-1);
+        },
       }),
     /Expected 1 package archive.*produced 0/,
   );
+  assert.ok(packDirectory);
+  assert.equal(fs.existsSync(packDirectory), false);
 });
