@@ -12,7 +12,7 @@ do not need a renderer option or an additional adapter package.
 ## Create an app
 
 ```bash
-pnpm create @farm.js/app@beta my-app --template basic --typescript
+pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-app --template basic --typescript
 ```
 
 Omitting `renderer` keeps React active:
@@ -97,7 +97,7 @@ Start from the focused experimental starter when you want the compiler flag, sha
 UI, a live AOT-versus-React comparison, and a reproducible browser check already wired together:
 
 ```bash
-pnpm create @farm.js/app@beta compiler-app --template react-compiler --typescript
+pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta compiler-app --template react-compiler --typescript
 ```
 
 You can also clone the standalone

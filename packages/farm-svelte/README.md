@@ -19,7 +19,7 @@ export default defineConfig({
 Create a complete starter:
 
 ```bash
-pnpm create @farm.js/app@beta my-svelte-app --template basic --renderer svelte --typescript
+pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-svelte-app --template basic --renderer svelte --typescript
 ```
 
 See the [Svelte renderer guide](https://farm.js.dev/docs/renderers/svelte) and the
