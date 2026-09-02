@@ -164,6 +164,37 @@ describe("Storage", () => {
     await expect(client.getItem("farewell")).resolves.toBe("goodbye");
   });
 
+  it("retries initialization after a driver factory failure", async () => {
+    const data = new Map<string, string>();
+    let attempts = 0;
+    const client = defineStorageClient(() => {
+      attempts++;
+      if (attempts === 1) throw new Error("temporary storage failure");
+
+      return {
+        name: "retryable",
+        hasItem: (key: string) => data.has(key),
+        getItem: (key: string) => data.get(key) ?? null,
+        setItem: (key: string, value: string) => {
+          data.set(key, value);
+        },
+        removeItem: (key: string) => {
+          data.delete(key);
+        },
+        getKeys: () => [...data.keys()],
+      } as never;
+    });
+
+    const firstAttempts = await Promise.allSettled([client.ready(), client.ready()]);
+    expect(firstAttempts.map((result) => result.status)).toEqual(["rejected", "rejected"]);
+    expect(attempts).toBe(1);
+
+    await client.setItem("status", "ready");
+
+    expect(attempts).toBe(2);
+    await expect(client.getItem("status")).resolves.toBe("ready");
+  });
+
   it("supports mounted local namespaces with shorthand options", async () => {
     const dir = await createTempDir("farm-storage-local-");
     const cacheClient = localStorage({ base: dir });
