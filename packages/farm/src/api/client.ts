@@ -441,9 +441,8 @@ export function createAPIClient<
         };
 
   const sharedCacheState = getFarmClientDataCache();
-  let scopedCacheState: FarmClientDataCache | undefined;
-  let scopedCacheContext: string | undefined;
-  const inflightState = new Map<string, InflightEntry>();
+  const sharedInflightState = new Map<string, InflightEntry>();
+  let scopedRequestState: ScopedRequestState | undefined;
   const routeMeta = new WeakMap<AnyRouteRef, RouteMeta>();
   let requestCounter = 0;
 
@@ -501,17 +500,6 @@ export function createAPIClient<
     input: any = {},
     clientOptions?: ClientOptions<any, any>,
   ): Promise<APIResult<any, Error>> => {
-    const requestCacheContext = getRequestCacheContext(options, input);
-    let cacheState = sharedCacheState;
-    if (requestCacheContext !== undefined) {
-      scopedCacheState ??= new FarmClientDataCache();
-      if (scopedCacheContext !== requestCacheContext) {
-        scopedCacheState.clear();
-        scopedCacheContext = requestCacheContext;
-      }
-      cacheState = scopedCacheState;
-    }
-
     const methodUpper = method.toUpperCase() as StatusEvent["method"];
     const requestId = `${Date.now()}-${++requestCounter}`;
     const cacheOptions = clientOptions?.cache
@@ -538,7 +526,6 @@ export function createAPIClient<
       });
     };
 
-    const entry = getValidCacheEntry(cacheState, cacheKey, now);
     const policy = cacheOptions?.policy ?? (cacheOptions ? "cache-first" : "network-only");
     const staleTime = cacheOptions?.staleTime ?? 0;
     const hasReliableDefaultCacheKey =
@@ -547,6 +534,42 @@ export function createAPIClient<
       Boolean(cacheOptions) &&
       (methodUpper === "GET" || methodUpper === "QUERY") &&
       hasReliableDefaultCacheKey;
+    const needsCacheState =
+      isCacheEnabled ||
+      Boolean(clientOptions?.optimistic?.update?.length) ||
+      Boolean(clientOptions?.invalidate);
+    let requestCacheContext: string | undefined;
+    let requestContextError: Error | undefined;
+    if (needsCacheState) {
+      try {
+        requestCacheContext = getRequestCacheContext(options, input);
+      } catch (error) {
+        requestCacheContext = `invalid:${requestId}`;
+        requestContextError = normalizeError(error);
+      }
+    }
+
+    let cacheState = sharedCacheState;
+    let inflightState = sharedInflightState;
+    let requestScopedState: ScopedRequestState | undefined;
+    if (requestCacheContext !== undefined) {
+      if (scopedRequestState && scopedRequestState.context !== requestCacheContext) {
+        scopedRequestState.retired = true;
+        if (scopedRequestState.inflight.size === 0) scopedRequestState.cache.dispose();
+        scopedRequestState = undefined;
+      }
+      scopedRequestState ??= {
+        context: requestCacheContext,
+        cache: new FarmClientDataCache(),
+        inflight: new Map(),
+        retired: false,
+      };
+      requestScopedState = scopedRequestState;
+      cacheState = requestScopedState.cache;
+      inflightState = requestScopedState.inflight;
+    }
+
+    const entry = getValidCacheEntry(cacheState, cacheKey, now);
     const isStale = entry ? isEntryStale(entry, now) : true;
 
     const applyOptimisticUpdates = () => {
@@ -647,6 +670,7 @@ export function createAPIClient<
           });
 
           try {
+            if (requestContextError) throw requestContextError;
             const { response, data } = await fetchClient(path, {
               ...input,
               method: methodUpper,
@@ -749,6 +773,13 @@ export function createAPIClient<
       } finally {
         if (inflightState.get(cacheKey) === inflightEntry) {
           inflightState.delete(cacheKey);
+        }
+        if (requestContextError && requestScopedState) {
+          requestScopedState.retired = true;
+          if (scopedRequestState === requestScopedState) scopedRequestState = undefined;
+        }
+        if (requestScopedState?.retired && requestScopedState.inflight.size === 0) {
+          requestScopedState.cache.dispose();
         }
       }
     };
@@ -1084,6 +1115,13 @@ type CacheEntry = FarmClientCacheEntry<any>;
 type InflightEntry = {
   promise: Promise<APIResult<any, Error>>;
   startedAt: number;
+};
+
+type ScopedRequestState = {
+  context: string;
+  cache: FarmClientDataCache;
+  inflight: Map<string, InflightEntry>;
+  retired: boolean;
 };
 
 type RouteMeta = {

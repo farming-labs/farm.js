@@ -392,6 +392,36 @@ describe("createAPIClient", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("isolates credentialed caches between client instances", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(buildResponse({ users: [{ id: "a" }], total: 1, limit: 5, offset: 0 }))
+      .mockResolvedValueOnce(
+        buildResponse({ users: [{ id: "b" }], total: 1, limit: 5, offset: 0 }),
+      );
+    globalThis.fetch = fetchMock as any;
+    const first = createAPIClient<APIRouter>({
+      baseURL: "http://example.com",
+      credentials: "include",
+    });
+    const second = createAPIClient<APIRouter>({
+      baseURL: "http://example.com",
+      credentials: "include",
+    });
+    const cache = { policy: "cache-first" as const, staleTime: 10_000 };
+
+    const firstResult = await first.users.get({}, { cache });
+    const secondResult = await second.users.get({}, { cache });
+    const cachedFirst = await first.users.get({}, { cache });
+    const cachedSecond = await second.users.get({}, { cache });
+
+    expect(firstResult.data?.users[0]?.id).toBe("a");
+    expect(secondResult.data?.users[0]?.id).toBe("b");
+    expect(cachedFirst.data?.users[0]?.id).toBe("a");
+    expect(cachedSecond.data?.users[0]?.id).toBe("b");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("drops a client cache when its request context changes", async () => {
     const headers = { Authorization: "Bearer user-a" };
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
@@ -409,6 +439,66 @@ describe("createAPIClient", () => {
     expect(first.data).toEqual({ user: "Bearer user-a" });
     expect(second.data).toEqual({ user: "Bearer user-b" });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not dedupe a new request context against an older in-flight request", async () => {
+    const headers = { Authorization: "Bearer user-a" };
+    const firstResponse = createDeferred<ReturnType<typeof buildResponse>>();
+    const secondResponse = createDeferred<ReturnType<typeof buildResponse>>();
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() => firstResponse.promise)
+      .mockImplementationOnce(() => secondResponse.promise);
+    globalThis.fetch = fetchMock as any;
+    const api = createAPIClient<APIRouter>({ baseURL: "http://example.com", headers });
+    const cache = { policy: "cache-first" as const, staleTime: 10_000, dedupeMs: 10_000 };
+
+    const first = api.users.get({}, { cache });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    headers.Authorization = "Bearer user-b";
+    const second = api.users.get({}, { cache });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    secondResponse.resolve(buildResponse({ users: [{ id: "b" }], total: 1, limit: 5, offset: 0 }));
+    await expect(second).resolves.toMatchObject({ data: { users: [{ id: "b" }] } });
+    await expect(api.users.get({}, { cache })).resolves.toMatchObject({
+      data: { users: [{ id: "b" }] },
+    });
+
+    firstResponse.resolve(buildResponse({ users: [{ id: "a" }], total: 1, limit: 5, offset: 0 }));
+    await expect(first).resolves.toMatchObject({ data: { users: [{ id: "a" }] } });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports malformed cache-context headers through the result lifecycle", async () => {
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock as any;
+    const onRequest = vi.fn();
+    const onResponse = vi.fn();
+    const onError = vi.fn();
+    const onSettled = vi.fn();
+    const api = createAPIClient<APIRouter>({
+      baseURL: "http://example.com",
+      headers: { "invalid\nheader": "value" },
+    });
+
+    const result = await api.users.get(
+      {},
+      {
+        cache: { policy: "cache-first", staleTime: 10_000 },
+        onRequest,
+        onResponse,
+        onError,
+        onSettled,
+      },
+    );
+
+    expect(result.error).toMatchObject({ code: "network_error", status: 0 });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(onRequest).toHaveBeenCalledTimes(1);
+    expect(onResponse).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onSettled).toHaveBeenCalledTimes(1);
   });
 
   it("uses defined structured keys directly for optimistic updates and invalidation", async () => {
