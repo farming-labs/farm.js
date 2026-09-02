@@ -2,6 +2,34 @@
 
 Date: 2026-08-29
 
+## Compiler-safe runtime slice bounds — 2026-09-02
+
+The retained-window workload now passes an event-local `trimCount` to
+`current.slice(trimCount)` instead of embedding the value as a literal. Both compiler builds emit
+one `keyedArraySliceHints` site, preserve every surviving DOM row, remove the exact prefix, and
+finish with zero compiled owner executions. The equivalent block-bodied setter remains the
+compiled control and performs the same native array and DOM work without the hint.
+
+| Mode   | React median | Runtime bound | Compiled control | vs React | vs control | 21k vs React |
+| ------ | -----------: | ------------: | ---------------: | -------: | ---------: | -----------: |
+| Static |      64.00 ms |       5.40 ms |         17.10 ms |   11.85x |      3.17x |       13.65x |
+| Hybrid |      64.00 ms |       7.00 ms |         18.70 ms |    9.14x |      2.67x |       15.53x |
+
+The unchanged gate requires at least 3x versus React at both 10,000 and 21,000 rows and 1.25x
+versus the compiled control. Three complete bracketed production-browser runs all passed the slice
+gate: 5.82x–13.37x versus React at 10,000 rows, 9.00x–15.53x at 21,000 rows, and 2.67x–4.64x versus
+the control. Each run also passed DOM correctness, compiler-report, owner-execution, general
+optimization-persistence, and normalized scalability checks for this path.
+
+Compiler tests accept identifiers, property reads, arithmetic, conditionals, and safe `Math` calls
+while rejecting user calls, assignments, updates, and fractional literals. Runtime coverage proves
+native bound coercion order, complete fallback for fractional, `NaN`, and no-op evaluated bounds,
+2,000 queued slices, and 1,000 randomized runtime-bound slices against normal React. The runtime is
+unchanged: the keyed-slice fixture remains a 12,222 B gzip compiler premium, the optional
+keyed-window fixture remains 14,173 B gzip, and the compiler-disabled core premium remains 3,766 B
+gzip with an 82.5% reduction from the full compatibility runtime. The recorded run used Chrome
+152.0.7977.65, Node.js 23.11.0, and Apple M1 macOS arm64.
+
 ## Runtime delete-count exact-window follow-up — 2026-09-02
 
 The full bracketed production-browser run changed the existing 10,000-row exact-window workload

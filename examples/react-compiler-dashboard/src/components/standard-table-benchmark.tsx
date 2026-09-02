@@ -202,25 +202,27 @@ export function StandardTableBenchmark() {
           data-action="table-drop-prefix"
           type="button"
           onClick={() => {
-            setRows((current) => current.slice(1_000));
-            setOperation("drop benchmark prefix");
+            const trimCount = 1_000;
+            setRows((current) => current.slice(trimCount));
+            setOperation("drop runtime-count prefix");
             setRevision((value) => value + 1);
           }}
         >
-          Drop benchmark prefix
+          Drop runtime-count prefix
         </button>
         <button
           data-action="table-drop-prefix-snapshot"
           type="button"
           onClick={() => {
+            const trimCount = 1_000;
             setRows((current) => {
-              return current.slice(1_000);
+              return current.slice(trimCount);
             });
-            setOperation("drop benchmark prefix (snapshot control)");
+            setOperation("drop runtime-count prefix (snapshot control)");
             setRevision((value) => value + 1);
           }}
         >
-          Drop benchmark prefix (snapshot control)
+          Drop runtime-count prefix (snapshot control)
         </button>
         <button
           data-action="table-roll-window"

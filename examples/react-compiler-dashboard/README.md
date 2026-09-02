@@ -81,12 +81,14 @@ least 1.25x faster than the compiled control at 10,000 rows. The report must con
 `keyedArrayPrependHints` count; deterministic package tests separately require key, descriptor, and
 binding work to equal only the new prefix while preserving every existing DOM row.
 
-Keyed array slices have an independent retained-window comparison. A concise `slice(1_000)` is
-measured against bracketed React and an equivalent block-bodied compiled snapshot control. Both
-compiler modes must remain at least 3x faster than React while trimming 10,000- and 21,000-row
-arrays, and at least 1.25x faster than the compiled control at 10,000 rows. The report must contain
-a nonzero `keyedArraySliceHints` count; deterministic package tests separately require zero
-surviving key, descriptor, and binding reads while preserving surviving DOM identity.
+Keyed array slices have an independent retained-window comparison. A concise
+`slice(trimCount)` uses an event-local runtime bound and is measured against bracketed React and an
+equivalent block-bodied compiled snapshot control. Both compiler modes must remain at least 3x
+faster than React while trimming 10,000- and 21,000-row arrays, and at least 1.25x faster than the
+compiled control at 10,000 rows. The report must contain a nonzero `keyedArraySliceHints` count;
+deterministic package tests separately require zero surviving key, descriptor, and binding reads,
+preserve surviving DOM identity, and cover safe and effectful bound expressions plus unsafe
+evaluated-bound fallback.
 
 Rolling windows have a separate 10,000-row persistence gate. A concise
 `[...current.slice(1_000), ...incoming]` update is measured against bracketed React and an

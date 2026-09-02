@@ -264,22 +264,28 @@ keys, React-owned row structures, middle insertion, direct replacement, duplicat
 sparse arrays, and failed validation use complete keyed reconciliation. The compiler report
 exposes the emitted-site count as `keyedArrayPrependHints`.
 
-Literal native slices can carry their exact retained interval into the same removal runtime:
+Native slices with compiler-safe bounds can carry their exact retained interval into the same
+removal runtime:
 
 ```tsx
 setItems((current) => current.slice(1_000));
 setItems((current) => current.slice(0, -1_000));
 setItems((current) => current.slice(2, 8));
+setItems((current) => current.slice(trimCount));
+setItems((current) => current.slice(visible.start, visible.end));
 ```
 
 For compiler-owned host rows whose render and key do not read the row index, Farm validates the
 committed source and queued slice chain, preserves every surviving DOM row, and removes only rows
 outside the retained interval. A slice-only chain does not reread surviving keys, descriptors, or
-bindings. One or two build-time safe-integer bounds are required. Runtime bounds, block-bodied or
-chained updates, custom slice methods, sparse or subclassed arrays, index-aware or
-collection-reading rows, React-owned structures, and failed validation keep complete keyed
-reconciliation. No option or component is added. The compiler report exposes the emitted-site
-count as `keyedArraySliceHints`.
+bindings. One or two safe-integer literals or compiler-safe runtime expressions are required.
+Identifiers, property reads, side-effect-free arithmetic and conditionals, and safe `Math` calls
+are supported. Farm preserves native method lookup, argument evaluation, coercion, results, and
+errors, then records metadata only when the evaluated bounds are already safe integers. Calls,
+assignments, updates, unsafe evaluated bounds, block-bodied or chained updates, custom slice
+methods, sparse or subclassed arrays, index-aware or collection-reading rows, React-owned
+structures, and failed validation keep complete keyed reconciliation. No option or component is
+added. The compiler report exposes the emitted-site count as `keyedArraySliceHints`.
 
 A fixed-size feed can combine that retained tail with a new keyed suffix:
 
@@ -702,8 +708,8 @@ and
 `keyedArraySortHints`, the number of compiler-proven direct native keyed-array sort sites; and
 `keyedArrayRollingWindowHints`, the number of compiler-proven retained-tail plus incoming-suffix
 sites; and
-`keyedArraySliceHints`, the number of compiler-proven direct keyed-array slice sites. A custom
-project-relative `reportFile` also enables reporting.
+`keyedArraySliceHints`, the number of compiler-proven direct keyed-array slice sites with literal or
+guarded compiler-safe runtime bounds. A custom project-relative `reportFile` also enables reporting.
 
 The runtime test compares the same counter interaction on both paths: ordinary React performs a
 second component render and commit, while the compiled component remains at one render and one
