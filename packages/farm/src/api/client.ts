@@ -446,6 +446,112 @@ export function createAPIClient<
   const routeMeta = new WeakMap<AnyRouteRef, RouteMeta>();
   let requestCounter = 0;
 
+  const applyOptimisticLayer = (
+    entry: CacheEntry | undefined,
+    layer: OptimisticLayer,
+  ): CacheEntry => {
+    let data = entry?.data;
+    for (const updater of layer.updaters) data = updater(data);
+
+    return {
+      data,
+      updatedAt: layer.updatedAt,
+      staleAt: entry?.staleAt ?? layer.staleAt,
+      gcAt: entry?.gcAt ?? layer.gcAt,
+      invalidatedAt: entry?.invalidatedAt,
+    };
+  };
+
+  const storeOptimisticEntry = (
+    cacheState: FarmClientDataCache,
+    key: string,
+    stack: OptimisticStack,
+    entry: CacheEntry | undefined,
+  ) => {
+    if (!entry) {
+      cacheState.delete(key);
+      stack.renderedEntry = undefined;
+      return;
+    }
+
+    cacheState.set(key, entry);
+    if (stack.invalidatedAt !== undefined) {
+      cacheState.invalidate(key, stack.invalidatedAt);
+    }
+    stack.renderedEntry = cacheState.get(key);
+  };
+
+  const reconcileOptimisticInvalidation = (
+    cacheState: FarmClientDataCache,
+    key: string,
+    stack: OptimisticStack,
+  ) => {
+    const current = cacheState.get(key);
+    const rendered = stack.renderedEntry;
+    if (current === rendered) return true;
+    if (
+      !current ||
+      !rendered ||
+      current.data !== rendered.data ||
+      current.updatedAt !== rendered.updatedAt ||
+      current.gcAt !== rendered.gcAt ||
+      current.status !== rendered.status ||
+      current.error !== rendered.error ||
+      current.fetching !== rendered.fetching ||
+      current.staleAt !== 0 ||
+      current.invalidatedAt === undefined
+    ) {
+      return false;
+    }
+
+    stack.invalidatedAt = current.invalidatedAt;
+    stack.renderedEntry = current;
+    return true;
+  };
+
+  const renderOptimisticStack = (
+    cacheState: FarmClientDataCache,
+    key: string,
+    stack: OptimisticStack,
+  ) => {
+    let entry = stack.entry ? { ...stack.entry } : undefined;
+    for (const layer of stack.layers) entry = applyOptimisticLayer(entry, layer);
+    storeOptimisticEntry(cacheState, key, stack, entry);
+  };
+
+  const settleOptimisticUpdates = (
+    cacheState: FarmClientDataCache,
+    optimisticState: Map<string, OptimisticStack>,
+    snapshots: OptimisticSnapshot[],
+    outcome: "commit" | "rollback" | "invalidate",
+  ) => {
+    const settledKeys: string[] = [];
+    for (const snapshot of snapshots) {
+      const stack = optimisticState.get(snapshot.key);
+      if (stack !== snapshot.stack) continue;
+      if (!reconcileOptimisticInvalidation(cacheState, snapshot.key, stack)) {
+        optimisticState.delete(snapshot.key);
+        continue;
+      }
+
+      if (outcome === "rollback") {
+        stack.layers = stack.layers.filter((layer) => layer !== snapshot.layer);
+      } else {
+        snapshot.layer.committed = true;
+        if (outcome === "invalidate") stack.invalidatedAt = Date.now();
+      }
+
+      while (stack.layers[0]?.committed) {
+        stack.entry = applyOptimisticLayer(stack.entry, stack.layers.shift()!);
+      }
+
+      renderOptimisticStack(cacheState, snapshot.key, stack);
+      if (stack.layers.length === 0) optimisticState.delete(snapshot.key);
+      settledKeys.push(snapshot.key);
+    }
+    return settledKeys;
+  };
+
   // Create a simple fetch-based client (browser compatible)
   const fetchClient = async (path: string, requestOptions: any = {}) => {
     const url = resolveFarmAPIRequestURL(path, baseURL);
@@ -576,6 +682,7 @@ export function createAPIClient<
       cacheState = requestScopedState.cache;
       inflightState = requestScopedState.inflight;
     }
+    const optimisticState = getOptimisticState(cacheState);
 
     const entry = getValidCacheEntry(cacheState, cacheKey, now);
     const isStale = entry ? isEntryStale(entry, now) : true;
@@ -583,7 +690,7 @@ export function createAPIClient<
     const applyOptimisticUpdates = () => {
       if (!clientOptions?.optimistic?.update?.length) return [] as OptimisticSnapshot[];
 
-      const snapshots: OptimisticSnapshot[] = [];
+      const snapshots = new Map<string, OptimisticSnapshot>();
       for (const update of clientOptions.optimistic.update) {
         const [target, targetInput, updater] =
           update.length === 2
@@ -599,37 +706,73 @@ export function createAPIClient<
         if (!targetKey) continue;
 
         const targetEntry = getValidCacheEntry(cacheState, targetKey, now);
-        const previousEntry = targetEntry ? { ...targetEntry } : undefined;
-        const previousData = targetEntry?.data;
-        const nextData = updater(previousData);
-        cacheState.set(targetKey, {
-          data: nextData,
-          updatedAt: now,
-          staleAt:
-            targetEntry?.staleAt ??
-            now + (cacheOptions?.staleTime ?? options.cacheDefaults?.staleTime ?? 0),
-          gcAt:
-            targetEntry?.gcAt ??
-            getGcAt(now, cacheOptions?.gcTime ?? options.cacheDefaults?.gcTime),
-          invalidatedAt: targetEntry?.invalidatedAt,
-        });
+        const currentEntry = cacheState.get(targetKey);
+        let stack = optimisticState.get(targetKey);
+        if (stack && !reconcileOptimisticInvalidation(cacheState, targetKey, stack)) {
+          stack = undefined;
+        }
+        if (!stack) {
+          stack = {
+            entry: targetEntry ? { ...targetEntry } : undefined,
+            layers: [],
+            renderedEntry: currentEntry,
+          };
+          optimisticState.set(targetKey, stack);
+        }
 
-        snapshots.push({ key: targetKey, entry: previousEntry });
+        let snapshot = snapshots.get(targetKey);
+        if (!snapshot) {
+          const previousEntry = stack.layers.length === 0 ? stack.entry : stack.renderedEntry;
+          const layer: OptimisticLayer = {
+            updaters: [],
+            updatedAt: now,
+            staleAt:
+              targetEntry?.staleAt ??
+              now + (cacheOptions?.staleTime ?? options.cacheDefaults?.staleTime ?? 0),
+            gcAt:
+              targetEntry?.gcAt ??
+              getGcAt(now, cacheOptions?.gcTime ?? options.cacheDefaults?.gcTime),
+          };
+          stack.layers.push(layer);
+          snapshot = {
+            key: targetKey,
+            stack,
+            layer,
+          };
+          snapshots.set(targetKey, snapshot);
+          snapshot.layer.updaters.push(updater);
+          const nextEntry = applyOptimisticLayer(previousEntry, {
+            ...snapshot.layer,
+            updaters: [updater],
+          });
+          storeOptimisticEntry(cacheState, targetKey, stack, nextEntry);
+          continue;
+        }
+        snapshot.layer.updaters.push(updater);
+        const nextEntry = applyOptimisticLayer(stack.renderedEntry, {
+          ...snapshot.layer,
+          updaters: [updater],
+        });
+        storeOptimisticEntry(cacheState, targetKey, stack, nextEntry);
       }
 
-      return snapshots;
+      return Array.from(snapshots.values());
     };
 
     const rollbackOptimisticUpdates = (snapshots: OptimisticSnapshot[]) => {
       if (!clientOptions?.optimistic?.rollbackOnError) return;
+      settleOptimisticUpdates(cacheState, optimisticState, snapshots, "rollback");
+    };
 
-      for (const snapshot of snapshots) {
-        if (!snapshot.entry) {
-          cacheState.delete(snapshot.key);
-          continue;
-        }
-
-        cacheState.set(snapshot.key, { ...snapshot.entry });
+    const invalidateUncommittedOptimisticUpdates = (snapshots: OptimisticSnapshot[]) => {
+      if (clientOptions?.optimistic?.rollbackOnError) return;
+      for (const key of settleOptimisticUpdates(
+        cacheState,
+        optimisticState,
+        snapshots,
+        "invalidate",
+      )) {
+        emitStatus("invalidated", { key });
       }
     };
 
@@ -808,11 +951,13 @@ export function createAPIClient<
 
         const existing = cacheState.get(targetKey);
         if (existing) {
-          cacheState.set(targetKey, {
-            ...existing,
-            staleAt: 0,
-            invalidatedAt: Date.now(),
-          });
+          const invalidatedAt = Date.now();
+          const stack = optimisticState.get(targetKey);
+          cacheState.invalidate(targetKey, invalidatedAt);
+          if (stack?.renderedEntry === existing) {
+            stack.invalidatedAt = invalidatedAt;
+            stack.renderedEntry = cacheState.get(targetKey);
+          }
         }
 
         emitStatus("invalidated", { key: targetKey });
@@ -846,8 +991,11 @@ export function createAPIClient<
     const result = await executeNetwork();
     if (result.error) {
       rollbackOptimisticUpdates(optimisticSnapshots);
+      invalidateUncommittedOptimisticUpdates(optimisticSnapshots);
+    } else {
+      settleOptimisticUpdates(cacheState, optimisticState, optimisticSnapshots, "commit");
+      await invalidateTargets();
     }
-    await invalidateTargets();
     clientOptions?.onSettled?.(result.data, result.error);
     return result;
   };
@@ -1166,8 +1314,35 @@ type RouteMeta = {
 
 type OptimisticSnapshot = {
   key: string;
-  entry?: CacheEntry;
+  stack: OptimisticStack;
+  layer: OptimisticLayer;
 };
+
+type OptimisticStack = {
+  entry?: CacheEntry;
+  layers: OptimisticLayer[];
+  renderedEntry?: CacheEntry;
+  invalidatedAt?: number;
+};
+
+type OptimisticLayer = {
+  updaters: Array<(prev: any) => any>;
+  updatedAt: number;
+  staleAt: number;
+  gcAt?: number;
+  committed?: boolean;
+};
+
+const optimisticStates = new WeakMap<FarmClientDataCache, Map<string, OptimisticStack>>();
+
+function getOptimisticState(cache: FarmClientDataCache): Map<string, OptimisticStack> {
+  let state = optimisticStates.get(cache);
+  if (!state) {
+    state = new Map();
+    optimisticStates.set(cache, state);
+  }
+  return state;
+}
 
 function buildCacheKey(
   method: string,
