@@ -55,16 +55,73 @@ const getCurrentSearchParams = (): URLSearchParams => {
 
 const throttleTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-const areParsedValuesEqual = <T>(parser: Parser<T>, current: T | null, next: T | null) => {
+const compareStructuredValues = (
+  current: unknown,
+  next: unknown,
+  seen = new WeakMap<object, object>(),
+): boolean | undefined => {
   if (Object.is(current, next)) return true;
   if (current === null || next === null || typeof current !== typeof next) return false;
-  if (Array.isArray(current) !== Array.isArray(next)) return false;
-  if (current instanceof Date !== next instanceof Date) return false;
+  if (typeof current !== "object" || typeof next !== "object") return false;
+  if (current instanceof Date || next instanceof Date) {
+    return current instanceof Date && next instanceof Date && current.getTime() === next.getTime();
+  }
+  if (Array.isArray(current) || Array.isArray(next)) {
+    if (!Array.isArray(current) || !Array.isArray(next) || current.length !== next.length) {
+      return false;
+    }
+    for (let index = 0; index < current.length; index++) {
+      const equal = compareStructuredValues(current[index], next[index], seen);
+      if (equal !== true) return equal;
+    }
+    return true;
+  }
+
+  const currentPrototype = Object.getPrototypeOf(current);
+  const nextPrototype = Object.getPrototypeOf(next);
+  if (currentPrototype !== nextPrototype) return false;
+  if (currentPrototype !== Object.prototype && currentPrototype !== null) return undefined;
+
+  const knownNext = seen.get(current);
+  if (knownNext) return knownNext === next;
+  seen.set(current, next);
+
+  const currentKeys = Object.keys(current);
+  const nextKeys = Object.keys(next);
+  if (
+    currentKeys.length !== nextKeys.length ||
+    currentKeys.some((key) => !Object.prototype.hasOwnProperty.call(next, key))
+  ) {
+    return false;
+  }
+  for (const key of currentKeys) {
+    const equal = compareStructuredValues(
+      (current as Record<string, unknown>)[key],
+      (next as Record<string, unknown>)[key],
+      seen,
+    );
+    if (equal !== true) return equal;
+  }
+  return true;
+};
+
+const areParsedValuesEqual = <T>(parser: Parser<T>, current: T | null, next: T | null) => {
+  const structuredResult = compareStructuredValues(current, next);
+  if (structuredResult !== undefined) return structuredResult;
+  if (current === null || next === null) return false;
 
   try {
     return parser.serialize(current) === parser.serialize(next);
   } catch {
     return false;
+  }
+};
+
+const getParserSignature = (parser: Parser<unknown>): string => {
+  try {
+    return `${Function.prototype.toString.call(parser.parse)}\0${Function.prototype.toString.call(parser.serialize)}`;
+  } catch {
+    return "";
   }
 };
 
@@ -191,6 +248,8 @@ export function useQueryState<TParser extends Parser<any>>(
   });
 
   const stateRef = useRef(state);
+  const stateKeyRef = useRef(key);
+  const stateParserSignatureRef = useRef(getParserSignature(parser));
   const isInternalUpdateRef = useRef(false);
   stateRef.current = state;
 
@@ -221,7 +280,12 @@ export function useQueryState<TParser extends Parser<any>>(
       const searchParams = getCurrentSearchParams();
       const value = searchParams.get(key);
       const parsed = parser.parse(value ?? "");
-      if (!areParsedValuesEqual(parser, stateRef.current, parsed)) {
+      const parserSignature = getParserSignature(parser);
+      const sourceChanged =
+        stateKeyRef.current !== key || stateParserSignatureRef.current !== parserSignature;
+      stateKeyRef.current = key;
+      stateParserSignatureRef.current = parserSignature;
+      if (sourceChanged || !areParsedValuesEqual(parser, stateRef.current, parsed)) {
         setState(parsed);
         stateRef.current = parsed;
       }
@@ -293,6 +357,11 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
   });
 
   const stateRef = useRef(state);
+  const stateParserSignaturesRef = useRef(
+    Object.fromEntries(
+      Object.entries(parsers).map(([key, parser]) => [key, getParserSignature(parser)]),
+    ),
+  );
   stateRef.current = state;
 
   const setValues = useCallback(
@@ -337,10 +406,15 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
         const value = searchParams.get(key);
         const parsed = parser.parse(value ?? "");
         const currentValue = stateRef.current[key as keyof T];
+        const parserSignature = getParserSignature(parser);
 
-        if (!areParsedValuesEqual(parser, currentValue, parsed)) {
+        if (
+          stateParserSignaturesRef.current[key] !== parserSignature ||
+          !areParsedValuesEqual(parser, currentValue, parsed)
+        ) {
           hasChanged = true;
         }
+        stateParserSignaturesRef.current[key] = parserSignature;
         result[key as keyof T] = parsed;
       });
 

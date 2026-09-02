@@ -8,7 +8,7 @@ import { useSearchParams } from "../navigation";
 import { pushState as pushFarmPageState, readPageState, SPARouter } from "../client/spa-router";
 import { usePageState } from "../client/router";
 import { FARM_HISTORY_CHANGE_EVENT, notifyHistoryChange } from "../client/history-sync";
-import { asJson, asString, useQueryState, useQueryStates } from "../query/client";
+import { asJson, asString, createParser, useQueryState, useQueryStates } from "../query/client";
 
 describe("useQueryState shallow routing", () => {
   let container: HTMLDivElement;
@@ -327,6 +327,85 @@ describe("useQueryState shallow routing", () => {
     });
 
     expect(renders).toBe(1);
+  });
+
+  it("resynchronizes primitive state when a default changes its serialized value", () => {
+    vi.useFakeTimers();
+    let value: string | null = null;
+    let setValue!: (next: string | null) => void;
+
+    function App() {
+      [value, setValue] = useQueryState("q", asString.withDefault!("fallback"));
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+    act(() => {
+      setValue("");
+      vi.runAllTimers();
+    });
+
+    expect(window.location.search).toBe("?q=fallback");
+    expect(value).toBe("fallback");
+  });
+
+  it("replaces object state when the useQueryState key changes", () => {
+    window.history.replaceState(null, "", '/?first={"id":1}&second={"id":1}');
+    const parser = asJson<{ id: number }>();
+    let value: { id: number } | null = null;
+
+    function App({ queryKey }: { queryKey: "first" | "second" }) {
+      [value] = useQueryState(queryKey, parser);
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App, { queryKey: "first" }));
+    });
+    const firstValue = value;
+    act(() => {
+      root?.render(createElement(App, { queryKey: "second" }));
+    });
+
+    expect(value).toEqual({ id: 1 });
+    expect(value).not.toBe(firstValue);
+  });
+
+  it("replaces useQueryStates values when parser semantics change", () => {
+    window.history.replaceState(null, "", "/?item=one");
+    const oldParser = createParser({
+      parse: (value) => ({ value }),
+      serialize: (value) => value.value,
+    });
+    const nextParser = createParser({
+      parse: (value) => {
+        return { value };
+      },
+      serialize: (value) => value.value,
+    });
+    let values: { item: { value: string } | null } = { item: null };
+
+    function App({ parser }: { parser: typeof oldParser }) {
+      [values] = useQueryStates({ item: parser });
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App, { parser: oldParser }));
+    });
+    const oldValue = values.item;
+    expect(oldValue).toEqual({ value: "one" });
+
+    act(() => {
+      root?.render(createElement(App, { parser: nextParser }));
+    });
+    expect(values.item).toEqual({ value: "one" });
+    expect(values.item).not.toBe(oldValue);
   });
 
   it("composes throttled updates for different query keys", () => {
