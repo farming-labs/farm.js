@@ -1271,7 +1271,11 @@ function reportResponseObserverError(error: unknown): void {
       // Fall through to the console when the platform reporter itself fails.
     }
   }
-  console.error("[Farm.js] API client onResponse callback failed:", error);
+  try {
+    console.error("[Farm.js] API client onResponse callback failed:", error);
+  } catch {
+    // Observers and their reporting fallbacks must never affect the request.
+  }
 }
 
 function isFormData(value: unknown): value is FormData {
