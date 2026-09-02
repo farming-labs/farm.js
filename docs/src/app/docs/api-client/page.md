@@ -345,8 +345,8 @@ response type, so `current` is inferred from `api.products.get`. You can also ta
 route directly with `[api.products.get, { query: { category } }, updater]`.
 
 With `rollbackOnError: true`, Farm restores the exact previous cache entry when the mutation fails.
-After the request settles, invalidation marks the key stale so mounted consumers or the next read
-can load the canonical server result.
+After a successful mutation, invalidation marks the key stale so mounted consumers or the next read
+can load the canonical server result. Failed mutations do not invalidate known-good cached reads.
 
 ## Result shape
 

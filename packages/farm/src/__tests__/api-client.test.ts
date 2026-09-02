@@ -436,6 +436,39 @@ describe("createAPIClient", () => {
     expect(getCount).toBe(2);
   });
 
+  it("keeps cached reads fresh when a mutation fails", async () => {
+    let getCount = 0;
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      if ((init?.method ?? "GET").toUpperCase() === "POST") {
+        return buildResponse({ error: "Write failed" }, false, 500);
+      }
+
+      getCount += 1;
+      return buildResponse({
+        users: [{ id: String(getCount), name: `User ${getCount}` }],
+        total: getCount,
+        limit: 5,
+        offset: 0,
+      });
+    });
+    globalThis.fetch = fetchMock as any;
+    const api = createAPIClient<APIRouter>({ baseURL: "http://example.com" });
+    const usersKey = ["users", "list"] as const;
+    const cache = { key: usersKey, policy: "cache-first" as const, staleTime: 10_000 };
+
+    const initial = await api.users.get({}, { cache });
+    const mutation = await api.users.post(
+      { body: { name: "Ada", email: "ada@example.com" } },
+      { invalidate: [usersKey] },
+    );
+    const cached = await api.users.get({}, { cache });
+
+    expect(mutation.error).toBeTruthy();
+    expect(initial.data?.users[0]?.id).toBe("1");
+    expect(cached.data?.users[0]?.id).toBe("1");
+    expect(getCount).toBe(1);
+  });
+
   it("keeps default cache keys isolated by API origin", async () => {
     const fetchMock = vi.fn(async (url: string) => buildResponse({ origin: new URL(url).origin }));
     globalThis.fetch = fetchMock as any;

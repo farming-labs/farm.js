@@ -794,8 +794,9 @@ export function createAPIClient<
     const result = await executeNetwork();
     if (result.error) {
       rollbackOptimisticUpdates(optimisticSnapshots);
+    } else {
+      await invalidateTargets();
     }
-    await invalidateTargets();
     clientOptions?.onSettled?.(result.data, result.error);
     return result;
   };
