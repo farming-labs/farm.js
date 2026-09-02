@@ -144,6 +144,85 @@ describe("Farm production lifecycle", () => {
     expect(lifecycle.state).toBe("closed");
   });
 
+  it("waits for an in-progress startup before closing its resources", async () => {
+    let finishStartup!: () => void;
+    const startup = new Promise<void>((resolve) => {
+      finishStartup = resolve;
+    });
+    const calls: string[] = [];
+    const lifecycle = createFarmProductionLifecycle({
+      server: resolveFarmServerConfig(undefined),
+      async start() {
+        calls.push("start:begin");
+        await startup;
+        calls.push("start:end");
+      },
+      async close() {
+        calls.push("close");
+      },
+    });
+
+    const starting = lifecycle.start();
+    const closing = lifecycle.close("SIGTERM");
+    await Promise.resolve();
+    expect(calls).toEqual(["start:begin"]);
+
+    finishStartup();
+    await Promise.all([starting, closing]);
+
+    expect(calls).toEqual(["start:begin", "start:end", "close"]);
+    expect(lifecycle.state).toBe("closed");
+  });
+
+  it("deduplicates forced cleanup when startup does not settle", async () => {
+    let finishStartup!: () => void;
+    const startup = new Promise<void>((resolve) => {
+      finishStartup = resolve;
+    });
+    const close = vi.fn(async () => {});
+    const lifecycle = createFarmProductionLifecycle({
+      server: resolveFarmServerConfig(undefined),
+      start: () => startup,
+      close,
+    });
+
+    const starting = lifecycle.start();
+    const closing = lifecycle.close("SIGTERM");
+    await lifecycle.forceClose("SIGTERM");
+    await expect(closing).resolves.toBeUndefined();
+
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(close).toHaveBeenCalledWith("SIGTERM");
+    expect(lifecycle.state).toBe("closed");
+
+    finishStartup();
+    await Promise.all([starting, closing]);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("stays closed when startup rejects after forced cleanup", async () => {
+    let failStartup!: (error: Error) => void;
+    const startup = new Promise<void>((_resolve, reject) => {
+      failStartup = reject;
+    });
+    const lifecycle = createFarmProductionLifecycle({
+      server: resolveFarmServerConfig(undefined),
+      start: () => startup,
+      close: async () => {},
+    });
+
+    const starting = lifecycle.start();
+    await lifecycle.forceClose("SIGTERM");
+    const startupError = new Error("late startup failure");
+    failStartup(startupError);
+
+    await expect(starting).rejects.toBe(startupError);
+    expect(lifecycle.state).toBe("closed");
+    await expect(lifecycle.runRequest(() => new Response("unexpected"))).resolves.toMatchObject({
+      status: 503,
+    });
+  });
+
   it("memoizes synchronous close failures and still reaches closed", async () => {
     const closeError = new Error("synchronous close failed");
     const close = vi.fn(() => {
