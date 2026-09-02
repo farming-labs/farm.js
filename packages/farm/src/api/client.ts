@@ -480,6 +480,30 @@ export function createAPIClient<
     stack.renderedEntry = cacheState.get(key);
   };
 
+  const reconcileOptimisticInvalidation = (key: string, stack: OptimisticStack) => {
+    const current = cacheState.get(key);
+    const rendered = stack.renderedEntry;
+    if (current === rendered) return true;
+    if (
+      !current ||
+      !rendered ||
+      current.data !== rendered.data ||
+      current.updatedAt !== rendered.updatedAt ||
+      current.gcAt !== rendered.gcAt ||
+      current.status !== rendered.status ||
+      current.error !== rendered.error ||
+      current.fetching !== rendered.fetching ||
+      current.staleAt !== 0 ||
+      current.invalidatedAt === undefined
+    ) {
+      return false;
+    }
+
+    stack.invalidatedAt = current.invalidatedAt;
+    stack.renderedEntry = current;
+    return true;
+  };
+
   const renderOptimisticStack = (key: string, stack: OptimisticStack) => {
     let entry = stack.entry ? { ...stack.entry } : undefined;
     for (const layer of stack.layers) entry = applyOptimisticLayer(entry, layer);
@@ -494,7 +518,7 @@ export function createAPIClient<
     for (const snapshot of snapshots) {
       const stack = optimisticState.get(snapshot.key);
       if (stack !== snapshot.stack) continue;
-      if (cacheState.get(snapshot.key) !== stack.renderedEntry) {
+      if (!reconcileOptimisticInvalidation(snapshot.key, stack)) {
         optimisticState.delete(snapshot.key);
         continue;
       }
@@ -629,7 +653,8 @@ export function createAPIClient<
         const targetEntry = getValidCacheEntry(cacheState, targetKey, now);
         const currentEntry = cacheState.get(targetKey);
         let stack = optimisticState.get(targetKey);
-        if (!stack || currentEntry !== stack.renderedEntry) {
+        if (stack && !reconcileOptimisticInvalidation(targetKey, stack)) stack = undefined;
+        if (!stack) {
           stack = {
             entry: targetEntry ? { ...targetEntry } : undefined,
             layers: [],

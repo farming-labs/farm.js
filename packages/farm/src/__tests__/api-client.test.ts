@@ -5,7 +5,7 @@ import {
   FARM_CACHE_INVALIDATION_HEADER,
 } from "../cache-invalidation";
 import { defineCacheKey } from "../cache";
-import { getFarmClientDataCache } from "../client-cache";
+import { getFarmClientDataCache, normalizeFarmClientCacheKey } from "../client-cache";
 import { endpoint } from "../integration-api";
 import { defineIntegration, integrationRoute, resolveIntegrationPlugins } from "../integrations";
 import { PluginManager } from "../plugin";
@@ -629,6 +629,53 @@ describe("createAPIClient", () => {
     );
 
     expect(afterRollback.data?.users).toHaveLength(1);
+  });
+
+  it("rolls back optimistic data after another request invalidates it", async () => {
+    const postDeferred = createDeferred<ReturnType<typeof buildResponse>>();
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      if ((init?.method ?? "GET").toUpperCase() === "POST") return postDeferred.promise;
+      return buildResponse({
+        users: [{ id: "1", name: "Alice" }],
+        total: 1,
+        limit: 5,
+        offset: 0,
+      });
+    });
+    globalThis.fetch = fetchMock as any;
+
+    type UsersData = APIRouter["users"]["get"]["__types"]["response"];
+    const usersKey = defineCacheKey<UsersData>()(() => ["users", "list"] as const)();
+    const normalizedUsersKey = normalizeFarmClientCacheKey(usersKey);
+    const api = createAPIClient<APIRouter>({ baseURL: "http://example.com" });
+    const cache = { key: usersKey, policy: "cache-first" as const, staleTime: 10_000 };
+
+    await api.users.get({}, { cache });
+    const mutation = api.users.post(
+      { body: { name: "Ada", email: "ada@example.com" } },
+      {
+        optimistic: {
+          update: [
+            [
+              usersKey,
+              (current) => ({
+                ...current!,
+                users: [{ id: "optimistic", name: "Ada" }, ...(current?.users ?? [])],
+              }),
+            ],
+          ],
+          rollbackOnError: true,
+        },
+      },
+    );
+
+    getFarmClientDataCache().invalidate(normalizedUsersKey);
+    postDeferred.resolve(buildResponse({ message: "fail" }, false, 500));
+    await mutation;
+
+    const rolledBack = getFarmClientDataCache().get<UsersData>(normalizedUsersKey);
+    expect(rolledBack?.data.users.map(({ id }) => id)).toEqual(["1"]);
+    expect(getFarmClientDataCache().isStale(normalizedUsersKey)).toBe(true);
   });
 
   it("removes every failed overlapping optimistic update", async () => {
