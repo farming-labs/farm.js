@@ -56,6 +56,11 @@ export {
 } from "../preload";
 export { searchParamsToObject } from "../search-params";
 export {
+  renderFarmLegacyErrorHtml,
+  renderFarmLegacyHtml,
+  serializeFarmInlineValue,
+} from "./legacy-runtime";
+export {
   resolveFarmTrailingSlashRedirect,
   setFarmTrailingSlashPreference,
 } from "../trailing-slash";
