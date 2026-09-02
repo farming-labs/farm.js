@@ -71,6 +71,7 @@ import { applyFarmCacheInvalidations } from '@farm.js/core/cache';
 import {
   beginFarmServerQueryAction,
   completeFarmServerQueryAction,
+  shouldApplyFarmServerQueryActionResult,
 } from '@farm.js/core/server-query/client';
 `;
   }
@@ -129,8 +130,10 @@ setServerCallback(async (id, args) => {
     console.error('[Farm.js] Action response missing payload.root / payload.rootContent');
     return;
   }
-  setPayloadRef.current?.(p);
-  applyFarmCacheInvalidations(p.returnValue?.invalidations);
+  if (shouldApplyFarmServerQueryActionResult(serverQueryInvocation)) {
+    setPayloadRef.current?.(p);
+    applyFarmCacheInvalidations(p.returnValue?.invalidations);
+  }
   if (!p.returnValue || !p.returnValue.ok) {
     debug('Server action failed:', id);
     throw createFarmServerFnTransportError(p.returnValue?.data);

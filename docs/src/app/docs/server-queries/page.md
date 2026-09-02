@@ -113,6 +113,8 @@ export function ProductPrice({ id }: { id: string }) {
 ```
 
 The hook returns `data`, `error`, `status`, `pending`, `fetching`, `stale`, and `refetch`. Stale data remains visible while Farm refreshes it in the background. Stale queries also refresh on window focus and reconnect unless those options are disabled.
+`refetch()` always starts fresh work. If an older request finishes afterward, its result is returned
+to its original caller but cannot replace the newer cached value.
 
 Use `fetchServerQuery(productQuery, input)` for an imperative browser read that should participate in deduplication and SWR. Calling the generated `productQuery(input)` reference directly still returns plain typed data, but the fetch helper supplies the browser cache lifecycle.
 
