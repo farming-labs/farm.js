@@ -251,6 +251,48 @@ describe("useQueryState shallow routing", () => {
     expect(historyChange).toHaveBeenCalledTimes(1);
   });
 
+  it("reads the current URL when a useQueryState key changes", () => {
+    window.history.replaceState(null, "", "/?first=one&second=two");
+    let value: string | null = null;
+
+    function App({ queryKey }: { queryKey: string }) {
+      [value] = useQueryState(queryKey, asString);
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App, { queryKey: "first" }));
+    });
+    expect(value).toBe("one");
+
+    act(() => {
+      root?.render(createElement(App, { queryKey: "second" }));
+    });
+    expect(value).toBe("two");
+  });
+
+  it("replaces useQueryStates output when its parser keys change", () => {
+    window.history.replaceState(null, "", "/?first=one&second=two");
+    let value: Record<string, string | null> = {};
+
+    function App({ queryKey }: { queryKey: "first" | "second" }) {
+      [value] = useQueryStates({ [queryKey]: asString });
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App, { queryKey: "first" }));
+    });
+    expect(value).toEqual({ first: "one" });
+
+    act(() => {
+      root?.render(createElement(App, { queryKey: "second" }));
+    });
+    expect(value).toEqual({ second: "two" });
+  });
+
   it("composes throttled updates for different query keys", () => {
     vi.useFakeTimers();
 

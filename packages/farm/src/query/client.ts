@@ -242,6 +242,7 @@ export function useQueryState<TParser extends Parser<any>>(
     // popstate, so listen through the shared history channel (real
     // back/forward events included). Self-updates no-op via the Object.is
     // comparison above.
+    onPopState();
     const unsubscribeHistory = subscribeHistoryChange(onPopState);
     emitter.on("update", onEmitterUpdate);
     emitter.onKey(key, onKeyUpdate);
@@ -312,9 +313,12 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    const applyChange = (searchParams: URLSearchParams, fromEmitter = false) => {
+    const applyChange = (searchParams: URLSearchParams) => {
       const result = {} as { [K in keyof T]: ReturnType<T[K]["parse"]> };
-      let hasChanged = false;
+      const currentKeys = Object.keys(stateRef.current);
+      let hasChanged =
+        currentKeys.length !== keys.length ||
+        currentKeys.some((key) => !Object.prototype.hasOwnProperty.call(parsers, key));
 
       Object.entries(parsers).forEach(([key, parser]) => {
         const value = searchParams.get(key);
@@ -335,13 +339,14 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
 
     const onPopState = () => {
       const searchParams = getCurrentSearchParams();
-      applyChange(searchParams, false);
+      applyChange(searchParams);
     };
 
     const onEmitterUpdate = (searchParams: URLSearchParams) => {
-      applyChange(searchParams, true);
+      applyChange(searchParams);
     };
 
+    applyChange(getCurrentSearchParams());
     const unsubscribeHistory = subscribeHistoryChange(onPopState);
     emitter.on("update", onEmitterUpdate);
 
