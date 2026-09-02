@@ -2,6 +2,42 @@
 
 Date: 2026-08-29
 
+## Queued disjoint variable-length window follow-up — 2026-09-02
+
+The full bracketed production-browser run added a 10,000-row workload that queues two disjoint
+updates before one compiler flush. The first window grows from 64 to 80 rows while the second
+shrinks from 64 to 48, so the final table remains at 10,000 rows. Both updates reverse and refresh
+locally retained keys, retire old rows, and add globally fresh rows. Static and hybrid builds
+emitted all 15 expected `keyedArrayPositionHints` sites, preserved surrounding anchors and retained
+DOM identities, disconnected retired rows, mounted only fresh rows, and produced zero owner
+executions.
+
+| Mode   | React median | Queued resize | Compiled control | vs React | vs control |
+| ------ | -----------: | ------------: | ---------------: | -------: | ---------: |
+| Static |      72.25 ms |      13.60 ms |         25.40 ms |    5.31x |      1.87x |
+| Hybrid |      72.25 ms |      13.40 ms |         25.40 ms |    5.39x |      1.90x |
+
+The independent gate requires at least 4x versus React and 1.5x versus the equivalent block-bodied
+compiled control in both modes. One initial full run passed correctness and every specialized
+compiler gate but caught a non-reproducing broad hybrid table-creation outlier. An unchanged second
+full run passed every correctness, performance, persistence, and scalability gate; the queued
+resize result remained above both required floors in both runs.
+
+Package coverage separately queues a 32-to-40-row grow and a 32-to-24-row shrink across a
+4,096-row table. It proves 64 key and binding reads, 24 fresh descriptors, exact local LIS moves,
+retained identity, retired-row cleanup, and stable anchors without rerunning the owner. Tests also
+cover high-window-first coordinate normalization, adjacent empty windows, preparation of every
+window before the first DOM write, overlap and cross-window-key fallback, controlled-input focus
+and selection, delegated event indexes, hydration, Strict Mode, unmount-before-flush cleanup, and
+1,000 randomized queued variable-length updates against normal React. Packaged React 18.3.1 and
+19.2.8 compatibility both pass.
+
+The isolated optional window runtime has a 14,173 B gzip compiler premium, 416 B above the previous
+record after reducing the initial implementation by 206 B. The compiler-disabled core runtime
+premium remains unchanged at 3,766 B gzip and still removes 82.5% of the full compatibility
+runtime. The measured environment was Chrome 145.0.7632.6, Node.js 23.11.0, and Apple M1 macOS
+arm64.
+
 ## Variable-length local-key window reuse follow-up — 2026-09-02
 
 The full bracketed production-browser run added a separate 10,000-row workload that grows one

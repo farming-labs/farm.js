@@ -1083,7 +1083,12 @@ then prepares every touched key, binding value, DOM target, new descriptor, bind
 disconnected DOM row before the first write. It patches same-key positions and swaps only final
 fresh-key positions. Untouched rows retain their identity. Duplicate final keys and keys reused
 from outside a single removed interval take complete reconciliation before fast-path mutation. A
-single insertion
+queued chain may also contain disjoint grow or shrink windows. Farm maps every immediate-source
+position through earlier length changes, proves that the source and final intervals remain
+disjoint, and prepares all local key reuse, fresh rows, binding updates, cleanup, and per-window LIS
+moves before changing the DOM. Adjacent windows and empty incoming intervals remain eligible. An
+overlapping structural window or a key transferred between windows keeps complete reconciliation.
+A single insertion
 creates one row at that position. A removal cleans up and removes only the known row or contiguous
 range while preserving every
 surviving element. A same-key replacement patches that row in place; a new-key replacement creates
@@ -1093,11 +1098,11 @@ and bindings are not reread.
 The proof requires compiler-owned host rows whose render and key do not observe the row index.
 Effectful position expressions, runtime values that are fractional or otherwise not safe integers,
 dynamic, zero, negative, or fractional removal counts, other `toSpliced()` shapes, block-bodied
-updaters, unsafe incoming expressions, custom methods, queued chains containing a structural
-window or unhinted intermediate update, an existing key moved from outside the removed interval,
-duplicate final keys, collection-reading bindings, React-owned rows, nested host blocks, row
-conditionals, unrelated dirty dependencies, and failed runtime checks keep complete keyed
-reconciliation.
+updaters, unsafe incoming expressions, custom methods, overlapping queued structural windows,
+unhinted intermediate updates, an existing key moved from outside its local removed interval or
+between queued windows, duplicate final keys, collection-reading bindings, React-owned rows,
+nested host blocks, row conditionals, unrelated dirty dependencies, and failed runtime checks keep
+complete keyed reconciliation.
 Negative safe-integer positions and counts larger than the remaining suffix use the native
 method's normal clamping rules. No new option or component is required. Reports expose emitted
 sites as `keyedArrayPositionHints`. Batch insertion and exact-window replacement select
@@ -1990,9 +1995,11 @@ The package and example test suites verify more than generated code:
   a separate 4,096-row sequence grows a 64-row interval to 80 rows and then shrinks it to 40 while
   preserving both surrounding anchors, reusing every retained row, creating only fresh rows, and
   performing the exact local LIS moves; another 1,000 randomized variable-length mixed-window
-  updates match normal React; tests also cover atomic binding preparation, empty spreads,
-  duplicate and outside-window key fallback, latest delegated event data, focus, selection,
-  hydration, Strict Mode, and queued structural fallback; another
+  updates match normal React; 1,000 queued disjoint grow/shrink updates also match React while
+  targeted tests cover both source orders, adjacent and empty windows, atomic preparation across
+  every window, exact local LIS moves, current delegated event indexes, focus, selection,
+  hydration, Strict Mode, cleanup, and overlapping structural or cross-window key-move fallback;
+  tests also cover duplicate and outside-window key fallback; another
   1,000 deterministic queued same-key window refreshes match normal React while disjoint and
   overlapping targeted tests preserve row identity and perform no descriptor work; 1,000 queued
   mixed fresh-key and same-key replacements also match React while targeted tests require only the
