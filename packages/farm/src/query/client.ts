@@ -70,6 +70,9 @@ const compareStructuredValues = (
     if (!Array.isArray(current) || !Array.isArray(next) || current.length !== next.length) {
       return false;
     }
+    const knownNext = seen.get(current);
+    if (knownNext) return knownNext === next;
+    seen.set(current, next);
     for (let index = 0; index < current.length; index++) {
       const equal = compareStructuredValues(current[index], next[index], seen);
       if (equal !== true) return equal;
@@ -106,22 +109,15 @@ const compareStructuredValues = (
 };
 
 const areParsedValuesEqual = <T>(parser: Parser<T>, current: T | null, next: T | null) => {
+  if (Object.is(current, next)) return true;
   const structuredResult = compareStructuredValues(current, next);
-  if (structuredResult !== undefined) return structuredResult;
+  if (structuredResult === false) return false;
   if (current === null || next === null) return false;
 
   try {
     return parser.serialize(current) === parser.serialize(next);
   } catch {
-    return false;
-  }
-};
-
-const getParserSignature = (parser: Parser<unknown>): string => {
-  try {
-    return `${Function.prototype.toString.call(parser.parse)}\0${Function.prototype.toString.call(parser.serialize)}`;
-  } catch {
-    return "";
+    return structuredResult === true;
   }
 };
 
@@ -249,7 +245,6 @@ export function useQueryState<TParser extends Parser<any>>(
 
   const stateRef = useRef(state);
   const stateKeyRef = useRef(key);
-  const stateParserSignatureRef = useRef(getParserSignature(parser));
   const isInternalUpdateRef = useRef(false);
   stateRef.current = state;
 
@@ -280,11 +275,8 @@ export function useQueryState<TParser extends Parser<any>>(
       const searchParams = getCurrentSearchParams();
       const value = searchParams.get(key);
       const parsed = parser.parse(value ?? "");
-      const parserSignature = getParserSignature(parser);
-      const sourceChanged =
-        stateKeyRef.current !== key || stateParserSignatureRef.current !== parserSignature;
+      const sourceChanged = stateKeyRef.current !== key;
       stateKeyRef.current = key;
-      stateParserSignatureRef.current = parserSignature;
       if (sourceChanged || !areParsedValuesEqual(parser, stateRef.current, parsed)) {
         setState(parsed);
         stateRef.current = parsed;
@@ -357,11 +349,6 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
   });
 
   const stateRef = useRef(state);
-  const stateParserSignaturesRef = useRef(
-    Object.fromEntries(
-      Object.entries(parsers).map(([key, parser]) => [key, getParserSignature(parser)]),
-    ),
-  );
   stateRef.current = state;
 
   const setValues = useCallback(
@@ -406,15 +393,10 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
         const value = searchParams.get(key);
         const parsed = parser.parse(value ?? "");
         const currentValue = stateRef.current[key as keyof T];
-        const parserSignature = getParserSignature(parser);
 
-        if (
-          stateParserSignaturesRef.current[key] !== parserSignature ||
-          !areParsedValuesEqual(parser, currentValue, parsed)
-        ) {
+        if (!areParsedValuesEqual(parser, currentValue, parsed)) {
           hasChanged = true;
         }
-        stateParserSignaturesRef.current[key] = parserSignature;
         result[key as keyof T] = parsed;
       });
 

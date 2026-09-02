@@ -329,6 +329,36 @@ describe("useQueryState shallow routing", () => {
     expect(renders).toBe(1);
   });
 
+  it("compares self-referential array values without recursing forever", () => {
+    type CyclicValue = Array<string | CyclicValue>;
+    const parser = createParser({
+      parse: (value): CyclicValue => {
+        const parsed: CyclicValue = [value];
+        parsed.push(parsed);
+        return parsed;
+      },
+      serialize: (value) => String(value[0]),
+    });
+    let renders = 0;
+
+    function App() {
+      renders += 1;
+      useQueryState("value", parser);
+      return null;
+    }
+
+    window.history.replaceState(null, "", "/?value=one");
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+
+    expect(renders).toBe(1);
+  });
+
   it("resynchronizes primitive state when a default changes its serialized value", () => {
     vi.useFakeTimers();
     let value: string | null = null;
@@ -375,19 +405,23 @@ describe("useQueryState shallow routing", () => {
     expect(value).not.toBe(firstValue);
   });
 
-  it("replaces useQueryStates values when parser semantics change", () => {
+  it("replaces useQueryStates values when parser-visible hidden state changes", () => {
     window.history.replaceState(null, "", "/?item=one");
+    type ParsedItem = { value: string; mode: string };
+    const parseItem = (value: string, mode: string): ParsedItem => {
+      const item = { value } as ParsedItem;
+      Object.defineProperty(item, "mode", { value: mode, configurable: true });
+      return item;
+    };
     const oldParser = createParser({
-      parse: (value) => ({ value }),
-      serialize: (value) => value.value,
+      parse: (value) => parseItem(value, "old"),
+      serialize: (value) => `${value.value}:${value.mode}`,
     });
     const nextParser = createParser({
-      parse: (value) => {
-        return { value };
-      },
-      serialize: (value) => value.value,
+      parse: (value) => parseItem(value, "next"),
+      serialize: (value) => `${value.value}:${value.mode}`,
     });
-    let values: { item: { value: string } | null } = { item: null };
+    let values: { item: ParsedItem | null } = { item: null };
 
     function App({ parser }: { parser: typeof oldParser }) {
       [values] = useQueryStates({ item: parser });
@@ -399,12 +433,12 @@ describe("useQueryState shallow routing", () => {
       root?.render(createElement(App, { parser: oldParser }));
     });
     const oldValue = values.item;
-    expect(oldValue).toEqual({ value: "one" });
+    expect(oldValue?.mode).toBe("old");
 
     act(() => {
       root?.render(createElement(App, { parser: nextParser }));
     });
-    expect(values.item).toEqual({ value: "one" });
+    expect(values.item?.mode).toBe("next");
     expect(values.item).not.toBe(oldValue);
   });
 
