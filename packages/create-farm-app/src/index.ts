@@ -13,6 +13,7 @@ import { logger, showBanner } from "./utils";
 interface CreateAppOptions {
   template?: string;
   renderer?: string;
+  /** @deprecated All maintained templates use TypeScript. */
   typescript?: boolean;
   skipInstall?: boolean;
   listTemplates?: boolean;
@@ -350,23 +351,6 @@ export async function createApp(projectName?: string, options: CreateAppOptions 
     process.exit(1);
   }
 
-  // Check TypeScript preference
-  let useTypeScript = options.typescript;
-  if (useTypeScript === undefined) {
-    const response = await prompts({
-      type: "confirm",
-      name: "typescript",
-      message: "Would you like to use TypeScript?",
-      initial: true,
-    });
-
-    if (response.typescript === undefined) {
-      logger.error("Operation cancelled.");
-      process.exit(1);
-    }
-    useTypeScript = response.typescript;
-  }
-
   const projectPath = path.resolve(process.cwd(), projectName!);
   const packageManager = detectPackageManager();
   const hasExistingFiles = await directoryHasFiles(projectPath);
@@ -388,7 +372,7 @@ export async function createApp(projectName?: string, options: CreateAppOptions 
 
   await fs.mkdir(projectPath, { recursive: true });
 
-  const integrationResult = await copyTemplate(template!, projectPath, useTypeScript!, renderer);
+  const integrationResult = await copyTemplate(template!, projectPath, renderer);
 
   await updatePackageJson(projectPath, projectName!, packageManager);
 
@@ -427,7 +411,7 @@ export async function createApp(projectName?: string, options: CreateAppOptions 
     template,
     renderer,
     packageManager: packageManager.name,
-    typescript: useTypeScript,
+    typescript: true,
     installedDependencies: !options.skipInstall,
   });
 }
@@ -435,7 +419,6 @@ export async function createApp(projectName?: string, options: CreateAppOptions 
 async function copyTemplate(
   template: string,
   projectPath: string,
-  useTypeScript: boolean,
   renderer: RendererName,
 ): Promise<AddFarmIntegrationResult | undefined> {
   const details = templateDetails[template];
@@ -450,14 +433,6 @@ async function copyTemplate(
   await copyDir(templatePath, projectPath);
 
   const basePackageJson = await readPackageJson(projectPath);
-
-  // If TypeScript is requested, copy TS-specific files
-  if (useTypeScript) {
-    const tsTemplatePath = path.join(__dirname, "..", "templates", "_typescript");
-    if (await dirExists(tsTemplatePath)) {
-      await copyDir(tsTemplatePath, projectPath);
-    }
-  }
 
   if (renderer !== "react") {
     await applyRendererTemplate(projectPath, renderer, basePackageJson);

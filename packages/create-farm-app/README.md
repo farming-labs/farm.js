@@ -5,7 +5,7 @@ Create a new FARMJS application
 FARMJS is currently in beta.
 
 ```bash
-pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-app --template basic --typescript
+pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-app --template basic
 cd my-app
 pnpm dev
 ```
@@ -19,7 +19,7 @@ within the last 24 hours. Pass `--skip-install` when you only want to generate t
 Choose React, Preact, Solid, Vue, or Svelte for the Basic and Better Auth starters:
 
 ```bash
-pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-app --template better-auth --renderer solid --typescript
+pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-app --template better-auth --renderer solid
 ```
 
 React remains the default when `--renderer` is omitted. The interactive Basic and Better Auth
@@ -43,7 +43,7 @@ home page, and setup documentation. Better Auth has renderer-native UI for all f
 other integration templates currently use React. For example:
 
 ```bash
-pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta stripe-app --template stripe --typescript
+pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta stripe-app --template stripe
 ```
 
 See the [FARMJS repository](https://github.com/farming-labs/farm.js) for documentation, examples, and support.
