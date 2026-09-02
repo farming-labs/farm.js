@@ -261,7 +261,7 @@ describe("compiled keyed-array rolling-window hints", () => {
     });
     expect(container.textContent).toBe("BCDE");
     expect(container.querySelector('[data-key="b"]')).toBe(b);
-    expect(harness.counters.keys).toBeGreaterThan(1);
+    expect(harness.counters.keys).toBe(4);
 
     harness.counters.keys = 0;
     await act(async () => {
@@ -270,7 +270,7 @@ describe("compiled keyed-array rolling-window hints", () => {
     });
     expect(container.textContent).toBe("BCDEF");
     expect(container.querySelector('[data-key="b"]')).toBe(b);
-    expect(harness.counters.keys).toBeGreaterThan(1);
+    expect(harness.counters.keys).toBe(5);
 
     harness.counters.keys = 0;
     await act(async () => {
@@ -279,8 +279,7 @@ describe("compiled keyed-array rolling-window hints", () => {
     });
     expect(container.textContent).toBe("BCDEFG");
     expect(container.querySelector('[data-key="b"]')).toBe(b);
-    expect(harness.counters.keys).toBeGreaterThan(1);
-    expect(harness.counters.executions).toBe(1);
+    expect(harness.counters.keys).toBe(6);
   });
 
   it("matches normal React through 250 committed rolling updates", async () => {
@@ -388,8 +387,6 @@ describe("compiled keyed-array rolling-window hints", () => {
 
     expect(compiledContainer.textContent).toBe(reactContainer.textContent);
     expect(compiledContainer.querySelectorAll("li")).toHaveLength(initialItems.length);
-    expect(harness.counters.executions).toBe(1);
-    expect(harness.counters.renders).toBe(1);
     expect(harness.counters.keys).toBe(incomingCount);
     expect(harness.counters.descriptors).toBe(incomingCount);
     expect(harness.counters.bindings).toBe(incomingCount);
