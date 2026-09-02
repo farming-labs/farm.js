@@ -10,7 +10,7 @@ import type {
   SSGPage,
 } from "../types";
 import type { MatchedRouteSlot, RouteManager } from "../routing/route-manager";
-import { logger, toRootRelativeUrlPath } from "../utils";
+import { logger, toRootRelativeUrlPath, toViteModuleId } from "../utils";
 import { collectDevStylesheetUrls } from "./dev-styles";
 import {
   composeFarmFullDocument,
@@ -27,7 +27,11 @@ import {
 } from "../middleware/server";
 import { getRequestContextSnapshot } from "../request-context";
 import { matchSSGPage, resolveRouteRenderingConfigFromFile } from "../ssg";
-import { getIntegrationProviders, getRegisteredIntegrationAPIManifest } from "../integrations";
+import {
+  getIntegrationProviders,
+  getRegisteredIntegrationAPIManifest,
+  isFarmIntegrationProviderComponentReference,
+} from "../integrations";
 import { _runWithCurrentRequest, createWebRequestFromFarmRequest } from "./request";
 import { createFarmCacheKey, getFarmDataCache, normalizeRevalidatePath } from "../cache";
 import { resolveFarmNotFoundComponentPath } from "../not-found";
@@ -1702,18 +1706,48 @@ export class ServerRenderer {
 
     for (let i = providers.length - 1; i >= 0; i--) {
       const provider = providers[i];
-      if (provider.type === "clerk") {
+      if (provider.component || provider.type === "clerk") {
         if (!isReactRenderer(this.config.renderer)) {
           throw new Error(
             `Integration provider \`${provider.type}\` currently requires the React renderer.`,
           );
         }
-        if (!cachedClerkProvider) {
-          cachedClerkProvider = await importRuntimeModule("@clerk/react");
+        let ProviderComponent;
+        if (isFarmIntegrationProviderComponentReference(provider.component)) {
+          const providerModuleId = provider.component.module.startsWith(".")
+            ? toViteModuleId(
+                path.resolve(this.config.root, provider.component.module),
+                this.config.root,
+              )
+            : provider.component.module;
+          const providerModule = this.viteServer
+            ? await this.viteServer.ssrLoadModule(providerModuleId)
+            : await importRuntimeModule(
+                provider.component.module.startsWith(".")
+                  ? pathToFileURL(path.resolve(this.config.root, provider.component.module)).href
+                  : provider.component.module,
+              );
+          ProviderComponent = providerModule[provider.component.export || "default"];
+        } else if (typeof provider.component === "function") {
+          ProviderComponent = provider.component;
+        } else if (provider.type === "clerk") {
+          if (!cachedClerkProvider) {
+            cachedClerkProvider = await importRuntimeModule("@clerk/react");
+          }
+          ProviderComponent = cachedClerkProvider!.ClerkProvider;
+        } else {
+          throw new Error(
+            `Integration provider \`${provider.name}\` has an invalid component reference.`,
+          );
+        }
+        if (!ProviderComponent) {
+          throw new Error(
+            `Integration provider \`${provider.name}\` did not export its configured component.`,
+          );
         }
 
         wrapped = this.rendererRuntime.createElement(
-          cachedClerkProvider!.ClerkProvider,
+          ProviderComponent,
           provider.props || {},
           wrapped,
         );
@@ -2035,6 +2069,8 @@ export class ServerRenderer {
           params: options.params,
         });
       }
+
+      wrapped = await this.wrapWithIntegrationProviders(wrapped);
 
       const html = await _runWithMiddlewareData(options.middlewareMap, () =>
         _runWithMiddlewareContext(options.middlewareContext, () =>
@@ -2645,6 +2681,8 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
               children: element,
             });
           }
+
+          element = await this.wrapWithIntegrationProviders(element);
 
           // Render to string
           const content = await this.rendererRuntime.renderToString(element);

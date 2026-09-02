@@ -9,6 +9,8 @@ import { ServerRenderer } from "../server/renderer";
 import type { FarmConfig, FarmRequest, FarmResponse, LoadingProps, ErrorProps } from "../types";
 import { logger } from "../utils";
 import { defer } from "../deferred";
+import { defineIntegration } from "../integrations";
+import { REACT_RENDERER } from "../renderer";
 import { Link } from "../client/link";
 
 type MockResponse = FarmResponse & {
@@ -73,27 +75,46 @@ describe("file route loading.tsx and error.tsx", () => {
   it("renders the nearest error.tsx for file route render failures", async () => {
     vi.spyOn(logger, "error").mockImplementation(() => {});
     const response = createMockResponse();
-    const renderer = createRenderer({
-      [routeModulePath]: {
-        default: function DashboardPage() {
-          throw new Error("dashboard exploded");
+    const acme = defineIntegration({
+      category: "custom",
+      type: "acme",
+      instance: {},
+      providers: [
+        {
+          name: "acme",
+          type: "client",
+          component: function AcmeProvider({ children }) {
+            return React.createElement("div", { "data-acme-provider": "" }, children);
+          },
         },
-      },
-      [errorModulePath]: {
-        default: function DashboardError(props: ErrorProps) {
-          const message = props.error instanceof Error ? props.error.message : String(props.error);
-          return React.createElement(
-            "section",
-            null,
-            `Dashboard error ${message} ${props.path} ${props.search?.tab}`,
-          );
-        },
-      },
+      ],
     });
+    const renderer = createRenderer(
+      {
+        [routeModulePath]: {
+          default: function DashboardPage() {
+            throw new Error("dashboard exploded");
+          },
+        },
+        [errorModulePath]: {
+          default: function DashboardError(props: ErrorProps) {
+            const message =
+              props.error instanceof Error ? props.error.message : String(props.error);
+            return React.createElement(
+              "section",
+              null,
+              `Dashboard error ${message} ${props.path} ${props.search?.tab}`,
+            );
+          },
+        },
+      },
+      { integrations: { acme } },
+    );
 
     await renderer.renderPage(createMockRequest("/dashboard?tab=stats"), response);
 
     expect(response.statusCode).toBe(500);
+    expect(response.body).toContain("data-acme-provider");
     expect(response.body).toContain("Dashboard error dashboard exploded /dashboard stats");
     expect(response.body).not.toContain("Internal Server Error");
   });
@@ -559,6 +580,67 @@ describe("file route loading.tsx and error.tsx", () => {
 });
 
 describe("custom not-found rendering", () => {
+  it("renders a custom not-found page inside integration providers", async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), "farm-not-found-provider-"));
+    temporaryDirectories.push(directory);
+    const appDirectory = path.join(directory, "src", "app");
+    const notFoundPath = path.join(appDirectory, "not-found.tsx");
+    const rootLayoutPath = path.join(appDirectory, "layout.tsx");
+    await mkdir(appDirectory, { recursive: true });
+    await Promise.all([writeFile(notFoundPath, ""), writeFile(rootLayoutPath, "")]);
+
+    const acme = defineIntegration({
+      category: "custom",
+      type: "acme",
+      instance: {},
+      providers: [
+        {
+          name: "acme",
+          type: "client",
+          component: function AcmeProvider({ children }) {
+            return React.createElement("div", { "data-acme-provider": "" }, children);
+          },
+        },
+      ],
+    });
+    const response = createMockResponse();
+    const routeManager = {
+      matchMetadataRoute: () => null,
+      matchMetadataImage: () => null,
+      matchRoute: () => ({ route: null, params: {}, layouts: [], slots: [] }),
+      async loadRouteModule(modulePath: string) {
+        expect(modulePath).toBe(notFoundPath);
+        return {
+          default: function CustomNotFound() {
+            return React.createElement("main", null, "Custom not found");
+          },
+        };
+      },
+      async loadLayoutModule(modulePath: string) {
+        expect(modulePath).toBe(rootLayoutPath);
+        return {
+          default: function RootLayout({ children }: { children: React.ReactNode }) {
+            return React.createElement("html", null, React.createElement("body", null, children));
+          },
+        };
+      },
+    };
+    const renderer = new ServerRenderer(
+      {
+        ...createConfig(),
+        root: directory,
+        integrations: { acme },
+      } as Required<FarmConfig>,
+      routeManager as any,
+    );
+
+    await renderer.renderPage(createMockRequest("/missing"), response);
+
+    expect(response.statusCode).toBe(404);
+    expect(response.body).toContain("data-acme-provider");
+    expect(response.body).toContain("Custom not found");
+  });
+
   it("surfaces a root layout import failure through the error response", async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), "farm-not-found-layout-"));
     temporaryDirectories.push(directory);
@@ -631,6 +713,7 @@ function createRenderer(
       islandStrategy?: string;
     };
     onGenerateClientManifest?: () => void;
+    integrations?: FarmConfig["integrations"];
     basePath?: string;
   } = {},
 ) {
@@ -805,7 +888,11 @@ function createRenderer(
   };
 
   return new ServerRenderer(
-    { ...createConfig(), basePath: options.basePath ?? "/" },
+    {
+      ...createConfig(),
+      integrations: options.integrations ?? {},
+      basePath: options.basePath ?? "/",
+    },
     routeManager as any,
   );
 }
@@ -820,6 +907,7 @@ function createConfig(): Required<FarmConfig> {
     deploy: {},
     storage: {},
     integrations: {},
+    renderer: REACT_RENDERER,
     migrations: { commands: [] },
     workflows: {
       enabled: false,

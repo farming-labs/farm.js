@@ -328,11 +328,20 @@ export interface FarmIntegrationProviderProps {
   children: ReactNode;
 }
 
+export interface FarmIntegrationProviderComponentReference {
+  /** Client-safe module specifier using `@/`, a path relative to the app root, or a package. */
+  module: string;
+  /** Named export to use. Defaults to the module's default export. */
+  export?: string;
+}
+
 export interface FarmIntegrationProvider {
   name: string;
   type: string;
   props?: Record<string, unknown>;
-  component?: ComponentType<FarmIntegrationProviderProps>;
+  component?:
+    | ComponentType<FarmIntegrationProviderProps>
+    | FarmIntegrationProviderComponentReference;
 }
 
 export interface FarmIntegrationDocumentNavigation {
@@ -1228,12 +1237,12 @@ function withIntegrationPluginOwner(
 
 export function getIntegrationProviders(
   integrations: FarmIntegrationsUserConfig | undefined,
-): Array<Pick<FarmIntegrationProvider, "name" | "type" | "props">> {
+): FarmIntegrationProvider[] {
   if (!integrations) {
     return [];
   }
 
-  const providers: Array<Pick<FarmIntegrationProvider, "name" | "type" | "props">> = [];
+  const providers: FarmIntegrationProvider[] = [];
   for (const integration of Object.values(integrations)) {
     if (!integration || !isFarmIntegration(integration) || !integration.providers?.length) {
       continue;
@@ -1244,11 +1253,24 @@ export function getIntegrationProviders(
         name: provider.name,
         type: provider.type,
         props: provider.props,
+        component: provider.component,
       });
     }
   }
 
   return providers;
+}
+
+export function isFarmIntegrationProviderComponentReference(
+  value: FarmIntegrationProvider["component"],
+): value is FarmIntegrationProviderComponentReference {
+  return Boolean(
+    value &&
+    typeof value === "object" &&
+    "module" in value &&
+    typeof value.module === "string" &&
+    value.module.length > 0,
+  );
 }
 
 export function getIntegrationDocumentNavigationMatchers(

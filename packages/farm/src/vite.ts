@@ -89,6 +89,7 @@ import {
   resolveFarmRenderer,
 } from "./renderer";
 import type { FarmRenderer } from "./renderer";
+import { generateFarmIntegrationProviderClientCode } from "./integration-provider-build";
 import type { FarmIslandStrategy } from "./island";
 import { resolveRouteRenderingConfig } from "./ssg";
 import {
@@ -3466,11 +3467,7 @@ function parseRouteModuleSchema(
 }
 
 function generateClientCode(
-  integrationProviders: Array<{
-    name: string;
-    type: string;
-    props?: Record<string, unknown>;
-  }> = [],
+  integrationProviders: ReturnType<typeof getIntegrationProviders> = [],
   documentNavigationMatchers: string[] = [],
   docsSearchClientRuntime = EMPTY_FARM_DOCS_SEARCH_CLIENT_RUNTIME,
   devtoolsClientRuntime = "",
@@ -3484,10 +3481,7 @@ function generateClientCode(
   trailingSlash = false,
   basePath = "/",
 ): string {
-  const hasClerkProvider = integrationProviders.some((provider) => provider.type === "clerk");
-  const providerImportBlock = hasClerkProvider
-    ? `import { ClerkProvider } from '@clerk/react';`
-    : "";
+  const providerClientCode = generateFarmIntegrationProviderClientCode(integrationProviders, root);
   const clientPluginEntry = generateFarmClientPluginEntryCode(
     plugins,
     root,
@@ -3547,7 +3541,10 @@ async function hydrateFarmIsolatedClientBoundaries(scope = document) {
             throw new Error('compiled original export was not found');
           }
           const props = JSON.parse(container.getAttribute('data-farm-client-props') || '{}');
-          const root = hydrateRoot(container, React.createElement(Component, props));
+          const root = hydrateRoot(
+            container,
+            wrapWithIntegrationProviders(React.createElement(Component, props)),
+          );
           farmIsolatedBoundaryRoots.set(container, root);
         } catch (error) {
           console.warn(
@@ -3574,7 +3571,7 @@ import {
   createFarmDeploymentRequestHeaders,
   isFarmDeploymentMismatchResponse,
 } from '@farm.js/core/deployment'
-${providerImportBlock}
+${providerClientCode.imports}
 ${clientPluginEntry.imports}
 ${docsSearchClientRuntime}
 ${devtoolsClientRuntime}
@@ -3586,7 +3583,6 @@ ${docsAdapterImportBlock}
 
 // Expose React for HMR
 window.__FARM_REACT__ = React;
-const integrationProviders = ${JSON.stringify(integrationProviders)};
 const integrationDocumentNavigationMatchers = ${JSON.stringify(documentNavigationMatchers)};
 
 setFarmBasePath(${JSON.stringify(basePath)});
@@ -3609,18 +3605,7 @@ function matchesDocumentNavigation(pathname) {
   });
 }
 
-function wrapWithIntegrationProviders(element) {
-  let wrapped = element;
-
-  for (let i = integrationProviders.length - 1; i >= 0; i--) {
-    const provider = integrationProviders[i];
-    if (provider.type === 'clerk') {
-      wrapped = React.createElement(ClerkProvider, provider.props || {}, wrapped);
-    }
-  }
-
-  return wrapped;
-}
+${providerClientCode.runtime}
 
 window.__FARM_WRAP_PROVIDERS__ = wrapWithIntegrationProviders;
 
