@@ -67,6 +67,19 @@ if (result.error) {
 }
 ```
 
+If a route path contains a lowercase HTTP method segment such as `get`, `post`, or `delete` that
+collides with a method on its parent route, the generated client exposes a leading-slash literal
+alias so the two cannot be confused:
+
+```ts
+// Both src/app/api/users/route.ts and src/app/api/users/get/route.ts export GET.
+const result = await api["/users/get"].get();
+```
+
+The leading slash marks the whole key as a literal API path. This also works when the method-named
+segment is in the middle of a colliding route, for example
+`api["/users/get/profile"].post(...)`. Non-conflicting paths keep their ordinary nested form.
+
 A typed `HEAD` route is called with `.head()`. Its result keeps the same `{ data, error, key }`
 shape, with `data` set to `undefined` because HTTP HEAD responses do not have a body.
 
