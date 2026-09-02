@@ -539,7 +539,7 @@ export function createAPIClient<
     const applyOptimisticUpdates = () => {
       if (!clientOptions?.optimistic?.update?.length) return [] as OptimisticSnapshot[];
 
-      const snapshots: OptimisticSnapshot[] = [];
+      const snapshots = new Map<string, OptimisticSnapshot>();
       for (const update of clientOptions.optimistic.update) {
         const [target, targetInput, updater] =
           update.length === 2
@@ -555,7 +555,14 @@ export function createAPIClient<
         if (!targetKey) continue;
 
         const targetEntry = getValidCacheEntry(cacheState, targetKey, now);
-        const previousEntry = targetEntry ? { ...targetEntry } : undefined;
+        let snapshot = snapshots.get(targetKey);
+        if (!snapshot) {
+          snapshot = {
+            key: targetKey,
+            entry: targetEntry ? { ...targetEntry } : undefined,
+          };
+          snapshots.set(targetKey, snapshot);
+        }
         const previousData = targetEntry?.data;
         const nextData = updater(previousData);
         cacheState.set(targetKey, {
@@ -569,17 +576,17 @@ export function createAPIClient<
             getGcAt(now, cacheOptions?.gcTime ?? options.cacheDefaults?.gcTime),
           invalidatedAt: targetEntry?.invalidatedAt,
         });
-
-        snapshots.push({ key: targetKey, entry: previousEntry });
+        snapshot.optimisticEntry = cacheState.get(targetKey);
       }
 
-      return snapshots;
+      return Array.from(snapshots.values());
     };
 
     const rollbackOptimisticUpdates = (snapshots: OptimisticSnapshot[]) => {
       if (!clientOptions?.optimistic?.rollbackOnError) return;
 
       for (const snapshot of snapshots) {
+        if (cacheState.get(snapshot.key) !== snapshot.optimisticEntry) continue;
         if (!snapshot.entry) {
           cacheState.delete(snapshot.key);
           continue;
@@ -593,18 +600,10 @@ export function createAPIClient<
       if (clientOptions?.optimistic?.rollbackOnError) return;
 
       const invalidatedAt = Date.now();
-      const invalidatedKeys = new Set<string>();
       for (const snapshot of snapshots) {
-        if (invalidatedKeys.has(snapshot.key)) continue;
-        invalidatedKeys.add(snapshot.key);
-
         const current = cacheState.get(snapshot.key);
-        if (!current) continue;
-        cacheState.set(snapshot.key, {
-          ...current,
-          staleAt: 0,
-          invalidatedAt,
-        });
+        if (!current || current !== snapshot.optimisticEntry) continue;
+        cacheState.invalidate(snapshot.key, invalidatedAt);
         emitStatus("invalidated", { key: snapshot.key });
       }
     };
@@ -1103,6 +1102,7 @@ type RouteMeta = {
 type OptimisticSnapshot = {
   key: string;
   entry?: CacheEntry;
+  optimisticEntry?: CacheEntry;
 };
 
 function buildCacheKey(
