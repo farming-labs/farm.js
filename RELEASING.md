@@ -26,9 +26,12 @@ pnpm release:beta
 
 Bumpp uses `beta` as the prerelease identifier for the shared release group, then pnpm publishes
 the new shared versions with the `beta` tag while leaving independently versioned packages at
-their current versions. After every current public package version is visible, the release promotes
-each current beta to npm's `latest` tag so unqualified installs receive the newest beta. If a
-package already has a stable `latest` version, the stable tag is preserved.
+their current versions. Before starting, confirm that every public package's current manifest
+version, including every independently versioned package, is a beta. The promotion step rejects a
+stable current version instead of skipping that package, which aborts the release after publishing.
+After every current beta is visible, the release promotes it to npm's `latest` tag so unqualified
+installs receive the newest beta. If a package already has a stable `latest` version, that stable tag
+is preserved.
 
 To build and publish a beta without running the test suite, pass `--no-test`:
 
