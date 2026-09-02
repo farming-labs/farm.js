@@ -45,6 +45,15 @@ function sentUpdatePaths(send: ReturnType<typeof vi.fn>): string[] {
 }
 
 describe("HMRManager affected-module traversal", () => {
+  it("reloads Windows page paths as route modules", async () => {
+    const page = createModule({ url: "/src/app/page.tsx" });
+    const { server, send } = createServer(page);
+
+    await new HMRManager(server).handleFileChange("C:\\project\\src\\app\\page.tsx");
+
+    expect(send).toHaveBeenCalledWith({ type: "full-reload", path: "*" });
+  });
+
   it("includes the self-accepting boundary and stops above it", async () => {
     // page -> widget(self-accepting) -> util(changed)
     const util = createModule({ url: "/src/util.ts" });

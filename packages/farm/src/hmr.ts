@@ -1,5 +1,5 @@
 import type { ViteDevServer, ModuleNode } from "vite";
-import { logger } from "./utils";
+import { toPosixPath } from "./utils";
 
 export class HMRManager {
   private server: ViteDevServer;
@@ -30,6 +30,7 @@ export class HMRManager {
    */
   async handleFileChange(file: string) {
     const module = await this.server.moduleGraph.getModuleByUrl(file);
+    const normalizedFile = toPosixPath(file);
 
     if (!module) {
       return;
@@ -45,12 +46,18 @@ export class HMRManager {
       return;
     }
 
-    if (file.includes("/app/") && /\/page\.(?:tsx?|jsx?|vue|svelte)$/.test(file)) {
+    if (
+      normalizedFile.includes("/app/") &&
+      /\/page\.(?:tsx?|jsx?|vue|svelte)$/.test(normalizedFile)
+    ) {
       await this.reloadPage();
       return;
     }
 
-    if (file.includes("/app/") && /\/layout\.(?:tsx?|jsx?|vue|svelte)$/.test(file)) {
+    if (
+      normalizedFile.includes("/app/") &&
+      /\/layout\.(?:tsx?|jsx?|vue|svelte)$/.test(normalizedFile)
+    ) {
       await this.reloadPage();
       return;
     }
