@@ -377,6 +377,8 @@ console.log(result.data.message);
 ```
 
 This makes client components easier to write because failed responses do not need to be caught with `try/catch` unless you want that behavior.
+If an HTTP error body is malformed, Farm still returns an `http_error` with the real status and
+`Response`; the decoding failure is available as `error.cause`.
 
 ## Server callers
 

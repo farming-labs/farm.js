@@ -337,6 +337,49 @@ describe("createAPIClient", () => {
     });
   });
 
+  it("preserves the HTTP response when an error body cannot be decoded", async () => {
+    const response = new Response("{broken", {
+      status: 500,
+      statusText: "Internal Server Error",
+      headers: { "content-type": "application/json" },
+    });
+    globalThis.fetch = vi.fn(async () => response) as any;
+    const api = createAPIClient<APIRouter>({ baseURL: "https://api.example.com" });
+
+    const result = await api.status.get();
+
+    expect(result.error).toMatchObject({
+      code: "http_error",
+      status: 500,
+      response,
+      cause: expect.any(SyntaxError),
+    });
+    expect(result.error).not.toMatchObject({ code: "network_error", status: 0 });
+  });
+
+  it("keeps transport failures while reading error bodies classified as network errors", async () => {
+    const transportError = new TypeError("connection closed while reading the body");
+    const response = {
+      ok: false,
+      status: 502,
+      statusText: "Bad Gateway",
+      headers: new Headers({ "content-type": "application/json" }),
+      body: {},
+      arrayBuffer: vi.fn().mockRejectedValue(transportError),
+    } as unknown as Response;
+    globalThis.fetch = vi.fn(async () => response) as any;
+    const api = createAPIClient<APIRouter>({ baseURL: "https://api.example.com" });
+
+    const result = await api.status.get();
+
+    expect(result.error).toMatchObject({
+      code: "network_error",
+      status: 0,
+      cause: transportError,
+    });
+    expect(result.error).not.toMatchObject({ code: "http_error", status: 502 });
+  });
+
   it("supports empty and binary successful responses", async () => {
     const responses = [
       new Response("", { status: 200 }),
@@ -433,7 +476,7 @@ describe("createAPIClient", () => {
 
   it("isolates cached responses between clients with different request contexts", async () => {
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
-      const authorization = (init?.headers as Record<string, string>)?.Authorization;
+      const authorization = new Headers(init?.headers).get("authorization") ?? undefined;
       return buildResponse({ user: authorization });
     });
     globalThis.fetch = fetchMock as any;
@@ -489,7 +532,7 @@ describe("createAPIClient", () => {
   it("drops a client cache when its request context changes", async () => {
     const headers = { Authorization: "Bearer user-a" };
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
-      const authorization = (init?.headers as Record<string, string>)?.Authorization;
+      const authorization = new Headers(init?.headers).get("authorization") ?? undefined;
       return buildResponse({ user: authorization });
     });
     globalThis.fetch = fetchMock as any;
