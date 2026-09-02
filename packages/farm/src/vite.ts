@@ -2621,6 +2621,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           renderer,
           resolvedConfig?.experimental?.isolatedClientHydration === "enabled",
           resolvedConfig?.trailingSlash ?? false,
+          resolvedConfig?.basePath ?? "/",
         );
       }
 
@@ -3481,6 +3482,7 @@ function generateClientCode(
   renderer: FarmRenderer = REACT_RENDERER,
   isolatedHydrationEnabled = false,
   trailingSlash = false,
+  basePath = "/",
 ): string {
   const hasClerkProvider = integrationProviders.some((provider) => provider.type === "clerk");
   const providerImportBlock = hasClerkProvider
@@ -3565,7 +3567,7 @@ async function hydrateFarmIsolatedClientBoundaries(scope = document) {
 ${rendererClientImports}
 import { installChunkErrorRecovery, SPARouter } from '@farm.js/core/client'
 import { createClientPluginManager } from '@farm.js/core/plugin/client'
-import { scheduleFarmIslandHydration, searchParamsToObject, setFarmTrailingSlashPreference } from '@farm.js/core/internal/client-runtime'
+import { scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference } from '@farm.js/core/internal/client-runtime'
 import { reviveDeferredData } from '@farm.js/core/deferred'
 import {
   createFarmDeploymentMismatchError,
@@ -3587,6 +3589,7 @@ window.__FARM_REACT__ = React;
 const integrationProviders = ${JSON.stringify(integrationProviders)};
 const integrationDocumentNavigationMatchers = ${JSON.stringify(documentNavigationMatchers)};
 
+setFarmBasePath(${JSON.stringify(basePath)});
 setFarmTrailingSlashPreference(${JSON.stringify(trailingSlash)});
 installChunkErrorRecovery();
 

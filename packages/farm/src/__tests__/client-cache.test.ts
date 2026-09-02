@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createRouteDataCacheKey } from "../cache";
-import { getFarmClientDataCache, normalizeFarmClientCacheKey } from "../client-cache";
+import {
+  FarmClientDataCache,
+  getFarmClientDataCache,
+  normalizeFarmClientCacheKey,
+} from "../client-cache";
 import { notifyFarmCacheInvalidation } from "../cache-invalidation";
 
 describe("Farm client data cache", () => {
@@ -31,6 +35,20 @@ describe("Farm client data cache", () => {
     expect(cache.get(key)?.invalidatedAt).toEqual(expect.any(Number));
     expect(listener).toHaveBeenCalledTimes(2);
     unsubscribe();
+  });
+
+  it("unsubscribes disposed cache instances from shared invalidations", () => {
+    const cache = new FarmClientDataCache();
+    cache.dispose();
+    cache.set("private", {
+      data: { id: "private" },
+      updatedAt: 1,
+      staleAt: Number.POSITIVE_INFINITY,
+    });
+
+    notifyFarmCacheInvalidation("private");
+
+    expect(cache.isStale("private")).toBe(false);
   });
 
   it("resolves aliases to one cache entry", () => {

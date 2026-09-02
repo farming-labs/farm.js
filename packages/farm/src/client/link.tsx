@@ -12,6 +12,8 @@ import type { FarmViewTransitionMode } from "./spa-router";
 import { isFarmLocaleChangeHref, localizeActiveFarmHref } from "../i18n/client-runtime";
 import type { FarmI18nLocale } from "../i18n/types";
 import { getFarmTrailingSlashPreference } from "../trailing-slash";
+import { applyFarmBasePath, getFarmBasePath } from "../base-path";
+import { useOptionalFarm } from "../provider";
 
 /**
  * Prefetch strategy (TanStack Router–style):
@@ -247,6 +249,7 @@ function LinkInner<TRoute extends string = DefaultRouteHref>(
   const elementRef = useRef<HTMLAnchorElement | null>(null);
   const intentTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasPrefetched = useRef(false);
+  const farm = useOptionalFarm();
 
   const { intent, viewport, render } = normalizePrefetch(prefetch);
   const baseHref = resolveLinkHref(href, params, {
@@ -254,7 +257,10 @@ function LinkInner<TRoute extends string = DefaultRouteHref>(
     hash,
     trailingSlash: trailingSlash ?? getFarmTrailingSlashPreference(),
   });
-  const resolvedHref = localizeActiveFarmHref(baseHref, locale);
+  const localizedHref = localizeActiveFarmHref(baseHref, locale);
+  const resolvedHref = isExternalUrl(localizedHref)
+    ? localizedHref
+    : applyFarmBasePath(localizedHref, farm?.basePath ?? getFarmBasePath());
   const isExternal = isExternalUrl(resolvedHref);
 
   const doPrefetch = useCallback(() => {
@@ -388,7 +394,7 @@ function LinkInner<TRoute extends string = DefaultRouteHref>(
 
       if (typeof window !== "undefined") {
         event.preventDefault();
-        if (isFarmLocaleChangeHref(resolvedHref)) {
+        if (isFarmLocaleChangeHref(localizedHref)) {
           window.location.assign(resolvedHref);
           return;
         }
@@ -401,7 +407,7 @@ function LinkInner<TRoute extends string = DefaultRouteHref>(
         }
       }
     },
-    [resolvedHref, replace, scroll, viewTransition, target, isExternal, onClick],
+    [localizedHref, resolvedHref, replace, scroll, viewTransition, target, isExternal, onClick],
   );
 
   const setRefs = useCallback(

@@ -176,6 +176,8 @@ export async function startCheckoutOnServer() {
 
 Both calls have typed input, typed `data`, and typed `error`. The Zod body schema also validates the
 incoming request at runtime.
+Integration clients decode both `application/json` and structured JSON media types such as
+`application/problem+json`, so structured success and error payloads remain available to callers.
 
 ### 2. `endpoints`: grouped owned handlers
 

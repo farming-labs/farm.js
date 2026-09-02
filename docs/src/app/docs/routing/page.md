@@ -117,6 +117,8 @@ Changing only the fragment preserves SPA state, honors push versus replace histo
 request route data again.
 Native anchor behavior still takes precedence: for example, a `Link` with a `download` attribute is
 handled by the browser instead of Farm's SPA router.
+Internal `Link` hrefs stay app-relative: when `basePath: "/console"` is configured, `href="/about"`
+renders and navigates to `/console/about`. Do not add the base path to route hrefs yourself.
 
 **Client navigation**
 

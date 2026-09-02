@@ -7,11 +7,11 @@ import {
   type IntegrationServerClientRoot,
 } from "../integration-client";
 import {
+  FarmClientDataCache,
   getFarmClientDataCache,
   normalizeFarmClientCacheKey,
   type FarmClientCacheEntry,
   type FarmClientCacheKey,
-  type FarmClientDataCache,
 } from "../client-cache";
 import {
   applyFarmCacheInvalidations,
@@ -440,8 +440,9 @@ export function createAPIClient<
           integrations: integrationsClient<TIntegrations>(integrationOptions),
         };
 
-  const cacheState = getFarmClientDataCache();
-  const inflightState = new Map<string, InflightEntry>();
+  const sharedCacheState = getFarmClientDataCache();
+  const sharedInflightState = new Map<string, InflightEntry>();
+  let scopedRequestState: ScopedRequestState | undefined;
   const routeMeta = new WeakMap<AnyRouteRef, RouteMeta>();
   let requestCounter = 0;
 
@@ -463,23 +464,24 @@ export function createAPIClient<
     }
 
     // Prepare fetch options
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      ...options.headers,
-      ...requestOptions.headers,
-    };
+    const headers = new Headers(options.headers);
+    new Headers(requestOptions.headers).forEach((value, key) => headers.set(key, value));
     const fetchOptions: RequestInit = {
       method,
       headers,
       credentials: options.credentials,
     };
+    if (method === "QUERY" && !headers.has("content-type")) {
+      headers.set("content-type", "application/json");
+    }
 
     // Handle body
     if (requestOptions.body !== undefined) {
       if (isFormData(requestOptions.body)) {
-        deleteHeader(headers, "content-type");
+        headers.delete("content-type");
         fetchOptions.body = requestOptions.body;
       } else {
+        if (!headers.has("content-type")) headers.set("content-type", "application/json");
         fetchOptions.body = JSON.stringify(requestOptions.body);
       }
     }
@@ -532,7 +534,6 @@ export function createAPIClient<
       });
     };
 
-    const entry = getValidCacheEntry(cacheState, cacheKey, now);
     const policy = cacheOptions?.policy ?? (cacheOptions ? "cache-first" : "network-only");
     const staleTime = cacheOptions?.staleTime ?? 0;
     const hasReliableDefaultCacheKey =
@@ -541,6 +542,42 @@ export function createAPIClient<
       Boolean(cacheOptions) &&
       (methodUpper === "GET" || methodUpper === "QUERY") &&
       hasReliableDefaultCacheKey;
+    const needsCacheState =
+      isCacheEnabled ||
+      Boolean(clientOptions?.optimistic?.update?.length) ||
+      Boolean(clientOptions?.invalidate);
+    let requestCacheContext: string | undefined;
+    let requestContextError: Error | undefined;
+    if (needsCacheState) {
+      try {
+        requestCacheContext = getRequestCacheContext(options, input);
+      } catch (error) {
+        requestCacheContext = `invalid:${requestId}`;
+        requestContextError = normalizeError(error);
+      }
+    }
+
+    let cacheState = sharedCacheState;
+    let inflightState = sharedInflightState;
+    let requestScopedState: ScopedRequestState | undefined;
+    if (requestCacheContext !== undefined) {
+      if (scopedRequestState && scopedRequestState.context !== requestCacheContext) {
+        scopedRequestState.retired = true;
+        if (scopedRequestState.inflight.size === 0) scopedRequestState.cache.dispose();
+        scopedRequestState = undefined;
+      }
+      scopedRequestState ??= {
+        context: requestCacheContext,
+        cache: new FarmClientDataCache(),
+        inflight: new Map(),
+        retired: false,
+      };
+      requestScopedState = scopedRequestState;
+      cacheState = requestScopedState.cache;
+      inflightState = requestScopedState.inflight;
+    }
+
+    const entry = getValidCacheEntry(cacheState, cacheKey, now);
     const isStale = entry ? isEntryStale(entry, now) : true;
 
     const applyOptimisticUpdates = () => {
@@ -641,6 +678,7 @@ export function createAPIClient<
           });
 
           try {
+            if (requestContextError) throw requestContextError;
             const { response, data, decodeError } = await fetchClient(path, {
               ...input,
               method: methodUpper,
@@ -743,6 +781,13 @@ export function createAPIClient<
       } finally {
         if (inflightState.get(cacheKey) === inflightEntry) {
           inflightState.delete(cacheKey);
+        }
+        if (requestContextError && requestScopedState) {
+          requestScopedState.retired = true;
+          if (scopedRequestState === requestScopedState) scopedRequestState = undefined;
+        }
+        if (requestScopedState?.retired && requestScopedState.inflight.size === 0) {
+          requestScopedState.cache.dispose();
         }
       }
     };
@@ -1107,6 +1152,13 @@ type InflightEntry = {
   startedAt: number;
 };
 
+type ScopedRequestState = {
+  context: string;
+  cache: FarmClientDataCache;
+  inflight: Map<string, InflightEntry>;
+  retired: boolean;
+};
+
 type RouteMeta = {
   path: string[];
   baseURL: string;
@@ -1173,6 +1225,27 @@ function getHeader(headers: unknown, name: string): string | undefined {
 
   const entry = Object.entries(headers).find(([key]) => key.toLowerCase() === name);
   return entry?.[1] === undefined ? undefined : String(entry[1]);
+}
+
+function getRequestCacheContext(
+  options: Pick<APIClientOptions, "headers" | "credentials">,
+  input: unknown,
+): string | undefined {
+  const credentials = options.credentials ?? "same-origin";
+  const headers = new Headers(options.headers);
+  const requestHeaders =
+    input && typeof input === "object" && "headers" in input ? input.headers : undefined;
+
+  if (requestHeaders) {
+    new Headers(requestHeaders as HeadersInit).forEach((value, key) => headers.set(key, value));
+  }
+
+  if (credentials === "same-origin" && [...headers].length === 0) return undefined;
+
+  return stableStringify({
+    credentials,
+    headers: [...headers].sort(([left], [right]) => left.localeCompare(right)),
+  });
 }
 
 function getGcAt(now: number, gcTime?: number): number | undefined {
@@ -1279,13 +1352,6 @@ function isFormData(value: unknown): value is FormData {
       (Object.prototype.toString.call(value) === "[object FormData]" &&
         typeof (value as { entries?: unknown }).entries === "function"))
   );
-}
-
-function deleteHeader(headers: Record<string, string>, name: string): void {
-  const normalized = name.toLowerCase();
-  for (const key of Object.keys(headers)) {
-    if (key.toLowerCase() === normalized) delete headers[key];
-  }
 }
 
 function createResponseError(response: Response, data: any, cause?: unknown): Error {

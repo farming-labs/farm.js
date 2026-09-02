@@ -24,9 +24,10 @@ export class FarmClientDataCache {
   private invalidatedAt = new Map<string, number>();
   private listeners = new Map<string, Set<FarmClientCacheListener>>();
   private inflight = new Map<string, Promise<unknown>>();
+  private unsubscribeInvalidation: (() => void) | undefined;
 
   constructor() {
-    subscribeFarmCacheInvalidation((key) => this.invalidate(key));
+    this.unsubscribeInvalidation = subscribeFarmCacheInvalidation((key) => this.invalidate(key));
   }
 
   get size(): number {
@@ -91,6 +92,12 @@ export class FarmClientDataCache {
     this.invalidatedAt.clear();
     this.inflight.clear();
     for (const key of keys) this.emit(key);
+  }
+
+  dispose(): void {
+    this.unsubscribeInvalidation?.();
+    this.unsubscribeInvalidation = undefined;
+    this.clear();
   }
 
   isStale(key: string, now = Date.now()): boolean {
