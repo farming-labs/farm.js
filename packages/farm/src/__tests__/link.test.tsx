@@ -398,8 +398,23 @@ describe("Link", () => {
       const el = render(
         createElement(Link, { href: "customapp:open/settings", prefetch: "render" }),
       ) as HTMLAnchorElement;
+      const event = new MouseEvent("click", { bubbles: true, button: 0, cancelable: true });
+      let farmPreventedDefault: boolean | undefined;
+      container.addEventListener(
+        "click",
+        (nativeEvent) => {
+          farmPreventedDefault = nativeEvent.defaultPrevented;
+          nativeEvent.preventDefault();
+        },
+        { once: true },
+      );
+
+      act(() => {
+        el.dispatchEvent(event);
+      });
 
       expect(el.getAttribute("href")).toBe("customapp:open/settings");
+      expect(farmPreventedDefault).toBe(false);
       expect(prefetch).not.toHaveBeenCalled();
       expect(navigate).not.toHaveBeenCalled();
     });
