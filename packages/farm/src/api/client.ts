@@ -464,23 +464,24 @@ export function createAPIClient<
     }
 
     // Prepare fetch options
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      ...options.headers,
-      ...requestOptions.headers,
-    };
+    const headers = new Headers(options.headers);
+    new Headers(requestOptions.headers).forEach((value, key) => headers.set(key, value));
     const fetchOptions: RequestInit = {
       method,
       headers,
       credentials: options.credentials,
     };
+    if (method === "QUERY" && !headers.has("content-type")) {
+      headers.set("content-type", "application/json");
+    }
 
     // Handle body
     if (requestOptions.body !== undefined) {
       if (isFormData(requestOptions.body)) {
-        deleteHeader(headers, "content-type");
+        headers.delete("content-type");
         fetchOptions.body = requestOptions.body;
       } else {
+        if (!headers.has("content-type")) headers.set("content-type", "application/json");
         fetchOptions.body = JSON.stringify(requestOptions.body);
       }
     }
@@ -1317,13 +1318,6 @@ function isFormData(value: unknown): value is FormData {
       (Object.prototype.toString.call(value) === "[object FormData]" &&
         typeof (value as { entries?: unknown }).entries === "function"))
   );
-}
-
-function deleteHeader(headers: Record<string, string>, name: string): void {
-  const normalized = name.toLowerCase();
-  for (const key of Object.keys(headers)) {
-    if (key.toLowerCase() === normalized) delete headers[key];
-  }
 }
 
 function createResponseError(response: Response, data: any): Error {
