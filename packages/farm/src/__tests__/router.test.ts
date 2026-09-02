@@ -34,6 +34,25 @@ describe("createFarmRouter", () => {
       slug: "getting-started",
     });
   });
+
+  it("rejects routes that differ only by parameter names", () => {
+    expect(() => createFarmRouter(["/users/[id]", "/users/[slug]"])).toThrow(
+      'Ambiguous route patterns "/users/[id]" and "/users/[slug]" match the same URLs.',
+    );
+  });
+
+  it("keeps literal bracket syntax and encoded segment boundaries distinct", () => {
+    const router = createFarmRouter([
+      "/docs/[not.valid]",
+      "/docs/[id]",
+      "/files/a%2Fb",
+      "/files/a/b",
+    ]);
+
+    expect(router.match("/docs/%5Bnot.valid%5D")?.route.path).toBe("/docs/[not.valid]");
+    expect(router.match("/files/a%2Fb")?.route.path).toBe("/files/a%2Fb");
+    expect(router.match("/files/a/b")?.route.path).toBe("/files/a/b");
+  });
 });
 
 describe("route helpers", () => {

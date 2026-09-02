@@ -69,7 +69,12 @@ import type { ResolvedFarmI18nConfig } from "../i18n/types";
 import { createRouteSlotContainerId, parseRouteSlotFile } from "./route-slots";
 import { getFarmRendererComponentExtensions } from "../renderer";
 import type { ApplicationMetadataRouteKind } from "../metadata-route";
-import { compareRouteSpecificity, type RouteSegmentSpecificity } from "./specificity";
+import {
+  AmbiguousRouteError,
+  compareRouteSpecificity,
+  getRoutePatternShape,
+  type RouteSegmentSpecificity,
+} from "./specificity";
 
 interface RouteEntry {
   route: ParsedRoute;
@@ -187,6 +192,7 @@ function compareRouteEntries(left: RouteEntry, right: RouteEntry): number {
 export class RouteManager {
   private config: Required<FarmConfig>;
   private routes: Map<string, RouteEntry> = new Map();
+  private pageRouteShapes: Map<string, RouteEntry> = new Map();
   private layouts: Map<string, RouteEntry> = new Map();
   private routeSlots: Map<string, RouteSlotEntry> = new Map();
   private loadings: Map<string, RouteEntry> = new Map();
@@ -218,6 +224,7 @@ export class RouteManager {
   async discoverRoutes(): Promise<void> {
     this.invalidateClientManifest();
     this.routes.clear();
+    this.pageRouteShapes.clear();
     this.layouts.clear();
     this.routeSlots.clear();
     this.loadings.clear();
@@ -234,8 +241,8 @@ export class RouteManager {
     }
 
     for (const slot of this.routeSlots.values()) {
-      if (slot.interception && !this.routes.has(slot.pattern)) {
-        throw new Error(
+      if (slot.interception && !this.pageRouteShapes.has(getRoutePatternShape(slot.pattern))) {
+        throw new AmbiguousRouteError(
           `Intercepting route slot "${slot.name}" targets "${slot.pattern}", but no canonical page exists for that URL`,
         );
       }
@@ -807,6 +814,23 @@ export class RouteManager {
     );
   }
 
+  private registerPageRoute(entry: RouteEntry): void {
+    const shape = getRoutePatternShape(entry.pattern);
+    const existing = this.pageRouteShapes.get(shape);
+
+    if (existing && existing.pattern !== entry.pattern) {
+      if (existing.sourceRoot === entry.sourceRoot) {
+        throw new Error(
+          `Ambiguous page routes "${existing.pattern}" and "${entry.pattern}" match the same URLs. Found ${existing.modulePath} and ${entry.modulePath}. Keep only one route for this URL shape.`,
+        );
+      }
+      this.routes.delete(existing.pattern);
+    }
+
+    this.routes.set(entry.pattern, entry);
+    this.pageRouteShapes.set(shape, entry);
+  }
+
   private async discoverFileRoutes(source: FarmSourceRoot): Promise<void> {
     const appDir = resolveAppPath(source.root, source.srcDir, "app");
     const componentExtensions = getFarmRendererComponentExtensions(this.config.renderer).map(
@@ -875,7 +899,7 @@ export class RouteManager {
           `Duplicate page route "${pattern}". Found both ${existing.modulePath} and ${modulePath}.`,
         );
       }
-      this.routes.set(pattern, {
+      this.registerPageRoute({
         route: group.route,
         modulePath,
         ...(markdownFile
@@ -1028,7 +1052,7 @@ export class RouteManager {
 
           const modulePath = createProgrammaticRouteModuleId(filePath, "page", definition.path);
           this.programmaticPages.set(modulePath, definition);
-          this.routes.set(pattern, {
+          this.registerPageRoute({
             route,
             modulePath,
             pattern,
