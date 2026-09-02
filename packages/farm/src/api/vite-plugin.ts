@@ -613,6 +613,13 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
           const relativePath = path.relative(apiDir, path.dirname(file));
           const routePath =
             "/api/" + (relativePath === "." ? "" : relativePath.replace(/\\/g, "/"));
+          const fs = await import("fs");
+          if (!fs.existsSync(file)) {
+            removeEndpointsFromFile(file);
+            await createRouter();
+            log(`API route file removed: ${routePath}`);
+            return [];
+          }
           const routeModule = await server.ssrLoadModule(file);
 
           removeEndpointsFromFile(file);
