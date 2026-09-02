@@ -91,11 +91,12 @@ preserve surviving DOM identity, and cover safe and effectful bound expressions 
 evaluated-bound fallback.
 
 Rolling windows have a separate 10,000-row persistence gate. A concise
-`[...current.slice(1_000), ...incoming]` update is measured against bracketed React and an
-equivalent block-bodied compiled control. Both compiler modes must remain at least 2x faster than
-React and 1.25x faster than the compiled control. The report must contain a nonzero
-`keyedArrayRollingWindowHints` count; package tests separately require retained DOM identity and
-work proportional only to the incoming suffix.
+`[...current.slice(trimCount), ...incoming]` update uses an event-local runtime bound and is
+measured against bracketed React and an equivalent block-bodied compiled control. Both compiler
+modes must remain at least 2x faster than React and 1.25x faster than the compiled control. The
+report must contain a nonzero `keyedArrayRollingWindowHints` count; package tests separately
+require retained DOM identity, work proportional only to the incoming suffix, randomized dynamic
+bounds, and complete fallback for unsafe evaluated bounds.
 
 Exact-position insertions, removals, and replacements have separate 10,000-row comparisons. Concise
 native `toSpliced(position, 0, item)`, `toSpliced(position, 0, ...items)`, `toSpliced(position, 1)`,

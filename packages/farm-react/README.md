@@ -292,16 +292,22 @@ A fixed-size feed can combine that retained tail with a new keyed suffix:
 ```tsx
 setItems((current) => [...current.slice(1), nextItem]);
 setItems((current) => [...current.slice(1_000), ...nextItems]);
+
+const trimCount = pageSize * pagesToExpire;
+setItems((current) => [...current.slice(trimCount), ...nextItems]);
 ```
 
 Farm executes the ordinary native slice and array construction, then validates the committed
 source, retained item identities, and incoming keys. It removes only the expired prefix, leaves
-the retained DOM rows in place, and creates only the incoming suffix. This first form supports one
-build-time safe-integer slice bound and compiler-owned, index-independent host rows. Reused keys,
-block-bodied updaters, custom slice behavior, collection-reading or index-aware rows, nested or
-React-owned rows, queued uncommitted windows, and failed checks use complete keyed reconciliation.
-The optional all-hint runtime is selected only for modules that emit this optimization. Reports
-expose the site count as `keyedArrayRollingWindowHints`.
+the retained DOM rows in place, and creates only the incoming suffix. This form supports one
+safe-integer literal or compiler-safe runtime slice bound and compiler-owned, index-independent
+host rows. Identifiers, property reads, side-effect-free arithmetic and conditionals, and safe
+`Math` calls are supported while preserving native lookup, evaluation, results, and errors.
+Effectful expressions, reused keys, block-bodied updaters, custom slice behavior,
+collection-reading or index-aware rows, nested or React-owned rows, queued uncommitted windows,
+unsafe or no-op evaluated bounds, and failed checks use complete keyed reconciliation. The
+optional all-hint runtime is selected only for modules that emit this optimization. Reports expose
+the site count as `keyedArrayRollingWindowHints`.
 
 Native known-position updates can avoid a complete keyed scan too:
 

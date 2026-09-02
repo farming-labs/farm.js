@@ -230,13 +230,14 @@ export function StandardTableBenchmark() {
           onClick={() => {
             const nextSeed = seed + 1;
             const additions = buildRows(1_000, nextSeed);
+            const trimCount = 1_000;
             setSeed(nextSeed);
-            setRows((current) => [...current.slice(1_000), ...additions]);
-            setOperation("roll benchmark window");
+            setRows((current) => [...current.slice(trimCount), ...additions]);
+            setOperation("roll runtime-count window");
             setRevision((value) => value + 1);
           }}
         >
-          Roll benchmark window
+          Roll runtime-count window
         </button>
         <button
           data-action="table-roll-window-snapshot"
@@ -244,15 +245,16 @@ export function StandardTableBenchmark() {
           onClick={() => {
             const nextSeed = seed + 1;
             const additions = buildRows(1_000, nextSeed);
+            const trimCount = 1_000;
             setSeed(nextSeed);
             setRows((current) => {
-              return [...current.slice(1_000), ...additions];
+              return [...current.slice(trimCount), ...additions];
             });
-            setOperation("roll benchmark window (snapshot control)");
+            setOperation("roll runtime-count window (snapshot control)");
             setRevision((value) => value + 1);
           }}
         >
-          Roll benchmark window (snapshot control)
+          Roll runtime-count window (snapshot control)
         </button>
         <button
           data-action="table-position-insert"

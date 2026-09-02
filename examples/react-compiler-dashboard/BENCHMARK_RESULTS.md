@@ -2,6 +2,34 @@
 
 Date: 2026-08-29
 
+## Compiler-safe runtime rolling-window bounds — 2026-09-02
+
+The 10,000-row rolling workload now passes an event-local `trimCount` to
+`[...current.slice(trimCount), ...incoming]` instead of embedding the retained-tail bound as a
+literal. Both compiler builds emit one `keyedArrayRollingWindowHints` site, preserve all 9,000
+retained DOM rows, remove the 1,000-row prefix, mount only the 1,000-row incoming suffix, and finish
+with zero compiled owner executions. The block-bodied setter remains the compiled control and
+performs the same native array and DOM update without the hint.
+
+| Mode   | React median | Runtime bound | Compiled control | vs React | vs control |
+| ------ | -----------: | ------------: | ---------------: | -------: | ---------: |
+| Static |     102.30 ms |      17.50 ms |         26.10 ms |    5.85x |      1.49x |
+| Hybrid |     102.30 ms |      17.30 ms |         25.10 ms |    5.91x |      1.45x |
+
+The unchanged gate requires at least 2x versus React and 1.25x versus the equivalent block-bodied
+compiled control. The complete bracketed production-browser run passed DOM correctness, compiler
+report checks, the general performance gate, every older optimization-persistence gate, and all
+normalized scalability checks.
+
+Compiler tests accept identifiers, property reads, arithmetic, conditionals, and safe `Math` calls
+while rejecting user calls, assignments, updates, and fractional literals. Runtime coverage proves
+complete reconciliation for fractional, `NaN`, and no-op evaluated bounds, retained identity and
+incoming-only work on the fast path, 250 committed fixed-bound updates, and 1,000 randomized
+runtime-bound updates against normal React. The runtime implementation is unchanged. The dynamic
+rolling fixture has a 12,957 B gzip compiler premium, 17 B above the literal-bound fixture; the
+compiler-disabled core premium remains 3,766 B gzip with an 82.5% reduction from the full runtime.
+The recorded run used Chrome 152.0.7977.65, Node.js 23.11.0, and Apple M1 macOS arm64.
+
 ## Compiler-safe runtime slice bounds — 2026-09-02
 
 The retained-window workload now passes an event-local `trimCount` to

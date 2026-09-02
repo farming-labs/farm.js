@@ -243,6 +243,46 @@ describe("compiled keyed-array rolling-window hints", () => {
     ]);
   });
 
+  it("keeps native results on complete reconciliation for unsafe runtime bounds", async () => {
+    const harness = createRollingHarness(
+      ["a", "b", "c", "d"].map((id) => ({ id, label: id.toUpperCase() })),
+    );
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Feed />));
+    const b = container.querySelector('[data-key="b"]');
+
+    harness.counters.keys = 0;
+    await act(async () => {
+      harness.roll(1.5, [{ id: "e", label: "E" }]);
+      await flushCompilerUpdates();
+    });
+    expect(container.textContent).toBe("BCDE");
+    expect(container.querySelector('[data-key="b"]')).toBe(b);
+    expect(harness.counters.keys).toBeGreaterThan(1);
+
+    harness.counters.keys = 0;
+    await act(async () => {
+      harness.roll(Number.NaN, [{ id: "f", label: "F" }]);
+      await flushCompilerUpdates();
+    });
+    expect(container.textContent).toBe("BCDEF");
+    expect(container.querySelector('[data-key="b"]')).toBe(b);
+    expect(harness.counters.keys).toBeGreaterThan(1);
+
+    harness.counters.keys = 0;
+    await act(async () => {
+      harness.roll(0, [{ id: "g", label: "G" }]);
+      await flushCompilerUpdates();
+    });
+    expect(container.textContent).toBe("BCDEFG");
+    expect(container.querySelector('[data-key="b"]')).toBe(b);
+    expect(harness.counters.keys).toBeGreaterThan(1);
+    expect(harness.counters.executions).toBe(1);
+  });
+
   it("matches normal React through 250 committed rolling updates", async () => {
     const initialItems = Array.from(
       { length: 32 },
@@ -288,6 +328,72 @@ describe("compiled keyed-array rolling-window hints", () => {
     expect(harness.counters.executions).toBe(1);
     expect(harness.counters.renders).toBe(1);
   });
+
+  it("matches React through 1,000 randomized runtime-bound rolling updates", async () => {
+    const initialItems = Array.from(
+      { length: 48 },
+      (_, index): Item => ({ id: `random-row-${index}`, label: `Random row ${index}` }),
+    );
+    const harness = createRollingHarness(initialItems);
+    let rollReact: (remove: number, incoming: readonly Item[]) => void = () => undefined;
+    let seed = 0x7011;
+    let nextId = initialItems.length;
+    const random = () => {
+      seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0;
+      return seed;
+    };
+    function NormalFeed() {
+      const [items, setItems] = useState(initialItems);
+      rollReact = (remove, incoming) =>
+        setItems((previous) => [...previous.slice(remove), ...incoming]);
+      return (
+        <ol>
+          {items.map((item) => (
+            <li key={item.id}>{item.label}</li>
+          ))}
+        </ol>
+      );
+    }
+    const compiledContainer = document.createElement("div");
+    const reactContainer = document.createElement("div");
+    document.body.append(compiledContainer, reactContainer);
+    const compiledRoot = createRoot(compiledContainer);
+    const reactRoot = createRoot(reactContainer);
+    roots.push(compiledRoot, reactRoot);
+    await act(async () => {
+      compiledRoot.render(<harness.Feed />);
+      reactRoot.render(<NormalFeed />);
+    });
+    harness.counters.keys = 0;
+    harness.counters.descriptors = 0;
+    harness.counters.bindings = 0;
+    let incomingCount = 0;
+
+    for (let update = 0; update < 1_000; update += 1) {
+      const remove = 1 + (random() % 4);
+      const incoming = Array.from({ length: remove }, (): Item => {
+        const id = nextId++;
+        return { id: `random-row-${id}`, label: `Random row ${id}` };
+      });
+      incomingCount += incoming.length;
+      await act(async () => {
+        harness.roll(remove, incoming);
+        rollReact(remove, incoming);
+        await flushCompilerUpdates();
+      });
+      if (update % 25 === 0) {
+        expect(compiledContainer.textContent).toBe(reactContainer.textContent);
+      }
+    }
+
+    expect(compiledContainer.textContent).toBe(reactContainer.textContent);
+    expect(compiledContainer.querySelectorAll("li")).toHaveLength(initialItems.length);
+    expect(harness.counters.executions).toBe(1);
+    expect(harness.counters.renders).toBe(1);
+    expect(harness.counters.keys).toBe(incomingCount);
+    expect(harness.counters.descriptors).toBe(incomingCount);
+    expect(harness.counters.bindings).toBe(incomingCount);
+  }, 20_000);
 
   it("hydrates in StrictMode and drops a queued rolling update after unmount", async () => {
     const harness = createRollingHarness([
