@@ -258,7 +258,12 @@ function discoverMatchingPages(
     const sourceDirectory = path.join(source.root, source.srcDir);
     if (!existsSync(sourceDirectory)) continue;
     for (const entry of readdirSync(sourceDirectory, { withFileTypes: true })) {
-      if (!entry.isFile() || !isProgrammaticRoutesFileName(entry.name)) continue;
+      if (
+        (!entry.isFile() && !entry.isSymbolicLink()) ||
+        !isProgrammaticRoutesFileName(entry.name)
+      ) {
+        continue;
+      }
       const filePath = path.join(sourceDirectory, entry.name);
       const moduleSource = readFileSync(filePath, "utf8");
       for (const pattern of scanProgrammaticPagePaths(moduleSource)) {

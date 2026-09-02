@@ -83,7 +83,11 @@ test("discovers pages declared through the programmatic router", async () => {
     );
     await writeFile(
       path.join(root, "src/lib/unregistered.ts"),
-      'page("/not-registered", { component: () => null });\n',
+      [
+        'import { page } from "@farm.js/core";',
+        'page("/not-registered", { component: () => null });',
+        "",
+      ].join("\n"),
     );
 
     const explanation = await explainFarmRoute("/catalog/42", { root });
