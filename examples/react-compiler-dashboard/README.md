@@ -98,9 +98,10 @@ work proportional only to the incoming suffix.
 Exact-position insertions, removals, and replacements have separate 10,000-row comparisons. Concise
 native `toSpliced(position, 0, item)`, `toSpliced(position, 0, ...items)`, `toSpliced(position, 1)`,
 `toSpliced(position, 64)`, `toSpliced(position, 1, replacement)`, and
-`toSpliced(position, 64, ...replacements)` and `with(position, replacement)` updates use event-local
-runtime position variables and are measured against bracketed React and equivalent block-bodied
-compiled controls. The compiler report must contain every dashboard `keyedArrayPositionHints` site;
+`toSpliced(position, runtimeCount, ...replacements)` and `with(position, replacement)` updates use
+event-local runtime position and count variables and are measured against bracketed React and
+equivalent block-bodied compiled controls. The compiler report must contain every dashboard
+`keyedArrayPositionHints` site;
 package tests separately require zero
 surviving key/descriptor/binding reads for removal, surrounding DOM identity, randomized
 differential correctness, runtime-position and count fallback, hydration, and cleanup. Both the
@@ -112,13 +113,15 @@ both surrounding DOM nodes, add no owner executions, remain at least 4x faster t
 at least 1.5x faster than the equivalent block-bodied compiled control. This gate is independent of
 the older single-row position gates, so a batch regression cannot hide inside their aggregate.
 
-The exact-window replacement case swaps 64 rows in the middle of a 10,000-row table. It must
+The exact-window replacement case derives its delete count from the 64-row replacement array and
+swaps that window in the middle of a 10,000-row table. It must
 preserve both retained boundary nodes, disconnect both removed boundaries, add no owner
 executions, remain at least 4x faster than React, and stay at least 1.5x faster than the equivalent
 block-bodied compiled control. Package tests require work proportional only to the 64 incoming
 rows and cover empty spreads, negative positions, clamped counts, reused and duplicate keys,
 native custom-method behavior, queued fallback, controlled-input focus and selection, delegated
-events, 1,000 differential replacements, hydration, Strict Mode, and unmount cleanup.
+events, compiler-safe and effectful count expressions, unsafe evaluated-count fallback, 1,000
+differential replacements, hydration, Strict Mode, and unmount cleanup.
 
 Mixed local-key exact-window replacement has its own 10,000-row gate. The benchmark reverses 48
 keys from inside one 64-row removed interval, changes their visible data, and adds 16 globally new
@@ -247,7 +250,7 @@ The default JSON report is `/tmp/farm-react-dashboard-benchmark.json`; change it
   saved suffix scan while the hinted path still creates and inserts every required new DOM row.
 - The slice snapshot control retains the same 9,000-row suffix through an unsupported block-bodied
   updater. It isolates the saved survivor scan while both paths remove the same 1,000 DOM rows.
-- The exact-position controls pass event-local runtime variables to concise native
+- The exact-position controls pass event-local runtime position and delete-count variables to concise native
   `toSpliced()` updates and compare them with equivalent block-bodied compiled controls. Package
   tests cover the equivalent `with()` replacement path too.
   They verify surrounding DOM identity and isolate the saved full keyed scan for one insertion,

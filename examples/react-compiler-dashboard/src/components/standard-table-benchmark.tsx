@@ -323,13 +323,14 @@ export function StandardTableBenchmark() {
             const nextSeed = seed + 1;
             const replacements = buildRows(64, nextSeed);
             const position = 5_000;
+            const deleteCount = replacements.length;
             setSeed(nextSeed);
-            setRows((current) => current.toSpliced(position, 64, ...replacements));
-            setOperation("replace 64-row runtime window");
+            setRows((current) => current.toSpliced(position, deleteCount, ...replacements));
+            setOperation("replace dynamic-count runtime window");
             setRevision((value) => value + 1);
           }}
         >
-          Replace 64-row runtime window
+          Replace dynamic-count runtime window
         </button>
         <button
           data-action="table-position-window-replace-snapshot"
@@ -338,15 +339,16 @@ export function StandardTableBenchmark() {
             const nextSeed = seed + 1;
             const replacements = buildRows(64, nextSeed);
             const position = 5_000;
+            const deleteCount = replacements.length;
             setSeed(nextSeed);
             setRows((current) => {
-              return current.toSpliced(position, 64, ...replacements);
+              return current.toSpliced(position, deleteCount, ...replacements);
             });
-            setOperation("replace 64-row runtime window (snapshot control)");
+            setOperation("replace dynamic-count runtime window (snapshot control)");
             setRevision((value) => value + 1);
           }}
         >
-          Replace 64-row runtime window (snapshot control)
+          Replace dynamic-count runtime window (snapshot control)
         </button>
         <button
           data-action="table-position-window-reuse"

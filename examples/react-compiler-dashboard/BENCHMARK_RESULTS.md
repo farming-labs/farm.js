@@ -2,6 +2,35 @@
 
 Date: 2026-08-29
 
+## Runtime delete-count exact-window follow-up — 2026-09-02
+
+The full bracketed production-browser run changed the existing 10,000-row exact-window workload
+from a literal delete count to `deleteCount = replacements.length`. The concise setter passes that
+runtime value to `toSpliced(position, deleteCount, ...replacements)`, while the block-bodied
+compiled control performs the same native array and DOM work without the hint. Both compiler builds
+emitted all 15 expected `keyedArrayPositionHints` sites, preserved both surrounding DOM anchors,
+disconnected the complete removed interval, mounted the 64 replacement rows, and produced zero
+owner executions.
+
+| Mode   | React median | Runtime count | Compiled control | vs React | vs control |
+| ------ | -----------: | ------------: | ---------------: | -------: | ---------: |
+| Static |     110.95 ms |       7.60 ms |         19.90 ms |   14.60x |      2.62x |
+| Hybrid |     110.95 ms |       7.80 ms |         18.90 ms |   14.22x |      2.42x |
+
+The unchanged gate requires at least 4x versus React and 1.5x versus the equivalent block-bodied
+compiled control. Every correctness, performance, persistence, and scalability gate passed. The
+stacked queued grow/shrink workload also remained above its existing floors: 7.27x/7.78x versus
+React and 2.03x/2.05x versus its control in static/hybrid modes.
+
+Compiler tests accept identifiers, property reads, arithmetic, conditionals, and safe `Math` calls
+as count expressions while rejecting calls, assignments, and update expressions. Runtime coverage
+proves native count coercion occurs exactly once and that zero or fractional evaluated counts keep
+their native result through complete reconciliation. The full 615-test ordinary suite and all
+three isolated stress controls pass, as do packaged React 18.3.1 and 19.2.8 compatibility. The
+optional keyed-window runtime remains unchanged at a 14,173 B gzip compiler premium, and the
+compiler-disabled core premium remains 3,766 B gzip. The measured environment was Chrome
+145.0.7632.6, Node.js 23.11.0, and Apple M1 macOS arm64.
+
 ## Queued disjoint variable-length window follow-up — 2026-09-02
 
 The full bracketed production-browser run added a 10,000-row workload that queues two disjoint

@@ -1034,28 +1034,32 @@ setItems((current) => current.toSpliced(selectedIndex, 1, replacement));
 setItems((current) => current.toSpliced(selectedIndex, 25, ...replacements));
 setItems((current) => current.with(selectedIndex, replacement));
 
+const deleteCount = visibleRows.length;
+setItems((current) => current.toSpliced(selectedIndex, deleteCount, ...replacements));
+
 // Two same-key windows may be queued before one compiler flush.
 setItems((current) => current.toSpliced(firstIndex, 25, ...firstRefresh));
 setItems((current) => current.toSpliced(secondIndex, 25, ...secondRefresh));
 ```
 
-At build time, Farm recognizes only concise functional setters whose position is either a
-safe-integer literal or a compiler-safe runtime expression. Identifiers, property reads,
+At build time, Farm recognizes only concise functional setters whose position—and, for
+`toSpliced()`, delete count—is a safe-integer literal or compiler-safe runtime expression.
+Identifiers, property reads,
 side-effect-free arithmetic and conditionals, and safe `Math` calls are supported. User-defined
 calls, assignments, update expressions, and other effectful forms are not transformed.
-`toSpliced()` must insert compiler-safe items with a zero delete count, remove one item or a
-contiguous range using a positive safe-integer literal delete count, replace exactly one item with
-a delete count of one, or replace a positive safe-integer literal window with compiler-safe
-explicit items or a safe spread; `with()` must replace exactly one item. A zero delete count with
-an explicit pair or a safe spread such as `...incomingItems` selects the batch insertion path when
-at least two items are produced at runtime. A delete count above one with any incoming item, or a
-positive delete count with multiple items or a spread, selects exact-window replacement; the spread
-may evaluate to zero, one, or many items. Farm
+`toSpliced()` may insert compiler-safe items with a literal zero delete count, remove one item or a
+contiguous range, replace exactly one item, or replace a positive window with compiler-safe
+explicit items or a safe spread; `with()` must replace exactly one item. A literal zero delete count
+with an explicit pair or a safe spread such as `...incomingItems` selects the batch insertion path
+when at least two items are produced at runtime. A literal delete count above one with any incoming
+item, a positive literal count with multiple items or a spread, or any compiler-safe runtime delete
+count selects exact-window replacement; the spread may evaluate to zero, one, or many items. Farm
 preserves the original method lookup,
 evaluates every argument once in its original order, and preserves the native call, return value,
-coercion, and thrown errors. If the method is not native, the evaluated position is not already a
-safe integer, or the removal count is dynamic or unsafe, the update still runs normally but no
-metadata is recorded.
+coercion, and thrown errors. The runtime records metadata only after the native call proves that the
+evaluated position is already a safe integer and the evaluated delete count is already a positive
+safe integer. A custom method or a count that is zero, negative, fractional, non-numeric, or
+otherwise unsafe still runs normally but takes complete keyed reconciliation.
 
 At update time, Farm validates the committed native source, result length, source token, normalized
 position, clamped removal count, and any incoming key before changing the DOM. For a batch, Farm
@@ -1096,9 +1100,10 @@ and swaps one host row. The owner component does not rerun, and surviving row ke
 and bindings are not reread.
 
 The proof requires compiler-owned host rows whose render and key do not observe the row index.
-Effectful position expressions, runtime values that are fractional or otherwise not safe integers,
-dynamic, zero, negative, or fractional removal counts, other `toSpliced()` shapes, block-bodied
-updaters, unsafe incoming expressions, custom methods, overlapping queued structural windows,
+Effectful position or delete-count expressions, runtime positions that are fractional or otherwise
+not safe integers, runtime delete counts that are zero, negative, fractional, non-numeric, or
+otherwise not positive safe integers, other `toSpliced()` shapes, block-bodied updaters, unsafe
+incoming expressions, custom methods, overlapping queued structural windows,
 unhinted intermediate updates, an existing key moved from outside its local removed interval or
 between queued windows, duplicate final keys, collection-reading bindings, React-owned rows,
 nested host blocks, row conditionals, unrelated dirty dependencies, and failed runtime checks keep
@@ -1983,8 +1988,9 @@ The package and example test suites verify more than generated code:
   zero surviving descriptor and binding reads, preserve DOM identity, and cover queued filters,
   unhinted-chain fallback, collection-reading rows, StrictMode hydration, and unmount cleanup;
 - 1,000 deterministic exact-position insertions, single and contiguous-range removals, single-row
-  replacements, and exact-window replacements match normal React; compiler tests cover literal counts and guarded runtime
-  positions, while targeted removal tests require zero surviving key, descriptor, or binding reads,
+  replacements, and exact-window replacements match normal React; compiler tests cover guarded
+  runtime positions plus literal and compiler-safe runtime delete counts, while targeted removal
+  tests require zero surviving key, descriptor, or binding reads,
   preserve focused input and surrounding DOM identity, and cover native evaluation and coercion,
   clamping, unsafe runtime positions and counts, custom methods, queued updates,
   collection-reading rows, StrictMode hydration, and cleanup; targeted window tests additionally

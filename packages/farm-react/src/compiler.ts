@@ -1687,10 +1687,17 @@ function rewriteKeyedArrayPositionHints(
 
       const methodName = updater.body.callee.property.name;
       const args = updater.body.arguments;
-      const toSplicedDeleteCount =
-        methodName === "toSpliced" && args.length >= 2 && t.isNumericLiteral(args[1])
-          ? args[1].value
+      const deleteCountExpression =
+        methodName === "toSpliced" && args.length >= 2 && t.isExpression(args[1])
+          ? args[1]
           : undefined;
+      const toSplicedDeleteCount = deleteCountExpression
+        ? staticSliceIndex(deleteCountExpression)
+        : undefined;
+      const hasRuntimeDeleteCount =
+        deleteCountExpression !== undefined &&
+        toSplicedDeleteCount === undefined &&
+        validateKeyedArrayPositionExpression(deleteCountExpression, safeGlobals) === undefined;
       const isBatchInsert =
         methodName === "toSpliced" &&
         args.length >= 3 &&
@@ -1698,11 +1705,12 @@ function rewriteKeyedArrayPositionHints(
         (args.length > 3 || t.isSpreadElement(args[2]));
       const isWindowReplace =
         methodName === "toSpliced" &&
-        args.length >= 3 &&
-        toSplicedDeleteCount !== undefined &&
-        Number.isSafeInteger(toSplicedDeleteCount) &&
-        toSplicedDeleteCount > 0 &&
-        (toSplicedDeleteCount !== 1 || args.length > 3 || t.isSpreadElement(args[2]));
+        ((args.length >= 3 &&
+          toSplicedDeleteCount !== undefined &&
+          Number.isSafeInteger(toSplicedDeleteCount) &&
+          toSplicedDeleteCount > 0 &&
+          (toSplicedDeleteCount !== 1 || args.length > 3 || t.isSpreadElement(args[2]))) ||
+          hasRuntimeDeleteCount);
       const kind = isBatchInsert
         ? "batch-insert"
         : isWindowReplace
@@ -1729,6 +1737,10 @@ function rewriteKeyedArrayPositionHints(
         kind === "batch-insert" || kind === "window-replace" ? args.slice(2) : [args.at(-1)];
       if (
         validateKeyedArrayPositionExpression(position, safeGlobals) !== undefined ||
+        (kind === "window-replace" &&
+          (!deleteCountExpression ||
+            validateKeyedArrayPositionExpression(deleteCountExpression, safeGlobals) !==
+              undefined)) ||
         (kind !== "remove" &&
           incoming.some((item) => {
             const expression = t.isSpreadElement(item) ? item.argument : item;
