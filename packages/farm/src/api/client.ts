@@ -589,6 +589,26 @@ export function createAPIClient<
       }
     };
 
+    const invalidateUncommittedOptimisticUpdates = (snapshots: OptimisticSnapshot[]) => {
+      if (clientOptions?.optimistic?.rollbackOnError) return;
+
+      const invalidatedAt = Date.now();
+      const invalidatedKeys = new Set<string>();
+      for (const snapshot of snapshots) {
+        if (invalidatedKeys.has(snapshot.key)) continue;
+        invalidatedKeys.add(snapshot.key);
+
+        const current = cacheState.get(snapshot.key);
+        if (!current) continue;
+        cacheState.set(snapshot.key, {
+          ...current,
+          staleAt: 0,
+          invalidatedAt,
+        });
+        emitStatus("invalidated", { key: snapshot.key });
+      }
+    };
+
     const executeNetwork = async (opts?: { isBackground?: boolean; callCallbacks?: boolean }) => {
       const dedupeMs = cacheOptions?.dedupeMs ?? 0;
       const inflight = inflightState.get(cacheKey);
@@ -794,6 +814,7 @@ export function createAPIClient<
     const result = await executeNetwork();
     if (result.error) {
       rollbackOptimisticUpdates(optimisticSnapshots);
+      invalidateUncommittedOptimisticUpdates(optimisticSnapshots);
     } else {
       await invalidateTargets();
     }

@@ -346,7 +346,9 @@ route directly with `[api.products.get, { query: { category } }, updater]`.
 
 With `rollbackOnError: true`, Farm restores the exact previous cache entry when the mutation fails.
 After a successful mutation, invalidation marks the key stale so mounted consumers or the next read
-can load the canonical server result. Failed mutations do not invalidate known-good cached reads.
+can load the canonical server result. Failed mutations do not invalidate known-good cached reads;
+when rollback is disabled, only cache entries changed optimistically are marked stale so the next
+read loads canonical data.
 
 ## Result shape
 

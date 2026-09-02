@@ -631,6 +631,52 @@ describe("createAPIClient", () => {
     expect(afterRollback.data?.users).toHaveLength(1);
   });
 
+  it("marks uncommitted optimistic data stale when rollback is disabled", async () => {
+    let getCount = 0;
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      if ((init?.method ?? "GET").toUpperCase() === "POST") {
+        return buildResponse({ message: "fail" }, false, 500);
+      }
+
+      getCount += 1;
+      return buildResponse({
+        users: [{ id: String(getCount), name: `User ${getCount}` }],
+        total: getCount,
+        limit: 5,
+        offset: 0,
+      });
+    });
+    globalThis.fetch = fetchMock as any;
+
+    type UsersData = APIRouter["users"]["get"]["__types"]["response"];
+    const usersKey = defineCacheKey<UsersData>()(() => ["users", "list"] as const)();
+    const api = createAPIClient<APIRouter>({ baseURL: "http://example.com" });
+    const cache = { key: usersKey, policy: "cache-first" as const, staleTime: 10_000 };
+
+    await api.users.get({}, { cache });
+    const mutation = await api.users.post(
+      { body: { name: "Ada", email: "ada@example.com" } },
+      {
+        optimistic: {
+          update: [
+            [
+              usersKey,
+              (current) => ({
+                ...current!,
+                users: [{ id: "optimistic", name: "Ada" }, ...(current?.users ?? [])],
+              }),
+            ],
+          ],
+        },
+      },
+    );
+    const canonical = await api.users.get({}, { cache });
+
+    expect(mutation.error).toBeTruthy();
+    expect(canonical.data?.users[0]?.id).toBe("2");
+    expect(getCount).toBe(2);
+  });
+
   it("applies optimistic updates immediately while the mutation is still pending", async () => {
     const postDeferred = createDeferred<ReturnType<typeof buildResponse>>();
     let getCount = 0;
