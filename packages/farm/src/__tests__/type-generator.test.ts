@@ -105,6 +105,34 @@ describe("APITypeGenerator", () => {
     expect(content).toContain("query: typeof QUERY_profile;");
   });
 
+  it("detects typed variable handlers", () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "farm-api-types-"));
+    const appDir = path.join(root, "src", "app");
+    const routeDir = path.join(appDir, "api", "typed");
+    const similarlyNamedRouteDir = path.join(appDir, "api", "similarly-named");
+    mkdirSync(routeDir, { recursive: true });
+    mkdirSync(similarlyNamedRouteDir, { recursive: true });
+
+    writeFileSync(
+      path.join(routeDir, "route.ts"),
+      [
+        "type Handler = () => Response;",
+        "export const GET: Handler = () => Response.json({ ok: true });",
+        "export let POST: Handler = () => Response.json({ ok: true });",
+      ].join("\n"),
+    );
+    writeFileSync(
+      path.join(similarlyNamedRouteDir, "route.ts"),
+      "export const GET$ = () => Response.json({ ok: true });\n",
+    );
+
+    const generator = new APITypeGenerator(appDir);
+    const routes = generator.scanAPIRoutes();
+
+    expect(routes).toHaveLength(1);
+    expect(routes[0]?.methods).toEqual(["GET", "POST"]);
+  });
+
   it("detects the HTTP names exposed by export lists", () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "farm-api-types-"));
     const appDir = path.join(root, "src", "app");
