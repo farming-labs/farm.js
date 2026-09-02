@@ -169,7 +169,6 @@ test("generates a buildable starter application", async () => {
         "generated-app",
         "--template",
         "basic",
-        "--typescript",
         "--skip-install",
       ],
       {
