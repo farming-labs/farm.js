@@ -237,6 +237,70 @@ describe("createAPIClient", () => {
     );
   });
 
+  it("does not add a JSON content type to bodyless requests", async () => {
+    const fetchMock = vi.fn(async () => buildResponse({ users: [], total: 0 }));
+    globalThis.fetch = fetchMock as any;
+    const api = createAPIClient<APIRouter>({ baseURL: "https://api.example.com" });
+
+    await api.users.get({ query: { limit: "5" } });
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(new Headers(init.headers).has("content-type")).toBe(false);
+  });
+
+  it("keeps the JSON content type on bodyless QUERY requests", async () => {
+    const fetchMock = vi.fn(async () => buildResponse({ results: [] }));
+    globalThis.fetch = fetchMock as any;
+    const api = createAPIClient<APIRouter>({ baseURL: "https://api.example.com" });
+
+    await (api.search.query as any)();
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(new Headers(init.headers).get("content-type")).toBe("application/json");
+  });
+
+  it("lets fetch set the multipart boundary for FormData QUERY bodies", async () => {
+    const fetchMock = vi.fn(async () => buildResponse({ results: [] }));
+    globalThis.fetch = fetchMock as any;
+    const api = createAPIClient<APIRouter>({ baseURL: "https://api.example.com" });
+    const body = new FormData();
+    body.set("filter", "tools");
+
+    await (api.search.query as any)({ body });
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(init.body).toBe(body);
+    expect(new Headers(init.headers).has("content-type")).toBe(false);
+  });
+
+  it("normalizes header overrides without combining duplicate casing", async () => {
+    const fetchMock = vi.fn(async () => buildResponse({ success: true }));
+    globalThis.fetch = fetchMock as any;
+    const api = createAPIClient<APIRouter>({
+      baseURL: "https://api.example.com",
+      headers: { "Content-Type": "application/json" },
+    });
+
+    await api.users.post({
+      body: { name: "Ada", email: "ada@example.com" },
+      headers: { "content-type": "application/problem+json" },
+    });
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(new Headers(init.headers).get("content-type")).toBe("application/problem+json");
+  });
+
+  it("adds JSON content type when serializing a request body", async () => {
+    const fetchMock = vi.fn(async () => buildResponse({ success: true }));
+    globalThis.fetch = fetchMock as any;
+    const api = createAPIClient<APIRouter>({ baseURL: "https://api.example.com" });
+
+    await api.users.post({ body: { name: "Ada", email: "ada@example.com" } });
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(new Headers(init.headers).get("content-type")).toBe("application/json");
+  });
+
   it("does not parse an empty HEAD response as JSON", async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
     globalThis.fetch = fetchMock as any;
@@ -271,6 +335,49 @@ describe("createAPIClient", () => {
       status: 502,
       data: "<h1>Bad Gateway</h1>",
     });
+  });
+
+  it("preserves the HTTP response when an error body cannot be decoded", async () => {
+    const response = new Response("{broken", {
+      status: 500,
+      statusText: "Internal Server Error",
+      headers: { "content-type": "application/json" },
+    });
+    globalThis.fetch = vi.fn(async () => response) as any;
+    const api = createAPIClient<APIRouter>({ baseURL: "https://api.example.com" });
+
+    const result = await api.status.get();
+
+    expect(result.error).toMatchObject({
+      code: "http_error",
+      status: 500,
+      response,
+      cause: expect.any(SyntaxError),
+    });
+    expect(result.error).not.toMatchObject({ code: "network_error", status: 0 });
+  });
+
+  it("keeps transport failures while reading error bodies classified as network errors", async () => {
+    const transportError = new TypeError("connection closed while reading the body");
+    const response = {
+      ok: false,
+      status: 502,
+      statusText: "Bad Gateway",
+      headers: new Headers({ "content-type": "application/json" }),
+      body: {},
+      arrayBuffer: vi.fn().mockRejectedValue(transportError),
+    } as unknown as Response;
+    globalThis.fetch = vi.fn(async () => response) as any;
+    const api = createAPIClient<APIRouter>({ baseURL: "https://api.example.com" });
+
+    const result = await api.status.get();
+
+    expect(result.error).toMatchObject({
+      code: "network_error",
+      status: 0,
+      cause: transportError,
+    });
+    expect(result.error).not.toMatchObject({ code: "http_error", status: 502 });
   });
 
   it("supports empty and binary successful responses", async () => {
@@ -365,6 +472,140 @@ describe("createAPIClient", () => {
 
     expect(cached.data).toEqual({ id: "1", name: "Alice" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("isolates cached responses between clients with different request contexts", async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const authorization = new Headers(init?.headers).get("authorization") ?? undefined;
+      return buildResponse({ user: authorization });
+    });
+    globalThis.fetch = fetchMock as any;
+
+    const first = createAPIClient<APIRouter>({
+      baseURL: "http://example.com",
+      headers: { Authorization: "Bearer user-a" },
+    });
+    const second = createAPIClient<APIRouter>({
+      baseURL: "http://example.com",
+      headers: { Authorization: "Bearer user-b" },
+    });
+    const cache = { policy: "cache-first" as const, staleTime: 10_000 };
+
+    const firstResult = await first.users.get({}, { cache });
+    const secondResult = await second.users.get({}, { cache });
+
+    expect(firstResult.data).toEqual({ user: "Bearer user-a" });
+    expect(secondResult.data).toEqual({ user: "Bearer user-b" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("isolates credentialed caches between client instances", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(buildResponse({ users: [{ id: "a" }], total: 1, limit: 5, offset: 0 }))
+      .mockResolvedValueOnce(
+        buildResponse({ users: [{ id: "b" }], total: 1, limit: 5, offset: 0 }),
+      );
+    globalThis.fetch = fetchMock as any;
+    const first = createAPIClient<APIRouter>({
+      baseURL: "http://example.com",
+      credentials: "include",
+    });
+    const second = createAPIClient<APIRouter>({
+      baseURL: "http://example.com",
+      credentials: "include",
+    });
+    const cache = { policy: "cache-first" as const, staleTime: 10_000 };
+
+    const firstResult = await first.users.get({}, { cache });
+    const secondResult = await second.users.get({}, { cache });
+    const cachedFirst = await first.users.get({}, { cache });
+    const cachedSecond = await second.users.get({}, { cache });
+
+    expect(firstResult.data?.users[0]?.id).toBe("a");
+    expect(secondResult.data?.users[0]?.id).toBe("b");
+    expect(cachedFirst.data?.users[0]?.id).toBe("a");
+    expect(cachedSecond.data?.users[0]?.id).toBe("b");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("drops a client cache when its request context changes", async () => {
+    const headers = { Authorization: "Bearer user-a" };
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const authorization = new Headers(init?.headers).get("authorization") ?? undefined;
+      return buildResponse({ user: authorization });
+    });
+    globalThis.fetch = fetchMock as any;
+    const api = createAPIClient<APIRouter>({ baseURL: "http://example.com", headers });
+    const cache = { policy: "cache-first" as const, staleTime: 10_000 };
+
+    const first = await api.users.get({}, { cache });
+    headers.Authorization = "Bearer user-b";
+    const second = await api.users.get({}, { cache });
+
+    expect(first.data).toEqual({ user: "Bearer user-a" });
+    expect(second.data).toEqual({ user: "Bearer user-b" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not dedupe a new request context against an older in-flight request", async () => {
+    const headers = { Authorization: "Bearer user-a" };
+    const firstResponse = createDeferred<ReturnType<typeof buildResponse>>();
+    const secondResponse = createDeferred<ReturnType<typeof buildResponse>>();
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() => firstResponse.promise)
+      .mockImplementationOnce(() => secondResponse.promise);
+    globalThis.fetch = fetchMock as any;
+    const api = createAPIClient<APIRouter>({ baseURL: "http://example.com", headers });
+    const cache = { policy: "cache-first" as const, staleTime: 10_000, dedupeMs: 10_000 };
+
+    const first = api.users.get({}, { cache });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    headers.Authorization = "Bearer user-b";
+    const second = api.users.get({}, { cache });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    secondResponse.resolve(buildResponse({ users: [{ id: "b" }], total: 1, limit: 5, offset: 0 }));
+    await expect(second).resolves.toMatchObject({ data: { users: [{ id: "b" }] } });
+    await expect(api.users.get({}, { cache })).resolves.toMatchObject({
+      data: { users: [{ id: "b" }] },
+    });
+
+    firstResponse.resolve(buildResponse({ users: [{ id: "a" }], total: 1, limit: 5, offset: 0 }));
+    await expect(first).resolves.toMatchObject({ data: { users: [{ id: "a" }] } });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports malformed cache-context headers through the result lifecycle", async () => {
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock as any;
+    const onRequest = vi.fn();
+    const onResponse = vi.fn();
+    const onError = vi.fn();
+    const onSettled = vi.fn();
+    const api = createAPIClient<APIRouter>({
+      baseURL: "http://example.com",
+      headers: { "invalid\nheader": "value" },
+    });
+
+    const result = await api.users.get(
+      {},
+      {
+        cache: { policy: "cache-first", staleTime: 10_000 },
+        onRequest,
+        onResponse,
+        onError,
+        onSettled,
+      },
+    );
+
+    expect(result.error).toMatchObject({ code: "network_error", status: 0 });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(onRequest).toHaveBeenCalledTimes(1);
+    expect(onResponse).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onSettled).toHaveBeenCalledTimes(1);
   });
 
   it("uses defined structured keys directly for optimistic updates and invalidation", async () => {

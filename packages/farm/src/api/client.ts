@@ -7,11 +7,11 @@ import {
   type IntegrationServerClientRoot,
 } from "../integration-client";
 import {
+  FarmClientDataCache,
   getFarmClientDataCache,
   normalizeFarmClientCacheKey,
   type FarmClientCacheEntry,
   type FarmClientCacheKey,
-  type FarmClientDataCache,
 } from "../client-cache";
 import {
   applyFarmCacheInvalidations,
@@ -440,9 +440,9 @@ export function createAPIClient<
           integrations: integrationsClient<TIntegrations>(integrationOptions),
         };
 
-  const cacheState = getFarmClientDataCache();
-  const inflightState = new Map<string, InflightEntry>();
-  const optimisticState = getOptimisticState(cacheState);
+  const sharedCacheState = getFarmClientDataCache();
+  const sharedInflightState = new Map<string, InflightEntry>();
+  let scopedRequestState: ScopedRequestState | undefined;
   const routeMeta = new WeakMap<AnyRouteRef, RouteMeta>();
   let requestCounter = 0;
 
@@ -463,6 +463,7 @@ export function createAPIClient<
   };
 
   const storeOptimisticEntry = (
+    cacheState: FarmClientDataCache,
     key: string,
     stack: OptimisticStack,
     entry: CacheEntry | undefined,
@@ -480,7 +481,11 @@ export function createAPIClient<
     stack.renderedEntry = cacheState.get(key);
   };
 
-  const reconcileOptimisticInvalidation = (key: string, stack: OptimisticStack) => {
+  const reconcileOptimisticInvalidation = (
+    cacheState: FarmClientDataCache,
+    key: string,
+    stack: OptimisticStack,
+  ) => {
     const current = cacheState.get(key);
     const rendered = stack.renderedEntry;
     if (current === rendered) return true;
@@ -504,13 +509,19 @@ export function createAPIClient<
     return true;
   };
 
-  const renderOptimisticStack = (key: string, stack: OptimisticStack) => {
+  const renderOptimisticStack = (
+    cacheState: FarmClientDataCache,
+    key: string,
+    stack: OptimisticStack,
+  ) => {
     let entry = stack.entry ? { ...stack.entry } : undefined;
     for (const layer of stack.layers) entry = applyOptimisticLayer(entry, layer);
-    storeOptimisticEntry(key, stack, entry);
+    storeOptimisticEntry(cacheState, key, stack, entry);
   };
 
   const settleOptimisticUpdates = (
+    cacheState: FarmClientDataCache,
+    optimisticState: Map<string, OptimisticStack>,
     snapshots: OptimisticSnapshot[],
     outcome: "commit" | "rollback" | "invalidate",
   ) => {
@@ -518,7 +529,7 @@ export function createAPIClient<
     for (const snapshot of snapshots) {
       const stack = optimisticState.get(snapshot.key);
       if (stack !== snapshot.stack) continue;
-      if (!reconcileOptimisticInvalidation(snapshot.key, stack)) {
+      if (!reconcileOptimisticInvalidation(cacheState, snapshot.key, stack)) {
         optimisticState.delete(snapshot.key);
         continue;
       }
@@ -534,7 +545,7 @@ export function createAPIClient<
         stack.entry = applyOptimisticLayer(stack.entry, stack.layers.shift()!);
       }
 
-      renderOptimisticStack(snapshot.key, stack);
+      renderOptimisticStack(cacheState, snapshot.key, stack);
       if (stack.layers.length === 0) optimisticState.delete(snapshot.key);
       settledKeys.push(snapshot.key);
     }
@@ -559,23 +570,24 @@ export function createAPIClient<
     }
 
     // Prepare fetch options
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      ...options.headers,
-      ...requestOptions.headers,
-    };
+    const headers = new Headers(options.headers);
+    new Headers(requestOptions.headers).forEach((value, key) => headers.set(key, value));
     const fetchOptions: RequestInit = {
       method,
       headers,
       credentials: options.credentials,
     };
+    if (method === "QUERY" && !headers.has("content-type")) {
+      headers.set("content-type", "application/json");
+    }
 
     // Handle body
     if (requestOptions.body !== undefined) {
       if (isFormData(requestOptions.body)) {
-        deleteHeader(headers, "content-type");
+        headers.delete("content-type");
         fetchOptions.body = requestOptions.body;
       } else {
+        if (!headers.has("content-type")) headers.set("content-type", "application/json");
         fetchOptions.body = JSON.stringify(requestOptions.body);
       }
     }
@@ -584,7 +596,14 @@ export function createAPIClient<
     applyFarmCacheInvalidations(
       decodeFarmCacheInvalidations(response.headers?.get?.(FARM_CACHE_INVALIDATION_HEADER)),
     );
-    const data = await readAPIResponseData(response, method);
+    let data: unknown;
+    try {
+      data = await readAPIResponseData(response, method);
+    } catch (decodeError) {
+      if (!(decodeError instanceof APIResponseDecodeError)) throw decodeError;
+      if (response.ok) throw decodeError.cause;
+      return { response, data: undefined, decodeError: decodeError.cause };
+    }
 
     return { response, data };
   };
@@ -621,7 +640,6 @@ export function createAPIClient<
       });
     };
 
-    const entry = getValidCacheEntry(cacheState, cacheKey, now);
     const policy = cacheOptions?.policy ?? (cacheOptions ? "cache-first" : "network-only");
     const staleTime = cacheOptions?.staleTime ?? 0;
     const hasReliableDefaultCacheKey =
@@ -630,6 +648,43 @@ export function createAPIClient<
       Boolean(cacheOptions) &&
       (methodUpper === "GET" || methodUpper === "QUERY") &&
       hasReliableDefaultCacheKey;
+    const needsCacheState =
+      isCacheEnabled ||
+      Boolean(clientOptions?.optimistic?.update?.length) ||
+      Boolean(clientOptions?.invalidate);
+    let requestCacheContext: string | undefined;
+    let requestContextError: Error | undefined;
+    if (needsCacheState) {
+      try {
+        requestCacheContext = getRequestCacheContext(options, input);
+      } catch (error) {
+        requestCacheContext = `invalid:${requestId}`;
+        requestContextError = normalizeError(error);
+      }
+    }
+
+    let cacheState = sharedCacheState;
+    let inflightState = sharedInflightState;
+    let requestScopedState: ScopedRequestState | undefined;
+    if (requestCacheContext !== undefined) {
+      if (scopedRequestState && scopedRequestState.context !== requestCacheContext) {
+        scopedRequestState.retired = true;
+        if (scopedRequestState.inflight.size === 0) scopedRequestState.cache.dispose();
+        scopedRequestState = undefined;
+      }
+      scopedRequestState ??= {
+        context: requestCacheContext,
+        cache: new FarmClientDataCache(),
+        inflight: new Map(),
+        retired: false,
+      };
+      requestScopedState = scopedRequestState;
+      cacheState = requestScopedState.cache;
+      inflightState = requestScopedState.inflight;
+    }
+    const optimisticState = getOptimisticState(cacheState);
+
+    const entry = getValidCacheEntry(cacheState, cacheKey, now);
     const isStale = entry ? isEntryStale(entry, now) : true;
 
     const applyOptimisticUpdates = () => {
@@ -653,7 +708,9 @@ export function createAPIClient<
         const targetEntry = getValidCacheEntry(cacheState, targetKey, now);
         const currentEntry = cacheState.get(targetKey);
         let stack = optimisticState.get(targetKey);
-        if (stack && !reconcileOptimisticInvalidation(targetKey, stack)) stack = undefined;
+        if (stack && !reconcileOptimisticInvalidation(cacheState, targetKey, stack)) {
+          stack = undefined;
+        }
         if (!stack) {
           stack = {
             entry: targetEntry ? { ...targetEntry } : undefined,
@@ -688,7 +745,7 @@ export function createAPIClient<
             ...snapshot.layer,
             updaters: [updater],
           });
-          storeOptimisticEntry(targetKey, stack, nextEntry);
+          storeOptimisticEntry(cacheState, targetKey, stack, nextEntry);
           continue;
         }
         snapshot.layer.updaters.push(updater);
@@ -696,7 +753,7 @@ export function createAPIClient<
           ...snapshot.layer,
           updaters: [updater],
         });
-        storeOptimisticEntry(targetKey, stack, nextEntry);
+        storeOptimisticEntry(cacheState, targetKey, stack, nextEntry);
       }
 
       return Array.from(snapshots.values());
@@ -704,12 +761,17 @@ export function createAPIClient<
 
     const rollbackOptimisticUpdates = (snapshots: OptimisticSnapshot[]) => {
       if (!clientOptions?.optimistic?.rollbackOnError) return;
-      settleOptimisticUpdates(snapshots, "rollback");
+      settleOptimisticUpdates(cacheState, optimisticState, snapshots, "rollback");
     };
 
     const invalidateUncommittedOptimisticUpdates = (snapshots: OptimisticSnapshot[]) => {
       if (clientOptions?.optimistic?.rollbackOnError) return;
-      for (const key of settleOptimisticUpdates(snapshots, "invalidate")) {
+      for (const key of settleOptimisticUpdates(
+        cacheState,
+        optimisticState,
+        snapshots,
+        "invalidate",
+      )) {
         emitStatus("invalidated", { key });
       }
     };
@@ -759,12 +821,13 @@ export function createAPIClient<
           });
 
           try {
-            const { response, data } = await fetchClient(path, {
+            if (requestContextError) throw requestContextError;
+            const { response, data, decodeError } = await fetchClient(path, {
               ...input,
               method: methodUpper,
             });
 
-            const error = response.ok ? null : createResponseError(response, data);
+            const error = response.ok ? null : createResponseError(response, data, decodeError);
 
             const responseEvent: ResponseEvent<any, Error> = {
               requestId,
@@ -862,6 +925,13 @@ export function createAPIClient<
         if (inflightState.get(cacheKey) === inflightEntry) {
           inflightState.delete(cacheKey);
         }
+        if (requestContextError && requestScopedState) {
+          requestScopedState.retired = true;
+          if (scopedRequestState === requestScopedState) scopedRequestState = undefined;
+        }
+        if (requestScopedState?.retired && requestScopedState.inflight.size === 0) {
+          requestScopedState.cache.dispose();
+        }
       }
     };
 
@@ -923,7 +993,7 @@ export function createAPIClient<
       rollbackOptimisticUpdates(optimisticSnapshots);
       invalidateUncommittedOptimisticUpdates(optimisticSnapshots);
     } else {
-      settleOptimisticUpdates(optimisticSnapshots, "commit");
+      settleOptimisticUpdates(cacheState, optimisticState, optimisticSnapshots, "commit");
       await invalidateTargets();
     }
     clientOptions?.onSettled?.(result.data, result.error);
@@ -954,7 +1024,7 @@ async function readAPIResponseData(response: Response, method: string): Promise<
   // Keep lightweight fetch-compatible adapters working when they expose the
   // traditional json() contract without a complete Web Response implementation.
   if (!response.headers?.get && typeof response.json === "function") {
-    return response.json();
+    return readResponseJSON(response);
   }
 
   if (response.body === null) return undefined;
@@ -969,7 +1039,7 @@ async function readAPIResponseData(response: Response, method: string): Promise<
     if (data.byteLength === 0) return undefined;
 
     if (!contentType || contentType === "application/json" || contentType.endsWith("+json")) {
-      return JSON.parse(new TextDecoder().decode(data));
+      return parseResponseJSON(new TextDecoder().decode(data));
     }
 
     if (
@@ -988,7 +1058,7 @@ async function readAPIResponseData(response: Response, method: string): Promise<
     (!contentType || contentType === "application/json" || contentType.endsWith("+json")) &&
     typeof response.json === "function"
   ) {
-    return response.json();
+    return readResponseJSON(response);
   }
 
   if (
@@ -1004,10 +1074,37 @@ async function readAPIResponseData(response: Response, method: string): Promise<
   // Some fetch-compatible adapters expose headers but still only implement
   // the traditional json() reader.
   if (typeof response.json === "function") {
-    return response.json();
+    return readResponseJSON(response);
   }
 
   return undefined;
+}
+
+class APIResponseDecodeError extends Error {
+  readonly cause: unknown;
+
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : "Failed to decode JSON response");
+    this.name = "APIResponseDecodeError";
+    this.cause = cause;
+  }
+}
+
+function parseResponseJSON(value: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    throw new APIResponseDecodeError(error);
+  }
+}
+
+async function readResponseJSON(response: Pick<Response, "json">): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch (error) {
+    if (error instanceof SyntaxError) throw new APIResponseDecodeError(error);
+    throw error;
+  }
 }
 
 /**
@@ -1203,6 +1300,13 @@ type InflightEntry = {
   startedAt: number;
 };
 
+type ScopedRequestState = {
+  context: string;
+  cache: FarmClientDataCache;
+  inflight: Map<string, InflightEntry>;
+  retired: boolean;
+};
+
 type RouteMeta = {
   path: string[];
   baseURL: string;
@@ -1296,6 +1400,27 @@ function getHeader(headers: unknown, name: string): string | undefined {
 
   const entry = Object.entries(headers).find(([key]) => key.toLowerCase() === name);
   return entry?.[1] === undefined ? undefined : String(entry[1]);
+}
+
+function getRequestCacheContext(
+  options: Pick<APIClientOptions, "headers" | "credentials">,
+  input: unknown,
+): string | undefined {
+  const credentials = options.credentials ?? "same-origin";
+  const headers = new Headers(options.headers);
+  const requestHeaders =
+    input && typeof input === "object" && "headers" in input ? input.headers : undefined;
+
+  if (requestHeaders) {
+    new Headers(requestHeaders as HeadersInit).forEach((value, key) => headers.set(key, value));
+  }
+
+  if (credentials === "same-origin" && [...headers].length === 0) return undefined;
+
+  return stableStringify({
+    credentials,
+    headers: [...headers].sort(([left], [right]) => left.localeCompare(right)),
+  });
 }
 
 function getGcAt(now: number, gcTime?: number): number | undefined {
@@ -1404,14 +1529,7 @@ function isFormData(value: unknown): value is FormData {
   );
 }
 
-function deleteHeader(headers: Record<string, string>, name: string): void {
-  const normalized = name.toLowerCase();
-  for (const key of Object.keys(headers)) {
-    if (key.toLowerCase() === normalized) delete headers[key];
-  }
-}
-
-function createResponseError(response: Response, data: any): Error {
+function createResponseError(response: Response, data: any, cause?: unknown): Error {
   const expected = readEndpointErrorEnvelope(data);
   if (expected) {
     return new APIClientError(expected.code, expected.data, {
@@ -1421,11 +1539,13 @@ function createResponseError(response: Response, data: any): Error {
     });
   }
 
-  return new APIClientError("http_error", data, {
+  const error = new APIClientError("http_error", data, {
     status: response.status,
     message: `HTTP ${response.status}: ${response.statusText}`,
     response,
   });
+  if (cause !== undefined) (error as Error & { cause?: unknown }).cause = cause;
+  return error;
 }
 
 function readEndpointErrorEnvelope(data: unknown): {

@@ -45,10 +45,13 @@ export function SearchControls() {
 
 `throttleMs` coalesces rapid writes to the same query key. Updates to different keys are
 composed against the latest URL, and returning a value to the current URL cancels its queued write.
+If a component changes the key or parser it passes to the hook, the returned value is immediately
+re-read from the current URL.
 
 ## Multiple query values
 
 Use `useQueryStates` when several controls should update together. This keeps the browser URL as the source of shareable state for filters, pagination, and tabs.
+Changing the parser map replaces the returned object with exactly the newly declared keys.
 
 **src/components/product-filters.tsx**
 

@@ -12,6 +12,8 @@ import type { FarmViewTransitionMode } from "./spa-router";
 import { isFarmLocaleChangeHref, localizeActiveFarmHref } from "../i18n/client-runtime";
 import type { FarmI18nLocale } from "../i18n/types";
 import { getFarmTrailingSlashPreference } from "../trailing-slash";
+import { applyFarmBasePath, getFarmBasePath } from "../base-path";
+import { useOptionalFarm } from "../provider";
 
 /**
  * Prefetch strategy (TanStack Router–style):
@@ -58,12 +60,105 @@ export type RouteParams<TRoute extends string> = string extends TRoute
   ? FarmRouterPathParams
   : ExtractRouteParams<StripRouteSuffix<TRoute>>;
 
+/** URI schemes recognized as typed external Link targets. Apps may augment this interface. */
+export interface LinkExternalUriSchemes {
+  about: true;
+  blob: true;
+  data: true;
+  file: true;
+  ftp: true;
+  ftps: true;
+  geo: true;
+  git: true;
+  http: true;
+  https: true;
+  im: true;
+  intent: true;
+  irc: true;
+  ircs: true;
+  magnet: true;
+  mailto: true;
+  market: true;
+  sms: true;
+  ssh: true;
+  tel: true;
+  urn: true;
+  vscode: true;
+  webcal: true;
+  ws: true;
+  wss: true;
+}
+
+type ExternalUriScheme = Extract<keyof LinkExternalUriSchemes, string>;
+
+type UriSchemeLetter =
+  | "a"
+  | "b"
+  | "c"
+  | "d"
+  | "e"
+  | "f"
+  | "g"
+  | "h"
+  | "i"
+  | "j"
+  | "k"
+  | "l"
+  | "m"
+  | "n"
+  | "o"
+  | "p"
+  | "q"
+  | "r"
+  | "s"
+  | "t"
+  | "u"
+  | "v"
+  | "w"
+  | "x"
+  | "y"
+  | "z";
+type UriSchemeStart = UriSchemeLetter | Uppercase<UriSchemeLetter>;
+type UriSchemeCharacter =
+  | UriSchemeStart
+  | "0"
+  | "1"
+  | "2"
+  | "3"
+  | "4"
+  | "5"
+  | "6"
+  | "7"
+  | "8"
+  | "9"
+  | "+"
+  | "-"
+  | ".";
+type IsUriSchemeTail<TValue extends string> = TValue extends ""
+  ? true
+  : TValue extends `${infer First}${infer Rest}`
+    ? First extends UriSchemeCharacter
+      ? IsUriSchemeTail<Rest>
+      : false
+    : false;
+type IsUriScheme<TValue extends string> = TValue extends `${infer First}${infer Rest}`
+  ? First extends UriSchemeStart
+    ? IsUriSchemeTail<Rest>
+    : false
+  : false;
+
+type KnownExternalHref = `//${string}` | `${ExternalUriScheme}:${string}`;
+
 /** External URLs; these are never type-checked as routes. */
-export type ExternalHref =
-  | `http://${string}`
-  | `https://${string}`
-  | `//${string}`
-  | `mailto:${string}`;
+export type ExternalHref<THref extends string = string> = string extends THref
+  ? KnownExternalHref
+  : THref extends `//${string}`
+    ? THref
+    : THref extends `${infer Scheme}:${string}`
+      ? IsUriScheme<Scheme> extends true
+        ? THref
+        : never
+      : never;
 
 type StripRouteSuffix<TRoute extends string> = TRoute extends `${infer Path}?${string}`
   ? StripRouteSuffix<Path>
@@ -127,21 +222,21 @@ type LinkRouteTargetProps<TRoute extends string> = [RoutesWithRequiredParams<TRo
       } & LinkRouteParamsProps<TRoute>
     : never;
 
-type LinkExternalTargetProps = {
+type LinkExternalTargetProps<THref extends string = string> = {
   /** External URL; these are never type-checked as app routes. */
-  href: ExternalHref;
+  href: ExternalHref<THref>;
   params?: never;
 };
 
-type LinkTargetProps<TRoute extends string> =
-  | LinkExternalTargetProps
+type LinkTargetProps<TRoute extends string, THref extends string> =
+  | LinkExternalTargetProps<THref>
   | LinkRouteTargetProps<TRoute>;
 
-export type LinkProps<TRoute extends string = DefaultRouteHref> = Omit<
-  AnchorHTMLAttributes<HTMLAnchorElement>,
-  "href"
-> &
-  LinkTargetProps<TRoute> & {
+export type LinkProps<
+  TRoute extends string = DefaultRouteHref,
+  THref extends string = string,
+> = Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "href"> &
+  LinkTargetProps<TRoute, THref> & {
     /**
      * When to prefetch. TanStack-style: "intent" (hover+touch), "viewport", "render", or "none".
      * Legacy: true (intent+viewport), "hover" (intent), "viewport", false/"none".
@@ -170,13 +265,7 @@ function isModifierEvent(e: React.MouseEvent): boolean {
 }
 
 function isExternalUrl(href: string): boolean {
-  const normalizedHref = href.toLowerCase();
-  return (
-    normalizedHref.startsWith("http://") ||
-    normalizedHref.startsWith("https://") ||
-    href.startsWith("//") ||
-    normalizedHref.startsWith("mailto:")
-  );
+  return href.startsWith("//") || /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(href);
 }
 
 function getRouter(): {
@@ -220,7 +309,7 @@ function normalizePrefetch(prefetch: LinkProps["prefetch"]): {
   return { intent: false, viewport: false, render: false };
 }
 
-function LinkInner<TRoute extends string = DefaultRouteHref>(
+function LinkInner<TRoute extends string = DefaultRouteHref, THref extends string = string>(
   {
     href,
     params,
@@ -241,12 +330,13 @@ function LinkInner<TRoute extends string = DefaultRouteHref>(
     onBlur,
     onTouchStart,
     ...props
-  }: LinkProps<TRoute>,
+  }: LinkProps<TRoute, THref>,
   ref: React.ForwardedRef<HTMLAnchorElement>,
 ) {
   const elementRef = useRef<HTMLAnchorElement | null>(null);
   const intentTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasPrefetched = useRef(false);
+  const farm = useOptionalFarm();
 
   const { intent, viewport, render } = normalizePrefetch(prefetch);
   const baseHref = resolveLinkHref(href, params, {
@@ -254,7 +344,10 @@ function LinkInner<TRoute extends string = DefaultRouteHref>(
     hash,
     trailingSlash: trailingSlash ?? getFarmTrailingSlashPreference(),
   });
-  const resolvedHref = localizeActiveFarmHref(baseHref, locale);
+  const localizedHref = localizeActiveFarmHref(baseHref, locale);
+  const resolvedHref = isExternalUrl(localizedHref)
+    ? localizedHref
+    : applyFarmBasePath(localizedHref, farm?.basePath ?? getFarmBasePath());
   const isExternal = isExternalUrl(resolvedHref);
 
   const doPrefetch = useCallback(() => {
@@ -388,7 +481,7 @@ function LinkInner<TRoute extends string = DefaultRouteHref>(
 
       if (typeof window !== "undefined") {
         event.preventDefault();
-        if (isFarmLocaleChangeHref(resolvedHref)) {
+        if (isFarmLocaleChangeHref(localizedHref)) {
           window.location.assign(resolvedHref);
           return;
         }
@@ -401,7 +494,7 @@ function LinkInner<TRoute extends string = DefaultRouteHref>(
         }
       }
     },
-    [resolvedHref, replace, scroll, viewTransition, target, isExternal, onClick],
+    [localizedHref, resolvedHref, replace, scroll, viewTransition, target, isExternal, onClick],
   );
 
   const setRefs = useCallback(
@@ -438,8 +531,8 @@ function LinkInner<TRoute extends string = DefaultRouteHref>(
 const LinkWithRef = forwardRef(LinkInner);
 LinkWithRef.displayName = "Link";
 
-type LinkComponentType = <TRoute extends string = DefaultRouteHref>(
-  props: LinkProps<TRoute> & { ref?: React.ForwardedRef<HTMLAnchorElement> },
+type LinkComponentType = <TRoute extends string = DefaultRouteHref, THref extends string = string>(
+  props: LinkProps<TRoute, THref> & { ref?: React.ForwardedRef<HTMLAnchorElement> },
 ) => React.ReactElement;
 
 export const Link = LinkWithRef as unknown as LinkComponentType;
