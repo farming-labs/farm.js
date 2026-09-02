@@ -228,6 +228,75 @@ describe("createAPIClient", () => {
     expect(result).toMatchObject({ data: undefined, error: null });
   });
 
+  it("preserves non-JSON HTTP errors instead of reporting a network failure", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response("<h1>Bad Gateway</h1>", {
+          status: 502,
+          statusText: "Bad Gateway",
+          headers: { "content-type": "text/html; charset=utf-8" },
+        }),
+    );
+    globalThis.fetch = fetchMock as any;
+    const api = createAPIClient<APIRouter>({ baseURL: "https://api.example.com" });
+
+    const result = await api.status.get();
+
+    expect(result.data).toBeUndefined();
+    expect(result.error).toMatchObject({
+      code: "http_error",
+      status: 502,
+      data: "<h1>Bad Gateway</h1>",
+    });
+  });
+
+  it("supports empty and binary successful responses", async () => {
+    const responses = [
+      new Response("", { status: 200 }),
+      new Response(Uint8Array.from([1, 2, 3]), {
+        headers: { "content-type": "application/octet-stream" },
+      }),
+    ];
+    globalThis.fetch = vi.fn(async () => responses.shift()!) as any;
+    const api = createAPIClient<APIRouter>({ baseURL: "https://api.example.com" });
+
+    const empty = await api.status.get();
+    const binary = await api.status.get();
+
+    expect(empty).toMatchObject({ data: undefined, error: null });
+    expect(Array.from(new Uint8Array(binary.data as ArrayBuffer))).toEqual([1, 2, 3]);
+    expect(binary.error).toBeNull();
+  });
+
+  it("keeps the legacy JSON fallback when content type is missing", async () => {
+    globalThis.fetch = vi.fn(
+      async () => new Response(new TextEncoder().encode('{"source":"legacy"}')),
+    ) as any;
+    const api = createAPIClient<APIRouter>({ baseURL: "https://api.example.com" });
+
+    await expect(api.status.get()).resolves.toMatchObject({
+      data: { source: "legacy" },
+      error: null,
+    });
+  });
+
+  it("falls back to json for adapters with headers but no binary reader", async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      headers: { get: () => "application/octet-stream" },
+      body: {},
+      json: async () => ({ source: "adapter" }),
+    })) as any;
+    const api = createAPIClient<APIRouter>({ baseURL: "https://api.example.com" });
+
+    await expect(api.status.get()).resolves.toMatchObject({
+      data: { source: "adapter" },
+      error: null,
+    });
+  });
+
   it("applies invalidations declared by the server response", async () => {
     const key = '["products","list"]';
     const cache = getFarmClientDataCache();

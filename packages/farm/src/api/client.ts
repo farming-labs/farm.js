@@ -488,10 +488,7 @@ export function createAPIClient<
     applyFarmCacheInvalidations(
       decodeFarmCacheInvalidations(response.headers?.get?.(FARM_CACHE_INVALIDATION_HEADER)),
     );
-    let data: any = undefined;
-    if (method !== "HEAD" && response.status !== 204 && response.status !== 205) {
-      data = isJSONStreamResponse(response) ? readJSONStream(response) : await response.json();
-    }
+    const data = await readAPIResponseData(response, method);
 
     return { response, data };
   };
@@ -812,6 +809,75 @@ export function createAPIClient<
     isSameOriginAPIBaseURL(baseURL),
     rootAliases,
   ) as APIClient<TRouter, TIntegrations>;
+}
+
+async function readAPIResponseData(response: Response, method: string): Promise<unknown> {
+  if (
+    method === "HEAD" ||
+    response.status === 204 ||
+    response.status === 205 ||
+    response.status === 304
+  ) {
+    return undefined;
+  }
+
+  // Keep lightweight fetch-compatible adapters working when they expose the
+  // traditional json() contract without a complete Web Response implementation.
+  if (!response.headers?.get && typeof response.json === "function") {
+    return response.json();
+  }
+
+  if (response.body === null) return undefined;
+
+  if (isJSONStreamResponse(response)) {
+    return readJSONStream(response);
+  }
+
+  const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+  if (typeof response.arrayBuffer === "function") {
+    const data = await response.arrayBuffer();
+    if (data.byteLength === 0) return undefined;
+
+    if (!contentType || contentType === "application/json" || contentType.endsWith("+json")) {
+      return JSON.parse(new TextDecoder().decode(data));
+    }
+
+    if (
+      contentType.startsWith("text/") ||
+      contentType === "application/xml" ||
+      contentType === "application/xhtml+xml" ||
+      contentType === "application/graphql"
+    ) {
+      return new TextDecoder().decode(data);
+    }
+
+    return data;
+  }
+
+  if (
+    (!contentType || contentType === "application/json" || contentType.endsWith("+json")) &&
+    typeof response.json === "function"
+  ) {
+    return response.json();
+  }
+
+  if (
+    (contentType?.startsWith("text/") ||
+      contentType === "application/xml" ||
+      contentType === "application/xhtml+xml" ||
+      contentType === "application/graphql") &&
+    typeof response.text === "function"
+  ) {
+    return response.text();
+  }
+
+  // Some fetch-compatible adapters expose headers but still only implement
+  // the traditional json() reader.
+  if (typeof response.json === "function") {
+    return response.json();
+  }
+
+  return undefined;
 }
 
 /**
