@@ -470,6 +470,9 @@ export function createAPIClient<
       headers,
       credentials: options.credentials,
     };
+    if (method === "QUERY" && !headers.has("content-type")) {
+      headers.set("content-type", "application/json");
+    }
 
     // Handle body
     if (requestOptions.body !== undefined) {

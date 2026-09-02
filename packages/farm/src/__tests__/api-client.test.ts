@@ -248,6 +248,31 @@ describe("createAPIClient", () => {
     expect(new Headers(init.headers).has("content-type")).toBe(false);
   });
 
+  it("keeps the JSON content type on bodyless QUERY requests", async () => {
+    const fetchMock = vi.fn(async () => buildResponse({ results: [] }));
+    globalThis.fetch = fetchMock as any;
+    const api = createAPIClient<APIRouter>({ baseURL: "https://api.example.com" });
+
+    await (api.search.query as any)();
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(new Headers(init.headers).get("content-type")).toBe("application/json");
+  });
+
+  it("lets fetch set the multipart boundary for FormData QUERY bodies", async () => {
+    const fetchMock = vi.fn(async () => buildResponse({ results: [] }));
+    globalThis.fetch = fetchMock as any;
+    const api = createAPIClient<APIRouter>({ baseURL: "https://api.example.com" });
+    const body = new FormData();
+    body.set("filter", "tools");
+
+    await (api.search.query as any)({ body });
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(init.body).toBe(body);
+    expect(new Headers(init.headers).has("content-type")).toBe(false);
+  });
+
   it("normalizes header overrides without combining duplicate casing", async () => {
     const fetchMock = vi.fn(async () => buildResponse({ success: true }));
     globalThis.fetch = fetchMock as any;
