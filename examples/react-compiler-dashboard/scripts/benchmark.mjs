@@ -1927,9 +1927,10 @@ const keyedPrependRegressions = keyedPrependResults.filter(
     !Number.isFinite(snapshotSpeedup) ||
     snapshotSpeedup < keyedPrependMinimumSnapshotSpeedup,
 );
-// A compiler-proven native slice identifies one exact retained interval. Reuse those row instances
-// without rescanning their keys, descriptors, or bindings. Compare it with React and a block-bodied
-// compiled control, and preserve the same advantage after trimming a 21,000-row list.
+// A compiler-proven native slice with an event-local runtime bound identifies one exact retained
+// interval after runtime validation. Reuse those row instances without rescanning their keys,
+// descriptors, or bindings. Compare it with React and a block-bodied compiled control, and
+// preserve the same advantage after trimming a 21,000-row list.
 const keyedSliceMinimumSpeedup = 3;
 const keyedSliceMinimumSnapshotSpeedup = 1.25;
 const keyedSliceResults = ["static", "hybrid"].map((mode) => {

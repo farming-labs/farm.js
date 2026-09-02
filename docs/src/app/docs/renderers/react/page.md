@@ -370,8 +370,8 @@ module.
 and can hand the appended suffix to the runtime. `keyedArrayFilterHints` counts concise keyed-array
 filter sites that can report removed positions. `keyedArrayPrependHints` counts setter sites where
 the compiler proved a direct keyed array prepend and can hand the new prefix to the runtime.
-`keyedArraySliceHints` counts direct keyed-array slices whose build-time bounds identify one exact
-retained interval.
+`keyedArraySliceHints` counts direct keyed-array slices whose compiler-safe bounds identify one
+exact retained interval after runtime validation.
 `keyedArrayPositionHints` counts compiler-proven native keyed-array insertions, single or
 contiguous-range removals, single-row replacements, and exact-window replacements with a guarded
 position.
@@ -968,12 +968,20 @@ setItems((current) => current.slice(1_000));
 setItems((current) => current.slice(0, -1_000));
 setItems((current) => current.slice(2, 8));
 setItems((current) => current.slice(-5));
+
+const trimCount = pageSize * pagesToDiscard;
+setItems((current) => current.slice(trimCount));
+setItems((current) => current.slice(visible.start, visible.end));
 ```
 
 At build time, Farm recognizes a concise functional setter that directly calls native `slice()`
-with one or two safe-integer bounds known by the compiler. The application still executes its
-ordinary `slice()`. Generated metadata records the normalized retained interval and links multiple
-slice or filter updates queued before one compiler flush.
+with one or two safe-integer literals or compiler-safe runtime expressions. Identifiers, property
+reads, side-effect-free arithmetic and conditionals, and safe `Math` calls are supported.
+User-defined calls, assignments, update expressions, and other effectful forms are not transformed.
+Farm preserves the original method lookup and argument evaluation order, evaluates each bound once,
+and preserves the native call, coercion, return value, and thrown errors. Generated metadata records
+the normalized retained interval only when every evaluated bound is already a safe integer, and
+links multiple slice or filter updates queued before one compiler flush.
 
 At update time, Farm validates the native arrays, committed source, queued lengths, interval, and
 surviving item identities before changing the DOM. It removes only rows outside the interval,
@@ -982,12 +990,14 @@ slice-only chain does not reread surviving keys, descriptors, or bindings, and t
 does not rerun.
 
 The proof requires compiler-owned host rows whose render callback and key do not observe the row
-index. Runtime or fractional bounds, `slice()` without a bound, a no-op `slice(0)`, block-bodied or
-chained updaters, custom slice methods, sparse or subclassed arrays, collection-derived keys,
+index. Effectful bound expressions, evaluated bounds that are fractional, non-numeric, or otherwise
+not safe integers, `slice()` without a bound, a literal no-op `slice(0)`, block-bodied or chained
+updaters, custom slice methods, sparse or subclassed arrays, collection-derived keys,
 collection-reading bindings, React-owned row structures, nested host blocks, row conditionals,
 unrelated dirty dependencies, and failed runtime validation keep complete keyed reconciliation.
-These checks make the metadata an optional optimization rather than a new behavior contract. No
-configuration or component primitive is added. Reports expose emitted sites as
+A runtime bound that evaluates to a no-op still preserves the native result and uses complete
+reconciliation. These checks make the metadata an optional optimization rather than a new behavior
+contract. No configuration or component primitive is added. Reports expose emitted sites as
 `keyedArraySliceHints`; slice reuses the existing removal-hint runtime so it does not add another
 structural runtime combination.
 
@@ -1977,10 +1987,12 @@ The package and example test suites verify more than generated code:
   descriptor, and binding reads to equal only the inserted prefix, preserve every existing DOM
   row, update delegated event indexes, and cover queued updates, StrictMode hydration, unmount,
   invalid metadata, custom arrays, and conservative fallback;
-- 2,000 deterministic queued keyed-array slices match normal React; targeted tests require zero
-  surviving key, descriptor, and binding reads, preserve focused controlled-input identity and
-  selection, update delegated event indexes, and cover native bounds, queued slice/filter chains,
-  Strict Mode hydration, unmount cleanup, custom methods, proxies, and conservative fallback;
+- 2,000 deterministic queued keyed-array slices and 1,000 randomized runtime-bound slices match
+  normal React; compiler tests cover literal and compiler-safe runtime bounds while rejecting calls
+  and mutations; targeted tests require zero surviving key, descriptor, and binding reads, preserve
+  focused controlled-input identity and selection, update delegated event indexes, and cover native
+  evaluation and coercion, unsafe evaluated bounds, queued slice/filter chains, Strict Mode
+  hydration, unmount cleanup, custom methods, proxies, and conservative fallback;
 - 250 committed keyed rolling-window updates match normal React; targeted tests require work to
   equal only the incoming suffix, preserve retained DOM identity, and cover reused-key,
   custom-slice, and collection-dependent fallbacks;

@@ -1960,6 +1960,7 @@ function rewriteKeyedArraySliceHints(
   hintedStateIndices: ReadonlySet<number>,
   statesBySetter: ReadonlyMap<string, StateBinding>,
   helperIdentifier: t.Identifier,
+  safeGlobals: ReadonlySet<string>,
 ): { root: t.JSXElement; count: number; stateIndices: ReadonlySet<number> } {
   if (hintedStateIndices.size === 0) {
     return { root: t.cloneNode(root, true), count: 0, stateIndices: new Set() };
@@ -1992,14 +1993,13 @@ function rewriteKeyedArraySliceHints(
       ) {
         return;
       }
-      const indexes: number[] = [];
+      const bounds: t.Expression[] = [];
       for (const argument of updater.body.arguments) {
         if (!t.isExpression(argument)) return;
-        const value = staticSliceIndex(argument);
-        if (value === undefined) return;
-        indexes.push(value);
+        if (validateKeyedArrayPositionExpression(argument, safeGlobals) !== undefined) return;
+        bounds.push(argument);
       }
-      if (indexes.length === 1 && indexes[0] === 0) return;
+      if (bounds.length === 1 && staticSliceIndex(bounds[0]) === 0) return;
 
       const previous = t.cloneNode(updater.params[0]);
       const sliceMethod = path.scope.generateUidIdentifier("farmSlice");
@@ -2016,7 +2016,7 @@ function rewriteKeyedArraySliceHints(
             t.callExpression(t.cloneNode(helperIdentifier), [
               t.cloneNode(previous),
               t.cloneNode(sliceMethod),
-              ...indexes.map((value) => t.numericLiteral(value)),
+              ...bounds.map((bound) => t.cloneNode(bound, true)),
             ]),
           ),
         ]),
@@ -7413,6 +7413,7 @@ function compileCandidate(
     shiftedIndexIndependentStateIndices,
     statesBySetter,
     keyedArraySliceIdentifier,
+    safeGlobals,
   );
   let appliedKeyedArraySliceHints = 0;
   let appliedSliceHintedStateIndices: ReadonlySet<number> = new Set();

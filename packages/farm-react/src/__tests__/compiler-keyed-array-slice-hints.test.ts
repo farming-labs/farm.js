@@ -65,6 +65,28 @@ describe("React AOT keyed-array slice hints", () => {
     expect(result.code).not.toContain("keyedRowsFilterPrependHintedRuntimeFeature");
   });
 
+  it("records compiler-safe runtime slice bounds", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Feed({ offset, bounds, trimTail }) {
+        const [rows, setRows] = useState([{ id: "a", label: "Alpha" }]);
+        return <main>
+          <button onClick={() => setRows((current) => current.slice(offset))}>Drop prefix</button>
+          <button onClick={() => setRows((current) => current.slice(bounds.start, bounds.end))}>Keep window</button>
+          <button onClick={() => setRows((current) => current.slice(Math.trunc(offset / 2)))}>Drop calculated prefix</button>
+          <button onClick={() => setRows((current) => current.slice(0, trimTail ? -trimTail : current.length))}>Drop suffix</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </main>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Feed"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.optimizations.keyedArraySliceHints).toBe(4);
+    expect(result.code.match(/createCompilerKeyedArraySlice\(/g)).toHaveLength(4);
+    expect(result.code).toContain("keyedRowsFilterHintedRuntimeFeature");
+  });
+
   it.each([
     {
       name: "an index-sensitive row",
@@ -82,14 +104,24 @@ describe("React AOT keyed-array slice hints", () => {
       update: "{ return current.slice(1); }",
     },
     {
-      name: "a dynamic start",
-      row: "(row) => <li key={row.id}>{row.label}</li>",
-      update: "current.slice(offset)",
-    },
-    {
       name: "a fractional start",
       row: "(row) => <li key={row.id}>{row.label}</li>",
       update: "current.slice(1.5)",
+    },
+    {
+      name: "a bound call",
+      row: "(row) => <li key={row.id}>{row.label}</li>",
+      update: "current.slice(getOffset())",
+    },
+    {
+      name: "a bound assignment",
+      row: "(row) => <li key={row.id}>{row.label}</li>",
+      update: "current.slice(offset = 1)",
+    },
+    {
+      name: "a bound update expression",
+      row: "(row) => <li key={row.id}>{row.label}</li>",
+      update: "current.slice(offset++)",
     },
     {
       name: "an unbounded copy",
@@ -109,7 +141,7 @@ describe("React AOT keyed-array slice hints", () => {
   ])("keeps $name off the slice fast path", async ({ row, update }) => {
     const result = await compile(`
       import { useState } from "react";
-      export function Feed({ offset = 1 }: { offset?: number }) {
+      export function Feed({ offset = 1, getOffset }: { offset?: number; getOffset?: () => number }) {
         const [rows, setRows] = useState([{ id: "a", label: "Alpha" }]);
         return <main>
           <button onClick={() => setRows((current) => ${update})}>Trim</button>
