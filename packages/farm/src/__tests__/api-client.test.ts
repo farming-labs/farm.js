@@ -771,6 +771,72 @@ describe("createAPIClient", () => {
     expect(responses).toHaveLength(1);
   });
 
+  it("reports response observer failures without changing the request result", async () => {
+    const fetchMock = vi.fn(async () => buildResponse({ success: true }));
+    const observerError = new Error("analytics callback failed");
+    const onResponse = vi.fn(() => {
+      throw observerError;
+    });
+    const reportError = vi.fn();
+    globalThis.fetch = fetchMock as any;
+    vi.stubGlobal("reportError", reportError);
+    const api = createAPIClient<APIRouter>({ baseURL: "http://example.com" });
+
+    const result = await api.users.post(
+      { body: { name: "Ada", email: "ada@example.com" } },
+      { onResponse },
+    );
+
+    expect(result).toMatchObject({ data: { success: true }, error: null });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(onResponse).toHaveBeenCalledTimes(1);
+    expect(reportError).toHaveBeenCalledWith(observerError);
+  });
+
+  it("reports rejected response observers without changing the request result", async () => {
+    const fetchMock = vi.fn(async () => buildResponse({ success: true }));
+    const observerError = new Error("async analytics callback failed");
+    const onResponse = vi.fn(async () => {
+      throw observerError;
+    });
+    const reportError = vi.fn();
+    globalThis.fetch = fetchMock as any;
+    vi.stubGlobal("reportError", reportError);
+    const api = createAPIClient<APIRouter>({ baseURL: "http://example.com" });
+
+    const result = await api.users.post(
+      { body: { name: "Ada", email: "ada@example.com" } },
+      { onResponse },
+    );
+
+    expect(result).toMatchObject({ data: { success: true }, error: null });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(onResponse).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(reportError).toHaveBeenCalledWith(observerError));
+  });
+
+  it("isolates requests when the response observer console fallback throws", async () => {
+    const fetchMock = vi.fn(async () => buildResponse({ success: true }));
+    const onResponse = vi.fn(() => {
+      throw new Error("analytics callback failed");
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {
+      throw new Error("console unavailable");
+    });
+    vi.stubGlobal("reportError", undefined);
+    globalThis.fetch = fetchMock as any;
+    const api = createAPIClient<APIRouter>({ baseURL: "http://example.com" });
+
+    const result = await api.users.post(
+      { body: { name: "Ada", email: "ada@example.com" } },
+      { onResponse },
+    );
+
+    expect(result).toMatchObject({ data: { success: true }, error: null });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(onResponse).toHaveBeenCalledTimes(1);
+  });
+
   it("invalidates cache entries after mutation", async () => {
     let getCount = 0;
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
