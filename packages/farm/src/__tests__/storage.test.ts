@@ -425,14 +425,18 @@ describe("Storage", () => {
     expect(typeof vercelKV.hasItem).toBe("function");
   });
 
-  const itWithPostgres = process.env.FARM_TEST_POSTGRES_URL ? it : it.skip;
+  const postgresTestUrl = process.env.FARM_TEST_POSTGRES_URL;
+  if (process.env.FARM_REQUIRE_TEST_POSTGRES === "1" && !postgresTestUrl) {
+    throw new Error("FARM_TEST_POSTGRES_URL is required for the Postgres storage test job.");
+  }
+  const itWithPostgres = postgresTestUrl ? it : it.skip;
 
   itWithPostgres(
     "supports postgres storage against a real database",
     async () => {
       const tableName = `farm_pg_${Date.now()}_${Math.floor(Math.random() * 1_000_000)}`;
       const pg = postgresStorage({
-        url: process.env.FARM_TEST_POSTGRES_URL!,
+        url: postgresTestUrl!,
         tableName,
       });
 
