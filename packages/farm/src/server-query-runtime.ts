@@ -18,27 +18,34 @@ export type FarmServerQueryActionInvocation = {
   actionId: string;
   args: readonly unknown[];
   provisionalKey?: string;
+  owner?: object;
 };
 
 type ActiveServerQueryInvocation = {
   provisionalKey: string;
+  owner: object;
 };
 
 type ServerQueryClientState = {
   functionIds: WeakMap<Function, number>;
   nextFunctionId: number;
   active: ActiveServerQueryInvocation[];
+  latestOwners: Map<string, object>;
 };
 
 const FARM_SERVER_QUERY_CLIENT_STATE = Symbol.for("farm.serverQueryClientState");
 const serverQueryClientGlobal = globalThis as typeof globalThis & {
   [FARM_SERVER_QUERY_CLIENT_STATE]?: ServerQueryClientState;
 };
-const serverQueryClientState = (serverQueryClientGlobal[FARM_SERVER_QUERY_CLIENT_STATE] ??= {
+const serverQueryClientState: ServerQueryClientState = (serverQueryClientGlobal[
+  FARM_SERVER_QUERY_CLIENT_STATE
+] ??= {
   functionIds: new WeakMap(),
   nextFunctionId: 0,
   active: [],
+  latestOwners: new Map(),
 });
+serverQueryClientState.latestOwners ??= new Map();
 
 // Global symbol registry key set on raw server query implementations by
 // createServerQuery. Referenced via Symbol.for instead of importing
@@ -73,6 +80,7 @@ export function beginFarmServerQueryAction(
     actionId,
     args,
     provisionalKey: active?.provisionalKey,
+    owner: active?.owner,
   };
 }
 
@@ -84,6 +92,13 @@ export function completeFarmServerQueryAction<TData>(
 
   const cache = getFarmClientDataCache();
   const metadata = value.__farmServerQuery;
+  if (
+    invocation.provisionalKey &&
+    invocation.owner &&
+    serverQueryClientState.latestOwners.get(invocation.provisionalKey) !== invocation.owner
+  ) {
+    return value.data as TData;
+  }
   if (invocation.provisionalKey) {
     cache.alias(invocation.provisionalKey, metadata.key);
   }
@@ -126,7 +141,7 @@ export async function fetchServerQuery<TInput, TData>(
   const stale = cache.isStale(provisionalKey);
   const inflight = cache.getInflight<TData>(provisionalKey);
 
-  if (inflight) return inflight;
+  if (inflight && !options.force) return inflight;
   if (!options.force && entry && !stale && entry.status !== "error") return entry.data;
 
   if (
@@ -161,7 +176,10 @@ async function executeServerQuery<TInput, TData>(
   assertNotRawServerQueryInBrowser(query);
   const cache = getFarmClientDataCache();
   const inflight = cache.getInflight<TData>(provisionalKey);
-  if (inflight) return inflight;
+  if (inflight && !options.force) return inflight;
+
+  const owner = {};
+  serverQueryClientState.latestOwners.set(provisionalKey, owner);
 
   const previous = cache.get<TData>(provisionalKey);
   cache.set(provisionalKey, {
@@ -175,9 +193,10 @@ async function executeServerQuery<TInput, TData>(
     fetching: true,
   });
 
-  const promise = (async () => {
+  let promise!: Promise<TData>;
+  promise = (async () => {
     try {
-      serverQueryClientState.active.push({ provisionalKey });
+      serverQueryClientState.active.push({ provisionalKey, owner });
       let pending: Promise<TData>;
       try {
         pending = query(input);
@@ -187,7 +206,10 @@ async function executeServerQuery<TInput, TData>(
 
       const data = await pending;
       const transported = cache.get<TData>(provisionalKey);
-      if (!transported || transported.fetching) {
+      if (
+        serverQueryClientState.latestOwners.get(provisionalKey) === owner &&
+        (!transported || transported.fetching)
+      ) {
         const updatedAt = Date.now();
         cache.set(provisionalKey, {
           data,
@@ -204,20 +226,27 @@ async function executeServerQuery<TInput, TData>(
       return data;
     } catch (cause) {
       const error = normalizeServerQueryError(cause);
-      const current = cache.get<TData>(provisionalKey);
-      cache.set(provisionalKey, {
-        data: current?.data as TData,
-        updatedAt: current?.updatedAt ?? 0,
-        staleAt: current?.staleAt ?? 0,
-        gcAt: current?.gcAt,
-        invalidatedAt: current?.invalidatedAt,
-        status: "error",
-        error,
-        fetching: false,
-      });
+      if (serverQueryClientState.latestOwners.get(provisionalKey) === owner) {
+        const current = cache.get<TData>(provisionalKey);
+        cache.set(provisionalKey, {
+          data: current?.data as TData,
+          updatedAt: current?.updatedAt ?? 0,
+          staleAt: current?.staleAt ?? 0,
+          gcAt: current?.gcAt,
+          invalidatedAt: current?.invalidatedAt,
+          status: "error",
+          error,
+          fetching: false,
+        });
+      }
       throw error;
     } finally {
-      cache.deleteInflight(provisionalKey);
+      if (cache.getInflight(provisionalKey) === promise) {
+        cache.deleteInflight(provisionalKey);
+      }
+      if (serverQueryClientState.latestOwners.get(provisionalKey) === owner) {
+        serverQueryClientState.latestOwners.delete(provisionalKey);
+      }
     }
   })();
 
