@@ -13,6 +13,7 @@ test("discovers every public package without consulting the registry", () => {
     for (const [directory, manifest] of [
       ["public-b", { name: "@farm.js/b", version: "1.0.0" }],
       ["private", { name: "@farm.js/private", version: "1.0.0", private: true }],
+      ["private-string", { name: "@farm.js/private-string", version: "1.0.0", private: "true" }],
       ["public-a", { name: "@farm.js/a", version: "2.0.0", private: false }],
     ]) {
       const packageDirectory = path.join(root, "packages", directory);
@@ -22,12 +23,24 @@ test("discovers every public package without consulting the registry", () => {
         `${JSON.stringify(manifest)}\n`,
       );
     }
+    const linkedPackageDirectory = path.join(root, "linked-package");
+    fs.mkdirSync(linkedPackageDirectory, { recursive: true });
+    fs.writeFileSync(
+      path.join(linkedPackageDirectory, "package.json"),
+      `${JSON.stringify({ name: "@farm.js/linked", version: "3.0.0" })}\n`,
+    );
+    fs.symlinkSync(
+      linkedPackageDirectory,
+      path.join(root, "packages", "linked"),
+      process.platform === "win32" ? "junction" : "dir",
+    );
 
     assert.deepEqual(
       readPublicPackages(root).map(({ name, version }) => ({ name, version })),
       [
         { name: "@farm.js/a", version: "2.0.0" },
         { name: "@farm.js/b", version: "1.0.0" },
+        { name: "@farm.js/linked", version: "3.0.0" },
       ],
     );
   } finally {
