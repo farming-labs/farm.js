@@ -3789,6 +3789,11 @@ function generateVirtualEntryCode(
     Object.entries(config.integrations).flatMap(([name, integration]) => {
       const configuredProviders = (integration as { providers?: unknown } | null)?.providers;
       const providers = Array.isArray(configuredProviders) ? configuredProviders : [];
+      if (providers.some((provider) => typeof provider?.component === "function")) {
+        throw new Error(
+          `Integration provider components in production must use an importable component reference, for example component: { module: "@/components/provider" }.`,
+        );
+      }
       return providers.length > 0 ? [[name, { providers }]] : [];
     }),
   );
@@ -4272,10 +4277,19 @@ const farmRuntimeConfigs = [${[...layerConfigValues, "farmUserConfig"].join(", "
 const farmResolvedRuntimeConfig = Object.assign({}, ...farmRuntimeConfigs);
 setFarmTrailingSlashPreference(${JSON.stringify(config.trailingSlash)});
 const hasConfiguredRouteContext = typeof farmResolvedRuntimeConfig.context === "function";
-const configuredIntegrations = Object.assign(
-  ${JSON.stringify(resolvedIntegrationProviderFallback)},
-  ...farmRuntimeConfigs.map((runtimeConfig) => runtimeConfig.integrations || {}),
-);
+const configuredIntegrations = ${JSON.stringify(resolvedIntegrationProviderFallback)};
+for (const runtimeConfig of farmRuntimeConfigs) {
+  for (const [name, integration] of Object.entries(runtimeConfig.integrations || {})) {
+    const fallback = configuredIntegrations[name];
+    configuredIntegrations[name] =
+      fallback?.providers &&
+      integration &&
+      typeof integration === "object" &&
+      !Object.prototype.hasOwnProperty.call(integration, "providers")
+        ? { ...integration, providers: fallback.providers }
+        : integration;
+  }
+}
 const farmIntegrationProviderModuleComponents = new Map([
 ${providerServerModules.entries}
 ]);
