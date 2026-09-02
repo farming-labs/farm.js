@@ -631,11 +631,16 @@ async function parseResponseData(response: Response): Promise<unknown> {
 
   const contentType = response.headers.get("content-type") || "";
 
-  if (contentType.includes("application/json")) {
+  if (isJSONMediaType(contentType)) {
     return await response.json();
   }
 
   return await response.text();
+}
+
+function isJSONMediaType(contentType: string): boolean {
+  const mediaType = contentType.split(";", 1)[0].trim().toLowerCase();
+  return mediaType === "application/json" || mediaType.endsWith("+json");
 }
 
 async function safeParseResponseData(response: Response): Promise<unknown> {
