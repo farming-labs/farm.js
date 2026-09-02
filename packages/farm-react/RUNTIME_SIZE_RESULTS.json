@@ -191,19 +191,19 @@
     },
     "keyedRollingWindow": {
       "compilerOff": {
-        "raw": 192914,
-        "gzip": 60098,
-        "brotli": 51750
+        "raw": 192929,
+        "gzip": 60108,
+        "brotli": 51859
       },
       "compilerOn": {
-        "raw": 239452,
-        "gzip": 73038,
-        "brotli": 62481
+        "raw": 239514,
+        "gzip": 73065,
+        "brotli": 62602
       },
       "compilerPremium": {
-        "raw": 46538,
-        "gzip": 12940,
-        "brotli": 10731
+        "raw": 46585,
+        "gzip": 12957,
+        "brotli": 10743
       }
     },
     "isolatedRuntime": {

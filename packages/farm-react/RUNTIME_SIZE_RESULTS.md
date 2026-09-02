@@ -34,7 +34,7 @@ is enforced on every pull request instead of serving only as a manually recorded
 | Keyed rows with exact-window hints                |          60,124 B |         74,297 B |         14,173 B |
 | Keyed rows with reverse hints                     |          60,058 B |         72,115 B |         12,057 B |
 | Keyed rows with sort hints                        |          60,077 B |         72,172 B |         12,095 B |
-| Keyed rows with rolling-window hints              |          60,098 B |         73,038 B |         12,940 B |
+| Keyed rows with rolling-window hints              |          60,108 B |         73,065 B |         12,957 B |
 
 The isolated compatibility runtime contributes 21,525 B gzip over the React control. The
 compiler-selected core contributes 3,766 B, an **82.5% reduction**. This comparison uses the same
@@ -49,7 +49,7 @@ rolling-window modules select separate hint runtimes only when the compiler emit
 shapes. Reverse and sort share the optional reorder capability; the direct and isolated core
 results remain byte-for-byte unchanged. Over the ordinary keyed fixture, position pays 1,074 B
 gzip, batch-position pays 1,249 B, exact-window pays 2,979 B, reverse pays 863 B, sort pays 901 B,
-slice pays 1,028 B, and rolling-window pays 1,746 B. The exact-window figure includes fresh-key
+slice pays 1,028 B, and rolling-window pays 1,763 B. The exact-window figure includes fresh-key
 replacement, atomic same-key binding refresh, fixed- and variable-length window-local keyed reuse
 with LIS movement, queued same-key window composition, disjoint queued fresh-key replacement, and
 queued disjoint variable-length local-key reuse.

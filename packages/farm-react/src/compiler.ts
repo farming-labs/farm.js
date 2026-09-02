@@ -1519,8 +1519,13 @@ function rewriteKeyedArrayRollingWindowHints(
       ) {
         return;
       }
-      const retainedStart = staticSliceIndex(retainedSpread.argument.arguments[0]);
-      if (retainedStart === undefined || retainedStart === 0) return;
+      const retainedStart = retainedSpread.argument.arguments[0];
+      if (
+        validateKeyedArrayPositionExpression(retainedStart, safeGlobals) !== undefined ||
+        staticSliceIndex(retainedStart) === 0
+      ) {
+        return;
+      }
 
       const safeIncomingValue = (value: t.Expression): boolean => {
         if (t.isArrayExpression(value)) {
@@ -1575,7 +1580,7 @@ function rewriteKeyedArrayRollingWindowHints(
               t.callExpression(t.cloneNode(sliceHelperIdentifier), [
                 t.cloneNode(previous),
                 t.cloneNode(sliceMethod),
-                t.numericLiteral(retainedStart),
+                t.cloneNode(retainedStart, true),
               ]),
             ),
             t.variableDeclarator(t.cloneNode(nextValue), t.arrayExpression(nextElements)),
