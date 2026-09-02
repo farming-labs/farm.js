@@ -12,7 +12,7 @@ the FARMJS renderer contract. React remains the default unless the application s
 ## Create an app
 
 ```bash
-pnpm create @farm.js/app@beta my-solid-app --template basic --renderer solid --typescript
+pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-solid-app --template basic --renderer solid --typescript
 ```
 
 For an existing Basic app, install the adapter and Solid runtime:
@@ -110,7 +110,7 @@ adapter, and generated JSX metadata images remain React-oriented today.
 The Better Auth starter includes native Solid routes, signals, and forms:
 
 ```bash
-pnpm create @farm.js/app@beta my-auth-app --template better-auth --renderer solid --typescript
+pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-auth-app --template better-auth --renderer solid --typescript
 ```
 
 Other integration starter templates currently target React, so add their renderer-neutral provider

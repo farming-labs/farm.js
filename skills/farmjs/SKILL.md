@@ -58,9 +58,9 @@ Use `"use client"` when a component uses React hooks, browser APIs, or client-on
 Follow the current beta channel for beta apps and use `pnpm create`, not `pnpm add`:
 
 ```bash
-pnpm create @farm.js/app@beta my-app --template basic --typescript
-pnpm create @farm.js/app@beta my-app --template basic --renderer vue --typescript
-pnpm create @farm.js/app@beta --list-templates
+pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-app --template basic --typescript
+pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-app --template basic --renderer vue --typescript
+pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta --list-templates
 ```
 
 React is the default renderer. The Basic and Better Auth starters support `react`, `preact`,

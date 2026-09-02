@@ -11,13 +11,13 @@ Use the Farm CLI to run, build, generate types, migrate apps, deploy output, and
 ## Create an app
 
 ```bash
-pnpm create @farm.js/app@beta my-app --template basic --typescript
-pnpm create @farm.js/app@beta my-preact-app --template basic --renderer preact --typescript
-pnpm create @farm.js/app@beta my-solid-app --template basic --renderer solid --typescript
-pnpm create @farm.js/app@beta my-vue-app --template basic --renderer vue --typescript
-pnpm create @farm.js/app@beta my-svelte-app --template basic --renderer svelte --typescript
-pnpm create @farm.js/app@beta stripe-app --template stripe --typescript
-pnpm create @farm.js/app@beta --list-templates
+pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-app --template basic --typescript
+pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-preact-app --template basic --renderer preact --typescript
+pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-solid-app --template basic --renderer solid --typescript
+pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-vue-app --template basic --renderer vue --typescript
+pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-svelte-app --template basic --renderer svelte --typescript
+pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta stripe-app --template stripe --typescript
+pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta --list-templates
 ```
 
 The create-app CLI includes Basic, Farm.js Auth, Better Auth, and one ready-to-configure starter

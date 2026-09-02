@@ -149,7 +149,7 @@ renderers; rewrite component and client-state code using the selected renderer's
 The Basic and Better Auth templates support every renderer directly:
 
 ```bash
-pnpm create @farm.js/app@beta my-auth-app --template better-auth --renderer vue --typescript
+pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-auth-app --template better-auth --renderer vue --typescript
 ```
 
 Other integration starter templates currently target React. Add their renderer-neutral server
