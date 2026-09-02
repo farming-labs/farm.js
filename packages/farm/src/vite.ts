@@ -1,7 +1,7 @@
 import type { ConfigEnv, Plugin, UserConfig, ViteDevServer, HmrContext, Connect } from "vite";
 import type { FarmConfig } from "./types";
 import { FarmApp } from "./app";
-import { logger, toViteModuleId } from "./utils";
+import { logger, toPosixPath, toViteModuleId } from "./utils";
 import { defaultGlobalCSS } from "./default-styles";
 import type { FarmPlugin, FarmPluginRuntimeSession, PluginManager } from "./plugin";
 import { generateFarmClientPluginEntryCode } from "./client-plugin-build";
@@ -878,12 +878,13 @@ export function farmPlugin(
         event: string,
         selection: TypeArtifactSelection,
       ) => {
+        const normalizedFile = toPosixPath(file);
         for (const [artifact, enabled] of Object.entries(selection)) {
           if (enabled) {
             pendingTypeArtifacts[artifact as keyof TypeArtifactSelection] = true;
           }
         }
-        pendingTypeArtifactReason ||= `${event} ${file.split("/app/")[1] || file}`;
+        pendingTypeArtifactReason ||= `${event} ${normalizedFile.split("/app/")[1] || normalizedFile}`;
         if (typeArtifactGenScheduled) return;
         typeArtifactGenScheduled = setTimeout(() => {
           typeArtifactGenScheduled = null;
@@ -3036,9 +3037,9 @@ if (import.meta.hot) {
         return [];
       }
 
-      if (file.includes("/app/")) {
+      if (normalizedFile.includes("/app/")) {
         // Hot reload middleware changes
-        if (file.includes("middleware.")) {
+        if (normalizedFile.includes("middleware.")) {
           if (middlewareManager) {
             await middlewareManager.reload();
             logger.success("✅ Middleware reloaded!");
@@ -3062,8 +3063,8 @@ if (import.meta.hot) {
           server.moduleGraph.invalidateModule(manifestModule);
         }
 
-        if (file.includes("page.") || file.includes("layout.")) {
-          const shortPath = file.split("/app/")[1] || file;
+        if (normalizedFile.includes("page.") || normalizedFile.includes("layout.")) {
+          const shortPath = normalizedFile.split("/app/")[1] || normalizedFile;
           logUpdate("PAGE", `updated ${shortPath}`);
 
           for (const mod of modules) {

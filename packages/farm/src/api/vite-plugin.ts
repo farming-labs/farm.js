@@ -28,7 +28,7 @@ import { isFarmAPIRouteFileName } from "./route-files";
 import { _withAfterNodeMiddleware } from "../after";
 import { isProgrammaticRoutesFileName } from "../routes-shared";
 import { findProgrammaticRouteFilesInDir } from "../routes.server";
-import { toViteModuleId } from "../utils";
+import { toPosixPath, toViteModuleId } from "../utils";
 import {
   createFarmRequestBodyErrorResponse,
   readNodeRequestBody,
@@ -423,7 +423,8 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
     },
 
     async handleHotUpdate({ file, server, modules }) {
-      const fileName = file.split("/").pop() || "";
+      const normalizedFile = toPosixPath(file);
+      const fileName = normalizedFile.split("/").pop() || "";
 
       // Handle root routes.ts updates
       if (
@@ -485,8 +486,8 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
       }
 
       // Handle file-based route updates
-      if (file.includes("/api/") && fileName.startsWith("route.")) {
-        const shortPath = file.split("/api/")[1] || file;
+      if (normalizedFile.includes("/api/") && fileName.startsWith("route.")) {
+        const shortPath = normalizedFile.split("/api/")[1] || normalizedFile;
         log(`API route updated: ${shortPath}`);
 
         for (const mod of modules) {
