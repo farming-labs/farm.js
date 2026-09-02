@@ -117,10 +117,9 @@ Changing only the fragment preserves SPA state, honors push versus replace histo
 request route data again.
 Native anchor behavior still takes precedence: for example, a `Link` with a `download` attribute is
 handled by the browser instead of Farm's SPA router. Absolute URI schemes such as `mailto:`, `tel:`,
-and `sms:` are also passed through unchanged and are never prefetched as app routes.
-For an app-specific scheme, declaration-merge `LinkExternalUriSchemes` from
-`@farm.js/core/client`; the runtime already delegates every syntactically valid URI scheme to the
-browser.
+and `sms:` are also passed through unchanged and are never prefetched as app routes. Literal custom
+schemes such as `customapp:open` are validated from their URI grammar and work without registration.
+For a reusable custom-scheme type, use `ExternalHref<\`customapp:${string}\>`(or declaration-merge`LinkExternalUriSchemes`when the scheme should belong to the default`ExternalHref` union).
 
 **Client navigation**
 

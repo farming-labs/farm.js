@@ -393,6 +393,16 @@ describe("Link", () => {
       expect(prefetch).not.toHaveBeenCalled();
       expect(navigate).not.toHaveBeenCalled();
     });
+
+    it("leaves custom URI schemes to the browser", () => {
+      const el = render(
+        createElement(Link, { href: "customapp:open/settings", prefetch: "render" }),
+      ) as HTMLAnchorElement;
+
+      expect(el.getAttribute("href")).toBe("customapp:open/settings");
+      expect(prefetch).not.toHaveBeenCalled();
+      expect(navigate).not.toHaveBeenCalled();
+    });
   });
 
   describe("typed href", () => {
@@ -449,7 +459,17 @@ describe("Link", () => {
       expectTypeOf<"/about#sec:1">().not.toMatchTypeOf<ExternalHref>();
       expectTypeOf<"tel:+15551234567">().toMatchTypeOf<ExternalHref>();
       expectTypeOf<"vscode://file/app.ts">().toMatchTypeOf<ExternalHref>();
+      expectTypeOf<"customapp:open/settings">().toMatchTypeOf<
+        ExternalHref<"customapp:open/settings">
+      >();
+      expectTypeOf<"1custom:value">().not.toMatchTypeOf<ExternalHref<"1custom:value">>();
+      expectTypeOf<"custom app:value">().not.toMatchTypeOf<ExternalHref<"custom app:value">>();
       expectTypeOf<"not a scheme:value">().not.toMatchTypeOf<ExternalHref>();
+
+      const customSchemeProps = {
+        href: "customapp:open/settings",
+      } satisfies LinkProps<"/about", "customapp:open/settings">;
+      expect(customSchemeProps.href).toBe("customapp:open/settings");
     });
 
     it("accepts a union variable of routes whose params are already resolved", () => {
