@@ -295,11 +295,15 @@ describe("production prebuilt SSR output", () => {
   }, 120_000);
 
   it.each([
-    { label: "from programmatic config", runtimeConfigWithoutProviders: false },
-    { label: "when runtime config omits providers", runtimeConfigWithoutProviders: true },
+    { label: "from programmatic config", runtimeProviders: null },
+    { label: "when runtime config omits providers", runtimeProviders: "" },
+    {
+      label: "when runtime config sets providers to undefined",
+      runtimeProviders: "providers: undefined,",
+    },
   ])(
     "renders custom integration providers in production $label",
-    async ({ runtimeConfigWithoutProviders }) => {
+    async ({ runtimeProviders }) => {
       const root = await createProductionFixture();
 
       try {
@@ -314,7 +318,7 @@ export function AcmeProvider({ children, label }) {
 }
 `.trim(),
         );
-        if (runtimeConfigWithoutProviders) {
+        if (runtimeProviders !== null) {
           await fs.writeFile(
             path.join(root, "farm.config.ts"),
             `
@@ -324,6 +328,7 @@ const acme = defineIntegration({
   category: "custom",
   type: "acme",
   instance: {},
+  ${runtimeProviders}
 });
 
 export default defineConfig({ integrations: { acme } });

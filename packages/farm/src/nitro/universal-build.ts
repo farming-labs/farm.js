@@ -4285,7 +4285,7 @@ for (const runtimeConfig of farmRuntimeConfigs) {
       fallback?.providers &&
       integration &&
       typeof integration === "object" &&
-      !Object.prototype.hasOwnProperty.call(integration, "providers")
+      integration.providers === undefined
         ? { ...integration, providers: fallback.providers }
         : integration;
   }
