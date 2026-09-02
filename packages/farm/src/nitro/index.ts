@@ -269,6 +269,7 @@ import { farmRegistry } from '../farm-registry';
 import React from 'react';
 import { renderToString } from 'react-dom/server';
 import { searchParamsToObject } from '@farm.js/core/internal/production-runtime';
+import { renderFarmLegacyErrorHtml, renderFarmLegacyHtml } from '@farm.js/core/internal/production-runtime';
 
 export default defineEventHandler(async (event: H3Event) => {
   try {
@@ -514,38 +515,28 @@ export default defineEventHandler(async (event: H3Event) => {
       }
       
       // Build full HTML
-      const serializedDeploymentId = JSON.stringify(farmRegistry.deploymentId || '').replace(/</g, '\\u003c');
-      const fullHtml = \`<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="icon" href="data:,">
-  <title>Farm.js App</title>
-  <script>
-    window.__FARM_DEPLOYMENT_ID__ = \${serializedDeploymentId};
-    window.__FARM_PROPS__ = \${JSON.stringify(pageProps)};
-    window.__FARM_PATH__ = \${JSON.stringify(pathname)};
-  </script>
-</head>
-<body>
-  <div id="root">\${html}</div>
-  <script type="module" src="\${clientScript}"></script>
-</body>
-</html>\`;
+      const fullHtml = renderFarmLegacyHtml({
+        deploymentId: farmRegistry.deploymentId || '',
+        pageProps,
+        pathname,
+        html,
+        clientScript,
+      });
       
       setHeader(event, 'Content-Type', 'text/html; charset=utf-8');
       return fullHtml;
       
     } catch (renderError: any) {
+      console.error('SSR render error:', renderError);
       setResponseStatus(event, 500);
       setHeader(event, 'Content-Type', 'text/html; charset=utf-8');
-      return \`<!DOCTYPE html><html><head><title>Error</title></head><body><h1>Error</h1><p>\${renderError.message || 'Internal Server Error'}</p></body></html>\`;
+      return renderFarmLegacyErrorHtml();
     }
   } catch (error: any) {
+    console.error('SSR handler error:', error);
     setResponseStatus(event, 500);
     setHeader(event, 'Content-Type', 'text/html; charset=utf-8');
-    return \`<!DOCTYPE html><html><head><title>Error</title></head><body><h1>Error</h1><p>\${error.message || 'Internal Server Error'}</p></body></html>\`;
+    return renderFarmLegacyErrorHtml();
   }
 });
 `,
