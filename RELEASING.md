@@ -80,5 +80,9 @@ pnpm release:check
 pnpm publish:dry-run
 ```
 
+The package dry-run packs every public package into a temporary directory and removes the
+archives afterward. It does not consult npm, so packages are checked even when their current
+versions are already published.
+
 The release commands require a clean `main` branch. They preserve pnpm's Git checks instead
 of bypassing them.
