@@ -1343,6 +1343,7 @@ async function buildClient(
     config.publicRuntimeConfig,
     config.trailingSlash,
     getIntegrationProviders(config.integrations),
+    config.basePath,
   );
 
   // Write the client entry to a temporary file
@@ -1860,6 +1861,7 @@ function generateClientHydrationEntry(
   publicRuntimeConfig: Record<string, unknown> | undefined = undefined,
   trailingSlash = false,
   integrationProviders: ReturnType<typeof getIntegrationProviders> = [],
+  basePath = "/",
 ): string {
   const toImportPath = (targetPath: string) => targetPath.replace(/\\/g, "/");
   const clientPluginEntry: FarmClientPluginEntryCode = generateFarmClientPluginEntryCode(
@@ -1973,13 +1975,14 @@ async function hydrateFarmDocsAdapterRuntime() {
 // Farm.js Client Runtime (no client components)
 ${cssImport}
 ${layoutImports}
-import { createClientPluginManager, installChunkErrorRecovery, setFarmTrailingSlashPreference } from "@farm.js/core/internal/client-runtime";
+import { createClientPluginManager, installChunkErrorRecovery, setFarmBasePath, setFarmTrailingSlashPreference } from "@farm.js/core/internal/client-runtime";
 ${clientPluginEntry.imports}
 ${i18nClientRuntime}
 ${docsNavigationRuntime}
 ${docsAdapterRuntime}
 ${generateFarmDocsSearchClientRuntime(docsSearchEnabled, docsSearchModuleId)}
 
+setFarmBasePath(${JSON.stringify(basePath)});
 setFarmTrailingSlashPreference(${JSON.stringify(trailingSlash)});
 installChunkErrorRecovery();
 mountFarmDocsSearch();
@@ -2363,7 +2366,7 @@ ${cssImport}
 ${layoutImports}
 ${rendererClientImports}
 ${providerClientCode.imports}
-import { createClientPluginManager, installChunkErrorRecovery, scheduleFarmIslandHydration, searchParamsToObject, setFarmTrailingSlashPreference } from "@farm.js/core/internal/client-runtime";
+import { createClientPluginManager, installChunkErrorRecovery, scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference } from "@farm.js/core/internal/client-runtime";
 import { matchFarmRoute } from "@farm.js/core/router";
 ${clientPluginEntry.imports}
 ${i18nClientRuntime}
@@ -2375,6 +2378,7 @@ ${generateFarmDocsSearchClientRuntime(docsSearchEnabled, docsSearchModuleId)}
 
 ${providerClientCode.runtime}
 
+setFarmBasePath(${JSON.stringify(basePath)});
 setFarmTrailingSlashPreference(${JSON.stringify(trailingSlash)});
 installChunkErrorRecovery();
 
@@ -4037,6 +4041,7 @@ function generateVirtualEntryCode(
   resolveFarmInstrumentationRuntime,
   runWithFarmRequestSpan,
   searchParamsToObject,
+  setFarmBasePath,
   setFarmTrailingSlashPreference,
   stripFarmLocaleFromPathname,
   withFarmRouteContext,
@@ -4275,6 +4280,7 @@ const farmUserConfig = ${
   };
 const farmRuntimeConfigs = [${[...layerConfigValues, "farmUserConfig"].join(", ")}].filter(Boolean);
 const farmResolvedRuntimeConfig = Object.assign({}, ...farmRuntimeConfigs);
+setFarmBasePath(${JSON.stringify(config.basePath)});
 setFarmTrailingSlashPreference(${JSON.stringify(config.trailingSlash)});
 const hasConfiguredRouteContext = typeof farmResolvedRuntimeConfig.context === "function";
 const configuredIntegrations = ${JSON.stringify(resolvedIntegrationProviderFallback)};

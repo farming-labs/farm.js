@@ -11,6 +11,7 @@ import { logger } from "../utils";
 import { defer } from "../deferred";
 import { defineIntegration } from "../integrations";
 import { REACT_RENDERER } from "../renderer";
+import { Link } from "../client/link";
 
 type MockResponse = FarmResponse & {
   body: string;
@@ -559,6 +560,23 @@ describe("file route loading.tsx and error.tsx", () => {
     expect(html).toContain('data-farm-client="false"');
     expect(html).toContain("Settings fragment");
   });
+
+  it("applies the app base path while rendering navigation fragments", async () => {
+    const renderer = createRenderer({}, { basePath: "/console" });
+    const html = await renderer.renderNavigationFragment({
+      PageComponent: function SettingsPage() {
+        return React.createElement(Link, { href: "/settings" }, "Settings");
+      },
+      pageProps: {},
+      params: {},
+      layouts: [],
+      pageShouldHydrate: false,
+      layoutShouldHydrate: false,
+      islandStrategy: null,
+    });
+
+    expect(html).toContain('href="/console/settings"');
+  });
 });
 
 describe("custom not-found rendering", () => {
@@ -696,6 +714,7 @@ function createRenderer(
     };
     onGenerateClientManifest?: () => void;
     integrations?: FarmConfig["integrations"];
+    basePath?: string;
   } = {},
 ) {
   const metadataImageEntry = {
@@ -869,7 +888,11 @@ function createRenderer(
   };
 
   return new ServerRenderer(
-    { ...createConfig(), integrations: options.integrations ?? {} },
+    {
+      ...createConfig(),
+      integrations: options.integrations ?? {},
+      basePath: options.basePath ?? "/",
+    },
     routeManager as any,
   );
 }

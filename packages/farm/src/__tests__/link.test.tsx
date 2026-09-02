@@ -5,8 +5,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, createElement } from "react";
 import { expectTypeOf } from "vitest";
 import { createRoot } from "react-dom/client";
-import { Link, type LinkProps, type RouteHref } from "../client/link";
+import { Link, type ExternalHref, type LinkProps, type RouteHref } from "../client/link";
 import { setFarmTrailingSlashPreference } from "../trailing-slash";
+import { setFarmBasePath } from "../base-path";
+import { FarmProvider } from "../provider";
 
 const prefetch = vi.fn().mockResolvedValue(undefined);
 const navigate = vi.fn();
@@ -46,6 +48,7 @@ describe("Link", () => {
     delete (window as any).__FARM_SPA_ROUTER__;
     delete (window as any).__FARM_MANIFEST__;
     setFarmTrailingSlashPreference(false);
+    setFarmBasePath("/");
   });
 
   function render(ui: React.ReactElement) {
@@ -176,6 +179,60 @@ describe("Link", () => {
   });
 
   describe("navigation", () => {
+    it("prefixes internal links with the configured app base path", () => {
+      setFarmBasePath("/console");
+      const el = render(createElement(Link, { href: "/dashboard", prefetch: "render" }));
+
+      expect(el?.getAttribute("href")).toBe("/console/dashboard");
+      expect(prefetch).toHaveBeenCalledWith("/console/dashboard");
+    });
+
+    it("normalizes and uses an explicit FarmProvider base path", () => {
+      const el = render(
+        createElement(
+          FarmProvider,
+          { config: { basePath: "workspace/" } as any },
+          createElement(Link, { href: "/settings" }),
+        ),
+      );
+
+      expect(el?.getAttribute("href")).toBe("/workspace/settings");
+    });
+
+    it("does not prefix an already-prefixed FarmProvider link twice", () => {
+      const el = render(
+        createElement(
+          FarmProvider,
+          { config: { basePath: "/workspace" } as any },
+          createElement(Link, { href: "/workspace/settings" }),
+        ),
+      );
+
+      expect(el?.getAttribute("href")).toBe("/workspace/settings");
+    });
+
+    it("treats a root FarmProvider base path as unprefixed", () => {
+      const el = render(
+        createElement(
+          FarmProvider,
+          { config: { basePath: "/" } as any },
+          createElement(Link, { href: "/about" }),
+        ),
+      );
+
+      expect(el?.getAttribute("href")).toBe("/about");
+    });
+
+    it("recognizes an already-prefixed base path before a query or hash", () => {
+      setFarmBasePath("/console");
+      const queryLink = render(createElement(Link, { href: "/console?tab=activity" }));
+      expect(queryLink?.getAttribute("href")).toBe("/console?tab=activity");
+
+      act(() => root.unmount());
+      const hashLink = render(createElement(Link, { href: "/console#activity" }));
+      expect(hashLink?.getAttribute("href")).toBe("/console#activity");
+    });
+
     it("inherits the app trailing-slash preference", () => {
       setFarmTrailingSlashPreference(true);
       const el = render(
@@ -368,6 +425,56 @@ describe("Link", () => {
       expect(prefetch).not.toHaveBeenCalled();
       expect(navigate).not.toHaveBeenCalled();
     });
+
+    it("leaves native URI schemes to the browser", () => {
+      const el = render(
+        createElement(Link, { href: "tel:+15551234567", prefetch: "render" }),
+      ) as HTMLAnchorElement;
+      const event = new MouseEvent("click", { bubbles: true, button: 0, cancelable: true });
+      let farmPreventedDefault: boolean | undefined;
+      container.addEventListener(
+        "click",
+        (nativeEvent) => {
+          farmPreventedDefault = nativeEvent.defaultPrevented;
+          nativeEvent.preventDefault();
+        },
+        { once: true },
+      );
+
+      act(() => {
+        el.dispatchEvent(event);
+      });
+
+      expect(el.getAttribute("href")).toBe("tel:+15551234567");
+      expect(farmPreventedDefault).toBe(false);
+      expect(prefetch).not.toHaveBeenCalled();
+      expect(navigate).not.toHaveBeenCalled();
+    });
+
+    it("leaves custom URI schemes to the browser", () => {
+      const el = render(
+        createElement(Link, { href: "customapp:open/settings", prefetch: "render" }),
+      ) as HTMLAnchorElement;
+      const event = new MouseEvent("click", { bubbles: true, button: 0, cancelable: true });
+      let farmPreventedDefault: boolean | undefined;
+      container.addEventListener(
+        "click",
+        (nativeEvent) => {
+          farmPreventedDefault = nativeEvent.defaultPrevented;
+          nativeEvent.preventDefault();
+        },
+        { once: true },
+      );
+
+      act(() => {
+        el.dispatchEvent(event);
+      });
+
+      expect(el.getAttribute("href")).toBe("customapp:open/settings");
+      expect(farmPreventedDefault).toBe(false);
+      expect(prefetch).not.toHaveBeenCalled();
+      expect(navigate).not.toHaveBeenCalled();
+    });
   });
 
   describe("typed href", () => {
@@ -415,11 +522,26 @@ describe("Link", () => {
         | `/users/${string}?${string}`
         | `/users/${string}#${string}`
         | `/users/${string}?${string}#${string}`
-        | `http://${string}`
-        | `https://${string}`
         | `//${string}`
-        | `mailto:${string}`
+        | ExternalHref
       >();
+
+      expectTypeOf<"/search?q=a:b">().not.toMatchTypeOf<ExternalHref>();
+      expectTypeOf<"/users/:id">().not.toMatchTypeOf<ExternalHref>();
+      expectTypeOf<"/about#sec:1">().not.toMatchTypeOf<ExternalHref>();
+      expectTypeOf<"tel:+15551234567">().toMatchTypeOf<ExternalHref>();
+      expectTypeOf<"vscode://file/app.ts">().toMatchTypeOf<ExternalHref>();
+      expectTypeOf<"customapp:open/settings">().toMatchTypeOf<
+        ExternalHref<"customapp:open/settings">
+      >();
+      expectTypeOf<"1custom:value">().not.toMatchTypeOf<ExternalHref<"1custom:value">>();
+      expectTypeOf<"custom app:value">().not.toMatchTypeOf<ExternalHref<"custom app:value">>();
+      expectTypeOf<"not a scheme:value">().not.toMatchTypeOf<ExternalHref>();
+
+      const customSchemeProps = {
+        href: "customapp:open/settings",
+      } satisfies LinkProps<"/about", "customapp:open/settings">;
+      expect(customSchemeProps.href).toBe("customapp:open/settings");
     });
 
     it("accepts a union variable of routes whose params are already resolved", () => {
