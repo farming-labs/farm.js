@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createAPIClient, createServerAPIClient } from "../api/client";
+import { createAPIClient, createServerAPIClient, getAPIRouteRefMetadata } from "../api/client";
 import {
   encodeFarmCacheInvalidations,
   FARM_CACHE_INVALIDATION_HEADER,
@@ -181,6 +181,29 @@ describe("createAPIClient", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       "https://api.example.com/gateway/v1/users?limit=5",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("uses leading-slash aliases for literal HTTP method path segments", async () => {
+    const fetchMock = vi.fn(async () => buildResponse({ ok: true }));
+    globalThis.fetch = fetchMock as any;
+    const api = createAPIClient<{
+      "/users/get": {
+        get: {
+          __types: { body: never; query: never; response: { ok: boolean } };
+        };
+      };
+    }>({ baseURL: "https://api.example.com" });
+
+    await api["/users/get"].get();
+
+    expect(getAPIRouteRefMetadata(api["/users/get"].get)).toMatchObject({
+      path: "/api/users/get",
+      method: "GET",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.com/api/users/get",
       expect.objectContaining({ method: "GET" }),
     );
   });

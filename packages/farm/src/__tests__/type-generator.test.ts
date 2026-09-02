@@ -60,6 +60,45 @@ describe("APITypeGenerator", () => {
     expect(new Set(aliases).size).toBe(4);
   });
 
+  it("emits literal aliases only when HTTP method path segments collide", () => {
+    const generator = new APITypeGenerator("/tmp/app");
+
+    const content = generator.generateAPIRouter([
+      {
+        path: "/api/users",
+        methods: ["GET"],
+        filePath: "/tmp/app/api/users/route.ts",
+        relativePath: "api/users/route.ts",
+      },
+      {
+        path: "/api/users/get/profile",
+        methods: ["GET", "POST"],
+        filePath: "/tmp/app/api/users/get/profile/route.ts",
+        relativePath: "api/users/get/profile/route.ts",
+      },
+      {
+        path: "/api/get",
+        methods: ["GET"],
+        filePath: "/tmp/app/api/get/route.ts",
+        relativePath: "api/get/route.ts",
+      },
+      {
+        path: "/api/users/post",
+        methods: ["GET"],
+        filePath: "/tmp/app/api/users/post/route.ts",
+        relativePath: "api/users/post/route.ts",
+      },
+    ]);
+
+    expect(content).toContain("users: {");
+    expect(content).toContain("get: typeof GET_users;");
+    expect(content).toContain('"/users/get/profile": {');
+    expect(content).not.toContain('"/get": {');
+    expect(content).not.toContain('"/users/post": {');
+    expect(content).toContain("post: {");
+    expect(content).not.toMatch(/get: \{\n\s+profile:/);
+  });
+
   it("creates the output directory before writing generated API types", () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "farm-api-types-"));
     const appDir = path.join(root, "src", "app");

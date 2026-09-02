@@ -3,6 +3,17 @@ import { join, relative, dirname } from "path";
 import { writeFileIfChanged } from "./write-file-if-changed";
 import { isFarmAPIRouteFileName } from "./api/route-files";
 
+const API_CLIENT_METHOD_SEGMENTS = new Set([
+  "get",
+  "head",
+  "query",
+  "post",
+  "put",
+  "delete",
+  "patch",
+  "options",
+]);
+
 export interface APIRouteInfo {
   path: string;
   methods: string[];
@@ -131,6 +142,15 @@ export class APITypeGenerator {
       routeGroups.get(key)!.push(route);
     }
 
+    const routeMethodsByPath = new Map<string, Set<string>>();
+    for (const [routePath, routeList] of routeGroups) {
+      const cleanPath = routePath === "/api" ? "" : routePath.replace(/^\/api\//, "");
+      routeMethodsByPath.set(
+        cleanPath,
+        new Set(routeList.flatMap((route) => route.methods.map((method) => method.toLowerCase()))),
+      );
+    }
+
     // Build nested structure
     const nestedStructure: any = {};
     const usedRouteNames = new Map<string, number>();
@@ -160,11 +180,17 @@ export class APITypeGenerator {
           nestedStructure[methodName] = `typeof ${importName}`;
         }
       } else {
+        const hasMethodCollision = parts.some((part, index) => {
+          if (!API_CLIENT_METHOD_SEGMENTS.has(part)) return false;
+          const parentPath = parts.slice(0, index).join("/");
+          return routeMethodsByPath.get(parentPath)?.has(part) === true;
+        });
+        const typePath = hasMethodCollision ? [`/${cleanPath}`] : parts;
         // Build nested object
         let current = nestedStructure;
-        for (let i = 0; i < parts.length; i++) {
-          const part = parts[i];
-          if (i === parts.length - 1) {
+        for (let i = 0; i < typePath.length; i++) {
+          const part = typePath[i];
+          if (i === typePath.length - 1) {
             // Last part - add methods
             current[part] = {};
             for (const method of allMethods) {

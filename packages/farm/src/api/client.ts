@@ -948,7 +948,7 @@ function createNestedProxy(
       if (httpMethods.includes(lastPart)) {
         // Method is explicitly called: api.users.get() or api['auth/login'].post()
         // Remove the method from path and use it as the HTTP method
-        const routePath = "/api/" + path.slice(0, -1).join("/");
+        const routePath = buildProxyRoutePath(path.slice(0, -1));
         const method = lastPart.toUpperCase();
 
         // Extract options from arguments
@@ -959,7 +959,7 @@ function createNestedProxy(
       } else {
         // Direct call without method: api.hello()
         // Use the full path and let the server determine the method (usually GET)
-        const routePath = "/api/" + path.join("/");
+        const routePath = buildProxyRoutePath(path);
 
         // Extract options from arguments
         const [options, clientOptions] = args;
@@ -972,6 +972,10 @@ function createNestedProxy(
 
   routeMeta.set(proxy, { path: [...path], baseURL });
   return proxy;
+}
+
+function buildProxyRoutePath(path: string[]): string {
+  return "/api/" + path.join("/").replace(/^\/+/, "");
 }
 
 export function isAPIRouteRef(value: unknown): value is CallableRouteRef {
@@ -1206,13 +1210,13 @@ function resolveRouteMeta(meta: RouteMeta): { routePath: string; method: string 
   const lastPart = meta.path[meta.path.length - 1];
   if (lastPart && httpMethods.includes(lastPart)) {
     return {
-      routePath: "/api/" + meta.path.slice(0, -1).join("/"),
+      routePath: buildProxyRoutePath(meta.path.slice(0, -1)),
       method: lastPart.toUpperCase(),
     };
   }
 
   return {
-    routePath: "/api/" + meta.path.join("/"),
+    routePath: buildProxyRoutePath(meta.path),
     method: "GET",
   };
 }
