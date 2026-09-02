@@ -293,6 +293,29 @@ describe("createAPIClient", () => {
     expect(result.error).not.toMatchObject({ code: "network_error", status: 0 });
   });
 
+  it("keeps transport failures while reading error bodies classified as network errors", async () => {
+    const transportError = new TypeError("connection closed while reading the body");
+    const response = {
+      ok: false,
+      status: 502,
+      statusText: "Bad Gateway",
+      headers: new Headers({ "content-type": "application/json" }),
+      body: {},
+      arrayBuffer: vi.fn().mockRejectedValue(transportError),
+    } as unknown as Response;
+    globalThis.fetch = vi.fn(async () => response) as any;
+    const api = createAPIClient<APIRouter>({ baseURL: "https://api.example.com" });
+
+    const result = await api.status.get();
+
+    expect(result.error).toMatchObject({
+      code: "network_error",
+      status: 0,
+      cause: transportError,
+    });
+    expect(result.error).not.toMatchObject({ code: "http_error", status: 502 });
+  });
+
   it("supports empty and binary successful responses", async () => {
     const responses = [
       new Response("", { status: 200 }),

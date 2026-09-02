@@ -492,8 +492,9 @@ export function createAPIClient<
     try {
       data = await readAPIResponseData(response, method);
     } catch (decodeError) {
-      if (response.ok) throw decodeError;
-      return { response, data: undefined, decodeError };
+      if (!(decodeError instanceof APIResponseDecodeError)) throw decodeError;
+      if (response.ok) throw decodeError.cause;
+      return { response, data: undefined, decodeError: decodeError.cause };
     }
 
     return { response, data };
@@ -830,7 +831,7 @@ async function readAPIResponseData(response: Response, method: string): Promise<
   // Keep lightweight fetch-compatible adapters working when they expose the
   // traditional json() contract without a complete Web Response implementation.
   if (!response.headers?.get && typeof response.json === "function") {
-    return response.json();
+    return readResponseJSON(response);
   }
 
   if (response.body === null) return undefined;
@@ -845,7 +846,7 @@ async function readAPIResponseData(response: Response, method: string): Promise<
     if (data.byteLength === 0) return undefined;
 
     if (!contentType || contentType === "application/json" || contentType.endsWith("+json")) {
-      return JSON.parse(new TextDecoder().decode(data));
+      return parseResponseJSON(new TextDecoder().decode(data));
     }
 
     if (
@@ -864,7 +865,7 @@ async function readAPIResponseData(response: Response, method: string): Promise<
     (!contentType || contentType === "application/json" || contentType.endsWith("+json")) &&
     typeof response.json === "function"
   ) {
-    return response.json();
+    return readResponseJSON(response);
   }
 
   if (
@@ -880,10 +881,37 @@ async function readAPIResponseData(response: Response, method: string): Promise<
   // Some fetch-compatible adapters expose headers but still only implement
   // the traditional json() reader.
   if (typeof response.json === "function") {
-    return response.json();
+    return readResponseJSON(response);
   }
 
   return undefined;
+}
+
+class APIResponseDecodeError extends Error {
+  readonly cause: unknown;
+
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : "Failed to decode JSON response");
+    this.name = "APIResponseDecodeError";
+    this.cause = cause;
+  }
+}
+
+function parseResponseJSON(value: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    throw new APIResponseDecodeError(error);
+  }
+}
+
+async function readResponseJSON(response: Pick<Response, "json">): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch (error) {
+    if (error instanceof SyntaxError) throw new APIResponseDecodeError(error);
+    throw error;
+  }
 }
 
 /**
