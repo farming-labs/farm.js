@@ -309,27 +309,6 @@ export function AcmeProvider({ children, label }) {
 }
 `.trim(),
       );
-      await fs.writeFile(
-        path.join(root, "farm.config.ts"),
-        `
-import { defineConfig, defineIntegration } from "@farm.js/core";
-
-const acme = defineIntegration({
-  category: "custom",
-  type: "acme",
-  instance: {},
-  providers: [{
-    name: "acme",
-    type: "client",
-    props: { label: "production-provider" },
-    component: { module: "@/components/acme-provider", export: "AcmeProvider" },
-  }],
-});
-
-export default defineConfig({ integrations: { acme } });
-`.trim(),
-      );
-
       const acme = defineIntegration({
         category: "custom",
         type: "acme",
@@ -350,7 +329,7 @@ export default defineConfig({ integrations: { acme } });
           images: { provider: "none" },
           telemetry: false,
           integrations: { acme },
-          generateBuildId: () => "custom-integration-provider-test",
+          generateBuildId: () => "programmatic-integration-provider-test",
         },
         "production",
       );

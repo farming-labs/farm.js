@@ -96,7 +96,9 @@ export function generateFarmIntegrationProviderServerModules(
   return {
     imports: imports.join("\n"),
     entries: entries.join(",\n"),
-    hasClerkProvider: providers.some((provider) => provider.type === "clerk"),
+    hasClerkProvider: providers.some(
+      (provider) => provider.type === "clerk" && !provider.component,
+    ),
   };
 }
 

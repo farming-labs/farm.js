@@ -3785,6 +3785,13 @@ function generateVirtualEntryCode(
     renderedIntegrationProviders,
     config.root,
   );
+  const resolvedIntegrationProviderFallback = Object.fromEntries(
+    Object.entries(config.integrations).flatMap(([name, integration]) => {
+      const configuredProviders = (integration as { providers?: unknown } | null)?.providers;
+      const providers = Array.isArray(configuredProviders) ? configuredProviders : [];
+      return providers.length > 0 ? [[name, { providers }]] : [];
+    }),
+  );
   const providerServerImports = [
     providerServerModules.hasClerkProvider
       ? `import { ClerkProvider as FarmClerkProvider } from "@clerk/react";`
@@ -4266,7 +4273,7 @@ const farmResolvedRuntimeConfig = Object.assign({}, ...farmRuntimeConfigs);
 setFarmTrailingSlashPreference(${JSON.stringify(config.trailingSlash)});
 const hasConfiguredRouteContext = typeof farmResolvedRuntimeConfig.context === "function";
 const configuredIntegrations = Object.assign(
-  {},
+  ${JSON.stringify(resolvedIntegrationProviderFallback)},
   ...farmRuntimeConfigs.map((runtimeConfig) => runtimeConfig.integrations || {}),
 );
 const farmIntegrationProviderModuleComponents = new Map([

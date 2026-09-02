@@ -1,7 +1,10 @@
 import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
-import { generateFarmIntegrationProviderClientCode } from "../integration-provider-build";
+import { describe, expect, it, vi } from "vitest";
+import {
+  generateFarmIntegrationProviderClientCode,
+  generateFarmIntegrationProviderServerModules,
+} from "../integration-provider-build";
 import { defineIntegration, getIntegrationProviders } from "../integrations";
 import { REACT_RENDERER } from "../renderer";
 import { ServerRenderer } from "../server/renderer";
@@ -76,6 +79,59 @@ describe("integration providers", () => {
     expect(generated.imports).toContain(
       'import * as FarmIntegrationProviderModule0 from "/src/components/acme-provider";',
     );
+  });
+
+  it("resolves relative provider modules from the app root in development", async () => {
+    function AcmeProvider({ children }: { children: ReactNode }) {
+      return createElement("section", { "data-acme-provider": "" }, children);
+    }
+    const ssrLoadModule = vi.fn(async () => ({ default: AcmeProvider }));
+    const acme = defineIntegration({
+      category: "custom",
+      type: "acme",
+      instance: {},
+      providers: [
+        {
+          name: "acme",
+          type: "client",
+          component: { module: "./src/components/acme-provider" },
+        },
+      ],
+    });
+    const renderer = new ServerRenderer(
+      {
+        root: "/app",
+        outDir: ".farm-integration-provider-test",
+        integrations: { acme },
+        renderer: REACT_RENDERER,
+      } as any,
+      {} as any,
+    );
+    (renderer as any).viteServer = { ssrLoadModule };
+    (renderer as any).rendererRuntime = { createElement };
+
+    const wrapped = await (renderer as any).wrapWithIntegrationProviders(
+      createElement("span", null, "inside"),
+    );
+
+    expect(ssrLoadModule).toHaveBeenCalledWith("/src/components/acme-provider");
+    expect(renderToStaticMarkup(wrapped)).toContain("data-acme-provider");
+  });
+
+  it("does not import Clerk when a Clerk provider configures its own component", () => {
+    const providers = [
+      {
+        name: "custom-clerk",
+        type: "clerk",
+        component: { module: "@/components/custom-clerk-provider" },
+      },
+    ];
+    const client = generateFarmIntegrationProviderClientCode(providers, "/app");
+    const server = generateFarmIntegrationProviderServerModules(providers, "/app");
+
+    expect(client.imports).not.toContain("@clerk/react");
+    expect(server.hasClerkProvider).toBe(false);
+    expect(server.imports).not.toContain("@clerk/react");
   });
 
   it("rejects opaque function components from client generation", () => {

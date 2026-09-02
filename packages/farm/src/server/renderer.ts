@@ -10,7 +10,7 @@ import type {
   SSGPage,
 } from "../types";
 import type { MatchedRouteSlot, RouteManager } from "../routing/route-manager";
-import { logger, toRootRelativeUrlPath } from "../utils";
+import { logger, toRootRelativeUrlPath, toViteModuleId } from "../utils";
 import { collectDevStylesheetUrls } from "./dev-styles";
 import {
   composeFarmFullDocument,
@@ -1710,8 +1710,14 @@ export class ServerRenderer {
         }
         let ProviderComponent;
         if (isFarmIntegrationProviderComponentReference(provider.component)) {
+          const providerModuleId = provider.component.module.startsWith(".")
+            ? toViteModuleId(
+                path.resolve(this.config.root, provider.component.module),
+                this.config.root,
+              )
+            : provider.component.module;
           const providerModule = this.viteServer
-            ? await this.viteServer.ssrLoadModule(provider.component.module)
+            ? await this.viteServer.ssrLoadModule(providerModuleId)
             : await importRuntimeModule(
                 provider.component.module.startsWith(".")
                   ? pathToFileURL(path.resolve(this.config.root, provider.component.module)).href
@@ -2059,6 +2065,8 @@ export class ServerRenderer {
           params: options.params,
         });
       }
+
+      wrapped = await this.wrapWithIntegrationProviders(wrapped);
 
       const html = await _runWithMiddlewareData(options.middlewareMap, () =>
         _runWithMiddlewareContext(options.middlewareContext, () =>
@@ -2669,6 +2677,8 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
               children: element,
             });
           }
+
+          element = await this.wrapWithIntegrationProviders(element);
 
           // Render to string
           const content = await this.rendererRuntime.renderToString(element);
