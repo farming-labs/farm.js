@@ -442,8 +442,80 @@ export function createAPIClient<
 
   const cacheState = getFarmClientDataCache();
   const inflightState = new Map<string, InflightEntry>();
+  const optimisticState = getOptimisticState(cacheState);
   const routeMeta = new WeakMap<AnyRouteRef, RouteMeta>();
   let requestCounter = 0;
+
+  const applyOptimisticLayer = (
+    entry: CacheEntry | undefined,
+    layer: OptimisticLayer,
+  ): CacheEntry => {
+    let data = entry?.data;
+    for (const updater of layer.updaters) data = updater(data);
+
+    return {
+      data,
+      updatedAt: layer.updatedAt,
+      staleAt: entry?.staleAt ?? layer.staleAt,
+      gcAt: entry?.gcAt ?? layer.gcAt,
+      invalidatedAt: entry?.invalidatedAt,
+    };
+  };
+
+  const storeOptimisticEntry = (
+    key: string,
+    stack: OptimisticStack,
+    entry: CacheEntry | undefined,
+  ) => {
+    if (!entry) {
+      cacheState.delete(key);
+      stack.renderedEntry = undefined;
+      return;
+    }
+
+    cacheState.set(key, entry);
+    if (stack.invalidatedAt !== undefined) {
+      cacheState.invalidate(key, stack.invalidatedAt);
+    }
+    stack.renderedEntry = cacheState.get(key);
+  };
+
+  const renderOptimisticStack = (key: string, stack: OptimisticStack) => {
+    let entry = stack.entry ? { ...stack.entry } : undefined;
+    for (const layer of stack.layers) entry = applyOptimisticLayer(entry, layer);
+    storeOptimisticEntry(key, stack, entry);
+  };
+
+  const settleOptimisticUpdates = (
+    snapshots: OptimisticSnapshot[],
+    outcome: "commit" | "rollback" | "invalidate",
+  ) => {
+    const settledKeys: string[] = [];
+    for (const snapshot of snapshots) {
+      const stack = optimisticState.get(snapshot.key);
+      if (stack !== snapshot.stack) continue;
+      if (cacheState.get(snapshot.key) !== stack.renderedEntry) {
+        optimisticState.delete(snapshot.key);
+        continue;
+      }
+
+      if (outcome === "rollback") {
+        stack.layers = stack.layers.filter((layer) => layer !== snapshot.layer);
+      } else {
+        snapshot.layer.committed = true;
+        if (outcome === "invalidate") stack.invalidatedAt = Date.now();
+      }
+
+      while (stack.layers[0]?.committed) {
+        stack.entry = applyOptimisticLayer(stack.entry, stack.layers.shift()!);
+      }
+
+      renderOptimisticStack(snapshot.key, stack);
+      if (stack.layers.length === 0) optimisticState.delete(snapshot.key);
+      settledKeys.push(snapshot.key);
+    }
+    return settledKeys;
+  };
 
   // Create a simple fetch-based client (browser compatible)
   const fetchClient = async (path: string, requestOptions: any = {}) => {
@@ -555,28 +627,51 @@ export function createAPIClient<
         if (!targetKey) continue;
 
         const targetEntry = getValidCacheEntry(cacheState, targetKey, now);
+        const currentEntry = cacheState.get(targetKey);
+        let stack = optimisticState.get(targetKey);
+        if (!stack || currentEntry !== stack.renderedEntry) {
+          stack = {
+            entry: targetEntry ? { ...targetEntry } : undefined,
+            layers: [],
+            renderedEntry: currentEntry,
+          };
+          optimisticState.set(targetKey, stack);
+        }
+
         let snapshot = snapshots.get(targetKey);
         if (!snapshot) {
+          const previousEntry = stack.layers.length === 0 ? stack.entry : stack.renderedEntry;
+          const layer: OptimisticLayer = {
+            updaters: [],
+            updatedAt: now,
+            staleAt:
+              targetEntry?.staleAt ??
+              now + (cacheOptions?.staleTime ?? options.cacheDefaults?.staleTime ?? 0),
+            gcAt:
+              targetEntry?.gcAt ??
+              getGcAt(now, cacheOptions?.gcTime ?? options.cacheDefaults?.gcTime),
+          };
+          stack.layers.push(layer);
           snapshot = {
             key: targetKey,
-            entry: targetEntry ? { ...targetEntry } : undefined,
+            stack,
+            layer,
           };
           snapshots.set(targetKey, snapshot);
+          snapshot.layer.updaters.push(updater);
+          const nextEntry = applyOptimisticLayer(previousEntry, {
+            ...snapshot.layer,
+            updaters: [updater],
+          });
+          storeOptimisticEntry(targetKey, stack, nextEntry);
+          continue;
         }
-        const previousData = targetEntry?.data;
-        const nextData = updater(previousData);
-        cacheState.set(targetKey, {
-          data: nextData,
-          updatedAt: now,
-          staleAt:
-            targetEntry?.staleAt ??
-            now + (cacheOptions?.staleTime ?? options.cacheDefaults?.staleTime ?? 0),
-          gcAt:
-            targetEntry?.gcAt ??
-            getGcAt(now, cacheOptions?.gcTime ?? options.cacheDefaults?.gcTime),
-          invalidatedAt: targetEntry?.invalidatedAt,
+        snapshot.layer.updaters.push(updater);
+        const nextEntry = applyOptimisticLayer(stack.renderedEntry, {
+          ...snapshot.layer,
+          updaters: [updater],
         });
-        snapshot.optimisticEntry = cacheState.get(targetKey);
+        storeOptimisticEntry(targetKey, stack, nextEntry);
       }
 
       return Array.from(snapshots.values());
@@ -584,27 +679,13 @@ export function createAPIClient<
 
     const rollbackOptimisticUpdates = (snapshots: OptimisticSnapshot[]) => {
       if (!clientOptions?.optimistic?.rollbackOnError) return;
-
-      for (const snapshot of snapshots) {
-        if (cacheState.get(snapshot.key) !== snapshot.optimisticEntry) continue;
-        if (!snapshot.entry) {
-          cacheState.delete(snapshot.key);
-          continue;
-        }
-
-        cacheState.set(snapshot.key, { ...snapshot.entry });
-      }
+      settleOptimisticUpdates(snapshots, "rollback");
     };
 
     const invalidateUncommittedOptimisticUpdates = (snapshots: OptimisticSnapshot[]) => {
       if (clientOptions?.optimistic?.rollbackOnError) return;
-
-      const invalidatedAt = Date.now();
-      for (const snapshot of snapshots) {
-        const current = cacheState.get(snapshot.key);
-        if (!current || current !== snapshot.optimisticEntry) continue;
-        cacheState.invalidate(snapshot.key, invalidatedAt);
-        emitStatus("invalidated", { key: snapshot.key });
+      for (const key of settleOptimisticUpdates(snapshots, "invalidate")) {
+        emitStatus("invalidated", { key });
       }
     };
 
@@ -775,11 +856,13 @@ export function createAPIClient<
 
         const existing = cacheState.get(targetKey);
         if (existing) {
-          cacheState.set(targetKey, {
-            ...existing,
-            staleAt: 0,
-            invalidatedAt: Date.now(),
-          });
+          const invalidatedAt = Date.now();
+          const stack = optimisticState.get(targetKey);
+          cacheState.invalidate(targetKey, invalidatedAt);
+          if (stack?.renderedEntry === existing) {
+            stack.invalidatedAt = invalidatedAt;
+            stack.renderedEntry = cacheState.get(targetKey);
+          }
         }
 
         emitStatus("invalidated", { key: targetKey });
@@ -815,6 +898,7 @@ export function createAPIClient<
       rollbackOptimisticUpdates(optimisticSnapshots);
       invalidateUncommittedOptimisticUpdates(optimisticSnapshots);
     } else {
+      settleOptimisticUpdates(optimisticSnapshots, "commit");
       await invalidateTargets();
     }
     clientOptions?.onSettled?.(result.data, result.error);
@@ -1101,9 +1185,35 @@ type RouteMeta = {
 
 type OptimisticSnapshot = {
   key: string;
-  entry?: CacheEntry;
-  optimisticEntry?: CacheEntry;
+  stack: OptimisticStack;
+  layer: OptimisticLayer;
 };
+
+type OptimisticStack = {
+  entry?: CacheEntry;
+  layers: OptimisticLayer[];
+  renderedEntry?: CacheEntry;
+  invalidatedAt?: number;
+};
+
+type OptimisticLayer = {
+  updaters: Array<(prev: any) => any>;
+  updatedAt: number;
+  staleAt: number;
+  gcAt?: number;
+  committed?: boolean;
+};
+
+const optimisticStates = new WeakMap<FarmClientDataCache, Map<string, OptimisticStack>>();
+
+function getOptimisticState(cache: FarmClientDataCache): Map<string, OptimisticStack> {
+  let state = optimisticStates.get(cache);
+  if (!state) {
+    state = new Map();
+    optimisticStates.set(cache, state);
+  }
+  return state;
+}
 
 function buildCacheKey(
   method: string,
