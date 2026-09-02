@@ -139,6 +139,16 @@ equivalent block-bodied compiled control. Package tests additionally cover shrin
 exact local LIS moves, atomic preparation, delegated event indexes, focused-input selection,
 Strict Mode hydration, and 1,000 randomized grow/shrink differential updates.
 
+Queued variable-length windows have their own 10,000-row gate. One event grows an early 64-row
+interval to 80 rows and then shrinks a later 64-row interval to 48 rows using the position after
+the first length change. The benchmark requires every locally retained row to keep its identity,
+every retired row to disconnect, every fresh row to be globally new, and all four surrounding
+anchors to remain attached. Static and hybrid modes must remain at least 4x faster than React and
+1.5x faster than the equivalent block-bodied compiled control. Package tests additionally cover
+both source orders, adjacent and empty intervals, exact local LIS moves, atomic preparation,
+delegated event indexes, controlled-input selection, Strict Mode hydration and cleanup, overlap
+and cross-window key-move fallback, and 1,000 randomized queued differential updates.
+
 Same-key exact-window refresh has a separate 10,000-row gate. The benchmark replaces a 64-row
 snapshot with 64 new objects carrying the same keys in the same order and changes one visible row,
 which isolates the avoided full-list key scan without hiding the required binding update. All 64
@@ -154,7 +164,7 @@ identity while both changed labels and amounts reach the DOM. Static and hybrid 
 at least 4x faster than React and 1.5x faster than the equivalent block-bodied compiled control.
 That workload contributes two of the dashboard `keyedArrayPositionHints`. Package tests compare
 1,000 deterministic queued updates with React and cover disjoint windows, overlap with
-last-update-wins semantics, atomic preparation, structural fallback, controlled-input selection,
+last-update-wins semantics, atomic preparation, overlapping structural fallback, controlled-input selection,
 events, Strict Mode hydration, and cleanup.
 
 Queued fresh-key exact-window replacement has a separate 10,000-row gate. One event replaces two
@@ -163,7 +173,7 @@ final union. The benchmark requires the 48 old rows to disconnect, both surround
 retain identity, both final labels to reach the DOM, and zero compiled owner executions. Static and
 hybrid modes must remain at least 4x faster than React and 1.5x faster than the equivalent
 block-bodied compiled control. Together with the existing position workloads, the compiler report
-must contain all thirteen dashboard `keyedArrayPositionHints`. Package tests also cover disjoint and
+must contain all fifteen dashboard `keyedArrayPositionHints`. Package tests also cover disjoint and
 overlapping fresh-key commits, mixed same-key/fresh-key commits, atomic preparation,
 existing-key-move fallback, events, controlled-input selection, Strict Mode hydration, cleanup,
 and 1,000 differential overlapping updates.

@@ -433,6 +433,70 @@ export function StandardTableBenchmark() {
           Grow and reuse a runtime window (snapshot control)
         </button>
         <button
+          data-action="table-position-window-resize-queued"
+          type="button"
+          onClick={() => {
+            const firstSeed = seed + 1;
+            const secondSeed = seed + 2;
+            const firstPosition = 2_500;
+            const firstRetained = rows
+              .slice(firstPosition, firstPosition + 48)
+              .toReversed()
+              .map((row) => ({ ...row, label: `${row.label} queued grow` }));
+            const firstReplacements = [...firstRetained, ...buildRows(32, firstSeed)];
+            const secondSourcePosition = 7_500;
+            const secondPosition = secondSourcePosition + 16;
+            const secondRetained = rows
+              .slice(secondSourcePosition, secondSourcePosition + 32)
+              .toReversed()
+              .map((row) => ({ ...row, label: `${row.label} queued shrink` }));
+            const secondReplacements = [...secondRetained, ...buildRows(16, secondSeed)];
+            setSeed(secondSeed);
+            setRows((current) =>
+              current.toSpliced(firstPosition, 64, ...firstReplacements),
+            );
+            setRows((current) =>
+              current.toSpliced(secondPosition, 64, ...secondReplacements),
+            );
+            setOperation("queue disjoint grow and shrink windows");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queue disjoint grow and shrink windows
+        </button>
+        <button
+          data-action="table-position-window-resize-queued-snapshot"
+          type="button"
+          onClick={() => {
+            const firstSeed = seed + 1;
+            const secondSeed = seed + 2;
+            const firstPosition = 2_500;
+            const firstRetained = rows
+              .slice(firstPosition, firstPosition + 48)
+              .toReversed()
+              .map((row) => ({ ...row, label: `${row.label} queued grow` }));
+            const firstReplacements = [...firstRetained, ...buildRows(32, firstSeed)];
+            const secondSourcePosition = 7_500;
+            const secondPosition = secondSourcePosition + 16;
+            const secondRetained = rows
+              .slice(secondSourcePosition, secondSourcePosition + 32)
+              .toReversed()
+              .map((row) => ({ ...row, label: `${row.label} queued shrink` }));
+            const secondReplacements = [...secondRetained, ...buildRows(16, secondSeed)];
+            setSeed(secondSeed);
+            setRows((current) => {
+              return current.toSpliced(firstPosition, 64, ...firstReplacements);
+            });
+            setRows((current) => {
+              return current.toSpliced(secondPosition, 64, ...secondReplacements);
+            });
+            setOperation("queue disjoint grow and shrink windows (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queue disjoint grow and shrink windows (snapshot control)
+        </button>
+        <button
           data-action="table-position-window-refresh"
           type="button"
           onClick={() => {

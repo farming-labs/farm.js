@@ -4797,6 +4797,166 @@ function reconcileCompilerKeyedArrayBatchInsert(
   return new Map(previousInstances.map((instance) => [instance.key, instance]));
 }
 
+type CompilerKeyedArrayDisjointWindow = [
+  sourcePosition: number,
+  currentPosition: number,
+  removedCount: number,
+  insertedCount: number,
+];
+
+function normalizeCompilerKeyedArrayDisjointWindows(
+  updates: readonly CompilerKeyedArrayWindowReplaceHint[],
+): CompilerKeyedArrayDisjointWindow[] | undefined {
+  const windows: CompilerKeyedArrayDisjointWindow[] = [];
+  for (const update of updates) {
+    const updateEnd = update.position + update.removedCount;
+    let sourcePosition = update.position;
+    for (const window of windows) {
+      const windowStart = window[1];
+      const windowEnd = windowStart + window[3];
+      const before = updateEnd <= windowStart;
+      const after = window[3] === 0 ? update.position >= windowStart : update.position >= windowEnd;
+      if (!before && !after) return undefined;
+      if (after) sourcePosition -= window[3] - window[2];
+    }
+
+    const delta = update.insertedCount - update.removedCount;
+    for (const window of windows) {
+      if (updateEnd <= window[1]) window[1] += delta;
+    }
+    windows.push([sourcePosition, update.position, update.removedCount, update.insertedCount]);
+  }
+
+  windows.sort((left, right) => left[0] - right[0]);
+  return windows;
+}
+
+type CompilerKeyedArrayWindowItems = [items: unknown[], keys: string[]];
+
+function readCompilerKeyedArrayWindowItems(
+  props: CompilerKeyedRowsBlockProps,
+  finalValue: readonly unknown[],
+  resultPosition: number,
+  insertedCount: number,
+): CompilerKeyedArrayWindowItems | undefined {
+  const items: unknown[] = [];
+  const keys: string[] = [];
+  try {
+    for (let offset = 0; offset < insertedCount; offset += 1) {
+      const index = resultPosition + offset;
+      const item = finalValue[index];
+      items.push(item);
+      keys.push(keyedRowIdentity(props.rowKey(item, index)));
+    }
+  } catch {
+    return undefined;
+  }
+  return [items, keys];
+}
+
+type CompilerPreparedKeyedArrayWindow = [
+  removed: CompilerKeyedRowInstance[],
+  anchor: ChildNode | null,
+  incomingItems: unknown[],
+  incomingKeySet: ReadonlySet<string>,
+  nextWindow: CompilerKeyedRowInstance[],
+  sequence: number[],
+  preparedBindings: Array<readonly CompilerPreparedKeyedRowBindingUpdate[] | undefined>,
+];
+
+function prepareCompilerKeyedArrayWindow(
+  props: CompilerKeyedRowsBlockProps,
+  instances: ReadonlyMap<string, CompilerKeyedRowInstance>,
+  previousInstances: readonly CompilerKeyedRowInstance[],
+  root: Element,
+  window: CompilerKeyedArrayDisjointWindow,
+  incoming: CompilerKeyedArrayWindowItems,
+  preparedIncomingKeys: Set<string>,
+): CompilerPreparedKeyedArrayWindow | undefined {
+  const removedEnd = window[0] + window[2];
+  const removed = previousInstances.slice(window[0], removedEnd);
+  const anchor = previousInstances[removedEnd]?.element || null;
+  if (
+    removed.length !== window[2] ||
+    removed.some(
+      (instance, offset) =>
+        instance.index !== window[0] + offset || instance.element.parentNode !== root,
+    ) ||
+    (anchor && anchor.parentNode !== root)
+  ) {
+    return undefined;
+  }
+
+  const incomingKeySet = new Set(incoming[1]);
+  if (incomingKeySet.size !== incoming[1].length) return undefined;
+  for (const key of incomingKeySet) {
+    if (preparedIncomingKeys.has(key)) return undefined;
+    preparedIncomingKeys.add(key);
+  }
+
+  const hasLocalReuse = removed.some((instance) => incomingKeySet.has(instance.key));
+  const removedByKey = hasLocalReuse
+    ? new Map(removed.map((instance, offset) => [instance.key, { instance, offset }] as const))
+    : undefined;
+  const nextWindow: CompilerKeyedRowInstance[] = [];
+  const sequence: number[] = [];
+  const preparedBindings: Array<readonly CompilerPreparedKeyedRowBindingUpdate[] | undefined> = [];
+  try {
+    for (let offset = 0; offset < window[3]; offset += 1) {
+      const index = window[1] + offset;
+      const item = incoming[0][offset];
+      const key = incoming[1][offset];
+      const retained = removedByKey?.get(key);
+      if (retained) {
+        const bindingUpdates = prepareKeyedRowBindingUpdates(props, retained.instance, item, index);
+        if (!bindingUpdates) return undefined;
+        nextWindow.push(retained.instance);
+        sequence.push(retained.offset);
+        preparedBindings.push(bindingUpdates);
+        continue;
+      }
+      // A key owned outside this exact source window would move a row across
+      // a compiler-proven boundary. Complete reconciliation owns that case.
+      if (instances.has(key)) return undefined;
+      const descriptor = props.create(item, index);
+      nextWindow.push({
+        key,
+        element: createCompilerHostElement(root.ownerDocument, descriptor),
+        values: readKeyedRowBindingValues(props, item, index),
+        item,
+        index,
+        conditionalValues: EMPTY_KEYED_ROW_CONDITIONAL_VALUES,
+      });
+      sequence.push(-1);
+      preparedBindings.push(undefined);
+    }
+  } catch {
+    return undefined;
+  }
+
+  return [removed, anchor, incoming[0], incomingKeySet, nextWindow, sequence, preparedBindings];
+}
+
+function commitCompilerKeyedArrayWindow(
+  props: CompilerKeyedRowsBlockProps,
+  root: Element,
+  prepared: CompilerPreparedKeyedArrayWindow,
+): void {
+  for (const instance of prepared[0]) {
+    if (prepared[3].has(instance.key)) continue;
+    instance.scope?.cleanup();
+    instance.element.remove();
+  }
+  for (let offset = 0; offset < prepared[4].length; offset += 1) {
+    const bindingUpdates = prepared[6][offset];
+    if (!bindingUpdates) continue;
+    const instance = prepared[4][offset];
+    applyPreparedKeyedRowBindingUpdates(props, instance, bindingUpdates);
+    instance.item = prepared[2][offset];
+  }
+  reorderCompilerKeyedRows(root, prepared[4], prepared[5], prepared[1]);
+}
+
 function reconcileCompilerKeyedArrayWindowReplace(
   props: CompilerKeyedRowsBlockProps,
   dirtyState: ReadonlySet<number>,
@@ -4829,9 +4989,79 @@ function reconcileCompilerKeyedArrayWindowReplace(
   if (!updates || !Array.isArray(finalValue)) return undefined;
   const previousInstances = [...instances.values()];
   if (updates.length > 1) {
+    if (updates.some((update) => update.insertedCount !== update.removedCount)) {
+      const windows = normalizeCompilerKeyedArrayDisjointWindows(updates);
+      if (!windows) return undefined;
+
+      let sourceCursor = 0;
+      let resultCursor = 0;
+      const preparedIncomingKeys = new Set<string>();
+      const preparedWindows: CompilerPreparedKeyedArrayWindow[] = [];
+      const nextInstances: CompilerKeyedRowInstance[] = [];
+      for (const window of windows) {
+        if (window[0] < sourceCursor) return undefined;
+        while (sourceCursor < window[0]) {
+          const instance = previousInstances[sourceCursor];
+          if (
+            !instance ||
+            instance.index !== sourceCursor ||
+            !Object.is(instance.item, finalValue[resultCursor])
+          ) {
+            return undefined;
+          }
+          nextInstances.push(instance);
+          sourceCursor += 1;
+          resultCursor += 1;
+        }
+        const incoming = readCompilerKeyedArrayWindowItems(
+          props,
+          finalValue,
+          resultCursor,
+          window[3],
+        );
+        if (!incoming) return undefined;
+        window[1] = resultCursor;
+        const prepared = prepareCompilerKeyedArrayWindow(
+          props,
+          instances,
+          previousInstances,
+          root,
+          window,
+          incoming,
+          preparedIncomingKeys,
+        );
+        if (!prepared) return undefined;
+        preparedWindows.push(prepared);
+        nextInstances.push(...prepared[4]);
+        sourceCursor += window[2];
+        resultCursor += window[3];
+      }
+      while (sourceCursor < previousInstances.length) {
+        const instance = previousInstances[sourceCursor];
+        if (
+          !instance ||
+          instance.index !== sourceCursor ||
+          !Object.is(instance.item, finalValue[resultCursor])
+        ) {
+          return undefined;
+        }
+        nextInstances.push(instance);
+        sourceCursor += 1;
+        resultCursor += 1;
+      }
+      if (resultCursor !== finalValue.length) return undefined;
+
+      for (const prepared of preparedWindows) {
+        commitCompilerKeyedArrayWindow(props, root, prepared);
+      }
+      for (let index = 0; index < nextInstances.length; index += 1) {
+        nextInstances[index].index = index;
+      }
+      return new Map(nextInstances.map((instance) => [instance.key, instance]));
+    }
+
     const touchedIndices = new Set<number>();
     for (const update of updates) {
-      if (update.insertedCount !== update.removedCount) return undefined;
       for (let index = update.position; index < update.position + update.removedCount; index += 1) {
         touchedIndices.add(index);
       }
@@ -4938,19 +5168,15 @@ function reconcileCompilerKeyedArrayWindowReplace(
     return undefined;
   }
 
-  const incomingItems: unknown[] = [];
-  const incomingKeys: string[] = [];
-  try {
-    for (let offset = 0; offset < update.insertedCount; offset += 1) {
-      const index = update.position + offset;
-      const item = finalValue[index];
-      const key = keyedRowIdentity(props.rowKey(item, index));
-      incomingItems.push(item);
-      incomingKeys.push(key);
-    }
-  } catch {
-    return undefined;
-  }
+  const incoming = readCompilerKeyedArrayWindowItems(
+    props,
+    finalValue,
+    update.position,
+    update.insertedCount,
+  );
+  if (!incoming) return undefined;
+  const incomingItems = incoming[0];
+  const incomingKeys = incoming[1];
 
   if (
     update.insertedCount === update.removedCount &&
@@ -4978,122 +5204,19 @@ function reconcileCompilerKeyedArrayWindowReplace(
     return instances;
   }
 
-  const incomingKeySet = new Set(incomingKeys);
-  if (incomingKeySet.size !== incomingKeys.length) return undefined;
-  if (removed.some((instance) => incomingKeySet.has(instance.key))) {
-    const removedByKey = new Map(
-      removed.map((instance, offset) => [instance.key, { instance, offset }] as const),
-    );
-    const nextWindow: CompilerKeyedRowInstance[] = [];
-    const sequence: number[] = [];
-    const preparedBindings: Array<readonly CompilerPreparedKeyedRowBindingUpdate[] | undefined> =
-      [];
-    try {
-      for (let offset = 0; offset < update.insertedCount; offset += 1) {
-        const index = update.position + offset;
-        const item = incomingItems[offset];
-        const key = incomingKeys[offset];
-        const retained = removedByKey.get(key);
-        if (retained) {
-          const bindingUpdates = prepareKeyedRowBindingUpdates(
-            props,
-            retained.instance,
-            item,
-            index,
-          );
-          if (!bindingUpdates) return undefined;
-          nextWindow.push(retained.instance);
-          sequence.push(retained.offset);
-          preparedBindings.push(bindingUpdates);
-          continue;
-        }
-        // A key owned outside this exact window would duplicate or move a
-        // row across the proven boundary. Complete keyed reconciliation
-        // remains responsible for that case.
-        if (instances.has(key)) return undefined;
-        const descriptor = props.create(item, index);
-        nextWindow.push({
-          key,
-          element: createCompilerHostElement(root.ownerDocument, descriptor),
-          values: readKeyedRowBindingValues(props, item, index),
-          item,
-          index,
-          conditionalValues: EMPTY_KEYED_ROW_CONDITIONAL_VALUES,
-        });
-        sequence.push(-1);
-        preparedBindings.push(undefined);
-      }
-    } catch {
-      return undefined;
-    }
-
-    for (const instance of removed) {
-      if (incomingKeySet.has(instance.key)) continue;
-      instance.scope?.cleanup();
-      instance.element.remove();
-    }
-    for (let offset = 0; offset < nextWindow.length; offset += 1) {
-      const bindingUpdates = preparedBindings[offset];
-      if (bindingUpdates) {
-        const instance = nextWindow[offset];
-        applyPreparedKeyedRowBindingUpdates(props, instance, bindingUpdates);
-        instance.item = incomingItems[offset];
-        instance.index = update.position + offset;
-      }
-    }
-
-    reorderCompilerKeyedRows(root, nextWindow, sequence, anchor || null);
-    previousInstances.splice(update.position, update.removedCount, ...nextWindow);
-    for (
-      let index = update.position + update.insertedCount;
-      index < previousInstances.length;
-      index += 1
-    ) {
-      previousInstances[index].index = index;
-    }
-    return new Map(previousInstances.map((instance) => [instance.key, instance]));
-  }
-
-  const knownKeys = new Set(instances.keys());
-  const incoming: CompilerKeyedRowInstance[] = [];
-  try {
-    for (let offset = 0; offset < update.insertedCount; offset += 1) {
-      const index = update.position + offset;
-      const item = incomingItems[offset];
-      const key = incomingKeys[offset];
-      // Exact same-order reuse already returned above. Any remaining reuse is
-      // reordered or mixed and needs complete keyed reconciliation.
-      if (knownKeys.has(key)) return undefined;
-      knownKeys.add(key);
-      const descriptor = props.create(item, index);
-      incoming.push({
-        key,
-        element: createCompilerHostElement(root.ownerDocument, descriptor),
-        values: readKeyedRowBindingValues(props, item, index),
-        item,
-        index,
-        conditionalValues: EMPTY_KEYED_ROW_CONDITIONAL_VALUES,
-      });
-    }
-  } catch {
-    return undefined;
-  }
-
-  for (const instance of removed) {
-    instance.scope?.cleanup();
-    instance.element.remove();
-  }
-  if (incoming.length > 0) {
-    const fragment = root.ownerDocument.createDocumentFragment();
-    for (const instance of incoming) fragment.append(instance.element);
-    root.insertBefore(fragment, anchor || null);
-  }
-  previousInstances.splice(update.position, update.removedCount, ...incoming);
-  for (
-    let index = update.position + update.insertedCount;
-    index < previousInstances.length;
-    index += 1
-  ) {
+  const prepared = prepareCompilerKeyedArrayWindow(
+    props,
+    instances,
+    previousInstances,
+    root,
+    [update.position, update.position, update.removedCount, update.insertedCount],
+    incoming,
+    new Set(),
+  );
+  if (!prepared) return undefined;
+  commitCompilerKeyedArrayWindow(props, root, prepared);
+  previousInstances.splice(update.position, update.removedCount, ...prepared[4]);
+  for (let index = update.position; index < previousInstances.length; index += 1) {
     previousInstances[index].index = index;
   }
   return new Map(previousInstances.map((instance) => [instance.key, instance]));
