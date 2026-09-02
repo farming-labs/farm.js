@@ -55,6 +55,19 @@ const getCurrentSearchParams = (): URLSearchParams => {
 
 const throttleTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+const areParsedValuesEqual = <T>(parser: Parser<T>, current: T | null, next: T | null) => {
+  if (Object.is(current, next)) return true;
+  if (current === null || next === null || typeof current !== typeof next) return false;
+  if (Array.isArray(current) !== Array.isArray(next)) return false;
+  if (current instanceof Date !== next instanceof Date) return false;
+
+  try {
+    return parser.serialize(current) === parser.serialize(next);
+  } catch {
+    return false;
+  }
+};
+
 const applyChange = (
   searchParams: URLSearchParams,
   updates: Record<string, string | null>,
@@ -208,7 +221,7 @@ export function useQueryState<TParser extends Parser<any>>(
       const searchParams = getCurrentSearchParams();
       const value = searchParams.get(key);
       const parsed = parser.parse(value ?? "");
-      if (!Object.is(stateRef.current, parsed)) {
+      if (!areParsedValuesEqual(parser, stateRef.current, parsed)) {
         setState(parsed);
         stateRef.current = parsed;
       }
@@ -221,7 +234,7 @@ export function useQueryState<TParser extends Parser<any>>(
 
       const value = searchParams.get(key);
       const parsed = parser.parse(value ?? "");
-      if (!Object.is(stateRef.current, parsed)) {
+      if (!areParsedValuesEqual(parser, stateRef.current, parsed)) {
         setState(parsed);
         stateRef.current = parsed;
       }
@@ -232,7 +245,7 @@ export function useQueryState<TParser extends Parser<any>>(
         return;
       }
 
-      if (!Object.is(stateRef.current, payload.state)) {
+      if (!areParsedValuesEqual(parser, stateRef.current, payload.state)) {
         setState(payload.state);
         stateRef.current = payload.state;
       }
@@ -265,7 +278,7 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
   (updates: Partial<{ [K in keyof T]: ReturnType<T[K]["parse"]> | null }>) => void,
 ] {
   const keys = Object.keys(parsers);
-  const watchKeys = keys.join("&");
+  const watchKeys = JSON.stringify(keys);
 
   const [state, setState] = useState<{ [K in keyof T]: ReturnType<T[K]["parse"]> }>(() => {
     const searchParams = getCurrentSearchParams();
@@ -325,7 +338,7 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
         const parsed = parser.parse(value ?? "");
         const currentValue = stateRef.current[key as keyof T];
 
-        if (!Object.is(currentValue, parsed)) {
+        if (!areParsedValuesEqual(parser, currentValue, parsed)) {
           hasChanged = true;
         }
         result[key as keyof T] = parsed;

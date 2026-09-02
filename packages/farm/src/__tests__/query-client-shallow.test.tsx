@@ -8,7 +8,7 @@ import { useSearchParams } from "../navigation";
 import { pushState as pushFarmPageState, readPageState, SPARouter } from "../client/spa-router";
 import { usePageState } from "../client/router";
 import { FARM_HISTORY_CHANGE_EVENT, notifyHistoryChange } from "../client/history-sync";
-import { asString, useQueryState, useQueryStates } from "../query/client";
+import { asJson, asString, useQueryState, useQueryStates } from "../query/client";
 
 describe("useQueryState shallow routing", () => {
   let container: HTMLDivElement;
@@ -291,6 +291,42 @@ describe("useQueryState shallow routing", () => {
       root?.render(createElement(App, { queryKey: "second" }));
     });
     expect(value).toEqual({ second: "two" });
+  });
+
+  it("does not loop when useQueryState receives an inline parser returning objects", () => {
+    window.history.replaceState(null, "", '/?filters={"status":"open"}');
+    let renders = 0;
+
+    function App() {
+      renders += 1;
+      useQueryState("filters", asJson<{ status: string }>());
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+
+    expect(renders).toBe(1);
+  });
+
+  it("does not loop when useQueryStates receives an inline parser map", () => {
+    window.history.replaceState(null, "", '/?filters={"status":"open"}');
+    let renders = 0;
+
+    function App() {
+      renders += 1;
+      useQueryStates({ filters: asJson<{ status: string }>() });
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+
+    expect(renders).toBe(1);
   });
 
   it("composes throttled updates for different query keys", () => {
