@@ -66,6 +66,7 @@ import {
   resolveFarmTrailingSlashRedirect,
   setFarmTrailingSlashPreference,
 } from "../trailing-slash";
+import { setFarmBasePath } from "../base-path";
 import { DEFAULT_NOT_FOUND_STYLES } from "../components/not-found-styles";
 import {
   createDefaultErrorMarkup,
@@ -987,6 +988,7 @@ export class ServerRenderer {
 
   async renderPage(req: FarmRequest, res: FarmResponse): Promise<void> {
     await this.initialize();
+    setFarmBasePath(this.config.basePath);
     setFarmTrailingSlashPreference(this.config.trailingSlash);
     const request = createWebRequestFromFarmRequest(req);
     const runtime = this.i18nRuntime;

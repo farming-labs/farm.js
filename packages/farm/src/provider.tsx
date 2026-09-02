@@ -38,6 +38,11 @@ export function useFarm(): FarmContextValue {
   return context;
 }
 
+/** @internal Read Farm context when a component can also use a runtime fallback. */
+export function useOptionalFarm(): FarmContextValue | null {
+  return useContext(FarmContext);
+}
+
 /**
  * Hook to get the current base path
  */

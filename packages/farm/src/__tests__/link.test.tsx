@@ -7,6 +7,8 @@ import { expectTypeOf } from "vitest";
 import { createRoot } from "react-dom/client";
 import { Link, type LinkProps, type RouteHref } from "../client/link";
 import { setFarmTrailingSlashPreference } from "../trailing-slash";
+import { setFarmBasePath } from "../base-path";
+import { FarmProvider } from "../provider";
 
 const prefetch = vi.fn().mockResolvedValue(undefined);
 const navigate = vi.fn();
@@ -46,6 +48,7 @@ describe("Link", () => {
     delete (window as any).__FARM_SPA_ROUTER__;
     delete (window as any).__FARM_MANIFEST__;
     setFarmTrailingSlashPreference(false);
+    setFarmBasePath("/");
   });
 
   function render(ui: React.ReactElement) {
@@ -176,6 +179,26 @@ describe("Link", () => {
   });
 
   describe("navigation", () => {
+    it("prefixes internal links with the configured app base path", () => {
+      setFarmBasePath("/console");
+      const el = render(createElement(Link, { href: "/dashboard", prefetch: "render" }));
+
+      expect(el?.getAttribute("href")).toBe("/console/dashboard");
+      expect(prefetch).toHaveBeenCalledWith("/console/dashboard");
+    });
+
+    it("uses an explicit FarmProvider base path without prefixing it twice", () => {
+      const el = render(
+        createElement(
+          FarmProvider,
+          { config: { basePath: "/workspace" } as any },
+          createElement(Link, { href: "/workspace/settings" }),
+        ),
+      );
+
+      expect(el?.getAttribute("href")).toBe("/workspace/settings");
+    });
+
     it("inherits the app trailing-slash preference", () => {
       setFarmTrailingSlashPreference(true);
       const el = render(
