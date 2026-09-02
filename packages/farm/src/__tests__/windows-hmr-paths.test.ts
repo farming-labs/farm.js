@@ -4,6 +4,14 @@ import { describe, expect, it, vi } from "vitest";
 import { farmApiPlugin } from "../api/vite-plugin";
 import { farmPlugin } from "../vite";
 
+const { existsSync } = vi.hoisted(() => ({ existsSync: vi.fn() }));
+
+vi.mock("fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("fs")>();
+  existsSync.mockImplementation(actual.existsSync);
+  return { ...actual, existsSync };
+});
+
 describe("Windows HMR paths", () => {
   it("reloads page modules through the main Farm plugin", async () => {
     const send = vi.fn();
@@ -52,6 +60,7 @@ describe("Windows HMR paths", () => {
   });
 
   it("recognizes file-based API routes through the standalone plugin", async () => {
+    existsSync.mockReturnValueOnce(true);
     const ssrLoadModule = vi.fn(async () => ({ GET: async () => new Response("ok") }));
     const plugin = farmApiPlugin() as any;
 
