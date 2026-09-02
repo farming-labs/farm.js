@@ -102,7 +102,7 @@ export class APITypeGenerator {
     for (const method of httpMethods) {
       // Look for a direct declaration or the name exposed by an export list.
       const patterns = [
-        new RegExp(`export\\s+const\\s+${method}\\s*=`, "g"),
+        new RegExp(`export\\s+(?:const|let|var)\\s+${method}\\s*(?::|=)`, "g"),
         new RegExp(`export\\s+(?:async\\s+)?function\\s+${method}\\s*\\(`, "g"),
       ];
 
