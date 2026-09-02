@@ -1,8 +1,11 @@
 # Releasing Farm.js
 
-Farm.js releases every public package under `packages/*` through one Bumpp flow. Bumpp updates every package manifest to the selected version, builds the workspace, creates the release commit and Git
-tag, and pushes them before pnpm publishes the packages to npm. The first release through
-this flow also aligns any currently different package versions.
+Farm.js has a shared release group defined by the package manifests listed in `bump.config.ts`.
+Bumpp updates that group to the selected version, builds the workspace, creates the release commit
+and Git tag, and pushes them before pnpm publishes packages to npm. Public packages omitted from
+the Bumpp list keep their independently managed versions. Release preparation synchronizes starter
+dependencies to the actual version of each workspace package instead of forcing those packages into
+the shared version.
 
 ## Stable release
 
@@ -11,8 +14,9 @@ pnpm release
 ```
 
 `pnpm release` is an alias for `pnpm release:latest`. Choose the next version in the Bumpp
-prompt. After the build and Git release steps pass, every package is published with npm's
-`latest` tag.
+prompt. After the build and Git release steps pass, newly versioned shared packages are published
+with npm's `latest` tag. An independently versioned package is not bumped by this command; pnpm
+publishes it only when its current version is not already present on npm.
 
 ## Beta release
 
@@ -20,10 +24,14 @@ prompt. After the build and Git release steps pass, every package is published w
 pnpm release:beta
 ```
 
-Bumpp uses `beta` as the prerelease identifier, then pnpm publishes every package with the
-`beta` tag. After every package is published successfully, the release promotes each current
-beta to npm's `latest` tag so unqualified installs receive the newest beta. If a package already
-has a stable `latest` version, the stable tag is preserved.
+Bumpp uses `beta` as the prerelease identifier for the shared release group, then pnpm publishes
+the new shared versions with the `beta` tag while leaving independently versioned packages at
+their current versions. Before starting, confirm that every public package's current manifest
+version, including every independently versioned package, is a beta. The promotion step rejects a
+stable current version instead of skipping that package, which aborts the release after publishing.
+After every current beta is visible, the release promotes it to npm's `latest` tag so unqualified
+installs receive the newest beta. If a package already has a stable `latest` version, that stable tag
+is preserved.
 
 To build and publish a beta without running the test suite, pass `--no-test`:
 
@@ -49,8 +57,8 @@ This follows the same flow with a `canary` prerelease identifier and npm tag.
 pnpm bump
 ```
 
-This updates the shared version, builds, commits, tags, and pushes without publishing to
-npm.
+This updates the packages in the shared Bumpp group, builds, commits, tags, and pushes without
+publishing to npm. Independently versioned packages remain unchanged.
 
 ## Retry a publish
 
