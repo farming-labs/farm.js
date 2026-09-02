@@ -103,6 +103,15 @@ interface CachedPPRShell {
   html: string;
 }
 
+export function shouldServePrerenderedPage(
+  nodeEnv: string | undefined,
+  method: string | undefined,
+): boolean {
+  if (nodeEnv !== "production") return false;
+  const normalizedMethod = (method || "GET").toUpperCase();
+  return normalizedMethod === "GET" || normalizedMethod === "HEAD";
+}
+
 function formatSSGManifestError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -1066,8 +1075,9 @@ export class ServerRenderer {
         }
       }
 
-      // Check for pre-rendered SSG page first (production only)
-      if (process.env.NODE_ENV === "production") {
+      // Pre-rendered HTML only represents retrieval requests. Other methods must
+      // continue through the live route so their request semantics are preserved.
+      if (shouldServePrerenderedPage(process.env.NODE_ENV, req.method)) {
         const ssgPage = await this.shouldServeSSG(pathname);
         if (ssgPage) {
           const served = await this.serveSSGPage(req, res, ssgPage);
