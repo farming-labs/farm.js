@@ -6,6 +6,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useRouter } from "../client/router";
 import { pushState as pushFarmPageState, readPageState, SPARouter } from "../client/spa-router";
+import { setFarmBasePath } from "../base-path";
 
 let router: SPARouter | undefined;
 let container: HTMLDivElement;
@@ -25,6 +26,7 @@ function renderHook() {
 const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
 
 beforeEach(() => {
+  setFarmBasePath("/");
   window.history.replaceState(null, "", "/");
   (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   container = document.createElement("div");
@@ -32,6 +34,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  setFarmBasePath("/");
   if (root) act(() => root?.unmount());
   container.remove();
   root = undefined;
@@ -72,6 +75,22 @@ describe("useRouter push/replace delegation", () => {
     await settle();
 
     expect(navigate).toHaveBeenCalledWith("/pricing", { replace: true });
+  });
+
+  it("uses the configured app base path without duplicating it", async () => {
+    setFarmBasePath("/console");
+    const spa = installRouter();
+    const navigate = vi.spyOn(spa, "navigate").mockResolvedValue();
+    const getApi = renderHook();
+
+    act(() => {
+      getApi().push("/reports");
+      getApi().replace("/console/settings");
+    });
+    await settle();
+
+    expect(navigate).toHaveBeenNthCalledWith(1, "/console/reports", { replace: false });
+    expect(navigate).toHaveBeenNthCalledWith(2, "/console/settings", { replace: true });
   });
 
   it("leaves the URL unchanged when a blocker cancels the navigation", async () => {

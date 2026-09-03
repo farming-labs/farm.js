@@ -11,6 +11,12 @@ import { notifyHistoryChange, subscribeHistoryChange } from "./history-sync";
 import { getFarmI18nClientState } from "../i18n/client-runtime";
 import { _resolveCurrentRequest } from "../server/request-bridge";
 import { stripFarmLocaleFromPathname } from "../i18n/routing";
+import {
+  applyFarmBasePath,
+  getFarmBasePath,
+  normalizeFarmBasePath,
+  stripFarmBasePath,
+} from "../base-path";
 
 interface RouterState {
   pathname: string;
@@ -48,7 +54,7 @@ export interface UseBlockerReturn {
 function navigateViaRouter(href: string, basePath: string, replace: boolean): void {
   if (typeof window === "undefined") return;
 
-  const url = href.startsWith("/") ? basePath + href : href;
+  const url = applyFarmBasePath(href, basePath);
   const spaRouter = getInstalledFarmSPARouter();
   if (spaRouter) {
     void spaRouter.navigate(url, { replace });
@@ -64,7 +70,8 @@ function navigateViaRouter(href: string, basePath: string, replace: boolean): vo
 }
 
 export function useRouter(options: UseRouterOptions = {}) {
-  const basePath = options.basePath || "";
+  const basePath =
+    options.basePath === undefined ? getFarmBasePath() : normalizeFarmBasePath(options.basePath);
   const routes = options.routes;
   const routeKey =
     routes?.map((route) => (typeof route === "string" ? route : route.path)).join("\n") || "";
@@ -253,14 +260,10 @@ function readCurrentUrl(): URL | undefined {
 }
 
 function normalizeClientPathname(pathname: string, basePath: string) {
-  const normalizedBase = basePath.replace(/\/+$/, "");
-  const isUnderBase =
-    normalizedBase && (pathname === normalizedBase || pathname.startsWith(`${normalizedBase}/`));
-  const withoutBase = isUnderBase ? pathname.slice(normalizedBase.length) || "/" : pathname;
-  return withoutBase || "/";
+  return stripFarmBasePath(pathname, basePath);
 }
 
 function resolveClientHref(href: string | undefined, basePath: string): string | undefined {
   if (!href) return undefined;
-  return href.startsWith("/") ? basePath + href : href;
+  return applyFarmBasePath(href, basePath);
 }

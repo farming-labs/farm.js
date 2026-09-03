@@ -191,6 +191,8 @@ export function CurrentUserTab() {
 
 Imperative `push()` and `replace()` calls use SPA navigation for same-origin routes. Absolute
 cross-origin URLs use normal document navigation instead of Farm's local page-data endpoint.
+Internal router paths use the configured application `basePath`, matching `Link`; already-prefixed
+paths are preserved.
 
 ## Navigation blocking
 

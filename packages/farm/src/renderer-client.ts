@@ -26,6 +26,12 @@ import {
   subscribeFarmI18n,
 } from "./i18n/client-runtime";
 import type { FarmI18nClientSnapshot, FarmI18nLocale, FarmTranslator } from "./i18n/types";
+import {
+  applyFarmBasePath,
+  getFarmBasePath,
+  normalizeFarmBasePath,
+  stripFarmBasePath,
+} from "./base-path";
 
 export interface FarmClientStore<TSnapshot> {
   getSnapshot(): TSnapshot;
@@ -57,7 +63,8 @@ export interface FarmRendererRouter extends FarmClientStore<FarmRendererRouterSn
 }
 
 export function createRendererRouter(options: FarmRendererRouterOptions = {}): FarmRendererRouter {
-  const basePath = options.basePath || "";
+  const basePath =
+    options.basePath === undefined ? getFarmBasePath() : normalizeFarmBasePath(options.basePath);
   const matcher = options.routes?.length ? createFarmRouter([...options.routes]) : null;
   const router = getSPARouter();
   let snapshot = readRendererRouterSnapshot(basePath, matcher, router.getNavigationState());
@@ -386,12 +393,7 @@ function readRendererRouterSnapshot(
   }
 
   const url = new URL(window.location.href);
-  const normalizedBase = basePath.replace(/\/+$/, "");
-  const pathname =
-    normalizedBase &&
-    (url.pathname === normalizedBase || url.pathname.startsWith(`${normalizedBase}/`))
-      ? url.pathname.slice(normalizedBase.length) || "/"
-      : url.pathname;
+  const pathname = stripFarmBasePath(url.pathname, basePath);
   const i18n = getFarmI18nClientState();
   const routePathname = i18n ? stripFarmLocaleFromPathname(pathname, i18n) : pathname;
 
@@ -405,7 +407,7 @@ function readRendererRouterSnapshot(
 }
 
 function resolveRendererHref(href: string, basePath: string): string {
-  return href.startsWith("/") ? `${basePath}${href}` : href;
+  return applyFarmBasePath(href, basePath);
 }
 
 function resolveRendererServerFn<TInput, TResult, TError extends Error>(

@@ -1,5 +1,6 @@
 import { useRouter as useFarmRouter } from "./client/router";
 import { getRouter as getFarmSPARouter } from "./client/spa-router";
+import { applyFarmBasePath } from "./base-path";
 
 export {
   getFarmRedirectError,
@@ -24,7 +25,7 @@ export function useRouter() {
     },
     prefetch(href: string) {
       if (typeof window === "undefined") return Promise.resolve();
-      return getFarmSPARouter().prefetch(href);
+      return getFarmSPARouter().prefetch(applyFarmBasePath(href));
     },
   };
 }

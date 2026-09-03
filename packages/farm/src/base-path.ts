@@ -16,7 +16,7 @@ export function getFarmBasePath(): string {
 
 export function applyFarmBasePath(href: string, basePath = getFarmBasePath()): string {
   const normalizedBasePath = normalizeFarmBasePath(basePath);
-  if (!normalizedBasePath || !href.startsWith("/")) return href;
+  if (!normalizedBasePath || !href.startsWith("/") || href.startsWith("//")) return href;
   if (
     href === normalizedBasePath ||
     href.startsWith(`${normalizedBasePath}/`) ||
@@ -26,6 +26,14 @@ export function applyFarmBasePath(href: string, basePath = getFarmBasePath()): s
     return href;
   }
   return `${normalizedBasePath}${href}`;
+}
+
+export function stripFarmBasePath(pathname: string, basePath = getFarmBasePath()): string {
+  const normalizedBasePath = normalizeFarmBasePath(basePath);
+  if (!normalizedBasePath) return pathname || "/";
+  if (pathname === normalizedBasePath) return "/";
+  if (!pathname.startsWith(`${normalizedBasePath}/`)) return pathname || "/";
+  return pathname.slice(normalizedBasePath.length) || "/";
 }
 
 export function normalizeFarmBasePath(basePath: string | undefined): string {
