@@ -1769,6 +1769,15 @@ export function generateUniversalRouterStateProperties(): string {
     this.setNavigationState(IDLE_NAVIGATION_STATE);
   },
 
+  clearPrefetchedPath: function(url) {
+    const interceptionPrefix = url + "\\nintercept:";
+    for (const key of this.prefetchCache.keys()) {
+      if (key === url || key.startsWith(interceptionPrefix)) {
+        this.prefetchCache.delete(key);
+      }
+    }
+  },
+
   setNavigationState: function(state) {
     this.navigationState = state;
     for (const listener of this.navigationListeners) listener(state);
@@ -2156,7 +2165,7 @@ ${generateUniversalRouterStateProperties()}
   },
   
   fetchPage: async function(url, fresh = false, recover = true, signal) {
-    if (fresh) this.prefetchCache.delete(url);
+    if (fresh) this.clearPrefetchedPath(url);
     const cached = fresh ? undefined : this.prefetchCache.get(url);
     if (cached) return cached;
     
@@ -2947,7 +2956,7 @@ ${generateUniversalRouterStateProperties()}
 
     const action = options.action || (options.replace ? "replace" : "push");
     const to = url.pathname + url.search;
-    if (action !== "pop" && to === this.currentPath) {
+    if (!options.refresh && action !== "pop" && to === this.currentPath) {
       this.cancelActiveNavigation();
       if (url.hash === window.location.hash) return;
       const pageState = options.state === undefined
@@ -2990,7 +2999,7 @@ ${generateUniversalRouterStateProperties()}
       navigation.clientNavigation = clientNavigation;
       if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
 
-      if (activeRouteInterception && clearRouteInterception(to)) {
+      if (!options.refresh && activeRouteInterception && clearRouteInterception(to)) {
         this.currentPath = to;
         await farmClientRuntime.markNavigationLoaded(clientNavigation, {
           routeSlots: "restored",
@@ -3006,9 +3015,9 @@ ${generateUniversalRouterStateProperties()}
         clearRouteInterception(to);
       }
 
-      const intercepted = matchInterceptedRouteSlot(pathname, from);
+      const intercepted = options.refresh ? null : matchInterceptedRouteSlot(pathname, from);
       if (intercepted) {
-        const html = await this.fetchPage(to, from, true, navigation.controller.signal);
+        const html = await this.fetchPage(to, from, false, true, navigation.controller.signal);
         if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
         const doc = new DOMParser().parseFromString(html, "text/html");
         const slotPayload = readRouteSlotPayload(doc);
@@ -3045,7 +3054,7 @@ ${generateUniversalRouterStateProperties()}
         }
       }
 
-      if (matched?.route.navigation === "client-render") {
+      if (!options.refresh && matched?.route.navigation === "client-render") {
         // Navigation itself signals intent, so destination routes load eagerly even
         // when their initial document hydration strategy is deferred.
         const Component = await loadRouteComponent(matched.route);
@@ -3096,6 +3105,7 @@ ${generateUniversalRouterStateProperties()}
         const html = await this.fetchPage(
           url.pathname + url.search,
           undefined,
+          options.refresh === true,
           true,
           navigation.controller.signal,
         );
@@ -3152,10 +3162,21 @@ ${generateUniversalRouterStateProperties()}
       else window.location.href = href;
     }
   },
+
+  refresh: function(options = {}) {
+    return this.navigate(window.location.href, {
+      ...options,
+      action: "replace",
+      replace: true,
+      refresh: true,
+      scroll: options.scroll === undefined ? false : options.scroll,
+    });
+  },
   
-  fetchPage: async function(url, interceptFrom, recover = true, signal) {
+  fetchPage: async function(url, interceptFrom, fresh = false, recover = true, signal) {
     const cacheKey = interceptFrom ? url + "\\nintercept:" + interceptFrom : url;
-    const cached = this.prefetchCache.get(cacheKey);
+    if (fresh) this.clearPrefetchedPath(url);
+    const cached = fresh ? undefined : this.prefetchCache.get(cacheKey);
     if (cached) return cached;
     
     const response = await fetchFarmNavigationDocument(
@@ -3312,7 +3333,7 @@ ${generateUniversalRouterStateProperties()}
     const cacheKey = pathname + "\\nintercept:" + interceptFrom;
     if (this.prefetchCache.has(cacheKey)) return;
     
-    this.fetchPage(pathname, interceptFrom, false)
+    this.fetchPage(pathname, interceptFrom, false, false)
       .then(function(html) { spaRouter.prefetchCache.set(cacheKey, html); })
       .catch(function(error) {
         clearFarmPrefetchCacheOnDeploymentMismatch(spaRouter, error);

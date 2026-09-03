@@ -70,6 +70,35 @@ describe("generateUniversalRouterStateProperties", () => {
     router.finishNavigation(second);
     expect(router.getNavigationState().state).toBe("idle");
   });
+
+  it("invalidates plain and interception-qualified prefetch entries together", () => {
+    const createRouter = new Function(
+      "window",
+      "IDLE_NAVIGATION_STATE",
+      "createNavigationLocation",
+      `return ({${runtime} prefetchCache: new Map([
+        ["/reports", "plain"],
+        ["/reports\\nintercept:/dashboard", "intercepted"],
+        ["/settings", "other"],
+      ])});`,
+    ) as (
+      windowValue: { location: { pathname: string; search: string } },
+      idleState: object,
+      createLocation: (url: URL) => object,
+    ) => {
+      clearPrefetchedPath(url: string): void;
+      prefetchCache: Map<string, string>;
+    };
+    const router = createRouter(
+      { location: { pathname: "/", search: "" } },
+      { state: "idle", pending: false },
+      (url) => ({ href: url.href }),
+    );
+
+    router.clearPrefetchedPath("/reports");
+
+    expect([...router.prefetchCache.keys()]).toEqual(["/settings"]);
+  });
 });
 
 describe("generated deployment navigation guard", () => {
