@@ -12,14 +12,18 @@ import {
 } from "../renderer-client";
 import type { ServerFn } from "../server-fn";
 import type { ServerQuery } from "../server-query";
+import { setFarmBasePath } from "../base-path";
+import { getRouter } from "../client/spa-router";
 
 describe("renderer-neutral client primitives", () => {
   beforeEach(() => {
+    setFarmBasePath("/");
     getFarmClientDataCache().clear();
     window.history.replaceState(null, "", "/products/42?tab=details");
   });
 
   afterEach(() => {
+    setFarmBasePath("/");
     delete window.__FARM_THEME__;
     vi.restoreAllMocks();
   });
@@ -36,6 +40,23 @@ describe("renderer-neutral client primitives", () => {
 
     expect(listener).toHaveBeenCalled();
     unsubscribe();
+  });
+
+  it("uses the configured app base path for renderer-neutral routing", async () => {
+    setFarmBasePath("/console");
+    window.history.replaceState(null, "", "/console/products/42?tab=details");
+    const router = createRendererRouter({ routes: ["/products/[id]"] });
+    const navigate = vi.spyOn(getRouter(), "navigate").mockResolvedValue();
+
+    expect(router.getSnapshot()).toMatchObject({
+      pathname: "/products/42",
+      params: { id: "42" },
+    });
+    await router.push("/orders");
+    await router.replace("/console/settings");
+
+    expect(navigate).toHaveBeenNthCalledWith(1, "/console/orders", undefined);
+    expect(navigate).toHaveBeenNthCalledWith(2, "/console/settings", { replace: true });
   });
 
   it("runs typed actions with observable optimistic and settled state", async () => {

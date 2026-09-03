@@ -3564,7 +3564,7 @@ async function hydrateFarmIsolatedClientBoundaries(scope = document) {
 ${rendererClientImports}
 import { installChunkErrorRecovery, SPARouter } from '@farm.js/core/client'
 import { createClientPluginManager } from '@farm.js/core/plugin/client'
-import { scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference } from '@farm.js/core/internal/client-runtime'
+import { scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from '@farm.js/core/internal/client-runtime'
 import { reviveDeferredData } from '@farm.js/core/deferred'
 import {
   createFarmDeploymentMismatchError,
@@ -3593,6 +3593,7 @@ let reactRoot = null;
 ${isolatedHydrationRuntime}
 
 function matchesDocumentNavigation(pathname) {
+  pathname = stripFarmBasePath(pathname);
   return integrationDocumentNavigationMatchers.some((matcher) => {
     if (matcher === '/(.*)' || matcher === '*') {
       return true;
@@ -3663,6 +3664,7 @@ function matchRoute(pathname, routeSegments) {
 }
 
 function findRoute(pathname) {
+  pathname = stripFarmBasePath(pathname);
   const manifest = getManifest();
   const routes = Object.values(manifest.routes);
   
@@ -3676,6 +3678,7 @@ function findRoute(pathname) {
 }
 
 function findLayouts(pathname) {
+  pathname = stripFarmBasePath(pathname);
   const manifest = getManifest();
   const layouts = Object.values(manifest.layouts);
   const normalizedPath = pathname === '/' ? '/' : pathname.replace(/\\/$/, '');

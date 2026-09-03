@@ -753,6 +753,7 @@ export function Chart() {}
     expect(source).toContain("subscribeNavigation: function(listener)");
     expect(source).toContain("addBlocker: function(blocker)");
     expect(source).toContain("registerScrollElement: function(key, element)");
+    expect(source).toContain("stripFarmBasePath(pathname)");
     expect(source).toContain("writePageState: function(action, state, href)");
     expect(source).toContain("runViewTransition: async function(enabled, callback)");
     expect(source).toContain('const href = element.getAttribute("href");');

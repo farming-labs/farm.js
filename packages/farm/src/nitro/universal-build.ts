@@ -1911,7 +1911,7 @@ if (window.__FARM_I18N__) {
 }
 
 function getFarmRoutePathname(pathname) {
-  return stripFarmLocaleFromPathname(pathname, farmI18nConfig);
+  return stripFarmLocaleFromPathname(stripFarmBasePath(pathname), farmI18nConfig);
 }
 
 function isFarmLocaleDocumentChange(doc) {
@@ -1922,7 +1922,7 @@ function isFarmLocaleDocumentChange(doc) {
 `
     : `
 function getFarmRoutePathname(pathname) {
-  return pathname;
+  return stripFarmBasePath(pathname);
 }
 
 function isFarmLocaleDocumentChange() {
@@ -1933,7 +1933,8 @@ function isFarmLocaleDocumentChange() {
     ? `
 const farmDocsEntryPath = ${JSON.stringify(docsEntryPath)};
 function isFarmDocsPath(pathname) {
-  const normalizedPath = pathname.length > 1 ? pathname.replace(/\\/+$/, "") : pathname;
+  const routePathname = getFarmRoutePathname(pathname);
+  const normalizedPath = routePathname.length > 1 ? routePathname.replace(/\\/+$/, "") : routePathname;
   return normalizedPath === farmDocsEntryPath || normalizedPath.startsWith(farmDocsEntryPath + "/");
 }
 `
@@ -1975,7 +1976,7 @@ async function hydrateFarmDocsAdapterRuntime() {
 // Farm.js Client Runtime (no client components)
 ${cssImport}
 ${layoutImports}
-import { createClientPluginManager, installChunkErrorRecovery, setFarmBasePath, setFarmTrailingSlashPreference } from "@farm.js/core/internal/client-runtime";
+import { createClientPluginManager, installChunkErrorRecovery, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
 ${clientPluginEntry.imports}
 ${i18nClientRuntime}
 ${docsNavigationRuntime}
@@ -2366,7 +2367,7 @@ ${cssImport}
 ${layoutImports}
 ${rendererClientImports}
 ${providerClientCode.imports}
-import { createClientPluginManager, installChunkErrorRecovery, scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference } from "@farm.js/core/internal/client-runtime";
+import { createClientPluginManager, installChunkErrorRecovery, scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
 import { matchFarmRoute } from "@farm.js/core/router";
 ${clientPluginEntry.imports}
 ${i18nClientRuntime}
