@@ -1,10 +1,20 @@
 // @vitest-environment node
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { FARM_HISTORY_CHANGE_EVENT } from "../client/history-sync";
 import {
+  createFarmDeploymentMismatchError,
+  createFarmDeploymentRequestHeaders,
+  isFarmDeploymentMismatchResponse,
+} from "../deployment";
+import {
   generateRuntimePathMatcherSource,
+  generateUniversalRouterStateRuntime,
   generateUniversalRouterStateProperties,
 } from "../nitro/universal-build";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("generateUniversalRouterStateProperties", () => {
   // Shared by both production runtime variants (node and edge templates).
@@ -59,6 +69,114 @@ describe("generateUniversalRouterStateProperties", () => {
     expect(router.getNavigationState().state).toBe("loading");
     router.finishNavigation(second);
     expect(router.getNavigationState().state).toBe("idle");
+  });
+});
+
+describe("generated deployment navigation guard", () => {
+  const createGuard = () =>
+    new Function(
+      "createFarmDeploymentMismatchError",
+      "createFarmDeploymentRequestHeaders",
+      "isFarmDeploymentMismatchResponse",
+      `${generateUniversalRouterStateRuntime()}; return fetchFarmNavigationDocument;`,
+    )(
+      createFarmDeploymentMismatchError,
+      createFarmDeploymentRequestHeaders,
+      isFarmDeploymentMismatchResponse,
+    ) as (url: string, headers: HeadersInit, recover?: boolean) => Promise<Response>;
+
+  it("reports a prefetched deployment mismatch without navigating", async () => {
+    const assign = vi.fn();
+    const dispatchEvent = vi.fn();
+    vi.stubGlobal("window", {
+      __FARM_DEPLOYMENT_ID__: "release-1",
+      dispatchEvent,
+      location: { assign },
+    });
+    vi.stubGlobal(
+      "CustomEvent",
+      class {
+        constructor(
+          readonly type: string,
+          readonly init: { detail: unknown },
+        ) {}
+      },
+    );
+    const response = new Response(null, {
+      status: 409,
+      headers: {
+        "x-farm-deployment-id": "release-2",
+        "x-farm-deployment-mismatch": "1",
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(createGuard()("/reports", { Accept: "text/html" }, false)).rejects.toMatchObject({
+      name: "FarmDeploymentMismatchError",
+      clientDeploymentId: "release-1",
+      serverDeploymentId: "release-2",
+    });
+
+    const requestHeaders = fetchMock.mock.calls[0]?.[1]?.headers as Headers;
+    expect(requestHeaders.get("x-farm-deployment-id")).toBe("release-1");
+    expect(dispatchEvent).toHaveBeenCalledTimes(1);
+    expect(assign).not.toHaveBeenCalled();
+  });
+
+  it("navigates to the requested URL when recovery is enabled", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("window", {
+      __FARM_DEPLOYMENT_ID__: "release-1",
+      dispatchEvent: vi.fn(),
+      location: { assign },
+    });
+    vi.stubGlobal(
+      "CustomEvent",
+      class {
+        constructor(
+          readonly type: string,
+          readonly init: { detail: unknown },
+        ) {}
+      },
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(null, {
+          status: 409,
+          headers: {
+            "x-farm-deployment-id": "release-2",
+            "x-farm-deployment-mismatch": "1",
+          },
+        }),
+      ),
+    );
+
+    await expect(createGuard()("/reports", { Accept: "text/html" })).rejects.toMatchObject({
+      name: "FarmDeploymentMismatchError",
+    });
+    expect(assign).toHaveBeenCalledWith("/reports");
+  });
+
+  it("clears older prefetched HTML after a deployment mismatch", () => {
+    const getHandler = new Function(
+      `${generateUniversalRouterStateRuntime()}; return clearFarmPrefetchCacheOnDeploymentMismatch;`,
+    ) as () => (router: { prefetchCache: Map<string, string> }, error: Error) => void;
+    const clearOnMismatch = getHandler();
+    const router = {
+      prefetchCache: new Map([
+        ["/reports", "old release"],
+        ["/settings", "old release"],
+      ]),
+    };
+
+    clearOnMismatch(
+      router,
+      Object.assign(new Error("mismatch"), { name: "FarmDeploymentMismatchError" }),
+    );
+
+    expect(router.prefetchCache.size).toBe(0);
   });
 });
 

@@ -1558,7 +1558,7 @@ async function buildClient(
 /**
  * Generate client hydration entry that imports and hydrates client components
  */
-function generateUniversalRouterStateRuntime(): string {
+export function generateUniversalRouterStateRuntime(): string {
   return `
 const FARM_PAGE_STATE_KEY = "__farmPageState";
 const IDLE_NAVIGATION_STATE = {
@@ -1590,6 +1590,27 @@ function createHistoryState(path, pageState, currentState) {
     path,
     [FARM_PAGE_STATE_KEY]: pageState,
   };
+}
+
+async function fetchFarmNavigationDocument(url, headers, recover = true, signal) {
+  const deploymentId = window.__FARM_DEPLOYMENT_ID__;
+  const response = await fetch(url, {
+    headers: createFarmDeploymentRequestHeaders(deploymentId, headers),
+    signal,
+  });
+  if (isFarmDeploymentMismatchResponse(response, deploymentId)) {
+    const error = createFarmDeploymentMismatchError(response, deploymentId || "unknown");
+    window.dispatchEvent(new CustomEvent("farm:deployment-mismatch", { detail: error }));
+    if (recover) window.location.assign(url);
+    throw error;
+  }
+  return response;
+}
+
+function clearFarmPrefetchCacheOnDeploymentMismatch(router, error) {
+  if (error?.name === "FarmDeploymentMismatchError") {
+    router.prefetchCache.clear();
+  }
 }
 `.trim();
 }
@@ -2006,6 +2027,7 @@ async function hydrateFarmDocsAdapterRuntime() {
 ${cssImport}
 ${layoutImports}
 import { createClientPluginManager, installChunkErrorRecovery, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
+import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";
 ${clientPluginEntry.imports}
 ${i18nClientRuntime}
 ${docsNavigationRuntime}
@@ -2076,6 +2098,7 @@ ${generateUniversalRouterStateProperties()}
       const html = await this.fetchPage(
         url.pathname + url.search,
         options.refresh === true,
+        true,
         navigation.controller.signal,
       );
       if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
@@ -2115,6 +2138,7 @@ ${generateUniversalRouterStateProperties()}
         await farmClientRuntime.failNavigation(clientNavigation, error);
       }
       this.finishNavigation(navigation);
+      if (error?.name === "FarmDeploymentMismatchError") return;
       console.error("[Farm.js] Navigation error:", error);
       if (action === "pop") window.location.reload();
       else window.location.href = href;
@@ -2131,15 +2155,17 @@ ${generateUniversalRouterStateProperties()}
     });
   },
   
-  fetchPage: async function(url, fresh = false, signal) {
+  fetchPage: async function(url, fresh = false, recover = true, signal) {
     if (fresh) this.prefetchCache.delete(url);
     const cached = fresh ? undefined : this.prefetchCache.get(url);
     if (cached) return cached;
     
-    const response = await fetch(url, {
+    const response = await fetchFarmNavigationDocument(
+      url,
+      { "Accept": "text/html" },
+      recover,
       signal,
-      headers: { "Accept": "text/html" }
-    });
+    );
     if (!response.ok) throw new Error("Failed to fetch page");
     return response.text();
   },
@@ -2213,9 +2239,11 @@ ${generateUniversalRouterStateProperties()}
     const pathname = url.pathname + url.search;
     if (this.prefetchCache.has(pathname)) return;
     
-    this.fetchPage(pathname)
+    this.fetchPage(pathname, false, false)
       .then(function(html) { spaRouter.prefetchCache.set(pathname, html); })
-      .catch(function() {});
+      .catch(function(error) {
+        clearFarmPrefetchCacheOnDeploymentMismatch(spaRouter, error);
+      });
   },
 
   clearCache: function() {
@@ -2419,6 +2447,7 @@ ${layoutImports}
 ${rendererClientImports}
 ${providerClientCode.imports}
 import { createClientPluginManager, installChunkErrorRecovery, scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
+import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";
 import { matchFarmRoute } from "@farm.js/core/router";
 ${clientPluginEntry.imports}
 ${i18nClientRuntime}
@@ -2979,7 +3008,7 @@ ${generateUniversalRouterStateProperties()}
 
       const intercepted = matchInterceptedRouteSlot(pathname, from);
       if (intercepted) {
-        const html = await this.fetchPage(to, from, navigation.controller.signal);
+        const html = await this.fetchPage(to, from, true, navigation.controller.signal);
         if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
         const doc = new DOMParser().parseFromString(html, "text/html");
         const slotPayload = readRouteSlotPayload(doc);
@@ -3067,6 +3096,7 @@ ${generateUniversalRouterStateProperties()}
         const html = await this.fetchPage(
           url.pathname + url.search,
           undefined,
+          true,
           navigation.controller.signal,
         );
         if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
@@ -3116,24 +3146,27 @@ ${generateUniversalRouterStateProperties()}
         await farmClientRuntime.failNavigation(clientNavigation, error);
       }
       this.finishNavigation(navigation);
+      if (error?.name === "FarmDeploymentMismatchError") return;
       console.error("[Farm.js] Navigation error:", error);
       if (action === "pop") window.location.reload();
       else window.location.href = href;
     }
   },
   
-  fetchPage: async function(url, interceptFrom, signal) {
+  fetchPage: async function(url, interceptFrom, recover = true, signal) {
     const cacheKey = interceptFrom ? url + "\\nintercept:" + interceptFrom : url;
     const cached = this.prefetchCache.get(cacheKey);
     if (cached) return cached;
     
-    const response = await fetch(url, {
-      signal,
-      headers: {
+    const response = await fetchFarmNavigationDocument(
+      url,
+      {
         "Accept": "text/html",
         ...(interceptFrom ? { "X-Farm-Intercept-From": interceptFrom } : {}),
-      }
-    });
+      },
+      recover,
+      signal,
+    );
     if (!response.ok) throw new Error("Failed to fetch page");
     const html = await response.text();
     this.prefetchCache.set(cacheKey, html);
@@ -3279,9 +3312,11 @@ ${generateUniversalRouterStateProperties()}
     const cacheKey = pathname + "\\nintercept:" + interceptFrom;
     if (this.prefetchCache.has(cacheKey)) return;
     
-    this.fetchPage(pathname, interceptFrom)
+    this.fetchPage(pathname, interceptFrom, false)
       .then(function(html) { spaRouter.prefetchCache.set(cacheKey, html); })
-      .catch(function() {});
+      .catch(function(error) {
+        clearFarmPrefetchCacheOnDeploymentMismatch(spaRouter, error);
+      });
   },
   
   observeForPrefetch: function(element) {
