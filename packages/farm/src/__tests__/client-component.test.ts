@@ -743,6 +743,23 @@ export function Chart() {}
     expect(source).toContain("resetReactRoot();");
   });
 
+  it("guards generated production HTML requests against stale deployments", () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), "src", "nitro", "universal-build.ts"),
+      "utf-8",
+    );
+
+    expect(source).toContain("async function fetchFarmNavigationDocument(");
+    expect(source).toContain("headers: createFarmDeploymentRequestHeaders(deploymentId, headers)");
+    expect(source).toContain("isFarmDeploymentMismatchResponse(response, deploymentId)");
+    expect(source).toContain(
+      'window.dispatchEvent(new CustomEvent("farm:deployment-mismatch", { detail: error }))',
+    );
+    expect(source).toContain('if (error?.name === "FarmDeploymentMismatchError") return;');
+    expect(source).toContain("this.fetchPage(pathname, false, false)");
+    expect(source).toContain("this.fetchPage(pathname, interceptFrom, false)");
+  });
+
   it("keeps the generated production router compatible with client navigation hooks", () => {
     const source = fs.readFileSync(
       path.join(process.cwd(), "src", "nitro", "universal-build.ts"),
