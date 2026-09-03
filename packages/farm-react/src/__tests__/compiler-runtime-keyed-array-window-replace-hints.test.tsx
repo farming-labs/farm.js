@@ -82,6 +82,14 @@ function createWindowHarness(initialItems: Item[]) {
     secondPosition: number,
     second: readonly Item[],
   ) => void = () => undefined;
+  let queueWindows: (
+    firstPosition: number,
+    firstRemovedCount: number,
+    first: readonly Item[],
+    secondPosition: number,
+    secondRemovedCount: number,
+    second: readonly Item[],
+  ) => void = () => undefined;
   let queueWithUnhinted: (first: readonly Item[], second: readonly Item[]) => void = () =>
     undefined;
   let customReplace: (items: readonly Item[]) => void = () => undefined;
@@ -100,14 +108,23 @@ function createWindowHarness(initialItems: Item[]) {
           state[0].set((previous) => hintedWindowReplace(previous as Item[], 1, 2, first));
           state[0].set((previous) => hintedWindowReplace(previous as Item[], 2, 1, second));
         };
-        queueRefreshes = (firstPosition, first, secondPosition, second) => {
+        queueWindows = (
+          firstPosition,
+          firstRemovedCount,
+          first,
+          secondPosition,
+          secondRemovedCount,
+          second,
+        ) => {
           state[0].set((previous) =>
-            hintedWindowReplace(previous as Item[], firstPosition, first.length, first),
+            hintedWindowReplace(previous as Item[], firstPosition, firstRemovedCount, first),
           );
           state[0].set((previous) =>
-            hintedWindowReplace(previous as Item[], secondPosition, second.length, second),
+            hintedWindowReplace(previous as Item[], secondPosition, secondRemovedCount, second),
           );
         };
+        queueRefreshes = (firstPosition, first, secondPosition, second) =>
+          queueWindows(firstPosition, first.length, first, secondPosition, second.length, second);
         queueWithUnhinted = (first, second) => {
           state[0].set((previous) =>
             hintedWindowReplace(previous as Item[], 0, first.length, first),
@@ -200,6 +217,22 @@ function createWindowHarness(initialItems: Item[]) {
       secondPosition: number,
       second: readonly Item[],
     ) => queueRefreshes(firstPosition, first, secondPosition, second),
+    queueWindows: (
+      firstPosition: number,
+      firstRemovedCount: number,
+      first: readonly Item[],
+      secondPosition: number,
+      secondRemovedCount: number,
+      second: readonly Item[],
+    ) =>
+      queueWindows(
+        firstPosition,
+        firstRemovedCount,
+        first,
+        secondPosition,
+        secondRemovedCount,
+        second,
+      ),
     queueWithUnhinted: (first: readonly Item[], second: readonly Item[]) =>
       queueWithUnhinted(first, second),
     replace: (position: number, deleteCount: number, items: readonly Item[]) =>
@@ -241,6 +274,33 @@ describe("compiled keyed-array window replacement hints", () => {
         first,
       ),
     ).toThrow(error);
+  });
+
+  it("preserves native runtime count coercion exactly once", () => {
+    const source = [
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+      { id: "c", label: "Gamma" },
+    ] as WindowArray;
+    const replacement = { id: "x", label: "Xi" };
+    const coercions: string[] = [];
+    const runtimeCount = {
+      valueOf() {
+        coercions.push("count");
+        return 2;
+      },
+    };
+
+    const result = createCompilerKeyedArrayWindowReplace(
+      source,
+      source.toSpliced,
+      1,
+      runtimeCount as unknown as number,
+      replacement,
+    ) as Item[];
+
+    expect(result).toEqual([source[0], replacement]);
+    expect(coercions).toEqual(["count"]);
   });
 
   it("replaces one exact window without reading or replacing retained rows", async () => {
@@ -630,7 +690,531 @@ describe("compiled keyed-array window replacement hints", () => {
     expect(harness.counters.bindings).toBe(0);
   });
 
-  it("takes complete reconciliation for reordered, mixed, or duplicate reused keys", async () => {
+  it("falls back without changing native results for unsafe runtime counts", async () => {
+    const harness = createWindowHarness([
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+      { id: "c", label: "Gamma" },
+      { id: "d", label: "Delta" },
+    ]);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Table />));
+    const alpha = container.querySelector('[data-key="a"]');
+    const gamma = container.querySelector('[data-key="c"]');
+    harness.counters.keys = 0;
+
+    await act(async () => {
+      harness.replace(1, 1.5, [{ id: "x", label: "Xi" }]);
+      await flushCompilerUpdates();
+    });
+
+    expect(container.textContent).toBe("AlphaXiGammaDelta");
+    expect(container.querySelector('[data-key="a"]')).toBe(alpha);
+    expect(container.querySelector('[data-key="c"]')).toBe(gamma);
+    expect(harness.counters.keys).toBeGreaterThan(1);
+
+    harness.counters.keys = 0;
+    await act(async () => {
+      harness.replace(1, 0, [{ id: "y", label: "Upsilon" }]);
+      await flushCompilerUpdates();
+    });
+
+    expect(container.textContent).toBe("AlphaUpsilonXiGammaDelta");
+    expect(container.querySelector('[data-key="a"]')).toBe(alpha);
+    expect(container.querySelector('[data-key="c"]')).toBe(gamma);
+    expect(harness.counters.keys).toBeGreaterThan(1);
+    expect(harness.counters.executions).toBe(1);
+    expect(harness.counters.renders).toBe(1);
+  });
+
+  it("reuses, reorders, and creates only rows inside one fixed-length window", async () => {
+    const initialItems = Array.from(
+      { length: 4_096 },
+      (_, index): Item => ({ id: `row-${index}`, label: `Row ${index}` }),
+    );
+    const harness = createWindowHarness(initialItems);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Table />));
+    const rows = [...container.querySelectorAll("li")];
+    const list = container.querySelector("ul")!;
+    const insertBefore = vi.spyOn(list, "insertBefore");
+    const position = 1_024;
+    const retained = initialItems.slice(position, position + 48).reverse();
+    const fresh = Array.from(
+      { length: 16 },
+      (_, offset): Item => ({ id: `fresh-${offset}`, label: `Fresh ${offset}` }),
+    );
+    harness.counters.keys = 0;
+    harness.counters.descriptors = 0;
+    harness.counters.bindings = 0;
+
+    await act(async () => {
+      harness.replace(position, 64, [...retained, ...fresh]);
+      await flushCompilerUpdates();
+    });
+
+    const nextRows = [...container.querySelectorAll("li")];
+    expect(nextRows).toHaveLength(4_096);
+    expect(nextRows[position - 1]).toBe(rows[position - 1]);
+    expect(nextRows[position + 64]).toBe(rows[position + 64]);
+    for (let offset = 0; offset < retained.length; offset += 1) {
+      expect(nextRows[position + offset]).toBe(rows[position + 47 - offset]);
+      expect(nextRows[position + offset]?.textContent).toBe(retained[offset].label);
+    }
+    for (let offset = 48; offset < 64; offset += 1) {
+      expect(rows[position + offset]?.isConnected).toBe(false);
+      expect(nextRows[position + offset]?.getAttribute("data-key")).toBe(`fresh-${offset - 48}`);
+    }
+    expect(insertBefore).toHaveBeenCalledTimes(48);
+    expect(harness.counters).toEqual({
+      executions: 1,
+      renders: 1,
+      keys: 64,
+      descriptors: 16,
+      bindings: 64,
+    });
+  }, 15_000);
+
+  it("grows and shrinks one window while reusing only its retained rows", async () => {
+    const initialItems = Array.from(
+      { length: 4_096 },
+      (_, index): Item => ({ id: `row-${index}`, label: `Row ${index}` }),
+    );
+    const harness = createWindowHarness(initialItems);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Table />));
+    const position = 1_024;
+    const initialRows = [...container.querySelectorAll("li")];
+    const initialRowSet = new Set(initialRows);
+    const retainedForGrowth = initialItems.slice(position, position + 48).reverse();
+    const freshForGrowth = Array.from(
+      { length: 32 },
+      (_, offset): Item => ({ id: `grow-${offset}`, label: `Grow ${offset}` }),
+    );
+    const list = container.querySelector("ul")!;
+    const insertBefore = vi.spyOn(list, "insertBefore");
+    harness.counters.keys = 0;
+    harness.counters.descriptors = 0;
+    harness.counters.bindings = 0;
+
+    await act(async () => {
+      harness.replace(position, 64, [...retainedForGrowth, ...freshForGrowth]);
+      await flushCompilerUpdates();
+    });
+
+    let nextRows = [...container.querySelectorAll("li")];
+    expect(nextRows).toHaveLength(4_112);
+    expect(nextRows[position - 1]).toBe(initialRows[position - 1]);
+    expect(nextRows[position + 80]).toBe(initialRows[position + 64]);
+    retainedForGrowth.forEach((item, offset) => {
+      expect(nextRows[position + offset]).toBe(initialRows[position + 47 - offset]);
+      expect(nextRows[position + offset]?.textContent).toBe(item.label);
+    });
+    nextRows.slice(position + 48, position + 80).forEach((row) => {
+      expect(initialRowSet.has(row)).toBe(false);
+    });
+    initialRows.slice(position + 48, position + 64).forEach((row) => {
+      expect(row.isConnected).toBe(false);
+    });
+    expect(insertBefore).toHaveBeenCalledTimes(48);
+    expect(harness.counters).toEqual({
+      executions: 1,
+      renders: 1,
+      keys: 80,
+      descriptors: 32,
+      bindings: 80,
+    });
+
+    const rowsBeforeShrink = nextRows;
+    const itemsBeforeShrink = [...retainedForGrowth, ...freshForGrowth];
+    const retainedForShrink = itemsBeforeShrink.slice(0, 32).reverse();
+    const freshForShrink = Array.from(
+      { length: 8 },
+      (_, offset): Item => ({ id: `shrink-${offset}`, label: `Shrink ${offset}` }),
+    );
+    const rowsBeforeShrinkSet = new Set(rowsBeforeShrink);
+    insertBefore.mockClear();
+    harness.counters.keys = 0;
+    harness.counters.descriptors = 0;
+    harness.counters.bindings = 0;
+
+    await act(async () => {
+      harness.replace(position, 80, [...retainedForShrink, ...freshForShrink]);
+      await flushCompilerUpdates();
+    });
+
+    nextRows = [...container.querySelectorAll("li")];
+    expect(nextRows).toHaveLength(4_072);
+    expect(nextRows[position - 1]).toBe(rowsBeforeShrink[position - 1]);
+    expect(nextRows[position + 40]).toBe(rowsBeforeShrink[position + 80]);
+    retainedForShrink.forEach((item, offset) => {
+      expect(nextRows[position + offset]).toBe(rowsBeforeShrink[position + 31 - offset]);
+      expect(nextRows[position + offset]?.textContent).toBe(item.label);
+    });
+    nextRows.slice(position + 32, position + 40).forEach((row) => {
+      expect(rowsBeforeShrinkSet.has(row)).toBe(false);
+    });
+    rowsBeforeShrink.slice(position + 32, position + 80).forEach((row) => {
+      expect(row.isConnected).toBe(false);
+    });
+    expect(insertBefore).toHaveBeenCalledTimes(32);
+    expect(harness.counters).toEqual({
+      executions: 1,
+      renders: 1,
+      keys: 40,
+      descriptors: 8,
+      bindings: 40,
+    });
+  }, 15_000);
+
+  it("composes disjoint queued grow and shrink windows with local LIS reuse", async () => {
+    const initialItems = Array.from(
+      { length: 4_096 },
+      (_, index): Item => ({ id: `row-${index}`, label: `Row ${index}` }),
+    );
+    const harness = createWindowHarness(initialItems);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Table />));
+    const initialRows = [...container.querySelectorAll("li")];
+    const initialRowSet = new Set(initialRows);
+    const firstPosition = 512;
+    const firstRetained = initialItems.slice(firstPosition, firstPosition + 24).reverse();
+    const firstFresh = Array.from(
+      { length: 16 },
+      (_, offset): Item => ({ id: `first-${offset}`, label: `First ${offset}` }),
+    );
+    const secondSourcePosition = 3_072;
+    const secondPosition = secondSourcePosition + 8;
+    const secondRetained = initialItems
+      .slice(secondSourcePosition, secondSourcePosition + 16)
+      .reverse();
+    const secondFresh = Array.from(
+      { length: 8 },
+      (_, offset): Item => ({ id: `second-${offset}`, label: `Second ${offset}` }),
+    );
+    const list = container.querySelector("ul")!;
+    const insertBefore = vi.spyOn(list, "insertBefore");
+    harness.counters.keys = 0;
+    harness.counters.descriptors = 0;
+    harness.counters.bindings = 0;
+
+    await act(async () => {
+      harness.queueWindows(
+        firstPosition,
+        32,
+        [...firstRetained, ...firstFresh],
+        secondPosition,
+        32,
+        [...secondRetained, ...secondFresh],
+      );
+      await flushCompilerUpdates();
+    });
+
+    const nextRows = [...container.querySelectorAll("li")];
+    expect(nextRows).toHaveLength(4_096);
+    expect(nextRows[firstPosition - 1]).toBe(initialRows[firstPosition - 1]);
+    expect(nextRows[firstPosition + 40]).toBe(initialRows[firstPosition + 32]);
+    expect(nextRows[secondPosition - 1]).toBe(initialRows[secondSourcePosition - 1]);
+    expect(nextRows[secondPosition + 24]).toBe(initialRows[secondSourcePosition + 32]);
+    firstRetained.forEach((item, offset) => {
+      expect(nextRows[firstPosition + offset]).toBe(initialRows[firstPosition + 23 - offset]);
+      expect(nextRows[firstPosition + offset]?.textContent).toBe(item.label);
+    });
+    secondRetained.forEach((item, offset) => {
+      expect(nextRows[secondPosition + offset]).toBe(
+        initialRows[secondSourcePosition + 15 - offset],
+      );
+      expect(nextRows[secondPosition + offset]?.textContent).toBe(item.label);
+    });
+    nextRows.slice(firstPosition + 24, firstPosition + 40).forEach((row) => {
+      expect(initialRowSet.has(row)).toBe(false);
+    });
+    nextRows.slice(secondPosition + 16, secondPosition + 24).forEach((row) => {
+      expect(initialRowSet.has(row)).toBe(false);
+    });
+    initialRows.slice(firstPosition + 24, firstPosition + 32).forEach((row) => {
+      expect(row.isConnected).toBe(false);
+    });
+    initialRows
+      .slice(secondSourcePosition + 16, secondSourcePosition + 32)
+      .forEach((row) => expect(row.isConnected).toBe(false));
+    expect(insertBefore).toHaveBeenCalledTimes(40);
+    expect(harness.counters).toEqual({
+      executions: 1,
+      renders: 1,
+      keys: 64,
+      descriptors: 24,
+      bindings: 64,
+    });
+  }, 15_000);
+
+  it("normalizes queued resized windows when the higher source window runs first", async () => {
+    const initialItems = [
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+      { id: "c", label: "Gamma" },
+      { id: "d", label: "Delta" },
+      { id: "e", label: "Epsilon" },
+      { id: "f", label: "Phi" },
+      { id: "g", label: "Eta" },
+      { id: "h", label: "Theta" },
+    ];
+    const harness = createWindowHarness(initialItems);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Table />));
+    const rows = [...container.querySelectorAll("li")];
+    harness.counters.keys = 0;
+    harness.counters.descriptors = 0;
+    harness.counters.bindings = 0;
+
+    await act(async () => {
+      harness.queueWindows(5, 2, [{ id: "f", label: "Phi high" }], 1, 2, [
+        { id: "c", label: "Gamma low" },
+        { id: "x", label: "Xi" },
+        { id: "b", label: "Beta low" },
+        { id: "y", label: "Upsilon" },
+      ]);
+      await flushCompilerUpdates();
+    });
+
+    expect(container.textContent).toBe("AlphaGamma lowXiBeta lowUpsilonDeltaEpsilonPhi highTheta");
+    expect(container.querySelector('[data-key="c"]')).toBe(rows[2]);
+    expect(container.querySelector('[data-key="b"]')).toBe(rows[1]);
+    expect(container.querySelector('[data-key="f"]')).toBe(rows[5]);
+    expect(rows[6]?.isConnected).toBe(false);
+    expect(harness.counters).toEqual({
+      executions: 1,
+      renders: 1,
+      keys: 5,
+      descriptors: 2,
+      bindings: 5,
+    });
+  });
+
+  it("composes an empty resized window next to another local replacement", async () => {
+    const initialItems = [
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+      { id: "c", label: "Gamma" },
+      { id: "d", label: "Delta" },
+      { id: "e", label: "Epsilon" },
+      { id: "f", label: "Phi" },
+    ];
+    const harness = createWindowHarness(initialItems);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Table />));
+    const rows = [...container.querySelectorAll("li")];
+    harness.counters.keys = 0;
+    harness.counters.descriptors = 0;
+    harness.counters.bindings = 0;
+
+    await act(async () => {
+      harness.queueWindows(1, 2, [], 1, 2, [
+        { id: "e", label: "Epsilon retained" },
+        { id: "x", label: "Xi" },
+        { id: "d", label: "Delta retained" },
+      ]);
+      await flushCompilerUpdates();
+    });
+
+    expect(container.textContent).toBe("AlphaEpsilon retainedXiDelta retainedPhi");
+    expect(container.querySelector('[data-key="e"]')).toBe(rows[4]);
+    expect(container.querySelector('[data-key="d"]')).toBe(rows[3]);
+    expect(rows[1]?.isConnected).toBe(false);
+    expect(rows[2]?.isConnected).toBe(false);
+    expect(harness.counters).toEqual({
+      executions: 1,
+      renders: 1,
+      keys: 3,
+      descriptors: 1,
+      bindings: 3,
+    });
+  });
+
+  it("prepares every disjoint resized window before the first structural DOM write", async () => {
+    const harness = createWindowHarness([
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+      { id: "c", label: "Gamma" },
+      { id: "d", label: "Delta" },
+      { id: "e", label: "Epsilon" },
+      { id: "f", label: "Phi" },
+      { id: "g", label: "Eta" },
+    ]);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Table />));
+    const list = container.querySelector("ul")!;
+    const trace: string[] = [];
+    const insertBefore = list.insertBefore.bind(list);
+    vi.spyOn(list, "insertBefore").mockImplementation((node, child) => {
+      trace.push("dom:insert");
+      return insertBefore(node, child);
+    });
+    const remove = Element.prototype.remove;
+    vi.spyOn(Element.prototype, "remove").mockImplementation(function (this: Element) {
+      trace.push(`dom:remove:${this.getAttribute("data-key")}`);
+      remove.call(this);
+    });
+    harness.traceBindings(trace);
+    harness.failNextDescriptorFor("y");
+
+    await act(async () => {
+      harness.queueWindows(
+        0,
+        2,
+        [
+          { id: "b", label: "Beta first" },
+          { id: "x", label: "Xi" },
+          { id: "a", label: "Alpha first" },
+        ],
+        5,
+        2,
+        [
+          { id: "f", label: "Phi second" },
+          { id: "y", label: "Upsilon" },
+          { id: "e", label: "Epsilon second" },
+          { id: "z", label: "Zeta" },
+        ],
+      );
+      await flushCompilerUpdates();
+    });
+
+    const failedCreate = trace.indexOf("create:y");
+    const firstDomWrite = trace.findIndex((entry) => entry.startsWith("dom:"));
+    expect(failedCreate).toBeGreaterThanOrEqual(0);
+    expect(firstDomWrite).toBeGreaterThan(failedCreate);
+    expect(container.textContent).toBe(
+      "Beta firstXiAlpha firstGammaDeltaPhi secondUpsilonEpsilon secondZetaEta",
+    );
+  });
+
+  it("falls back for overlapping resized windows and cross-window key moves", async () => {
+    const initialItems = [
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+      { id: "c", label: "Gamma" },
+      { id: "d", label: "Delta" },
+      { id: "e", label: "Epsilon" },
+      { id: "f", label: "Phi" },
+      { id: "g", label: "Eta" },
+      { id: "h", label: "Theta" },
+    ];
+    const harness = createWindowHarness(initialItems);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Table />));
+    harness.counters.keys = 0;
+
+    await act(async () => {
+      harness.queueWindows(
+        1,
+        2,
+        [
+          { id: "x", label: "Xi" },
+          { id: "y", label: "Upsilon" },
+          { id: "z", label: "Zeta" },
+        ],
+        2,
+        2,
+        [{ id: "q", label: "Qoppa" }],
+      );
+      await flushCompilerUpdates();
+    });
+    expect(container.textContent).toBe("AlphaXiQoppaDeltaEpsilonPhiEtaTheta");
+    expect(harness.counters.keys).toBeGreaterThan(4);
+
+    harness.counters.keys = 0;
+    await act(async () => {
+      harness.queueWindows(
+        1,
+        2,
+        [
+          { id: "m", label: "Mu" },
+          { id: "n", label: "Nu" },
+          { id: "o", label: "Omicron" },
+        ],
+        6,
+        2,
+        [
+          { id: "x", label: "Xi moved across windows" },
+          { id: "t", label: "Tau" },
+        ],
+      );
+      await flushCompilerUpdates();
+    });
+    expect(container.textContent).toBe(
+      "AlphaMuNuOmicronDeltaEpsilonXi moved across windowsTauTheta",
+    );
+    expect(harness.counters.keys).toBeGreaterThan(5);
+  });
+
+  it("prepares a mixed local window before the first structural DOM write", async () => {
+    const harness = createWindowHarness([
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+      { id: "c", label: "Gamma" },
+      { id: "d", label: "Delta" },
+    ]);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Table />));
+    const list = container.querySelector("ul")!;
+    const trace: string[] = [];
+    const insertBefore = list.insertBefore.bind(list);
+    vi.spyOn(list, "insertBefore").mockImplementation((node, child) => {
+      trace.push("dom:insert");
+      return insertBefore(node, child);
+    });
+    const remove = Element.prototype.remove;
+    vi.spyOn(Element.prototype, "remove").mockImplementation(function (this: Element) {
+      trace.push(`dom:remove:${this.getAttribute("data-key")}`);
+      remove.call(this);
+    });
+    harness.traceBindings(trace);
+    harness.failNextDescriptorFor("e");
+
+    await act(async () => {
+      harness.replace(1, 2, [
+        { id: "c", label: "Gamma retained" },
+        { id: "e", label: "Epsilon" },
+        { id: "f", label: "Phi" },
+      ]);
+      await flushCompilerUpdates();
+    });
+
+    const failedCreate = trace.indexOf("create:e");
+    const firstDomWrite = trace.findIndex((entry) => entry.startsWith("dom:"));
+    expect(failedCreate).toBeGreaterThanOrEqual(0);
+    expect(firstDomWrite).toBeGreaterThan(failedCreate);
+    expect(container.textContent).toBe("AlphaGamma retainedEpsilonPhiDelta");
+  });
+
+  it("takes complete reconciliation for duplicate or outside-window reused keys", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const harness = createWindowHarness([
       { id: "a", label: "Alpha" },
@@ -643,23 +1227,23 @@ describe("compiled keyed-array window replacement hints", () => {
     const root = createRoot(container);
     roots.push(root);
     await act(async () => root.render(<harness.Table />));
-    const gamma = container.querySelector('[data-key="c"]');
     harness.counters.keys = 0;
 
     await act(async () => {
       harness.replace(1, 2, [
-        { id: "c", label: "Gamma retained" },
+        { id: "a", label: "Alpha duplicated" },
         { id: "e", label: "Epsilon" },
+        { id: "g", label: "Gamma replacement" },
       ]);
       await flushCompilerUpdates();
     });
-    expect(container.querySelector('[data-key="c"]')).toBe(gamma);
-    expect(gamma?.textContent).toBe("Gamma retained");
-    expect(harness.counters.keys).toBeGreaterThan(2);
+    expect(container.textContent).toBe("AlphaAlpha duplicatedEpsilonGamma replacementDelta");
+    expect(container.querySelectorAll('[data-key="a"]')).toHaveLength(2);
+    expect(harness.counters.keys).toBeGreaterThan(3);
 
     harness.counters.keys = 0;
     await act(async () => {
-      harness.replace(1, 2, [
+      harness.replace(1, 3, [
         { id: "f", label: "Phi one" },
         { id: "f", label: "Phi two" },
       ]);
@@ -998,6 +1582,9 @@ describe("compiled keyed-array window replacement hints", () => {
     const calls: string[] = [];
     let replace = () => undefined;
     let refresh = () => undefined;
+    let reuse = () => undefined;
+    let resize = () => undefined;
+    let resizeQueued = () => undefined;
     const InteractiveRows = createCompiledComponentWithFeatures(
       {
         displayName: "WindowInteractiveRows",
@@ -1015,6 +1602,35 @@ describe("compiled keyed-array window replacement hints", () => {
             state[0].set((previous) =>
               hintedWindowReplace(previous as Item[], 2, 1, [
                 { id: "d", label: "Delta refreshed" },
+              ]),
+            );
+          };
+          reuse = () =>
+            state[0].set((previous) =>
+              hintedWindowReplace(previous as Item[], 1, 2, [
+                { id: "c", label: "Gamma moved" },
+                { id: "b", label: "Beta moved" },
+              ]),
+            );
+          resize = () =>
+            state[0].set((previous) =>
+              hintedWindowReplace(previous as Item[], 1, 2, [
+                { id: "d", label: "Delta resized" },
+                { id: "f", label: "Phi resized" },
+                { id: "g", label: "Gamma fresh" },
+              ]),
+            );
+          resizeQueued = () => {
+            state[0].set((previous) =>
+              hintedWindowReplace(previous as Item[], 0, 1, [
+                { id: "a", label: "Alpha queued" },
+                { id: "h", label: "Eta queued" },
+              ]),
+            );
+            state[0].set((previous) =>
+              hintedWindowReplace(previous as Item[], 3, 1, [
+                { id: "f", label: "Phi queued" },
+                { id: "i", label: "Iota queued" },
               ]),
             );
           };
@@ -1104,6 +1720,32 @@ describe("compiled keyed-array window replacement hints", () => {
     const root = createRoot(container);
     roots.push(root);
     await act(async () => root.render(<InteractiveRows />));
+    const betaRow = container.querySelector('[data-key="b"]');
+    const gammaRow = container.querySelector('[data-key="c"]');
+    const gammaInput = container.querySelector('[aria-label="Edit c"]') as HTMLInputElement;
+    gammaInput.focus();
+    gammaInput.setSelectionRange(1, 3);
+
+    await act(async () => {
+      reuse();
+      await flushCompilerUpdates();
+    });
+    expect(
+      [...container.querySelectorAll("li")].map((row) => row.getAttribute("data-key")),
+    ).toEqual(["a", "c", "b", "d"]);
+    expect(container.querySelector('[data-key="c"]')).toBe(gammaRow);
+    expect(container.querySelector('[data-key="b"]')).toBe(betaRow);
+    expect(container.querySelector('[aria-label="Edit c"]')).toBe(gammaInput);
+    expect(gammaInput.value).toBe("Gamma moved");
+    expect(document.activeElement).toBe(gammaInput);
+    expect([gammaInput.selectionStart, gammaInput.selectionEnd]).toEqual([1, 3]);
+    await act(async () => {
+      (container.querySelector('[data-row-button="c"]') as HTMLButtonElement).click();
+      (container.querySelector('[data-row-button="b"]') as HTMLButtonElement).click();
+    });
+    expect(calls).toEqual(["c:Gamma moved:1", "b:Beta moved:2"]);
+    calls.length = 0;
+
     const input = container.querySelector('[aria-label="Edit d"]') as HTMLInputElement;
     input.focus();
     input.setSelectionRange(1, 3);
@@ -1138,6 +1780,53 @@ describe("compiled keyed-array window replacement hints", () => {
       (container.querySelector('[data-row-button="d"]') as HTMLButtonElement).click();
     });
     expect(calls).toEqual(["f:Phi refreshed:1", "d:Delta refreshed:2"]);
+    calls.length = 0;
+
+    await act(async () => {
+      resize();
+      await flushCompilerUpdates();
+    });
+    expect(
+      [...container.querySelectorAll("li")].map((row) => row.getAttribute("data-key")),
+    ).toEqual(["a", "d", "f", "g"]);
+    expect(container.querySelector('[data-key="d"]')).toBe(deltaRow);
+    expect(container.querySelector('[aria-label="Edit d"]')).toBe(input);
+    expect(input.value).toBe("Delta resized");
+    expect(document.activeElement).toBe(input);
+    expect([input.selectionStart, input.selectionEnd]).toEqual([1, 3]);
+    await act(async () => {
+      (container.querySelector('[data-row-button="d"]') as HTMLButtonElement).click();
+      (container.querySelector('[data-row-button="f"]') as HTMLButtonElement).click();
+      (container.querySelector('[data-row-button="g"]') as HTMLButtonElement).click();
+    });
+    expect(calls).toEqual(["d:Delta resized:1", "f:Phi resized:2", "g:Gamma fresh:3"]);
+    calls.length = 0;
+
+    await act(async () => {
+      resizeQueued();
+      await flushCompilerUpdates();
+    });
+    expect(
+      [...container.querySelectorAll("li")].map((row) => row.getAttribute("data-key")),
+    ).toEqual(["a", "h", "d", "f", "i", "g"]);
+    expect(container.querySelector('[data-key="d"]')).toBe(deltaRow);
+    expect(container.querySelector('[aria-label="Edit d"]')).toBe(input);
+    expect(document.activeElement).toBe(input);
+    expect([input.selectionStart, input.selectionEnd]).toEqual([1, 3]);
+    await act(async () => {
+      (container.querySelector('[data-row-button="a"]') as HTMLButtonElement).click();
+      (container.querySelector('[data-row-button="h"]') as HTMLButtonElement).click();
+      (container.querySelector('[data-row-button="d"]') as HTMLButtonElement).click();
+      (container.querySelector('[data-row-button="f"]') as HTMLButtonElement).click();
+      (container.querySelector('[data-row-button="i"]') as HTMLButtonElement).click();
+    });
+    expect(calls).toEqual([
+      "a:Alpha queued:0",
+      "h:Eta queued:1",
+      "d:Delta resized:2",
+      "f:Phi queued:3",
+      "i:Iota queued:4",
+    ]);
   });
 
   it("matches normal React through 1,000 deterministic bounded replacements", async () => {
@@ -1211,6 +1900,300 @@ describe("compiled keyed-array window replacement hints", () => {
     expect(harness.counters.executions).toBe(1);
     expect(harness.counters.renders).toBe(1);
   }, 15_000);
+
+  it("matches React through 1,000 randomized variable-length local-window updates", async () => {
+    const initialItems = Array.from(
+      { length: 64 },
+      (_, index): Item => ({ id: `row-${index}`, label: `Row ${index}` }),
+    );
+    const harness = createWindowHarness(initialItems);
+    let replaceReact: (position: number, count: number, incoming: readonly Item[]) => void = () =>
+      undefined;
+    function NormalTable() {
+      const [items, setItems] = useState(initialItems);
+      replaceReact = (position, count, incoming) =>
+        setItems((previous) => (previous as WindowArray).toSpliced(position, count, ...incoming));
+      return (
+        <ol>
+          {items.map((item) => (
+            <li data-key={item.id} key={item.id}>
+              {item.label}
+            </li>
+          ))}
+        </ol>
+      );
+    }
+    const compiledContainer = document.createElement("div");
+    const reactContainer = document.createElement("div");
+    document.body.append(compiledContainer, reactContainer);
+    const compiledRoot = createRoot(compiledContainer);
+    const reactRoot = createRoot(reactContainer);
+    roots.push(compiledRoot, reactRoot);
+    await act(async () => {
+      compiledRoot.render(<harness.Table />);
+      reactRoot.render(<NormalTable />);
+    });
+    harness.counters.keys = 0;
+    harness.counters.descriptors = 0;
+    harness.counters.bindings = 0;
+    let expected = initialItems;
+    let expectedFresh = 0;
+    let expectedWork = 0;
+    let random = 0x6b31_9f25;
+    const nextRandom = () => {
+      random = (Math.imul(random, 1_664_525) + 1_013_904_223) >>> 0;
+      return random;
+    };
+
+    for (let step = 0; step < 1_000; step += 1) {
+      const removedCount = Math.min((nextRandom() % 8) + 2, expected.length);
+      const position = nextRandom() % (expected.length - removedCount + 1);
+      let delta = (nextRandom() % 5) - 2;
+      if (expected.length <= 40) delta = Math.abs(delta) + 1;
+      if (expected.length >= 88) delta = -(Math.abs(delta) + 1);
+      const incomingCount = Math.max(2, removedCount + delta);
+      const previousWindow = expected.slice(position, position + removedCount);
+      const shuffled = [...previousWindow];
+      for (let index = shuffled.length - 1; index > 0; index -= 1) {
+        const target = nextRandom() % (index + 1);
+        [shuffled[index], shuffled[target]] = [shuffled[target], shuffled[index]];
+      }
+      const maximumRetained = Math.min(removedCount, incomingCount - 1);
+      const retainedCount = (nextRandom() % maximumRetained) + 1;
+      const incoming: Item[] = shuffled.slice(0, retainedCount).map((item, offset) => ({
+        ...item,
+        label: `Reuse ${step}.${offset}`,
+      }));
+      const freshCount = incomingCount - retainedCount;
+      incoming.push(
+        ...Array.from(
+          { length: freshCount },
+          (_, offset): Item => ({
+            id: `fresh-${step}-${offset}`,
+            label: `Fresh ${step}.${offset}`,
+          }),
+        ),
+      );
+      for (let index = incoming.length - 1; index > 0; index -= 1) {
+        const target = nextRandom() % (index + 1);
+        [incoming[index], incoming[target]] = [incoming[target], incoming[index]];
+      }
+      const beforeRows = [...compiledContainer.querySelectorAll("li")];
+      const beforeRowSet = new Set(beforeRows);
+      const previousRowsByKey = new Map(
+        previousWindow.map((item, offset) => [item.id, beforeRows[position + offset]]),
+      );
+      const incomingKeys = new Set(incoming.map((item) => item.id));
+      expected = (expected as WindowArray).toSpliced(position, removedCount, ...incoming);
+      expectedFresh += freshCount;
+      expectedWork += incomingCount;
+
+      await act(async () => {
+        harness.replace(position, removedCount, incoming);
+        replaceReact(position, removedCount, incoming);
+        await flushCompilerUpdates();
+      });
+
+      expect(compiledContainer.querySelector("ul")?.textContent).toBe(
+        reactContainer.querySelector("ol")?.textContent,
+      );
+      const nextRows = [...compiledContainer.querySelectorAll("li")];
+      if (position > 0) expect(nextRows[position - 1]).toBe(beforeRows[position - 1]);
+      if (position + removedCount < beforeRows.length) {
+        expect(nextRows[position + incomingCount]).toBe(beforeRows[position + removedCount]);
+      }
+      incoming.forEach((item, offset) => {
+        const previousRow = previousRowsByKey.get(item.id);
+        if (previousRow) expect(nextRows[position + offset]).toBe(previousRow);
+        else expect(beforeRowSet.has(nextRows[position + offset])).toBe(false);
+      });
+      previousWindow.forEach((item) => {
+        if (!incomingKeys.has(item.id)) {
+          expect(previousRowsByKey.get(item.id)?.isConnected).toBe(false);
+        }
+      });
+    }
+
+    expect(harness.counters).toEqual({
+      executions: 1,
+      renders: 1,
+      keys: expectedWork,
+      descriptors: expectedFresh,
+      bindings: expectedWork,
+    });
+  }, 30_000);
+
+  it("matches React through 1,000 queued disjoint variable-length window updates", async () => {
+    const initialItems = Array.from(
+      { length: 64 },
+      (_, index): Item => ({ id: `row-${index}`, label: `Row ${index}` }),
+    );
+    const harness = createWindowHarness(initialItems);
+    let queueReact: (
+      firstPosition: number,
+      firstRemovedCount: number,
+      first: readonly Item[],
+      secondPosition: number,
+      secondRemovedCount: number,
+      second: readonly Item[],
+    ) => void = () => undefined;
+    function NormalTable() {
+      const [items, setItems] = useState(initialItems);
+      queueReact = (
+        firstPosition,
+        firstRemovedCount,
+        first,
+        secondPosition,
+        secondRemovedCount,
+        second,
+      ) => {
+        setItems((previous) =>
+          (previous as WindowArray).toSpliced(firstPosition, firstRemovedCount, ...first),
+        );
+        setItems((previous) =>
+          (previous as WindowArray).toSpliced(secondPosition, secondRemovedCount, ...second),
+        );
+      };
+      return (
+        <ol>
+          {items.map((item) => (
+            <li data-key={item.id} key={item.id}>
+              {item.label}
+            </li>
+          ))}
+        </ol>
+      );
+    }
+    const compiledContainer = document.createElement("div");
+    const reactContainer = document.createElement("div");
+    document.body.append(compiledContainer, reactContainer);
+    const compiledRoot = createRoot(compiledContainer);
+    const reactRoot = createRoot(reactContainer);
+    roots.push(compiledRoot, reactRoot);
+    await act(async () => {
+      compiledRoot.render(<harness.Table />);
+      reactRoot.render(<NormalTable />);
+    });
+    harness.counters.keys = 0;
+    harness.counters.descriptors = 0;
+    harness.counters.bindings = 0;
+    let expected = initialItems;
+    let expectedFresh = 0;
+    let expectedWork = 0;
+    let random = 0xd41f_8b27;
+    const nextRandom = () => {
+      random = (Math.imul(random, 1_664_525) + 1_013_904_223) >>> 0;
+      return random;
+    };
+
+    for (let step = 0; step < 500; step += 1) {
+      const firstRemovedCount = (nextRandom() % 4) + 3;
+      const firstPosition = (nextRandom() % 8) + 4;
+      const secondRemovedCount = (nextRandom() % 4) + 3;
+      const secondSourcePosition = expected.length - secondRemovedCount - 4 - (nextRandom() % 8);
+      const firstDelta = step % 2 === 0 ? 1 : -1;
+      const secondDelta = -firstDelta;
+      const firstIncomingCount = firstRemovedCount + firstDelta;
+      const secondIncomingCount = secondRemovedCount + secondDelta;
+      const firstPrevious = expected.slice(firstPosition, firstPosition + firstRemovedCount);
+      const secondPrevious = expected.slice(
+        secondSourcePosition,
+        secondSourcePosition + secondRemovedCount,
+      );
+      const makeIncoming = (previous: readonly Item[], count: number, prefix: string): Item[] => {
+        const retainedCount = Math.min(previous.length, count - 1);
+        const retained = previous
+          .slice(0, retainedCount)
+          .reverse()
+          .map((item, offset) => ({ ...item, label: `${prefix} reused ${offset}` }));
+        const fresh = Array.from(
+          { length: count - retainedCount },
+          (_, offset): Item => ({
+            id: `${prefix}-fresh-${offset}`,
+            label: `${prefix} fresh ${offset}`,
+          }),
+        );
+        expectedFresh += fresh.length;
+        return [...retained, ...fresh];
+      };
+      const first = makeIncoming(firstPrevious, firstIncomingCount, `first-${step}`);
+      const second = makeIncoming(secondPrevious, secondIncomingCount, `second-${step}`);
+      const secondPosition = secondSourcePosition + firstDelta;
+      const beforeRows = [...compiledContainer.querySelectorAll("li")];
+      const beforeRowSet = new Set(beforeRows);
+      const previousRowsByKey = new Map(
+        [...firstPrevious, ...secondPrevious].map((item) => [
+          item.id,
+          compiledContainer.querySelector(`[data-key="${item.id}"]`),
+        ]),
+      );
+      const incomingKeys = new Set([...first, ...second].map((item) => item.id));
+      const afterFirst = (expected as WindowArray).toSpliced(
+        firstPosition,
+        firstRemovedCount,
+        ...first,
+      );
+      expected = (afterFirst as WindowArray).toSpliced(
+        secondPosition,
+        secondRemovedCount,
+        ...second,
+      );
+      expectedWork += first.length + second.length;
+
+      await act(async () => {
+        harness.queueWindows(
+          firstPosition,
+          firstRemovedCount,
+          first,
+          secondPosition,
+          secondRemovedCount,
+          second,
+        );
+        queueReact(
+          firstPosition,
+          firstRemovedCount,
+          first,
+          secondPosition,
+          secondRemovedCount,
+          second,
+        );
+        await flushCompilerUpdates();
+      });
+
+      expect(compiledContainer.querySelector("ul")?.textContent).toBe(
+        reactContainer.querySelector("ol")?.textContent,
+      );
+      const nextRows = [...compiledContainer.querySelectorAll("li")];
+      expect(nextRows).toHaveLength(64);
+      expect(nextRows[firstPosition - 1]).toBe(beforeRows[firstPosition - 1]);
+      expect(nextRows[firstPosition + first.length]).toBe(
+        beforeRows[firstPosition + firstRemovedCount],
+      );
+      expect(nextRows[secondPosition - 1]).toBe(beforeRows[secondSourcePosition - 1]);
+      expect(nextRows[secondPosition + second.length]).toBe(
+        beforeRows[secondSourcePosition + secondRemovedCount],
+      );
+      [...first, ...second].forEach((item) => {
+        const nextRow = compiledContainer.querySelector(`[data-key="${item.id}"]`);
+        const previousRow = previousRowsByKey.get(item.id);
+        if (previousRow) expect(nextRow).toBe(previousRow);
+        else expect(beforeRowSet.has(nextRow as Element)).toBe(false);
+      });
+      [...firstPrevious, ...secondPrevious].forEach((item) => {
+        if (!incomingKeys.has(item.id)) {
+          expect(previousRowsByKey.get(item.id)?.isConnected).toBe(false);
+        }
+      });
+    }
+
+    expect(harness.counters).toEqual({
+      executions: 1,
+      renders: 1,
+      keys: expectedWork,
+      descriptors: expectedFresh,
+      bindings: expectedWork,
+    });
+  }, 30_000);
 
   it("matches normal React through 1,000 queued same-key window refreshes", async () => {
     const initialItems = Array.from(
@@ -1519,6 +2502,7 @@ describe("compiled keyed-array window replacement hints", () => {
       );
     });
     roots.push(root);
+    const alpha = container.querySelector('[data-key="a"]');
     const beta = container.querySelector('[data-key="b"]');
     const gamma = container.querySelector('[data-key="c"]');
 
@@ -1533,7 +2517,35 @@ describe("compiled keyed-array window replacement hints", () => {
     expect(container.querySelector('[data-key="c"]')).toBe(gamma);
     expect(recoverable).toEqual([]);
 
-    const alpha = container.querySelector('[data-key="a"]');
+    await act(async () => {
+      harness.replace(0, 2, [
+        { id: "b", label: "Beta moved" },
+        { id: "a", label: "Alpha moved" },
+        { id: "d", label: "Delta fresh" },
+      ]);
+      await flushCompilerUpdates();
+    });
+    expect(container.textContent).toBe("Beta movedAlpha movedDelta freshGamma hydrated");
+    expect(container.querySelector('[data-key="b"]')).toBe(beta);
+    expect(container.querySelector('[data-key="a"]')).toBe(alpha);
+    expect(container.querySelector('[data-key="c"]')).toBe(gamma);
+    expect(recoverable).toEqual([]);
+
+    const fresh = container.querySelector('[data-key="d"]');
+    await act(async () => {
+      harness.replace(0, 3, [
+        { id: "a", label: "Alpha restored" },
+        { id: "b", label: "Beta restored" },
+      ]);
+      await flushCompilerUpdates();
+    });
+    expect(container.textContent).toBe("Alpha restoredBeta restoredGamma hydrated");
+    expect(container.querySelector('[data-key="a"]')).toBe(alpha);
+    expect(container.querySelector('[data-key="b"]')).toBe(beta);
+    expect(container.querySelector('[data-key="c"]')).toBe(gamma);
+    expect(fresh?.isConnected).toBe(false);
+    expect(recoverable).toEqual([]);
+
     await act(async () => {
       harness.queueRefreshes(
         0,
@@ -1556,16 +2568,47 @@ describe("compiled keyed-array window replacement hints", () => {
     expect(container.querySelector('[data-key="f"]')).toBeNull();
     expect(recoverable).toEqual([]);
 
+    const epsilon = container.querySelector('[data-key="e"]');
+    const eta = container.querySelector('[data-key="h"]');
+    await act(async () => {
+      harness.queueWindows(
+        0,
+        1,
+        [
+          { id: "e", label: "Epsilon resized" },
+          { id: "x", label: "Xi hydrated" },
+        ],
+        3,
+        1,
+        [
+          { id: "h", label: "Eta resized" },
+          { id: "y", label: "Upsilon hydrated" },
+        ],
+      );
+      await flushCompilerUpdates();
+    });
+    expect(container.textContent).toBe(
+      "Epsilon resizedXi hydratedGamma replacement hydratedEta resizedUpsilon hydrated",
+    );
+    expect(container.querySelector('[data-key="e"]')).toBe(epsilon);
+    expect(container.querySelector('[data-key="h"]')).toBe(eta);
+    expect(recoverable).toEqual([]);
+
     roots.pop();
     act(() => {
-      harness.queueRefreshes(
+      harness.queueWindows(
         0,
+        1,
         [
           { id: "i", label: "Iota" },
           { id: "j", label: "Jota" },
         ],
+        4,
         1,
-        [{ id: "k", label: "Kappa" }],
+        [
+          { id: "k", label: "Kappa" },
+          { id: "l", label: "Lambda" },
+        ],
       );
       root.unmount();
     });

@@ -12,7 +12,7 @@ the FARMJS renderer contract. React remains the default unless the application s
 ## Create an app
 
 ```bash
-pnpm create @farm.js/app@beta my-svelte-app --template basic --renderer svelte --typescript
+pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-svelte-app --template basic --renderer svelte --typescript
 ```
 
 For an existing Basic app, install the adapter and Svelte 5:
@@ -130,7 +130,7 @@ the docs adapter, and generated JSX metadata images remain React-oriented today.
 The Better Auth starter includes native Svelte routes, runes, and forms:
 
 ```bash
-pnpm create @farm.js/app@beta my-auth-app --template better-auth --renderer svelte --typescript
+pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-auth-app --template better-auth --renderer svelte --typescript
 ```
 
 Other integration starter templates currently target React, so add their renderer-neutral provider

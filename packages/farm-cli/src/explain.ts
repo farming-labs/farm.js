@@ -2,6 +2,7 @@ import {
   farmRouteRuleMatches,
   getFarmSourceRoots,
   getFarmPresetRuntime,
+  isProgrammaticRoutesFileName,
   loadConfig,
   mergeFarmRouteRuntimeConfigs,
   resolveConfig,
@@ -256,8 +257,14 @@ function discoverMatchingPages(
 
     const sourceDirectory = path.join(source.root, source.srcDir);
     if (!existsSync(sourceDirectory)) continue;
-    for (const filePath of walkFiles(sourceDirectory)) {
-      if (!/\.(?:tsx?|jsx?)$/.test(filePath) || filePath.endsWith(".d.ts")) continue;
+    for (const entry of readdirSync(sourceDirectory, { withFileTypes: true })) {
+      if (
+        (!entry.isFile() && !entry.isSymbolicLink()) ||
+        !isProgrammaticRoutesFileName(entry.name)
+      ) {
+        continue;
+      }
+      const filePath = path.join(sourceDirectory, entry.name);
       const moduleSource = readFileSync(filePath, "utf8");
       for (const pattern of scanProgrammaticPagePaths(moduleSource)) {
         const match = matchRoutePattern(pattern, pathname);

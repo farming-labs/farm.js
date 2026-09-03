@@ -14,6 +14,7 @@ export {
   completeFarmServerQueryAction,
   fetchServerQuery,
   prefetchServerQuery,
+  shouldApplyFarmServerQueryActionResult,
 } from "./server-query-runtime";
 export type {
   FarmServerQueryActionInvocation,

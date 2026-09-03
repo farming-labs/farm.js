@@ -70,7 +70,7 @@ test("discovers pages declared through the programmatic router", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "farm-cli-explain-programmatic-"));
 
   try {
-    await mkdir(path.join(root, "src"), { recursive: true });
+    await mkdir(path.join(root, "src/lib"), { recursive: true });
     await writeFile(path.join(root, "farm.config.mjs"), "export default {};\n");
     await writeFile(
       path.join(root, "src/farm.routes.ts"),
@@ -81,12 +81,24 @@ test("discovers pages declared through the programmatic router", async () => {
         "",
       ].join("\n"),
     );
+    await writeFile(
+      path.join(root, "src/lib/unregistered.ts"),
+      [
+        'import { page } from "@farm.js/core";',
+        'page("/not-registered", { component: () => null });',
+        "",
+      ].join("\n"),
+    );
 
     const explanation = await explainFarmRoute("/catalog/42", { root });
 
     assert.equal(explanation.pattern, "/catalog/[id]");
     assert.deepEqual(explanation.params, { id: "42" });
     assert.equal(explanation.filePath, "src/farm.routes.ts");
+    await assert.rejects(
+      () => explainFarmRoute("/not-registered", { root }),
+      /No Farm page route matches/,
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

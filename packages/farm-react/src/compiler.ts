@@ -1519,8 +1519,13 @@ function rewriteKeyedArrayRollingWindowHints(
       ) {
         return;
       }
-      const retainedStart = staticSliceIndex(retainedSpread.argument.arguments[0]);
-      if (retainedStart === undefined || retainedStart === 0) return;
+      const retainedStart = retainedSpread.argument.arguments[0];
+      if (
+        validateKeyedArrayPositionExpression(retainedStart, safeGlobals) !== undefined ||
+        staticSliceIndex(retainedStart) === 0
+      ) {
+        return;
+      }
 
       const safeIncomingValue = (value: t.Expression): boolean => {
         if (t.isArrayExpression(value)) {
@@ -1575,7 +1580,7 @@ function rewriteKeyedArrayRollingWindowHints(
               t.callExpression(t.cloneNode(sliceHelperIdentifier), [
                 t.cloneNode(previous),
                 t.cloneNode(sliceMethod),
-                t.numericLiteral(retainedStart),
+                t.cloneNode(retainedStart, true),
               ]),
             ),
             t.variableDeclarator(t.cloneNode(nextValue), t.arrayExpression(nextElements)),
@@ -1687,10 +1692,17 @@ function rewriteKeyedArrayPositionHints(
 
       const methodName = updater.body.callee.property.name;
       const args = updater.body.arguments;
-      const toSplicedDeleteCount =
-        methodName === "toSpliced" && args.length >= 2 && t.isNumericLiteral(args[1])
-          ? args[1].value
+      const deleteCountExpression =
+        methodName === "toSpliced" && args.length >= 2 && t.isExpression(args[1])
+          ? args[1]
           : undefined;
+      const toSplicedDeleteCount = deleteCountExpression
+        ? staticSliceIndex(deleteCountExpression)
+        : undefined;
+      const hasRuntimeDeleteCount =
+        deleteCountExpression !== undefined &&
+        toSplicedDeleteCount === undefined &&
+        validateKeyedArrayPositionExpression(deleteCountExpression, safeGlobals) === undefined;
       const isBatchInsert =
         methodName === "toSpliced" &&
         args.length >= 3 &&
@@ -1698,11 +1710,12 @@ function rewriteKeyedArrayPositionHints(
         (args.length > 3 || t.isSpreadElement(args[2]));
       const isWindowReplace =
         methodName === "toSpliced" &&
-        args.length >= 3 &&
-        toSplicedDeleteCount !== undefined &&
-        Number.isSafeInteger(toSplicedDeleteCount) &&
-        toSplicedDeleteCount > 0 &&
-        (toSplicedDeleteCount !== 1 || args.length > 3 || t.isSpreadElement(args[2]));
+        ((args.length >= 3 &&
+          toSplicedDeleteCount !== undefined &&
+          Number.isSafeInteger(toSplicedDeleteCount) &&
+          toSplicedDeleteCount > 0 &&
+          (toSplicedDeleteCount !== 1 || args.length > 3 || t.isSpreadElement(args[2]))) ||
+          hasRuntimeDeleteCount);
       const kind = isBatchInsert
         ? "batch-insert"
         : isWindowReplace
@@ -1729,6 +1742,10 @@ function rewriteKeyedArrayPositionHints(
         kind === "batch-insert" || kind === "window-replace" ? args.slice(2) : [args.at(-1)];
       if (
         validateKeyedArrayPositionExpression(position, safeGlobals) !== undefined ||
+        (kind === "window-replace" &&
+          (!deleteCountExpression ||
+            validateKeyedArrayPositionExpression(deleteCountExpression, safeGlobals) !==
+              undefined)) ||
         (kind !== "remove" &&
           incoming.some((item) => {
             const expression = t.isSpreadElement(item) ? item.argument : item;
@@ -1948,6 +1965,7 @@ function rewriteKeyedArraySliceHints(
   hintedStateIndices: ReadonlySet<number>,
   statesBySetter: ReadonlyMap<string, StateBinding>,
   helperIdentifier: t.Identifier,
+  safeGlobals: ReadonlySet<string>,
 ): { root: t.JSXElement; count: number; stateIndices: ReadonlySet<number> } {
   if (hintedStateIndices.size === 0) {
     return { root: t.cloneNode(root, true), count: 0, stateIndices: new Set() };
@@ -1980,14 +1998,13 @@ function rewriteKeyedArraySliceHints(
       ) {
         return;
       }
-      const indexes: number[] = [];
+      const bounds: t.Expression[] = [];
       for (const argument of updater.body.arguments) {
         if (!t.isExpression(argument)) return;
-        const value = staticSliceIndex(argument);
-        if (value === undefined) return;
-        indexes.push(value);
+        if (validateKeyedArrayPositionExpression(argument, safeGlobals) !== undefined) return;
+        bounds.push(argument);
       }
-      if (indexes.length === 1 && indexes[0] === 0) return;
+      if (bounds.length === 1 && staticSliceIndex(bounds[0]) === 0) return;
 
       const previous = t.cloneNode(updater.params[0]);
       const sliceMethod = path.scope.generateUidIdentifier("farmSlice");
@@ -2004,7 +2021,7 @@ function rewriteKeyedArraySliceHints(
             t.callExpression(t.cloneNode(helperIdentifier), [
               t.cloneNode(previous),
               t.cloneNode(sliceMethod),
-              ...indexes.map((value) => t.numericLiteral(value)),
+              ...bounds.map((bound) => t.cloneNode(bound, true)),
             ]),
           ),
         ]),
@@ -7401,6 +7418,7 @@ function compileCandidate(
     shiftedIndexIndependentStateIndices,
     statesBySetter,
     keyedArraySliceIdentifier,
+    safeGlobals,
   );
   let appliedKeyedArraySliceHints = 0;
   let appliedSliceHintedStateIndices: ReadonlySet<number> = new Set();

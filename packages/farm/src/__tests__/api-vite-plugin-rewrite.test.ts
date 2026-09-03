@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { farmApiPlugin } from "../api/vite-plugin";
 
 const tempDirs = new Set<string>();
@@ -16,6 +16,7 @@ function decodeChunk(chunk: unknown): string {
 }
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(
     [...tempDirs].map(async (dir) => {
       await rm(dir, { recursive: true, force: true });
@@ -128,6 +129,125 @@ async function createDevHarness(
 }
 
 describe("dev API dispatch after middleware rewrites", () => {
+  it("rejects dynamic routes that have the same URL shape", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(
+      createDevHarness({
+        "users/[id]": `export const GET = async () => new Response("id");\n`,
+        "users/[slug]": `export const GET = async () => new Response("slug");\n`,
+      }),
+    ).rejects.toThrow("Ambiguous API routes");
+  });
+
+  it("reports ambiguous routes introduced by HMR", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "farm-api-ambiguous-hmr-"));
+    tempDirs.add(root);
+    const idDir = path.join(root, "src", "api", "users", "[id]");
+    const slugDir = path.join(root, "src", "api", "users", "[slug]");
+    const idFile = path.join(idDir, "route.ts");
+    const slugFile = path.join(slugDir, "route.ts");
+    const routesFile = path.join(root, "src", "routes.ts");
+    await mkdir(idDir, { recursive: true });
+    await writeFile(idFile, "export {};\n");
+    await writeFile(routesFile, "export {};\n");
+
+    let rootModule: Record<string, unknown> = {};
+    const server: any = {
+      config: { root },
+      ssrLoadModule: async (filePath: string) =>
+        filePath === routesFile ? rootModule : { GET: async () => new Response("ok") },
+      moduleGraph: { invalidateModule() {} },
+      middlewares: { use() {} },
+      watcher: { on() {} },
+    };
+    const plugin = farmApiPlugin() as any;
+    await plugin.configureServer(server);
+    await server.__farmApi__.waitForDiscovery();
+
+    rootModule = {
+      slug: {
+        __path: "/api/users/[slug]",
+        __method: "GET",
+        handler: async () => new Response("slug"),
+      },
+    };
+    await expect(plugin.handleHotUpdate({ file: routesFile, modules: [], server })).rejects.toThrow(
+      "Ambiguous API routes",
+    );
+
+    rootModule = {};
+    await mkdir(slugDir, { recursive: true });
+    await writeFile(slugFile, "export {};\n");
+    await expect(plugin.handleHotUpdate({ file: slugFile, modules: [], server })).rejects.toThrow(
+      "Ambiguous API routes",
+    );
+  });
+
+  it("reports duplicate methods across file and explicit routes", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "farm-api-conflict-"));
+    tempDirs.add(root);
+    const routeDir = path.join(root, "src", "api", "health");
+    const routeFile = path.join(routeDir, "route.js");
+    const routesFile = path.join(root, "src", "routes.js");
+    await mkdir(routeDir, { recursive: true });
+    await writeFile(routeFile, "export {};\n");
+    await writeFile(routesFile, "export {};\n");
+
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const plugin = farmApiPlugin() as any;
+    let apiMiddleware: ((req: any, res: any, next: () => void) => Promise<void>) | undefined;
+    let rootMethod = "GET";
+    const server = {
+      config: { root },
+      ssrLoadModule: async (filePath: string) =>
+        filePath === routeFile
+          ? { GET: async () => new Response("file") }
+          : {
+              health: {
+                __path: "/api/health",
+                __method: rootMethod,
+                handler: async () => new Response("explicit"),
+              },
+            },
+      middlewares: {
+        use(handler: typeof apiMiddleware) {
+          apiMiddleware = handler;
+        },
+      },
+      moduleGraph: { invalidateModule: vi.fn() },
+      watcher: { on() {} },
+    };
+
+    const register = await plugin.configureServer(server);
+    register?.();
+
+    await expect((server as any).__farmApi__.waitForDiscovery()).rejects.toThrow(
+      `Duplicate API route for GET /api/health: ${routeFile} conflicts with ${routesFile}`,
+    );
+    expect(consoleError).toHaveBeenCalledWith(
+      "[FARM] API discovery error:",
+      expect.objectContaining({ name: "APIRouteConflictError" }),
+    );
+
+    await expect(
+      apiMiddleware!(
+        { url: "/api/health", method: "GET", headers: {} },
+        { once() {}, writableEnded: false },
+        vi.fn(),
+      ),
+    ).rejects.toThrow("Duplicate API route for GET /api/health");
+
+    rootMethod = "POST";
+    await plugin.handleHotUpdate({ file: routesFile, modules: [], server });
+    await expect((server as any).__farmApi__.waitForDiscovery()).resolves.toBeUndefined();
+    expect((server as any).__farmApi__.isReady()).toBe(true);
+    expect((server as any).__farmApi__.getRoutes().get("/api/health")?.methods.sort()).toEqual([
+      "GET",
+      "POST",
+    ]);
+  });
+
   it("serves canonical routes through the configured local base path", async () => {
     const harness = await createDevHarness(
       {

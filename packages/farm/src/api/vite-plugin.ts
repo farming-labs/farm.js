@@ -17,6 +17,7 @@
 
 import type { Plugin, ViteDevServer } from "vite";
 import {
+  APIRouteConflictError,
   API_ROUTE_METHODS,
   getAllowedAPIRouteMethods,
   invokeAPIRouteEndpoint,
@@ -28,13 +29,14 @@ import { isFarmAPIRouteFileName } from "./route-files";
 import { _withAfterNodeMiddleware } from "../after";
 import { isProgrammaticRoutesFileName } from "../routes-shared";
 import { findProgrammaticRouteFilesInDir } from "../routes.server";
-import { toViteModuleId } from "../utils";
+import { toPosixPath, toViteModuleId } from "../utils";
 import {
   createFarmRequestBodyErrorResponse,
   readNodeRequestBody,
   resolveFarmServerConfig,
 } from "../server-http";
 import { createCliColors } from "../cli-colors";
+import { AmbiguousRouteError, getRoutePatternShape } from "../routing/specificity";
 
 export interface FarmApiPluginOptions {
   /** Source directory containing the api folder (default: 'src') */
@@ -70,6 +72,10 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
   let apiRouterHandler: ((req: Request) => Promise<Response>) | null = null;
   let discoveryComplete = false;
   let discoveryPromise: Promise<void> | null = null;
+  let discoveryError: unknown;
+  let recoverFailedDiscovery: (() => Promise<boolean>) | undefined;
+  const endpointSources = new Map<string, Map<string, string>>();
+  const routeShapes = new Map<string, { routePath: string; filePath: string }>();
 
   const log = (_message: string) => {};
   const logResponse = (method: string, urlPath: string, status: number, duration: number) => {
@@ -91,20 +97,40 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
     console.log(logMsg);
   };
 
+  const registerRouteShape = (routePath: string, filePath: string): void => {
+    const shape = getRoutePatternShape(routePath, "api");
+    const existing = routeShapes.get(shape);
+    if (existing && existing.routePath !== routePath) {
+      throw new AmbiguousRouteError(
+        `Ambiguous API routes "${existing.routePath}" and "${routePath}" match the same URLs. Found ${existing.filePath} and ${filePath}. Keep only one route for this URL shape.`,
+      );
+    }
+    routeShapes.set(shape, { routePath, filePath });
+  };
+
   const addEndpoint = (
     routePath: string,
     filePath: string,
     method: string,
     endpoint: any,
   ): void => {
+    registerRouteShape(routePath, filePath);
     const normalizedMethod = method.toUpperCase();
     const existing = apiRoutesCache.get(routePath);
+    const existingFile = endpointSources.get(routePath)?.get(normalizedMethod);
+
+    if (existingFile) {
+      throw new APIRouteConflictError(routePath, normalizedMethod, existingFile, filePath);
+    }
 
     if (existing) {
       if (!existing.methods.includes(normalizedMethod)) {
         existing.methods.push(normalizedMethod);
       }
       existing.endpoints[normalizedMethod] = endpoint;
+      const sources = endpointSources.get(routePath) ?? new Map();
+      sources.set(normalizedMethod, filePath);
+      endpointSources.set(routePath, sources);
       return;
     }
 
@@ -114,6 +140,65 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
       methods: [normalizedMethod],
       endpoints: { [normalizedMethod]: endpoint },
     });
+    endpointSources.set(routePath, new Map([[normalizedMethod, filePath]]));
+  };
+
+  const removeEndpointsFromFile = (filePath: string): void => {
+    for (const [routePath, sources] of endpointSources) {
+      const route = apiRoutesCache.get(routePath);
+      if (!route) continue;
+
+      for (const [method, sourceFile] of sources) {
+        if (sourceFile !== filePath) continue;
+        sources.delete(method);
+        route.methods = route.methods.filter((candidate) => candidate !== method);
+        delete route.endpoints[method];
+      }
+
+      if (route.methods.length === 0) {
+        apiRoutesCache.delete(routePath);
+        endpointSources.delete(routePath);
+        routeShapes.delete(getRoutePatternShape(routePath, "api"));
+      } else {
+        const currentSource = sources.values().next().value;
+        if (route.filePath === filePath && currentSource) {
+          route.filePath = currentSource;
+        }
+        routeShapes.set(getRoutePatternShape(routePath, "api"), {
+          routePath,
+          filePath: currentSource ?? route.filePath,
+        });
+      }
+    }
+  };
+
+  const snapshotRouteState = () => ({
+    routes: new Map(
+      [...apiRoutesCache].map(([routePath, route]) => [
+        routePath,
+        {
+          ...route,
+          methods: [...route.methods],
+          endpoints: { ...route.endpoints },
+        },
+      ]),
+    ),
+    sources: new Map(
+      [...endpointSources].map(([routePath, sources]) => [routePath, new Map(sources)]),
+    ),
+    shapes: new Map(routeShapes),
+  });
+
+  const restoreRouteState = (snapshot: ReturnType<typeof snapshotRouteState>): void => {
+    apiRoutesCache = snapshot.routes;
+    endpointSources.clear();
+    for (const [routePath, sources] of snapshot.sources) {
+      endpointSources.set(routePath, sources);
+    }
+    routeShapes.clear();
+    for (const [shape, route] of snapshot.shapes) {
+      routeShapes.set(shape, route);
+    }
   };
 
   // Create API router handler
@@ -198,6 +283,8 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
 
         const routeFiles = findRouteFiles(apiDir);
         apiRoutesCache.clear();
+        endpointSources.clear();
+        routeShapes.clear();
 
         for (const filePath of routeFiles) {
           try {
@@ -217,15 +304,13 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
             }
 
             if (availableMethods.length > 0) {
-              apiRoutesCache.set(routePath, {
-                path: routePath,
-                filePath,
-                methods: availableMethods,
-                endpoints,
-              });
+              for (const method of availableMethods) {
+                addEndpoint(routePath, filePath, method, endpoints[method]);
+              }
               log(`API route discovered: ${availableMethods.join(", ")} ${routePath}`);
             }
           } catch (e: any) {
+            if (e instanceof APIRouteConflictError || e instanceof AmbiguousRouteError) throw e;
             log(`API route load failed at ${filePath}: ${e.message}`);
           }
         }
@@ -259,6 +344,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
                 }
               }
             } catch (e: any) {
+              if (e instanceof APIRouteConflictError || e instanceof AmbiguousRouteError) throw e;
               log(`Root routes.ts load failed: ${e.message}`);
             }
             break;
@@ -292,6 +378,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
               }
             }
           } catch (e: any) {
+            if (e instanceof APIRouteConflictError || e instanceof AmbiguousRouteError) throw e;
             log(`Programmatic routes file load failed at ${routeFile}: ${e.message}`);
           }
         }
@@ -313,15 +400,40 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
       };
 
       discoveryPromise = initializeDiscovery().catch((e) => {
+        discoveryError = e;
         console.error("[FARM] API discovery error:", e);
       });
+
+      const waitForDiscovery = async () => {
+        await discoveryPromise;
+        if (discoveryError) throw discoveryError;
+      };
+
+      recoverFailedDiscovery = async (): Promise<boolean> => {
+        if (!discoveryError) return false;
+
+        const previousState = snapshotRouteState();
+        try {
+          await initializeDiscovery();
+          discoveryError = undefined;
+          discoveryPromise = Promise.resolve();
+        } catch (error) {
+          restoreRouteState(previousState);
+          discoveryError = error;
+          discoveryComplete = false;
+          discoveryPromise = Promise.resolve();
+          throw error;
+        }
+
+        return true;
+      };
 
       // Expose API router for other plugins
       (server as any).__farmApi__ = {
         getHandler: () => apiRouterHandler,
         getRoutes: () => apiRoutesCache,
         isReady: () => discoveryComplete,
-        waitForDiscovery: () => discoveryPromise,
+        waitForDiscovery,
       };
 
       // Add middleware to handle API requests
@@ -332,9 +444,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
             const pathname = url.split("?")[0];
             const method = req.method || "GET";
 
-            if (discoveryPromise && !discoveryComplete) {
-              await discoveryPromise;
-            }
+            if (discoveryPromise) await waitForDiscovery();
 
             if (!matchAPIRouteAtBasePath(apiRoutesCache, pathname, basePath)) {
               return next();
@@ -423,7 +533,8 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
     },
 
     async handleHotUpdate({ file, server, modules }) {
-      const fileName = file.split("/").pop() || "";
+      const normalizedFile = toPosixPath(file);
+      const fileName = normalizedFile.split("/").pop() || "";
 
       // Handle root routes.ts updates
       if (
@@ -438,15 +549,13 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
           server.moduleGraph.invalidateModule(mod);
         }
 
-        // Clear routes from this file
-        for (const [routePath, route] of apiRoutesCache) {
-          if (route.filePath === file) {
-            apiRoutesCache.delete(routePath);
-          }
-        }
+        if (await recoverFailedDiscovery?.()) return [];
+
+        const previousState = snapshotRouteState();
 
         try {
           const routesModule = await server.ssrLoadModule(file);
+          removeEndpointsFromFile(file);
 
           for (const [exportName, exportValue] of Object.entries(routesModule)) {
             const endpoint = exportValue as any;
@@ -478,6 +587,8 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
           await createRouter();
           log(`API router recreated`);
         } catch (e: any) {
+          restoreRouteState(previousState);
+          if (e instanceof APIRouteConflictError || e instanceof AmbiguousRouteError) throw e;
           log(`Root routes.ts HMR failed: ${e.message}`);
         }
 
@@ -485,82 +596,47 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
       }
 
       // Handle file-based route updates
-      if (file.includes("/api/") && fileName.startsWith("route.")) {
-        const shortPath = file.split("/api/")[1] || file;
+      if (normalizedFile.includes("/api/") && fileName.startsWith("route.")) {
+        const shortPath = normalizedFile.split("/api/")[1] || normalizedFile;
         log(`API route updated: ${shortPath}`);
 
         for (const mod of modules) {
           server.moduleGraph.invalidateModule(mod);
         }
 
-        let routePathToUpdate: string | null = null;
-        for (const [routePath, route] of apiRoutesCache) {
-          if (route.filePath === file) {
-            routePathToUpdate = routePath;
-            break;
+        if (await recoverFailedDiscovery?.()) return [];
+
+        const previousState = snapshotRouteState();
+        try {
+          const path = await import("path");
+          const apiDir = path.join(server.config.root, srcDir, "api");
+          const relativePath = path.relative(apiDir, path.dirname(file));
+          const routePath =
+            "/api/" + (relativePath === "." ? "" : relativePath.replace(/\\/g, "/"));
+          const fs = await import("fs");
+          if (!fs.existsSync(file)) {
+            removeEndpointsFromFile(file);
+            await createRouter();
+            log(`API route file removed: ${routePath}`);
+            return [];
           }
-        }
+          const routeModule = await server.ssrLoadModule(file);
 
-        if (routePathToUpdate) {
-          try {
-            const routeModule = await server.ssrLoadModule(file);
-            const endpoints: Record<string, any> = {};
-            const availableMethods: string[] = [];
-
-            for (const method of API_ROUTE_METHODS) {
-              if (routeModule[method]) {
-                availableMethods.push(method);
-                endpoints[method] = routeModule[method];
-              }
-            }
-
-            if (availableMethods.length > 0) {
-              apiRoutesCache.set(routePathToUpdate, {
-                path: routePathToUpdate,
-                filePath: file,
-                methods: availableMethods,
-                endpoints,
-              });
-              log(`API route reloaded: ${routePathToUpdate}`);
-              await createRouter();
-              log(`API router recreated`);
-            }
-          } catch (e: any) {
-            log(`API route HMR failed: ${e.message}`);
+          removeEndpointsFromFile(file);
+          const availableMethods: string[] = [];
+          for (const method of API_ROUTE_METHODS) {
+            if (!routeModule[method]) continue;
+            availableMethods.push(method);
+            addEndpoint(routePath, file, method, routeModule[method]);
           }
-        } else {
-          // New route file
-          try {
-            const path = await import("path");
-            const apiDir = path.join(server.config.root, srcDir, "api");
-            const relativePath = path.relative(apiDir, path.dirname(file));
-            const routePath =
-              "/api/" + (relativePath === "." ? "" : relativePath.replace(/\\/g, "/"));
 
-            const routeModule = await server.ssrLoadModule(file);
-            const endpoints: Record<string, any> = {};
-            const availableMethods: string[] = [];
-
-            for (const method of API_ROUTE_METHODS) {
-              if (routeModule[method]) {
-                availableMethods.push(method);
-                endpoints[method] = routeModule[method];
-              }
-            }
-
-            if (availableMethods.length > 0) {
-              apiRoutesCache.set(routePath, {
-                path: routePath,
-                filePath: file,
-                methods: availableMethods,
-                endpoints,
-              });
-              log(`New API route discovered: ${routePath}`);
-              await createRouter();
-            }
-          } catch (e: any) {
-            log(`New API route load failed: ${e.message}`);
-          }
+          await createRouter();
+          log(`API route reloaded: ${availableMethods.join(", ")} ${routePath}`);
+          log(`API router recreated`);
+        } catch (e: any) {
+          restoreRouteState(previousState);
+          if (e instanceof APIRouteConflictError || e instanceof AmbiguousRouteError) throw e;
+          log(`API route HMR failed: ${e.message}`);
         }
 
         return [];

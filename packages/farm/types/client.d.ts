@@ -215,12 +215,105 @@ declare module "@farm.js/core/client" {
 
   export type PrefetchBehavior = false | "intent" | "viewport" | "render" | "none";
 
+  /** URI schemes recognized as typed external Link targets. Apps may augment this interface. */
+  export interface LinkExternalUriSchemes {
+    about: true;
+    blob: true;
+    data: true;
+    file: true;
+    ftp: true;
+    ftps: true;
+    geo: true;
+    git: true;
+    http: true;
+    https: true;
+    im: true;
+    intent: true;
+    irc: true;
+    ircs: true;
+    magnet: true;
+    mailto: true;
+    market: true;
+    sms: true;
+    ssh: true;
+    tel: true;
+    urn: true;
+    vscode: true;
+    webcal: true;
+    ws: true;
+    wss: true;
+  }
+
+  type ExternalUriScheme = Extract<keyof LinkExternalUriSchemes, string>;
+
+  type UriSchemeLetter =
+    | "a"
+    | "b"
+    | "c"
+    | "d"
+    | "e"
+    | "f"
+    | "g"
+    | "h"
+    | "i"
+    | "j"
+    | "k"
+    | "l"
+    | "m"
+    | "n"
+    | "o"
+    | "p"
+    | "q"
+    | "r"
+    | "s"
+    | "t"
+    | "u"
+    | "v"
+    | "w"
+    | "x"
+    | "y"
+    | "z";
+  type UriSchemeStart = UriSchemeLetter | Uppercase<UriSchemeLetter>;
+  type UriSchemeCharacter =
+    | UriSchemeStart
+    | "0"
+    | "1"
+    | "2"
+    | "3"
+    | "4"
+    | "5"
+    | "6"
+    | "7"
+    | "8"
+    | "9"
+    | "+"
+    | "-"
+    | ".";
+  type IsUriSchemeTail<TValue extends string> = TValue extends ""
+    ? true
+    : TValue extends `${infer First}${infer Rest}`
+      ? First extends UriSchemeCharacter
+        ? IsUriSchemeTail<Rest>
+        : false
+      : false;
+  type IsUriScheme<TValue extends string> = TValue extends `${infer First}${infer Rest}`
+    ? First extends UriSchemeStart
+      ? IsUriSchemeTail<Rest>
+      : false
+    : false;
+
+  type KnownExternalHref = `//${string}` | `${ExternalUriScheme}:${string}`;
+
   /** External URLs are never type-checked as routes; use for http/https/mailto etc. */
-  export type ExternalHref =
-    | `http://${string}`
-    | `https://${string}`
-    | `//${string}`
-    | `mailto:${string}`;
+  export type ExternalHref<THref extends string = string> = string extends THref
+    ? KnownExternalHref
+    : THref extends `//${string}`
+      ? THref
+      : THref extends `${infer Scheme}:${string}`
+        ? IsUriScheme<Scheme> extends true
+          ? THref
+          : never
+        : never;
 
   export interface LinkDefaultRoute {}
 
@@ -316,16 +409,16 @@ declare module "@farm.js/core/client" {
         } & LinkRouteParamsProps<TRoute>
       : never;
 
-  export type LinkExternalTargetProps = {
-    href: ExternalHref;
+  export type LinkExternalTargetProps<THref extends string = string> = {
+    href: ExternalHref<THref>;
     params?: never;
   };
 
-  export type LinkProps<TRoute extends string = DefaultRouteHref> = Omit<
-    AnchorHTMLAttributes<HTMLAnchorElement>,
-    "href"
-  > &
-    (LinkExternalTargetProps | LinkRouteTargetProps<TRoute>) & {
+  export type LinkProps<
+    TRoute extends string = DefaultRouteHref,
+    THref extends string = string,
+  > = Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "href"> &
+    (LinkExternalTargetProps<THref> | LinkRouteTargetProps<TRoute>) & {
       /** Internal route path (typed when route types are generated) or external URL (never raises route-type errors). */
       prefetch?: PrefetchBehavior | boolean | "hover" | "viewport" | "none";
       query?: URLSearchParams | Record<string, RouteQueryValue>;
@@ -337,8 +430,11 @@ declare module "@farm.js/core/client" {
       viewTransition?: FarmViewTransitionMode;
     };
 
-  export type LinkComponent = <TRoute extends string = DefaultRouteHref>(
-    props: LinkProps<TRoute> & RefAttributes<HTMLAnchorElement>,
+  export type LinkComponent = <
+    TRoute extends string = DefaultRouteHref,
+    THref extends string = string,
+  >(
+    props: LinkProps<TRoute, THref> & RefAttributes<HTMLAnchorElement>,
   ) => ReactElement;
 
   export const Link: LinkComponent;

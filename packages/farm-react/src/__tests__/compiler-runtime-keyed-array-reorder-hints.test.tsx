@@ -21,6 +21,7 @@ interface Item {
 type ReversibleArray = Item[] & { toReversed(): Item[] };
 
 const roots: Root[] = [];
+const stressIt = process.env.FARM_REACT_STRESS === "1" ? it : it.skip;
 
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -146,39 +147,42 @@ function itemLabels(container: Element): string[] {
 }
 
 describe("compiled keyed-array reorder hints", () => {
-  it("reverses 4,096 rows with minimum DOM moves and no key, descriptor, or binding reads", async () => {
-    const initialItems = Array.from(
-      { length: 4_096 },
-      (_, index): Item => ({ id: `row-${index}`, label: `Row ${index}` }),
-    );
-    const harness = createReorderHarness(initialItems);
-    const container = document.createElement("div");
-    document.body.append(container);
-    const root = createRoot(container);
-    roots.push(root);
-    await act(async () => root.render(<harness.Table />));
-    const first = container.querySelector('[data-key="row-0"]');
-    const last = container.querySelector('[data-key="row-4095"]');
-    const list = container.querySelector("ul")!;
-    const insertBefore = vi.spyOn(list, "insertBefore");
-    harness.counters.keys = 0;
-    harness.counters.descriptors = 0;
-    harness.counters.bindings = 0;
+  stressIt(
+    "reverses 4,096 rows with minimum DOM moves and no key, descriptor, or binding reads",
+    async () => {
+      const initialItems = Array.from(
+        { length: 4_096 },
+        (_, index): Item => ({ id: `row-${index}`, label: `Row ${index}` }),
+      );
+      const harness = createReorderHarness(initialItems);
+      const container = document.createElement("div");
+      document.body.append(container);
+      const root = createRoot(container);
+      roots.push(root);
+      await act(async () => root.render(<harness.Table />));
+      const first = container.querySelector('[data-key="row-0"]');
+      const last = container.querySelector('[data-key="row-4095"]');
+      const list = container.querySelector("ul")!;
+      const insertBefore = vi.spyOn(list, "insertBefore");
+      harness.counters.keys = 0;
+      harness.counters.descriptors = 0;
+      harness.counters.bindings = 0;
 
-    await act(async () => {
-      harness.reverse();
-      await flushCompilerUpdates();
-    });
+      await act(async () => {
+        harness.reverse();
+        await flushCompilerUpdates();
+      });
 
-    expect(container.querySelector("li:first-child")).toBe(last);
-    expect(container.querySelector("li:last-child")).toBe(first);
-    expect(insertBefore).toHaveBeenCalledTimes(4_095);
-    expect(harness.counters.executions).toBe(1);
-    expect(harness.counters.renders).toBe(1);
-    expect(harness.counters.keys).toBe(0);
-    expect(harness.counters.descriptors).toBe(0);
-    expect(harness.counters.bindings).toBe(0);
-  });
+      expect(container.querySelector("li:first-child")).toBe(last);
+      expect(container.querySelector("li:last-child")).toBe(first);
+      expect(insertBefore).toHaveBeenCalledTimes(4_095);
+      expect(harness.counters.executions).toBe(1);
+      expect(harness.counters.renders).toBe(1);
+      expect(harness.counters.keys).toBe(0);
+      expect(harness.counters.descriptors).toBe(0);
+      expect(harness.counters.bindings).toBe(0);
+    },
+  );
 
   it("falls back safely for custom methods, queued hints, and collection-reading bindings", async () => {
     const initialItems: Item[] = [

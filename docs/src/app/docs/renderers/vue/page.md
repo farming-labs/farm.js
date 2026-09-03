@@ -13,7 +13,7 @@ Vue.
 ## Create an app
 
 ```bash
-pnpm create @farm.js/app@beta my-vue-app --template basic --renderer vue --typescript
+pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-vue-app --template basic --renderer vue --typescript
 ```
 
 For an existing Basic app, install the adapter and Vue runtime:
@@ -140,7 +140,7 @@ adapter, and generated JSX metadata images remain React-oriented today.
 The Better Auth starter includes native Vue SFC routes, composables, and forms:
 
 ```bash
-pnpm create @farm.js/app@beta my-auth-app --template better-auth --renderer vue --typescript
+pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-auth-app --template better-auth --renderer vue --typescript
 ```
 
 Other integration starter templates currently target React, so add their renderer-neutral provider

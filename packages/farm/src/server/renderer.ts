@@ -10,7 +10,8 @@ import type {
   SSGPage,
 } from "../types";
 import type { MatchedRouteSlot, RouteManager } from "../routing/route-manager";
-import { logger, toRootRelativeUrlPath } from "../utils";
+import { logger, toRootRelativeUrlPath, toViteModuleId } from "../utils";
+import { collectDevStylesheetUrls } from "./dev-styles";
 import {
   composeFarmFullDocument,
   extractFarmFullDocument,
@@ -26,7 +27,11 @@ import {
 } from "../middleware/server";
 import { getRequestContextSnapshot } from "../request-context";
 import { matchSSGPage, resolveRouteRenderingConfigFromFile } from "../ssg";
-import { getIntegrationProviders, getRegisteredIntegrationAPIManifest } from "../integrations";
+import {
+  getIntegrationProviders,
+  getRegisteredIntegrationAPIManifest,
+  isFarmIntegrationProviderComponentReference,
+} from "../integrations";
 import { _runWithCurrentRequest, createWebRequestFromFarmRequest } from "./request";
 import { createFarmCacheKey, getFarmDataCache, normalizeRevalidatePath } from "../cache";
 import { resolveFarmNotFoundComponentPath } from "../not-found";
@@ -65,6 +70,7 @@ import {
   resolveFarmTrailingSlashRedirect,
   setFarmTrailingSlashPreference,
 } from "../trailing-slash";
+import { setFarmBasePath } from "../base-path";
 import { DEFAULT_NOT_FOUND_STYLES } from "../components/not-found-styles";
 import {
   createDefaultErrorMarkup,
@@ -100,6 +106,15 @@ interface CachedSSGPage {
 
 interface CachedPPRShell {
   html: string;
+}
+
+export function shouldServePrerenderedPage(
+  nodeEnv: string | undefined,
+  method: string | undefined,
+): boolean {
+  if (nodeEnv !== "production") return false;
+  const normalizedMethod = (method || "GET").toUpperCase();
+  return normalizedMethod === "GET" || normalizedMethod === "HEAD";
 }
 
 function formatSSGManifestError(error: unknown): string {
@@ -528,6 +543,20 @@ export class ServerRenderer {
     );
   }
 
+  /// Stylesheets the app imported through JS (fontsource packages, component
+  /// CSS) that the document must link alongside globals.css — see #658.
+  private collectDevStyleHrefs(): string[] {
+    const graph = this.viteServer?.moduleGraph;
+    if (!graph) return [];
+    return collectDevStylesheetUrls(graph.idToModuleMap.values());
+  }
+
+  private collectDevStyleLinks(): string[] {
+    return this.collectDevStyleHrefs().map(
+      (href) => `<link rel="stylesheet" href="${escapeHtmlAttribute(href)}">`,
+    );
+  }
+
   private createLayoutBoundary(pattern: string, layoutElement: unknown): unknown {
     return this.rendererRuntime.createElement(
       "div",
@@ -603,6 +632,8 @@ export class ServerRenderer {
    */
   async renderNavigationFragment(input: FarmNavigationFragmentInput): Promise<string> {
     await this.initialize();
+    setFarmBasePath(this.config.basePath);
+    setFarmTrailingSlashPreference(this.config.trailingSlash);
     let element = this.rendererRuntime.createElement(input.PageComponent, input.pageProps);
     if (input.LoadingComponent) {
       element = this.rendererRuntime.createElement(
@@ -963,6 +994,7 @@ export class ServerRenderer {
 
   async renderPage(req: FarmRequest, res: FarmResponse): Promise<void> {
     await this.initialize();
+    setFarmBasePath(this.config.basePath);
     setFarmTrailingSlashPreference(this.config.trailingSlash);
     const request = createWebRequestFromFarmRequest(req);
     const runtime = this.i18nRuntime;
@@ -1051,8 +1083,9 @@ export class ServerRenderer {
         }
       }
 
-      // Check for pre-rendered SSG page first (production only)
-      if (process.env.NODE_ENV === "production") {
+      // Pre-rendered HTML only represents retrieval requests. Other methods must
+      // continue through the live route so their request semantics are preserved.
+      if (shouldServePrerenderedPage(process.env.NODE_ENV, req.method)) {
         const ssgPage = await this.shouldServeSSG(pathname);
         if (ssgPage) {
           const served = await this.serveSSGPage(req, res, ssgPage);
@@ -1673,18 +1706,48 @@ export class ServerRenderer {
 
     for (let i = providers.length - 1; i >= 0; i--) {
       const provider = providers[i];
-      if (provider.type === "clerk") {
+      if (provider.component || provider.type === "clerk") {
         if (!isReactRenderer(this.config.renderer)) {
           throw new Error(
             `Integration provider \`${provider.type}\` currently requires the React renderer.`,
           );
         }
-        if (!cachedClerkProvider) {
-          cachedClerkProvider = await importRuntimeModule("@clerk/react");
+        let ProviderComponent;
+        if (isFarmIntegrationProviderComponentReference(provider.component)) {
+          const providerModuleId = provider.component.module.startsWith(".")
+            ? toViteModuleId(
+                path.resolve(this.config.root, provider.component.module),
+                this.config.root,
+              )
+            : provider.component.module;
+          const providerModule = this.viteServer
+            ? await this.viteServer.ssrLoadModule(providerModuleId)
+            : await importRuntimeModule(
+                provider.component.module.startsWith(".")
+                  ? pathToFileURL(path.resolve(this.config.root, provider.component.module)).href
+                  : provider.component.module,
+              );
+          ProviderComponent = providerModule[provider.component.export || "default"];
+        } else if (typeof provider.component === "function") {
+          ProviderComponent = provider.component;
+        } else if (provider.type === "clerk") {
+          if (!cachedClerkProvider) {
+            cachedClerkProvider = await importRuntimeModule("@clerk/react");
+          }
+          ProviderComponent = cachedClerkProvider!.ClerkProvider;
+        } else {
+          throw new Error(
+            `Integration provider \`${provider.name}\` has an invalid component reference.`,
+          );
+        }
+        if (!ProviderComponent) {
+          throw new Error(
+            `Integration provider \`${provider.name}\` did not export its configured component.`,
+          );
         }
 
         wrapped = this.rendererRuntime.createElement(
-          cachedClerkProvider!.ClerkProvider,
+          ProviderComponent,
           provider.props || {},
           wrapped,
         );
@@ -2007,6 +2070,8 @@ export class ServerRenderer {
         });
       }
 
+      wrapped = await this.wrapWithIntegrationProviders(wrapped);
+
       const html = await _runWithMiddlewareData(options.middlewareMap, () =>
         _runWithMiddlewareContext(options.middlewareContext, () =>
           this.rendererRuntime.renderToString(wrapped),
@@ -2058,6 +2123,10 @@ export class ServerRenderer {
             tag: "link",
             attrs: { rel: "stylesheet", href: "/src/app/globals.css" },
           },
+          ...this.collectDevStyleHrefs().map((href) => ({
+            tag: "link",
+            attrs: { rel: "stylesheet", href },
+          })),
         ],
       };
 
@@ -2176,6 +2245,7 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
             rendererHead,
             renderFarmFontDevHead(this.config.root || process.cwd()),
             `<link rel="stylesheet" href="/src/app/globals.css">`,
+            ...this.collectDevStyleLinks(),
             `<script type="module" src="/@vite/client"></script>`,
             rendererHydrationScript,
             bootstrapScript,
@@ -2199,7 +2269,9 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
   ${hasFavicon ? "" : '<link rel="icon" href="data:,">'}
   ${documentTitleTag}${metaTags}${alternateTags}${rendererHead ? `\n  ${rendererHead}` : ""}
   ${renderFarmFontDevHead(this.config.root || process.cwd())}
-  <link rel="stylesheet" href="/src/app/globals.css">
+  <link rel="stylesheet" href="/src/app/globals.css">${this.collectDevStyleLinks()
+    .map((l) => `\n  ${l}`)
+    .join("")}
   <script type="module" src="/@vite/client"></script>
   ${rendererHydrationScript}
   ${bootstrapScript}
@@ -2296,6 +2368,10 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
             tag: "link",
             attrs: { rel: "stylesheet", href: "/src/app/globals.css" },
           },
+          ...this.collectDevStyleHrefs().map((href) => ({
+            tag: "link",
+            attrs: { rel: "stylesheet", href },
+          })),
         ],
       };
 
@@ -2407,6 +2483,7 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
         { style: { display: "contents" } },
         element,
       );
+      const devStyleLinks = this.collectDevStyleLinks();
       const { pipe } = renderToPipeableStream(streamRoot, {
         onShellReady() {
           const shellReadyMs = Date.now() - streamStartTime;
@@ -2430,7 +2507,9 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
   ${hasFavicon ? "" : '<link rel="icon" href="data:,">'}
   <title>${title}</title>${metaTags}${i18nAlternateTags}
   ${fontHead}
-  <link rel="stylesheet" href="/src/app/globals.css" />
+  <link rel="stylesheet" href="/src/app/globals.css" />${devStyleLinks
+    .map((l) => `\n  ${l}`)
+    .join("")}
   <script type="module" src="/@vite/client"></script>
   ${propsScript}
   ${hydrationClickQueueScript}
@@ -2603,6 +2682,8 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
             });
           }
 
+          element = await this.wrapWithIntegrationProviders(element);
+
           // Render to string
           const content = await this.rendererRuntime.renderToString(element);
 
@@ -2714,6 +2795,7 @@ ${i18nSnapshot ? `window.__FARM_I18N__ = ${serializeInlineValue(i18nSnapshot)};`
           alternateLinks,
           fontHead,
           `<link rel="stylesheet" href="/src/app/globals.css" />`,
+          ...this.collectDevStyleLinks(),
           `<script type="module" src="/@vite/client"></script>`,
           rendererHydrationScript,
           integrationManifestScript,
@@ -2736,7 +2818,9 @@ ${i18nSnapshot ? `window.__FARM_I18N__ = ${serializeInlineValue(i18nSnapshot)};`
   <link rel="icon" href="data:,">
   <title>${escapeHtmlAttribute(documentTitle)}</title>${alternateLinks}
   ${fontHead}
-  <link rel="stylesheet" href="/src/app/globals.css" />
+  <link rel="stylesheet" href="/src/app/globals.css" />${this.collectDevStyleLinks()
+    .map((l) => `\n  ${l}`)
+    .join("")}
   <script type="module" src="/@vite/client"></script>
   ${rendererHydrationScript}
   ${integrationManifestScript}

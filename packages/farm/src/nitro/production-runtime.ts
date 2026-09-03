@@ -55,10 +55,17 @@ export {
   reportFarmPreloadWarnings,
 } from "../preload";
 export { searchParamsToObject } from "../search-params";
+export { createFarmLegacyRequest } from "./legacy-request";
+export {
+  renderFarmLegacyErrorHtml,
+  renderFarmLegacyHtml,
+  serializeFarmInlineValue,
+} from "./legacy-runtime";
 export {
   resolveFarmTrailingSlashRedirect,
   setFarmTrailingSlashPreference,
 } from "../trailing-slash";
+export { setFarmBasePath } from "../base-path";
 
 export function appendFarmLinkHeader(headers: Headers, value: string): void {
   const current = headers.get("Link");

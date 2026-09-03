@@ -2,6 +2,179 @@
 
 Date: 2026-08-29
 
+## Compiler-safe runtime rolling-window bounds — 2026-09-02
+
+The 10,000-row rolling workload now passes an event-local `trimCount` to
+`[...current.slice(trimCount), ...incoming]` instead of embedding the retained-tail bound as a
+literal. Both compiler builds emit one `keyedArrayRollingWindowHints` site, preserve all 9,000
+retained DOM rows, remove the 1,000-row prefix, mount only the 1,000-row incoming suffix, and finish
+with zero compiled owner executions. The block-bodied setter remains the compiled control and
+performs the same native array and DOM update without the hint.
+
+| Mode   | React median | Runtime bound | Compiled control | vs React | vs control |
+| ------ | -----------: | ------------: | ---------------: | -------: | ---------: |
+| Static |     102.30 ms |      17.50 ms |         26.10 ms |    5.85x |      1.49x |
+| Hybrid |     102.30 ms |      17.30 ms |         25.10 ms |    5.91x |      1.45x |
+
+The unchanged gate requires at least 2x versus React and 1.25x versus the equivalent block-bodied
+compiled control. The complete bracketed production-browser run passed DOM correctness, compiler
+report checks, the general performance gate, every older optimization-persistence gate, and all
+normalized scalability checks.
+
+Compiler tests accept identifiers, property reads, arithmetic, conditionals, and safe `Math` calls
+while rejecting user calls, assignments, updates, and fractional literals. Runtime coverage proves
+complete reconciliation for fractional, `NaN`, and no-op evaluated bounds, retained identity and
+incoming-only work on the fast path, 250 committed fixed-bound updates, and 1,000 randomized
+runtime-bound updates against normal React. The runtime implementation is unchanged. The dynamic
+rolling fixture has a 12,957 B gzip compiler premium, 17 B above the literal-bound fixture; the
+compiler-disabled core premium remains 3,766 B gzip with an 82.5% reduction from the full runtime.
+The recorded run used Chrome 152.0.7977.65, Node.js 23.11.0, and Apple M1 macOS arm64.
+
+## Compiler-safe runtime slice bounds — 2026-09-02
+
+The retained-window workload now passes an event-local `trimCount` to
+`current.slice(trimCount)` instead of embedding the value as a literal. Both compiler builds emit
+one `keyedArraySliceHints` site, preserve every surviving DOM row, remove the exact prefix, and
+finish with zero compiled owner executions. The equivalent block-bodied setter remains the
+compiled control and performs the same native array and DOM work without the hint.
+
+| Mode   | React median | Runtime bound | Compiled control | vs React | vs control | 21k vs React |
+| ------ | -----------: | ------------: | ---------------: | -------: | ---------: | -----------: |
+| Static |      64.00 ms |       5.40 ms |         17.10 ms |   11.85x |      3.17x |       13.65x |
+| Hybrid |      64.00 ms |       7.00 ms |         18.70 ms |    9.14x |      2.67x |       15.53x |
+
+The unchanged gate requires at least 3x versus React at both 10,000 and 21,000 rows and 1.25x
+versus the compiled control. Three complete bracketed production-browser runs all passed the slice
+gate: 5.82x–13.37x versus React at 10,000 rows, 9.00x–15.53x at 21,000 rows, and 2.67x–4.64x versus
+the control. Each run also passed DOM correctness, compiler-report, owner-execution, general
+optimization-persistence, and normalized scalability checks for this path.
+
+Compiler tests accept identifiers, property reads, arithmetic, conditionals, and safe `Math` calls
+while rejecting user calls, assignments, updates, and fractional literals. Runtime coverage proves
+native bound coercion order, complete fallback for fractional, `NaN`, and no-op evaluated bounds,
+2,000 queued slices, and 1,000 randomized runtime-bound slices against normal React. The runtime is
+unchanged: the keyed-slice fixture remains a 12,222 B gzip compiler premium, the optional
+keyed-window fixture remains 14,173 B gzip, and the compiler-disabled core premium remains 3,766 B
+gzip with an 82.5% reduction from the full compatibility runtime. The recorded run used Chrome
+152.0.7977.65, Node.js 23.11.0, and Apple M1 macOS arm64.
+
+## Runtime delete-count exact-window follow-up — 2026-09-02
+
+The full bracketed production-browser run changed the existing 10,000-row exact-window workload
+from a literal delete count to `deleteCount = replacements.length`. The concise setter passes that
+runtime value to `toSpliced(position, deleteCount, ...replacements)`, while the block-bodied
+compiled control performs the same native array and DOM work without the hint. Both compiler builds
+emitted all 15 expected `keyedArrayPositionHints` sites, preserved both surrounding DOM anchors,
+disconnected the complete removed interval, mounted the 64 replacement rows, and produced zero
+owner executions.
+
+| Mode   | React median | Runtime count | Compiled control | vs React | vs control |
+| ------ | -----------: | ------------: | ---------------: | -------: | ---------: |
+| Static |     110.95 ms |       7.60 ms |         19.90 ms |   14.60x |      2.62x |
+| Hybrid |     110.95 ms |       7.80 ms |         18.90 ms |   14.22x |      2.42x |
+
+The unchanged gate requires at least 4x versus React and 1.5x versus the equivalent block-bodied
+compiled control. Every correctness, performance, persistence, and scalability gate passed. The
+stacked queued grow/shrink workload also remained above its existing floors: 7.27x/7.78x versus
+React and 2.03x/2.05x versus its control in static/hybrid modes.
+
+Compiler tests accept identifiers, property reads, arithmetic, conditionals, and safe `Math` calls
+as count expressions while rejecting calls, assignments, and update expressions. Runtime coverage
+proves native count coercion occurs exactly once and that zero or fractional evaluated counts keep
+their native result through complete reconciliation. The full 615-test ordinary suite and all
+three isolated stress controls pass, as do packaged React 18.3.1 and 19.2.8 compatibility. The
+optional keyed-window runtime remains unchanged at a 14,173 B gzip compiler premium, and the
+compiler-disabled core premium remains 3,766 B gzip. The measured environment was Chrome
+145.0.7632.6, Node.js 23.11.0, and Apple M1 macOS arm64.
+
+## Queued disjoint variable-length window follow-up — 2026-09-02
+
+The full bracketed production-browser run added a 10,000-row workload that queues two disjoint
+updates before one compiler flush. The first window grows from 64 to 80 rows while the second
+shrinks from 64 to 48, so the final table remains at 10,000 rows. Both updates reverse and refresh
+locally retained keys, retire old rows, and add globally fresh rows. Static and hybrid builds
+emitted all 15 expected `keyedArrayPositionHints` sites, preserved surrounding anchors and retained
+DOM identities, disconnected retired rows, mounted only fresh rows, and produced zero owner
+executions.
+
+| Mode   | React median | Queued resize | Compiled control | vs React | vs control |
+| ------ | -----------: | ------------: | ---------------: | -------: | ---------: |
+| Static |      72.25 ms |      13.60 ms |         25.40 ms |    5.31x |      1.87x |
+| Hybrid |      72.25 ms |      13.40 ms |         25.40 ms |    5.39x |      1.90x |
+
+The independent gate requires at least 4x versus React and 1.5x versus the equivalent block-bodied
+compiled control in both modes. One initial full run passed correctness and every specialized
+compiler gate but caught a non-reproducing broad hybrid table-creation outlier. An unchanged second
+full run passed every correctness, performance, persistence, and scalability gate; the queued
+resize result remained above both required floors in both runs.
+
+Package coverage separately queues a 32-to-40-row grow and a 32-to-24-row shrink across a
+4,096-row table. It proves 64 key and binding reads, 24 fresh descriptors, exact local LIS moves,
+retained identity, retired-row cleanup, and stable anchors without rerunning the owner. Tests also
+cover high-window-first coordinate normalization, adjacent empty windows, preparation of every
+window before the first DOM write, overlap and cross-window-key fallback, controlled-input focus
+and selection, delegated event indexes, hydration, Strict Mode, unmount-before-flush cleanup, and
+1,000 randomized queued variable-length updates against normal React. Packaged React 18.3.1 and
+19.2.8 compatibility both pass.
+
+The isolated optional window runtime has a 14,173 B gzip compiler premium, 416 B above the previous
+record after reducing the initial implementation by 206 B. The compiler-disabled core runtime
+premium remains unchanged at 3,766 B gzip and still removes 82.5% of the full compatibility
+runtime. The measured environment was Chrome 145.0.7632.6, Node.js 23.11.0, and Apple M1 macOS
+arm64.
+
+## Variable-length local-key window reuse follow-up — 2026-09-02
+
+The full bracketed production-browser run added a separate 10,000-row workload that grows one
+64-row window to 80 rows. The update reverses and refreshes 48 keys retained from that interval,
+retires 16 old keys, adds 32 globally fresh keys, and shifts the untouched suffix without
+recreating either surrounding anchor. Both compiler builds emitted all 13 expected
+`keyedArrayPositionHints` sites, produced zero owner executions, and passed every existing
+correctness, performance, persistence, and scalability gate without lowering a threshold.
+
+| Mode   | React median | Variable local window | Compiled control | vs React | vs control |
+| ------ | -----------: | --------------------: | ---------------: | -------: | ---------: |
+| Static |    114.75 ms |              15.90 ms |         31.90 ms |    7.22x |      2.01x |
+| Hybrid |    114.75 ms |              19.10 ms |         34.80 ms |    6.01x |      1.82x |
+
+The independent gate requires at least 4x versus React and 1.5x versus the equivalent block-bodied
+compiled control in both modes. Package tests separately grow a 4,096-row table from a 64-row
+window to 80 rows and shrink it to 40, requiring exact local LIS moves, retained DOM identity,
+fresh-row-only descriptor work, retired-row cleanup, and preserved surrounding anchors. Another
+1,000 deterministic randomized variable-length updates match normal React. Atomic preparation,
+outside-window and duplicate-key fallback, controlled-input focus and selection, delegated event
+indexes, hydration, Strict Mode, unmount cleanup, and packaged React 18.3.1/19.2.8 compatibility
+also pass. The isolated exact-window runtime grows by 13 B gzip to a 13,757 B compiler premium,
+inside the unchanged 256 B allowance; the compiler-selected core still removes 82.2% of the full
+compatibility runtime. The measured environment was Chrome 145.0.7632.6, Node.js 23.11.0, and
+Apple M1 macOS arm64.
+
+## Mixed local-key exact-window replacement follow-up — 2026-09-01
+
+The full bracketed production-browser run added a separate 10,000-row workload for one fixed
+64-row window. The update reverses and changes 48 keys reused from inside that removed interval,
+retires 16 old keys, and inserts 16 globally new keys. Both compiler builds emitted all 12 expected
+`keyedArrayPositionHints` sites, retained all 48 reused DOM rows, disconnected all 16 retired rows,
+created all 16 fresh rows without borrowing any of the 10,000 pre-update DOM nodes, preserved both
+surrounding anchors, produced zero owner executions, and passed every existing correctness,
+performance, persistence, and scalability gate without lowering a threshold.
+
+| Mode   | React median | Mixed local window | Compiled control | vs React | vs control |
+| ------ | -----------: | -----------------: | ---------------: | -------: | ---------: |
+| Static |     57.70 ms |           10.80 ms |         22.50 ms |    5.34x |      2.08x |
+| Hybrid |     57.70 ms |           10.80 ms |         23.10 ms |    5.34x |      2.14x |
+
+The independent gate requires at least 4x versus React and 1.5x versus the equivalent block-bodied
+compiled control in both modes. Package tests separately prove bounded work across 4,096 rows: 64
+key reads, 64 binding snapshots, 16 fresh descriptors, 47 local LIS moves, and one fragment mount.
+They also cover complete preparation before mutation, duplicate and outside-window key fallback,
+1,000 deterministic differential updates, controlled-input focus and selection, delegated events,
+hydration, Strict Mode, React 18/19 compatibility, and unmount cleanup. The isolated exact-window
+fixture has a 13,744 B gzip compiler premium, 219 B above the previous result and inside the
+unchanged 256 B allowance. Sharing the LIS/focus mover with ordinary keyed reconciliation also
+reduces the other hinted keyed fixtures by up to 49 B gzip. The measured environment was Chrome
+145.0.7632.6, Node.js 23.11.0, and Apple M1 macOS arm64.
+
 ## Overlapping fresh-key exact-window replacement follow-up — 2026-09-01
 
 The full bracketed production-browser run changed the 10,000-row queued replacement workload to

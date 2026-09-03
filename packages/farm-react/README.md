@@ -42,7 +42,7 @@ definitions, while generated code uses the tree-shakable feature entry.
 
 The persisted production-size fixtures and regression gate live in
 [`RUNTIME_SIZE_RESULTS.md`](./RUNTIME_SIZE_RESULTS.md). The recorded direct-only runtime premium is
-73.6% smaller than the complete compatibility runtime premium; the feature-heavy keyed benchmark
+82.5% smaller than the complete compatibility runtime premium; the feature-heavy keyed benchmark
 application removes 6,185 gzip bytes from its previous compiler-on build.
 
 For selective adoption, use annotation mode:
@@ -264,38 +264,50 @@ keys, React-owned row structures, middle insertion, direct replacement, duplicat
 sparse arrays, and failed validation use complete keyed reconciliation. The compiler report
 exposes the emitted-site count as `keyedArrayPrependHints`.
 
-Literal native slices can carry their exact retained interval into the same removal runtime:
+Native slices with compiler-safe bounds can carry their exact retained interval into the same
+removal runtime:
 
 ```tsx
 setItems((current) => current.slice(1_000));
 setItems((current) => current.slice(0, -1_000));
 setItems((current) => current.slice(2, 8));
+setItems((current) => current.slice(trimCount));
+setItems((current) => current.slice(visible.start, visible.end));
 ```
 
 For compiler-owned host rows whose render and key do not read the row index, Farm validates the
 committed source and queued slice chain, preserves every surviving DOM row, and removes only rows
 outside the retained interval. A slice-only chain does not reread surviving keys, descriptors, or
-bindings. One or two build-time safe-integer bounds are required. Runtime bounds, block-bodied or
-chained updates, custom slice methods, sparse or subclassed arrays, index-aware or
-collection-reading rows, React-owned structures, and failed validation keep complete keyed
-reconciliation. No option or component is added. The compiler report exposes the emitted-site
-count as `keyedArraySliceHints`.
+bindings. One or two safe-integer literals or compiler-safe runtime expressions are required.
+Identifiers, property reads, side-effect-free arithmetic and conditionals, and safe `Math` calls
+are supported. Farm preserves native method lookup, argument evaluation, coercion, results, and
+errors, then records metadata only when the evaluated bounds are already safe integers. Calls,
+assignments, updates, unsafe evaluated bounds, block-bodied or chained updates, custom slice
+methods, sparse or subclassed arrays, index-aware or collection-reading rows, React-owned
+structures, and failed validation keep complete keyed reconciliation. No option or component is
+added. The compiler report exposes the emitted-site count as `keyedArraySliceHints`.
 
 A fixed-size feed can combine that retained tail with a new keyed suffix:
 
 ```tsx
 setItems((current) => [...current.slice(1), nextItem]);
 setItems((current) => [...current.slice(1_000), ...nextItems]);
+
+const trimCount = pageSize * pagesToExpire;
+setItems((current) => [...current.slice(trimCount), ...nextItems]);
 ```
 
 Farm executes the ordinary native slice and array construction, then validates the committed
 source, retained item identities, and incoming keys. It removes only the expired prefix, leaves
-the retained DOM rows in place, and creates only the incoming suffix. This first form supports one
-build-time safe-integer slice bound and compiler-owned, index-independent host rows. Reused keys,
-block-bodied updaters, custom slice behavior, collection-reading or index-aware rows, nested or
-React-owned rows, queued uncommitted windows, and failed checks use complete keyed reconciliation.
-The optional all-hint runtime is selected only for modules that emit this optimization. Reports
-expose the site count as `keyedArrayRollingWindowHints`.
+the retained DOM rows in place, and creates only the incoming suffix. This form supports one
+safe-integer literal or compiler-safe runtime slice bound and compiler-owned, index-independent
+host rows. Identifiers, property reads, side-effect-free arithmetic and conditionals, and safe
+`Math` calls are supported while preserving native lookup, evaluation, results, and errors.
+Effectful expressions, reused keys, block-bodied updaters, custom slice behavior,
+collection-reading or index-aware rows, nested or React-owned rows, queued uncommitted windows,
+unsafe or no-op evaluated bounds, and failed checks use complete keyed reconciliation. The
+optional all-hint runtime is selected only for modules that emit this optimization. Reports expose
+the site count as `keyedArrayRollingWindowHints`.
 
 Native known-position updates can avoid a complete keyed scan too:
 
@@ -330,7 +342,14 @@ through one document fragment. It then removes only the replaced window. When th
 has the same length and the same keys in the same order, Farm prepares every binding read and
 changed DOM target across the complete window first, patches the existing rows in place, and
 updates the stored row objects used by later events. That path creates no descriptors or DOM rows,
-and preserves row identity, focus, and selection. Multiple length-preserving same-key windows
+and preserves row identity, focus, and selection. A window may instead grow or shrink while it
+reorders keys from inside its own removed interval and mixes them with globally fresh keys. Farm
+prepares all reused binding updates, new descriptors, binding snapshots, and detached rows before
+the first DOM write. It removes only retired rows, preserves each reused row, batches adjacent new
+rows in a fragment, updates shifted suffix indexes, and applies LIS only to the reused part of that
+interval so it moves the fewest connected rows needed by the local permutation. Rows outside the
+interval are not rerendered or rebound.
+Multiple length-preserving same-key windows
 queued before one compiler flush compose into one atomic refresh. Fixed-length queued windows may
 mix same-key refreshes with globally new final keys, and both disjoint and overlapping windows are
 supported. An overlapping position uses the last queued value; intermediate identities are never
@@ -344,8 +363,8 @@ collection-reading rows, custom methods, position expressions with user calls or
 runtime positions that are not safe integers, dynamic, zero, negative, or fractional removal
 counts, other `toSpliced()` forms, block-bodied updaters, unsafe incoming expressions, queued
 chains containing a structural window or unhinted intermediate update, existing keys moved from
-another position, partially reused windows, duplicate final keys, nested or React-owned rows, and
-failed checks use complete keyed reconciliation before the fast path mutates the DOM.
+outside the removed interval, duplicate final keys, nested or React-owned rows, and failed checks
+use complete keyed reconciliation before the fast path mutates the DOM.
 Reports expose the site count as `keyedArrayPositionHints`. Batch insertion and exact-window
 replacement use progressively separate optional runtime capabilities, so existing single-position
 and batch-only bundles do not retain window validation or replacement code.
@@ -695,8 +714,8 @@ and
 `keyedArraySortHints`, the number of compiler-proven direct native keyed-array sort sites; and
 `keyedArrayRollingWindowHints`, the number of compiler-proven retained-tail plus incoming-suffix
 sites; and
-`keyedArraySliceHints`, the number of compiler-proven direct keyed-array slice sites. A custom
-project-relative `reportFile` also enables reporting.
+`keyedArraySliceHints`, the number of compiler-proven direct keyed-array slice sites with literal or
+guarded compiler-safe runtime bounds. A custom project-relative `reportFile` also enables reporting.
 
 The runtime test compares the same counter interaction on both paths: ordinary React performs a
 second component render and commit, while the compiled component remains at one render and one

@@ -133,6 +133,7 @@ export type {
   DefaultRoutePattern,
   DefaultRouteHref,
   ExternalHref,
+  LinkExternalUriSchemes,
   RouteHref,
   RouteParamValue,
   RouteOptionalParamValue,

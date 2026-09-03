@@ -7,11 +7,11 @@ import {
   type IntegrationServerClientRoot,
 } from "../integration-client";
 import {
+  FarmClientDataCache,
   getFarmClientDataCache,
   normalizeFarmClientCacheKey,
   type FarmClientCacheEntry,
   type FarmClientCacheKey,
-  type FarmClientDataCache,
 } from "../client-cache";
 import {
   applyFarmCacheInvalidations,
@@ -440,10 +440,117 @@ export function createAPIClient<
           integrations: integrationsClient<TIntegrations>(integrationOptions),
         };
 
-  const cacheState = getFarmClientDataCache();
-  const inflightState = new Map<string, InflightEntry>();
+  const sharedCacheState = getFarmClientDataCache();
+  const sharedInflightState = new Map<string, InflightEntry>();
+  let scopedRequestState: ScopedRequestState | undefined;
   const routeMeta = new WeakMap<AnyRouteRef, RouteMeta>();
   let requestCounter = 0;
+
+  const applyOptimisticLayer = (
+    entry: CacheEntry | undefined,
+    layer: OptimisticLayer,
+  ): CacheEntry => {
+    let data = entry?.data;
+    for (const updater of layer.updaters) data = updater(data);
+
+    return {
+      data,
+      updatedAt: layer.updatedAt,
+      staleAt: entry?.staleAt ?? layer.staleAt,
+      gcAt: entry?.gcAt ?? layer.gcAt,
+      invalidatedAt: entry?.invalidatedAt,
+    };
+  };
+
+  const storeOptimisticEntry = (
+    cacheState: FarmClientDataCache,
+    key: string,
+    stack: OptimisticStack,
+    entry: CacheEntry | undefined,
+  ) => {
+    if (!entry) {
+      cacheState.delete(key);
+      stack.renderedEntry = undefined;
+      return;
+    }
+
+    cacheState.set(key, entry);
+    if (stack.invalidatedAt !== undefined) {
+      cacheState.invalidate(key, stack.invalidatedAt);
+    }
+    stack.renderedEntry = cacheState.get(key);
+  };
+
+  const reconcileOptimisticInvalidation = (
+    cacheState: FarmClientDataCache,
+    key: string,
+    stack: OptimisticStack,
+  ) => {
+    const current = cacheState.get(key);
+    const rendered = stack.renderedEntry;
+    if (current === rendered) return true;
+    if (
+      !current ||
+      !rendered ||
+      current.data !== rendered.data ||
+      current.updatedAt !== rendered.updatedAt ||
+      current.gcAt !== rendered.gcAt ||
+      current.status !== rendered.status ||
+      current.error !== rendered.error ||
+      current.fetching !== rendered.fetching ||
+      current.staleAt !== 0 ||
+      current.invalidatedAt === undefined
+    ) {
+      return false;
+    }
+
+    stack.invalidatedAt = current.invalidatedAt;
+    stack.renderedEntry = current;
+    return true;
+  };
+
+  const renderOptimisticStack = (
+    cacheState: FarmClientDataCache,
+    key: string,
+    stack: OptimisticStack,
+  ) => {
+    let entry = stack.entry ? { ...stack.entry } : undefined;
+    for (const layer of stack.layers) entry = applyOptimisticLayer(entry, layer);
+    storeOptimisticEntry(cacheState, key, stack, entry);
+  };
+
+  const settleOptimisticUpdates = (
+    cacheState: FarmClientDataCache,
+    optimisticState: Map<string, OptimisticStack>,
+    snapshots: OptimisticSnapshot[],
+    outcome: "commit" | "rollback" | "invalidate",
+  ) => {
+    const settledKeys: string[] = [];
+    for (const snapshot of snapshots) {
+      const stack = optimisticState.get(snapshot.key);
+      if (stack !== snapshot.stack) continue;
+      if (!reconcileOptimisticInvalidation(cacheState, snapshot.key, stack)) {
+        optimisticState.delete(snapshot.key);
+        continue;
+      }
+
+      if (outcome === "rollback") {
+        stack.layers = stack.layers.filter((layer) => layer !== snapshot.layer);
+      } else {
+        snapshot.layer.committed = true;
+        if (outcome === "invalidate") stack.invalidatedAt = Date.now();
+      }
+
+      while (stack.layers[0]?.committed) {
+        stack.entry = applyOptimisticLayer(stack.entry, stack.layers.shift()!);
+      }
+
+      renderOptimisticStack(cacheState, snapshot.key, stack);
+      if (stack.layers.length === 0) optimisticState.delete(snapshot.key);
+      settledKeys.push(snapshot.key);
+    }
+    return settledKeys;
+  };
 
   // Create a simple fetch-based client (browser compatible)
   const fetchClient = async (path: string, requestOptions: any = {}) => {
@@ -463,23 +570,24 @@ export function createAPIClient<
     }
 
     // Prepare fetch options
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      ...options.headers,
-      ...requestOptions.headers,
-    };
+    const headers = new Headers(options.headers);
+    new Headers(requestOptions.headers).forEach((value, key) => headers.set(key, value));
     const fetchOptions: RequestInit = {
       method,
       headers,
       credentials: options.credentials,
     };
+    if (method === "QUERY" && !headers.has("content-type")) {
+      headers.set("content-type", "application/json");
+    }
 
     // Handle body
     if (requestOptions.body !== undefined) {
       if (isFormData(requestOptions.body)) {
-        deleteHeader(headers, "content-type");
+        headers.delete("content-type");
         fetchOptions.body = requestOptions.body;
       } else {
+        if (!headers.has("content-type")) headers.set("content-type", "application/json");
         fetchOptions.body = JSON.stringify(requestOptions.body);
       }
     }
@@ -488,9 +596,13 @@ export function createAPIClient<
     applyFarmCacheInvalidations(
       decodeFarmCacheInvalidations(response.headers?.get?.(FARM_CACHE_INVALIDATION_HEADER)),
     );
-    let data: any = undefined;
-    if (method !== "HEAD" && response.status !== 204 && response.status !== 205) {
-      data = isJSONStreamResponse(response) ? readJSONStream(response) : await response.json();
+    let data: unknown;
+    try {
+      data = await readAPIResponseData(response, method);
+    } catch (decodeError) {
+      if (!(decodeError instanceof APIResponseDecodeError)) throw decodeError;
+      if (response.ok) throw decodeError.cause;
+      return { response, data: undefined, decodeError: decodeError.cause };
     }
 
     return { response, data };
@@ -528,7 +640,6 @@ export function createAPIClient<
       });
     };
 
-    const entry = getValidCacheEntry(cacheState, cacheKey, now);
     const policy = cacheOptions?.policy ?? (cacheOptions ? "cache-first" : "network-only");
     const staleTime = cacheOptions?.staleTime ?? 0;
     const hasReliableDefaultCacheKey =
@@ -537,12 +648,49 @@ export function createAPIClient<
       Boolean(cacheOptions) &&
       (methodUpper === "GET" || methodUpper === "QUERY") &&
       hasReliableDefaultCacheKey;
+    const needsCacheState =
+      isCacheEnabled ||
+      Boolean(clientOptions?.optimistic?.update?.length) ||
+      Boolean(clientOptions?.invalidate);
+    let requestCacheContext: string | undefined;
+    let requestContextError: Error | undefined;
+    if (needsCacheState) {
+      try {
+        requestCacheContext = getRequestCacheContext(options, input);
+      } catch (error) {
+        requestCacheContext = `invalid:${requestId}`;
+        requestContextError = normalizeError(error);
+      }
+    }
+
+    let cacheState = sharedCacheState;
+    let inflightState = sharedInflightState;
+    let requestScopedState: ScopedRequestState | undefined;
+    if (requestCacheContext !== undefined) {
+      if (scopedRequestState && scopedRequestState.context !== requestCacheContext) {
+        scopedRequestState.retired = true;
+        if (scopedRequestState.inflight.size === 0) scopedRequestState.cache.dispose();
+        scopedRequestState = undefined;
+      }
+      scopedRequestState ??= {
+        context: requestCacheContext,
+        cache: new FarmClientDataCache(),
+        inflight: new Map(),
+        retired: false,
+      };
+      requestScopedState = scopedRequestState;
+      cacheState = requestScopedState.cache;
+      inflightState = requestScopedState.inflight;
+    }
+    const optimisticState = getOptimisticState(cacheState);
+
+    const entry = getValidCacheEntry(cacheState, cacheKey, now);
     const isStale = entry ? isEntryStale(entry, now) : true;
 
     const applyOptimisticUpdates = () => {
       if (!clientOptions?.optimistic?.update?.length) return [] as OptimisticSnapshot[];
 
-      const snapshots: OptimisticSnapshot[] = [];
+      const snapshots = new Map<string, OptimisticSnapshot>();
       for (const update of clientOptions.optimistic.update) {
         const [target, targetInput, updater] =
           update.length === 2
@@ -558,37 +706,73 @@ export function createAPIClient<
         if (!targetKey) continue;
 
         const targetEntry = getValidCacheEntry(cacheState, targetKey, now);
-        const previousEntry = targetEntry ? { ...targetEntry } : undefined;
-        const previousData = targetEntry?.data;
-        const nextData = updater(previousData);
-        cacheState.set(targetKey, {
-          data: nextData,
-          updatedAt: now,
-          staleAt:
-            targetEntry?.staleAt ??
-            now + (cacheOptions?.staleTime ?? options.cacheDefaults?.staleTime ?? 0),
-          gcAt:
-            targetEntry?.gcAt ??
-            getGcAt(now, cacheOptions?.gcTime ?? options.cacheDefaults?.gcTime),
-          invalidatedAt: targetEntry?.invalidatedAt,
-        });
+        const currentEntry = cacheState.get(targetKey);
+        let stack = optimisticState.get(targetKey);
+        if (stack && !reconcileOptimisticInvalidation(cacheState, targetKey, stack)) {
+          stack = undefined;
+        }
+        if (!stack) {
+          stack = {
+            entry: targetEntry ? { ...targetEntry } : undefined,
+            layers: [],
+            renderedEntry: currentEntry,
+          };
+          optimisticState.set(targetKey, stack);
+        }
 
-        snapshots.push({ key: targetKey, entry: previousEntry });
+        let snapshot = snapshots.get(targetKey);
+        if (!snapshot) {
+          const previousEntry = stack.layers.length === 0 ? stack.entry : stack.renderedEntry;
+          const layer: OptimisticLayer = {
+            updaters: [],
+            updatedAt: now,
+            staleAt:
+              targetEntry?.staleAt ??
+              now + (cacheOptions?.staleTime ?? options.cacheDefaults?.staleTime ?? 0),
+            gcAt:
+              targetEntry?.gcAt ??
+              getGcAt(now, cacheOptions?.gcTime ?? options.cacheDefaults?.gcTime),
+          };
+          stack.layers.push(layer);
+          snapshot = {
+            key: targetKey,
+            stack,
+            layer,
+          };
+          snapshots.set(targetKey, snapshot);
+          snapshot.layer.updaters.push(updater);
+          const nextEntry = applyOptimisticLayer(previousEntry, {
+            ...snapshot.layer,
+            updaters: [updater],
+          });
+          storeOptimisticEntry(cacheState, targetKey, stack, nextEntry);
+          continue;
+        }
+        snapshot.layer.updaters.push(updater);
+        const nextEntry = applyOptimisticLayer(stack.renderedEntry, {
+          ...snapshot.layer,
+          updaters: [updater],
+        });
+        storeOptimisticEntry(cacheState, targetKey, stack, nextEntry);
       }
 
-      return snapshots;
+      return Array.from(snapshots.values());
     };
 
     const rollbackOptimisticUpdates = (snapshots: OptimisticSnapshot[]) => {
       if (!clientOptions?.optimistic?.rollbackOnError) return;
+      settleOptimisticUpdates(cacheState, optimisticState, snapshots, "rollback");
+    };
 
-      for (const snapshot of snapshots) {
-        if (!snapshot.entry) {
-          cacheState.delete(snapshot.key);
-          continue;
-        }
-
-        cacheState.set(snapshot.key, { ...snapshot.entry });
+    const invalidateUncommittedOptimisticUpdates = (snapshots: OptimisticSnapshot[]) => {
+      if (clientOptions?.optimistic?.rollbackOnError) return;
+      for (const key of settleOptimisticUpdates(
+        cacheState,
+        optimisticState,
+        snapshots,
+        "invalidate",
+      )) {
+        emitStatus("invalidated", { key });
       }
     };
 
@@ -637,12 +821,13 @@ export function createAPIClient<
           });
 
           try {
-            const { response, data } = await fetchClient(path, {
+            if (requestContextError) throw requestContextError;
+            const { response, data, decodeError } = await fetchClient(path, {
               ...input,
               method: methodUpper,
             });
 
-            const error = response.ok ? null : createResponseError(response, data);
+            const error = response.ok ? null : createResponseError(response, data, decodeError);
 
             const responseEvent: ResponseEvent<any, Error> = {
               requestId,
@@ -659,7 +844,12 @@ export function createAPIClient<
               status: response.status,
             };
 
-            clientOptions?.onResponse?.(response.ok ? data : undefined, error, responseEvent);
+            notifyResponseObserver(
+              clientOptions?.onResponse,
+              response.ok ? data : undefined,
+              error,
+              responseEvent,
+            );
 
             if (!error) {
               return { data, error: null, key: cacheKey } as APIResult<any, Error>;
@@ -682,7 +872,7 @@ export function createAPIClient<
               ok: false,
             };
 
-            clientOptions?.onResponse?.(undefined, error, responseEvent);
+            notifyResponseObserver(clientOptions?.onResponse, undefined, error, responseEvent);
 
             if (attempt >= maxRetries) {
               return { data: undefined, error, key: cacheKey } as APIResult<any, Error>;
@@ -740,6 +930,13 @@ export function createAPIClient<
         if (inflightState.get(cacheKey) === inflightEntry) {
           inflightState.delete(cacheKey);
         }
+        if (requestContextError && requestScopedState) {
+          requestScopedState.retired = true;
+          if (scopedRequestState === requestScopedState) scopedRequestState = undefined;
+        }
+        if (requestScopedState?.retired && requestScopedState.inflight.size === 0) {
+          requestScopedState.cache.dispose();
+        }
       }
     };
 
@@ -759,11 +956,13 @@ export function createAPIClient<
 
         const existing = cacheState.get(targetKey);
         if (existing) {
-          cacheState.set(targetKey, {
-            ...existing,
-            staleAt: 0,
-            invalidatedAt: Date.now(),
-          });
+          const invalidatedAt = Date.now();
+          const stack = optimisticState.get(targetKey);
+          cacheState.invalidate(targetKey, invalidatedAt);
+          if (stack?.renderedEntry === existing) {
+            stack.invalidatedAt = invalidatedAt;
+            stack.renderedEntry = cacheState.get(targetKey);
+          }
         }
 
         emitStatus("invalidated", { key: targetKey });
@@ -797,8 +996,11 @@ export function createAPIClient<
     const result = await executeNetwork();
     if (result.error) {
       rollbackOptimisticUpdates(optimisticSnapshots);
+      invalidateUncommittedOptimisticUpdates(optimisticSnapshots);
+    } else {
+      settleOptimisticUpdates(cacheState, optimisticState, optimisticSnapshots, "commit");
+      await invalidateTargets();
     }
-    await invalidateTargets();
     clientOptions?.onSettled?.(result.data, result.error);
     return result;
   };
@@ -812,6 +1014,102 @@ export function createAPIClient<
     isSameOriginAPIBaseURL(baseURL),
     rootAliases,
   ) as APIClient<TRouter, TIntegrations>;
+}
+
+async function readAPIResponseData(response: Response, method: string): Promise<unknown> {
+  if (
+    method === "HEAD" ||
+    response.status === 204 ||
+    response.status === 205 ||
+    response.status === 304
+  ) {
+    return undefined;
+  }
+
+  // Keep lightweight fetch-compatible adapters working when they expose the
+  // traditional json() contract without a complete Web Response implementation.
+  if (!response.headers?.get && typeof response.json === "function") {
+    return readResponseJSON(response);
+  }
+
+  if (response.body === null) return undefined;
+
+  if (isJSONStreamResponse(response)) {
+    return readJSONStream(response);
+  }
+
+  const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+  if (typeof response.arrayBuffer === "function") {
+    const data = await response.arrayBuffer();
+    if (data.byteLength === 0) return undefined;
+
+    if (!contentType || contentType === "application/json" || contentType.endsWith("+json")) {
+      return parseResponseJSON(new TextDecoder().decode(data));
+    }
+
+    if (
+      contentType.startsWith("text/") ||
+      contentType === "application/xml" ||
+      contentType === "application/xhtml+xml" ||
+      contentType === "application/graphql"
+    ) {
+      return new TextDecoder().decode(data);
+    }
+
+    return data;
+  }
+
+  if (
+    (!contentType || contentType === "application/json" || contentType.endsWith("+json")) &&
+    typeof response.json === "function"
+  ) {
+    return readResponseJSON(response);
+  }
+
+  if (
+    (contentType?.startsWith("text/") ||
+      contentType === "application/xml" ||
+      contentType === "application/xhtml+xml" ||
+      contentType === "application/graphql") &&
+    typeof response.text === "function"
+  ) {
+    return response.text();
+  }
+
+  // Some fetch-compatible adapters expose headers but still only implement
+  // the traditional json() reader.
+  if (typeof response.json === "function") {
+    return readResponseJSON(response);
+  }
+
+  return undefined;
+}
+
+class APIResponseDecodeError extends Error {
+  readonly cause: unknown;
+
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : "Failed to decode JSON response");
+    this.name = "APIResponseDecodeError";
+    this.cause = cause;
+  }
+}
+
+function parseResponseJSON(value: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    throw new APIResponseDecodeError(error);
+  }
+}
+
+async function readResponseJSON(response: Pick<Response, "json">): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch (error) {
+    if (error instanceof SyntaxError) throw new APIResponseDecodeError(error);
+    throw error;
+  }
 }
 
 /**
@@ -882,7 +1180,7 @@ function createNestedProxy(
       if (httpMethods.includes(lastPart)) {
         // Method is explicitly called: api.users.get() or api['auth/login'].post()
         // Remove the method from path and use it as the HTTP method
-        const routePath = "/api/" + path.slice(0, -1).join("/");
+        const routePath = buildProxyRoutePath(path.slice(0, -1));
         const method = lastPart.toUpperCase();
 
         // Extract options from arguments
@@ -893,7 +1191,7 @@ function createNestedProxy(
       } else {
         // Direct call without method: api.hello()
         // Use the full path and let the server determine the method (usually GET)
-        const routePath = "/api/" + path.join("/");
+        const routePath = buildProxyRoutePath(path);
 
         // Extract options from arguments
         const [options, clientOptions] = args;
@@ -906,6 +1204,10 @@ function createNestedProxy(
 
   routeMeta.set(proxy, { path: [...path], baseURL });
   return proxy;
+}
+
+function buildProxyRoutePath(path: string[]): string {
+  return "/api/" + path.join("/").replace(/^\/+/, "");
 }
 
 export function isAPIRouteRef(value: unknown): value is CallableRouteRef {
@@ -1003,6 +1305,13 @@ type InflightEntry = {
   startedAt: number;
 };
 
+type ScopedRequestState = {
+  context: string;
+  cache: FarmClientDataCache;
+  inflight: Map<string, InflightEntry>;
+  retired: boolean;
+};
+
 type RouteMeta = {
   path: string[];
   baseURL: string;
@@ -1010,8 +1319,35 @@ type RouteMeta = {
 
 type OptimisticSnapshot = {
   key: string;
-  entry?: CacheEntry;
+  stack: OptimisticStack;
+  layer: OptimisticLayer;
 };
+
+type OptimisticStack = {
+  entry?: CacheEntry;
+  layers: OptimisticLayer[];
+  renderedEntry?: CacheEntry;
+  invalidatedAt?: number;
+};
+
+type OptimisticLayer = {
+  updaters: Array<(prev: any) => any>;
+  updatedAt: number;
+  staleAt: number;
+  gcAt?: number;
+  committed?: boolean;
+};
+
+const optimisticStates = new WeakMap<FarmClientDataCache, Map<string, OptimisticStack>>();
+
+function getOptimisticState(cache: FarmClientDataCache): Map<string, OptimisticStack> {
+  let state = optimisticStates.get(cache);
+  if (!state) {
+    state = new Map();
+    optimisticStates.set(cache, state);
+  }
+  return state;
+}
 
 function buildCacheKey(
   method: string,
@@ -1069,6 +1405,27 @@ function getHeader(headers: unknown, name: string): string | undefined {
 
   const entry = Object.entries(headers).find(([key]) => key.toLowerCase() === name);
   return entry?.[1] === undefined ? undefined : String(entry[1]);
+}
+
+function getRequestCacheContext(
+  options: Pick<APIClientOptions, "headers" | "credentials">,
+  input: unknown,
+): string | undefined {
+  const credentials = options.credentials ?? "same-origin";
+  const headers = new Headers(options.headers);
+  const requestHeaders =
+    input && typeof input === "object" && "headers" in input ? input.headers : undefined;
+
+  if (requestHeaders) {
+    new Headers(requestHeaders as HeadersInit).forEach((value, key) => headers.set(key, value));
+  }
+
+  if (credentials === "same-origin" && [...headers].length === 0) return undefined;
+
+  return stableStringify({
+    credentials,
+    headers: [...headers].sort(([left], [right]) => left.localeCompare(right)),
+  });
 }
 
 function getGcAt(now: number, gcTime?: number): number | undefined {
@@ -1140,13 +1497,13 @@ function resolveRouteMeta(meta: RouteMeta): { routePath: string; method: string 
   const lastPart = meta.path[meta.path.length - 1];
   if (lastPart && httpMethods.includes(lastPart)) {
     return {
-      routePath: "/api/" + meta.path.slice(0, -1).join("/"),
+      routePath: buildProxyRoutePath(meta.path.slice(0, -1)),
       method: lastPart.toUpperCase(),
     };
   }
 
   return {
-    routePath: "/api/" + meta.path.join("/"),
+    routePath: buildProxyRoutePath(meta.path),
     method: "GET",
   };
 }
@@ -1167,6 +1524,42 @@ function normalizeError(error: unknown): Error {
   return normalized;
 }
 
+function notifyResponseObserver(
+  observer: ClientOptions<any, any>["onResponse"],
+  data: unknown,
+  error: unknown,
+  event: ResponseEvent<any, any>,
+): void {
+  if (!observer) return;
+
+  try {
+    const result = observer(data, error, event) as unknown;
+    if (result && typeof (result as PromiseLike<unknown>).then === "function") {
+      void Promise.resolve(result).catch(reportResponseObserverError);
+    }
+  } catch (observerError) {
+    reportResponseObserverError(observerError);
+  }
+}
+
+function reportResponseObserverError(error: unknown): void {
+  const reportError = (globalThis as typeof globalThis & { reportError?: (error: unknown) => void })
+    .reportError;
+  if (typeof reportError === "function") {
+    try {
+      reportError.call(globalThis, error);
+      return;
+    } catch {
+      // Fall through to the console when the platform reporter itself fails.
+    }
+  }
+  try {
+    console.error("[Farm.js] API client onResponse callback failed:", error);
+  } catch {
+    // Observers and their reporting fallbacks must never affect the request.
+  }
+}
+
 function isFormData(value: unknown): value is FormData {
   return (
     typeof value === "object" &&
@@ -1177,14 +1570,7 @@ function isFormData(value: unknown): value is FormData {
   );
 }
 
-function deleteHeader(headers: Record<string, string>, name: string): void {
-  const normalized = name.toLowerCase();
-  for (const key of Object.keys(headers)) {
-    if (key.toLowerCase() === normalized) delete headers[key];
-  }
-}
-
-function createResponseError(response: Response, data: any): Error {
+function createResponseError(response: Response, data: any, cause?: unknown): Error {
   const expected = readEndpointErrorEnvelope(data);
   if (expected) {
     return new APIClientError(expected.code, expected.data, {
@@ -1194,11 +1580,13 @@ function createResponseError(response: Response, data: any): Error {
     });
   }
 
-  return new APIClientError("http_error", data, {
+  const error = new APIClientError("http_error", data, {
     status: response.status,
     message: `HTTP ${response.status}: ${response.statusText}`,
     response,
   });
+  if (cause !== undefined) (error as Error & { cause?: unknown }).cause = cause;
+  return error;
 }
 
 function readEndpointErrorEnvelope(data: unknown): {

@@ -19,7 +19,7 @@ This project was generated from the Better Auth template included with `@farm.js
 ## Quick start
 
 ```bash
-pnpm create @farm.js/app@beta my-app --template better-auth --renderer solid --typescript
+pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-app --template better-auth --renderer solid
 cd my-app
 cp .env.example .env.local
 ```

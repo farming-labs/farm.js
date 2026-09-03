@@ -67,6 +67,19 @@ if (result.error) {
 }
 ```
 
+If a route path contains a lowercase HTTP method segment such as `get`, `post`, or `delete` that
+collides with a method on its parent route, the generated client exposes a leading-slash literal
+alias so the two cannot be confused:
+
+```ts
+// Both src/app/api/users/route.ts and src/app/api/users/get/route.ts export GET.
+const result = await api["/users/get"].get();
+```
+
+The leading slash marks the whole key as a literal API path. This also works when the method-named
+segment is in the middle of a colliding route, for example
+`api["/users/get/profile"].post(...)`. Non-conflicting paths keep their ordinary nested form.
+
 A typed `HEAD` route is called with `.head()`. Its result keeps the same `{ data, error, key }`
 shape, with `data` set to `undefined` because HTTP HEAD responses do not have a body.
 
@@ -111,6 +124,10 @@ body as JSON and uses the `QUERY` method on the wire. Opt-in cache keys include 
 path, URL query parameters, request body, `Content-Type`, and `Content-Encoding`. Multipart QUERY
 requests need an explicit cache key because a generated multipart boundary cannot be represented
 reliably before `fetch` sends the request.
+
+Farm adds `Content-Type: application/json` when it serializes a JSON request body. Bodyless
+requests do not receive that header, and an explicitly configured content type takes precedence
+regardless of header casing.
 
 ## Upload files and consume progress streams
 
@@ -261,6 +278,10 @@ while the hydrated fetcher stays on the page.
 - optimistic: update cached query data before the server response returns.
 - onRequest, onResponse, onSuccess, onError, onSettled, and onStatus: observe the full client lifecycle.
 
+`onResponse` is a transport observer. If it throws or returns a rejected promise, Farm reports that
+failure through the platform `reportError` hook (or the console fallback) without retrying or
+changing the completed API result.
+
 Use a structured cache key when an API response intentionally shares data with route data or a [`createServerQuery`](/docs/server-queries):
 
 ```ts
@@ -276,7 +297,12 @@ const product = await api.products.get(
 );
 ```
 
-Structured keys use Farm's route-data key contract. Default API cache keys include the API origin and remain isolated from other clients.
+Structured keys use Farm's route-data key contract. Default API cache keys include the API origin.
+Clients that configure headers or non-default credentials keep their cache private to that client,
+and changing that request context clears the private cache. This prevents an authenticated response
+from being reused by a client with a different identity without placing credential values in a
+public cache key. Clients using the default same-origin request context can still share structured
+keys with Farm's route-data cache.
 
 Set `cache.dedupeMs` to join identical requests started within that window. If an older request is
 still running after the window expires, the newer request becomes the cache owner; the older result
@@ -332,8 +358,10 @@ response type, so `current` is inferred from `api.products.get`. You can also ta
 route directly with `[api.products.get, { query: { category } }, updater]`.
 
 With `rollbackOnError: true`, Farm restores the exact previous cache entry when the mutation fails.
-After the request settles, invalidation marks the key stale so mounted consumers or the next read
-can load the canonical server result.
+After a successful mutation, invalidation marks the key stale so mounted consumers or the next read
+can load the canonical server result. Failed mutations do not invalidate known-good cached reads;
+when rollback is disabled, only cache entries changed optimistically are marked stale so the next
+read loads canonical data.
 
 ## Result shape
 
@@ -355,6 +383,8 @@ console.log(result.data.message);
 ```
 
 This makes client components easier to write because failed responses do not need to be caught with `try/catch` unless you want that behavior.
+If an HTTP error body is malformed, Farm still returns an `http_error` with the real status and
+`Response`; the decoding failure is available as `error.cause`.
 
 ## Server callers
 

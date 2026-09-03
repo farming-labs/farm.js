@@ -10,7 +10,7 @@ update beside ordinary React reconciliation.
 ## Create this starter
 
 ```bash
-pnpm create @farm.js/app@beta my-compiler-app --template react-compiler --typescript
+pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-compiler-app --template react-compiler
 cd my-compiler-app
 pnpm dev
 ```

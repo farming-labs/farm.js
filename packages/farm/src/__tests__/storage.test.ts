@@ -164,6 +164,37 @@ describe("Storage", () => {
     await expect(client.getItem("farewell")).resolves.toBe("goodbye");
   });
 
+  it("retries initialization after a driver factory failure", async () => {
+    const data = new Map<string, string>();
+    let attempts = 0;
+    const client = defineStorageClient(() => {
+      attempts++;
+      if (attempts === 1) throw new Error("temporary storage failure");
+
+      return {
+        name: "retryable",
+        hasItem: (key: string) => data.has(key),
+        getItem: (key: string) => data.get(key) ?? null,
+        setItem: (key: string, value: string) => {
+          data.set(key, value);
+        },
+        removeItem: (key: string) => {
+          data.delete(key);
+        },
+        getKeys: () => [...data.keys()],
+      } as never;
+    });
+
+    const firstAttempts = await Promise.allSettled([client.ready(), client.ready()]);
+    expect(firstAttempts.map((result) => result.status)).toEqual(["rejected", "rejected"]);
+    expect(attempts).toBe(1);
+
+    await client.setItem("status", "ready");
+
+    expect(attempts).toBe(2);
+    await expect(client.getItem("status")).resolves.toBe("ready");
+  });
+
   it("supports mounted local namespaces with shorthand options", async () => {
     const dir = await createTempDir("farm-storage-local-");
     const cacheClient = localStorage({ base: dir });
@@ -425,14 +456,18 @@ describe("Storage", () => {
     expect(typeof vercelKV.hasItem).toBe("function");
   });
 
-  const itWithPostgres = process.env.FARM_TEST_POSTGRES_URL ? it : it.skip;
+  const postgresTestUrl = process.env.FARM_TEST_POSTGRES_URL;
+  if (process.env.FARM_REQUIRE_TEST_POSTGRES === "1" && !postgresTestUrl) {
+    throw new Error("FARM_TEST_POSTGRES_URL is required for the Postgres storage test job.");
+  }
+  const itWithPostgres = postgresTestUrl ? it : it.skip;
 
   itWithPostgres(
     "supports postgres storage against a real database",
     async () => {
       const tableName = `farm_pg_${Date.now()}_${Math.floor(Math.random() * 1_000_000)}`;
       const pg = postgresStorage({
-        url: process.env.FARM_TEST_POSTGRES_URL!,
+        url: postgresTestUrl!,
         tableName,
       });
 

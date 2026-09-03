@@ -275,18 +275,33 @@ function createStorageClientFromResolver(resolveDriver: DriverResolver): FarmSto
   let driverPromise: Promise<Driver> | undefined;
   let storagePromise: Promise<Storage> | undefined;
 
-  const ensureDriver = async () => {
-    driverPromise ??= Promise.resolve(resolveDriver());
-    return driverPromise;
+  const ensureDriver = () => {
+    if (driverPromise) return driverPromise;
+
+    const pending = Promise.resolve().then(resolveDriver);
+    driverPromise = pending;
+    void pending.catch(() => {
+      if (driverPromise === pending) {
+        driverPromise = undefined;
+        storagePromise = undefined;
+      }
+    });
+    return pending;
   };
 
-  const ensureStorage = async () => {
-    storagePromise ??= ensureDriver().then((driver) =>
+  const ensureStorage = () => {
+    if (storagePromise) return storagePromise;
+
+    const pending = ensureDriver().then((driver) =>
       createStorage({
         driver,
       }),
     );
-    return storagePromise;
+    storagePromise = pending;
+    void pending.catch(() => {
+      if (storagePromise === pending) storagePromise = undefined;
+    });
+    return pending;
   };
 
   const target = {

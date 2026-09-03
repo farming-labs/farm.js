@@ -98,8 +98,31 @@ if (startupSignal) {
   ]);
   clearTimeout(startupCloseTimer);
   if (!startupCloseCompleted) {
-    console.error("[Farm] Runtime shutdown during startup timed out");
-    process.exitCode = 1;
+    console.warn("[Farm] Runtime startup did not settle before shutdown; forcing cleanup");
+    let forcedCloseTimer;
+    const forcedCloseCompleted = await Promise.race([
+      Promise.resolve()
+        .then(() => farmProductionLifecycle.forceClose(startupSignal))
+        .then(
+          () => true,
+          (error) => {
+            console.error("[Farm] Forced runtime shutdown during startup failed:", error);
+            process.exitCode = 1;
+            return true;
+          },
+        ),
+      new Promise((resolve) => {
+        forcedCloseTimer = setTimeout(
+          () => resolve(false),
+          farmServerConfig.gracefulShutdownTimeout,
+        );
+      }),
+    ]);
+    clearTimeout(forcedCloseTimer);
+    if (!forcedCloseCompleted) {
+      console.error("[Farm] Forced runtime shutdown during startup timed out");
+      process.exitCode = 1;
+    }
   }
   process.exit(process.exitCode || 0);
 }

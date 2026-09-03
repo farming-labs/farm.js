@@ -202,25 +202,27 @@ export function StandardTableBenchmark() {
           data-action="table-drop-prefix"
           type="button"
           onClick={() => {
-            setRows((current) => current.slice(1_000));
-            setOperation("drop benchmark prefix");
+            const trimCount = 1_000;
+            setRows((current) => current.slice(trimCount));
+            setOperation("drop runtime-count prefix");
             setRevision((value) => value + 1);
           }}
         >
-          Drop benchmark prefix
+          Drop runtime-count prefix
         </button>
         <button
           data-action="table-drop-prefix-snapshot"
           type="button"
           onClick={() => {
+            const trimCount = 1_000;
             setRows((current) => {
-              return current.slice(1_000);
+              return current.slice(trimCount);
             });
-            setOperation("drop benchmark prefix (snapshot control)");
+            setOperation("drop runtime-count prefix (snapshot control)");
             setRevision((value) => value + 1);
           }}
         >
-          Drop benchmark prefix (snapshot control)
+          Drop runtime-count prefix (snapshot control)
         </button>
         <button
           data-action="table-roll-window"
@@ -228,13 +230,14 @@ export function StandardTableBenchmark() {
           onClick={() => {
             const nextSeed = seed + 1;
             const additions = buildRows(1_000, nextSeed);
+            const trimCount = 1_000;
             setSeed(nextSeed);
-            setRows((current) => [...current.slice(1_000), ...additions]);
-            setOperation("roll benchmark window");
+            setRows((current) => [...current.slice(trimCount), ...additions]);
+            setOperation("roll runtime-count window");
             setRevision((value) => value + 1);
           }}
         >
-          Roll benchmark window
+          Roll runtime-count window
         </button>
         <button
           data-action="table-roll-window-snapshot"
@@ -242,15 +245,16 @@ export function StandardTableBenchmark() {
           onClick={() => {
             const nextSeed = seed + 1;
             const additions = buildRows(1_000, nextSeed);
+            const trimCount = 1_000;
             setSeed(nextSeed);
             setRows((current) => {
-              return [...current.slice(1_000), ...additions];
+              return [...current.slice(trimCount), ...additions];
             });
-            setOperation("roll benchmark window (snapshot control)");
+            setOperation("roll runtime-count window (snapshot control)");
             setRevision((value) => value + 1);
           }}
         >
-          Roll benchmark window (snapshot control)
+          Roll runtime-count window (snapshot control)
         </button>
         <button
           data-action="table-position-insert"
@@ -323,13 +327,14 @@ export function StandardTableBenchmark() {
             const nextSeed = seed + 1;
             const replacements = buildRows(64, nextSeed);
             const position = 5_000;
+            const deleteCount = replacements.length;
             setSeed(nextSeed);
-            setRows((current) => current.toSpliced(position, 64, ...replacements));
-            setOperation("replace 64-row runtime window");
+            setRows((current) => current.toSpliced(position, deleteCount, ...replacements));
+            setOperation("replace dynamic-count runtime window");
             setRevision((value) => value + 1);
           }}
         >
-          Replace 64-row runtime window
+          Replace dynamic-count runtime window
         </button>
         <button
           data-action="table-position-window-replace-snapshot"
@@ -338,15 +343,164 @@ export function StandardTableBenchmark() {
             const nextSeed = seed + 1;
             const replacements = buildRows(64, nextSeed);
             const position = 5_000;
+            const deleteCount = replacements.length;
+            setSeed(nextSeed);
+            setRows((current) => {
+              return current.toSpliced(position, deleteCount, ...replacements);
+            });
+            setOperation("replace dynamic-count runtime window (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Replace dynamic-count runtime window (snapshot control)
+        </button>
+        <button
+          data-action="table-position-window-reuse"
+          type="button"
+          onClick={() => {
+            const nextSeed = seed + 1;
+            const position = 2_500;
+            const retained = rows
+              .slice(position, position + 48)
+              .toReversed()
+              .map((row) => ({ ...row, label: `${row.label} retained` }));
+            const additions = buildRows(16, nextSeed);
+            const replacements = [...retained, ...additions];
+            setSeed(nextSeed);
+            setRows((current) => current.toSpliced(position, 64, ...replacements));
+            setOperation("reuse and reorder a 64-row runtime window");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Reuse and reorder a 64-row runtime window
+        </button>
+        <button
+          data-action="table-position-window-reuse-snapshot"
+          type="button"
+          onClick={() => {
+            const nextSeed = seed + 1;
+            const position = 2_500;
+            const retained = rows
+              .slice(position, position + 48)
+              .toReversed()
+              .map((row) => ({ ...row, label: `${row.label} retained` }));
+            const additions = buildRows(16, nextSeed);
+            const replacements = [...retained, ...additions];
             setSeed(nextSeed);
             setRows((current) => {
               return current.toSpliced(position, 64, ...replacements);
             });
-            setOperation("replace 64-row runtime window (snapshot control)");
+            setOperation("reuse and reorder a 64-row runtime window (snapshot control)");
             setRevision((value) => value + 1);
           }}
         >
-          Replace 64-row runtime window (snapshot control)
+          Reuse and reorder a 64-row runtime window (snapshot control)
+        </button>
+        <button
+          data-action="table-position-window-resize-reuse"
+          type="button"
+          onClick={() => {
+            const nextSeed = seed + 1;
+            const position = 2_500;
+            const retained = rows
+              .slice(position, position + 48)
+              .toReversed()
+              .map((row) => ({ ...row, label: `${row.label} resized` }));
+            const additions = buildRows(32, nextSeed);
+            const replacements = [...retained, ...additions];
+            setSeed(nextSeed);
+            setRows((current) => current.toSpliced(position, 64, ...replacements));
+            setOperation("grow and reuse a runtime window");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Grow and reuse a runtime window
+        </button>
+        <button
+          data-action="table-position-window-resize-reuse-snapshot"
+          type="button"
+          onClick={() => {
+            const nextSeed = seed + 1;
+            const position = 2_500;
+            const retained = rows
+              .slice(position, position + 48)
+              .toReversed()
+              .map((row) => ({ ...row, label: `${row.label} resized` }));
+            const additions = buildRows(32, nextSeed);
+            const replacements = [...retained, ...additions];
+            setSeed(nextSeed);
+            setRows((current) => {
+              return current.toSpliced(position, 64, ...replacements);
+            });
+            setOperation("grow and reuse a runtime window (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Grow and reuse a runtime window (snapshot control)
+        </button>
+        <button
+          data-action="table-position-window-resize-queued"
+          type="button"
+          onClick={() => {
+            const firstSeed = seed + 1;
+            const secondSeed = seed + 2;
+            const firstPosition = 2_500;
+            const firstRetained = rows
+              .slice(firstPosition, firstPosition + 48)
+              .toReversed()
+              .map((row) => ({ ...row, label: `${row.label} queued grow` }));
+            const firstReplacements = [...firstRetained, ...buildRows(32, firstSeed)];
+            const secondSourcePosition = 7_500;
+            const secondPosition = secondSourcePosition + 16;
+            const secondRetained = rows
+              .slice(secondSourcePosition, secondSourcePosition + 32)
+              .toReversed()
+              .map((row) => ({ ...row, label: `${row.label} queued shrink` }));
+            const secondReplacements = [...secondRetained, ...buildRows(16, secondSeed)];
+            setSeed(secondSeed);
+            setRows((current) =>
+              current.toSpliced(firstPosition, 64, ...firstReplacements),
+            );
+            setRows((current) =>
+              current.toSpliced(secondPosition, 64, ...secondReplacements),
+            );
+            setOperation("queue disjoint grow and shrink windows");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queue disjoint grow and shrink windows
+        </button>
+        <button
+          data-action="table-position-window-resize-queued-snapshot"
+          type="button"
+          onClick={() => {
+            const firstSeed = seed + 1;
+            const secondSeed = seed + 2;
+            const firstPosition = 2_500;
+            const firstRetained = rows
+              .slice(firstPosition, firstPosition + 48)
+              .toReversed()
+              .map((row) => ({ ...row, label: `${row.label} queued grow` }));
+            const firstReplacements = [...firstRetained, ...buildRows(32, firstSeed)];
+            const secondSourcePosition = 7_500;
+            const secondPosition = secondSourcePosition + 16;
+            const secondRetained = rows
+              .slice(secondSourcePosition, secondSourcePosition + 32)
+              .toReversed()
+              .map((row) => ({ ...row, label: `${row.label} queued shrink` }));
+            const secondReplacements = [...secondRetained, ...buildRows(16, secondSeed)];
+            setSeed(secondSeed);
+            setRows((current) => {
+              return current.toSpliced(firstPosition, 64, ...firstReplacements);
+            });
+            setRows((current) => {
+              return current.toSpliced(secondPosition, 64, ...secondReplacements);
+            });
+            setOperation("queue disjoint grow and shrink windows (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queue disjoint grow and shrink windows (snapshot control)
         </button>
         <button
           data-action="table-position-window-refresh"

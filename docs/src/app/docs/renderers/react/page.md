@@ -12,7 +12,7 @@ do not need a renderer option or an additional adapter package.
 ## Create an app
 
 ```bash
-pnpm create @farm.js/app@beta my-app --template basic --typescript
+pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-app --template basic --typescript
 ```
 
 Omitting `renderer` keeps React active:
@@ -97,7 +97,7 @@ Start from the focused experimental starter when you want the compiler flag, sha
 UI, a live AOT-versus-React comparison, and a reproducible browser check already wired together:
 
 ```bash
-pnpm create @farm.js/app@beta compiler-app --template react-compiler --typescript
+pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta compiler-app --template react-compiler --typescript
 ```
 
 You can also clone the standalone
@@ -370,8 +370,8 @@ module.
 and can hand the appended suffix to the runtime. `keyedArrayFilterHints` counts concise keyed-array
 filter sites that can report removed positions. `keyedArrayPrependHints` counts setter sites where
 the compiler proved a direct keyed array prepend and can hand the new prefix to the runtime.
-`keyedArraySliceHints` counts direct keyed-array slices whose build-time bounds identify one exact
-retained interval.
+`keyedArraySliceHints` counts direct keyed-array slices whose compiler-safe bounds identify one
+exact retained interval after runtime validation.
 `keyedArrayPositionHints` counts compiler-proven native keyed-array insertions, single or
 contiguous-range removals, single-row replacements, and exact-window replacements with a guarded
 position.
@@ -968,12 +968,20 @@ setItems((current) => current.slice(1_000));
 setItems((current) => current.slice(0, -1_000));
 setItems((current) => current.slice(2, 8));
 setItems((current) => current.slice(-5));
+
+const trimCount = pageSize * pagesToDiscard;
+setItems((current) => current.slice(trimCount));
+setItems((current) => current.slice(visible.start, visible.end));
 ```
 
 At build time, Farm recognizes a concise functional setter that directly calls native `slice()`
-with one or two safe-integer bounds known by the compiler. The application still executes its
-ordinary `slice()`. Generated metadata records the normalized retained interval and links multiple
-slice or filter updates queued before one compiler flush.
+with one or two safe-integer literals or compiler-safe runtime expressions. Identifiers, property
+reads, side-effect-free arithmetic and conditionals, and safe `Math` calls are supported.
+User-defined calls, assignments, update expressions, and other effectful forms are not transformed.
+Farm preserves the original method lookup and argument evaluation order, evaluates each bound once,
+and preserves the native call, coercion, return value, and thrown errors. Generated metadata records
+the normalized retained interval only when every evaluated bound is already a safe integer, and
+links multiple slice or filter updates queued before one compiler flush.
 
 At update time, Farm validates the native arrays, committed source, queued lengths, interval, and
 surviving item identities before changing the DOM. It removes only rows outside the interval,
@@ -982,12 +990,14 @@ slice-only chain does not reread surviving keys, descriptors, or bindings, and t
 does not rerun.
 
 The proof requires compiler-owned host rows whose render callback and key do not observe the row
-index. Runtime or fractional bounds, `slice()` without a bound, a no-op `slice(0)`, block-bodied or
-chained updaters, custom slice methods, sparse or subclassed arrays, collection-derived keys,
+index. Effectful bound expressions, evaluated bounds that are fractional, non-numeric, or otherwise
+not safe integers, `slice()` without a bound, a literal no-op `slice(0)`, block-bodied or chained
+updaters, custom slice methods, sparse or subclassed arrays, collection-derived keys,
 collection-reading bindings, React-owned row structures, nested host blocks, row conditionals,
 unrelated dirty dependencies, and failed runtime validation keep complete keyed reconciliation.
-These checks make the metadata an optional optimization rather than a new behavior contract. No
-configuration or component primitive is added. Reports expose emitted sites as
+A runtime bound that evaluates to a no-op still preserves the native result and uses complete
+reconciliation. These checks make the metadata an optional optimization rather than a new behavior
+contract. No configuration or component primitive is added. Reports expose emitted sites as
 `keyedArraySliceHints`; slice reuses the existing removal-hint runtime so it does not add another
 structural runtime combination.
 
@@ -998,12 +1008,18 @@ Queues, logs, charts, and fixed-size feeds often expire a prefix while adding ne
 ```tsx
 setItems((current) => [...current.slice(1), nextItem]);
 setItems((current) => [...current.slice(1_000), ...nextItems]);
+
+const trimCount = pageSize * pagesToExpire;
+setItems((current) => [...current.slice(trimCount), ...nextItems]);
 ```
 
 At build time, Farm recognizes a concise functional setter whose first array entry spreads a
 direct native `current.slice(bound)` and whose remaining entries are compiler-safe incoming values.
-The application still performs the same slice and array construction. Farm records only metadata
-that connects the final array to its committed source and retained interval.
+The single bound may be a safe-integer literal or a compiler-safe runtime expression: identifiers,
+property reads, side-effect-free arithmetic and conditionals, and safe `Math` calls are supported.
+The application still performs the same slice and array construction. Farm preserves method lookup
+and argument evaluation order, evaluates the bound once, and records only metadata that connects
+the final array to its committed source and retained interval.
 
 At update time, Farm validates native arrays, the committed source token, the exact retained tail,
 every retained item identity, and every incoming key before changing the DOM. It removes the
@@ -1011,14 +1027,15 @@ expired prefix, updates stored event indexes, preserves every retained element, 
 the incoming suffix. Incoming keys are checked against the complete previous window; reusing an
 expired key takes full keyed reconciliation so React key identity is preserved.
 
-The initial proof is intentionally narrow: one build-time safe-integer slice bound,
-compiler-owned host rows, and index-independent render and key callbacks. A second slice bound,
-runtime or zero bounds, block-bodied updates, custom slice behavior, sparse or subclassed arrays,
-queued uncommitted windows, collection-reading bindings, index-aware rows, React-owned rows,
-nested host blocks, row conditionals, unrelated dirty dependencies, and failed runtime validation
-all keep complete keyed reconciliation. No new component or option is required. Reports expose
-emitted sites as `keyedArrayRollingWindowHints`; only modules with such a site retain the optional
-all-hint runtime.
+The proof remains intentionally narrow: one compiler-safe slice bound, compiler-owned host rows,
+and index-independent render and key callbacks. A second slice bound, literal zero, effectful bound
+expressions, block-bodied updates, custom slice behavior, sparse or subclassed arrays, queued
+uncommitted windows, collection-reading bindings, index-aware rows, React-owned rows, nested host
+blocks, row conditionals, unrelated dirty dependencies, and failed runtime validation all keep
+complete keyed reconciliation. Runtime bounds that evaluate to a fractional, non-numeric, unsafe,
+or no-op value preserve native results and use that fallback. No new component or option is
+required. Reports expose emitted sites as `keyedArrayRollingWindowHints`; only modules with such a
+site retain the optional all-hint runtime.
 
 #### Keyed array known-position hints
 
@@ -1034,28 +1051,32 @@ setItems((current) => current.toSpliced(selectedIndex, 1, replacement));
 setItems((current) => current.toSpliced(selectedIndex, 25, ...replacements));
 setItems((current) => current.with(selectedIndex, replacement));
 
+const deleteCount = visibleRows.length;
+setItems((current) => current.toSpliced(selectedIndex, deleteCount, ...replacements));
+
 // Two same-key windows may be queued before one compiler flush.
 setItems((current) => current.toSpliced(firstIndex, 25, ...firstRefresh));
 setItems((current) => current.toSpliced(secondIndex, 25, ...secondRefresh));
 ```
 
-At build time, Farm recognizes only concise functional setters whose position is either a
-safe-integer literal or a compiler-safe runtime expression. Identifiers, property reads,
+At build time, Farm recognizes only concise functional setters whose position—and, for
+`toSpliced()`, delete count—is a safe-integer literal or compiler-safe runtime expression.
+Identifiers, property reads,
 side-effect-free arithmetic and conditionals, and safe `Math` calls are supported. User-defined
 calls, assignments, update expressions, and other effectful forms are not transformed.
-`toSpliced()` must insert compiler-safe items with a zero delete count, remove one item or a
-contiguous range using a positive safe-integer literal delete count, replace exactly one item with
-a delete count of one, or replace a positive safe-integer literal window with compiler-safe
-explicit items or a safe spread; `with()` must replace exactly one item. A zero delete count with
-an explicit pair or a safe spread such as `...incomingItems` selects the batch insertion path when
-at least two items are produced at runtime. A delete count above one with any incoming item, or a
-positive delete count with multiple items or a spread, selects exact-window replacement; the spread
-may evaluate to zero, one, or many items. Farm
+`toSpliced()` may insert compiler-safe items with a literal zero delete count, remove one item or a
+contiguous range, replace exactly one item, or replace a positive window with compiler-safe
+explicit items or a safe spread; `with()` must replace exactly one item. A literal zero delete count
+with an explicit pair or a safe spread such as `...incomingItems` selects the batch insertion path
+when at least two items are produced at runtime. A literal delete count above one with any incoming
+item, a positive literal count with multiple items or a spread, or any compiler-safe runtime delete
+count selects exact-window replacement; the spread may evaluate to zero, one, or many items. Farm
 preserves the original method lookup,
 evaluates every argument once in its original order, and preserves the native call, return value,
-coercion, and thrown errors. If the method is not native, the evaluated position is not already a
-safe integer, or the removal count is dynamic or unsafe, the update still runs normally but no
-metadata is recorded.
+coercion, and thrown errors. The runtime records metadata only after the native call proves that the
+evaluated position is already a safe integer and the evaluated delete count is already a positive
+safe integer. A custom method or a count that is zero, negative, fractional, non-numeric, or
+otherwise unsafe still runs normally but takes complete keyed reconciliation.
 
 At update time, Farm validates the committed native source, result length, source token, normalized
 position, clamped removal count, and any incoming key before changing the DOM. For a batch, Farm
@@ -1068,16 +1089,27 @@ prepared. If the incoming interval has the same length and exactly the same keys
 Farm first evaluates all keys and binding snapshots and resolves every changed target across the
 complete interval. It then patches only changed bindings in place and updates each stored row
 object, so later delegated or cached handlers observe the latest data. No descriptor or DOM row is
-created, and every row keeps its identity, focus, and text selection. Multiple length-preserving
+created, and every row keeps its identity, focus, and text selection. A window may instead grow or
+shrink while it reorders keys from inside its own removed interval and mixes them with globally
+fresh keys. Farm prepares all reused binding updates, new descriptors, binding snapshots, and
+detached rows before the first DOM write. It removes only retired rows, preserves each reused row,
+batches adjacent new rows in a fragment, updates shifted suffix indexes, and applies LIS only to
+the reused part of that interval so it moves the fewest connected rows needed by the local
+permutation. Rows outside the interval are not rerendered or rebound. Multiple length-preserving
 same-key windows queued before one compiler flush compose into one atomic refresh. Fixed-length
 queued windows may mix same-key rows with globally new final keys, and both disjoint and
 overlapping windows are supported. An overlapping position uses the last queued value;
 intermediate identities are never mounted. Farm validates the complete chain and final key set,
 then prepares every touched key, binding value, DOM target, new descriptor, binding snapshot, and
 disconnected DOM row before the first write. It patches same-key positions and swaps only final
-fresh-key positions. Untouched rows retain their identity. Reordered, partially reused, or
-duplicate final keys take complete
-reconciliation before fast-path mutation. A single insertion
+fresh-key positions. Untouched rows retain their identity. Duplicate final keys and keys reused
+from outside a single removed interval take complete reconciliation before fast-path mutation. A
+queued chain may also contain disjoint grow or shrink windows. Farm maps every immediate-source
+position through earlier length changes, proves that the source and final intervals remain
+disjoint, and prepares all local key reuse, fresh rows, binding updates, cleanup, and per-window LIS
+moves before changing the DOM. Adjacent windows and empty incoming intervals remain eligible. An
+overlapping structural window or a key transferred between windows keeps complete reconciliation.
+A single insertion
 creates one row at that position. A removal cleans up and removes only the known row or contiguous
 range while preserving every
 surviving element. A same-key replacement patches that row in place; a new-key replacement creates
@@ -1085,13 +1117,14 @@ and swaps one host row. The owner component does not rerun, and surviving row ke
 and bindings are not reread.
 
 The proof requires compiler-owned host rows whose render and key do not observe the row index.
-Effectful position expressions, runtime values that are fractional or otherwise not safe integers,
-dynamic, zero, negative, or fractional removal counts, other `toSpliced()` shapes, block-bodied
-updaters, unsafe incoming expressions, custom methods, queued chains containing a structural
-window or unhinted intermediate update, an existing key moved from another position, duplicate or
-partially reused final keys, collection-reading bindings, React-owned rows, nested host blocks, row
-conditionals, unrelated dirty dependencies, and failed runtime checks keep complete keyed
-reconciliation.
+Effectful position or delete-count expressions, runtime positions that are fractional or otherwise
+not safe integers, runtime delete counts that are zero, negative, fractional, non-numeric, or
+otherwise not positive safe integers, other `toSpliced()` shapes, block-bodied updaters, unsafe
+incoming expressions, custom methods, overlapping queued structural windows,
+unhinted intermediate updates, an existing key moved from outside its local removed interval or
+between queued windows, duplicate final keys, collection-reading bindings, React-owned rows,
+nested host blocks, row conditionals, unrelated dirty dependencies, and failed runtime checks keep
+complete keyed reconciliation.
 Negative safe-integer positions and counts larger than the remaining suffix use the native
 method's normal clamping rules. No new option or component is required. Reports expose emitted
 sites as `keyedArrayPositionHints`. Batch insertion and exact-window replacement select
@@ -1961,26 +1994,38 @@ The package and example test suites verify more than generated code:
   descriptor, and binding reads to equal only the inserted prefix, preserve every existing DOM
   row, update delegated event indexes, and cover queued updates, StrictMode hydration, unmount,
   invalid metadata, custom arrays, and conservative fallback;
-- 2,000 deterministic queued keyed-array slices match normal React; targeted tests require zero
-  surviving key, descriptor, and binding reads, preserve focused controlled-input identity and
-  selection, update delegated event indexes, and cover native bounds, queued slice/filter chains,
-  Strict Mode hydration, unmount cleanup, custom methods, proxies, and conservative fallback;
-- 250 committed keyed rolling-window updates match normal React; targeted tests require work to
-  equal only the incoming suffix, preserve retained DOM identity, and cover reused-key,
-  custom-slice, and collection-dependent fallbacks;
+- 2,000 deterministic queued keyed-array slices and 1,000 randomized runtime-bound slices match
+  normal React; compiler tests cover literal and compiler-safe runtime bounds while rejecting calls
+  and mutations; targeted tests require zero surviving key, descriptor, and binding reads, preserve
+  focused controlled-input identity and selection, update delegated event indexes, and cover native
+  evaluation and coercion, unsafe evaluated bounds, queued slice/filter chains, Strict Mode
+  hydration, unmount cleanup, custom methods, proxies, and conservative fallback;
+- 250 committed fixed-bound and 1,000 randomized runtime-bound keyed rolling-window updates match
+  normal React; targeted tests require work to equal only the incoming suffix, preserve retained
+  DOM identity, and cover unsafe evaluated bounds, reused keys, custom slices, collection-dependent
+  rows, Strict Mode hydration, and unmount cleanup;
 - 2,000 deterministic randomized keyed-array removals match normal React; targeted tests require
   zero surviving descriptor and binding reads, preserve DOM identity, and cover queued filters,
   unhinted-chain fallback, collection-reading rows, StrictMode hydration, and unmount cleanup;
 - 1,000 deterministic exact-position insertions, single and contiguous-range removals, single-row
-  replacements, and exact-window replacements match normal React; compiler tests cover literal counts and guarded runtime
-  positions, while targeted removal tests require zero surviving key, descriptor, or binding reads,
+  replacements, and exact-window replacements match normal React; compiler tests cover guarded
+  runtime positions plus literal and compiler-safe runtime delete counts, while targeted removal
+  tests require zero surviving key, descriptor, or binding reads,
   preserve focused input and surrounding DOM identity, and cover native evaluation and coercion,
   clamping, unsafe runtime positions and counts, custom methods, queued updates,
   collection-reading rows, StrictMode hydration, and cleanup; targeted window tests additionally
   require fresh-key work to equal only the incoming window and a 4,096-row same-key refresh to
-  perform zero descriptor creation while preserving all 64 refreshed DOM rows; they also cover
-  atomic binding preparation, empty spreads, reordered and duplicate key fallback, latest delegated
-  event data, focus, selection, hydration, Strict Mode, and queued structural fallback; another
+  perform zero descriptor creation while preserving all 64 refreshed DOM rows; a 4,096-row mixed
+  window reuses and reorders 48 keyed rows, creates only 16 descriptors, evaluates only the 64
+  local keys and bindings, and performs the exact 47 local LIS moves plus one fresh-row fragment;
+  a separate 4,096-row sequence grows a 64-row interval to 80 rows and then shrinks it to 40 while
+  preserving both surrounding anchors, reusing every retained row, creating only fresh rows, and
+  performing the exact local LIS moves; another 1,000 randomized variable-length mixed-window
+  updates match normal React; 1,000 queued disjoint grow/shrink updates also match React while
+  targeted tests cover both source orders, adjacent and empty windows, atomic preparation across
+  every window, exact local LIS moves, current delegated event indexes, focus, selection,
+  hydration, Strict Mode, cleanup, and overlapping structural or cross-window key-move fallback;
+  tests also cover duplicate and outside-window key fallback; another
   1,000 deterministic queued same-key window refreshes match normal React while disjoint and
   overlapping targeted tests preserve row identity and perform no descriptor work; 1,000 queued
   mixed fresh-key and same-key replacements also match React while targeted tests require only the
@@ -2018,8 +2063,9 @@ The package and example test suites verify more than generated code:
   preserves the keyed-update speedup floor, checks that scalar selection, Set membership, and Map
   lookups remain key-directed at scale, compares dense hinted Set/Map updates with equivalent
   compiled snapshot controls, requires separate single-row and contiguous-range removal speedup
-  floors, and passes DOM correctness, React-relative regression, direct-delta, and normalized
-  scalability gates;
+  floors, requires a mixed local-window reuse/reorder gate to remain at least 4× faster than React
+  and 1.5× faster than its compiled snapshot control, and passes DOM correctness, React-relative
+  regression, direct-delta, and normalized scalability gates;
 - the public `List` renders iterable and nullish collections correctly with the compiler off;
 - the packaged runtime, including a keyed-range component root, editable and interactive keyed-row
   events, row-local conditions, reorders, identity, selection, and hydration, is exercised

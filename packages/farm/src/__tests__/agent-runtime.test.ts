@@ -116,6 +116,39 @@ describe("agent runtime integration", () => {
 });
 
 describe("agent runtime proxy", () => {
+  it("removes headers named by Connection in both proxy directions", async () => {
+    let forwardedHeaders: Headers | undefined;
+    const response = await proxyAgentRuntimeRequest(
+      new Request("https://farm.test/agents/demo", {
+        headers: {
+          connection: "keep-alive, x-request-hop",
+          "x-request-hop": "request-only",
+          "x-end-to-end": "preserved",
+        },
+      }),
+      "https://agent.example.com",
+      {
+        fetch: async (_input, init) => {
+          forwardedHeaders = new Headers(init?.headers);
+          return new Response("ok", {
+            headers: {
+              connection: "x-response-hop",
+              "x-response-hop": "response-only",
+              "x-upstream": "preserved",
+            },
+          });
+        },
+      },
+    );
+
+    expect(forwardedHeaders?.get("connection")).toBeNull();
+    expect(forwardedHeaders?.get("x-request-hop")).toBeNull();
+    expect(forwardedHeaders?.get("x-end-to-end")).toBe("preserved");
+    expect(response.headers.get("connection")).toBeNull();
+    expect(response.headers.get("x-response-hop")).toBeNull();
+    expect(response.headers.get("x-upstream")).toBe("preserved");
+  });
+
   it("forwards method, body, query, auth, and streaming responses", async () => {
     const server = createServer(async (request, response) => {
       const chunks: Buffer[] = [];

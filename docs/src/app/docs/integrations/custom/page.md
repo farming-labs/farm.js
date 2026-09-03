@@ -176,6 +176,8 @@ export async function startCheckoutOnServer() {
 
 Both calls have typed input, typed `data`, and typed `error`. The Zod body schema also validates the
 incoming request at runtime.
+Integration clients decode both `application/json` and structured JSON media types such as
+`application/problem+json`, so structured success and error payloads remain available to callers.
 
 ### 2. `endpoints`: grouped owned handlers
 
@@ -869,11 +871,20 @@ The integration code still uses `ctx.args.db`, not SQLite-specific APIs. If the 
 Use `providers` for client SDKs, context providers, or integration metadata that the app shell can compose.
 
 ```tsx
+// src/components/acme-provider.tsx
+"use client";
+
 import type { FarmIntegrationProviderProps } from "@farm.js/core";
 
-function AcmeProvider({ children }: FarmIntegrationProviderProps) {
+export function AcmeProvider({ children }: FarmIntegrationProviderProps) {
   return <>{children}</>;
 }
+```
+
+Reference that client-safe module from the integration definition:
+
+```ts
+// farm.config.ts
 
 export const acme = defineIntegration({
   category: "custom",
@@ -886,13 +897,22 @@ export const acme = defineIntegration({
       props: {
         publishableKey: process.env.ACME_PUBLISHABLE_KEY,
       },
-      component: AcmeProvider,
+      component: {
+        module: "@/components/acme-provider",
+        export: "AcmeProvider",
+      },
     },
   ],
 });
 ```
 
-Keep provider props public-safe. Secrets belong in server config and lifecycle hooks.
+Farm statically imports the component into development and production client entries and composes
+the same provider during server rendering. Use the standard `@/` source alias, a relative path, or
+a package specifier; `export` defaults to `default`. Keep the provider module client-safe and
+provider props public-safe. Secrets belong in server config and lifecycle hooks. Passing an opaque
+function directly remains available to development and custom server-renderer callers, but a full
+production build reports an actionable error because Farm cannot trace that function's imports
+without also exposing the server configuration module.
 
 ## Logging
 

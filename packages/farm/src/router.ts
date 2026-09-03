@@ -1,4 +1,9 @@
-import { compareRouteSpecificity, type RouteSegmentSpecificity } from "./routing/specificity";
+import {
+  AmbiguousRouteError,
+  compareRouteSpecificity,
+  getRoutePatternShape,
+  type RouteSegmentSpecificity,
+} from "./routing/specificity";
 
 export type FarmRouterPrimitiveParam = string | number | boolean;
 export type FarmRouterPathParam =
@@ -68,7 +73,19 @@ interface NormalizedRouterRoute<TMeta> {
 export function createFarmRouter<TMeta = unknown>(
   routes: FarmRouterRouteInput<TMeta>[],
 ): FarmRouter<TMeta> {
-  const normalizedRoutes = routes.map(normalizeRouteInput).sort(compareRoutes);
+  const normalizedRoutes = routes.map(normalizeRouteInput);
+  const patternsByShape = new Map<string, string>();
+  for (const entry of normalizedRoutes) {
+    const shape = getRoutePatternShape(entry.route.path, "router");
+    const existingPattern = patternsByShape.get(shape);
+    if (existingPattern) {
+      throw new AmbiguousRouteError(
+        `Ambiguous route patterns "${existingPattern}" and "${entry.route.path}" match the same URLs. Keep only one route for this URL shape.`,
+      );
+    }
+    patternsByShape.set(shape, entry.route.path);
+  }
+  normalizedRoutes.sort(compareRoutes);
 
   return {
     routes: normalizedRoutes.map((entry) => entry.route),

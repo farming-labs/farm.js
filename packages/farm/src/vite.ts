@@ -1,7 +1,7 @@
 import type { ConfigEnv, Plugin, UserConfig, ViteDevServer, HmrContext, Connect } from "vite";
 import type { FarmConfig } from "./types";
 import { FarmApp } from "./app";
-import { logger, toViteModuleId } from "./utils";
+import { logger, toPosixPath, toViteModuleId } from "./utils";
 import { defaultGlobalCSS } from "./default-styles";
 import type { FarmPlugin, FarmPluginRuntimeSession, PluginManager } from "./plugin";
 import { generateFarmClientPluginEntryCode } from "./client-plugin-build";
@@ -89,6 +89,7 @@ import {
   resolveFarmRenderer,
 } from "./renderer";
 import type { FarmRenderer } from "./renderer";
+import { generateFarmIntegrationProviderClientCode } from "./integration-provider-build";
 import type { FarmIslandStrategy } from "./island";
 import { resolveRouteRenderingConfig } from "./ssg";
 import {
@@ -878,12 +879,13 @@ export function farmPlugin(
         event: string,
         selection: TypeArtifactSelection,
       ) => {
+        const normalizedFile = toPosixPath(file);
         for (const [artifact, enabled] of Object.entries(selection)) {
           if (enabled) {
             pendingTypeArtifacts[artifact as keyof TypeArtifactSelection] = true;
           }
         }
-        pendingTypeArtifactReason ||= `${event} ${file.split("/app/")[1] || file}`;
+        pendingTypeArtifactReason ||= `${event} ${normalizedFile.split("/app/")[1] || normalizedFile}`;
         if (typeArtifactGenScheduled) return;
         typeArtifactGenScheduled = setTimeout(() => {
           typeArtifactGenScheduled = null;
@@ -2620,6 +2622,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           renderer,
           resolvedConfig?.experimental?.isolatedClientHydration === "enabled",
           resolvedConfig?.trailingSlash ?? false,
+          resolvedConfig?.basePath ?? "/",
         );
       }
 
@@ -3036,9 +3039,9 @@ if (import.meta.hot) {
         return [];
       }
 
-      if (file.includes("/app/")) {
+      if (normalizedFile.includes("/app/")) {
         // Hot reload middleware changes
-        if (file.includes("middleware.")) {
+        if (normalizedFile.includes("middleware.")) {
           if (middlewareManager) {
             await middlewareManager.reload();
             logger.success("✅ Middleware reloaded!");
@@ -3062,8 +3065,8 @@ if (import.meta.hot) {
           server.moduleGraph.invalidateModule(manifestModule);
         }
 
-        if (file.includes("page.") || file.includes("layout.")) {
-          const shortPath = file.split("/app/")[1] || file;
+        if (normalizedFile.includes("page.") || normalizedFile.includes("layout.")) {
+          const shortPath = normalizedFile.split("/app/")[1] || normalizedFile;
           logUpdate("PAGE", `updated ${shortPath}`);
 
           for (const mod of modules) {
@@ -3464,11 +3467,7 @@ function parseRouteModuleSchema(
 }
 
 function generateClientCode(
-  integrationProviders: Array<{
-    name: string;
-    type: string;
-    props?: Record<string, unknown>;
-  }> = [],
+  integrationProviders: ReturnType<typeof getIntegrationProviders> = [],
   documentNavigationMatchers: string[] = [],
   docsSearchClientRuntime = EMPTY_FARM_DOCS_SEARCH_CLIENT_RUNTIME,
   devtoolsClientRuntime = "",
@@ -3480,11 +3479,9 @@ function generateClientCode(
   renderer: FarmRenderer = REACT_RENDERER,
   isolatedHydrationEnabled = false,
   trailingSlash = false,
+  basePath = "/",
 ): string {
-  const hasClerkProvider = integrationProviders.some((provider) => provider.type === "clerk");
-  const providerImportBlock = hasClerkProvider
-    ? `import { ClerkProvider } from '@clerk/react';`
-    : "";
+  const providerClientCode = generateFarmIntegrationProviderClientCode(integrationProviders, root);
   const clientPluginEntry = generateFarmClientPluginEntryCode(
     plugins,
     root,
@@ -3544,7 +3541,10 @@ async function hydrateFarmIsolatedClientBoundaries(scope = document) {
             throw new Error('compiled original export was not found');
           }
           const props = JSON.parse(container.getAttribute('data-farm-client-props') || '{}');
-          const root = hydrateRoot(container, React.createElement(Component, props));
+          const root = hydrateRoot(
+            container,
+            wrapWithIntegrationProviders(React.createElement(Component, props)),
+          );
           farmIsolatedBoundaryRoots.set(container, root);
         } catch (error) {
           console.warn(
@@ -3564,14 +3564,14 @@ async function hydrateFarmIsolatedClientBoundaries(scope = document) {
 ${rendererClientImports}
 import { installChunkErrorRecovery, SPARouter } from '@farm.js/core/client'
 import { createClientPluginManager } from '@farm.js/core/plugin/client'
-import { scheduleFarmIslandHydration, searchParamsToObject, setFarmTrailingSlashPreference } from '@farm.js/core/internal/client-runtime'
+import { scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference } from '@farm.js/core/internal/client-runtime'
 import { reviveDeferredData } from '@farm.js/core/deferred'
 import {
   createFarmDeploymentMismatchError,
   createFarmDeploymentRequestHeaders,
   isFarmDeploymentMismatchResponse,
 } from '@farm.js/core/deployment'
-${providerImportBlock}
+${providerClientCode.imports}
 ${clientPluginEntry.imports}
 ${docsSearchClientRuntime}
 ${devtoolsClientRuntime}
@@ -3583,9 +3583,9 @@ ${docsAdapterImportBlock}
 
 // Expose React for HMR
 window.__FARM_REACT__ = React;
-const integrationProviders = ${JSON.stringify(integrationProviders)};
 const integrationDocumentNavigationMatchers = ${JSON.stringify(documentNavigationMatchers)};
 
+setFarmBasePath(${JSON.stringify(basePath)});
 setFarmTrailingSlashPreference(${JSON.stringify(trailingSlash)});
 installChunkErrorRecovery();
 
@@ -3605,18 +3605,7 @@ function matchesDocumentNavigation(pathname) {
   });
 }
 
-function wrapWithIntegrationProviders(element) {
-  let wrapped = element;
-
-  for (let i = integrationProviders.length - 1; i >= 0; i--) {
-    const provider = integrationProviders[i];
-    if (provider.type === 'clerk') {
-      wrapped = React.createElement(ClerkProvider, provider.props || {}, wrapped);
-    }
-  }
-
-  return wrapped;
-}
+${providerClientCode.runtime}
 
 window.__FARM_WRAP_PROVIDERS__ = wrapWithIntegrationProviders;
 
