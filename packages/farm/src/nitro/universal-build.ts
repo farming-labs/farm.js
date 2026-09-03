@@ -1876,7 +1876,7 @@ export function generateUniversalRouterStateProperties(): string {
 
   registerScrollElement: function(key, element) {
     this.scrollElements.set(key, element);
-    this.restoreScrollElement(window.location.pathname, key, element);
+    this.restoreScrollElement(window.location.pathname + window.location.search, key, element);
     return () => {
       if (this.scrollElements.get(key) === element) this.scrollElements.delete(key);
     };

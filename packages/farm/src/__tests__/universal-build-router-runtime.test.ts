@@ -179,6 +179,15 @@ describe("generateUniversalRouterStateProperties", () => {
     expect(readHistoryIndex({ __farmHistoryIndex: Number.POSITIVE_INFINITY })).toBeNull();
     expect(readHistoryIndex({ __farmHistoryIndex: Number.MAX_SAFE_INTEGER + 1 })).toBeNull();
   });
+
+  it("restores registered scroll elements with the current query string", () => {
+    expect(runtime).toContain(
+      "this.restoreScrollElement(window.location.pathname + window.location.search, key, element)",
+    );
+    expect(runtime).not.toContain(
+      "this.restoreScrollElement(window.location.pathname, key, element)",
+    );
+  });
 });
 
 describe("generated deployment navigation guard", () => {
