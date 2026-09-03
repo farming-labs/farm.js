@@ -741,6 +741,10 @@ export function Chart() {}
       "const targetUrl = new URL(targetPath || window.location.href, window.location.origin);",
     );
     expect(source).toContain("resetReactRoot();");
+    expect(source.match(/reconcileFarmDocumentHead\(doc\);/g)).toHaveLength(2);
+    expect(source).toContain("renderRouteInterception(selectedSlot, intercepted.slot, from, doc)");
+    expect(source).toContain("reconcileFarmDocumentHead(nextDocument);");
+    expect(source).not.toContain('const newMetas = doc.querySelectorAll("meta[name]")');
   });
 
   it("guards generated production HTML requests against stale deployments", () => {

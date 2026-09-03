@@ -2097,7 +2097,7 @@ async function hydrateFarmDocsAdapterRuntime() {
 // Farm.js Client Runtime (no client components)
 ${cssImport}
 ${layoutImports}
-import { createClientPluginManager, getHashTargetElement, installChunkErrorRecovery, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
+import { createClientPluginManager, getHashTargetElement, installChunkErrorRecovery, reconcileFarmDocumentHead, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
 import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";
 ${clientPluginEntry.imports}
 ${i18nClientRuntime}
@@ -2245,23 +2245,7 @@ ${generateUniversalRouterStateProperties()}
     if (isFarmLocaleDocumentChange(doc)) return false;
     if (doc.getElementById("nd-docs-layout")) return false;
     
-    // Update title
-    const newTitle = doc.querySelector("title");
-    if (newTitle) document.title = newTitle.textContent || "";
-    
-    // Update meta tags
-    const newMetas = doc.querySelectorAll("meta[name]");
-    newMetas.forEach(function(meta) {
-      const name = meta.getAttribute("name");
-      if (name) {
-        const existing = document.querySelector("meta[name=\\"" + name + "\\"]");
-        if (existing) {
-          existing.setAttribute("content", meta.getAttribute("content") || "");
-        } else {
-          document.head.appendChild(meta.cloneNode(true));
-        }
-      }
-    });
+    reconcileFarmDocumentHead(doc);
     
     // Swap root content
     const newRoot = doc.getElementById("root");
@@ -2515,7 +2499,7 @@ ${cssImport}
 ${layoutImports}
 ${rendererClientImports}
 ${providerClientCode.imports}
-import { createClientPluginManager, getHashTargetElement, installChunkErrorRecovery, scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
+import { createClientPluginManager, getHashTargetElement, installChunkErrorRecovery, reconcileFarmDocumentHead, scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
 import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";
 import { matchFarmRoute } from "@farm.js/core/router";
 ${clientPluginEntry.imports}
@@ -2766,15 +2750,16 @@ function hydrateInitialRouteSlots() {
   }
 }
 
-function renderRouteInterception(slot, registration, from) {
+function renderRouteInterception(slot, registration, from, nextDocument) {
   const container = document.getElementById(slot.containerId);
-  if (!container) return false;
+  if (!container || !registration?.Component) return false;
   const key = routeSlotKey(slot);
   const previousSlot = (window.__FARM_ROUTE_SLOTS__ || []).find(function(candidate) {
     return routeSlotKey(candidate) === key;
   }) || null;
   const previousHtml = container.innerHTML;
 
+  reconcileFarmDocumentHead(nextDocument);
   if (!renderClientRouteSlot(slot, registration, "render")) return false;
   activeRouteInterception = {
     from: from,
@@ -3100,7 +3085,7 @@ ${generateUniversalRouterStateProperties()}
             params: intercepted.params,
           });
           if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
-          if (renderRouteInterception(selectedSlot, intercepted.slot, from)) {
+          if (renderRouteInterception(selectedSlot, intercepted.slot, from, doc)) {
             this.writeHistoryEntry(action, to, options.state, url);
             this.currentPath = to;
             await farmClientRuntime.resolveNavigation(clientNavigation);
@@ -3243,23 +3228,7 @@ ${generateUniversalRouterStateProperties()}
     const isNavigationCurrent = () =>
       this.isCurrentNavigation(navigation, clientNavigation);
     
-    // Update title
-    const newTitle = doc.querySelector("title");
-    if (newTitle) document.title = newTitle.textContent || "";
-    
-    // Update meta tags
-    const newMetas = doc.querySelectorAll("meta[name]");
-    newMetas.forEach(function(meta) {
-      const name = meta.getAttribute("name");
-      if (name) {
-        const existing = document.querySelector("meta[name=\\"" + name + "\\"]");
-        if (existing) {
-          existing.setAttribute("content", meta.getAttribute("content") || "");
-        } else {
-          document.head.appendChild(meta.cloneNode(true));
-        }
-      }
-    });
+    reconcileFarmDocumentHead(doc);
     
     // Swap root content
     const newRoot = doc.getElementById("root");
