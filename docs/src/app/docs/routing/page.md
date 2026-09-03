@@ -675,6 +675,10 @@ from the rendered React page automatically.
 
 Export `metadata` for static head tags or `generateMetadata` when the values depend on route params, search params, middleware data, or route data. Farm merges layout metadata from root to leaf, then applies the page metadata last.
 
+During HTML-based client navigation, Farm reconciles the destination document's title, meta tags,
+canonical and alternate links, icons, and manifest link. Tags omitted by the destination are removed,
+so metadata from the previous route cannot remain active.
+
 A layout can define a default title and a `%s` template for child segments. The layout itself uses
 the default; a child string title is substituted into the nearest parent template:
 
