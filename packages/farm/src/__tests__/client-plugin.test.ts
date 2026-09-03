@@ -219,6 +219,19 @@ describe("client plugin lifecycle", () => {
     expect(loaded).toEqual(["/second"]);
   });
 
+  it("cancels the active navigation session explicitly", async () => {
+    const manager = createManager([]);
+    const navigation = await manager.beginNavigation({
+      to: "/account",
+      action: "push",
+    });
+
+    manager.cancelNavigation(navigation, "document-navigation");
+
+    expect(navigation.signal.aborted).toBe(true);
+    expect(navigation.signal.reason).toBe("document-navigation");
+  });
+
   it("isolates failed hooks and reports them to sibling plugins", async () => {
     const calls: string[] = [];
     vi.spyOn(console, "error").mockImplementation(() => {});

@@ -736,7 +736,7 @@ export function Chart() {}
     expect(source).toContain("delete window.__farmDocsRuntime;");
     expect(source).toContain("script.replaceWith(freshScript);");
     expect(source).toContain('document.documentElement.dataset.farmDocsRuntime === "true"');
-    expect(source).toContain("this.swapContent(html, url.pathname + url.search)");
+    expect(source).toContain("const swapped = await this.swapContent(");
     expect(source).toContain(
       "const targetUrl = new URL(targetPath || window.location.href, window.location.origin);",
     );
@@ -763,6 +763,17 @@ export function Chart() {}
     expect(source).toContain("this.currentPath = to;");
     expect(source).toContain("scheduleFarmIslandHydration");
     expect(source).toContain("pendingPageHydrationController?.abort()");
+    expect(source.match(/const navigation = this\.startNavigation/g)).toHaveLength(2);
+    expect(source).toContain(
+      "if (!this.isCurrentNavigation(navigation, clientNavigation)) return;",
+    );
+    expect(source).toContain("navigation.controller.signal");
+    expect(source).toContain("navigation.clientNavigation = clientNavigation;");
+    expect(source).toContain("farmClientRuntime.cancelNavigation(");
+    expect(source).toContain(
+      "swapContent: async function(html, targetPath, navigation, clientNavigation)",
+    );
+    expect(source).toContain("if (!isNavigationCurrent()) return false;");
     expect(source).toContain("reactRootContainer !== container");
     expect(source).toContain('document.getElementById("__farm_page__") || currentRoot');
     expect(source).toContain("Navigation itself signals intent");

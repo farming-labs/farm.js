@@ -1678,6 +1678,8 @@ export function generateUniversalRouterStateProperties(): string {
   blockers: new Set(),
   navigationListeners: new Set(),
   navigationState: IDLE_NAVIGATION_STATE,
+  navigationSequence: 0,
+  activeNavigation: null,
   observers: new Map(),
   scrollElements: new Map(),
   currentPath: window.location.pathname + window.location.search,
@@ -1705,6 +1707,13 @@ export function generateUniversalRouterStateProperties(): string {
   },
 
   startNavigation: function(from, to, action) {
+    this.activeNavigation?.controller.abort("superseded");
+    const navigation = {
+      id: ++this.navigationSequence,
+      controller: new AbortController(),
+      clientNavigation: null,
+    };
+    this.activeNavigation = navigation;
     this.setNavigationState({
       state: "loading",
       pending: true,
@@ -1713,9 +1722,29 @@ export function generateUniversalRouterStateProperties(): string {
       action,
       startedAt: Date.now(),
     });
+    return navigation;
   },
 
-  finishNavigation: function() {
+  isCurrentNavigation: function(navigation, clientNavigation) {
+    return this.activeNavigation?.id === navigation.id &&
+      !navigation.controller.signal.aborted &&
+      !clientNavigation?.signal.aborted;
+  },
+
+  finishNavigation: function(navigation) {
+    if (this.activeNavigation?.id !== navigation.id) return;
+    this.activeNavigation = null;
+    this.setNavigationState(IDLE_NAVIGATION_STATE);
+  },
+
+  cancelActiveNavigation: function() {
+    if (!this.activeNavigation) return;
+    farmClientRuntime.cancelNavigation(
+      this.activeNavigation.clientNavigation || undefined,
+      "superseded",
+    );
+    this.activeNavigation.controller.abort("superseded");
+    this.activeNavigation = null;
     this.setNavigationState(IDLE_NAVIGATION_STATE);
   },
 
@@ -1997,10 +2026,12 @@ ${generateUniversalRouterStateProperties()}
   navigate: async function(href, options = {}) {
     const url = new URL(href, window.location.origin);
     if (url.origin !== window.location.origin) {
+      this.cancelActiveNavigation();
       window.location.href = href;
       return;
     }
     if (isFarmDocsPath(url.pathname)) {
+      this.cancelActiveNavigation();
       window.location.href = href;
       return;
     }
@@ -2008,6 +2039,7 @@ ${generateUniversalRouterStateProperties()}
     const action = options.action || (options.replace ? "replace" : "push");
     const to = url.pathname + url.search;
     if (!options.refresh && action !== "pop" && to === this.currentPath) {
+      this.cancelActiveNavigation();
       if (url.hash === window.location.hash) return;
       const pageState = options.state === undefined
         ? window.history.state?.[FARM_PAGE_STATE_KEY]
@@ -2021,13 +2053,16 @@ ${generateUniversalRouterStateProperties()}
       }
       return;
     }
-    if (action === "pop" && to === this.currentPath) return;
+    if (action === "pop" && to === this.currentPath) {
+      this.cancelActiveNavigation();
+      return;
+    }
 
     const from = this.currentPath;
     if (await this.shouldBlockNavigation({ from, to, action })) return;
 
     this.saveScrollPosition(window.location.pathname + window.location.search);
-    this.startNavigation(from, url, action);
+    const navigation = this.startNavigation(from, url, action);
     let clientNavigation;
     try {
       clientNavigation = await farmClientRuntime.beginNavigation({
@@ -2035,9 +2070,18 @@ ${generateUniversalRouterStateProperties()}
         to: url,
         action,
       });
-      const html = await this.fetchPage(url.pathname + url.search, options.refresh === true);
+      navigation.clientNavigation = clientNavigation;
+      if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
+      const html = await this.fetchPage(
+        url.pathname + url.search,
+        options.refresh === true,
+        navigation.controller.signal,
+      );
+      if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
       await farmClientRuntime.markNavigationLoaded(clientNavigation, html);
+      if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
       await this.runViewTransition(options.viewTransition, async () => {
+        if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
         if (!this.swapContent(html)) {
           throw new Error("Farm could not swap the target document");
         }
@@ -2051,6 +2095,7 @@ ${generateUniversalRouterStateProperties()}
         } else if (action !== "pop") {
           window.history.pushState(historyState, "", url);
         }
+        this.currentPath = to;
         if (options.scroll !== false) {
           if (url.hash) document.querySelector(url.hash)?.scrollIntoView();
           else window.scrollTo(0, 0);
@@ -2058,15 +2103,17 @@ ${generateUniversalRouterStateProperties()}
           this.restoreScrollPosition(to);
         }
       });
+      if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
       await farmClientRuntime.resolveNavigation(clientNavigation);
+      if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
       void farmClientRuntime.scheduleNavigationRendered(clientNavigation);
-      this.currentPath = to;
-      this.finishNavigation();
+      this.finishNavigation(navigation);
     } catch (error) {
+      if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
       if (clientNavigation) {
         await farmClientRuntime.failNavigation(clientNavigation, error);
       }
-      this.finishNavigation();
+      this.finishNavigation(navigation);
       console.error("[Farm.js] Navigation error:", error);
       if (action === "pop") window.location.reload();
       else window.location.href = href;
@@ -2083,12 +2130,13 @@ ${generateUniversalRouterStateProperties()}
     });
   },
   
-  fetchPage: async function(url, fresh = false) {
+  fetchPage: async function(url, fresh = false, signal) {
     if (fresh) this.prefetchCache.delete(url);
     const cached = fresh ? undefined : this.prefetchCache.get(url);
     if (cached) return cached;
     
     const response = await fetch(url, {
+      signal,
       headers: { "Accept": "text/html" }
     });
     if (!response.ok) throw new Error("Failed to fetch page");
@@ -2301,7 +2349,7 @@ function disposeFarmIsolatedClientBoundaries(scope) {
   }
 }
 
-async function hydrateFarmIsolatedClientBoundaries(scope = document) {
+async function hydrateFarmIsolatedClientBoundaries(scope = document, signal) {
   const candidates = Array.from(scope.querySelectorAll("farm-client-boundary[data-farm-client-boundary]"));
   const boundaries = candidates.filter((container) => {
     if (farmIsolatedBoundaryRoots.has(container)) return false;
@@ -2321,7 +2369,9 @@ async function hydrateFarmIsolatedClientBoundaries(scope = document) {
       strategy,
       hydrate: async function() {
         try {
+          if (signal?.aborted || !container.isConnected) return;
           const module = await loader();
+          if (signal?.aborted || !container.isConnected) return;
           const Component = module.__farm_client_boundary_originals__?.[exportName];
           if (typeof Component !== "function" && typeof Component !== "object") {
             throw new Error("compiled original export was not found");
@@ -2854,10 +2904,12 @@ ${generateUniversalRouterStateProperties()}
   navigate: async function(href, options = {}) {
     const url = new URL(href, window.location.origin);
     if (url.origin !== window.location.origin) {
+      this.cancelActiveNavigation();
       window.location.href = href;
       return;
     }
     if (isFarmDocsPath(url.pathname)) {
+      this.cancelActiveNavigation();
       window.location.href = href;
       return;
     }
@@ -2865,6 +2917,7 @@ ${generateUniversalRouterStateProperties()}
     const action = options.action || (options.replace ? "replace" : "push");
     const to = url.pathname + url.search;
     if (action !== "pop" && to === this.currentPath) {
+      this.cancelActiveNavigation();
       if (url.hash === window.location.hash) return;
       const pageState = options.state === undefined
         ? window.history.state?.[FARM_PAGE_STATE_KEY]
@@ -2878,7 +2931,10 @@ ${generateUniversalRouterStateProperties()}
       }
       return;
     }
-    if (action === "pop" && to === this.currentPath) return;
+    if (action === "pop" && to === this.currentPath) {
+      this.cancelActiveNavigation();
+      return;
+    }
     
     const pathname = url.pathname;
     const matched = matchRoute(pathname);
@@ -2888,7 +2944,7 @@ ${generateUniversalRouterStateProperties()}
     // A route transition invalidates any trigger waiting on the previous DOM boundary.
     cancelPendingPageHydration();
     this.saveScrollPosition(window.location.pathname + window.location.search);
-    this.startNavigation(from, url, action);
+    const navigation = this.startNavigation(from, url, action);
     let clientNavigation;
 
     try {
@@ -2900,15 +2956,19 @@ ${generateUniversalRouterStateProperties()}
           ? { pattern: matched.route.pattern, params: matched.params }
           : undefined,
       });
+      navigation.clientNavigation = clientNavigation;
+      if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
 
       if (activeRouteInterception && clearRouteInterception(to)) {
+        this.currentPath = to;
         await farmClientRuntime.markNavigationLoaded(clientNavigation, {
           routeSlots: "restored",
         });
+        if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
         await farmClientRuntime.resolveNavigation(clientNavigation);
+        if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
         void farmClientRuntime.scheduleNavigationRendered(clientNavigation);
-        this.currentPath = to;
-        this.finishNavigation();
+        this.finishNavigation(navigation);
         return;
       }
       if (activeRouteInterception) {
@@ -2917,7 +2977,8 @@ ${generateUniversalRouterStateProperties()}
 
       const intercepted = matchInterceptedRouteSlot(pathname, from);
       if (intercepted) {
-        const html = await this.fetchPage(to, from);
+        const html = await this.fetchPage(to, from, navigation.controller.signal);
+        if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
         const doc = new DOMParser().parseFromString(html, "text/html");
         const slotPayload = readRouteSlotPayload(doc);
         const selectedSlot = slotPayload.find(function(slot) {
@@ -2926,29 +2987,30 @@ ${generateUniversalRouterStateProperties()}
             slot.ownerPattern === intercepted.slot.ownerPattern;
         });
 
-        if (
-          selectedSlot &&
-          renderRouteInterception(selectedSlot, intercepted.slot, from)
-        ) {
+        if (selectedSlot) {
           await farmClientRuntime.markNavigationLoaded(clientNavigation, {
             route: intercepted.slot.pattern,
             params: intercepted.params,
           });
-          const historyState = createHistoryState(
-            to,
-            options.state,
-            window.history.state,
-          );
-          if (action === "replace") {
-            window.history.replaceState(historyState, "", url);
-          } else if (action !== "pop") {
-            window.history.pushState(historyState, "", url);
+          if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
+          if (renderRouteInterception(selectedSlot, intercepted.slot, from)) {
+            const historyState = createHistoryState(
+              to,
+              options.state,
+              window.history.state,
+            );
+            if (action === "replace") {
+              window.history.replaceState(historyState, "", url);
+            } else if (action !== "pop") {
+              window.history.pushState(historyState, "", url);
+            }
+            this.currentPath = to;
+            await farmClientRuntime.resolveNavigation(clientNavigation);
+            if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
+            void farmClientRuntime.scheduleNavigationRendered(clientNavigation);
+            this.finishNavigation(navigation);
+            return;
           }
-          await farmClientRuntime.resolveNavigation(clientNavigation);
-          void farmClientRuntime.scheduleNavigationRendered(clientNavigation);
-          this.currentPath = to;
-          this.finishNavigation();
-          return;
         }
       }
 
@@ -2956,6 +3018,7 @@ ${generateUniversalRouterStateProperties()}
         // Navigation itself signals intent, so destination routes load eagerly even
         // when their initial document hydration strategy is deferred.
         const Component = await loadRouteComponent(matched.route);
+        if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
         const params = matched.params;
         const searchParams = searchParamsToObject(url.searchParams);
         const props = { params: params, searchParams: Promise.resolve(searchParams) };
@@ -2971,8 +3034,10 @@ ${generateUniversalRouterStateProperties()}
           route: matched.route.pattern,
           params,
         });
+        if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
 
         await this.runViewTransition(options.viewTransition, async () => {
+          if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
           const historyState = createHistoryState(
             url.pathname + url.search,
             options.state,
@@ -2994,12 +3059,27 @@ ${generateUniversalRouterStateProperties()}
             reactRoot.render(wrappedElement);
             currentPathname = pathname;
           }
+          this.currentPath = to;
         });
       } else {
-        const html = await this.fetchPage(url.pathname + url.search);
+        const html = await this.fetchPage(
+          url.pathname + url.search,
+          undefined,
+          navigation.controller.signal,
+        );
+        if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
         await farmClientRuntime.markNavigationLoaded(clientNavigation, html);
+        if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
         await this.runViewTransition(options.viewTransition, async () => {
-          if (!(await this.swapContent(html, url.pathname + url.search))) {
+          if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
+          const swapped = await this.swapContent(
+            html,
+            url.pathname + url.search,
+            navigation,
+            clientNavigation,
+          );
+          if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
+          if (!swapped) {
             throw new Error("Farm could not swap the target document");
           }
           const historyState = createHistoryState(
@@ -3013,9 +3093,11 @@ ${generateUniversalRouterStateProperties()}
             window.history.pushState(historyState, "", url);
           }
           currentPathname = pathname;
+          this.currentPath = to;
         });
       }
 
+      if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
       if (options.scroll !== false) {
         if (url.hash) document.querySelector(url.hash)?.scrollIntoView();
         else window.scrollTo(0, 0);
@@ -3023,26 +3105,28 @@ ${generateUniversalRouterStateProperties()}
         this.restoreScrollPosition(to);
       }
       await farmClientRuntime.resolveNavigation(clientNavigation);
+      if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
       void farmClientRuntime.scheduleNavigationRendered(clientNavigation);
-      this.currentPath = to;
-      this.finishNavigation();
+      this.finishNavigation(navigation);
     } catch (error) {
+      if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
       if (clientNavigation) {
         await farmClientRuntime.failNavigation(clientNavigation, error);
       }
-      this.finishNavigation();
+      this.finishNavigation(navigation);
       console.error("[Farm.js] Navigation error:", error);
       if (action === "pop") window.location.reload();
       else window.location.href = href;
     }
   },
   
-  fetchPage: async function(url, interceptFrom) {
+  fetchPage: async function(url, interceptFrom, signal) {
     const cacheKey = interceptFrom ? url + "\\nintercept:" + interceptFrom : url;
     const cached = this.prefetchCache.get(cacheKey);
     if (cached) return cached;
     
     const response = await fetch(url, {
+      signal,
       headers: {
         "Accept": "text/html",
         ...(interceptFrom ? { "X-Farm-Intercept-From": interceptFrom } : {}),
@@ -3054,12 +3138,14 @@ ${generateUniversalRouterStateProperties()}
     return html;
   },
   
-  swapContent: async function(html, targetPath) {
+  swapContent: async function(html, targetPath, navigation, clientNavigation) {
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, "text/html");
     if (isFarmLocaleDocumentChange(doc)) return false;
     if (doc.getElementById("nd-docs-layout")) return false;
     const nextRouteSlots = readRouteSlotPayload(doc);
+    const isNavigationCurrent = () =>
+      this.isCurrentNavigation(navigation, clientNavigation);
     
     // Update title
     const newTitle = doc.querySelector("title");
@@ -3082,7 +3168,10 @@ ${generateUniversalRouterStateProperties()}
     // Swap root content
     const newRoot = doc.getElementById("root");
     const currentRoot = document.getElementById("root");
-    if (!newRoot || !currentRoot) return this.swapDocument(doc);
+    if (!newRoot || !currentRoot) {
+      if (!isNavigationCurrent()) return false;
+      return this.swapDocument(doc);
+    }
     const targetUrl = new URL(targetPath || window.location.href, window.location.origin);
     const newPathname = targetUrl.pathname;
     const matched = matchRoute(newPathname);
@@ -3099,6 +3188,7 @@ ${generateUniversalRouterStateProperties()}
         searchParams,
         nextPage ? nextPage.innerHTML : "",
       );
+      if (!isNavigationCurrent()) return false;
       if (wrappedElement) {
         reactRoot.render(wrappedElement);
         window.__FARM_ROUTE_SLOTS__ = nextRouteSlots;
@@ -3128,6 +3218,7 @@ ${generateUniversalRouterStateProperties()}
         newPathname,
         searchParams,
       );
+      if (!isNavigationCurrent()) return false;
       if (wrappedElement) {
         reactRoot = hydrateRoot(pageContainer, wrappedElement);
         reactRootContainer = pageContainer;
@@ -3135,7 +3226,8 @@ ${generateUniversalRouterStateProperties()}
       }${
         isolatedHydrationEnabled
           ? ` else if (matched.route.hasIsolatedClientBoundaries) {
-        await hydrateFarmIsolatedClientBoundaries(currentRoot);
+        await hydrateFarmIsolatedClientBoundaries(currentRoot, navigation.controller.signal);
+        if (!isNavigationCurrent()) return false;
       }`
           : ""
       }
