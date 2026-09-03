@@ -7,11 +7,14 @@ import {
   createFarmDeploymentRequestHeaders,
   isFarmDeploymentMismatchResponse,
 } from "../deployment";
+import { getHashTargetElement } from "./hash-target";
 import type { FarmClientNavigationSession, FarmClientPluginManager } from "./plugin";
 import { _hydrateFarmI18n, isFarmLocaleChangeHref } from "../i18n/client-runtime";
 import type { FarmI18nClientSnapshot } from "../i18n/types";
 import type { FarmIslandStrategy } from "../island";
 import type { FarmRouteRenderPlan } from "../navigation/render-plan";
+
+export { getHashTargetElement } from "./hash-target";
 
 /**
  * Farm.js SPA Router
@@ -1042,29 +1045,4 @@ function createNavigationLocation(url: URL): FarmNavigationLocation {
 
 function getScrollElementStorageKey(path: string, key: string): string {
   return `farm-scroll-${path}:${key}`;
-}
-
-export function getHashTargetElement(hash: string): Element | null {
-  // The fragment is not a CSS selector: ids starting with a digit or
-  // containing selector characters (#2-installation, #a.b) throw in
-  // querySelector. Match by id (decoded first, then raw) and fall back to
-  // anchor name, mirroring native fragment navigation.
-  const fragment = hash.startsWith("#") ? hash.slice(1) : hash;
-  if (!fragment) {
-    return null;
-  }
-
-  let decoded = fragment;
-  try {
-    decoded = decodeURIComponent(fragment);
-  } catch {
-    // Keep the raw fragment when the percent-encoding is malformed.
-  }
-
-  return (
-    document.getElementById(decoded) ||
-    document.getElementById(fragment) ||
-    document.getElementsByName(decoded)[0] ||
-    null
-  );
 }
