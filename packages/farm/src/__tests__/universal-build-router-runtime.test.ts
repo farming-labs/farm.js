@@ -99,6 +99,86 @@ describe("generateUniversalRouterStateProperties", () => {
 
     expect([...router.prefetchCache.keys()]).toEqual(["/settings"]);
   });
+
+  it("restores a blocked pop without assuming indexed entries are contiguous", () => {
+    const history = {
+      state: null as Record<string, unknown> | null,
+      go: vi.fn(),
+      pushState: vi.fn((state: Record<string, unknown>) => {
+        history.state = state;
+      }),
+      replaceState: vi.fn((state: Record<string, unknown>) => {
+        history.state = state;
+      }),
+    };
+    const windowValue = {
+      history,
+      location: {
+        href: "https://example.test/",
+        origin: "https://example.test",
+        pathname: "/",
+        search: "",
+      },
+    };
+    const createRouter = new Function(
+      "window",
+      "document",
+      "IDLE_NAVIGATION_STATE",
+      "createNavigationLocation",
+      "createHistoryState",
+      "readHistoryIndex",
+      "FARM_PAGE_STATE_KEY",
+      "FARM_HISTORY_INDEX_KEY",
+      "URL",
+      "CustomEvent",
+      `return ({${runtime}});`,
+    );
+    const createHistoryState = (path: string, pageState: unknown, currentState?: unknown) => ({
+      ...(currentState && typeof currentState === "object" ? currentState : {}),
+      path,
+      __farmPageState: pageState,
+    });
+    const readHistoryIndex = (state: unknown) => {
+      if (!state || typeof state !== "object") return null;
+      const value = (state as Record<string, unknown>).__farmHistoryIndex;
+      return typeof value === "number" ? value : null;
+    };
+    const router = createRouter(
+      windowValue,
+      { documentElement: { dataset: {} } },
+      { state: "idle" },
+      (url: URL) => ({ href: url.href }),
+      createHistoryState,
+      readHistoryIndex,
+      "__farmPageState",
+      "__farmHistoryIndex",
+      URL,
+      Event,
+    );
+
+    router.initializeHistory();
+    router.writeHistoryEntry("push", "/edit", null, "https://example.test/edit");
+    router.revertBlockedPopState("/edit");
+
+    expect(history.go).not.toHaveBeenCalled();
+    expect(history.pushState).toHaveBeenLastCalledWith(
+      expect.objectContaining({ __farmHistoryIndex: 1, path: "/edit" }),
+      "",
+      "/edit",
+    );
+  });
+
+  it("accepts only safe integer history indexes", () => {
+    const getReader = new Function(
+      `${generateUniversalRouterStateRuntime()}; return readHistoryIndex;`,
+    ) as () => (state: unknown) => number | null;
+    const readHistoryIndex = getReader();
+
+    expect(readHistoryIndex({ __farmHistoryIndex: 2 })).toBe(2);
+    expect(readHistoryIndex({ __farmHistoryIndex: 1.5 })).toBeNull();
+    expect(readHistoryIndex({ __farmHistoryIndex: Number.POSITIVE_INFINITY })).toBeNull();
+    expect(readHistoryIndex({ __farmHistoryIndex: Number.MAX_SAFE_INTEGER + 1 })).toBeNull();
+  });
 });
 
 describe("generated deployment navigation guard", () => {
