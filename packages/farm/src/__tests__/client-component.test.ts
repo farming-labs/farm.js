@@ -789,6 +789,10 @@ export function Chart() {}
     expect(source).toContain("stripFarmBasePath(pathname)");
     expect(source).toContain("writePageState: function(action, state, href)");
     expect(source).toContain("runViewTransition: async function(enabled, callback)");
+    expect(source.match(/getHashTargetElement\(url\.hash\)\?\.scrollIntoView\(\)/g)).toHaveLength(
+      4,
+    );
+    expect(source).not.toContain("document.querySelector(url.hash)");
     expect(source).toContain('const href = element.getAttribute("href");');
     expect(
       source.match(

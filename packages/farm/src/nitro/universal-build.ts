@@ -2097,7 +2097,7 @@ async function hydrateFarmDocsAdapterRuntime() {
 // Farm.js Client Runtime (no client components)
 ${cssImport}
 ${layoutImports}
-import { createClientPluginManager, installChunkErrorRecovery, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
+import { createClientPluginManager, getHashTargetElement, installChunkErrorRecovery, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
 import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";
 ${clientPluginEntry.imports}
 ${i18nClientRuntime}
@@ -2140,7 +2140,7 @@ ${generateUniversalRouterStateProperties()}
         : options.state;
       this.writeHistoryEntry(action, to, pageState, url);
       if (options.scroll !== false) {
-        if (url.hash) document.querySelector(url.hash)?.scrollIntoView();
+        if (url.hash) getHashTargetElement(url.hash)?.scrollIntoView();
         else window.scrollTo(0, 0);
       }
       return;
@@ -2190,7 +2190,7 @@ ${generateUniversalRouterStateProperties()}
         this.writeHistoryEntry(action, url.pathname + url.search, options.state, url);
         this.currentPath = to;
         if (options.scroll !== false) {
-          if (url.hash) document.querySelector(url.hash)?.scrollIntoView();
+          if (url.hash) getHashTargetElement(url.hash)?.scrollIntoView();
           else window.scrollTo(0, 0);
         } else {
           this.restoreScrollPosition(to);
@@ -2515,7 +2515,7 @@ ${cssImport}
 ${layoutImports}
 ${rendererClientImports}
 ${providerClientCode.imports}
-import { createClientPluginManager, installChunkErrorRecovery, scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
+import { createClientPluginManager, getHashTargetElement, installChunkErrorRecovery, scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
 import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";
 import { matchFarmRoute } from "@farm.js/core/router";
 ${clientPluginEntry.imports}
@@ -3024,7 +3024,7 @@ ${generateUniversalRouterStateProperties()}
         : options.state;
       this.writeHistoryEntry(action, to, pageState, url);
       if (options.scroll !== false) {
-        if (url.hash) document.querySelector(url.hash)?.scrollIntoView();
+        if (url.hash) getHashTargetElement(url.hash)?.scrollIntoView();
         else window.scrollTo(0, 0);
       }
       return;
@@ -3181,7 +3181,7 @@ ${generateUniversalRouterStateProperties()}
 
       if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
       if (options.scroll !== false) {
-        if (url.hash) document.querySelector(url.hash)?.scrollIntoView();
+        if (url.hash) getHashTargetElement(url.hash)?.scrollIntoView();
         else window.scrollTo(0, 0);
       } else {
         this.restoreScrollPosition(to);
