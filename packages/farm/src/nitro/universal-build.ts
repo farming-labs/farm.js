@@ -1619,6 +1619,10 @@ function readHistoryIndex(state) {
   const value = state[FARM_HISTORY_INDEX_KEY];
   return Number.isSafeInteger(value) ? value : null;
 }
+
+function hasAbsoluteNavigationHref(href) {
+  return /^[a-zA-Z][a-zA-Z\\d+.-]*:/.test(href) || href.startsWith("//");
+}
 `.trim();
 }
 
@@ -2097,7 +2101,7 @@ async function hydrateFarmDocsAdapterRuntime() {
 // Farm.js Client Runtime (no client components)
 ${cssImport}
 ${layoutImports}
-import { createClientPluginManager, getHashTargetElement, installChunkErrorRecovery, reconcileFarmDocumentHead, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
+import { createClientPluginManager, getHashTargetElement, installChunkErrorRecovery, isFarmExternalNavigationURL, reconcileFarmDocumentHead, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
 import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";
 ${clientPluginEntry.imports}
 ${i18nClientRuntime}
@@ -2119,7 +2123,7 @@ ${generateUniversalRouterStateProperties()}
   
   navigate: async function(href, options = {}) {
     const url = new URL(href, window.location.origin);
-    if (url.origin !== window.location.origin) {
+    if (isFarmExternalNavigationURL(url, window.location.origin)) {
       this.cancelActiveNavigation();
       window.location.href = href;
       return;
@@ -2287,7 +2291,7 @@ ${generateUniversalRouterStateProperties()}
   },
   prefetch: function(href) {
     const url = new URL(href, window.location.origin);
-    if (url.origin !== window.location.origin) return;
+    if (isFarmExternalNavigationURL(url, window.location.origin)) return;
     
     const pathname = url.pathname + url.search;
     if (this.prefetchCache.has(pathname)) return;
@@ -2372,7 +2376,7 @@ document.addEventListener("click", function(e) {
   const href = anchor.getAttribute("href");
   if (!href) return;
   if (anchor.hasAttribute("download")) return;
-  if (href.startsWith("http://") || href.startsWith("https://") || href.startsWith("//")) return;
+  if (hasAbsoluteNavigationHref(href)) return;
   if (href.startsWith("#")) return;
   if (anchor.target && anchor.target !== "_self") return;
   if (document.documentElement.dataset.farmDocsRuntime === "true") return;
@@ -2499,7 +2503,7 @@ ${cssImport}
 ${layoutImports}
 ${rendererClientImports}
 ${providerClientCode.imports}
-import { createClientPluginManager, getHashTargetElement, installChunkErrorRecovery, reconcileFarmDocumentHead, scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
+import { createClientPluginManager, getHashTargetElement, installChunkErrorRecovery, isFarmExternalNavigationURL, reconcileFarmDocumentHead, scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
 import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";
 import { matchFarmRoute } from "@farm.js/core/router";
 ${clientPluginEntry.imports}
@@ -2988,7 +2992,7 @@ ${generateUniversalRouterStateProperties()}
   
   navigate: async function(href, options = {}) {
     const url = new URL(href, window.location.origin);
-    if (url.origin !== window.location.origin) {
+    if (isFarmExternalNavigationURL(url, window.location.origin)) {
       this.cancelActiveNavigation();
       window.location.href = href;
       return;
@@ -3335,7 +3339,7 @@ ${generateUniversalRouterStateProperties()}
   },
   prefetch: function(href) {
     const url = new URL(href, window.location.origin);
-    if (url.origin !== window.location.origin) return;
+    if (isFarmExternalNavigationURL(url, window.location.origin)) return;
     
     const pathname = url.pathname + url.search;
     const interceptFrom = this.currentPath;
@@ -3416,7 +3420,7 @@ document.addEventListener("click", function(e) {
   const href = anchor.getAttribute("href");
   if (!href) return;
   if (anchor.hasAttribute("download")) return;
-  if (href.startsWith("http://") || href.startsWith("https://") || href.startsWith("//")) return;
+  if (hasAbsoluteNavigationHref(href)) return;
   if (href.startsWith("#")) return;
   if (anchor.target && anchor.target !== "_self") return;
   if (document.documentElement.dataset.farmDocsRuntime === "true") return;

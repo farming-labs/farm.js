@@ -10,6 +10,7 @@ import {
   generateRuntimePathMatcherSource,
   generateUniversalRouterStateRuntime,
   generateUniversalRouterStateProperties,
+  generateUniversalRouterStateRuntime,
 } from "../nitro/universal-build";
 
 afterEach(() => {
@@ -295,6 +296,20 @@ describe("generated deployment navigation guard", () => {
     );
 
     expect(router.prefetchCache.size).toBe(0);
+  });
+});
+
+describe("generateUniversalRouterStateRuntime", () => {
+  it("recognizes digit-bearing schemes in the generated click runtime", () => {
+    const getGuard = new Function(
+      `${generateUniversalRouterStateRuntime()}; return hasAbsoluteNavigationHref;`,
+    ) as () => (href: string) => boolean;
+    const hasAbsoluteNavigationHref = getGuard();
+
+    expect(hasAbsoluteNavigationHref("custom2app:open")).toBe(true);
+    expect(hasAbsoluteNavigationHref("custom-app:open")).toBe(true);
+    expect(hasAbsoluteNavigationHref("//cdn.example.test/file")).toBe(true);
+    expect(hasAbsoluteNavigationHref("/reports")).toBe(false);
   });
 });
 

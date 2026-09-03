@@ -8,6 +8,7 @@ import {
   isFarmDeploymentMismatchResponse,
 } from "../deployment";
 import { getHashTargetElement } from "./hash-target";
+import { isFarmExternalNavigationURL } from "./navigation-url";
 import type { FarmClientNavigationSession, FarmClientPluginManager } from "./plugin";
 import { _hydrateFarmI18n, isFarmLocaleChangeHref } from "../i18n/client-runtime";
 import type { FarmI18nClientSnapshot } from "../i18n/types";
@@ -15,6 +16,7 @@ import type { FarmIslandStrategy } from "../island";
 import type { FarmRouteRenderPlan } from "../navigation/render-plan";
 
 export { getHashTargetElement } from "./hash-target";
+export { isFarmExternalNavigationURL } from "./navigation-url";
 
 /**
  * Farm.js SPA Router
@@ -932,10 +934,6 @@ export class SPARouter {
   clearCache(): void {
     this.cache.clear();
   }
-}
-
-export function isFarmExternalNavigationURL(url: URL, currentOrigin: string): boolean {
-  return url.origin !== currentOrigin;
 }
 
 function readBrowserDeploymentId(): string | undefined {

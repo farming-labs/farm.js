@@ -117,7 +117,7 @@ Changing only the fragment preserves SPA state, honors push versus replace histo
 request route data again.
 Native anchor behavior still takes precedence: for example, a `Link` with a `download` attribute is
 handled by the browser instead of Farm's SPA router. Absolute URI schemes such as `mailto:`, `tel:`,
-and `sms:` are also passed through unchanged and are never prefetched as app routes. Literal custom
+`sms:`, and same-origin `blob:` URLs are passed through unchanged and are never prefetched as app routes. Literal custom
 schemes such as `customapp:open` are validated from their URI grammar and work without registration.
 Internal `Link` hrefs stay app-relative: when `basePath: "/console"` is configured, `href="/about"`
 renders and navigates to `/console/about`. Do not add the base path to route hrefs yourself.
