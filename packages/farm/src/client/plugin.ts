@@ -345,6 +345,13 @@ export class FarmClientPluginManager {
     );
   }
 
+  cancelNavigation(session?: FarmClientNavigationSession, reason: unknown = "canceled"): void {
+    const current = this.currentNavigation;
+    if (!current || (session && current.session !== session)) return;
+    current.controller.abort(reason);
+    this.currentNavigation = undefined;
+  }
+
   async resolveNavigation(session: FarmClientNavigationSession): Promise<void> {
     if (session.signal.aborted) return;
     await this.runHook("navigation.resolved", (instance) =>

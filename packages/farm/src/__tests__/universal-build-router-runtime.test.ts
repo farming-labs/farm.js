@@ -23,6 +23,43 @@ describe("generateUniversalRouterStateProperties", () => {
     expect(runtime).toContain("replaceState: function(state, href)");
     expect(runtime).toContain("writePageState: function(action, state, href)");
   });
+
+  it("aborts superseded navigations without letting them reset current state", () => {
+    const createRouter = new Function(
+      "window",
+      "IDLE_NAVIGATION_STATE",
+      "createNavigationLocation",
+      `return ({${runtime}});`,
+    ) as (
+      windowValue: { location: { pathname: string; search: string } },
+      idleState: object,
+      createLocation: (url: URL) => object,
+    ) => {
+      activeNavigation: { id: number; controller: AbortController } | null;
+      finishNavigation(navigation: { id: number; controller: AbortController }): void;
+      getNavigationState(): { state: string };
+      startNavigation(
+        from: string,
+        to: URL,
+        action: string,
+      ): { id: number; controller: AbortController };
+    };
+    const router = createRouter(
+      { location: { pathname: "/start", search: "" } },
+      { state: "idle", pending: false },
+      (url) => ({ href: url.href }),
+    );
+
+    const first = router.startNavigation("/start", new URL("https://example.test/slow"), "push");
+    const second = router.startNavigation("/start", new URL("https://example.test/fast"), "push");
+
+    expect(first.controller.signal.aborted).toBe(true);
+    expect(router.activeNavigation?.id).toBe(second.id);
+    router.finishNavigation(first);
+    expect(router.getNavigationState().state).toBe("loading");
+    router.finishNavigation(second);
+    expect(router.getNavigationState().state).toBe("idle");
+  });
 });
 
 describe("generateRuntimePathMatcherSource", () => {
