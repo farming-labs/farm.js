@@ -757,6 +757,11 @@ export function Chart() {}
     expect(source).toContain("writePageState: function(action, state, href)");
     expect(source).toContain("runViewTransition: async function(enabled, callback)");
     expect(source).toContain('const href = element.getAttribute("href");');
+    expect(
+      source.match(
+        /const href = anchor\.getAttribute\("href"\);\s+if \(!href\) return;\s+if \(anchor\.hasAttribute\("download"\)\) return;/g,
+      ),
+    ).toHaveLength(2);
     expect(source).toContain("this.observers.set(element, observer);");
     expect(source).toContain("createHistoryState(");
     expect(source).toContain("currentPath: window.location.pathname + window.location.search");

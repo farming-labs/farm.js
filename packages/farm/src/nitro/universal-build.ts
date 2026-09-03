@@ -2290,6 +2290,7 @@ document.addEventListener("click", function(e) {
   
   const href = anchor.getAttribute("href");
   if (!href) return;
+  if (anchor.hasAttribute("download")) return;
   if (href.startsWith("http://") || href.startsWith("https://") || href.startsWith("//")) return;
   if (href.startsWith("#")) return;
   if (anchor.target && anchor.target !== "_self") return;
@@ -3349,6 +3350,7 @@ document.addEventListener("click", function(e) {
   
   const href = anchor.getAttribute("href");
   if (!href) return;
+  if (anchor.hasAttribute("download")) return;
   if (href.startsWith("http://") || href.startsWith("https://") || href.startsWith("//")) return;
   if (href.startsWith("#")) return;
   if (anchor.target && anchor.target !== "_self") return;
