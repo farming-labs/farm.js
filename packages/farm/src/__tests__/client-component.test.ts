@@ -757,7 +757,23 @@ export function Chart() {}
     );
     expect(source).toContain('if (error?.name === "FarmDeploymentMismatchError") return;');
     expect(source).toContain("this.fetchPage(pathname, false, false)");
-    expect(source).toContain("this.fetchPage(pathname, interceptFrom, false)");
+    expect(source).toContain("this.fetchPage(pathname, interceptFrom, false, false)");
+  });
+
+  it("refreshes hydratable production routes from uncached server HTML", () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), "src", "nitro", "universal-build.ts"),
+      "utf-8",
+    );
+
+    expect(source.match(/refresh: function\(options = \{\}\)/g)).toHaveLength(2);
+    expect(source).toContain(
+      'if (!options.refresh && matched?.route.navigation === "client-render")',
+    );
+    expect(source).toContain("options.refresh ? null : matchInterceptedRouteSlot(pathname, from)");
+    expect(source).toContain("fetchPage: async function(url, interceptFrom, fresh = false");
+    expect(source).toContain("if (fresh) this.clearPrefetchedPath(url)");
+    expect(source).toContain("options.refresh === true,");
   });
 
   it("keeps the generated production router compatible with client navigation hooks", () => {
@@ -782,7 +798,9 @@ export function Chart() {}
     expect(source).toContain("this.observers.set(element, observer);");
     expect(source).toContain("createHistoryState(");
     expect(source).toContain("currentPath: window.location.pathname + window.location.search");
-    expect(source).toContain('if (action !== "pop" && to === this.currentPath)');
+    expect(source).toContain(
+      'if (!options.refresh && action !== "pop" && to === this.currentPath)',
+    );
     expect(source).toContain("this.currentPath = to;");
     expect(source).toContain("scheduleFarmIslandHydration");
     expect(source).toContain("pendingPageHydrationController?.abort()");
