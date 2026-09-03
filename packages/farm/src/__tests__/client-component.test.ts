@@ -797,6 +797,10 @@ export function Chart() {}
     ).toHaveLength(2);
     expect(source).toContain("this.observers.set(element, observer);");
     expect(source).toContain("createHistoryState(");
+    expect(source).toContain("revertBlockedPopState: function(from)");
+    expect(source).toContain('if (action === "pop") this.revertBlockedPopState(from)');
+    expect(source.match(/spaRouter\.initializeHistory\(\);/g)).toHaveLength(2);
+    expect(source.match(/void spaRouter\.handlePopState\(event\);/g)).toHaveLength(2);
     expect(source).toContain("currentPath: window.location.pathname + window.location.search");
     expect(source).toContain(
       'if (!options.refresh && action !== "pop" && to === this.currentPath)',

@@ -1561,6 +1561,7 @@ async function buildClient(
 export function generateUniversalRouterStateRuntime(): string {
   return `
 const FARM_PAGE_STATE_KEY = "__farmPageState";
+const FARM_HISTORY_INDEX_KEY = "__farmHistoryIndex";
 const IDLE_NAVIGATION_STATE = {
   state: "idle",
   pending: false,
@@ -1611,6 +1612,12 @@ function clearFarmPrefetchCacheOnDeploymentMismatch(router, error) {
   if (error?.name === "FarmDeploymentMismatchError") {
     router.prefetchCache.clear();
   }
+}
+
+function readHistoryIndex(state) {
+  if (!state || typeof state !== "object") return null;
+  const value = state[FARM_HISTORY_INDEX_KEY];
+  return Number.isSafeInteger(value) ? value : null;
 }
 `.trim();
 }
@@ -1704,6 +1711,31 @@ export function generateUniversalRouterStateProperties(): string {
   observers: new Map(),
   scrollElements: new Map(),
   currentPath: window.location.pathname + window.location.search,
+  currentHistoryIndex: null,
+  currentHistoryState: null,
+
+  initializeHistory: function() {
+    const existingIndex = readHistoryIndex(window.history.state);
+    if (existingIndex != null) {
+      this.currentHistoryIndex = existingIndex;
+      this.currentHistoryState = window.history.state;
+      return;
+    }
+    try {
+      const initialState = {
+        ...(window.history.state && typeof window.history.state === "object"
+          ? window.history.state
+          : {}),
+        [FARM_HISTORY_INDEX_KEY]: 0,
+      };
+      window.history.replaceState(initialState, "", window.location.href);
+      this.currentHistoryIndex = 0;
+      this.currentHistoryState = initialState;
+    } catch {
+      this.currentHistoryIndex = null;
+      this.currentHistoryState = null;
+    }
+  },
 
   getNavigationState: function() {
     return this.navigationState;
@@ -1725,6 +1757,30 @@ export function generateUniversalRouterStateProperties(): string {
       if (await blocker(context)) return true;
     }
     return false;
+  },
+
+  handlePopState: function(event) {
+    if (document.documentElement.dataset.farmDocsRuntime === "true") return;
+    return this.navigate(window.location.href, {
+      action: "pop",
+      scroll: false,
+      popState: event.state,
+    });
+  },
+
+  revertBlockedPopState: function(from) {
+    try {
+      const previousState = this.currentHistoryState;
+      const pageState = previousState && typeof previousState === "object"
+        ? previousState[FARM_PAGE_STATE_KEY]
+        : undefined;
+      const restoredState = createHistoryState(from, pageState, previousState);
+      if (this.currentHistoryIndex != null) {
+        restoredState[FARM_HISTORY_INDEX_KEY] = this.currentHistoryIndex;
+      }
+      window.history.pushState(restoredState, "", from);
+      this.currentHistoryState = restoredState;
+    } catch {}
   },
 
   startNavigation: function(from, to, action) {
@@ -1793,16 +1849,7 @@ export function generateUniversalRouterStateProperties(): string {
 
   writePageState: function(action, state, href) {
     const url = new URL(href || window.location.href, window.location.origin);
-    const nextState = createHistoryState(
-      url.pathname + url.search,
-      state,
-      window.history.state,
-    );
-    if (action === "replace") {
-      window.history.replaceState(nextState, "", url);
-    } else {
-      window.history.pushState(nextState, "", url);
-    }
+    this.writeHistoryEntry(action, url.pathname + url.search, state, url);
     // Announce on the dedicated history channel; a synthetic popstate would
     // be treated as back/forward by the popstate listener below and trigger
     // a full navigation for a shallow page-state write. The bundled client
@@ -1810,6 +1857,21 @@ export function generateUniversalRouterStateProperties(): string {
     window.dispatchEvent(
       new CustomEvent("farm:historychange", { detail: { kind: "page-state" } }),
     );
+  },
+
+  writeHistoryEntry: function(action, path, pageState, url) {
+    if (action === "pop") return;
+    const nextState = createHistoryState(path, pageState, window.history.state);
+    const nextIndex = this.currentHistoryIndex == null
+      ? null
+      : action === "replace"
+        ? this.currentHistoryIndex
+        : this.currentHistoryIndex + 1;
+    if (nextIndex != null) nextState[FARM_HISTORY_INDEX_KEY] = nextIndex;
+    if (action === "replace") window.history.replaceState(nextState, "", url);
+    else window.history.pushState(nextState, "", url);
+    this.currentHistoryIndex = nextIndex;
+    this.currentHistoryState = nextState;
   },
 
   registerScrollElement: function(key, element) {
@@ -2076,9 +2138,7 @@ ${generateUniversalRouterStateProperties()}
       const pageState = options.state === undefined
         ? window.history.state?.[FARM_PAGE_STATE_KEY]
         : options.state;
-      const historyState = createHistoryState(to, pageState, window.history.state);
-      if (action === "replace") window.history.replaceState(historyState, "", url);
-      else window.history.pushState(historyState, "", url);
+      this.writeHistoryEntry(action, to, pageState, url);
       if (options.scroll !== false) {
         if (url.hash) document.querySelector(url.hash)?.scrollIntoView();
         else window.scrollTo(0, 0);
@@ -2087,11 +2147,20 @@ ${generateUniversalRouterStateProperties()}
     }
     if (action === "pop" && to === this.currentPath) {
       this.cancelActiveNavigation();
+      this.currentHistoryIndex = readHistoryIndex(options.popState);
+      this.currentHistoryState = options.popState;
       return;
     }
 
     const from = this.currentPath;
-    if (await this.shouldBlockNavigation({ from, to, action })) return;
+    if (await this.shouldBlockNavigation({ from, to, action })) {
+      if (action === "pop") this.revertBlockedPopState(from);
+      return;
+    }
+    if (action === "pop") {
+      this.currentHistoryIndex = readHistoryIndex(options.popState);
+      this.currentHistoryState = options.popState;
+    }
 
     this.saveScrollPosition(window.location.pathname + window.location.search);
     const navigation = this.startNavigation(from, url, action);
@@ -2118,16 +2187,7 @@ ${generateUniversalRouterStateProperties()}
         if (!this.swapContent(html)) {
           throw new Error("Farm could not swap the target document");
         }
-        const historyState = createHistoryState(
-          url.pathname + url.search,
-          options.state,
-          window.history.state,
-        );
-        if (action === "replace") {
-          window.history.replaceState(historyState, "", url);
-        } else if (action !== "pop") {
-          window.history.pushState(historyState, "", url);
-        }
+        this.writeHistoryEntry(action, url.pathname + url.search, options.state, url);
         this.currentPath = to;
         if (options.scroll !== false) {
           if (url.hash) document.querySelector(url.hash)?.scrollIntoView();
@@ -2301,6 +2361,7 @@ window.__FARM_CLIENT_RUNTIME__ = farmClientRuntime;
 void farmClientRuntime.start();
 
 // Expose router globally
+spaRouter.initializeHistory();
 window.__FARM_SPA_ROUTER__ = spaRouter;
 
 void hydrateFarmDocsAdapterRuntime();
@@ -2314,9 +2375,8 @@ window.addEventListener("beforeunload", function(event) {
 });
 
 // Handle popstate (back/forward)
-window.addEventListener("popstate", function() {
-  if (document.documentElement.dataset.farmDocsRuntime === "true") return;
-  void spaRouter.navigate(window.location.href, { action: "pop", scroll: false });
+window.addEventListener("popstate", function(event) {
+  void spaRouter.handlePopState(event);
 });
 
 // Intercept link clicks
@@ -2962,9 +3022,7 @@ ${generateUniversalRouterStateProperties()}
       const pageState = options.state === undefined
         ? window.history.state?.[FARM_PAGE_STATE_KEY]
         : options.state;
-      const historyState = createHistoryState(to, pageState, window.history.state);
-      if (action === "replace") window.history.replaceState(historyState, "", url);
-      else window.history.pushState(historyState, "", url);
+      this.writeHistoryEntry(action, to, pageState, url);
       if (options.scroll !== false) {
         if (url.hash) document.querySelector(url.hash)?.scrollIntoView();
         else window.scrollTo(0, 0);
@@ -2973,13 +3031,22 @@ ${generateUniversalRouterStateProperties()}
     }
     if (action === "pop" && to === this.currentPath) {
       this.cancelActiveNavigation();
+      this.currentHistoryIndex = readHistoryIndex(options.popState);
+      this.currentHistoryState = options.popState;
       return;
     }
     
     const pathname = url.pathname;
     const matched = matchRoute(pathname);
     const from = this.currentPath;
-    if (await this.shouldBlockNavigation({ from, to, action })) return;
+    if (await this.shouldBlockNavigation({ from, to, action })) {
+      if (action === "pop") this.revertBlockedPopState(from);
+      return;
+    }
+    if (action === "pop") {
+      this.currentHistoryIndex = readHistoryIndex(options.popState);
+      this.currentHistoryState = options.popState;
+    }
 
     // A route transition invalidates any trigger waiting on the previous DOM boundary.
     cancelPendingPageHydration();
@@ -3034,16 +3101,7 @@ ${generateUniversalRouterStateProperties()}
           });
           if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
           if (renderRouteInterception(selectedSlot, intercepted.slot, from)) {
-            const historyState = createHistoryState(
-              to,
-              options.state,
-              window.history.state,
-            );
-            if (action === "replace") {
-              window.history.replaceState(historyState, "", url);
-            } else if (action !== "pop") {
-              window.history.pushState(historyState, "", url);
-            }
+            this.writeHistoryEntry(action, to, options.state, url);
             this.currentPath = to;
             await farmClientRuntime.resolveNavigation(clientNavigation);
             if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
@@ -3078,16 +3136,7 @@ ${generateUniversalRouterStateProperties()}
 
         await this.runViewTransition(options.viewTransition, async () => {
           if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
-          const historyState = createHistoryState(
-            url.pathname + url.search,
-            options.state,
-            window.history.state,
-          );
-          if (action === "replace") {
-            window.history.replaceState(historyState, "", url);
-          } else if (action !== "pop") {
-            window.history.pushState(historyState, "", url);
-          }
+          this.writeHistoryEntry(action, url.pathname + url.search, options.state, url);
 
           const container = document.getElementById("root");
           if (container) {
@@ -3124,16 +3173,7 @@ ${generateUniversalRouterStateProperties()}
           if (!swapped) {
             throw new Error("Farm could not swap the target document");
           }
-          const historyState = createHistoryState(
-            url.pathname + url.search,
-            options.state,
-            window.history.state,
-          );
-          if (action === "replace") {
-            window.history.replaceState(historyState, "", url);
-          } else if (action !== "pop") {
-            window.history.pushState(historyState, "", url);
-          }
+          this.writeHistoryEntry(action, url.pathname + url.search, options.state, url);
           currentPathname = pathname;
           this.currentPath = to;
         });
@@ -3382,6 +3422,7 @@ window.__FARM_CLIENT_RUNTIME__ = farmClientRuntime;
 void farmClientRuntime.start();
 
 // Expose router globally
+spaRouter.initializeHistory();
 window.__FARM_SPA_ROUTER__ = spaRouter;
 
 window.addEventListener("beforeunload", function(event) {
@@ -3393,9 +3434,8 @@ window.addEventListener("beforeunload", function(event) {
 });
 
 // Handle popstate (back/forward)
-window.addEventListener("popstate", function() {
-  if (document.documentElement.dataset.farmDocsRuntime === "true") return;
-  void spaRouter.navigate(window.location.href, { action: "pop", scroll: false });
+window.addEventListener("popstate", function(event) {
+  void spaRouter.handlePopState(event);
 });
 
 // Intercept link clicks
