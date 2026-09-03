@@ -797,6 +797,10 @@ export function Chart() {}
       4,
     );
     expect(source).not.toContain("document.querySelector(url.hash)");
+    expect(
+      source.match(/isFarmExternalNavigationURL\(url, window\.location\.origin\)/g),
+    ).toHaveLength(4);
+    expect(source.match(/if \(hasAbsoluteNavigationHref\(href\)\) return;/g)).toHaveLength(2);
     expect(source).toContain('const href = element.getAttribute("href");');
     expect(
       source.match(

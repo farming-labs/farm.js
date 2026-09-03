@@ -21,6 +21,12 @@ describe("external SPA router URLs", () => {
     ).toBe(true);
     expect(
       isFarmExternalNavigationURL(
+        new URL(`blob:${window.location.origin}/download-id`),
+        window.location.origin,
+      ),
+    ).toBe(true);
+    expect(
+      isFarmExternalNavigationURL(
         new URL("/reports", window.location.origin),
         window.location.origin,
       ),
@@ -31,6 +37,15 @@ describe("external SPA router URLs", () => {
     const router = new SPARouter({ scrollRestoration: false });
 
     await router.prefetch("https://example.com/reports");
+
+    expect(fetch).not.toHaveBeenCalled();
+    router.destroy();
+  });
+
+  it("does not prefetch same-origin blob URLs as routes", async () => {
+    const router = new SPARouter({ scrollRestoration: false });
+
+    await router.prefetch(`blob:${window.location.origin}/download-id`);
 
     expect(fetch).not.toHaveBeenCalled();
     router.destroy();
