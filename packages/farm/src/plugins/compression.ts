@@ -55,8 +55,8 @@ function isCompressionEligible(request: Request, response: Response): boolean {
     return false;
   }
 
-  const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
-  return contentType !== "text/event-stream";
+  const mediaType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+  return mediaType !== "text/event-stream";
 }
 
 function appendVary(headers: Headers, value: string): void {

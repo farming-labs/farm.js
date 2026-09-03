@@ -121,7 +121,7 @@ and `sms:` are also passed through unchanged and are never prefetched as app rou
 schemes such as `customapp:open` are validated from their URI grammar and work without registration.
 Internal `Link` hrefs stay app-relative: when `basePath: "/console"` is configured, `href="/about"`
 renders and navigates to `/console/about`. Do not add the base path to route hrefs yourself.
-For a reusable custom-scheme type, use `ExternalHref<\`customapp:${string}\>` (or declaration-merge
+For a reusable custom-scheme type, use ``ExternalHref<`customapp:${string}`>`` (or declaration-merge
 `LinkExternalUriSchemes` when the scheme should belong to the default `ExternalHref` union).
 
 **Client navigation**

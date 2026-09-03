@@ -118,10 +118,19 @@ describe("compression plugin", () => {
           headers: { "content-type": "text/event-stream" },
         }),
     );
+    const parameterizedEventStream = await manager.runRuntimeRequest(
+      new Request("https://farm.test/events", { headers: { "accept-encoding": "gzip" } }),
+      () =>
+        new Response("data: still-ready\n\n", {
+          headers: { "content-type": "text/event-stream; charset=utf-8" },
+        }),
+    );
 
     expect(encoded.headers.get("content-encoding")).toBe("custom");
     expect(await encoded.text()).toBe("already encoded");
     expect(eventStream.headers.get("content-encoding")).toBeNull();
     expect(await eventStream.text()).toBe("data: ready\n\n");
+    expect(parameterizedEventStream.headers.get("content-encoding")).toBeNull();
+    expect(await parameterizedEventStream.text()).toBe("data: still-ready\n\n");
   });
 });
