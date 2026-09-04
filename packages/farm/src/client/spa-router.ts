@@ -543,19 +543,7 @@ export class SPARouter {
       new URL(historyPath, window.location.origin).pathname +
       new URL(historyPath, window.location.origin).search;
 
-    if (options.pageData.metadata?.title) {
-      document.title = options.pageData.metadata.title;
-    }
-
-    if (options.pageData.metadata?.description) {
-      let metaDesc = document.querySelector('meta[name="description"]');
-      if (!metaDesc) {
-        metaDesc = document.createElement("meta");
-        metaDesc.setAttribute("name", "description");
-        document.head.appendChild(metaDesc);
-      }
-      metaDesc.setAttribute("content", options.pageData.metadata.description);
-    }
+    this.updateDocumentMetadata(options.pageData.metadata);
 
     _hydrateFarmI18n(options.pageData.i18n);
 
@@ -752,10 +740,7 @@ export class SPARouter {
       }
       if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
 
-      // Update document title
-      if (pageData.metadata?.title) {
-        document.title = pageData.metadata.title;
-      }
+      this.updateDocumentMetadata(pageData.metadata);
 
       _hydrateFarmI18n(pageData.i18n);
 
@@ -829,6 +814,23 @@ export class SPARouter {
       }
     }
     return false;
+  }
+
+  private updateDocumentMetadata(metadata: PageData["metadata"]): void {
+    document.title = metadata?.title || "Farm.js App";
+
+    let description = document.querySelector('meta[name="description"]');
+    if (!metadata?.description) {
+      description?.remove();
+      return;
+    }
+
+    if (!description) {
+      description = document.createElement("meta");
+      description.setAttribute("name", "description");
+      document.head.appendChild(description);
+    }
+    description.setAttribute("content", metadata.description);
   }
 
   private startNavigation(options: {
