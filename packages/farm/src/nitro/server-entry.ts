@@ -141,6 +141,10 @@ async function defaultHandler({
       // Parse the target path
       const targetUrl = new URL(targetPath, url.origin);
       const targetPathname = targetUrl.pathname;
+      const targetRequest = new Request(targetUrl, {
+        method: "GET",
+        headers: request.headers,
+      });
 
       // Find the route
       const match = rm.matchRoute(targetPathname);
@@ -224,7 +228,7 @@ async function defaultHandler({
       const searchParams = searchParamsToObject(targetUrl.searchParams);
       const routeContext = sr
         ? await sr.resolveRouteContext({
-            request,
+            request: targetRequest,
             params,
             search: searchParams,
             path: targetUrl.pathname,
