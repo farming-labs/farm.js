@@ -255,6 +255,7 @@ function createRequestFromNodeRequest(
     headers: Record<string, string | string[] | undefined>;
   },
   url: URL,
+  signal?: AbortSignal,
 ): Request {
   const headers = new Headers();
   for (const [key, value] of Object.entries(req.headers)) {
@@ -268,7 +269,42 @@ function createRequestFromNodeRequest(
   return new Request(url.toString(), {
     method: req.method || "GET",
     headers,
+    signal,
   });
+}
+
+interface FarmNodeAbortRequest {
+  once(event: "aborted", listener: () => void): unknown;
+  off(event: "aborted", listener: () => void): unknown;
+}
+
+interface FarmNodeAbortResponse {
+  writableEnded: boolean;
+  once(event: "close" | "finish", listener: () => void): unknown;
+  off(event: "close" | "finish", listener: () => void): unknown;
+}
+
+/** Exported for tests: forwards a disconnected dev client to Web Request consumers. */
+export function createFarmNodeRequestAbortSignal(
+  req: FarmNodeAbortRequest,
+  res: FarmNodeAbortResponse,
+): AbortSignal {
+  const controller = new AbortController();
+  const dispose = () => {
+    req.off("aborted", abort);
+    res.off("close", abortOnEarlyClose);
+    res.off("finish", dispose);
+  };
+  const abort = () => controller.abort();
+  const abortOnEarlyClose = () => {
+    if (!res.writableEnded) abort();
+  };
+
+  req.once("aborted", abort);
+  res.once("close", abortOnEarlyClose);
+  res.once("finish", dispose);
+  controller.signal.addEventListener("abort", dispose, { once: true });
+  return controller.signal;
 }
 
 /** Exported for tests: the request boundary all Farm dev middlewares share. */
@@ -1901,7 +1937,11 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             const targetPath = urlObj.searchParams.get("path") || "/";
 
             try {
-              const request = createRequestFromNodeRequest(req, urlObj);
+              const request = createRequestFromNodeRequest(
+                req,
+                urlObj,
+                createFarmNodeRequestAbortSignal(req, res),
+              );
               const deploymentMismatch = getFarmDeploymentMismatch(
                 request,
                 farmConfig.deploymentId,
