@@ -543,18 +543,18 @@ export class SPARouter {
       new URL(historyPath, window.location.origin).pathname +
       new URL(historyPath, window.location.origin).search;
 
-    if (options.pageData.metadata?.title) {
-      document.title = options.pageData.metadata.title;
-    }
+    document.title = options.pageData.metadata?.title || "Farm.js App";
 
+    let metaDesc = document.querySelector('meta[name="description"]');
     if (options.pageData.metadata?.description) {
-      let metaDesc = document.querySelector('meta[name="description"]');
       if (!metaDesc) {
         metaDesc = document.createElement("meta");
         metaDesc.setAttribute("name", "description");
         document.head.appendChild(metaDesc);
       }
       metaDesc.setAttribute("content", options.pageData.metadata.description);
+    } else {
+      metaDesc?.remove();
     }
 
     _hydrateFarmI18n(options.pageData.i18n);
