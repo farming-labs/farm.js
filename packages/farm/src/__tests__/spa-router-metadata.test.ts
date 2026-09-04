@@ -38,4 +38,28 @@ describe("SPA router metadata", () => {
     expect(document.querySelector('meta[name="description"]')).toBeNull();
     router.destroy();
   });
+
+  it("removes absent metadata during back and forward navigation", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          props: {},
+          modulePath: "/src/app/previous/page.tsx",
+          metadata: {},
+        }),
+      ),
+    );
+    const router = new SPARouter({ scrollRestoration: false });
+    router.setNavigationHandler(async () => undefined);
+    window.history.replaceState({ path: "/previous" }, "", "/previous");
+
+    await (
+      router as unknown as { handlePopState(event: PopStateEvent): Promise<void> }
+    ).handlePopState(new PopStateEvent("popstate", { state: window.history.state }));
+
+    expect(document.title).toBe("Farm.js App");
+    expect(document.querySelector('meta[name="description"]')).toBeNull();
+    router.destroy();
+  });
 });
