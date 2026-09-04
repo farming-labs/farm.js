@@ -64,4 +64,43 @@ describe("Farm client data cache", () => {
 
     expect(cache.get("query-call")).toBe(cache.get(key));
   });
+
+  it("preserves an invalidation when a provisional key becomes canonical", () => {
+    const cache = new FarmClientDataCache();
+
+    cache.invalidate("query-call", 10);
+    cache.alias("query-call", "product:123");
+    cache.set("product:123", {
+      data: { id: "stale" },
+      updatedAt: 1,
+      staleAt: Number.POSITIVE_INFINITY,
+    });
+
+    expect(cache.isStale("product:123", 11)).toBe(true);
+    expect(cache.get("query-call")?.invalidatedAt).toBe(10);
+
+    cache.set("product:123", {
+      data: { id: "fresh" },
+      updatedAt: 11,
+      staleAt: Number.POSITIVE_INFINITY,
+    });
+    expect(cache.isStale("query-call", 12)).toBe(false);
+    cache.dispose();
+  });
+
+  it("applies a provisional invalidation to an existing canonical entry", () => {
+    const cache = new FarmClientDataCache();
+    cache.set("product:123", {
+      data: { id: "existing" },
+      updatedAt: 1,
+      staleAt: Number.POSITIVE_INFINITY,
+    });
+
+    cache.invalidate("query-call", 10);
+    cache.alias("query-call", "product:123");
+
+    expect(cache.isStale("product:123", 11)).toBe(true);
+    expect(cache.get("product:123")?.invalidatedAt).toBe(10);
+    cache.dispose();
+  });
 });

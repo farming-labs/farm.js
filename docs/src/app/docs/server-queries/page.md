@@ -144,6 +144,8 @@ export const updateProduct = createServerFn({
 ```
 
 During a browser server-action call, Farm carries structured invalidations back with the action response. Mounted stale queries refetch automatically, and concurrent consumers still produce one request.
+If invalidation arrives while a query is still resolving its canonical server key, the invalidation
+follows that key and the older response cannot make the entry fresh again.
 
 ## Share keys with routes and APIs
 
