@@ -94,12 +94,38 @@ export function normalizeFarmAPIConfig(
 }
 
 export function normalizeFarmAPIBasePath(value: string): string {
+  const hasUnstableCharacters = (candidate: string) =>
+    candidate.includes("\\") ||
+    Array.from(candidate).some((character) => {
+      const code = character.charCodeAt(0);
+      return code <= 31 || (code >= 127 && code <= 159);
+    });
+
+  if (hasUnstableCharacters(value)) {
+    throw new Error("Farm api.basePath cannot contain backslashes or control characters.");
+  }
+
   const path = value.trim();
   if (!path) {
     throw new Error("Farm api.basePath cannot be empty.");
   }
   if (path.includes("?") || path.includes("#")) {
     throw new Error("Farm api.basePath cannot contain a query string or hash.");
+  }
+  for (const segment of path.split("/")) {
+    let decoded = segment;
+    try {
+      decoded = decodeURIComponent(segment);
+    } catch {
+      // A malformed escape remains literal in a URL pathname. It cannot be a
+      // dot segment, so leave the ordinary URL parser to preserve it.
+    }
+    if (hasUnstableCharacters(decoded)) {
+      throw new Error("Farm api.basePath cannot contain backslashes or control characters.");
+    }
+    if (decoded === "." || decoded === "..") {
+      throw new Error('Farm api.basePath cannot contain "." or ".." path segments.');
+    }
   }
 
   const normalized = `/${path.replace(/^\/+|\/+$/g, "")}`;

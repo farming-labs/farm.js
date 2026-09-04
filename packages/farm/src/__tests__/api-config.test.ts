@@ -80,6 +80,24 @@ describe("Farm API config", () => {
     expect(() => normalizeFarmAPIConfig({ basePath: "/api?version=1" })).toThrow(
       "cannot contain a query string or hash",
     );
+    expect(() => normalizeFarmAPIConfig({ basePath: "/api\\admin" })).toThrow(
+      "cannot contain backslashes or control characters",
+    );
+    expect(() => normalizeFarmAPIConfig({ basePath: "\n/api" })).toThrow(
+      "cannot contain backslashes or control characters",
+    );
+    expect(() => normalizeFarmAPIConfig({ basePath: "/api/\u0085admin" })).toThrow(
+      "cannot contain backslashes or control characters",
+    );
+    expect(() => normalizeFarmAPIConfig({ basePath: "/api/%0Aadmin" })).toThrow(
+      "cannot contain backslashes or control characters",
+    );
+    expect(() => normalizeFarmAPIConfig({ basePath: "/api/../admin" })).toThrow(
+      'cannot contain "." or ".." path segments',
+    );
+    expect(() => normalizeFarmAPIConfig({ basePath: "/api/%2e%2e/admin" })).toThrow(
+      'cannot contain "." or ".." path segments',
+    );
   });
 
   it("replaces the canonical /api prefix when the API root has a path", () => {
