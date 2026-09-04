@@ -75,7 +75,9 @@ async function waitForWritable(res: ServerResponse): Promise<boolean> {
 /**
  * Older Fetch implementations expose repeated Set-Cookie fields as one
  * comma-joined value. Split only at a comma followed by another cookie-pair;
- * commas inside Expires dates remain part of the current cookie.
+ * commas inside Expires dates remain part of the current cookie. RFC cookie
+ * values exclude commas, so a comma followed by a cookie-pair is unambiguous
+ * for valid Set-Cookie syntax once the original field boundaries are lost.
  */
 function splitSetCookieHeader(value: string): string[] {
   const cookies: string[] = [];
