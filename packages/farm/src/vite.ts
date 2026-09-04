@@ -1918,6 +1918,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               const targetRequest = new Request(targetRequestUrl, {
                 method: "GET",
                 headers: request.headers,
+                signal: request.signal,
               });
               await farmApp.getServerRenderer().runWithRequestContext(targetRequest, async () => {
                 const routeManager = farmApp.getRouteManager();
