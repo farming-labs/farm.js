@@ -8,7 +8,14 @@ import { useSearchParams } from "../navigation";
 import { pushState as pushFarmPageState, readPageState, SPARouter } from "../client/spa-router";
 import { usePageState } from "../client/router";
 import { FARM_HISTORY_CHANGE_EVENT, notifyHistoryChange } from "../client/history-sync";
-import { asJson, asString, createParser, useQueryState, useQueryStates } from "../query/client";
+import {
+  asArrayOf,
+  asJson,
+  asString,
+  createParser,
+  useQueryState,
+  useQueryStates,
+} from "../query/client";
 
 describe("useQueryState shallow routing", () => {
   let container: HTMLDivElement;
@@ -96,6 +103,41 @@ describe("useQueryState shallow routing", () => {
 
     expect(window.location.search).toBe("?url=https%3A%2F%2Fexample.com");
     expect(popstate).not.toHaveBeenCalled();
+  });
+
+  it("reads every repeated value through useQueryState", () => {
+    window.history.replaceState(null, "", "/?tag=react&tag=vite");
+    let value: string[] | null = null;
+
+    function App() {
+      [value] = useQueryState("tag", asArrayOf(asString));
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+
+    expect(value).toEqual(["react", "vite"]);
+  });
+
+  it("reads every repeated value through useQueryStates", () => {
+    window.history.replaceState(null, "", "/?tag=react&tag=vite");
+    let value: string[] | null = null;
+
+    function App() {
+      const [state] = useQueryStates({ tag: asArrayOf(asString) });
+      value = state.tag;
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+
+    expect(value).toEqual(["react", "vite"]);
   });
 
   it("does not trigger SPA navigation when shallow is true and Farm router is installed", async () => {

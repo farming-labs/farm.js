@@ -48,6 +48,9 @@ composed against the latest URL, and returning a value to the current URL cancel
 If a component changes the key or parser it passes to the hook, the returned value is immediately
 re-read from the current URL.
 
+Repeated keys have the same meaning during server rendering and in client hooks. For example,
+`?tag=react&tag=vite` is read as both values by `asArrayOf(asString)`.
+
 ## Multiple query values
 
 Use `useQueryStates` when several controls should update together. This keeps the browser URL as the source of shareable state for filters, pagination, and tabs.
