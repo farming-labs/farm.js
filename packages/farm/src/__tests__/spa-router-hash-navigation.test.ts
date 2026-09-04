@@ -44,4 +44,30 @@ describe("same-page hash navigation", () => {
     router.destroy();
     target.remove();
   });
+
+  it("preserves a fragment when navigating to another route", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      Response.json({
+        canonicalPath: "/reference",
+        props: {},
+        modulePath: "/src/app/reference/page.tsx",
+        metadata: {},
+      }),
+    );
+    const router = new SPARouter({ scrollRestoration: false });
+    router.setNavigationHandler(async () => undefined);
+    const target = document.createElement("h2");
+    target.id = "api";
+    target.scrollIntoView = vi.fn();
+    document.body.appendChild(target);
+
+    await router.navigate("/reference#api");
+
+    expect(window.location.pathname).toBe("/reference");
+    expect(window.location.hash).toBe("#api");
+    expect(window.history.state.path).toBe("/reference#api");
+    expect(target.scrollIntoView).toHaveBeenCalledTimes(1);
+    router.destroy();
+    target.remove();
+  });
 });
