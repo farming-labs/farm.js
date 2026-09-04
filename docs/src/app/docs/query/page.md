@@ -128,6 +128,10 @@ unsafe `page` values fall back to page 1. `totalItems` must be a non-negative sa
 | `asIsoDate`         | Calendar-valid `YYYY-MM-DD` values.                       |
 | `asIsoDateTime`     | Calendar-valid ISO date-times with `Z` or numeric offset. |
 
+`asArrayOf` keeps the readable comma-separated format for simple values. When an item contains a
+comma or would otherwise be ambiguous, Farm switches to a structured representation automatically
+so parsing the generated URL returns the original items.
+
 ## Production notes
 
 - Parse query on the server before passing values to database queries.

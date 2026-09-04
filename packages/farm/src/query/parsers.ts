@@ -123,27 +123,50 @@ export const asBoolean: Parser<boolean> = {
 };
 
 // Array parser
+const STRUCTURED_ARRAY_PREFIX = "~[";
+
+function parseArrayItems(value: string): string[] {
+  if (value.startsWith(STRUCTURED_ARRAY_PREFIX)) {
+    try {
+      const parsed = JSON.parse(value.slice(1));
+      if (Array.isArray(parsed) && parsed.every((item) => typeof item === "string")) {
+        return parsed;
+      }
+    } catch {
+      // Keep accepting legacy values that happen to begin with the prefix.
+    }
+  }
+
+  return value
+    .split(",")
+    .filter(Boolean)
+    .map((item) => item.trim());
+}
+
+function serializeArrayItems(values: string[]): string {
+  const needsStructuredEncoding = values.some(
+    (value, index) =>
+      value === "" || value.includes(",") || (index === 0 && value.startsWith("~[")),
+  );
+  return needsStructuredEncoding ? `~${JSON.stringify(values)}` : values.join(",");
+}
+
 export function asArrayOf<T>(itemParser: Parser<T>): Parser<T[]> {
+  const parse = (value: string): T[] | null => {
+    if (!value) return null;
+    return parseArrayItems(value)
+      .map((item) => itemParser.parse(item))
+      .filter((item) => item !== null) as T[];
+  };
+  const serialize = (value: T[]) =>
+    serializeArrayItems(value.map((item) => itemParser.serialize(item)));
+
   return {
-    parse: (value: string) => {
-      if (!value) return null;
-      return value
-        .split(",")
-        .filter(Boolean)
-        .map((item) => itemParser.parse(item.trim()))
-        .filter((item) => item !== null) as T[];
-    },
-    serialize: (value: T[]) => value.map((item) => itemParser.serialize(item)).join(","),
+    parse,
+    serialize,
     withDefault: (defaultValue: T[]) => ({
-      parse: (value: string) => {
-        if (!value) return defaultValue;
-        return value
-          .split(",")
-          .filter(Boolean)
-          .map((item) => itemParser.parse(item.trim()))
-          .filter((item) => item !== null) as T[];
-      },
-      serialize: (value: T[]) => value.map((item) => itemParser.serialize(item)).join(","),
+      parse: (value: string) => parse(value) ?? defaultValue,
+      serialize,
     }),
   };
 }
