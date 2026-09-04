@@ -25,7 +25,12 @@ describe("generateUniversalRouterStateProperties", () => {
     // synthetic popstate here reintroduces #420 in production builds (#424).
     expect(runtime).not.toContain("new PopStateEvent");
     expect(runtime).toContain(`new CustomEvent("${FARM_HISTORY_CHANGE_EVENT}"`);
-    expect(runtime).toContain('kind: "page-state"');
+    expect(runtime).toContain('state, url, "page-state"');
+  });
+
+  it("announces ordinary route history writes to client hooks", () => {
+    expect(runtime).toContain('changeKind = "url-search"');
+    expect(runtime).toContain("detail: { kind: changeKind }");
   });
 
   it("keeps the page-state write API intact", () => {
@@ -118,6 +123,7 @@ describe("generateUniversalRouterStateProperties", () => {
     };
     const windowValue = {
       history,
+      dispatchEvent: vi.fn(),
       location: {
         href: "https://example.test/",
         origin: "https://example.test",

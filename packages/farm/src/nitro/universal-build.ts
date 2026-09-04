@@ -1876,17 +1876,10 @@ export function generateUniversalRouterStateProperties(): string {
 
   writePageState: function(action, state, href) {
     const url = new URL(href || window.location.href, window.location.origin);
-    this.writeHistoryEntry(action, url.pathname + url.search, state, url);
-    // Announce on the dedicated history channel; a synthetic popstate would
-    // be treated as back/forward by the popstate listener below and trigger
-    // a full navigation for a shallow page-state write. The bundled client
-    // hooks subscribe to this event via subscribeHistoryChange.
-    window.dispatchEvent(
-      new CustomEvent("farm:historychange", { detail: { kind: "page-state" } }),
-    );
+    this.writeHistoryEntry(action, url.pathname + url.search, state, url, "page-state");
   },
 
-  writeHistoryEntry: function(action, path, pageState, url) {
+  writeHistoryEntry: function(action, path, pageState, url, changeKind = "url-search") {
     if (action === "pop") return;
     const nextState = createHistoryState(path, pageState, window.history.state);
     const nextIndex = this.currentHistoryIndex == null
@@ -1899,6 +1892,11 @@ export function generateUniversalRouterStateProperties(): string {
     else window.history.pushState(nextState, "", url);
     this.currentHistoryIndex = nextIndex;
     this.currentHistoryState = nextState;
+    // Announce programmatic history writes without synthesizing popstate,
+    // which the router reserves for real back/forward navigation.
+    window.dispatchEvent(
+      new CustomEvent("farm:historychange", { detail: { kind: changeKind } }),
+    );
   },
 
   registerScrollElement: function(key, element) {
