@@ -126,11 +126,39 @@ export class FarmClientDataCache {
     if (alias === resolved) return;
 
     const aliasEntry = this.entries.get(alias);
+    const aliasInvalidatedAt = this.invalidatedAt.get(alias) ?? aliasEntry?.invalidatedAt;
+    const resolvedInvalidatedAt = this.invalidatedAt.get(resolved);
     if (aliasEntry && !this.entries.has(resolved)) {
       this.entries.set(resolved, aliasEntry);
     }
 
     this.entries.delete(alias);
+    this.invalidatedAt.delete(alias);
+    const invalidatedAt = [aliasInvalidatedAt, resolvedInvalidatedAt].reduce<number | undefined>(
+      (latest, value) =>
+        value === undefined ? latest : latest === undefined ? value : Math.max(latest, value),
+      undefined,
+    );
+    const resolvedEntry = this.entries.get(resolved);
+    if (
+      invalidatedAt !== undefined &&
+      (!resolvedEntry || invalidatedAt > resolvedEntry.updatedAt)
+    ) {
+      this.invalidatedAt.set(resolved, invalidatedAt);
+      if (resolvedEntry) {
+        this.entries.set(resolved, {
+          ...resolvedEntry,
+          staleAt: 0,
+          invalidatedAt,
+        });
+      }
+    } else if (invalidatedAt !== undefined) {
+      this.invalidatedAt.delete(resolved);
+      if (resolvedEntry?.invalidatedAt !== undefined) {
+        this.entries.set(resolved, { ...resolvedEntry, invalidatedAt: undefined });
+      }
+    }
+
     const aliasInflight = this.inflight.get(alias);
     if (aliasInflight && !this.inflight.has(resolved)) {
       this.inflight.set(resolved, aliasInflight);
