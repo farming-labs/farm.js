@@ -399,6 +399,7 @@ export class SPARouter {
     if (isFarmLocaleChangeHref(href)) return;
     const url = new URL(href, window.location.origin);
     if (isFarmExternalNavigationURL(url, window.location.origin)) return;
+    if (this.options.shouldUseDocumentNavigation(url.pathname)) return;
     const fullPath = url.pathname + url.search;
     const interceptFrom = window.location.pathname + window.location.search;
 

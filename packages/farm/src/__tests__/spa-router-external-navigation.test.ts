@@ -50,4 +50,16 @@ describe("external SPA router URLs", () => {
     expect(fetch).not.toHaveBeenCalled();
     router.destroy();
   });
+
+  it("does not prefetch routes that require document navigation", async () => {
+    const router = new SPARouter({
+      scrollRestoration: false,
+      shouldUseDocumentNavigation: (pathname) => pathname.startsWith("/docs"),
+    });
+
+    await router.prefetch("/docs/getting-started");
+
+    expect(fetch).not.toHaveBeenCalled();
+    router.destroy();
+  });
 });
