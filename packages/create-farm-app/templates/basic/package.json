@@ -9,7 +9,7 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@farm.js/core": "0.1.0-beta.80",
+    "@farm.js/core": "0.1.0-beta.81",
     "@farming-labs/docs": "0.2.111",
     "@farming-labs/farmjs": "0.2.111",
     "@farming-labs/theme": "0.2.111",
@@ -19,7 +19,7 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
-    "@farm.js/cli": "0.1.0-beta.80",
+    "@farm.js/cli": "0.1.0-beta.81",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "tailwindcss": "^4.0.0",

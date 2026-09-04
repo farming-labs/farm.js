@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/stripe",
-  "version": "0.1.0-beta.80",
+  "version": "0.1.0-beta.81",
   "description": "Stripe billing integration for Farm.js",
   "license": "MIT",
   "repository": {
