@@ -75,6 +75,17 @@ describe("navigation state and blocking", () => {
     expect(window.location.pathname).toBe("/");
   });
 
+  it("does not prompt for a blocker that is inactive during unload", () => {
+    const router = new SPARouter({ scrollRestoration: false });
+    router.addBlocker(() => false);
+    const shouldBlockUnload = (
+      router as unknown as { shouldBlockUnload(): boolean }
+    ).shouldBlockUnload();
+
+    expect(shouldBlockUnload).toBe(false);
+    router.destroy();
+  });
+
   it("stores page state in history without changing route data", () => {
     pushState({ modal: "cart" });
     expect(readPageState()).toEqual({ modal: "cart" });

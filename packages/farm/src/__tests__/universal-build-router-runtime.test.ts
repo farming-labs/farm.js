@@ -34,6 +34,11 @@ describe("generateUniversalRouterStateProperties", () => {
     expect(runtime).toContain("writePageState: function(action, state, href)");
   });
 
+  it("checks blocker activity before prompting on unload", () => {
+    expect(runtime).toContain("shouldBlockUnload: function()");
+    expect(runtime).toContain("return result === true");
+  });
+
   it("aborts superseded navigations without letting them reset current state", () => {
     const createRouter = new Function(
       "window",

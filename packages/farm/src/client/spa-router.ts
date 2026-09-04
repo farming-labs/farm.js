@@ -156,6 +156,7 @@ export class SPARouter {
   private prefetchingUrls: Set<string> = new Set();
   private observers: Map<Element, IntersectionObserver> = new Map();
   private blockers: Set<FarmNavigationBlocker> = new Set();
+  private unloadBlockers: Map<FarmNavigationBlocker, () => boolean> = new Map();
   private navigationListeners: Set<FarmNavigationListener> = new Set();
   private navigationState: FarmNavigationState = IDLE_NAVIGATION_STATE;
   private currentHistoryPath: string | null = null;
@@ -184,7 +185,7 @@ export class SPARouter {
   };
 
   private readonly onBeforeUnload = (event: BeforeUnloadEvent) => {
-    if (this.blockers.size > 0) {
+    if (this.shouldBlockUnload()) {
       event.preventDefault();
       event.returnValue = "";
     }
@@ -459,10 +460,15 @@ export class SPARouter {
     }
   }
 
-  addBlocker(blocker: FarmNavigationBlocker): () => void {
+  addBlocker(blocker: FarmNavigationBlocker, shouldBlockUnload?: () => boolean): () => void {
     this.blockers.add(blocker);
+    this.unloadBlockers.set(
+      blocker,
+      shouldBlockUnload ?? (() => this.evaluateBlockerForUnload(blocker)),
+    );
     return () => {
       this.blockers.delete(blocker);
+      this.unloadBlockers.delete(blocker);
     };
   }
 
@@ -792,6 +798,27 @@ export class SPARouter {
   private async shouldBlockNavigation(context: FarmNavigationBlockerContext): Promise<boolean> {
     for (const blocker of this.blockers) {
       if (await blocker(context)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private evaluateBlockerForUnload(blocker: FarmNavigationBlocker): boolean {
+    const path = window.location.pathname + window.location.search;
+    const result = blocker({ from: path, to: path, action: "replace" });
+    if (result && typeof result !== "boolean") {
+      void result.catch(() => undefined);
+      return true;
+    }
+    return result === true;
+  }
+
+  private shouldBlockUnload(): boolean {
+    for (const blocker of this.blockers) {
+      try {
+        if (this.unloadBlockers.get(blocker)?.()) return true;
+      } catch {
         return true;
       }
     }
