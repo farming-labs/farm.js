@@ -315,7 +315,8 @@ public URL in the browser bundle.
 A root-relative API root is also mounted by Farm in development and production. For example,
 `api: { basePath: "/v2/api" }` makes a route declared at `app/api/users/route.ts` available at
 `/v2/api/users`. Farm treats an absolute `baseURL` as external and does not remount the current
-application's API routes for it.
+application's API routes for it. `basePath` rejects backslashes, control characters, and `.` or
+`..` segments so the server mount and browser URL cannot normalize to different paths.
 
 The option configures `createAPIClient()` automatically. An explicit per-client `baseURL` still
 takes precedence.
