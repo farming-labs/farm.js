@@ -1,7 +1,7 @@
 "use client";
 
 import { readDeferredDataResponse } from "../deferred";
-import { notifyHistoryChange } from "./history-sync";
+import { notifyHistoryChange, notifyRouterHistoryChange } from "./history-sync";
 import {
   createFarmDeploymentMismatchError,
   createFarmDeploymentRequestHeaders,
@@ -542,6 +542,7 @@ export class SPARouter {
     this.currentHistoryPath =
       new URL(historyPath, window.location.origin).pathname +
       new URL(historyPath, window.location.origin).search;
+    notifyRouterHistoryChange();
 
     if (options.pageData.metadata?.title) {
       document.title = options.pageData.metadata.title;

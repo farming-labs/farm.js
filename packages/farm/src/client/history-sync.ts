@@ -9,6 +9,14 @@ export interface FarmHistoryChangeDetail {
   kind: FarmHistoryChangeKind;
 }
 
+function dispatchHistoryChange(kind: FarmHistoryChangeKind): void {
+  window.dispatchEvent(
+    new CustomEvent<FarmHistoryChangeDetail>(FARM_HISTORY_CHANGE_EVENT, {
+      detail: { kind },
+    }),
+  );
+}
+
 /**
  * Notify history observers after pushState/replaceState.
  *
@@ -26,12 +34,14 @@ export function notifyHistoryChange(kind: FarmHistoryChangeKind): void {
       return;
     }
 
-    window.dispatchEvent(
-      new CustomEvent<FarmHistoryChangeDetail>(FARM_HISTORY_CHANGE_EVENT, {
-        detail: { kind },
-      }),
-    );
+    dispatchHistoryChange(kind);
   }, 0);
+}
+
+/** Notify observers after a Farm router commit without simulating traversal. */
+export function notifyRouterHistoryChange(): void {
+  if (typeof window === "undefined") return;
+  setTimeout(() => dispatchHistoryChange("url-search"), 0);
 }
 
 export function subscribeHistoryChange(listener: () => void): () => void {
