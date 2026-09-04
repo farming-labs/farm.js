@@ -2125,12 +2125,14 @@ ${generateUniversalRouterStateProperties()}
     const url = new URL(href, window.location.origin);
     if (isFarmExternalNavigationURL(url, window.location.origin)) {
       this.cancelActiveNavigation();
-      window.location.href = href;
+      if (options.replace || options.action === "replace") window.location.replace(url.toString());
+      else window.location.href = href;
       return;
     }
     if (isFarmDocsPath(url.pathname)) {
       this.cancelActiveNavigation();
-      window.location.href = href;
+      if (options.replace || options.action === "replace") window.location.replace(url.toString());
+      else window.location.href = href;
       return;
     }
 
@@ -2994,12 +2996,14 @@ ${generateUniversalRouterStateProperties()}
     const url = new URL(href, window.location.origin);
     if (isFarmExternalNavigationURL(url, window.location.origin)) {
       this.cancelActiveNavigation();
-      window.location.href = href;
+      if (options.replace || options.action === "replace") window.location.replace(url.toString());
+      else window.location.href = href;
       return;
     }
     if (isFarmDocsPath(url.pathname)) {
       this.cancelActiveNavigation();
-      window.location.href = href;
+      if (options.replace || options.action === "replace") window.location.replace(url.toString());
+      else window.location.href = href;
       return;
     }
 
