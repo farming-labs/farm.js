@@ -619,6 +619,30 @@ describe("useQueryState shallow routing", () => {
     expect(window.location.search).toBe("?q=new&page=2");
   });
 
+  it("keeps throttled useQueryStates writes for different key sets", () => {
+    vi.useFakeTimers();
+    let setQueries!: (updates: { q?: string | null; page?: string | null }) => void;
+    const parsers = { q: asString, page: asString };
+
+    function App() {
+      const [, updateQueries] = useQueryStates(parsers, { throttleMs: 50 });
+      setQueries = updateQueries;
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+    act(() => {
+      setQueries({ q: "search" });
+      setQueries({ page: "2" });
+      vi.runAllTimers();
+    });
+
+    expect(window.location.search).toBe("?q=search&page=2");
+  });
+
   it("preserves Farm page history state when updating query params", async () => {
     vi.useFakeTimers();
     spaRouter = new SPARouter({ scrollRestoration: false });

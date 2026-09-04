@@ -364,7 +364,7 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
   });
 
   const stateRef = useRef(state);
-  const cancelPendingUpdateRef = useRef<(() => void) | undefined>(undefined);
+  const pendingUpdatesRef = useRef(new Map<string, () => void>());
   stateRef.current = state;
 
   const setValues = useCallback(
@@ -390,8 +390,14 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
         }
       });
 
-      cancelPendingUpdateRef.current?.();
-      cancelPendingUpdateRef.current = updateURL(urlUpdates, options, true);
+      const updateKey = Object.keys(urlUpdates).sort().join(",");
+      pendingUpdatesRef.current.get(updateKey)?.();
+      const cancelPendingUpdate = updateURL(urlUpdates, options, true);
+      if (cancelPendingUpdate) {
+        pendingUpdatesRef.current.set(updateKey, cancelPendingUpdate);
+      } else {
+        pendingUpdatesRef.current.delete(updateKey);
+      }
     },
     [parsers, options],
   );
@@ -444,8 +450,10 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
 
   useEffect(
     () => () => {
-      cancelPendingUpdateRef.current?.();
-      cancelPendingUpdateRef.current = undefined;
+      for (const cancelPendingUpdate of pendingUpdatesRef.current.values()) {
+        cancelPendingUpdate();
+      }
+      pendingUpdatesRef.current.clear();
     },
     [watchKeys],
   );
