@@ -2047,6 +2047,37 @@ describe("Middleware Manager Data Flow", () => {
     expect(res.setHeader).toHaveBeenCalledWith("x-middleware", "/dashboard/settings");
   });
 
+  it("keeps context cookies when middleware returns a Response with cookies", async () => {
+    const manager = new MiddlewareManager("/tmp", undefined, [
+      {
+        matcher: "/dashboard/:path*",
+        handler(ctx) {
+          ctx.cookies.set("session", "abc", { httpOnly: true });
+          return new Response(null, {
+            status: 204,
+            headers: { "Set-Cookie": "theme=dark; Path=/" },
+          });
+        },
+      },
+    ]);
+    const req = createMockRequest("/dashboard/settings");
+    const res = createMockResponse();
+    let setCookieHeader: string | string[] | undefined;
+    vi.mocked(res.setHeader).mockImplementation((name, value) => {
+      if (String(name).toLowerCase() === "set-cookie") {
+        setCookieHeader = value as string | string[];
+      }
+      return res;
+    });
+    vi.spyOn(res, "getHeader").mockImplementation((name) =>
+      String(name).toLowerCase() === "set-cookie" ? setCookieHeader : undefined,
+    );
+
+    await expect(manager.execute(req, res)).resolves.toBe(true);
+
+    expect(setCookieHeader).toEqual(["session=abc; Path=/; HttpOnly", "theme=dark; Path=/"]);
+  });
+
   it("emits middleware observability events", async () => {
     const events: FarmEvent[] = [];
     configureFarmObservability({ onEvent: (event) => events.push(event) });

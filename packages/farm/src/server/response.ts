@@ -75,16 +75,27 @@ async function waitForWritable(res: ServerResponse): Promise<boolean> {
 export async function sendWebResponse(res: ServerResponse, response: Response): Promise<void> {
   res.statusCode = response.status;
 
+  const appendSetCookies = (cookies: readonly string[]) => {
+    const existing = typeof res.getHeader === "function" ? res.getHeader("Set-Cookie") : undefined;
+    const existingCookies = Array.isArray(existing)
+      ? existing.map(String)
+      : existing === undefined
+        ? []
+        : [String(existing)];
+    res.setHeader("Set-Cookie", [...existingCookies, ...cookies]);
+  };
+
   const responseHeaders = response.headers as Headers & {
     getSetCookie?: () => string[];
   };
   const setCookies = responseHeaders.getSetCookie?.() || [];
   if (setCookies.length > 0) {
-    res.setHeader("Set-Cookie", setCookies);
+    appendSetCookies(setCookies);
   }
 
   response.headers.forEach((value, key) => {
-    if (key.toLowerCase() === "set-cookie" && setCookies.length > 0) {
+    if (key.toLowerCase() === "set-cookie") {
+      if (setCookies.length === 0) appendSetCookies([value]);
       return;
     }
     res.setHeader(key, value);
