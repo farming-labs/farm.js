@@ -142,10 +142,13 @@ export type ResponseEvent<TData = unknown, TError = Error> = {
 };
 
 export type CachePolicy = "cache-first" | "network-only" | "stale-while-revalidate";
+export type CacheScope = "client" | "shared";
 
 export type CacheOptions = {
   key?: FarmClientCacheKey;
   policy?: CachePolicy;
+  /** Keep credentialed responses private to this client unless sharing is explicit. */
+  scope?: CacheScope;
   staleTime?: number;
   gcTime?: number;
   dedupeMs?: number;
@@ -656,7 +659,7 @@ export function createAPIClient<
     let requestContextError: Error | undefined;
     if (needsCacheState) {
       try {
-        requestCacheContext = getRequestCacheContext(options, input);
+        requestCacheContext = getRequestCacheContext(options, input, cacheOptions?.scope);
       } catch (error) {
         requestCacheContext = `invalid:${requestId}`;
         requestContextError = normalizeError(error);
@@ -1410,6 +1413,7 @@ function getHeader(headers: unknown, name: string): string | undefined {
 function getRequestCacheContext(
   options: Pick<APIClientOptions, "headers" | "credentials">,
   input: unknown,
+  scope: CacheScope | undefined,
 ): string | undefined {
   const credentials = options.credentials ?? "same-origin";
   const headers = new Headers(options.headers);
@@ -1420,7 +1424,8 @@ function getRequestCacheContext(
     new Headers(requestHeaders as HeadersInit).forEach((value, key) => headers.set(key, value));
   }
 
-  if (credentials === "same-origin" && [...headers].length === 0) return undefined;
+  if (scope === "shared") return undefined;
+  if (scope !== "client" && credentials === "omit" && [...headers].length === 0) return undefined;
 
   return stableStringify({
     credentials,
