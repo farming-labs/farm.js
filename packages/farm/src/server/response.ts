@@ -72,6 +72,36 @@ async function waitForWritable(res: ServerResponse): Promise<boolean> {
   }
 }
 
+/**
+ * Older Fetch implementations expose repeated Set-Cookie fields as one
+ * comma-joined value. Split only at a comma followed by another cookie-pair;
+ * commas inside Expires dates remain part of the current cookie.
+ */
+function splitSetCookieHeader(value: string): string[] {
+  const cookies: string[] = [];
+  let start = 0;
+
+  for (let index = 0; index < value.length; index += 1) {
+    if (value[index] !== ",") continue;
+
+    let next = index + 1;
+    while (value[next] === " " || value[next] === "\t") next += 1;
+
+    const equals = value.indexOf("=", next);
+    if (equals === -1) continue;
+
+    const separator = value.slice(next, equals);
+    if (separator.length === 0 || /[;,\s]/.test(separator)) continue;
+
+    cookies.push(value.slice(start, index).trim());
+    start = next;
+    index = next - 1;
+  }
+
+  cookies.push(value.slice(start).trim());
+  return cookies.filter(Boolean);
+}
+
 export async function sendWebResponse(res: ServerResponse, response: Response): Promise<void> {
   res.statusCode = response.status;
 
@@ -87,15 +117,17 @@ export async function sendWebResponse(res: ServerResponse, response: Response): 
 
   const responseHeaders = response.headers as Headers & {
     getSetCookie?: () => string[];
+    raw?: () => Record<string, string[]>;
   };
-  const setCookies = responseHeaders.getSetCookie?.() || [];
+  const rawSetCookies = responseHeaders.raw?.()["set-cookie"];
+  const setCookies = responseHeaders.getSetCookie?.() || rawSetCookies || [];
   if (setCookies.length > 0) {
     appendSetCookies(setCookies);
   }
 
   response.headers.forEach((value, key) => {
     if (key.toLowerCase() === "set-cookie") {
-      if (setCookies.length === 0) appendSetCookies([value]);
+      if (setCookies.length === 0) appendSetCookies(splitSetCookieHeader(value));
       return;
     }
     res.setHeader(key, value);
