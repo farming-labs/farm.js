@@ -438,6 +438,7 @@ export class SPARouter {
       (entries) => {
         for (const entry of entries) {
           if (entry.isIntersecting) {
+            if (this.observers.get(element) !== observer) continue;
             // Delay prefetch slightly to avoid prefetching during scroll
             const timer = setTimeout(() => {
               if (this.prefetchTimers.get(element) !== timer) return;

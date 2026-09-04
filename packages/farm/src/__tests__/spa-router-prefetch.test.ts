@@ -27,6 +27,7 @@ describe("SPA router viewport prefetch", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
     vi.useRealTimers();
   });
 
@@ -60,6 +61,21 @@ describe("SPA router viewport prefetch", () => {
     router.observeForPrefetch(link);
     intersect();
     router.unobserveForPrefetch(link);
+    vi.advanceTimersByTime(50);
+
+    expect(prefetch).not.toHaveBeenCalled();
+    router.destroy();
+  });
+
+  it("ignores an observer callback queued before the link was unobserved", () => {
+    const router = new SPARouter({ prefetchTimeout: 50, scrollRestoration: false });
+    const prefetch = vi.spyOn(router, "prefetch").mockResolvedValue();
+    const link = document.createElement("a");
+    link.setAttribute("href", "/removed-before-callback");
+
+    router.observeForPrefetch(link);
+    router.unobserveForPrefetch(link);
+    intersect();
     vi.advanceTimersByTime(50);
 
     expect(prefetch).not.toHaveBeenCalled();
