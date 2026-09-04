@@ -184,7 +184,7 @@ const updateURL = (
   updates: Record<string, string | null>,
   options: Options = {},
   emitUpdate = true,
-) => {
+): (() => void) | undefined => {
   if (typeof window === "undefined") return;
 
   const { throttleMs } = options;
@@ -212,6 +212,11 @@ const updateURL = (
   }, throttleMs);
 
   throttleTimers.set(throttleKey, timeout);
+  return () => {
+    if (throttleTimers.get(throttleKey) !== timeout) return;
+    clearTimeout(timeout);
+    throttleTimers.delete(throttleKey);
+  };
 };
 
 export function useQueryState<TParser extends Parser<any>>(
@@ -246,6 +251,7 @@ export function useQueryState<TParser extends Parser<any>>(
   const stateRef = useRef(state);
   const stateKeyRef = useRef(key);
   const isInternalUpdateRef = useRef(false);
+  const cancelPendingUpdateRef = useRef<(() => void) | undefined>(undefined);
   stateRef.current = state;
 
   const setValue = useCallback(
@@ -259,7 +265,7 @@ export function useQueryState<TParser extends Parser<any>>(
 
       emitter.emitKey(key, { state: value, query: serialized });
 
-      updateURL({ [key]: serialized }, options, true);
+      cancelPendingUpdateRef.current = updateURL({ [key]: serialized }, options, true);
 
       setTimeout(() => {
         isInternalUpdateRef.current = false;
@@ -323,6 +329,14 @@ export function useQueryState<TParser extends Parser<any>>(
     };
   }, [key, parser]);
 
+  useEffect(
+    () => () => {
+      cancelPendingUpdateRef.current?.();
+      cancelPendingUpdateRef.current = undefined;
+    },
+    [key],
+  );
+
   return [state, setValue];
 }
 
@@ -349,6 +363,7 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
   });
 
   const stateRef = useRef(state);
+  const cancelPendingUpdateRef = useRef<(() => void) | undefined>(undefined);
   stateRef.current = state;
 
   const setValues = useCallback(
@@ -374,7 +389,7 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
         }
       });
 
-      updateURL(urlUpdates, options, true);
+      cancelPendingUpdateRef.current = updateURL(urlUpdates, options, true);
     },
     [parsers, options],
   );
@@ -424,6 +439,14 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
       emitter.off("update", onEmitterUpdate);
     };
   }, [watchKeys, parsers]);
+
+  useEffect(
+    () => () => {
+      cancelPendingUpdateRef.current?.();
+      cancelPendingUpdateRef.current = undefined;
+    },
+    [watchKeys],
+  );
 
   return [state, setValues];
 }

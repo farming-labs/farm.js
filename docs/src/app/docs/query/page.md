@@ -46,7 +46,8 @@ export function SearchControls() {
 `throttleMs` coalesces rapid writes to the same query key. Updates to different keys are
 composed against the latest URL, and returning a value to the current URL cancels its queued write.
 If a component changes the key or parser it passes to the hook, the returned value is immediately
-re-read from the current URL.
+re-read from the current URL. A queued write is cancelled when its owning hook changes keys or
+unmounts, preventing an old component from modifying the URL of a later page.
 
 ## Multiple query values
 

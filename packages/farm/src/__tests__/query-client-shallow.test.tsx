@@ -496,6 +496,72 @@ describe("useQueryState shallow routing", () => {
     expect(window.location.search).toBe("?q=old");
   });
 
+  it("cancels a throttled update when its hook unmounts", () => {
+    vi.useFakeTimers();
+    let setQuery!: (value: string | null) => void;
+
+    function App() {
+      const [, updateQuery] = useQueryState("q", asString, { throttleMs: 50 });
+      setQuery = updateQuery;
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+    act(() => {
+      setQuery("old-page");
+      root?.unmount();
+    });
+    root = undefined;
+    window.history.replaceState(null, "", "/next");
+
+    act(() => {
+      vi.runAllTimers();
+    });
+
+    expect(window.location.pathname + window.location.search).toBe("/next");
+  });
+
+  it("does not let an earlier hook cancel a newer throttled update", () => {
+    vi.useFakeTimers();
+    let setFirst!: (value: string | null) => void;
+    let setSecond!: (value: string | null) => void;
+
+    function First() {
+      const [, updateQuery] = useQueryState("q", asString, { throttleMs: 50 });
+      setFirst = updateQuery;
+      return null;
+    }
+    function Second() {
+      const [, updateQuery] = useQueryState("q", asString, { throttleMs: 50 });
+      setSecond = updateQuery;
+      return null;
+    }
+    function App({ showFirst }: { showFirst: boolean }) {
+      return createElement(
+        "div",
+        null,
+        showFirst ? createElement(First) : null,
+        createElement(Second),
+      );
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App, { showFirst: true }));
+    });
+    act(() => {
+      setFirst("first");
+      setSecond("second");
+      root?.render(createElement(App, { showFirst: false }));
+      vi.runAllTimers();
+    });
+
+    expect(window.location.search).toBe("?q=second");
+  });
+
   it("preserves Farm page history state when updating query params", async () => {
     vi.useFakeTimers();
     spaRouter = new SPARouter({ scrollRestoration: false });
