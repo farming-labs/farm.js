@@ -459,8 +459,14 @@ describe("createAPIClient", () => {
     const fetchMock = vi.fn(async () => buildResponse({ id: "1", name: "Alice" }));
     globalThis.fetch = fetchMock as any;
 
-    const first = createAPIClient<APIRouter>({ baseURL: "http://example.com" });
-    const second = createAPIClient<APIRouter>({ baseURL: "http://example.com" });
+    const first = createAPIClient<APIRouter>({
+      baseURL: "http://example.com",
+      credentials: "omit",
+    });
+    const second = createAPIClient<APIRouter>({
+      baseURL: "http://example.com",
+      credentials: "omit",
+    });
     const cache = {
       key: ["user", "1"] as const,
       policy: "cache-first" as const,
@@ -473,6 +479,63 @@ describe("createAPIClient", () => {
 
     expect(cached.data).toEqual({ id: "1", name: "Alice" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not let shared scope expose credentialed responses to another client", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(buildResponse({ session: "first" }))
+      .mockResolvedValueOnce(buildResponse({ session: "second" }));
+    globalThis.fetch = fetchMock as any;
+    const first = createAPIClient<APIRouter>({
+      baseURL: "http://example.com",
+      credentials: "include",
+    });
+    const second = createAPIClient<APIRouter>({
+      baseURL: "http://example.com",
+      credentials: "include",
+    });
+    const cache = {
+      policy: "cache-first" as const,
+      scope: "shared" as const,
+      staleTime: 10_000,
+    };
+
+    const firstResult = await first.users.get({}, { cache });
+    const secondResult = await second.users.get({}, { cache });
+
+    expect(firstResult.data).toEqual({ session: "first" });
+    expect(secondResult.data).toEqual({ session: "second" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not let shared scope expose header-scoped responses to another client", async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) =>
+      buildResponse({ authorization: new Headers(init?.headers).get("authorization") }),
+    );
+    globalThis.fetch = fetchMock as any;
+    const first = createAPIClient<APIRouter>({
+      baseURL: "http://example.com",
+      credentials: "omit",
+      headers: { authorization: "Bearer first" },
+    });
+    const second = createAPIClient<APIRouter>({
+      baseURL: "http://example.com",
+      credentials: "omit",
+      headers: { authorization: "Bearer second" },
+    });
+    const cache = {
+      policy: "cache-first" as const,
+      scope: "shared" as const,
+      staleTime: 10_000,
+    };
+
+    const firstResult = await first.users.get({}, { cache });
+    const secondResult = await second.users.get({}, { cache });
+
+    expect(firstResult.data).toEqual({ authorization: "Bearer first" });
+    expect(secondResult.data).toEqual({ authorization: "Bearer second" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("isolates default same-origin caches between client instances", async () => {
@@ -979,7 +1042,10 @@ describe("createAPIClient", () => {
     type UsersData = APIRouter["users"]["get"]["__types"]["response"];
     const usersKey = defineCacheKey<UsersData>()(() => ["users", "list"] as const)();
     const normalizedUsersKey = normalizeFarmClientCacheKey(usersKey);
-    const api = createAPIClient<APIRouter>({ baseURL: "http://example.com" });
+    const api = createAPIClient<APIRouter>({
+      baseURL: "http://example.com",
+      credentials: "omit",
+    });
     const cache = {
       key: usersKey,
       policy: "cache-first" as const,
@@ -1038,8 +1104,14 @@ describe("createAPIClient", () => {
 
     type UsersData = APIRouter["users"]["get"]["__types"]["response"];
     const usersKey = defineCacheKey<UsersData>()(() => ["users", "list"] as const)();
-    const api = createAPIClient<APIRouter>({ baseURL: "http://example.com" });
-    const secondApi = createAPIClient<APIRouter>({ baseURL: "http://example.com" });
+    const api = createAPIClient<APIRouter>({
+      baseURL: "http://example.com",
+      credentials: "omit",
+    });
+    const secondApi = createAPIClient<APIRouter>({
+      baseURL: "http://example.com",
+      credentials: "omit",
+    });
     const cache = {
       key: usersKey,
       policy: "cache-first" as const,

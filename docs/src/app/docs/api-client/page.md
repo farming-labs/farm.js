@@ -285,11 +285,14 @@ changing the completed API result.
 Use a structured cache key when an API response intentionally shares data with route data or a [`createServerQuery`](/docs/server-queries):
 
 ```ts
-const product = await api.products.get(
+const publicApi = createAPIClient<APIRouter>({ credentials: "omit" });
+
+const product = await publicApi.products.get(
   { query: { id } },
   {
     cache: {
       key: ["product", id],
+      scope: "shared",
       policy: "stale-while-revalidate",
       staleTime: 30_000,
     },
@@ -303,8 +306,8 @@ changing explicit headers or credentials clears that private cache. This prevent
 reusing a response produced under an earlier cookie identity without placing credential values in a
 public cache key. Invalidate session-specific reads when the same client logs in or out.
 
-Use `scope: "shared"` only for public data that intentionally shares a structured key with route
-data or another API client:
+Use `scope: "shared"` only for public data requested with `credentials: "omit"` and no custom
+headers that intentionally shares a structured key with route data or another API client:
 
 ```ts
 cache: {
@@ -315,7 +318,8 @@ cache: {
 ```
 
 Requests with `credentials: "omit"` and no custom headers may share by default because they carry
-no browser identity. `scope: "client"` can keep those requests private as well.
+no browser identity. `scope: "client"` can keep those requests private as well. Credentialed or
+header-carrying requests remain client-scoped even if `scope: "shared"` is supplied.
 
 Set `cache.dedupeMs` to join identical requests started within that window. If an older request is
 still running after the window expires, the newer request becomes the cache owner; the older result

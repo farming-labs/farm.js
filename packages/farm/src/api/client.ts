@@ -147,7 +147,7 @@ export type CacheScope = "client" | "shared";
 export type CacheOptions = {
   key?: FarmClientCacheKey;
   policy?: CachePolicy;
-  /** Keep credentialed responses private to this client unless sharing is explicit. */
+  /** Select client-local or public shared storage. Identity-carrying requests always stay local. */
   scope?: CacheScope;
   staleTime?: number;
   gcTime?: number;
@@ -1424,8 +1424,8 @@ function getRequestCacheContext(
     new Headers(requestHeaders as HeadersInit).forEach((value, key) => headers.set(key, value));
   }
 
-  if (scope === "shared") return undefined;
-  if (scope !== "client" && credentials === "omit" && [...headers].length === 0) return undefined;
+  const carriesBrowserIdentity = credentials !== "omit" || [...headers].length > 0;
+  if (scope !== "client" && !carriesBrowserIdentity) return undefined;
 
   return stableStringify({
     credentials,
