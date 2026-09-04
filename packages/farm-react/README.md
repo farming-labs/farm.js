@@ -42,7 +42,7 @@ definitions, while generated code uses the tree-shakable feature entry.
 
 The persisted production-size fixtures and regression gate live in
 [`RUNTIME_SIZE_RESULTS.md`](./RUNTIME_SIZE_RESULTS.md). The recorded direct-only runtime premium is
-82.5% smaller than the complete compatibility runtime premium; the feature-heavy keyed benchmark
+82.6% smaller than the complete compatibility runtime premium; the feature-heavy keyed benchmark
 application removes 6,185 gzip bytes from its previous compiler-on build.
 
 For selective adoption, use annotation mode:
