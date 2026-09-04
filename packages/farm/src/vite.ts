@@ -2022,7 +2022,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 const targetUrl = new URL(targetPath, "http://localhost");
                 const searchParams = searchParamsToObject(targetUrl.searchParams);
                 const routeContext = await resolveFarmRouteContext(farmApp.getConfig(), {
-                  request,
+                  request: targetRequest,
                   params,
                   search: searchParams,
                   path: targetUrl.pathname,
@@ -2050,7 +2050,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                           entry.pattern === slot.route.pattern,
                       ) ?? getClientModuleMetadata(slot.route.modulePath, server.config.root);
                     const slotContext = await resolveFarmRouteContext(farmApp.getConfig(), {
-                      request,
+                      request: targetRequest,
                       params: slot.params,
                       search: searchParams,
                       path: targetUrl.pathname,
