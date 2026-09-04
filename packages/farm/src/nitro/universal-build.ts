@@ -1708,6 +1708,7 @@ function matchRuntimePathPattern(pattern, pathname) {
 export function generateUniversalRouterStateProperties(): string {
   return `
   blockers: new Set(),
+  unloadBlockers: new Map(),
   navigationListeners: new Set(),
   navigationState: IDLE_NAVIGATION_STATE,
   navigationSequence: 0,
@@ -1751,14 +1752,36 @@ export function generateUniversalRouterStateProperties(): string {
     return () => this.navigationListeners.delete(listener);
   },
 
-  addBlocker: function(blocker) {
+  addBlocker: function(blocker, shouldBlockUnload) {
     this.blockers.add(blocker);
-    return () => this.blockers.delete(blocker);
+    this.unloadBlockers.set(blocker, shouldBlockUnload || (() => {
+      const result = blocker({ from: this.currentPath, to: this.currentPath, action: "replace" });
+      if (result && typeof result.then === "function") {
+        result.catch(() => undefined);
+        return true;
+      }
+      return result === true;
+    }));
+    return () => {
+      this.blockers.delete(blocker);
+      this.unloadBlockers.delete(blocker);
+    };
   },
 
   shouldBlockNavigation: async function(context) {
     for (const blocker of this.blockers) {
       if (await blocker(context)) return true;
+    }
+    return false;
+  },
+
+  shouldBlockUnload: function() {
+    for (const blocker of this.blockers) {
+      try {
+        if (this.unloadBlockers.get(blocker)?.()) return true;
+      } catch {
+        return true;
+      }
     }
     return false;
   },
@@ -2355,7 +2378,7 @@ window.__FARM_SPA_ROUTER__ = spaRouter;
 void hydrateFarmDocsAdapterRuntime();
 
 window.addEventListener("beforeunload", function(event) {
-  if (spaRouter.blockers.size > 0) {
+  if (spaRouter.shouldBlockUnload()) {
     event.preventDefault();
     event.returnValue = "";
   }
@@ -3399,7 +3422,7 @@ spaRouter.initializeHistory();
 window.__FARM_SPA_ROUTER__ = spaRouter;
 
 window.addEventListener("beforeunload", function(event) {
-  if (spaRouter.blockers.size > 0) {
+  if (spaRouter.shouldBlockUnload()) {
     event.preventDefault();
     event.returnValue = "";
   }

@@ -40,6 +40,27 @@ export interface UseBlockerReturn {
   active: boolean;
 }
 
+function shouldBlockUnload(options: UseBlockerOptions): boolean {
+  const path = window.location.pathname + window.location.search;
+  const context: FarmNavigationBlockerContext = {
+    from: path,
+    to: path,
+    action: "replace",
+  };
+  const when = typeof options.when === "function" ? options.when(context) : options.when;
+  if (!when) return false;
+  if (!options.shouldBlock) return true;
+
+  try {
+    const result = options.shouldBlock(context);
+    if (typeof result === "boolean") return result;
+    void result.catch(() => undefined);
+    return true;
+  } catch {
+    return true;
+  }
+}
+
 /**
  * Hook for accessing router state and navigation
  */
@@ -176,22 +197,25 @@ export function useBlocker(options: UseBlockerOptions): UseBlockerReturn {
       return;
     }
 
-    return getSPARouter().addBlocker(async (context) => {
-      const current = optionsRef.current;
-      const when = typeof current.when === "function" ? current.when(context) : current.when;
+    return getSPARouter().addBlocker(
+      async (context) => {
+        const current = optionsRef.current;
+        const when = typeof current.when === "function" ? current.when(context) : current.when;
 
-      if (!when) return false;
+        if (!when) return false;
 
-      if (current.shouldBlock && !(await current.shouldBlock(context))) {
-        return false;
-      }
+        if (current.shouldBlock && !(await current.shouldBlock(context))) {
+          return false;
+        }
 
-      if (current.message && typeof window.confirm === "function") {
-        return !window.confirm(current.message);
-      }
+        if (current.message && typeof window.confirm === "function") {
+          return !window.confirm(current.message);
+        }
 
-      return true;
-    });
+        return true;
+      },
+      () => shouldBlockUnload(optionsRef.current),
+    );
   }, [active]);
 
   return { active };

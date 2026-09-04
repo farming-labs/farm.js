@@ -788,7 +788,7 @@ export function Chart() {}
 
     expect(source).toContain("getNavigationState: function()");
     expect(source).toContain("subscribeNavigation: function(listener)");
-    expect(source).toContain("addBlocker: function(blocker)");
+    expect(source).toContain("addBlocker: function(blocker, shouldBlockUnload)");
     expect(source).toContain("registerScrollElement: function(key, element)");
     expect(source).toContain("stripFarmBasePath(pathname)");
     expect(source).toContain("writePageState: function(action, state, href)");
