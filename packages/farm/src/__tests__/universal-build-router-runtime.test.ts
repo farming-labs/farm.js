@@ -10,7 +10,6 @@ import {
   generateRuntimePathMatcherSource,
   generateUniversalRouterStateRuntime,
   generateUniversalRouterStateProperties,
-  generateUniversalRouterStateRuntime,
 } from "../nitro/universal-build";
 
 afterEach(() => {
