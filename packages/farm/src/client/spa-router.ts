@@ -505,7 +505,12 @@ export class SPARouter {
     state: unknown;
     url: URL;
   }): Promise<void> {
-    const historyPath = options.pageData.canonicalPath || options.fullPath;
+    const historyUrl = new URL(
+      options.pageData.canonicalPath || options.fullPath,
+      window.location.origin,
+    );
+    historyUrl.hash = options.url.hash;
+    const historyPath = historyUrl.pathname + historyUrl.search + historyUrl.hash;
     const historyState = createHistoryState(
       historyPath,
       options.state,
