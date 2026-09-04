@@ -514,7 +514,7 @@ export class SPARouter {
     const historyState = createHistoryState(
       historyPath,
       options.state,
-      undefined,
+      options.replace ? window.history.state : undefined,
       options.pageData.interception?.from ?? null,
     ) as Record<string, unknown>;
     const nextHistoryIndex =
