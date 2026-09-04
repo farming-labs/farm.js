@@ -10,7 +10,9 @@ describe("SPA navigation request context", () => {
   it("passes the destination request to development route contexts", () => {
     const source = readSource("vite.ts");
     const start = source.indexOf("// Handle SPA page-data requests for client-side navigation");
-    const end = source.indexOf("// Handle API routes", start);
+    const end = source.indexOf("const startTime = Date.now();", start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
     const pageDataRuntime = source.slice(start, end);
 
     expect(pageDataRuntime.match(/request: targetRequest/g)).toHaveLength(2);
