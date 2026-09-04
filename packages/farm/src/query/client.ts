@@ -7,7 +7,11 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { notifyHistoryChange, subscribeHistoryChange } from "../client/history-sync";
+import {
+  notifyHistoryChange,
+  subscribeHistoryChange,
+  writeFarmURLSearchHistory,
+} from "../client/history-sync";
 import { _resolveCurrentRequest } from "../server/request-bridge";
 import { emitter } from "./sync";
 export { parseRouteParams, loadRouteParams, type RouteParamsInput } from "./params";
@@ -158,19 +162,14 @@ const commitURLUpdate = (
 
   if (newUrl === currentUrl) return;
 
-  // Preserve Farm's history state (page state, interception markers) and
-  // keep its recorded path in sync with the new query string so pops
-  // report the entry's real location.
-  const historyState = window.history.state;
-  const nextHistoryState =
-    historyState && typeof historyState === "object" && "path" in historyState
-      ? { ...historyState, path: newUrl }
-      : historyState;
-
-  if (history === "replaceState") {
-    window.history.replaceState(nextHistoryState, "", newUrl);
-  } else {
-    window.history.pushState(nextHistoryState, "", newUrl);
+  const historyAction = history === "replaceState" ? "replace" : "push";
+  if (!writeFarmURLSearchHistory(historyAction, newUrl)) {
+    const historyState = window.history.state;
+    const nextHistoryState =
+      historyState && typeof historyState === "object" && "path" in historyState
+        ? { ...historyState, path: newUrl }
+        : historyState;
+    window.history[history](nextHistoryState, "", newUrl);
   }
 
   if (emitUpdate) {

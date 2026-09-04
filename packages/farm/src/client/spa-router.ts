@@ -503,6 +503,11 @@ export class SPARouter {
     this.writePageState("replace", state, href);
   }
 
+  /** @internal Keep shallow URL-search writes inside the router's history bookkeeping. */
+  writeURLSearch(action: "push" | "replace", href: string): void {
+    this.writePageState(action, readPageState(), href, false);
+  }
+
   private async commitNavigation(options: {
     fullPath: string;
     pageData: PageData;
@@ -887,7 +892,12 @@ export class SPARouter {
     }
   }
 
-  private writePageState(action: "push" | "replace", state: unknown, href?: string): void {
+  private writePageState(
+    action: "push" | "replace",
+    state: unknown,
+    href?: string,
+    notify = true,
+  ): void {
     if (typeof window === "undefined") return;
 
     const url = href ? new URL(href, window.location.origin).toString() : window.location.href;
@@ -909,7 +919,7 @@ export class SPARouter {
     }
     this.currentHistoryPath = nextPath;
 
-    notifyHistoryChange("page-state");
+    if (notify) notifyHistoryChange("page-state");
   }
 
   /**

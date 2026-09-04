@@ -9,6 +9,14 @@ export interface FarmHistoryChangeDetail {
   kind: FarmHistoryChangeKind;
 }
 
+/** Write shallow URL history through the installed SPA router when available. */
+export function writeFarmURLSearchHistory(action: "push" | "replace", href: string): boolean {
+  const router = getInstalledFarmSPARouter();
+  if (!router) return false;
+  router.writeURLSearch(action, href);
+  return true;
+}
+
 function dispatchHistoryChange(kind: FarmHistoryChangeKind): void {
   window.dispatchEvent(
     new CustomEvent<FarmHistoryChangeDetail>(FARM_HISTORY_CHANGE_EVENT, {
