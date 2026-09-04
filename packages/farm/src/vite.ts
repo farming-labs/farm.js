@@ -274,6 +274,7 @@ function createRequestFromNodeRequest(
 }
 
 interface FarmNodeAbortRequest {
+  aborted?: boolean;
   once(event: "aborted", listener: () => void): unknown;
   off(event: "aborted", listener: () => void): unknown;
 }
@@ -290,15 +291,25 @@ export function createFarmNodeRequestAbortSignal(
   res: FarmNodeAbortResponse,
 ): AbortSignal {
   const controller = new AbortController();
+  let disposed = false;
   const dispose = () => {
+    if (disposed) return;
+    disposed = true;
     req.off("aborted", abort);
     res.off("close", abortOnEarlyClose);
     res.off("finish", dispose);
+    controller.signal.removeEventListener("abort", dispose);
   };
   const abort = () => controller.abort();
   const abortOnEarlyClose = () => {
     if (!res.writableEnded) abort();
+    dispose();
   };
+
+  if (req.aborted) {
+    controller.abort();
+    return controller.signal;
+  }
 
   req.once("aborted", abort);
   res.once("close", abortOnEarlyClose);
