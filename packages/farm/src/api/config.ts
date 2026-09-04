@@ -94,6 +94,17 @@ export function normalizeFarmAPIConfig(
 }
 
 export function normalizeFarmAPIBasePath(value: string): string {
+  const hasUnstableCharacters = (candidate: string) =>
+    candidate.includes("\\") ||
+    Array.from(candidate).some((character) => {
+      const code = character.charCodeAt(0);
+      return code <= 31 || (code >= 127 && code <= 159);
+    });
+
+  if (hasUnstableCharacters(value)) {
+    throw new Error("Farm api.basePath cannot contain backslashes or control characters.");
+  }
+
   const path = value.trim();
   if (!path) {
     throw new Error("Farm api.basePath cannot be empty.");
@@ -101,16 +112,6 @@ export function normalizeFarmAPIBasePath(value: string): string {
   if (path.includes("?") || path.includes("#")) {
     throw new Error("Farm api.basePath cannot contain a query string or hash.");
   }
-  if (
-    path.includes("\\") ||
-    Array.from(path).some((character) => {
-      const code = character.charCodeAt(0);
-      return code <= 31 || code === 127;
-    })
-  ) {
-    throw new Error("Farm api.basePath cannot contain backslashes or control characters.");
-  }
-
   for (const segment of path.split("/")) {
     let decoded = segment;
     try {
@@ -118,6 +119,9 @@ export function normalizeFarmAPIBasePath(value: string): string {
     } catch {
       // A malformed escape remains literal in a URL pathname. It cannot be a
       // dot segment, so leave the ordinary URL parser to preserve it.
+    }
+    if (hasUnstableCharacters(decoded)) {
+      throw new Error("Farm api.basePath cannot contain backslashes or control characters.");
     }
     if (decoded === "." || decoded === "..") {
       throw new Error('Farm api.basePath cannot contain "." or ".." path segments.');
