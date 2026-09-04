@@ -562,6 +562,63 @@ describe("useQueryState shallow routing", () => {
     expect(window.location.search).toBe("?q=second");
   });
 
+  it("cancels an older throttled write before an immediate update", () => {
+    vi.useFakeTimers();
+    let setQuery!: (value: string | null) => void;
+
+    function App({ throttle }: { throttle: boolean }) {
+      const [, updateQuery] = useQueryState("q", asString, {
+        throttleMs: throttle ? 50 : 0,
+      });
+      setQuery = updateQuery;
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App, { throttle: true }));
+    });
+    act(() => {
+      setQuery("old");
+      root?.render(createElement(App, { throttle: false }));
+    });
+    act(() => {
+      setQuery("new");
+      vi.runAllTimers();
+    });
+
+    expect(window.location.search).toBe("?q=new");
+  });
+
+  it("cancels an older throttled multi-key write before an immediate update", () => {
+    vi.useFakeTimers();
+    let setQueries!: (updates: { q?: string | null; page?: string | null }) => void;
+    const parsers = { q: asString, page: asString };
+
+    function App({ throttle }: { throttle: boolean }) {
+      const [, updateQueries] = useQueryStates(parsers, {
+        throttleMs: throttle ? 50 : 0,
+      });
+      setQueries = updateQueries;
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App, { throttle: true }));
+    });
+    act(() => {
+      setQueries({ q: "old", page: "1" });
+      root?.render(createElement(App, { throttle: false }));
+    });
+    act(() => {
+      setQueries({ q: "new", page: "2" });
+      vi.runAllTimers();
+    });
+
+    expect(window.location.search).toBe("?q=new&page=2");
+  });
+
   it("preserves Farm page history state when updating query params", async () => {
     vi.useFakeTimers();
     spaRouter = new SPARouter({ scrollRestoration: false });

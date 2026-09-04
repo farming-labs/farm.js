@@ -265,6 +265,7 @@ export function useQueryState<TParser extends Parser<any>>(
 
       emitter.emitKey(key, { state: value, query: serialized });
 
+      cancelPendingUpdateRef.current?.();
       cancelPendingUpdateRef.current = updateURL({ [key]: serialized }, options, true);
 
       setTimeout(() => {
@@ -389,6 +390,7 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
         }
       });
 
+      cancelPendingUpdateRef.current?.();
       cancelPendingUpdateRef.current = updateURL(urlUpdates, options, true);
     },
     [parsers, options],
