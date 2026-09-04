@@ -2315,6 +2315,7 @@ ${generateUniversalRouterStateProperties()}
   prefetch: function(href) {
     const url = new URL(href, window.location.origin);
     if (isFarmExternalNavigationURL(url, window.location.origin)) return;
+    if (isFarmDocsPath(url.pathname)) return;
     
     const pathname = url.pathname + url.search;
     if (this.prefetchCache.has(pathname)) return;
@@ -3363,6 +3364,7 @@ ${generateUniversalRouterStateProperties()}
   prefetch: function(href) {
     const url = new URL(href, window.location.origin);
     if (isFarmExternalNavigationURL(url, window.location.origin)) return;
+    if (isFarmDocsPath(url.pathname)) return;
     
     const pathname = url.pathname + url.search;
     const interceptFrom = this.currentPath;
