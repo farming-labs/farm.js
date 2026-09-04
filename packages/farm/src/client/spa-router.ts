@@ -155,6 +155,7 @@ export class SPARouter {
   private cache: Map<string, CacheEntry> = new Map();
   private prefetchingUrls: Set<string> = new Set();
   private observers: Map<Element, IntersectionObserver> = new Map();
+  private prefetchTimers: Map<Element, ReturnType<typeof setTimeout>> = new Map();
   private blockers: Set<FarmNavigationBlocker> = new Set();
   private unloadBlockers: Map<FarmNavigationBlocker, () => boolean> = new Map();
   private navigationListeners: Set<FarmNavigationListener> = new Set();
@@ -236,6 +237,10 @@ export class SPARouter {
   destroy(): void {
     if (typeof window === "undefined") return;
     this.cancelActiveNavigation();
+    for (const observer of this.observers.values()) observer.disconnect();
+    for (const timer of this.prefetchTimers.values()) clearTimeout(timer);
+    this.observers.clear();
+    this.prefetchTimers.clear();
     window.removeEventListener("popstate", this.onPopState);
     window.removeEventListener("beforeunload", this.onBeforeUnload);
   }
@@ -427,15 +432,19 @@ export class SPARouter {
 
     const href = element.getAttribute("href");
     if (!href || this.isExternalUrl(href)) return;
+    this.unobserveForPrefetch(element);
 
     const observer = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
           if (entry.isIntersecting) {
             // Delay prefetch slightly to avoid prefetching during scroll
-            setTimeout(() => {
-              this.prefetch(href);
+            const timer = setTimeout(() => {
+              if (this.prefetchTimers.get(element) !== timer) return;
+              this.prefetchTimers.delete(element);
+              void this.prefetch(href);
             }, this.options.prefetchTimeout);
+            this.prefetchTimers.set(element, timer);
 
             // Stop observing after first intersection
             observer.unobserve(element);
@@ -458,6 +467,11 @@ export class SPARouter {
     if (observer) {
       observer.unobserve(element);
       this.observers.delete(element);
+    }
+    const timer = this.prefetchTimers.get(element);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      this.prefetchTimers.delete(element);
     }
   }
 
