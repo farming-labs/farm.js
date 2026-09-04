@@ -614,6 +614,56 @@ describe("useQueryState shallow routing", () => {
     expect((spaRouter as any).currentHistoryIndex).toBe(2);
   });
 
+  it("keeps the hash in SPA router state during shallow query writes", () => {
+    vi.useFakeTimers();
+    window.history.replaceState(null, "", "/#details");
+    spaRouter = new SPARouter({ scrollRestoration: false });
+    (window as any).__FARM_SPA_ROUTER__ = spaRouter;
+    let setQuery!: (value: string | null) => void;
+
+    function App() {
+      const [, set] = useQueryState("q", asString);
+      setQuery = set;
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+    act(() => {
+      setQuery("value");
+    });
+
+    expect(window.location.hash).toBe("#details");
+    expect(window.history.state).toMatchObject({ path: "/?q=value#details" });
+  });
+
+  it("preserves primitive history state through the router fallback", () => {
+    vi.useFakeTimers();
+    spaRouter = new SPARouter({ scrollRestoration: false });
+    (window as any).__FARM_SPA_ROUTER__ = spaRouter;
+    window.history.replaceState("app-owned", "", "/");
+    let setQuery!: (value: string | null) => void;
+
+    function App() {
+      const [, set] = useQueryState("q", asString);
+      setQuery = set;
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+    act(() => {
+      setQuery("value");
+    });
+
+    expect(window.location.search).toBe("?q=value");
+    expect(window.history.state).toBe("app-owned");
+  });
+
   it("does not leak SPA router popstate listeners across tests", async () => {
     vi.useFakeTimers();
     spaRouter = new SPARouter({ scrollRestoration: false });

@@ -901,8 +901,10 @@ export class SPARouter {
     if (typeof window === "undefined") return;
 
     const url = href ? new URL(href, window.location.origin).toString() : window.location.href;
-    const nextPath = new URL(url).pathname + new URL(url).search;
-    const nextState = createHistoryState(nextPath, state, window.history.state) as Record<
+    const parsedUrl = new URL(url);
+    const nextPath = parsedUrl.pathname + parsedUrl.search;
+    const historyPath = nextPath + parsedUrl.hash;
+    const nextState = createHistoryState(historyPath, state, window.history.state) as Record<
       string,
       unknown
     >;

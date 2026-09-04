@@ -1876,10 +1876,26 @@ export function generateUniversalRouterStateProperties(): string {
 
   writePageState: function(action, state, href) {
     const url = new URL(href || window.location.href, window.location.origin);
-    this.writeHistoryEntry(action, url.pathname + url.search, state, url, "page-state");
+    this.writeHistoryEntry(action, url.pathname + url.search + url.hash, state, url, "page-state");
   },
 
-  writeHistoryEntry: function(action, path, pageState, url, changeKind = "url-search") {
+  writeURLSearch: function(action, href) {
+    const url = new URL(href || window.location.href, window.location.origin);
+    const currentState = window.history.state;
+    const pageState = currentState && typeof currentState === "object"
+      ? currentState[FARM_PAGE_STATE_KEY]
+      : undefined;
+    this.writeHistoryEntry(
+      action,
+      url.pathname + url.search + url.hash,
+      pageState,
+      url,
+      "url-search",
+      false,
+    );
+  },
+
+  writeHistoryEntry: function(action, path, pageState, url, changeKind = "url-search", notify = true) {
     if (action === "pop") return;
     const nextState = createHistoryState(path, pageState, window.history.state);
     const nextIndex = this.currentHistoryIndex == null
@@ -1894,9 +1910,11 @@ export function generateUniversalRouterStateProperties(): string {
     this.currentHistoryState = nextState;
     // Announce programmatic history writes without synthesizing popstate,
     // which the router reserves for real back/forward navigation.
-    window.dispatchEvent(
-      new CustomEvent("farm:historychange", { detail: { kind: changeKind } }),
-    );
+    if (notify) {
+      window.dispatchEvent(
+        new CustomEvent("farm:historychange", { detail: { kind: changeKind } }),
+      );
+    }
   },
 
   registerScrollElement: function(key, element) {
