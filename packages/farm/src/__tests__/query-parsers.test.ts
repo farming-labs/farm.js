@@ -10,32 +10,40 @@ describe("query parsers", () => {
   });
 
   it("round-trips array items containing the delimiter", () => {
-    const parser = asArrayOf(asString);
+    const parser = asArrayOf(asString, { format: "structured" });
     const value = ["New York, NY", "Los Angeles, CA"];
 
     expect(parser.parse(parser.serialize(value))).toEqual(value);
   });
 
   it("round-trips serialized nested values and empty items", () => {
-    const jsonParser = asArrayOf(asJson<{ label: string; count: number }>());
+    const jsonParser = asArrayOf(asJson<{ label: string; count: number }>(), {
+      format: "structured",
+    });
     const jsonValue = [
       { label: "alpha, beta", count: 1 },
       { label: "gamma", count: 2 },
     ];
-    const stringParser = asArrayOf({
-      parse: (value: string) => value,
-      serialize: (value: string) => value,
-    });
+    const stringParser = asArrayOf(
+      {
+        parse: (value: string) => value,
+        serialize: (value: string) => value,
+      },
+      { format: "structured" },
+    );
 
     expect(jsonParser.parse(jsonParser.serialize(jsonValue))).toEqual(jsonValue);
     expect(stringParser.parse(stringParser.serialize(["", "value"]))).toEqual(["", "value"]);
   });
 
   it("round-trips items whose surrounding whitespace is significant", () => {
-    const parser = asArrayOf({
-      parse: (value: string) => value,
-      serialize: (value: string) => value,
-    });
+    const parser = asArrayOf(
+      {
+        parse: (value: string) => value,
+        serialize: (value: string) => value,
+      },
+      { format: "structured" },
+    );
 
     expect(parser.parse(parser.serialize([" leading", "trailing ", " "]))).toEqual([
       " leading",
@@ -51,8 +59,16 @@ describe("query parsers", () => {
     expect(parser.parse('~["a"]')).toEqual(['~["a"]']);
   });
 
-  it("escapes values in the versioned structured namespace", () => {
+  it("does not reserve the structured namespace in the default comma format", () => {
     const parser = asArrayOf(asString);
+    const value = '~farm-array:v1:["legacy"]';
+
+    expect(parser.parse(value)).toEqual([value]);
+    expect(parser.serialize([value])).toBe(value);
+  });
+
+  it("escapes values in the versioned structured namespace", () => {
+    const parser = asArrayOf(asString, { format: "structured" });
     const value = ['~farm-array:v1:["legacy"]'];
 
     expect(parser.parse(parser.serialize(value))).toEqual(value);

@@ -124,9 +124,13 @@ export const asBoolean: Parser<boolean> = {
 
 // Array parser
 const STRUCTURED_ARRAY_PREFIX = "~farm-array:v1:";
+export interface ArrayParserOptions {
+  /** Preserve comma URLs by default; opt in when item delimiters must round-trip. */
+  format?: "comma" | "structured";
+}
 
-function parseArrayItems(value: string): string[] {
-  if (value.startsWith(STRUCTURED_ARRAY_PREFIX)) {
+function parseArrayItems(value: string, structured: boolean): string[] {
+  if (structured && value.startsWith(STRUCTURED_ARRAY_PREFIX)) {
     try {
       const parsed = JSON.parse(value.slice(STRUCTURED_ARRAY_PREFIX.length));
       if (Array.isArray(parsed) && parsed.every((item) => typeof item === "string")) {
@@ -143,7 +147,9 @@ function parseArrayItems(value: string): string[] {
     .map((item) => item.trim());
 }
 
-function serializeArrayItems(values: string[]): string {
+function serializeArrayItems(values: string[], structured: boolean): string {
+  if (!structured) return values.join(",");
+
   const needsStructuredEncoding = values.some(
     (value, index) =>
       value === "" ||
@@ -156,15 +162,19 @@ function serializeArrayItems(values: string[]): string {
     : values.join(",");
 }
 
-export function asArrayOf<T>(itemParser: Parser<T>): Parser<T[]> {
+export function asArrayOf<T>(itemParser: Parser<T>, options: ArrayParserOptions = {}): Parser<T[]> {
+  const structured = options.format === "structured";
   const parse = (value: string): T[] | null => {
     if (!value) return null;
-    return parseArrayItems(value)
+    return parseArrayItems(value, structured)
       .map((item) => itemParser.parse(item))
       .filter((item) => item !== null) as T[];
   };
   const serialize = (value: T[]) =>
-    serializeArrayItems(value.map((item) => itemParser.serialize(item)));
+    serializeArrayItems(
+      value.map((item) => itemParser.serialize(item)),
+      structured,
+    );
 
   return {
     parse,

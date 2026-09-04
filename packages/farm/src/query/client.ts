@@ -24,6 +24,7 @@ export {
   asIsoDate,
   asIsoDateTime,
   createParser,
+  type ArrayParserOptions,
   type Parser,
   type inferParserType,
 } from "./parsers";
