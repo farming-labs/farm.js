@@ -144,6 +144,7 @@ async function defaultHandler({
       const targetRequest = new Request(targetUrl, {
         method: "GET",
         headers: request.headers,
+        signal: request.signal,
       });
 
       // Find the route

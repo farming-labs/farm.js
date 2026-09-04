@@ -16,6 +16,7 @@ describe("SPA navigation request context", () => {
     const pageDataRuntime = source.slice(start, end);
 
     expect(pageDataRuntime.match(/request: targetRequest/g)).toHaveLength(2);
+    expect(pageDataRuntime).toContain("signal: request.signal");
     expect(pageDataRuntime).not.toMatch(/resolveFarmRouteContext[\s\S]*?\{\s*request,/);
   });
 
@@ -23,6 +24,7 @@ describe("SPA navigation request context", () => {
     const source = readSource("nitro", "server-entry.ts");
 
     expect(source).toContain("const targetRequest = new Request(targetUrl");
+    expect(source).toContain("signal: request.signal");
     expect(source).toMatch(/sr\.resolveRouteContext\(\{\s*request: targetRequest,/);
   });
 });
