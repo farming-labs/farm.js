@@ -123,12 +123,12 @@ export const asBoolean: Parser<boolean> = {
 };
 
 // Array parser
-const STRUCTURED_ARRAY_PREFIX = "~[";
+const STRUCTURED_ARRAY_PREFIX = "~farm-array:v1:";
 
 function parseArrayItems(value: string): string[] {
   if (value.startsWith(STRUCTURED_ARRAY_PREFIX)) {
     try {
-      const parsed = JSON.parse(value.slice(1));
+      const parsed = JSON.parse(value.slice(STRUCTURED_ARRAY_PREFIX.length));
       if (Array.isArray(parsed) && parsed.every((item) => typeof item === "string")) {
         return parsed;
       }
@@ -146,9 +146,14 @@ function parseArrayItems(value: string): string[] {
 function serializeArrayItems(values: string[]): string {
   const needsStructuredEncoding = values.some(
     (value, index) =>
-      value === "" || value.includes(",") || (index === 0 && value.startsWith("~[")),
+      value === "" ||
+      value.trim() !== value ||
+      value.includes(",") ||
+      (index === 0 && value.startsWith(STRUCTURED_ARRAY_PREFIX)),
   );
-  return needsStructuredEncoding ? `~${JSON.stringify(values)}` : values.join(",");
+  return needsStructuredEncoding
+    ? `${STRUCTURED_ARRAY_PREFIX}${JSON.stringify(values)}`
+    : values.join(",");
 }
 
 export function asArrayOf<T>(itemParser: Parser<T>): Parser<T[]> {

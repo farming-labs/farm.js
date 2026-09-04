@@ -130,7 +130,8 @@ unsafe `page` values fall back to page 1. `totalItems` must be a non-negative sa
 
 `asArrayOf` keeps the readable comma-separated format for simple values. When an item contains a
 comma or would otherwise be ambiguous, Farm switches to a structured representation automatically
-so parsing the generated URL returns the original items.
+so parsing the generated URL returns the original items. The representation uses a versioned
+`~farm-array:v1:` namespace; older values such as `~[]` keep their comma-format meaning.
 
 ## Production notes
 

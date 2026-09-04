@@ -31,6 +31,33 @@ describe("query parsers", () => {
     expect(stringParser.parse(stringParser.serialize(["", "value"]))).toEqual(["", "value"]);
   });
 
+  it("round-trips items whose surrounding whitespace is significant", () => {
+    const parser = asArrayOf({
+      parse: (value: string) => value,
+      serialize: (value: string) => value,
+    });
+
+    expect(parser.parse(parser.serialize([" leading", "trailing ", " "]))).toEqual([
+      " leading",
+      "trailing ",
+      " ",
+    ]);
+  });
+
+  it("keeps legacy values using the old structured-looking prefix", () => {
+    const parser = asArrayOf(asString);
+
+    expect(parser.parse("~[]")).toEqual(["~[]"]);
+    expect(parser.parse('~["a"]')).toEqual(['~["a"]']);
+  });
+
+  it("escapes values in the versioned structured namespace", () => {
+    const parser = asArrayOf(asString);
+    const value = ['~farm-array:v1:["legacy"]'];
+
+    expect(parser.parse(parser.serialize(value))).toEqual(value);
+  });
+
   it("keeps malformed structured-looking values on the legacy path", () => {
     const parser = asArrayOf(asString);
 
