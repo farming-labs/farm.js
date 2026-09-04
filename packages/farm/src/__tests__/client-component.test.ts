@@ -732,7 +732,7 @@ export function Chart() {}
     expect(source).toContain("window.location.href = href;");
     expect(
       source.match(
-        /if \(options\.replace \|\| options\.action === "replace"\) window\.location\.replace\(url\.toString\(\)\);/g,
+        /if \(options\.replace \|\| options\.action === "replace"\) window\.location\.replace\(href\);/g,
       ),
     ).toHaveLength(4);
     expect(source).toContain("if (!newRoot || !currentRoot) return this.swapDocument(doc);");
