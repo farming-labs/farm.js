@@ -166,10 +166,14 @@ describe("server query client", () => {
 
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    const api = createAPIClient<ProductAPI>({ baseURL: "https://farm.test" });
+    const api = createAPIClient<ProductAPI>({
+      baseURL: "https://farm.test",
+      credentials: "omit",
+    });
     const result = await api.products.get(undefined, {
       cache: {
         key: ["product", "123"],
+        scope: "shared",
         policy: "cache-first",
         staleTime: 10_000,
       },
