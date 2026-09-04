@@ -173,6 +173,137 @@ describe("compiled keyed-array rolling-window hints", () => {
     expect(harness.counters.bindings).toBe(2);
   });
 
+  it("composes queued rolling windows and creates only the final incoming suffix", async () => {
+    const initialItems = ["a", "b", "c", "d"].map((id) => ({
+      id,
+      label: id.toUpperCase(),
+    }));
+    const harness = createRollingHarness(initialItems);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Feed />));
+    const survivor = container.querySelector('[data-key="c"]');
+    harness.counters.keys = 0;
+    harness.counters.descriptors = 0;
+    harness.counters.bindings = 0;
+
+    await act(async () => {
+      harness.roll(1, [{ id: "e", label: "E" }]);
+      harness.roll(1, [{ id: "f", label: "F" }]);
+      await flushCompilerUpdates();
+    });
+
+    expect(container.textContent).toBe("CDEF");
+    expect(container.querySelector('[data-key="c"]')).toBe(survivor);
+    expect(harness.counters.keys).toBe(2);
+    expect(harness.counters.descriptors).toBe(2);
+    expect(harness.counters.bindings).toBe(2);
+  });
+
+  it("collapses queued grow and shrink rolls after all committed rows expire", async () => {
+    const initialItems = ["a", "b", "c", "d"].map((id) => ({
+      id,
+      label: id.toUpperCase(),
+    }));
+    const harness = createRollingHarness(initialItems);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Feed />));
+    harness.counters.keys = 0;
+    harness.counters.descriptors = 0;
+    harness.counters.bindings = 0;
+
+    await act(async () => {
+      harness.roll(3, [
+        { id: "e", label: "E" },
+        { id: "f", label: "F" },
+        { id: "g", label: "G" },
+      ]);
+      harness.roll(2, [{ id: "h", label: "H" }]);
+      await flushCompilerUpdates();
+    });
+
+    expect(container.textContent).toBe("FGH");
+    expect(container.querySelector('[data-key="a"]')).toBeNull();
+    expect(container.querySelector('[data-key="d"]')).toBeNull();
+    expect(harness.counters.keys).toBe(3);
+    expect(harness.counters.descriptors).toBe(3);
+    expect(harness.counters.bindings).toBe(3);
+  });
+
+  it("validates final queued keys against the committed window", async () => {
+    const initialItems = ["a", "b", "c", "d"].map((id) => ({
+      id,
+      label: id.toUpperCase(),
+    }));
+    const reused = createRollingHarness(initialItems);
+    const reusedContainer = document.createElement("div");
+    document.body.append(reusedContainer);
+    const reusedRoot = createRoot(reusedContainer);
+    roots.push(reusedRoot);
+    await act(async () => reusedRoot.render(<reused.Feed />));
+    const alpha = reusedContainer.querySelector('[data-key="a"]');
+    reused.counters.keys = 0;
+
+    await act(async () => {
+      reused.roll(1, [{ id: "e", label: "E" }]);
+      reused.roll(1, [initialItems[0]]);
+      await flushCompilerUpdates();
+    });
+
+    expect(reusedContainer.textContent).toBe("CDEA");
+    expect(reusedContainer.querySelector('[data-key="a"]')).toBe(alpha);
+    // The optimized attempt reads the two final incoming keys, then complete
+    // reconciliation rereads all four after detecting the committed-key move.
+    expect(reused.counters.keys).toBe(6);
+
+    const discarded = createRollingHarness(initialItems);
+    const discardedContainer = document.createElement("div");
+    document.body.append(discardedContainer);
+    const discardedRoot = createRoot(discardedContainer);
+    roots.push(discardedRoot);
+    await act(async () => discardedRoot.render(<discarded.Feed />));
+    discarded.counters.keys = 0;
+    discarded.counters.descriptors = 0;
+    discarded.counters.bindings = 0;
+
+    await act(async () => {
+      discarded.roll(4, [initialItems[0]]);
+      discarded.roll(1, [{ id: "e", label: "E" }]);
+      await flushCompilerUpdates();
+    });
+
+    expect(discardedContainer.textContent).toBe("E");
+    expect(discarded.counters.keys).toBe(1);
+    expect(discarded.counters.descriptors).toBe(1);
+    expect(discarded.counters.bindings).toBe(1);
+  });
+
+  it("rejects a queued rolling chain after an unhinted intermediate update", async () => {
+    const harness = createRollingHarness(
+      ["a", "b", "c", "d"].map((id) => ({ id, label: id.toUpperCase() })),
+    );
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Feed />));
+    harness.counters.keys = 0;
+
+    await act(async () => {
+      harness.customRoll({ id: "e", label: "E" });
+      harness.roll(1, [{ id: "f", label: "F" }]);
+      await flushCompilerUpdates();
+    });
+
+    expect(container.textContent).toBe("CBEF");
+    expect(harness.counters.keys).toBe(4);
+  });
+
   it("falls back when an incoming row reuses a committed key", async () => {
     const initialItems: Item[] = [
       { id: "a", label: "Alpha" },
@@ -280,6 +411,112 @@ describe("compiled keyed-array rolling-window hints", () => {
     expect(container.textContent).toBe("BCDEFG");
     expect(container.querySelector('[data-key="b"]')).toBe(b);
     expect(harness.counters.keys).toBe(6);
+  });
+
+  it("preserves controlled focus and updates delegated indexes after queued rolls", async () => {
+    const initialItems = ["a", "b", "c", "d"].map((id) => ({
+      id,
+      label: id.toUpperCase().repeat(4),
+    }));
+    const calls: string[] = [];
+    let queue = () => undefined;
+    const Feed = createCompiledComponent({
+      displayName: "QueuedRollingInteractiveFeed",
+      initialize: () => [initialItems],
+      render(_props: Record<string, never>, state, blocks) {
+        const items = () => state[0].get() as Item[];
+        queue = () => {
+          state[0].set((previous) =>
+            hintedRoll(previous as Item[], 1, [{ id: "e", label: "EEEE" }]),
+          );
+          state[0].set((previous) =>
+            hintedRoll(previous as Item[], 1, [{ id: "f", label: "FFFF" }]),
+          );
+        };
+        return (
+          <section>
+            <blocks.KeyedRows
+              collectionDependency={0}
+              delegateEvents
+              dependencies={[0]}
+              events={[
+                {
+                  invoke: (item, index) => calls.push(`${(item as Item).id}:${index}`),
+                  name: "onClick",
+                  path: [1],
+                },
+              ]}
+              filterIndexIndependent
+              id={0}
+              items={items}
+              structureDependencies={[0]}
+              render={(event) => (
+                <ul>
+                  {items().map((item, index) => (
+                    <li data-key={item.id} key={item.id}>
+                      <input readOnly value={item.label} />
+                      <button data-row-button={item.id} onClick={event(item, index, 0)}>
+                        Select
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              rowKey={(item) => (item as Item).id}
+              create={(item) => ({
+                kind: "element",
+                tag: "li",
+                attributes: [{ name: "data-key", value: (item as Item).id }],
+                styles: [],
+                children: [
+                  {
+                    kind: "element",
+                    tag: "input",
+                    attributes: [
+                      { name: "readOnly", value: true },
+                      { name: "value", value: (item as Item).label },
+                    ],
+                    styles: [],
+                    children: [],
+                  },
+                  {
+                    kind: "element",
+                    tag: "button",
+                    attributes: [{ name: "data-row-button", value: (item as Item).id }],
+                    styles: [],
+                    children: ["Select"],
+                  },
+                ],
+              })}
+              bindings={[]}
+            />
+          </section>
+        );
+      },
+      bindings: [{ kind: "block", id: 0, dependencies: [0] }],
+    });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<Feed />));
+    const input = container.querySelector('[data-key="d"] input') as HTMLInputElement;
+    input.focus();
+    input.setSelectionRange(1, 3);
+
+    await act(async () => {
+      queue();
+      await flushCompilerUpdates();
+    });
+    await act(async () => {
+      (container.querySelector('[data-row-button="d"]') as HTMLButtonElement).click();
+    });
+
+    expect(container.textContent).toBe("SelectSelectSelectSelect");
+    expect(container.querySelector('[data-key="d"] input')).toBe(input);
+    expect(document.activeElement).toBe(input);
+    expect([input.selectionStart, input.selectionEnd]).toEqual([1, 3]);
+    expect(calls).toEqual(["d:1"]);
   });
 
   it("matches normal React through 250 committed rolling updates", async () => {
@@ -392,6 +629,83 @@ describe("compiled keyed-array rolling-window hints", () => {
     expect(harness.counters.bindings).toBe(incomingCount);
   }, 20_000);
 
+  it("matches React through 1,000 randomized queued rolling commits", async () => {
+    const initialItems = Array.from(
+      { length: 48 },
+      (_, index): Item => ({ id: `queued-row-${index}`, label: `Queued row ${index}` }),
+    );
+    const harness = createRollingHarness(initialItems);
+    let rollReact: (remove: number, incoming: readonly Item[]) => void = () => undefined;
+    let seed = 0x51ced;
+    let nextId = initialItems.length;
+    let expectedLength = initialItems.length;
+    let incomingCount = 0;
+    const random = () => {
+      seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0;
+      return seed;
+    };
+    function NormalFeed() {
+      const [items, setItems] = useState(initialItems);
+      rollReact = (remove, incoming) =>
+        setItems((previous) => [...previous.slice(remove), ...incoming]);
+      return (
+        <ol>
+          {items.map((item) => (
+            <li key={item.id}>{item.label}</li>
+          ))}
+        </ol>
+      );
+    }
+    const compiledContainer = document.createElement("div");
+    const reactContainer = document.createElement("div");
+    document.body.append(compiledContainer, reactContainer);
+    const compiledRoot = createRoot(compiledContainer);
+    const reactRoot = createRoot(reactContainer);
+    roots.push(compiledRoot, reactRoot);
+    await act(async () => {
+      compiledRoot.render(<harness.Feed />);
+      reactRoot.render(<NormalFeed />);
+    });
+    harness.counters.keys = 0;
+    harness.counters.descriptors = 0;
+    harness.counters.bindings = 0;
+
+    for (let update = 0; update < 1_000; update += 1) {
+      const operations: Array<{ incoming: Item[]; remove: number }> = [];
+      const operationCount = 2 + (random() % 3);
+      for (let operation = 0; operation < operationCount; operation += 1) {
+        const remove = 1 + (random() % 4);
+        let incomingLength = 1 + (random() % 5);
+        if (expectedLength < 36 && incomingLength < remove) incomingLength = remove;
+        if (expectedLength > 60 && incomingLength > remove) incomingLength = remove;
+        const incoming = Array.from({ length: incomingLength }, (): Item => {
+          const id = nextId++;
+          return { id: `queued-row-${id}`, label: `Queued row ${id}` };
+        });
+        operations.push({ incoming, remove });
+        expectedLength = expectedLength - remove + incomingLength;
+        incomingCount += incomingLength;
+      }
+
+      await act(async () => {
+        for (const operation of operations) {
+          harness.roll(operation.remove, operation.incoming);
+          rollReact(operation.remove, operation.incoming);
+        }
+        await flushCompilerUpdates();
+      });
+      if (update % 25 === 0) {
+        expect(compiledContainer.textContent).toBe(reactContainer.textContent);
+      }
+    }
+
+    expect(compiledContainer.textContent).toBe(reactContainer.textContent);
+    expect(compiledContainer.querySelectorAll("li")).toHaveLength(expectedLength);
+    expect(harness.counters.keys).toBe(incomingCount);
+    expect(harness.counters.descriptors).toBe(incomingCount);
+    expect(harness.counters.bindings).toBe(incomingCount);
+  }, 30_000);
+
   it("hydrates in StrictMode and drops a queued rolling update after unmount", async () => {
     const harness = createRollingHarness([
       { id: "a", label: "Alpha" },
@@ -419,14 +733,16 @@ describe("compiled keyed-array rolling-window hints", () => {
 
     await act(async () => {
       harness.roll(1, [{ id: "c", label: "Gamma" }]);
+      harness.roll(1, [{ id: "d", label: "Delta" }]);
       await flushCompilerUpdates();
     });
-    expect(container.textContent).toBe("BetaGamma");
+    expect(container.textContent).toBe("GammaDelta");
     expect(recoverable).toEqual([]);
 
     roots.pop();
     act(() => {
-      harness.roll(1, [{ id: "d", label: "Delta" }]);
+      harness.roll(1, [{ id: "e", label: "Epsilon" }]);
+      harness.roll(1, [{ id: "f", label: "Phi" }]);
       root.unmount();
     });
     await flushCompilerUpdates();

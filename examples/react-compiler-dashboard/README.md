@@ -90,13 +90,14 @@ deterministic package tests separately require zero surviving key, descriptor, a
 preserve surviving DOM identity, and cover safe and effectful bound expressions plus unsafe
 evaluated-bound fallback.
 
-Rolling windows have a separate 10,000-row persistence gate. A concise
-`[...current.slice(trimCount), ...incoming]` update uses an event-local runtime bound and is
-measured against bracketed React and an equivalent block-bodied compiled control. Both compiler
-modes must remain at least 2x faster than React and 1.25x faster than the compiled control. The
-report must contain a nonzero `keyedArrayRollingWindowHints` count; package tests separately
-require retained DOM identity, work proportional only to the incoming suffix, randomized dynamic
-bounds, and complete fallback for unsafe evaluated bounds.
+Rolling windows have separate single-update and queued 10,000-row persistence gates. A concise
+`[...current.slice(trimCount), ...incoming]` update uses an event-local runtime bound; the queued
+case applies two 500-row rolls before one commit. Both are measured against bracketed React and
+equivalent block-bodied compiled controls. Both compiler modes must remain at least 2x faster than
+React and 1.25x faster than their compiled controls. The report must contain a nonzero
+`keyedArrayRollingWindowHints` count; package tests separately require retained DOM identity, work
+proportional only to the final incoming suffix, randomized dynamic and queued updates, and complete
+fallback for unsafe evaluated bounds or broken chains.
 
 Exact-position insertions, removals, and replacements have separate 10,000-row comparisons. Concise
 native `toSpliced(position, 0, item)`, `toSpliced(position, 0, ...items)`, `toSpliced(position, 1)`,

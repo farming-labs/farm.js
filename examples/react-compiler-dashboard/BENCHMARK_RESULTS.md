@@ -2,6 +2,39 @@
 
 Date: 2026-08-29
 
+## Queued rolling-window composition — 2026-09-05
+
+The 10,000-row table now has a separate workload that queues two functional rolling-window
+setters before one React commit. Each setter removes 500 rows and appends 500 rows. The compiled
+runtime validates both native updates back to the committed collection, removes the final
+1,000-row prefix once, preserves the 9,000 surviving DOM rows, and mounts only the final
+1,000-row suffix. It does not mount rows from the first setter that have already expired. The
+equivalent block-bodied setters remain the compiled fallback control.
+
+| Mode   | React median | Queued roll | Compiled control | vs React | vs control |
+| ------ | -----------: | ----------: | ---------------: | -------: | ---------: |
+| Static |      77.85 ms |    17.30 ms |         27.30 ms |    4.50x |      1.58x |
+| Hybrid |      77.85 ms |    16.70 ms |         26.60 ms |    4.66x |      1.59x |
+
+The independent gate requires at least 2x versus bracketed React and 1.25x versus the compiled
+control in both modes. The complete production run passed that gate, DOM identity assertions,
+zero-owner-execution checks, the general performance and scalability gates, and every older
+optimization gate without lowering a threshold. Both compiler reports emitted three
+`keyedArrayRollingWindowHints` sites: the existing single setter and both setters in the queued
+workload.
+
+Package tests separately prove work proportional only to the final incoming suffix, disjoint grow
+and shrink chains, committed-key fallback, discarded intermediate keys, mixed-chain fallback,
+controlled-input focus and selection, delegated event indexes, Strict Mode hydration, and
+unmount-before-flush cleanup. Another 1,000 randomized commits, each containing two to four queued
+rolling updates, match normal React exactly. The complete 633-test package suite, isolated stress
+suite, and packaged React 18.3.1 and 19.2.8 compatibility runs pass.
+
+The optional rolling-window fixture grows by 112 B gzip to a 13,069 B compiler premium. Direct and
+ordinary keyed fixtures remain byte-for-byte unchanged, and the compiler-selected core still
+removes 82.6% of the full compatibility-runtime premium. The recorded run used Chrome
+152.0.7977.82, Node.js 23.11.0, and Apple M1 macOS arm64.
+
 ## Compiler-safe runtime rolling-window bounds — 2026-09-02
 
 The 10,000-row rolling workload now passes an event-local `trimCount` to

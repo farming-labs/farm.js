@@ -584,6 +584,40 @@ async function measureTrial(browser, trial, compilerMode, port) {
           },
         );
 
+        const tableRollingWindowQueued = await measureTable(
+          async () => ensure10000(),
+          async () => {
+            const rows = table.querySelectorAll("tbody tr");
+            const firstSurvivor = rows[1_000];
+            const previousLast = rows[9_999]?.getAttribute("data-row-id");
+            await runTableAction(
+              () => tableButton("table-roll-window-queued").click(),
+              () =>
+                rowCount() === 10_000 &&
+                table.querySelector("tbody tr") === firstSurvivor &&
+                table.querySelector("tbody tr:last-child")?.getAttribute("data-row-id") !==
+                  previousLast,
+            );
+          },
+        );
+
+        const tableRollingWindowQueuedSnapshot = await measureTable(
+          async () => ensure10000(),
+          async () => {
+            const rows = table.querySelectorAll("tbody tr");
+            const firstSurvivor = rows[1_000];
+            const previousLast = rows[9_999]?.getAttribute("data-row-id");
+            await runTableAction(
+              () => tableButton("table-roll-window-queued-snapshot").click(),
+              () =>
+                rowCount() === 10_000 &&
+                table.querySelector("tbody tr") === firstSurvivor &&
+                table.querySelector("tbody tr:last-child")?.getAttribute("data-row-id") !==
+                  previousLast,
+            );
+          },
+        );
+
         const tablePositionInsert = await measureTable(
           async () => ensure10000(),
           async () => {
@@ -1507,6 +1541,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
             removeSnapshot: tableRemoveSnapshot,
             replace: tableReplace,
             rollingWindow: tableRollingWindow,
+            rollingWindowQueued: tableRollingWindowQueued,
+            rollingWindowQueuedSnapshot: tableRollingWindowQueuedSnapshot,
             rollingWindowSnapshot: tableRollingWindowSnapshot,
             select: tableSelect,
             snapshotMapLookup: tableSnapshotMapLookup,
@@ -1633,6 +1669,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
         removeSnapshot: timingSummary(result.table.removeSnapshot),
         replace: timingSummary(result.table.replace),
         rollingWindow: timingSummary(result.table.rollingWindow),
+        rollingWindowQueued: timingSummary(result.table.rollingWindowQueued),
+        rollingWindowQueuedSnapshot: timingSummary(result.table.rollingWindowQueuedSnapshot),
         rollingWindowSnapshot: timingSummary(result.table.rollingWindowSnapshot),
         select: timingSummary(result.table.select),
         snapshotMapLookup: timingSummary(result.table.snapshotMapLookup),
@@ -1753,6 +1791,8 @@ const tableMetrics = [
   "remove",
   "removeSnapshot",
   "rollingWindow",
+  "rollingWindowQueued",
+  "rollingWindowQueuedSnapshot",
   "rollingWindowSnapshot",
   "clear",
 ];
@@ -1976,6 +2016,29 @@ const keyedRollingWindowRegressions = keyedRollingWindowResults.filter(
     speedup < keyedRollingWindowMinimumSpeedup ||
     !Number.isFinite(snapshotSpeedup) ||
     snapshotSpeedup < keyedRollingWindowMinimumSnapshotSpeedup,
+);
+// Two queued rolling setters should collapse to the final retained committed suffix and incoming
+// rows. Keep the queued 10,000-row workload ahead of both React and an equivalent block-bodied
+// compiled control so an intermediate uncommitted array cannot silently restore the full scan.
+const keyedQueuedRollingWindowMinimumSpeedup = 2;
+const keyedQueuedRollingWindowMinimumSnapshotSpeedup = 1.25;
+const keyedQueuedRollingWindowResults = ["static", "hybrid"].map((mode) => {
+  const rollingMedianMs = comparisons.table.rollingWindowQueued[mode].medianMs;
+  const snapshotMedianMs = comparisons.table.rollingWindowQueuedSnapshot[mode].medianMs;
+  return {
+    mode,
+    rollingMedianMs,
+    snapshotMedianMs,
+    snapshotSpeedup: snapshotMedianMs / rollingMedianMs,
+    speedup: comparisons.table.rollingWindowQueued[`${mode}VsBaseline`].speedup,
+  };
+});
+const keyedQueuedRollingWindowRegressions = keyedQueuedRollingWindowResults.filter(
+  ({ snapshotSpeedup, speedup }) =>
+    !Number.isFinite(speedup) ||
+    speedup < keyedQueuedRollingWindowMinimumSpeedup ||
+    !Number.isFinite(snapshotSpeedup) ||
+    snapshotSpeedup < keyedQueuedRollingWindowMinimumSnapshotSpeedup,
 );
 // A compiler-proven toSpliced(position, 0, ...items) insertion creates the incoming rows in one
 // fragment and leaves both retained sides untouched. Protect that exact 10,000-row/64-row workload
@@ -2436,6 +2499,7 @@ const passed =
   keyedPrependRegressions.length === 0 &&
   keyedSliceRegressions.length === 0 &&
   keyedRollingWindowRegressions.length === 0 &&
+  keyedQueuedRollingWindowRegressions.length === 0 &&
   keyedBatchInsertRegressions.length === 0 &&
   keyedWindowReplaceRegressions.length === 0 &&
   keyedWindowReuseRegressions.length === 0 &&
@@ -2496,6 +2560,13 @@ const report = {
     regressions: keyedRollingWindowRegressions,
     results: keyedRollingWindowResults,
     status: keyedRollingWindowRegressions.length === 0 ? "PASS" : "FAIL",
+  },
+  keyedQueuedRollingWindowHintGate: {
+    minimumSnapshotSpeedup: keyedQueuedRollingWindowMinimumSnapshotSpeedup,
+    minimumSpeedup: keyedQueuedRollingWindowMinimumSpeedup,
+    regressions: keyedQueuedRollingWindowRegressions,
+    results: keyedQueuedRollingWindowResults,
+    status: keyedQueuedRollingWindowRegressions.length === 0 ? "PASS" : "FAIL",
   },
   keyedBatchInsertHintGate: {
     minimumSnapshotSpeedup: keyedBatchInsertMinimumSnapshotSpeedup,
