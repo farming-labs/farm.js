@@ -47,7 +47,9 @@ describe("generateUniversalRouterStateProperties", () => {
       pushState: vi.fn((state: Record<string, unknown>) => {
         history.state = state as typeof history.state;
       }),
-      replaceState: vi.fn(),
+      replaceState: vi.fn((state: Record<string, unknown>) => {
+        history.state = state as typeof history.state;
+      }),
     };
     const windowValue = {
       history,
@@ -97,7 +99,24 @@ describe("generateUniversalRouterStateProperties", () => {
       expect.any(URL),
     );
     expect(router.currentHistoryIndex).toBe(3);
+    expect(router.currentPath).toBe("/start?q=value");
     expect(windowValue.dispatchEvent).not.toHaveBeenCalled();
+
+    history.state = { __farmPageState: { draft: true }, __farmHistoryIndex: 2 };
+    router.currentHistoryIndex = 2;
+    router.writeURLSearch("replace", "/start?q=replaced#details");
+
+    expect(history.replaceState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        __farmPageState: { draft: true },
+        __farmHistoryIndex: 2,
+        path: "/start?q=replaced#details",
+      }),
+      "",
+      expect.any(URL),
+    );
+    expect(router.currentHistoryIndex).toBe(2);
+    expect(router.currentPath).toBe("/start?q=replaced");
   });
 
   it("checks blocker activity before prompting on unload", () => {

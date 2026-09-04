@@ -1893,6 +1893,7 @@ export function generateUniversalRouterStateProperties(): string {
       "url-search",
       false,
     );
+    this.currentPath = url.pathname + url.search;
   },
 
   writeHistoryEntry: function(action, path, pageState, url, changeKind = "url-search", notify = true) {
