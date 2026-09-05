@@ -8061,8 +8061,30 @@ export default async function farmNitroEventHandler(event) {
     logger.info(`📄 Pre-rendering ${prerenderRoutes.length} SSG page(s)`);
     await nitro.prerender(nitroInstance);
   }
-  await nitro.build(nitroInstance);
+  const sharpRuntimeStagePromise =
+    imageRuntime === "node"
+      ? stageSharpRuntime(config, root, distDir, fs)
+      : Promise.resolve<StagedSharpRuntime | null>(null);
+  const [nitroBuildResult, sharpRuntimeStageResult] = await Promise.allSettled([
+    nitro.build(nitroInstance),
+    sharpRuntimeStagePromise,
+  ]);
   await nitroInstance.close();
+  if (nitroBuildResult.status === "rejected") {
+    if (sharpRuntimeStageResult.status === "fulfilled" && sharpRuntimeStageResult.value) {
+      await fs.rm(sharpRuntimeStageResult.value.stageDir, {
+        recursive: true,
+        force: true,
+      });
+    }
+    throw nitroBuildResult.reason;
+  }
+  if (sharpRuntimeStageResult.status === "rejected") {
+    throw sharpRuntimeStageResult.reason;
+  }
+  const stagedSharpRuntime =
+    sharpRuntimeStageResult.value ??
+    (imageRuntime === "node" ? await stageSharpRuntime(config, root, distDir, fs) : null);
 
   const copyResults = await Promise.allSettled([
     canReusePrebuiltSSR
@@ -8074,8 +8096,8 @@ export default async function farmNitroEventHandler(event) {
           fs,
         )
       : Promise.resolve(),
-    imageRuntime === "node"
-      ? copySharpRuntime(config, root, path.join(outputDir, "server"), fs)
+    stagedSharpRuntime
+      ? installStagedSharpRuntime(stagedSharpRuntime, path.join(outputDir, "server"), fs)
       : Promise.resolve(),
     useExternalMetadataImageRuntime
       ? copyMetadataImageRuntime(root, path.join(outputDir, "server"), fs)
@@ -8339,14 +8361,17 @@ async function copyFarmDocsContentForVercel(
   logger.info(`📚 Bundled docs content for Vercel: ${path.relative(root, docsContentDir)}`);
 }
 
-async function copySharpRuntime(
+interface StagedSharpRuntime {
+  stageDir: string;
+  dependencies: Record<string, string>;
+}
+
+async function stageSharpRuntime(
   config: ResolvedFarmConfig,
   root: string,
-  nitroFuncDir: string,
+  distDir: string,
   fs: typeof import("fs/promises"),
-): Promise<void> {
-  if (config.images.provider === "none") return;
-
+): Promise<StagedSharpRuntime> {
   const projectRequire = createRequire(path.join(root, "package.json"));
   let sharpRequire = projectRequire;
   if (!resolvePackageJson(projectRequire, "sharp")) {
@@ -8361,7 +8386,10 @@ async function copySharpRuntime(
   }
   const copiedPackages = new Map<string, string>();
   const packageCopies = new Map<string, Promise<void>>();
-  const targetNodeModules = path.join(nitroFuncDir, "node_modules");
+  const stageRoot = path.join(root, distDir, "tmp");
+  await fs.mkdir(stageRoot, { recursive: true });
+  const stageDir = await fs.mkdtemp(path.join(stageRoot, "sharp-runtime-"));
+  const targetNodeModules = path.join(stageDir, "node_modules");
 
   function copyPackage(packageName: string, parentRequire: NodeJS.Require): Promise<void> {
     const activeCopy = packageCopies.get(packageName);
@@ -8402,21 +8430,90 @@ async function copySharpRuntime(
     ]);
   }
 
-  await copyPackage("sharp", sharpRequire);
-  if (!copiedPackages.has("sharp")) {
-    throw new Error(
-      "Farm image optimization requires sharp. Reinstall dependencies without omitting optional packages.",
-    );
+  try {
+    await copyPackage("sharp", sharpRequire);
+    if (!copiedPackages.has("sharp")) {
+      throw new Error(
+        "Farm image optimization requires sharp. Reinstall dependencies without omitting optional packages.",
+      );
+    }
+  } catch (error) {
+    await fs.rm(stageDir, { recursive: true, force: true });
+    throw error;
   }
 
-  const functionPackagePath = path.join(nitroFuncDir, "package.json");
-  const functionPackage = JSON.parse(await fs.readFile(functionPackagePath, "utf8"));
-  functionPackage.dependencies = {
-    ...functionPackage.dependencies,
-    ...Object.fromEntries([...copiedPackages].sort(([left], [right]) => left.localeCompare(right))),
+  return {
+    stageDir,
+    dependencies: Object.fromEntries(
+      [...copiedPackages].sort(([left], [right]) => left.localeCompare(right)),
+    ),
   };
-  await fs.writeFile(functionPackagePath, JSON.stringify(functionPackage, null, 2));
-  logger.info(`🖼️  Bundled Sharp image runtime (${copiedPackages.size} packages)`);
+}
+
+async function installStagedSharpRuntime(
+  staged: StagedSharpRuntime,
+  nitroFuncDir: string,
+  fs: typeof import("fs/promises"),
+): Promise<void> {
+  const stagedNodeModules = path.join(staged.stageDir, "node_modules");
+  const targetNodeModules = path.join(nitroFuncDir, "node_modules");
+
+  try {
+    await mergeStagedDirectory(stagedNodeModules, targetNodeModules, fs);
+
+    const functionPackagePath = path.join(nitroFuncDir, "package.json");
+    const functionPackage = JSON.parse(await fs.readFile(functionPackagePath, "utf8"));
+    functionPackage.dependencies = {
+      ...functionPackage.dependencies,
+      ...staged.dependencies,
+    };
+    await fs.writeFile(functionPackagePath, JSON.stringify(functionPackage, null, 2));
+  } finally {
+    await fs.rm(staged.stageDir, { recursive: true, force: true });
+  }
+
+  logger.info(
+    `🖼️  Bundled Sharp image runtime (${Object.keys(staged.dependencies).length} packages)`,
+  );
+}
+
+async function mergeStagedDirectory(
+  sourceDir: string,
+  targetDir: string,
+  fs: typeof import("fs/promises"),
+): Promise<void> {
+  await fs.mkdir(targetDir, { recursive: true });
+  const entries = await fs.readdir(sourceDir, { withFileTypes: true });
+
+  await Promise.all(
+    entries.map(async (entry) => {
+      const sourcePath = path.join(sourceDir, entry.name);
+      const targetPath = path.join(targetDir, entry.name);
+
+      try {
+        await fs.rename(sourcePath, targetPath);
+        return;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "EEXIST" && code !== "ENOTEMPTY" && code !== "EXDEV") {
+          throw error;
+        }
+      }
+
+      if (entry.isDirectory()) {
+        await mergeStagedDirectory(sourcePath, targetPath, fs);
+        await fs.rm(sourcePath, { recursive: true, force: true });
+        return;
+      }
+
+      await fs.cp(sourcePath, targetPath, {
+        force: true,
+        dereference: true,
+        mode: fsConstants.COPYFILE_FICLONE,
+      });
+      await fs.rm(sourcePath, { force: true });
+    }),
+  );
 }
 
 async function copyMetadataImageRuntime(
