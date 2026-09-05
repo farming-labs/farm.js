@@ -26,7 +26,8 @@ Data and headers written during middleware are request-scoped:
 | `return new Response(...)`                                           | Stops the chain and sends that response immediately.                                          |
 
 Cookies set by multiple matching middleware handlers are accumulated into separate `Set-Cookie`
-headers; a later handler does not replace cookies already written by an earlier handler.
+headers. They are also preserved when the short-circuiting `Response` supplies its own cookies, so
+a returned response does not replace cookies already written through `ctx.cookies`.
 
 ## Route middleware
 

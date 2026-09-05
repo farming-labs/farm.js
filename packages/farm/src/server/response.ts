@@ -72,19 +72,64 @@ async function waitForWritable(res: ServerResponse): Promise<boolean> {
   }
 }
 
+/**
+ * Older Fetch implementations expose repeated Set-Cookie fields as one
+ * comma-joined value. Split only at a comma followed by another cookie-pair;
+ * commas inside Expires dates remain part of the current cookie. RFC cookie
+ * values exclude commas, so a comma followed by a cookie-pair is unambiguous
+ * for valid Set-Cookie syntax once the original field boundaries are lost.
+ */
+function splitSetCookieHeader(value: string): string[] {
+  const cookies: string[] = [];
+  let start = 0;
+
+  for (let index = 0; index < value.length; index += 1) {
+    if (value[index] !== ",") continue;
+
+    let next = index + 1;
+    while (value[next] === " " || value[next] === "\t") next += 1;
+
+    const equals = value.indexOf("=", next);
+    if (equals === -1) continue;
+
+    const separator = value.slice(next, equals);
+    if (separator.length === 0 || /[;,\s]/.test(separator)) continue;
+
+    cookies.push(value.slice(start, index).trim());
+    start = next;
+    index = next - 1;
+  }
+
+  cookies.push(value.slice(start).trim());
+  return cookies.filter(Boolean);
+}
+
 export async function sendWebResponse(res: ServerResponse, response: Response): Promise<void> {
   res.statusCode = response.status;
 
+  const appendSetCookies = (cookies: readonly string[]) => {
+    const existing = typeof res.getHeader === "function" ? res.getHeader("Set-Cookie") : undefined;
+    const existingCookies = Array.isArray(existing)
+      ? existing.map(String)
+      : existing === undefined
+        ? []
+        : [String(existing)];
+    res.setHeader("Set-Cookie", [...existingCookies, ...cookies]);
+  };
+
   const responseHeaders = response.headers as Headers & {
     getSetCookie?: () => string[];
+    raw?: () => Record<string, string[]>;
   };
-  const setCookies = responseHeaders.getSetCookie?.() || [];
+  const rawSetCookies = responseHeaders.raw?.()["set-cookie"];
+  const setCookies = responseHeaders.getSetCookie?.() || rawSetCookies || [];
   if (setCookies.length > 0) {
-    res.setHeader("Set-Cookie", setCookies);
+    appendSetCookies(setCookies);
   }
 
   response.headers.forEach((value, key) => {
-    if (key.toLowerCase() === "set-cookie" && setCookies.length > 0) {
+    if (key.toLowerCase() === "set-cookie") {
+      if (setCookies.length === 0) appendSetCookies(splitSetCookieHeader(value));
       return;
     }
     res.setHeader(key, value);
