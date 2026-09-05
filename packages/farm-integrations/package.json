@@ -104,6 +104,10 @@
       "types": "./dist/supabase/client.d.ts",
       "import": "./dist/supabase/client.js"
     },
+    "./sanity": {
+      "types": "./dist/sanity/index.d.ts",
+      "import": "./dist/sanity/index.js"
+    },
     "./unkey": {
       "types": "./dist/unkey/index.d.ts",
       "import": "./dist/unkey/index.js"
@@ -130,6 +134,7 @@
     "@farm.js/integration-utils": "workspace:*",
     "@farm.js/jobs": "workspace:*",
     "@farm.js/polar": "workspace:*",
+    "@farm.js/sanity": "workspace:*",
     "@farm.js/stripe": "workspace:*",
     "@farm.js/supabase": "workspace:*",
     "@farm.js/unkey": "workspace:*",
