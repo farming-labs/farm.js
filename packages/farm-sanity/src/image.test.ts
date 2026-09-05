@@ -43,6 +43,15 @@ describe("createSanityImageLoader", () => {
     expect(params(url).get("q")).toBe("60");
   });
 
+  it("keeps the fit mode of a prebuilt URL", () => {
+    const base =
+      "https://cdn.sanity.io/images/abc123/production/Tb9Ew8CXIwaY6R1kjMvI0uRR-2000x3000.jpg?fit=crop&crop=focalpoint";
+    const url = loader({ src: base, width: 400, quality: 60 });
+
+    expect(params(url).get("fit")).toBe("crop");
+    expect(params(url).get("crop")).toBe("focalpoint");
+  });
+
   it("produces distinct URLs per width for a srcset", () => {
     const small = loader({ src: ASSET_ID, width: 400, quality: 75 });
     const large = loader({ src: ASSET_ID, width: 1600, quality: 75 });

@@ -45,7 +45,7 @@ describe("createSanityClient", () => {
     const applied = createSanityClient({
       ...config,
       webhookSecret: "should-not-leak",
-    }).config() as Record<string, unknown>;
+    }).config() as unknown as Record<string, unknown>;
 
     expect(applied.webhookSecret).toBeUndefined();
   });

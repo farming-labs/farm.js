@@ -34,8 +34,10 @@ export async function applySanityWebhookChange(
   invalidation: SanityWebhookInvalidation = farmInvalidation,
 ): Promise<number> {
   if (!change) return 0;
-  const keys = change.keys ?? [];
-  const paths = change.paths ?? [];
+  // The cache reports nothing back, so the count is of distinct targets asked
+  // for, not entries removed. Deduplicate so a repeated key is only requested once.
+  const keys = [...new Map((change.keys ?? []).map((key) => [JSON.stringify(key), key])).values()];
+  const paths = [...new Set(change.paths ?? [])];
   await Promise.all([
     ...keys.map((key) => invalidation.invalidate(key)),
     ...paths.map((path) => invalidation.revalidatePath(path)),
@@ -72,7 +74,7 @@ export function createSanityWebhookRoute(
       try {
         const change = await options.onChange(payload);
         const invalidated = await applySanityWebhookChange(change, invalidation);
-        return json(200, { invalidated });
+        return json(200, { targets: invalidated });
       } catch {
         return json(500, { error: "Failed to apply change" });
       }
