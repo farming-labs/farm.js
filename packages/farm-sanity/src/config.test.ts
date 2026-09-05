@@ -9,6 +9,7 @@ const SANITY_VARS = [
   "SANITY_API_VERSION",
   "SANITY_STUDIO_API_VERSION",
   "SANITY_API_READ_TOKEN",
+  "SANITY_WEBHOOK_SECRET",
 ];
 
 let saved: Record<string, string | undefined>;
@@ -34,8 +35,31 @@ describe("resolveSanityConfig", () => {
       projectId: "from-env",
       dataset: "production",
       apiVersion: DEFAULT_SANITY_API_VERSION,
+      useCdn: true,
       token: undefined,
+      webhookSecret: undefined,
     });
+  });
+
+  it("enables the CDN unless told otherwise", () => {
+    expect(resolveSanityConfig({}).useCdn).toBe(true);
+    expect(resolveSanityConfig({ useCdn: false }).useCdn).toBe(false);
+  });
+
+  it("reads the webhook secret from SANITY_WEBHOOK_SECRET", () => {
+    process.env.SANITY_WEBHOOK_SECRET = "whsec_env";
+
+    expect(resolveSanityConfig({}).webhookSecret).toBe("whsec_env");
+  });
+
+  it("prefers a webhook secret passed in input", () => {
+    process.env.SANITY_WEBHOOK_SECRET = "whsec_env";
+
+    const config = resolveSanityConfig({
+      webhook: { secret: "whsec_input", onChange: () => undefined },
+    });
+
+    expect(config.webhookSecret).toBe("whsec_input");
   });
 
   it("prefers explicit input over the environment", () => {

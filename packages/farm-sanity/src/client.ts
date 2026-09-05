@@ -7,13 +7,13 @@ export function createSanityClient(
 ): SanityClient {
   if (instance) return instance;
 
-  // Mapped field by field. Spreading config would forward anything we add
-  // later, like a webhook secret, straight into the Sanity client.
+  // Mapped field by field. Spreading config would forward the webhook secret
+  // straight into the Sanity client.
   return createClient({
     projectId: config.projectId,
     dataset: config.dataset,
     apiVersion: config.apiVersion,
-    useCdn: true,
+    useCdn: config.useCdn,
     ...(config.token ? { token: config.token } : {}),
   });
 }

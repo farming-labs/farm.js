@@ -7,6 +7,7 @@ const config: ResolvedSanityConfig = {
   projectId: "test-project",
   dataset: "production",
   apiVersion: "2026-03-01",
+  useCdn: true,
 };
 
 describe("createSanityClient", () => {
@@ -19,8 +20,9 @@ describe("createSanityClient", () => {
     expect(applied.apiVersion).toBe("2026-03-01");
   });
 
-  it("enables the CDN by default", () => {
+  it("applies the configured useCdn", () => {
     expect(createSanityClient(config).config().useCdn).toBe(true);
+    expect(createSanityClient({ ...config, useCdn: false }).config().useCdn).toBe(false);
   });
 
   it("passes the token through under the name Sanity expects", () => {
@@ -39,9 +41,11 @@ describe("createSanityClient", () => {
     expect(createSanityClient(config, instance)).toBe(instance);
   });
 
-  it("does not forward config fields Sanity does not define", () => {
-    const withExtra = { ...config, webhookSecret: "should-not-leak" } as ResolvedSanityConfig;
-    const applied = createSanityClient(withExtra).config() as Record<string, unknown>;
+  it("does not forward the webhook secret to the Sanity client", () => {
+    const applied = createSanityClient({
+      ...config,
+      webhookSecret: "should-not-leak",
+    }).config() as Record<string, unknown>;
 
     expect(applied.webhookSecret).toBeUndefined();
   });

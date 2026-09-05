@@ -33,7 +33,8 @@
   "dependencies": {
     "@farm.js/core": "workspace:*",
     "@farm.js/integration-utils": "workspace:*",
-    "@sanity/image-url": "^2.1.1"
+    "@sanity/image-url": "^2.1.1",
+    "@sanity/webhook": "^4.0.4"
   },
   "devDependencies": {
     "@sanity/client": "^8.4.0",
