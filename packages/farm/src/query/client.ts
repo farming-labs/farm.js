@@ -61,6 +61,10 @@ const readSearchParam = (searchParams: URLSearchParams, key: string): string => 
 
 const throttleTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+function getUpdateKey(updates: Record<string, unknown>): string {
+  return JSON.stringify(Object.keys(updates).sort());
+}
+
 const compareStructuredValues = (
   current: unknown,
   next: unknown,
@@ -190,7 +194,7 @@ const updateURL = (
   updates: Record<string, string | null>,
   options: Options = {},
   emitUpdate = true,
-) => {
+): (() => void) | undefined => {
   if (typeof window === "undefined") return;
 
   const { throttleMs } = options;
@@ -199,7 +203,7 @@ const updateURL = (
     return;
   }
 
-  const throttleKey = Object.keys(updates).sort().join(",");
+  const throttleKey = getUpdateKey(updates);
   const existingTimeout = throttleTimers.get(throttleKey);
   if (existingTimeout) {
     clearTimeout(existingTimeout);
@@ -218,6 +222,11 @@ const updateURL = (
   }, throttleMs);
 
   throttleTimers.set(throttleKey, timeout);
+  return () => {
+    if (throttleTimers.get(throttleKey) !== timeout) return;
+    clearTimeout(timeout);
+    throttleTimers.delete(throttleKey);
+  };
 };
 
 export function useQueryState<TParser extends Parser<any>>(
@@ -251,6 +260,7 @@ export function useQueryState<TParser extends Parser<any>>(
   const stateRef = useRef(state);
   const stateKeyRef = useRef(key);
   const isInternalUpdateRef = useRef(false);
+  const cancelPendingUpdateRef = useRef<(() => void) | undefined>(undefined);
   stateRef.current = state;
 
   const setValue = useCallback(
@@ -264,7 +274,8 @@ export function useQueryState<TParser extends Parser<any>>(
 
       emitter.emitKey(key, { state: value, query: serialized });
 
-      updateURL({ [key]: serialized }, options, true);
+      cancelPendingUpdateRef.current?.();
+      cancelPendingUpdateRef.current = updateURL({ [key]: serialized }, options, true);
 
       setTimeout(() => {
         isInternalUpdateRef.current = false;
@@ -326,6 +337,14 @@ export function useQueryState<TParser extends Parser<any>>(
     };
   }, [key, parser]);
 
+  useEffect(
+    () => () => {
+      cancelPendingUpdateRef.current?.();
+      cancelPendingUpdateRef.current = undefined;
+    },
+    [key],
+  );
+
   return [state, setValue];
 }
 
@@ -351,6 +370,7 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
   });
 
   const stateRef = useRef(state);
+  const pendingUpdatesRef = useRef(new Map<string, () => void>());
   stateRef.current = state;
 
   const setValues = useCallback(
@@ -376,7 +396,14 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
         }
       });
 
-      updateURL(urlUpdates, options, true);
+      const updateKey = getUpdateKey(urlUpdates);
+      pendingUpdatesRef.current.get(updateKey)?.();
+      const cancelPendingUpdate = updateURL(urlUpdates, options, true);
+      if (cancelPendingUpdate) {
+        pendingUpdatesRef.current.set(updateKey, cancelPendingUpdate);
+      } else {
+        pendingUpdatesRef.current.delete(updateKey);
+      }
     },
     [parsers, options],
   );
@@ -425,6 +452,16 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
       emitter.off("update", onEmitterUpdate);
     };
   }, [watchKeys, parsers]);
+
+  useEffect(
+    () => () => {
+      for (const cancelPendingUpdate of pendingUpdatesRef.current.values()) {
+        cancelPendingUpdate();
+      }
+      pendingUpdatesRef.current.clear();
+    },
+    [watchKeys],
+  );
 
   return [state, setValues];
 }
