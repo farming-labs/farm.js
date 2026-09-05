@@ -257,6 +257,46 @@ export function StandardTableBenchmark() {
           Roll runtime-count window (snapshot control)
         </button>
         <button
+          data-action="table-roll-window-queued"
+          type="button"
+          onClick={() => {
+            const firstSeed = seed + 1;
+            const secondSeed = seed + 2;
+            const firstAdditions = buildRows(500, firstSeed);
+            const secondAdditions = buildRows(500, secondSeed);
+            const trimCount = 500;
+            setSeed(secondSeed);
+            setRows((current) => [...current.slice(trimCount), ...firstAdditions]);
+            setRows((current) => [...current.slice(trimCount), ...secondAdditions]);
+            setOperation("roll two queued runtime-count windows");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Roll two queued runtime-count windows
+        </button>
+        <button
+          data-action="table-roll-window-queued-snapshot"
+          type="button"
+          onClick={() => {
+            const firstSeed = seed + 1;
+            const secondSeed = seed + 2;
+            const firstAdditions = buildRows(500, firstSeed);
+            const secondAdditions = buildRows(500, secondSeed);
+            const trimCount = 500;
+            setSeed(secondSeed);
+            setRows((current) => {
+              return [...current.slice(trimCount), ...firstAdditions];
+            });
+            setRows((current) => {
+              return [...current.slice(trimCount), ...secondAdditions];
+            });
+            setOperation("roll two queued runtime-count windows (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Roll two queued runtime-count windows (snapshot control)
+        </button>
+        <button
           data-action="table-position-insert"
           type="button"
           onClick={() => {

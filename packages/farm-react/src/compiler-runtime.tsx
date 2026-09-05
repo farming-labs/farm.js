@@ -43,6 +43,7 @@ interface CompilerKeyedArrayRollingWindowHint {
   readonly resultLength: number;
   readonly retainedEnd: number;
   readonly retainedStart: number;
+  readonly previous?: CompilerKeyedArrayRollingWindowHint;
 }
 
 interface CompilerKeyedArrayPositionHint {
@@ -317,26 +318,40 @@ function compilerKeyedArrayPrependLength(
   return length === value.length ? prefixLength : undefined;
 }
 
-function compilerKeyedArrayRollingWindow(
+function compilerKeyedArrayRollingWindows(
   value: unknown,
   sourceToken: object | undefined,
   expectedLength: number,
-): CompilerKeyedArrayRollingWindowHint | undefined {
+): readonly CompilerKeyedArrayRollingWindowHint[] | undefined {
   const target = compilerObject(value);
   if (!target || !sourceToken || !Array.isArray(value)) return undefined;
   const update = COMPILER_KEYED_ARRAY_ROLLING_WINDOWS.get(target);
-  if (
-    !update ||
-    update.sourceToken !== sourceToken ||
-    update.sourceLength !== expectedLength ||
-    update.resultLength !== value.length ||
-    update.retainedStart < 1 ||
-    update.retainedEnd !== update.sourceLength ||
-    update.resultLength <= update.retainedEnd - update.retainedStart
+  if (!update || update.sourceToken !== sourceToken) return undefined;
+  const updates: CompilerKeyedArrayRollingWindowHint[] = [];
+  for (
+    let current: CompilerKeyedArrayRollingWindowHint | undefined = update;
+    current;
+    current = current.previous
   ) {
-    return undefined;
+    if (current.sourceToken !== sourceToken) return undefined;
+    updates.push(current);
   }
-  return update;
+  updates.reverse();
+
+  let length = expectedLength;
+  for (const current of updates) {
+    if (
+      current.sourceLength !== length ||
+      current.retainedStart < 1 ||
+      current.retainedStart > current.sourceLength ||
+      current.retainedEnd !== current.sourceLength ||
+      current.resultLength <= current.retainedEnd - current.retainedStart
+    ) {
+      return undefined;
+    }
+    length = current.resultLength;
+  }
+  return length === value.length ? updates : undefined;
 }
 
 function compilerKeyedArrayPosition(
@@ -714,7 +729,6 @@ export function createCompilerKeyedArrayRollingWindow(
       !previousTarget ||
       !retainedTarget ||
       !valueTarget ||
-      !COMPILER_KEYED_COMMITTED_COLLECTIONS.has(previousTarget) ||
       !Array.isArray(previous) ||
       !Array.isArray(retained) ||
       !Array.isArray(value) ||
@@ -724,19 +738,27 @@ export function createCompilerKeyedArrayRollingWindow(
     ) {
       return value;
     }
-    const sourceToken = compilerKeyedCollectionToken(previousTarget);
+    const committedSource = COMPILER_KEYED_COMMITTED_COLLECTIONS.has(previousTarget);
+    const previousUpdate = committedSource
+      ? undefined
+      : COMPILER_KEYED_ARRAY_ROLLING_WINDOWS.get(previousTarget);
+    if (!committedSource && !previousUpdate) return value;
+    const immediateSourceToken = compilerKeyedCollectionToken(previousTarget);
+    const sourceToken = previousUpdate?.sourceToken || immediateSourceToken;
     const slice = COMPILER_KEYED_ARRAY_FILTERS.get(retainedTarget);
     if (
+      !immediateSourceToken ||
       !sourceToken ||
       !slice ||
       slice.previous ||
       slice.kind !== "slice" ||
-      slice.sourceToken !== sourceToken ||
+      slice.sourceToken !== immediateSourceToken ||
       slice.sourceLength !== previous.length ||
       slice.retainedStart === undefined ||
       slice.retainedEnd !== previous.length ||
       slice.retainedStart < 1 ||
       slice.resultLength !== retained.length ||
+      (previousUpdate && previousUpdate.resultLength !== previous.length) ||
       value.length <= retained.length
     ) {
       return value;
@@ -750,6 +772,7 @@ export function createCompilerKeyedArrayRollingWindow(
       resultLength: value.length,
       retainedEnd: slice.retainedEnd,
       retainedStart: slice.retainedStart,
+      ...(previousUpdate ? { previous: previousUpdate } : {}),
     });
   } catch {
     // Metadata must never change the result of a successful array update.
@@ -4544,14 +4567,18 @@ function reconcileCompilerKeyedArrayRollingWindow(
   }
 
   const finalValue = props.items();
-  const update = compilerKeyedArrayRollingWindow(finalValue, collectionToken, instances.size);
-  if (!update || !Array.isArray(finalValue)) return undefined;
+  const updates = compilerKeyedArrayRollingWindows(finalValue, collectionToken, instances.size);
+  if (!updates || !Array.isArray(finalValue)) return undefined;
   const previousInstances = [...instances.values()];
-  const retainedLength = update.retainedEnd - update.retainedStart;
+  let retainedStart = 0;
+  for (const update of updates) {
+    retainedStart += Math.min(update.retainedStart, previousInstances.length - retainedStart);
+  }
+  const retainedLength = previousInstances.length - retainedStart;
   const survivors: CompilerKeyedRowInstance[] = [];
   try {
     for (let index = 0; index < retainedLength; index += 1) {
-      const sourceIndex = update.retainedStart + index;
+      const sourceIndex = retainedStart + index;
       const instance = previousInstances[sourceIndex];
       if (
         !instance ||
@@ -4590,7 +4617,7 @@ function reconcileCompilerKeyedArrayRollingWindow(
     return undefined;
   }
 
-  for (let index = 0; index < update.retainedStart; index += 1) {
+  for (let index = 0; index < retainedStart; index += 1) {
     previousInstances[index].scope?.cleanup();
     previousInstances[index].element.remove();
   }
