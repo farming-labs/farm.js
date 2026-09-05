@@ -131,6 +131,31 @@ unsafe `page` values fall back to page 1. `totalItems` must be a non-negative sa
 | `asIsoDate`         | Calendar-valid `YYYY-MM-DD` values.                       |
 | `asIsoDateTime`     | Calendar-valid ISO date-times with `Z` or numeric offset. |
 
+`asArrayOf` keeps its existing comma-separated format by default. When items can contain commas,
+opt in to the structured format so generated URLs round-trip those values:
+
+```ts
+const locations = asArrayOf(asString, { format: "structured" });
+```
+
+The item parser still decides how each value is normalized. `asString` trims surrounding whitespace
+and treats an empty string as missing. Use an exact string parser when those values are significant:
+
+```ts
+import { asArrayOf, createParser } from "@farm.js/core/query";
+
+const exactString = createParser<string>({
+  parse: (value) => value,
+  serialize: (value) => value,
+});
+const labels = asArrayOf(exactString, { format: "structured" });
+```
+
+The structured parser still accepts ordinary comma URLs during migration and emits a versioned
+`~farm-array:v1:` representation only when the comma format would lose information. Because the
+default parser never reserves that namespace, existing literal values such as
+`~farm-array:v1:["legacy"]` retain their comma-format meaning.
+
 ## Production notes
 
 - Parse query on the server before passing values to database queries.
