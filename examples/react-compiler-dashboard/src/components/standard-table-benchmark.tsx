@@ -815,6 +815,30 @@ export function StandardTableBenchmark() {
           Reverse rows twice (snapshot control)
         </button>
         <button
+          data-action="table-reverse-pipeline"
+          type="button"
+          onClick={() => {
+            setRows((current) => current.toReversed().toReversed());
+            setOperation("reverse rows twice in one setter");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Reverse pipeline
+        </button>
+        <button
+          data-action="table-reverse-pipeline-snapshot"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              return current.toReversed().toReversed();
+            });
+            setOperation("reverse rows twice in one setter (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Reverse pipeline (snapshot control)
+        </button>
+        <button
           data-action="table-sort"
           type="button"
           onClick={() => {

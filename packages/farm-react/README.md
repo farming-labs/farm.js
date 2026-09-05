@@ -385,11 +385,21 @@ with the minimum `n - 1` connected DOM moves. It does not reread row keys, descr
 and does not run the generic LIS calculation. Consecutive concise native `toReversed()` and
 `toSorted()` setters queued before one flush compose into one final validated permutation. The
 runtime skips intermediate DOM states and uses LIS once for that final order; two reversals that
-cancel perform no DOM moves. Index-aware or collection-reading rows, arguments, computed or chained
-calls, block-bodied updaters, custom methods, sparse or subclassed behavior, an unhinted or
-structural intermediate update, nested or React-owned rows, and failed checks keep complete keyed
-reconciliation. Reports expose the site count as `keyedArrayReorderHints`, and modules without one
-omit the reorder runtime. Farm does not polyfill `Array.prototype.toReversed`.
+cancel perform no DOM moves. A single concise updater may also chain two or more native reorder
+operations:
+
+```tsx
+setItems((current) => current.toSorted((left, right) => left.rank - right.rank).toReversed());
+```
+
+Farm evaluates every lookup and call in JavaScript order, carries the same committed token through
+the pipeline, and reconciles only its final result. Index-aware or collection-reading rows,
+arguments to `toReversed()`, referenced comparators, computed methods, chains containing a method
+other than `toSorted()` or `toReversed()`, block-bodied updaters, custom methods, sparse or
+subclassed behavior, an unhinted or structural intermediate update, nested or React-owned rows, and
+failed checks keep complete keyed reconciliation. Reports count each compiled reverse step as a
+`keyedArrayReorderHints` entry, and modules without one omit the reorder runtime. Farm does not
+polyfill `Array.prototype.toReversed`.
 
 A direct native immutable sort can use the same optional reorder runtime:
 
@@ -404,14 +414,15 @@ stable native result, and errors. After the native sort runs, the runtime valida
 dense array whose reorder chain starts at the committed collection, equal lengths, and a unique
 one-to-one item-identity permutation. It then uses LIS to move only `n - LIS` keyed DOM nodes
 without rereading row keys, descriptors, or bindings. Multiple concise native sorts and reverses
-queued in one flush share the original committed token and reconcile only their final permutation.
-The native sorting work itself is unchanged.
+queued in one flush, or chained in one concise updater, share the original committed token and
+reconcile only their final permutation. The native sorting work itself is unchanged.
 
 Index-aware or collection-reading rows, referenced comparators, block-bodied updaters, computed or
-chained calls, custom methods, sparse or subclassed arrays, duplicate item identities, unhinted or
-structural intermediate updates, nested or React-owned rows, and failed checks keep complete keyed
-reconciliation. Reports expose the site count as `keyedArraySortHints`; sort shares the optional
-reorder runtime, and Farm does not polyfill `Array.prototype.toSorted`.
+unsupported chained calls, custom methods, sparse or subclassed arrays, duplicate item identities,
+unhinted or structural intermediate updates, nested or React-owned rows, and failed checks keep
+complete keyed reconciliation. Reports count each compiled sort step as a `keyedArraySortHints`
+entry; sort shares the optional reorder runtime, and Farm does not polyfill
+`Array.prototype.toSorted`.
 
 Concise immutable filters on a direct keyed array can carry removal positions into the same
 optional runtime:
@@ -718,8 +729,8 @@ reasons aggregated by count. Its summary and per-module `optimizations` also rep
 contiguous-range removal, single-row replacement, or exact-window replacement sites, including
 guarded compiler-safe runtime positions;
 and
-`keyedArrayReorderHints`, the number of compiler-proven direct native keyed-array reverse sites; and
-`keyedArraySortHints`, the number of compiler-proven direct native keyed-array sort sites; and
+`keyedArrayReorderHints`, the number of compiler-proven native keyed-array reverse steps; and
+`keyedArraySortHints`, the number of compiler-proven native keyed-array sort steps; and
 `keyedArrayRollingWindowHints`, the number of compiler-proven retained-tail plus incoming-suffix
 sites; and
 `keyedArraySliceHints`, the number of compiler-proven direct keyed-array slice sites with literal or

@@ -199,6 +199,13 @@ at least 2x faster than React and 1.25x faster than the equivalent block-bodied 
 Package tests also cover queued sorts, mixed sort/reverse chains, thousands of randomized batches,
 unsafe fallback, focus and selection, hydration, and cleanup.
 
+Native reorder pipelines have a separate 10,000-row comparison. One functional setter evaluates
+`current.toReversed().toReversed()`, so the final order again equals the committed order without
+using two queued React updates. Farm must preserve both native calls, validate the final permutation
+once, retain every DOM node, and remain at least 2x faster than React and 1.25x faster than the
+equivalent block-bodied compiled control. Package tests compile mixed sort/reverse pipelines and
+compare 2,000 deterministic two-to-four-step pipelines with normal React.
+
 Native keyed-array sorting has its own 10,000-row comparison. Concise `toSorted()` is measured
 against bracketed React and an equivalent block-bodied compiled control. Both compiler modes must
 remain at least 4x faster than React and 1.25x faster than the compiled control. The report must
@@ -278,6 +285,9 @@ The default JSON report is `/tmp/farm-react-dashboard-benchmark.json`; change it
 - The queued-reverse control executes two native reversals in one commit. Both controls end at the
   same original order; the hinted path validates one final identity permutation and avoids the
   complete keyed scan without exposing either intermediate order to the DOM.
+- The reorder-pipeline control executes two native reversals inside one functional setter. Its
+  block-bodied equivalent stays on complete reconciliation, isolating the build-time lowering of
+  native sort/reverse-only call chains.
 - The sort control compares concise native `toSorted()` with an equivalent block-bodied compiled
   update. Both paths run the same native sort and move the same keyed DOM rows; the hint isolates
   the saved key, descriptor, and binding work while retaining only the required LIS moves.

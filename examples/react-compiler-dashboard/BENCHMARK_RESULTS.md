@@ -2,6 +2,38 @@
 
 Date: 2026-08-29
 
+## Native reorder pipelines in one setter — 2026-09-05
+
+The 10,000-row table now measures two native `toReversed()` calls chained inside one concise
+functional setter. Both calls execute, but their final order equals the committed order. The
+compiler lowers each lookup and call in source order, carries one committed source token through
+both immutable results, validates the final identity permutation once, retains every keyed DOM
+node, and performs no DOM moves. The equivalent block-bodied updater remains the compiled fallback
+control.
+
+| Mode   | React median | Reorder pipeline | Compiled control | vs React | vs control |
+| ------ | -----------: | ---------------: | ---------------: | -------: | ---------: |
+| Static |      50.85 ms |          5.60 ms |         12.80 ms |    9.08x |      2.29x |
+| Hybrid |      50.85 ms |          5.60 ms |         13.00 ms |    9.08x |      2.32x |
+
+The independent gate requires at least 2x versus bracketed React and 1.25x versus the compiled
+control in both modes. The full production run passed that gate, all 10,000-row DOM identity
+assertions, zero-owner-execution checks, the general performance and scalability gates, and every
+older optimization gate without lowering a threshold. Both compiler reports emitted five
+`keyedArrayReorderHints` steps: one direct reverse, two queued setters, and both calls in this
+pipeline.
+
+Compiler tests cover mixed sort/reverse pipelines, default sorting, and rejected unsafe syntax.
+Runtime tests compare 2,000 deterministic two-to-four-step pipelines with normal React, preserve
+DOM identity without row-key reads, and prove fallback for custom or unhinted methods. The complete
+645-test package suite, isolated stress suite, and packaged React 18.3.1 and 19.2.8 compatibility
+runs pass.
+
+No runtime implementation or runtime feature selection changed. Every persisted runtime-size
+fixture remains byte-for-byte unchanged, and the compiler-selected core still removes 82.6% of the
+complete compatibility-runtime premium. The recorded run used Chrome 152.0.7977.82, Node.js
+23.11.0, and Apple M1 macOS arm64.
+
 ## Queued native reorder composition — 2026-09-05
 
 The 10,000-row table now has a separate workload that queues two concise native `toReversed()`
@@ -28,8 +60,8 @@ for a queued final permutation, native sort and reverse composition in both orde
 fallback after an unhinted intermediate update, focus and selection preservation, Strict Mode
 hydration, and unmount-before-flush cleanup. Two independent 2,000-commit differential suites,
 each queuing two to four reverses or randomized sorts, match normal React with zero row-key reads.
-The complete 637-test package suite, isolated stress suite, and packaged React 18.3.1 and 19.2.8
-compatibility runs pass.
+For that queued-setter measurement, the then-current complete 637-test package suite, isolated
+stress suite, and packaged React 18.3.1 and 19.2.8 compatibility runs passed.
 
 The optional reverse fixture grows by 42 B gzip to a 12,099 B compiler premium; the sort fixture
 grows by 35 B gzip to 12,130 B. Direct and ordinary keyed fixtures remain byte-for-byte unchanged,

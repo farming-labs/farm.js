@@ -375,10 +375,10 @@ exact retained interval after runtime validation.
 `keyedArrayPositionHints` counts compiler-proven native keyed-array insertions, single or
 contiguous-range removals, single-row replacements, and exact-window replacements with a guarded
 position.
-`keyedArrayReorderHints` counts direct native keyed-array reversals whose complete permutation is
-known at build time.
-`keyedArraySortHints` counts direct native keyed-array sorts whose resulting permutation can be
-validated without rebuilding keyed rows.
+`keyedArrayReorderHints` counts native keyed-array reverse steps whose complete permutation can be
+validated, including steps in a supported reorder-only pipeline.
+`keyedArraySortHints` counts native keyed-array sort steps whose resulting permutation can be
+validated without rebuilding keyed rows, including steps in a supported reorder-only pipeline.
 `keyedArrayRollingWindowHints` counts direct keyed-array updates that retain a proven sliced tail
 and append an incoming suffix.
 `selected` is `true` when an annotation explicitly requested compilation. Module paths are relative
@@ -1168,14 +1168,28 @@ once. Intermediate orders never reach the DOM. The final generic path uses LIS, 
 reversals that cancel preserve every row without a DOM move. A single direct reverse keeps the
 smaller specialized `n - 1` move path described above.
 
+The same proof also works when two or more native reorder operations are chained inside one concise
+functional setter:
+
+```tsx
+setItems((current) => current.toSorted((left, right) => left.rank - right.rank).toReversed());
+```
+
+Farm prepares this pipeline at build time and evaluates each property lookup, inline comparator,
+and native call in its original JavaScript order. The intermediate arrays do not reach the DOM.
+The runtime validates only the final identity permutation against the committed collection and
+then applies one LIS-based reconciliation. A cancelling
+`current.toReversed().toReversed()` pipeline therefore performs no DOM moves.
+
 The first proof requires compiler-owned host rows whose render and key do not observe the index.
-Arguments, computed or chained calls, block-bodied updaters, subclassed or sparse behavior,
-collection-reading bindings, custom methods, an unhinted or structural update between reorder
-setters, React-owned rows, nested host blocks, row conditionals, unrelated dirty dependencies, and
-any identity mismatch use complete keyed reconciliation. No option or component is added. Reports
-expose emitted sites as `keyedArrayReorderHints`; modules without one do not retain the optional
-reorder runtime. The application runtime must provide `Array.prototype.toReversed`; Farm does not
-polyfill it.
+Arguments to `toReversed()`, referenced comparators, computed methods, chains containing a method
+other than `toSorted()` or `toReversed()`, block-bodied updaters, subclassed or sparse
+behavior, collection-reading bindings, custom methods, an unhinted or structural update between
+reorder setters, React-owned rows, nested host blocks, row conditionals, unrelated dirty
+dependencies, and any identity mismatch use complete keyed reconciliation. No option or component
+is added. Reports count every compiled reverse step as a `keyedArrayReorderHints` entry; modules
+without one do not retain the optional reorder runtime. The application runtime must provide
+`Array.prototype.toReversed`; Farm does not polyfill it.
 
 #### Keyed array sort hints
 
@@ -1196,18 +1210,19 @@ At commit time, Farm verifies an ordinary dense array whose reorder chain starts
 collection, the native `toSorted()` method, equal lengths, and a one-to-one identity match between
 the committed and final items. It then computes the longest increasing subsequence of the resulting
 permutation and moves only the rows outside that subsequence. Consecutive concise native sorts and
-reverses queued before one flush share this final reconciliation. Keys, descriptors, and bindings
-are not reread, the owner component does not rerun, and existing elements, handlers, form state,
-focus, and text selection remain attached to their rows.
+reverses queued before one flush, or chained in one concise updater, share this final
+reconciliation. Keys, descriptors, and bindings are not reread, the owner component does not rerun,
+and existing elements, handlers, form state, focus, and text selection remain attached to their
+rows.
 
 This proof requires compiler-owned host rows whose render and key do not observe the row index.
-Referenced comparators, block-bodied updaters, computed or chained calls, custom methods, sparse or
-subclassed arrays, duplicate item identities, collection-reading bindings, an unhinted or
-structural update between queued sorts, React-owned rows, nested host blocks, row conditionals,
-unrelated dirty dependencies, and failed validation keep complete keyed
-reconciliation. Reports expose emitted sites as
-`keyedArraySortHints`. Sort shares the optional reorder runtime, and Farm does not polyfill
-`Array.prototype.toSorted`.
+Referenced comparators, block-bodied updaters, computed methods, custom methods, sparse or subclassed
+arrays, duplicate item identities, collection-reading bindings, an unhinted or structural update
+between queued sorts, React-owned rows, nested host blocks, row conditionals, unrelated dirty
+dependencies, and failed validation keep complete keyed reconciliation. Native
+sort/reverse-only chains are supported; other chained calls fall back. Reports count each compiled
+sort step as a `keyedArraySortHints` entry. Sort shares the optional reorder runtime, and Farm does
+not polyfill `Array.prototype.toSorted`.
 
 #### Keyed array filter hints
 
