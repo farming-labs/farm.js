@@ -379,14 +379,17 @@ setItems((current) => current.toReversed());
 ```
 
 Farm preserves the method lookup, call result, and errors, then records metadata only for the native
-method on a committed ordinary array. The runtime verifies equal lengths and every reversed item
-identity before moving the existing keyed elements with the minimum `n - 1` connected DOM moves.
-It does not reread row keys, descriptors, or bindings and does not run the generic LIS calculation.
-Index-aware or collection-reading rows, arguments, computed or chained calls, block-bodied
-updaters, custom methods, sparse or subclassed behavior, queued uncommitted reversals, nested or
-React-owned rows, and failed checks keep complete keyed reconciliation. Reports expose the site
-count as `keyedArrayReorderHints`, and modules without one omit the reorder runtime. Farm does not
-polyfill `Array.prototype.toReversed`.
+method on an ordinary array whose chain starts at the committed collection. One direct reverse
+verifies equal lengths and every reversed item identity before moving the existing keyed elements
+with the minimum `n - 1` connected DOM moves. It does not reread row keys, descriptors, or bindings
+and does not run the generic LIS calculation. Consecutive concise native `toReversed()` and
+`toSorted()` setters queued before one flush compose into one final validated permutation. The
+runtime skips intermediate DOM states and uses LIS once for that final order; two reversals that
+cancel perform no DOM moves. Index-aware or collection-reading rows, arguments, computed or chained
+calls, block-bodied updaters, custom methods, sparse or subclassed behavior, an unhinted or
+structural intermediate update, nested or React-owned rows, and failed checks keep complete keyed
+reconciliation. Reports expose the site count as `keyedArrayReorderHints`, and modules without one
+omit the reorder runtime. Farm does not polyfill `Array.prototype.toReversed`.
 
 A direct native immutable sort can use the same optional reorder runtime:
 
@@ -397,14 +400,16 @@ setLabels((current) => current.toSorted());
 
 Farm recognizes a concise functional setter with no comparator or an inline synchronous comparator
 from the compiler-safe expression subset. It preserves the original method lookup, comparator,
-stable native result, and errors. After the native sort runs, the runtime validates a committed
-ordinary dense array, equal lengths, and a unique one-to-one item-identity permutation. It then
-uses LIS to move only `n - LIS` keyed DOM nodes without rereading row keys, descriptors, or
-bindings. The native sorting work itself is unchanged.
+stable native result, and errors. After the native sort runs, the runtime validates an ordinary
+dense array whose reorder chain starts at the committed collection, equal lengths, and a unique
+one-to-one item-identity permutation. It then uses LIS to move only `n - LIS` keyed DOM nodes
+without rereading row keys, descriptors, or bindings. Multiple concise native sorts and reverses
+queued in one flush share the original committed token and reconcile only their final permutation.
+The native sorting work itself is unchanged.
 
 Index-aware or collection-reading rows, referenced comparators, block-bodied updaters, computed or
-chained calls, custom methods, sparse or subclassed arrays, duplicate item identities, queued
-uncommitted sorts, nested or React-owned rows, and failed checks keep complete keyed
+chained calls, custom methods, sparse or subclassed arrays, duplicate item identities, unhinted or
+structural intermediate updates, nested or React-owned rows, and failed checks keep complete keyed
 reconciliation. Reports expose the site count as `keyedArraySortHints`; sort shares the optional
 reorder runtime, and Farm does not polyfill `Array.prototype.toSorted`.
 

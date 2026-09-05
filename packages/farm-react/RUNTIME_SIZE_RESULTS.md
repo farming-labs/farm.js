@@ -32,11 +32,11 @@ is enforced on every pull request instead of serving only as a manually recorded
 | Keyed rows with known-position hints              |          60,076 B |         72,344 B |         12,268 B |
 | Keyed rows with batch-position hints              |          60,091 B |         72,534 B |         12,443 B |
 | Keyed rows with exact-window hints                |          60,124 B |         74,297 B |         14,173 B |
-| Keyed rows with reverse hints                     |          60,058 B |         72,115 B |         12,057 B |
-| Keyed rows with sort hints                        |          60,077 B |         72,172 B |         12,095 B |
+| Keyed rows with reverse hints                     |          60,058 B |         72,157 B |         12,099 B |
+| Keyed rows with sort hints                        |          60,077 B |         72,207 B |         12,130 B |
 | Keyed rows with rolling-window hints              |          60,108 B |         73,177 B |         13,069 B |
 
-The isolated compatibility runtime contributes 21,614 B gzip over the React control. The
+The isolated compatibility runtime contributes 21,619 B gzip over the React control. The
 compiler-selected core contributes 3,766 B, an **82.6% reduction**. This comparison uses the same
 hand-authored compiled definition and changes only the runtime entry used to create it.
 
@@ -48,7 +48,7 @@ reuses the filter removal capability. Position-only, batch-position, exact-windo
 rolling-window modules select separate hint runtimes only when the compiler emits those update
 shapes. Reverse and sort share the optional reorder capability; the direct and isolated core
 results remain byte-for-byte unchanged. Over the ordinary keyed fixture, position pays 1,074 B
-gzip, batch-position pays 1,249 B, exact-window pays 2,979 B, reverse pays 863 B, sort pays 901 B,
+gzip, batch-position pays 1,249 B, exact-window pays 2,979 B, reverse pays 905 B, sort pays 936 B,
 slice pays 1,028 B, and rolling-window pays 1,875 B. The exact-window figure includes fresh-key
 replacement, atomic same-key binding refresh, fixed- and variable-length window-local keyed reuse
 with LIS movement, queued same-key window composition, disjoint queued fresh-key replacement, and

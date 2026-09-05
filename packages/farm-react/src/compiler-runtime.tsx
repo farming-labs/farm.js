@@ -72,7 +72,7 @@ interface CompilerKeyedArrayWindowReplaceHint {
 }
 
 interface CompilerKeyedArrayReorderHint {
-  readonly kind: "reverse" | "sort";
+  readonly kind: "permutation" | "reverse";
   readonly sourceToken: object;
   readonly sourceLength: number;
   readonly resultLength: number;
@@ -985,7 +985,6 @@ export function createCompilerKeyedArrayReorder(previous: unknown, method: unkno
     if (
       !previousTarget ||
       !valueTarget ||
-      !COMPILER_KEYED_COMMITTED_COLLECTIONS.has(previousTarget) ||
       !Array.isArray(previous) ||
       !Array.isArray(value) ||
       Object.getPrototypeOf(previous) !== NATIVE_ARRAY_PROTOTYPE ||
@@ -996,10 +995,22 @@ export function createCompilerKeyedArrayReorder(previous: unknown, method: unkno
       return value;
     }
 
-    const sourceToken = compilerKeyedCollectionToken(previousTarget);
+    const committedSource = COMPILER_KEYED_COMMITTED_COLLECTIONS.has(previousTarget);
+    const previousUpdate = committedSource
+      ? undefined
+      : COMPILER_KEYED_ARRAY_REORDERS.get(previousTarget);
+    if (
+      !committedSource &&
+      (!previousUpdate ||
+        previousUpdate.sourceLength !== previous.length ||
+        previousUpdate.resultLength !== previous.length)
+    ) {
+      return value;
+    }
+    const sourceToken = previousUpdate?.sourceToken || compilerKeyedCollectionToken(previousTarget);
     if (!sourceToken) return value;
     COMPILER_KEYED_ARRAY_REORDERS.set(valueTarget, {
-      kind: "reverse",
+      kind: previousUpdate ? "permutation" : "reverse",
       sourceToken,
       sourceLength: previous.length,
       resultLength: value.length,
@@ -1028,7 +1039,6 @@ export function createCompilerKeyedArraySort(
     if (
       !previousTarget ||
       !valueTarget ||
-      !COMPILER_KEYED_COMMITTED_COLLECTIONS.has(previousTarget) ||
       !Array.isArray(previous) ||
       !Array.isArray(value) ||
       Object.getPrototypeOf(previous) !== NATIVE_ARRAY_PROTOTYPE ||
@@ -1044,10 +1054,22 @@ export function createCompilerKeyedArraySort(
       if (!(index in previous)) return value;
     }
 
-    const sourceToken = compilerKeyedCollectionToken(previousTarget);
+    const committedSource = COMPILER_KEYED_COMMITTED_COLLECTIONS.has(previousTarget);
+    const previousUpdate = committedSource
+      ? undefined
+      : COMPILER_KEYED_ARRAY_REORDERS.get(previousTarget);
+    if (
+      !committedSource &&
+      (!previousUpdate ||
+        previousUpdate.sourceLength !== previous.length ||
+        previousUpdate.resultLength !== previous.length)
+    ) {
+      return value;
+    }
+    const sourceToken = previousUpdate?.sourceToken || compilerKeyedCollectionToken(previousTarget);
     if (!sourceToken) return value;
     COMPILER_KEYED_ARRAY_REORDERS.set(valueTarget, {
-      kind: "sort",
+      kind: "permutation",
       sourceToken,
       sourceLength: previous.length,
       resultLength: value.length,
@@ -5299,7 +5321,7 @@ function reconcileCompilerKeyedArrayReorder(
   if (!update || !Array.isArray(finalValue)) return undefined;
 
   const previousInstances = [...instances.values()];
-  if (update.kind === "sort") {
+  if (update.kind === "permutation") {
     const instancesByItem = new Map<unknown, CompilerKeyedRowInstance>();
     try {
       for (let sourceIndex = 0; sourceIndex < previousInstances.length; sourceIndex += 1) {
