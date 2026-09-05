@@ -386,6 +386,13 @@ async function measureTrial(browser, trial, compilerMode, port) {
         await ensureLive();
 
         const rowCount = () => table.querySelectorAll("tbody tr").length;
+        const rowsMatch = (current, previous) => {
+          if (current.length !== previous.length) return false;
+          for (let index = 0; index < current.length; index += 1) {
+            if (current[index] !== previous[index]) return false;
+          }
+          return true;
+        };
         const tableRevision = () => Number(table.dataset.revision);
         const tableButton = (action) => requireButton(table, `[data-action="${action}"]`);
         const runTableAction = async (action, condition) => {
@@ -1117,14 +1124,9 @@ async function measureTrial(browser, trial, compilerMode, port) {
           async () => ensure10000(),
           async () => {
             const rows = table.querySelectorAll("tbody tr");
-            const first = rows[0];
-            const last = rows[9_999];
             await runTableAction(
               () => tableButton("table-reverse-queued").click(),
-              () => {
-                const current = table.querySelectorAll("tbody tr");
-                return current[0] === first && current[9_999] === last;
-              },
+              () => rowsMatch(table.querySelectorAll("tbody tr"), rows),
             );
           },
         );
@@ -1133,14 +1135,9 @@ async function measureTrial(browser, trial, compilerMode, port) {
           async () => ensure10000(),
           async () => {
             const rows = table.querySelectorAll("tbody tr");
-            const first = rows[0];
-            const last = rows[9_999];
             await runTableAction(
               () => tableButton("table-reverse-queued-snapshot").click(),
-              () => {
-                const current = table.querySelectorAll("tbody tr");
-                return current[0] === first && current[9_999] === last;
-              },
+              () => rowsMatch(table.querySelectorAll("tbody tr"), rows),
             );
           },
         );

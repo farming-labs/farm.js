@@ -12,13 +12,14 @@ moves. The equivalent block-bodied setters remain the compiled fallback control.
 
 | Mode   | React median | Queued reorder | Compiled control | vs React | vs control |
 | ------ | -----------: | -------------: | ---------------: | -------: | ---------: |
-| Static |      56.05 ms |        4.10 ms |         10.60 ms |   13.67x |      2.59x |
-| Hybrid |      56.05 ms |        4.20 ms |         11.00 ms |   13.35x |      2.62x |
+| Static |      54.45 ms |        5.90 ms |         12.30 ms |    9.23x |      2.08x |
+| Hybrid |      54.45 ms |        7.00 ms |         14.70 ms |    7.78x |      2.10x |
 
 The independent gate requires at least 2x versus bracketed React and 1.25x versus the compiled
-control in both modes. An unchanged second production run passed that gate, DOM identity checks,
-zero-owner-execution checks, the general performance and scalability gates, and every older
-optimization gate without lowering a threshold. Both compiled reports emitted three
+control in both modes. The production rerun passed that gate while checking all 10,000 DOM row
+identities after every queued action, plus zero-owner-execution checks, the general performance and
+scalability gates, and every older optimization gate without lowering a threshold. Both compiled
+reports emitted three
 `keyedArrayReorderHints` sites: the existing direct reverse and both setters in this queued
 workload.
 
