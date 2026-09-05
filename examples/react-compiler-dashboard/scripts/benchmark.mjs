@@ -1113,6 +1113,38 @@ async function measureTrial(browser, trial, compilerMode, port) {
           },
         );
 
+        const tableReverseQueued = await measureTable(
+          async () => ensure10000(),
+          async () => {
+            const rows = table.querySelectorAll("tbody tr");
+            const first = rows[0];
+            const last = rows[9_999];
+            await runTableAction(
+              () => tableButton("table-reverse-queued").click(),
+              () => {
+                const current = table.querySelectorAll("tbody tr");
+                return current[0] === first && current[9_999] === last;
+              },
+            );
+          },
+        );
+
+        const tableReverseQueuedSnapshot = await measureTable(
+          async () => ensure10000(),
+          async () => {
+            const rows = table.querySelectorAll("tbody tr");
+            const first = rows[0];
+            const last = rows[9_999];
+            await runTableAction(
+              () => tableButton("table-reverse-queued-snapshot").click(),
+              () => {
+                const current = table.querySelectorAll("tbody tr");
+                return current[0] === first && current[9_999] === last;
+              },
+            );
+          },
+        );
+
         const tableSort = await measureTable(
           async () => create10000(),
           async () => {
@@ -1534,6 +1566,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
             positionReplace: tablePositionReplace,
             positionReplaceSnapshot: tablePositionReplaceSnapshot,
             reverse: tableReverse,
+            reverseQueued: tableReverseQueued,
+            reverseQueuedSnapshot: tableReverseQueuedSnapshot,
             reverseSnapshot: tableReverseSnapshot,
             sort: tableSort,
             sortSnapshot: tableSortSnapshot,
@@ -1662,6 +1696,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
         positionReplace: timingSummary(result.table.positionReplace),
         positionReplaceSnapshot: timingSummary(result.table.positionReplaceSnapshot),
         reverse: timingSummary(result.table.reverse),
+        reverseQueued: timingSummary(result.table.reverseQueued),
+        reverseQueuedSnapshot: timingSummary(result.table.reverseQueuedSnapshot),
         reverseSnapshot: timingSummary(result.table.reverseSnapshot),
         sort: timingSummary(result.table.sort),
         sortSnapshot: timingSummary(result.table.sortSnapshot),
@@ -1774,6 +1810,8 @@ const tableMetrics = [
   "positionReplace",
   "positionReplaceSnapshot",
   "reverse",
+  "reverseQueued",
+  "reverseQueuedSnapshot",
   "reverseSnapshot",
   "sort",
   "sortSnapshot",
@@ -2327,6 +2365,29 @@ const keyedReorderRegressions = keyedReorderResults.filter(
     !Number.isFinite(snapshotSpeedup) ||
     snapshotSpeedup < keyedReorderMinimumSnapshotSpeedup,
 );
+// Two native reversals queued before one commit end in the original order. The composed hint
+// should validate that final permutation once, preserve every DOM node without moving it, and
+// stay ahead of React and the equivalent block-bodied compiled control at 10,000 rows.
+const keyedQueuedReorderMinimumSpeedup = 2;
+const keyedQueuedReorderMinimumSnapshotSpeedup = 1.25;
+const keyedQueuedReorderResults = ["static", "hybrid"].map((mode) => {
+  const reverseMedianMs = comparisons.table.reverseQueued[mode].medianMs;
+  const snapshotMedianMs = comparisons.table.reverseQueuedSnapshot[mode].medianMs;
+  return {
+    mode,
+    reverseMedianMs,
+    snapshotMedianMs,
+    snapshotSpeedup: snapshotMedianMs / reverseMedianMs,
+    speedup: comparisons.table.reverseQueued[`${mode}VsBaseline`].speedup,
+  };
+});
+const keyedQueuedReorderRegressions = keyedQueuedReorderResults.filter(
+  ({ snapshotSpeedup, speedup }) =>
+    !Number.isFinite(speedup) ||
+    speedup < keyedQueuedReorderMinimumSpeedup ||
+    !Number.isFinite(snapshotSpeedup) ||
+    snapshotSpeedup < keyedQueuedReorderMinimumSnapshotSpeedup,
+);
 // A direct native toSorted() exposes a permutation while preserving every keyed row object. The
 // hinted path validates that permutation by item identity, uses LIS to move only the required DOM
 // nodes, and avoids key, descriptor, and binding reads. Compare it with React and the equivalent
@@ -2511,6 +2572,7 @@ const passed =
   keyedPositionRegressions.length === 0 &&
   keyedRangeRemovalRegressions.length === 0 &&
   keyedReorderRegressions.length === 0 &&
+  keyedQueuedReorderRegressions.length === 0 &&
   keyedSortRegressions.length === 0 &&
   keyedFilterRegressions.length === 0 &&
   keyedIdentityRegressions.length === 0 &&
@@ -2648,6 +2710,13 @@ const report = {
     regressions: keyedReorderRegressions,
     results: keyedReorderResults,
     status: keyedReorderRegressions.length === 0 ? "PASS" : "FAIL",
+  },
+  keyedQueuedReorderHintGate: {
+    minimumSnapshotSpeedup: keyedQueuedReorderMinimumSnapshotSpeedup,
+    minimumSpeedup: keyedQueuedReorderMinimumSpeedup,
+    regressions: keyedQueuedReorderRegressions,
+    results: keyedQueuedReorderResults,
+    status: keyedQueuedReorderRegressions.length === 0 ? "PASS" : "FAIL",
   },
   keyedSortHintGate: {
     minimumSnapshotSpeedup: keyedSortMinimumSnapshotSpeedup,

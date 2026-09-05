@@ -2,6 +2,39 @@
 
 Date: 2026-08-29
 
+## Queued native reorder composition — 2026-09-05
+
+The 10,000-row table now has a separate workload that queues two concise native `toReversed()`
+setters before one React commit. Both setters execute, but the final order equals the committed
+order. The compiled runtime carries the committed source token across both immutable results,
+validates one final item-identity permutation, retains every keyed DOM node, and performs no DOM
+moves. The equivalent block-bodied setters remain the compiled fallback control.
+
+| Mode   | React median | Queued reorder | Compiled control | vs React | vs control |
+| ------ | -----------: | -------------: | ---------------: | -------: | ---------: |
+| Static |      56.05 ms |        4.10 ms |         10.60 ms |   13.67x |      2.59x |
+| Hybrid |      56.05 ms |        4.20 ms |         11.00 ms |   13.35x |      2.62x |
+
+The independent gate requires at least 2x versus bracketed React and 1.25x versus the compiled
+control in both modes. An unchanged second production run passed that gate, DOM identity checks,
+zero-owner-execution checks, the general performance and scalability gates, and every older
+optimization gate without lowering a threshold. Both compiled reports emitted three
+`keyedArrayReorderHints` sites: the existing direct reverse and both setters in this queued
+workload.
+
+Package tests separately prove zero DOM moves for a cancelling double reverse, minimum LIS moves
+for a queued final permutation, native sort and reverse composition in both orders, explicit
+fallback after an unhinted intermediate update, focus and selection preservation, Strict Mode
+hydration, and unmount-before-flush cleanup. Two independent 2,000-commit differential suites,
+each queuing two to four reverses or randomized sorts, match normal React with zero row-key reads.
+The complete 637-test package suite, isolated stress suite, and packaged React 18.3.1 and 19.2.8
+compatibility runs pass.
+
+The optional reverse fixture grows by 42 B gzip to a 12,099 B compiler premium; the sort fixture
+grows by 35 B gzip to 12,130 B. Direct and ordinary keyed fixtures remain byte-for-byte unchanged,
+and the compiler-selected core still removes 82.6% of the complete compatibility-runtime premium.
+The recorded run used Chrome 152.0.7977.82, Node.js 23.11.0, and Apple M1 macOS arm64.
+
 ## Queued rolling-window composition — 2026-09-05
 
 The 10,000-row table now has a separate workload that queues two functional rolling-window

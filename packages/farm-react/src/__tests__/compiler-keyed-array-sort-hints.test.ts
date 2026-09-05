@@ -52,6 +52,33 @@ describe("React AOT keyed-array sort hints", () => {
     expect(result.code).not.toContain("keyedRowsEveryHintedRuntimeFeature");
   });
 
+  it("emits every native reorder in one queued sort and reverse chain", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Table() {
+        const [rows, setRows] = useState([
+          { id: "a", rank: 2, label: "Alpha" },
+          { id: "b", rank: 1, label: "Beta" },
+        ]);
+        return <section>
+          <button onClick={() => {
+            setRows((current) => current.toSorted((left, right) => left.rank - right.rank));
+            setRows((current) => current.toReversed());
+            setRows((current) => current.toReversed());
+            setRows((current) => current.toSorted((left, right) => right.rank - left.rank));
+          }}>Reorder</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </section>;
+      }
+    `);
+
+    expect(result.optimizations.keyedArraySortHints).toBe(2);
+    expect(result.optimizations.keyedArrayReorderHints).toBe(2);
+    expect(result.code).toContain("createCompilerKeyedArraySort");
+    expect(result.code).toContain("createCompilerKeyedArrayReorder");
+    expect(result.code).toContain("keyedRowsReorderHintedRuntimeFeature");
+  });
+
   it.each([
     {
       name: "an index-dependent row",

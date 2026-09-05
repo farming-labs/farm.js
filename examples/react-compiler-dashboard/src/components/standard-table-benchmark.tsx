@@ -787,6 +787,34 @@ export function StandardTableBenchmark() {
           Reverse rows (snapshot control)
         </button>
         <button
+          data-action="table-reverse-queued"
+          type="button"
+          onClick={() => {
+            setRows((current) => current.toReversed());
+            setRows((current) => current.toReversed());
+            setOperation("reverse rows twice in one commit");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Reverse rows twice
+        </button>
+        <button
+          data-action="table-reverse-queued-snapshot"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              return current.toReversed();
+            });
+            setRows((current) => {
+              return current.toReversed();
+            });
+            setOperation("reverse rows twice (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Reverse rows twice (snapshot control)
+        </button>
+        <button
           data-action="table-sort"
           type="button"
           onClick={() => {

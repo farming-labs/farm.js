@@ -192,6 +192,13 @@ report must contain a nonzero `keyedArrayReorderHints` count; package tests sepa
 minimum `n - 1` connected DOM moves, zero key/descriptor/binding reads, randomized differential
 correctness, hydration, and cleanup.
 
+Queued native reorders have another independent 10,000-row comparison. One event queues two
+concise `toReversed()` setters, so the final order equals the committed order. Farm must validate
+that final permutation once, retain every DOM node, perform no intermediate DOM moves, and remain
+at least 2x faster than React and 1.25x faster than the equivalent block-bodied compiled control.
+Package tests also cover queued sorts, mixed sort/reverse chains, thousands of randomized batches,
+unsafe fallback, focus and selection, hydration, and cleanup.
+
 Native keyed-array sorting has its own 10,000-row comparison. Concise `toSorted()` is measured
 against bracketed React and an equivalent block-bodied compiled control. Both compiler modes must
 remain at least 4x faster than React and 1.25x faster than the compiled control. The report must
@@ -268,6 +275,9 @@ The default JSON report is `/tmp/farm-react-dashboard-benchmark.json`; change it
 - The reverse control compares concise native `toReversed()` with an equivalent block-bodied
   compiled update. Both paths move the same keyed DOM rows; the hint isolates the saved key,
   descriptor, binding, and generic LIS work.
+- The queued-reverse control executes two native reversals in one commit. Both controls end at the
+  same original order; the hinted path validates one final identity permutation and avoids the
+  complete keyed scan without exposing either intermediate order to the DOM.
 - The sort control compares concise native `toSorted()` with an equivalent block-bodied compiled
   update. Both paths run the same native sort and move the same keyed DOM rows; the hint isolates
   the saved key, descriptor, and binding work while retaining only the required LIS moves.

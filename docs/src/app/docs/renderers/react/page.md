@@ -1143,9 +1143,10 @@ setItems((current) => current.toReversed());
 ```
 
 Farm recognizes only this concise functional-setter form. It preserves the original method lookup,
-native call, returned array, and thrown errors. Metadata is recorded only when the committed source
-and result are ordinary native arrays and the executed method is the native `toReversed()` method.
-A custom or unavailable method therefore keeps its normal behavior and never enters the fast path.
+native call, returned array, and thrown errors. Metadata is recorded only when the result is an
+ordinary native array, the executed method is the native `toReversed()` method, and the reorder
+chain starts at the committed collection. A custom or unavailable method therefore keeps its normal
+behavior and never enters the fast path.
 
 At update time, Farm verifies the committed source token, equal lengths, every source row identity,
 and the exact reversed result before moving the DOM. The runtime leaves one row in place and moves
@@ -1153,13 +1154,28 @@ the other rows through connected `insertBefore()` operations, the minimum `n - 1
 reverse. It does not call row keys, recreate descriptors, reread bindings, or run the generic LIS
 calculation. Existing elements, handlers, form state, and focus stay attached to their keys.
 
+Multiple concise native reorder setters may run before the same compiler flush:
+
+```tsx
+setItems((current) => current.toSorted((left, right) => left.rank - right.rank));
+setItems((current) => current.toReversed());
+```
+
+Each setter still executes in order with normal JavaScript semantics. Farm carries the original
+committed token through consecutive native `toSorted()` and `toReversed()` results, validates the
+final array as the exact same set of unique item identities, and reconciles that final permutation
+once. Intermediate orders never reach the DOM. The final generic path uses LIS, so two queued
+reversals that cancel preserve every row without a DOM move. A single direct reverse keeps the
+smaller specialized `n - 1` move path described above.
+
 The first proof requires compiler-owned host rows whose render and key do not observe the index.
 Arguments, computed or chained calls, block-bodied updaters, subclassed or sparse behavior,
-collection-reading bindings, custom methods, two reversals queued before one commit, React-owned
-rows, nested host blocks, row conditionals, unrelated dirty dependencies, and any identity mismatch
-use complete keyed reconciliation. No option or component is added. Reports expose emitted sites as
-`keyedArrayReorderHints`; modules without one do not retain the optional reorder runtime. The
-application runtime must provide `Array.prototype.toReversed`; Farm does not polyfill it.
+collection-reading bindings, custom methods, an unhinted or structural update between reorder
+setters, React-owned rows, nested host blocks, row conditionals, unrelated dirty dependencies, and
+any identity mismatch use complete keyed reconciliation. No option or component is added. Reports
+expose emitted sites as `keyedArrayReorderHints`; modules without one do not retain the optional
+reorder runtime. The application runtime must provide `Array.prototype.toReversed`; Farm does not
+polyfill it.
 
 #### Keyed array sort hints
 
@@ -1176,18 +1192,20 @@ comparator execution, native result, stable-sort behavior, and thrown errors. Th
 does the comparison work; this optimization removes repeated keyed-row work after the result is
 known.
 
-At commit time, Farm verifies a committed ordinary dense array, the native `toSorted()` method,
-equal lengths, and a one-to-one identity match between the previous and sorted items. It then
-computes the longest increasing subsequence of the resulting permutation and moves only the rows
-outside that subsequence. Keys, descriptors, and bindings are not reread, the owner component does
-not rerun, and existing elements, handlers, form state, focus, and text selection remain attached
-to their rows.
+At commit time, Farm verifies an ordinary dense array whose reorder chain starts at the committed
+collection, the native `toSorted()` method, equal lengths, and a one-to-one identity match between
+the committed and final items. It then computes the longest increasing subsequence of the resulting
+permutation and moves only the rows outside that subsequence. Consecutive concise native sorts and
+reverses queued before one flush share this final reconciliation. Keys, descriptors, and bindings
+are not reread, the owner component does not rerun, and existing elements, handlers, form state,
+focus, and text selection remain attached to their rows.
 
 This proof requires compiler-owned host rows whose render and key do not observe the row index.
 Referenced comparators, block-bodied updaters, computed or chained calls, custom methods, sparse or
-subclassed arrays, duplicate item identities, collection-reading bindings, queued uncommitted
-sorts, React-owned rows, nested host blocks, row conditionals, unrelated dirty dependencies, and
-failed validation keep complete keyed reconciliation. Reports expose emitted sites as
+subclassed arrays, duplicate item identities, collection-reading bindings, an unhinted or
+structural update between queued sorts, React-owned rows, nested host blocks, row conditionals,
+unrelated dirty dependencies, and failed validation keep complete keyed
+reconciliation. Reports expose emitted sites as
 `keyedArraySortHints`. Sort shares the optional reorder runtime, and Farm does not polyfill
 `Array.prototype.toSorted`.
 
@@ -2038,13 +2056,14 @@ The package and example test suites verify more than generated code:
   another 1,000 queued overlapping fresh-key replacements match React while targeted tests require
   work to equal only the final touched union, preserve untouched DOM identity, and cover atomic
   preparation, existing-key-move fallback, Strict Mode hydration, and unmount cleanup;
-- 2,000 deterministic randomized reversals match normal React; a 4,096-row targeted test requires
-  exactly `n - 1` connected DOM moves and zero key, descriptor, or binding reads, while fallback
-  tests cover custom methods, queued updates, collection-reading rows, StrictMode hydration, and
-  unmount cleanup;
-- 2,000 deterministic randomized sorts match normal React; a 4,096-row targeted test requires
-  exactly `n - LIS` connected DOM moves and zero key, descriptor, or binding reads, while native
-  semantics, focus and selection, fallback cases, StrictMode hydration, and cleanup are covered;
+- 2,000 deterministic batches of two to four reversals match normal React with zero key reads; a
+  4,096-row direct test requires exactly `n - 1` connected DOM moves, while double-reverse and
+  fallback tests cover zero-move cancellation, custom or unhinted chains, collection-reading rows,
+  StrictMode hydration, and unmount cleanup;
+- 2,000 deterministic batches of two to four randomized sorts match normal React with zero key
+  reads; a 4,096-row direct test requires exactly `n - LIS` connected DOM moves, while mixed
+  sort/reverse chains, native semantics, focus and selection, fallback cases, StrictMode hydration,
+  and cleanup are covered;
 - the production browser experiment derives a keyed window from 2,048 source rows without
   rerunning the owner component or corrupting the existing compiler experiments;
 - the package reactivity benchmark updates one prop across 2,048 bindings, requires identical
