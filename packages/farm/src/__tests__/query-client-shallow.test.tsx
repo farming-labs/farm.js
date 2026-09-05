@@ -643,6 +643,37 @@ describe("useQueryState shallow routing", () => {
     expect(window.location.search).toBe("?q=search&page=2");
   });
 
+  it("keeps throttled key sets distinct when query names contain commas", () => {
+    vi.useFakeTimers();
+    let setQueries!: (updates: {
+      "a,b"?: string | null;
+      a?: string | null;
+      b?: string | null;
+    }) => void;
+    const parsers = { "a,b": asString, a: asString, b: asString };
+
+    function App() {
+      const [, updateQueries] = useQueryStates(parsers, { throttleMs: 50 });
+      setQueries = updateQueries;
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+    act(() => {
+      setQueries({ "a,b": "combined" });
+      setQueries({ a: "left", b: "right" });
+      vi.runAllTimers();
+    });
+
+    const searchParams = new URLSearchParams(window.location.search);
+    expect(searchParams.get("a,b")).toBe("combined");
+    expect(searchParams.get("a")).toBe("left");
+    expect(searchParams.get("b")).toBe("right");
+  });
+
   it("preserves Farm page history state when updating query params", async () => {
     vi.useFakeTimers();
     spaRouter = new SPARouter({ scrollRestoration: false });

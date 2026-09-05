@@ -55,6 +55,10 @@ const getCurrentSearchParams = (): URLSearchParams => {
 
 const throttleTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+function getUpdateKey(updates: Record<string, unknown>): string {
+  return JSON.stringify(Object.keys(updates).sort());
+}
+
 const compareStructuredValues = (
   current: unknown,
   next: unknown,
@@ -193,7 +197,7 @@ const updateURL = (
     return;
   }
 
-  const throttleKey = Object.keys(updates).sort().join(",");
+  const throttleKey = getUpdateKey(updates);
   const existingTimeout = throttleTimers.get(throttleKey);
   if (existingTimeout) {
     clearTimeout(existingTimeout);
@@ -390,7 +394,7 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
         }
       });
 
-      const updateKey = Object.keys(urlUpdates).sort().join(",");
+      const updateKey = getUpdateKey(urlUpdates);
       pendingUpdatesRef.current.get(updateKey)?.();
       const cancelPendingUpdate = updateURL(urlUpdates, options, true);
       if (cancelPendingUpdate) {
