@@ -29,6 +29,9 @@ function runScript(script, env = {}) {
       encoding: "utf8",
       shell: process.platform === "win32",
     });
+    if (result.error || result.stdout === null) {
+      throw new Error(`pnpm could not be spawned: ${result.error?.message ?? "no output"}`);
+    }
     return { status: result.status, stdout: result.stdout.trim(), stderr: result.stderr };
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -51,6 +54,14 @@ test("a ${VAR:-default} expansion falls back when the variable is unset", () => 
 
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout, "fallback");
+});
+
+test("a ${VAR:-default} expansion leaves an empty string alone", () => {
+  // Pins the emulator's departure from bash so a change in pnpm is noticed.
+  const result = runScript(`PROBE_VAR=\${PROBE_VAR:-fallback} ${PRINT}`, { PROBE_VAR: "" });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, "");
 });
 
 test("a ${VAR:-default} expansion keeps an explicit value", () => {
