@@ -52,6 +52,10 @@ unmounts, preventing an old component from modifying the URL of a later page.
 Repeated keys have the same meaning during server rendering and in client hooks. For example,
 `?tag=react&tag=vite` is read as both values by `asArrayOf(asString)`.
 
+When Farm's SPA router is installed, shallow query pushes participate in its normal history index.
+Back/forward blockers therefore receive the rendered query location and can restore a blocked
+traversal without inserting a duplicate entry.
+
 ## Multiple query values
 
 Use `useQueryStates` when several controls should update together. This keeps the browser URL as the source of shareable state for filters, pagination, and tabs.

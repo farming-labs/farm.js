@@ -37,6 +37,86 @@ describe("generateUniversalRouterStateProperties", () => {
     expect(runtime).toContain("pushState: function(state, href)");
     expect(runtime).toContain("replaceState: function(state, href)");
     expect(runtime).toContain("writePageState: function(action, state, href)");
+    expect(runtime).toContain("writeURLSearch: function(action, href)");
+    expect(runtime).toContain("url.pathname + url.search + url.hash");
+  });
+
+  it("keeps shallow query writes inside universal router bookkeeping", () => {
+    const history = {
+      state: { __farmPageState: { draft: true }, __farmHistoryIndex: 2 },
+      pushState: vi.fn((state: Record<string, unknown>) => {
+        history.state = state as typeof history.state;
+      }),
+      replaceState: vi.fn((state: Record<string, unknown>) => {
+        history.state = state as typeof history.state;
+      }),
+    };
+    const windowValue = {
+      history,
+      dispatchEvent: vi.fn(),
+      location: {
+        href: "https://example.test/start",
+        origin: "https://example.test",
+        pathname: "/start",
+        search: "",
+      },
+    };
+    const createRouter = new Function(
+      "window",
+      "IDLE_NAVIGATION_STATE",
+      "createHistoryState",
+      "FARM_PAGE_STATE_KEY",
+      "FARM_HISTORY_INDEX_KEY",
+      "URL",
+      "CustomEvent",
+      `return ({${runtime}});`,
+    );
+    const createHistoryState = (path: string, pageState: unknown, currentState?: unknown) => ({
+      ...(currentState && typeof currentState === "object" ? currentState : {}),
+      path,
+      __farmPageState: pageState,
+    });
+    const router = createRouter(
+      windowValue,
+      { state: "idle" },
+      createHistoryState,
+      "__farmPageState",
+      "__farmHistoryIndex",
+      URL,
+      Event,
+    );
+    router.currentHistoryIndex = 2;
+
+    router.writeURLSearch("push", "/start?q=value#details");
+
+    expect(history.pushState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        __farmPageState: { draft: true },
+        __farmHistoryIndex: 3,
+        path: "/start?q=value#details",
+      }),
+      "",
+      expect.any(URL),
+    );
+    expect(router.currentHistoryIndex).toBe(3);
+    expect(router.currentPath).toBe("/start?q=value");
+    expect(windowValue.dispatchEvent).not.toHaveBeenCalled();
+
+    history.state = { __farmPageState: { draft: true }, __farmHistoryIndex: 2 };
+    router.currentHistoryIndex = 2;
+    router.writeURLSearch("replace", "/start?q=replaced#details");
+
+    expect(history.replaceState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        __farmPageState: { draft: true },
+        __farmHistoryIndex: 2,
+        path: "/start?q=replaced#details",
+      }),
+      "",
+      expect.any(URL),
+    );
+    expect(router.currentHistoryIndex).toBe(2);
+    expect(router.currentPath).toBe("/start?q=replaced");
   });
 
   it("checks blocker activity before prompting on unload", () => {

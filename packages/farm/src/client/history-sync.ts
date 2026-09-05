@@ -1,4 +1,4 @@
-import { getInstalledFarmSPARouter } from "./spa-router";
+import { getInstalledFarmSPARouter, type SPARouter } from "./spa-router";
 
 /** Fired after programmatic history writes that must not start a navigation. */
 export const FARM_HISTORY_CHANGE_EVENT = "farm:historychange";
@@ -7,6 +7,18 @@ export type FarmHistoryChangeKind = "url-search" | "page-state";
 
 export interface FarmHistoryChangeDetail {
   kind: FarmHistoryChangeKind;
+}
+
+/** Write shallow URL history through the installed SPA router when available. */
+export function writeFarmURLSearchHistory(action: "push" | "replace", href: string): boolean {
+  const router = getInstalledFarmSPARouter();
+  if (!router) return false;
+  const writeURLSearch = (router as { writeURLSearch?: SPARouter["writeURLSearch"] })
+    .writeURLSearch;
+  if (typeof writeURLSearch !== "function") return false;
+  if (window.history.state !== null && typeof window.history.state !== "object") return false;
+  writeURLSearch.call(router, action, href);
+  return true;
 }
 
 function dispatchHistoryChange(kind: FarmHistoryChangeKind): void {
