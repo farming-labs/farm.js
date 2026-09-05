@@ -309,6 +309,20 @@ export function unkeyApiKeysUIFeature(): UIFeatureDefinition {
   };
 }
 
+export function sanityContentUIFeature(): UIFeatureDefinition {
+  return {
+    name: "sanity-content",
+    description: "Sanity content list UI",
+    components: ["badge", "card"],
+    needsApiClient: false,
+    notes: ['Open "/integrations/sanity" to check the Sanity connection.'],
+    files: () => [
+      componentFile("sanity-content-console.tsx", sanityContentTemplate()),
+      integrationPageFile("sanity", "SanityContentConsole"),
+    ],
+  };
+}
+
 function billingUIFeature(input: {
   provider: "stripe" | "polar" | "autumn";
   label: string;
@@ -1868,6 +1882,41 @@ export function UnkeyApiKeysConsole() {
             </code>
             <p className="text-sm text-muted-foreground">
               Create and rotate keys from trusted server code or the Unkey dashboard.
+            </p>
+          </CardContent>
+        </Card>
+      </section>
+    </main>
+  );
+}
+`;
+}
+
+function sanityContentTemplate() {
+  return `import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+
+export function SanityContentConsole() {
+  return (
+    <main className="min-h-screen bg-background px-6 py-12 text-foreground">
+      <section className="mx-auto flex w-full max-w-3xl flex-col gap-6">
+        <div className="space-y-3">
+          <Badge variant="secondary">Sanity</Badge>
+          <h1 className="text-3xl font-semibold tracking-normal">Content</h1>
+        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-xl">Connected to Sanity</CardTitle>
+            <CardDescription>
+              Query documents with createServerQuery and invalidate them from the Sanity webhook.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <code className="block overflow-x-auto rounded-md border bg-muted/30 p-3 text-xs">
+              cms.fetch(&apos;*[_type == &quot;post&quot;]{"{"} title {"}"}&apos;)
+            </code>
+            <p className="text-sm text-muted-foreground">
+              Point a Sanity webhook at /api/sanity/webhook to keep cached pages fresh.
             </p>
           </CardContent>
         </Card>

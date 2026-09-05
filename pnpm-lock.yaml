@@ -1881,6 +1881,9 @@ importers:
       '@farm.js/polar':
         specifier: workspace:*
         version: link:../farm-polar
+      '@farm.js/sanity':
+        specifier: workspace:*
+        version: link:../farm-sanity
       '@farm.js/stripe':
         specifier: workspace:*
         version: link:../farm-stripe
