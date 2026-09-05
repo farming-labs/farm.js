@@ -29,13 +29,13 @@ export default defineConfig({
 
 With no options, values come from the environment:
 
-| Variable                | Purpose                                                                           |
-| ----------------------- | --------------------------------------------------------------------------------- |
-| `SANITY_PROJECT_ID`     | Project id. `SANITY_STUDIO_PROJECT_ID` is also read.                              |
-| `SANITY_DATASET`        | Dataset. `SANITY_STUDIO_DATASET` is also read.                                    |
-| `SANITY_API_VERSION`    | Optional. Defaults to a pinned date so query behaviour does not change under you. |
-| `SANITY_API_READ_TOKEN` | Optional. A Viewer token, needed for private datasets and drafts.                 |
-| `SANITY_WEBHOOK_SECRET` | Required once a webhook is configured.                                            |
+| Variable                | Purpose                                                                        |
+| ----------------------- | ------------------------------------------------------------------------------ |
+| `SANITY_PROJECT_ID`     | Project id. `SANITY_STUDIO_PROJECT_ID` is also read.                           |
+| `SANITY_DATASET`        | Dataset. `SANITY_STUDIO_DATASET` is also read.                                 |
+| `SANITY_API_VERSION`    | Optional. `SANITY_STUDIO_API_VERSION` is also read. Defaults to a pinned date. |
+| `SANITY_API_READ_TOKEN` | Optional. A Viewer token, needed for private datasets and drafts.              |
+| `SANITY_WEBHOOK_SECRET` | Required once a webhook is configured.                                         |
 
 A missing project id or dataset fails at startup rather than at the first request.
 

@@ -28,7 +28,8 @@ export function createSanityImageLoader(options: SanityImageLoaderOptions): Farm
       url.searchParams.set("w", w);
       url.searchParams.set("q", q);
       url.searchParams.set("auto", "format");
-      url.searchParams.set("fit", "max");
+      // An art-directed URL may already carry fit=crop; only default it.
+      if (!url.searchParams.has("fit")) url.searchParams.set("fit", "max");
       return url.toString();
     }
 
