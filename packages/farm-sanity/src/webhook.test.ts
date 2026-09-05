@@ -128,12 +128,35 @@ describe("createSanityWebhookRoute", () => {
     const response = await call(route, await signedRequest({ _type: "post", slug: "a" }));
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ invalidated: 4 });
+    expect(await response.json()).toEqual({ targets: 4 });
     expect(invalidation.invalidate).toHaveBeenCalledTimes(2);
     expect(invalidation.invalidate).toHaveBeenCalledWith(["sanity", "post", "list"]);
     expect(invalidation.invalidate).toHaveBeenCalledWith(["sanity", "post", "a"]);
     expect(invalidation.revalidatePath).toHaveBeenCalledWith("/posts");
     expect(invalidation.revalidatePath).toHaveBeenCalledWith("/posts/a");
+  });
+
+  it("requests a repeated key or path only once", async () => {
+    const invalidation = fakeInvalidation();
+    const route = createSanityWebhookRoute(
+      {
+        secret: SECRET,
+        onChange: () => ({
+          keys: [
+            ["sanity", "post", "list"],
+            ["sanity", "post", "list"],
+          ],
+          paths: ["/posts", "/posts"],
+        }),
+      },
+      invalidation,
+    );
+
+    const response = await call(route, await signedRequest({ _type: "post" }));
+
+    expect(await response.json()).toEqual({ targets: 2 });
+    expect(invalidation.invalidate).toHaveBeenCalledTimes(1);
+    expect(invalidation.revalidatePath).toHaveBeenCalledTimes(1);
   });
 
   it("treats a void return as nothing to invalidate", async () => {
@@ -146,7 +169,7 @@ describe("createSanityWebhookRoute", () => {
     const response = await call(route, await signedRequest({ _type: "system" }));
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ invalidated: 0 });
+    expect(await response.json()).toEqual({ targets: 0 });
     expect(invalidation.invalidate).not.toHaveBeenCalled();
     expect(invalidation.revalidatePath).not.toHaveBeenCalled();
   });
@@ -160,7 +183,7 @@ describe("createSanityWebhookRoute", () => {
 
     const response = await call(route, await signedRequest({ _type: "post" }));
 
-    expect(await response.json()).toEqual({ invalidated: 1 });
+    expect(await response.json()).toEqual({ targets: 1 });
   });
 
   it("returns 500 when onChange throws so Sanity retries", async () => {

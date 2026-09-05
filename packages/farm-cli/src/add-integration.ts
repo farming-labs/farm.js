@@ -580,6 +580,8 @@ export const sanityIntegration = sanity({
   projectId: process.env.SANITY_PROJECT_ID,
   dataset: process.env.SANITY_DATASET,
   token: process.env.SANITY_API_READ_TOKEN,
+  // The webhook fires before Sanity's CDN updates, so reads go through the API.
+  useCdn: false,
   webhook: {
     secret: process.env.SANITY_WEBHOOK_SECRET,
     onChange(payload) {

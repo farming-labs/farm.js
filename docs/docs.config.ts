@@ -280,7 +280,7 @@ const sidebar = [
         ],
       },
       {
-        label: "Content",
+        label: "CMS",
         icon: "file",
         children: [{ label: "Sanity", slug: "integrations/sanity", icon: "file" }],
       },
