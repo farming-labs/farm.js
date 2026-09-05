@@ -1142,6 +1142,28 @@ async function measureTrial(browser, trial, compilerMode, port) {
           },
         );
 
+        const tableReversePipeline = await measureTable(
+          async () => ensure10000(),
+          async () => {
+            const rows = table.querySelectorAll("tbody tr");
+            await runTableAction(
+              () => tableButton("table-reverse-pipeline").click(),
+              () => rowsMatch(table.querySelectorAll("tbody tr"), rows),
+            );
+          },
+        );
+
+        const tableReversePipelineSnapshot = await measureTable(
+          async () => ensure10000(),
+          async () => {
+            const rows = table.querySelectorAll("tbody tr");
+            await runTableAction(
+              () => tableButton("table-reverse-pipeline-snapshot").click(),
+              () => rowsMatch(table.querySelectorAll("tbody tr"), rows),
+            );
+          },
+        );
+
         const tableSort = await measureTable(
           async () => create10000(),
           async () => {
@@ -1563,6 +1585,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
             positionReplace: tablePositionReplace,
             positionReplaceSnapshot: tablePositionReplaceSnapshot,
             reverse: tableReverse,
+            reversePipeline: tableReversePipeline,
+            reversePipelineSnapshot: tableReversePipelineSnapshot,
             reverseQueued: tableReverseQueued,
             reverseQueuedSnapshot: tableReverseQueuedSnapshot,
             reverseSnapshot: tableReverseSnapshot,
@@ -1693,6 +1717,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
         positionReplace: timingSummary(result.table.positionReplace),
         positionReplaceSnapshot: timingSummary(result.table.positionReplaceSnapshot),
         reverse: timingSummary(result.table.reverse),
+        reversePipeline: timingSummary(result.table.reversePipeline),
+        reversePipelineSnapshot: timingSummary(result.table.reversePipelineSnapshot),
         reverseQueued: timingSummary(result.table.reverseQueued),
         reverseQueuedSnapshot: timingSummary(result.table.reverseQueuedSnapshot),
         reverseSnapshot: timingSummary(result.table.reverseSnapshot),
@@ -1807,6 +1833,8 @@ const tableMetrics = [
   "positionReplace",
   "positionReplaceSnapshot",
   "reverse",
+  "reversePipeline",
+  "reversePipelineSnapshot",
   "reverseQueued",
   "reverseQueuedSnapshot",
   "reverseSnapshot",
@@ -2385,6 +2413,29 @@ const keyedQueuedReorderRegressions = keyedQueuedReorderResults.filter(
     !Number.isFinite(snapshotSpeedup) ||
     snapshotSpeedup < keyedQueuedReorderMinimumSnapshotSpeedup,
 );
+// Two native reversals inside one functional setter also end in the original order. The compiler
+// should preserve the full pipeline metadata, validate its final permutation once, and stay ahead
+// of React and the equivalent block-bodied compiled control at 10,000 rows.
+const keyedReorderPipelineMinimumSpeedup = 2;
+const keyedReorderPipelineMinimumSnapshotSpeedup = 1.25;
+const keyedReorderPipelineResults = ["static", "hybrid"].map((mode) => {
+  const reverseMedianMs = comparisons.table.reversePipeline[mode].medianMs;
+  const snapshotMedianMs = comparisons.table.reversePipelineSnapshot[mode].medianMs;
+  return {
+    mode,
+    reverseMedianMs,
+    snapshotMedianMs,
+    snapshotSpeedup: snapshotMedianMs / reverseMedianMs,
+    speedup: comparisons.table.reversePipeline[`${mode}VsBaseline`].speedup,
+  };
+});
+const keyedReorderPipelineRegressions = keyedReorderPipelineResults.filter(
+  ({ snapshotSpeedup, speedup }) =>
+    !Number.isFinite(speedup) ||
+    speedup < keyedReorderPipelineMinimumSpeedup ||
+    !Number.isFinite(snapshotSpeedup) ||
+    snapshotSpeedup < keyedReorderPipelineMinimumSnapshotSpeedup,
+);
 // A direct native toSorted() exposes a permutation while preserving every keyed row object. The
 // hinted path validates that permutation by item identity, uses LIS to move only the required DOM
 // nodes, and avoids key, descriptor, and binding reads. Compare it with React and the equivalent
@@ -2570,6 +2621,7 @@ const passed =
   keyedRangeRemovalRegressions.length === 0 &&
   keyedReorderRegressions.length === 0 &&
   keyedQueuedReorderRegressions.length === 0 &&
+  keyedReorderPipelineRegressions.length === 0 &&
   keyedSortRegressions.length === 0 &&
   keyedFilterRegressions.length === 0 &&
   keyedIdentityRegressions.length === 0 &&
@@ -2714,6 +2766,13 @@ const report = {
     regressions: keyedQueuedReorderRegressions,
     results: keyedQueuedReorderResults,
     status: keyedQueuedReorderRegressions.length === 0 ? "PASS" : "FAIL",
+  },
+  keyedReorderPipelineHintGate: {
+    minimumSnapshotSpeedup: keyedReorderPipelineMinimumSnapshotSpeedup,
+    minimumSpeedup: keyedReorderPipelineMinimumSpeedup,
+    regressions: keyedReorderPipelineRegressions,
+    results: keyedReorderPipelineResults,
+    status: keyedReorderPipelineRegressions.length === 0 ? "PASS" : "FAIL",
   },
   keyedSortHintGate: {
     minimumSnapshotSpeedup: keyedSortMinimumSnapshotSpeedup,

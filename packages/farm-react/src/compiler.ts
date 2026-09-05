@@ -1881,6 +1881,154 @@ function rewriteKeyedArrayReorderHints(
   };
 }
 
+interface KeyedArrayReorderPipelineStep {
+  readonly kind: "reverse" | "sort";
+  readonly comparator?: t.ArrowFunctionExpression | t.FunctionExpression;
+}
+
+function keyedArrayReorderPipeline(
+  expression: t.Expression,
+  parameterName: string,
+  safeGlobals: ReadonlySet<string>,
+): readonly KeyedArrayReorderPipelineStep[] | undefined {
+  const outerSteps: KeyedArrayReorderPipelineStep[] = [];
+  let current = expression;
+  while (
+    t.isCallExpression(current) &&
+    t.isMemberExpression(current.callee) &&
+    !current.callee.computed &&
+    t.isIdentifier(current.callee.property) &&
+    t.isExpression(current.callee.object)
+  ) {
+    const methodName = current.callee.property.name;
+    if (methodName === "toReversed") {
+      if (current.arguments.length !== 0) return undefined;
+      outerSteps.push({ kind: "reverse" });
+    } else if (methodName === "toSorted") {
+      if (current.arguments.length > 1) return undefined;
+      const comparator = current.arguments[0];
+      if (
+        comparator &&
+        !t.isArrowFunctionExpression(comparator) &&
+        !t.isFunctionExpression(comparator)
+      ) {
+        return undefined;
+      }
+      if (comparator && validateCollectionCallback(comparator, "toSorted", safeGlobals)) {
+        return undefined;
+      }
+      outerSteps.push({ kind: "sort", ...(comparator ? { comparator } : {}) });
+    } else {
+      return undefined;
+    }
+    current = current.callee.object;
+  }
+  if (!t.isIdentifier(current, { name: parameterName }) || outerSteps.length < 2) {
+    return undefined;
+  }
+  return outerSteps.reverse();
+}
+
+function rewriteKeyedArrayReorderPipelineHints(
+  root: t.JSXElement,
+  hintedStateIndices: ReadonlySet<number>,
+  statesBySetter: ReadonlyMap<string, StateBinding>,
+  reorderHelperIdentifier: t.Identifier,
+  sortHelperIdentifier: t.Identifier,
+  safeGlobals: ReadonlySet<string>,
+): {
+  root: t.JSXElement;
+  reorderCount: number;
+  sortCount: number;
+  stateIndices: ReadonlySet<number>;
+} {
+  if (hintedStateIndices.size === 0) {
+    return {
+      root: t.cloneNode(root, true),
+      reorderCount: 0,
+      sortCount: 0,
+      stateIndices: new Set(),
+    };
+  }
+  const file = expressionFile(t.cloneNode(root, true));
+  const stateIndices = new Set<number>();
+  let reorderCount = 0;
+  let sortCount = 0;
+  traverse(file, {
+    CallExpression(path) {
+      const callee = path.get("callee");
+      if (!callee.isIdentifier() || callee.scope.hasBinding(callee.node.name)) return;
+      const state = statesBySetter.get(callee.node.name);
+      if (!state || !hintedStateIndices.has(state.index) || path.node.arguments.length !== 1) {
+        return;
+      }
+      const updater = path.node.arguments[0];
+      if (
+        !t.isArrowFunctionExpression(updater) ||
+        updater.async ||
+        updater.generator ||
+        updater.params.length !== 1 ||
+        !t.isIdentifier(updater.params[0]) ||
+        !t.isExpression(updater.body)
+      ) {
+        return;
+      }
+      const steps = keyedArrayReorderPipeline(updater.body, updater.params[0].name, safeGlobals);
+      if (!steps) return;
+
+      const previous = t.cloneNode(updater.params[0]);
+      const statements: t.Statement[] = [];
+      let value: t.Expression = t.cloneNode(previous);
+      for (const step of steps) {
+        const methodName = step.kind === "reverse" ? "toReversed" : "toSorted";
+        const method = path.scope.generateUidIdentifier(
+          step.kind === "reverse" ? "farmToReversed" : "farmToSorted",
+        );
+        const result = path.scope.generateUidIdentifier("farmReordered");
+        statements.push(
+          t.variableDeclaration("const", [
+            t.variableDeclarator(
+              t.cloneNode(method),
+              t.memberExpression(t.cloneNode(value), t.identifier(methodName)),
+            ),
+          ]),
+          t.variableDeclaration("const", [
+            t.variableDeclarator(
+              t.cloneNode(result),
+              t.callExpression(
+                t.cloneNode(
+                  step.kind === "reverse" ? reorderHelperIdentifier : sortHelperIdentifier,
+                ),
+                [
+                  t.cloneNode(value),
+                  t.cloneNode(method),
+                  ...(step.comparator ? [t.cloneNode(step.comparator, true)] : []),
+                ],
+              ),
+            ),
+          ]),
+        );
+        value = t.cloneNode(result);
+        if (step.kind === "reverse") reorderCount += 1;
+        else sortCount += 1;
+      }
+      statements.push(t.returnStatement(t.cloneNode(value)));
+      path.node.arguments[0] = t.arrowFunctionExpression(
+        [t.cloneNode(previous)],
+        t.blockStatement(statements),
+      );
+      stateIndices.add(state.index);
+      path.skip();
+    },
+  });
+  return {
+    root: (file.program.body[0] as t.ExpressionStatement).expression as t.JSXElement,
+    reorderCount,
+    sortCount,
+    stateIndices,
+  };
+}
+
 function rewriteKeyedArraySortHints(
   root: t.JSXElement,
   hintedStateIndices: ReadonlySet<number>,
@@ -7344,14 +7492,53 @@ function compileCandidate(
       compilerUsage.keyedArrayWindowReplaceHints += positionHintedRoot.windowReplaceCount;
     }
   }
+  const reorderPipelineHintedRoot = rewriteKeyedArrayReorderPipelineHints(
+    expandedReactiveRoot,
+    shiftedIndexIndependentStateIndices,
+    statesBySetter,
+    keyedArrayReorderIdentifier,
+    keyedArraySortIdentifier,
+    safeGlobals,
+  );
+  let appliedPipelineReorderHints = 0;
+  let appliedPipelineSortHints = 0;
+  let appliedPipelineHintedStateIndices: ReadonlySet<number> = new Set();
+  if (reorderPipelineHintedRoot.reorderCount > 0 || reorderPipelineHintedRoot.sortCount > 0) {
+    const hintedBlockAnalysis = analyzeComposableBlocks(
+      reorderPipelineHintedRoot.root,
+      reactiveByValue,
+      safeGlobals,
+      listNames,
+      allowedComponentNames,
+    );
+    const hintedAnalysis = analyzeHostTree(
+      reorderPipelineHintedRoot.root,
+      reactiveByValue,
+      safeGlobals,
+      hintedBlockAnalysis.conditionalExpressions || new Set<t.Expression>(),
+      hintedBlockAnalysis.keyedExpressions || new Set<t.Expression>(),
+      hintedBlockAnalysis.ownedElements || new Set<t.JSXElement>(),
+      hintedBlockAnalysis.componentElements || new Set<t.JSXElement>(),
+    );
+    if (!hintedBlockAnalysis.reason && !hintedAnalysis.reason) {
+      expandedReactiveRoot = reorderPipelineHintedRoot.root;
+      blockAnalysis = hintedBlockAnalysis;
+      analysis = hintedAnalysis;
+      appliedPipelineReorderHints = reorderPipelineHintedRoot.reorderCount;
+      appliedPipelineSortHints = reorderPipelineHintedRoot.sortCount;
+      appliedPipelineHintedStateIndices = reorderPipelineHintedRoot.stateIndices;
+      optimizationCounts.keyedArrayReorderHints += reorderPipelineHintedRoot.reorderCount;
+      optimizationCounts.keyedArraySortHints += reorderPipelineHintedRoot.sortCount;
+    }
+  }
   const reorderHintedRoot = rewriteKeyedArrayReorderHints(
     expandedReactiveRoot,
     shiftedIndexIndependentStateIndices,
     statesBySetter,
     keyedArrayReorderIdentifier,
   );
-  let appliedKeyedArrayReorderHints = 0;
-  let appliedReorderHintedStateIndices: ReadonlySet<number> = new Set();
+  let appliedKeyedArrayReorderHints = appliedPipelineReorderHints;
+  let appliedReorderHintedStateIndices: ReadonlySet<number> = appliedPipelineHintedStateIndices;
   if (reorderHintedRoot.count > 0) {
     const hintedBlockAnalysis = analyzeComposableBlocks(
       reorderHintedRoot.root,
@@ -7373,8 +7560,11 @@ function compileCandidate(
       expandedReactiveRoot = reorderHintedRoot.root;
       blockAnalysis = hintedBlockAnalysis;
       analysis = hintedAnalysis;
-      appliedKeyedArrayReorderHints = reorderHintedRoot.count;
-      appliedReorderHintedStateIndices = reorderHintedRoot.stateIndices;
+      appliedKeyedArrayReorderHints += reorderHintedRoot.count;
+      appliedReorderHintedStateIndices = new Set([
+        ...appliedReorderHintedStateIndices,
+        ...reorderHintedRoot.stateIndices,
+      ]);
       optimizationCounts.keyedArrayReorderHints += reorderHintedRoot.count;
     }
   }
@@ -7385,8 +7575,8 @@ function compileCandidate(
     keyedArraySortIdentifier,
     safeGlobals,
   );
-  let appliedKeyedArraySortHints = 0;
-  let appliedSortHintedStateIndices: ReadonlySet<number> = new Set();
+  let appliedKeyedArraySortHints = appliedPipelineSortHints;
+  let appliedSortHintedStateIndices: ReadonlySet<number> = appliedPipelineHintedStateIndices;
   if (sortHintedRoot.count > 0) {
     const hintedBlockAnalysis = analyzeComposableBlocks(
       sortHintedRoot.root,
@@ -7408,8 +7598,11 @@ function compileCandidate(
       expandedReactiveRoot = sortHintedRoot.root;
       blockAnalysis = hintedBlockAnalysis;
       analysis = hintedAnalysis;
-      appliedKeyedArraySortHints = sortHintedRoot.count;
-      appliedSortHintedStateIndices = sortHintedRoot.stateIndices;
+      appliedKeyedArraySortHints += sortHintedRoot.count;
+      appliedSortHintedStateIndices = new Set([
+        ...appliedSortHintedStateIndices,
+        ...sortHintedRoot.stateIndices,
+      ]);
       optimizationCounts.keyedArraySortHints += sortHintedRoot.count;
     }
   }

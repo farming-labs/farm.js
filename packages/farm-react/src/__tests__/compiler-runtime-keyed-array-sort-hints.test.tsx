@@ -24,6 +24,13 @@ type SortableArray = Item[] & {
   toSorted(compare?: (left: Item, right: Item) => number): Item[];
 };
 
+type ReorderPipelineOperation =
+  | { readonly kind: "reverse" }
+  | {
+      readonly compare: (left: Item, right: Item) => number;
+      readonly kind: "sort";
+    };
+
 const roots: Root[] = [];
 const stressIt = process.env.FARM_REACT_STRESS === "1" ? it : it.skip;
 
@@ -77,7 +84,11 @@ function createSortHarness(initialItems: Item[], readsCollection = false) {
   let plainThenSort: () => void = () => undefined;
   let reverseThenSort: () => void = () => undefined;
   let sortThenReverse: () => void = () => undefined;
+  let reverseThenSortPipeline: () => void = () => undefined;
+  let sortThenReversePipeline: () => void = () => undefined;
+  let reorderPipeline: (operations: readonly ReorderPipelineOperation[]) => void = () => undefined;
   let customSort: () => void = () => undefined;
+  let customSortThenReversePipeline: () => void = () => undefined;
   let mismatchedSort: () => void = () => undefined;
   const Table = createCompiledComponent({
     displayName: "SortTable",
@@ -117,6 +128,25 @@ function createSortHarness(initialItems: Item[], readsCollection = false) {
         );
         state[0].set((previous) => hintedReverse(previous as Item[]));
       };
+      reverseThenSortPipeline = () =>
+        state[0].set((previous) =>
+          hintedSort(hintedReverse(previous as Item[]), (left, right) => left.rank - right.rank),
+        );
+      sortThenReversePipeline = () =>
+        state[0].set((previous) =>
+          hintedReverse(hintedSort(previous as Item[], (left, right) => left.rank - right.rank)),
+        );
+      reorderPipeline = (operations) =>
+        state[0].set((previous) => {
+          let next = previous as Item[];
+          for (const operation of operations) {
+            next =
+              operation.kind === "reverse"
+                ? hintedReverse(next)
+                : hintedSort(next, operation.compare);
+          }
+          return next;
+        });
       customSort = () =>
         state[0].set((previous) => {
           const source = previous as Item[];
@@ -128,6 +158,19 @@ function createSortHarness(initialItems: Item[], readsCollection = false) {
             method,
             (left: Item, right: Item) => left.rank - right.rank,
           );
+        });
+      customSortThenReversePipeline = () =>
+        state[0].set((previous) => {
+          const source = previous as Item[];
+          const custom = function (this: Item[], compare: (left: Item, right: Item) => number) {
+            return [...this].sort(compare);
+          };
+          const sorted = createCompilerKeyedArraySort(
+            source,
+            custom,
+            (left: Item, right: Item) => left.rank - right.rank,
+          ) as Item[];
+          return hintedReverse(sorted);
         });
       mismatchedSort = () =>
         state[0].set((previous) => {
@@ -187,12 +230,17 @@ function createSortHarness(initialItems: Item[], readsCollection = false) {
     Table,
     counters,
     customSort: () => customSort(),
+    customSortThenReversePipeline: () => customSortThenReversePipeline(),
     mismatchedSort: () => mismatchedSort(),
     plainThenSort: () => plainThenSort(),
     queueSorts: (compares: Array<(left: Item, right: Item) => number>) => queueSorts(compares),
     queueTwo: () => queueTwo(),
+    reorderPipeline: (operations: readonly ReorderPipelineOperation[]) =>
+      reorderPipeline(operations),
+    reverseThenSortPipeline: () => reverseThenSortPipeline(),
     reverseThenSort: () => reverseThenSort(),
     sort: (compare: (left: Item, right: Item) => number) => sort(compare),
+    sortThenReversePipeline: () => sortThenReversePipeline(),
     sortThenReverse: () => sortThenReverse(),
   };
 }
@@ -326,13 +374,59 @@ describe("compiled keyed-array sort hints", () => {
     }
   });
 
+  it("composes a native sort and reverse pipeline inside one setter", async () => {
+    const initialItems: Item[] = [
+      { id: "a", label: "Alpha", rank: 3 },
+      { id: "b", label: "Beta", rank: 1 },
+      { id: "c", label: "Gamma", rank: 2 },
+    ];
+    for (const operation of ["reverse-sort", "sort-reverse"] as const) {
+      const harness = createSortHarness(initialItems);
+      const container = document.createElement("div");
+      document.body.append(container);
+      const root = createRoot(container);
+      roots.push(root);
+      await act(async () => root.render(<harness.Table />));
+      const rows = new Map(
+        [...container.querySelectorAll("li")].map((row) => [row.getAttribute("data-key"), row]),
+      );
+      harness.counters.keys = 0;
+      harness.counters.descriptors = 0;
+      harness.counters.bindings = 0;
+
+      await act(async () => {
+        if (operation === "reverse-sort") harness.reverseThenSortPipeline();
+        else harness.sortThenReversePipeline();
+        await flushCompilerUpdates();
+      });
+
+      expect(itemLabels(container)).toEqual(
+        operation === "reverse-sort" ? ["Beta", "Gamma", "Alpha"] : ["Alpha", "Gamma", "Beta"],
+      );
+      for (const [key, row] of rows) {
+        expect(container.querySelector(`[data-key="${key}"]`)).toBe(row);
+      }
+      expect(harness.counters.executions).toBe(1);
+      expect(harness.counters.renders).toBe(1);
+      expect(harness.counters.keys).toBe(0);
+      expect(harness.counters.descriptors).toBe(0);
+      expect(harness.counters.bindings).toBe(0);
+    }
+  });
+
   it("falls back for custom methods, unhinted chains, changed identities, and collection bindings", async () => {
     const initialItems: Item[] = [
       { id: "a", label: "Alpha", rank: 3 },
       { id: "b", label: "Beta", rank: 1 },
       { id: "c", label: "Gamma", rank: 2 },
     ];
-    for (const operation of ["custom", "unhinted", "mismatched", "dependent"] as const) {
+    for (const operation of [
+      "custom",
+      "custom-pipeline",
+      "unhinted",
+      "mismatched",
+      "dependent",
+    ] as const) {
       const harness = createSortHarness(initialItems, operation === "dependent");
       const container = document.createElement("div");
       document.body.append(container);
@@ -342,6 +436,7 @@ describe("compiled keyed-array sort hints", () => {
       harness.counters.keys = 0;
       await act(async () => {
         if (operation === "custom") harness.customSort();
+        else if (operation === "custom-pipeline") harness.customSortThenReversePipeline();
         else if (operation === "unhinted") harness.plainThenSort();
         else if (operation === "mismatched") harness.mismatchedSort();
         else harness.sort((left, right) => left.rank - right.rank);
@@ -380,26 +475,22 @@ describe("compiled keyed-array sort hints", () => {
     ).toThrow(error);
   });
 
-  it("preserves focused controlled-input identity and selection while sorting", async () => {
+  it("preserves focused controlled-input identity and selection through a reorder pipeline", async () => {
     const initialItems: Item[] = [
       { id: "a", label: "Alpha", rank: 3 },
       { id: "b", label: "Beta", rank: 1 },
       { id: "c", label: "Gamma", rank: 2 },
     ];
-    let sortTwice = () => undefined;
+    let reorderPipeline = () => undefined;
     const FormRows = createCompiledComponent({
       displayName: "SortFormRows",
       initialize: () => [initialItems],
       render(_props: Record<string, never>, state, blocks) {
         const items = () => state[0].get() as Item[];
-        sortTwice = () => {
+        reorderPipeline = () =>
           state[0].set((previous) =>
-            hintedSort(previous as Item[], (left, right) => left.rank - right.rank),
+            hintedReverse(hintedSort(previous as Item[], (left, right) => left.rank - right.rank)),
           );
-          state[0].set((previous) =>
-            hintedSort(previous as Item[], (left, right) => left.rank - right.rank),
-          );
-        };
         return (
           <section>
             <blocks.KeyedRows
@@ -445,7 +536,7 @@ describe("compiled keyed-array sort hints", () => {
     input.setSelectionRange(1, 3);
 
     await act(async () => {
-      sortTwice();
+      reorderPipeline();
       await flushCompilerUpdates();
     });
 
@@ -518,13 +609,90 @@ describe("compiled keyed-array sort hints", () => {
     expect(compiled.counters.keys).toBe(0);
   }, 20_000);
 
+  it("matches normal React through 2,000 randomized native reorder pipelines", async () => {
+    const initialItems = Array.from(
+      { length: 64 },
+      (_, index): Item => ({ id: `row-${index}`, label: `Row ${index}`, rank: index }),
+    );
+    const compiled = createSortHarness(initialItems);
+    let runReactPipeline: (operations: readonly ReorderPipelineOperation[]) => void = () =>
+      undefined;
+    function NormalTable() {
+      const [items, setItems] = useState(initialItems);
+      runReactPipeline = (operations) => {
+        setItems((previous) => {
+          let next = previous as SortableArray;
+          for (const operation of operations) {
+            next = (
+              operation.kind === "reverse" ? next.toReversed() : next.toSorted(operation.compare)
+            ) as SortableArray;
+          }
+          return next;
+        });
+      };
+      return (
+        <ul>
+          {items.map((item) => (
+            <li data-key={item.id} key={item.id}>
+              {item.label}
+            </li>
+          ))}
+        </ul>
+      );
+    }
+    const compiledContainer = document.createElement("div");
+    const reactContainer = document.createElement("div");
+    document.body.append(compiledContainer, reactContainer);
+    const compiledRoot = createRoot(compiledContainer);
+    const reactRoot = createRoot(reactContainer);
+    roots.push(compiledRoot, reactRoot);
+    await act(async () => {
+      compiledRoot.render(<compiled.Table />);
+      reactRoot.render(<NormalTable />);
+    });
+    compiled.counters.keys = 0;
+
+    let seed = 0x4f1bbcdc;
+    for (let update = 0; update < 2_000; update += 1) {
+      seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0;
+      const stepCount = 2 + (seed % 3);
+      const operations: ReorderPipelineOperation[] = [];
+      for (let step = 0; step < stepCount; step += 1) {
+        seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0;
+        if ((seed & 1) === 0) {
+          operations.push({ kind: "reverse" });
+          continue;
+        }
+        const ranks = new Map<string, number>();
+        for (const item of initialItems) {
+          seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0;
+          ranks.set(item.id, seed);
+        }
+        operations.push({
+          compare: (left, right) => ranks.get(left.id)! - ranks.get(right.id)!,
+          kind: "sort",
+        });
+      }
+      await act(async () => {
+        compiled.reorderPipeline(operations);
+        runReactPipeline(operations);
+        await flushCompilerUpdates();
+      });
+      if (update % 100 === 0) {
+        expect(itemLabels(compiledContainer)).toEqual(itemLabels(reactContainer));
+      }
+    }
+    expect(itemLabels(compiledContainer)).toEqual(itemLabels(reactContainer));
+    expect(compiled.counters.executions).toBe(1);
+    expect(compiled.counters.keys).toBe(0);
+  }, 20_000);
+
   it("supports StrictMode hydration and ignores a flush after unmount", async () => {
     const items: Item[] = [
       { id: "a", label: "Alpha", rank: 3 },
       { id: "b", label: "Beta", rank: 1 },
       { id: "c", label: "Gamma", rank: 2 },
     ];
-    const compare = (left: Item, right: Item) => left.rank - right.rank;
     const hydration = createSortHarness(items);
     const container = document.createElement("div");
     container.innerHTML = renderToString(<hydration.Table />);
@@ -539,11 +707,10 @@ describe("compiled keyed-array sort hints", () => {
     await act(async () => flushCompilerUpdates());
     const beta = container.querySelector('[data-key="b"]');
     await act(async () => {
-      hydration.sort(compare);
-      hydration.sort(compare);
+      hydration.sortThenReversePipeline();
       await flushCompilerUpdates();
     });
-    expect(itemLabels(container)).toEqual(["Beta", "Gamma", "Alpha"]);
+    expect(itemLabels(container)).toEqual(["Alpha", "Gamma", "Beta"]);
     expect(container.querySelector('[data-key="b"]')).toBe(beta);
 
     const unmounted = createSortHarness(items);
@@ -551,8 +718,7 @@ describe("compiled keyed-array sort hints", () => {
     document.body.append(unmountContainer);
     const unmountRoot = createRoot(unmountContainer);
     await act(async () => unmountRoot.render(<unmounted.Table />));
-    unmounted.sort(compare);
-    unmounted.sort(compare);
+    unmounted.reverseThenSortPipeline();
     await act(async () => unmountRoot.unmount());
     await flushCompilerUpdates();
     expect(unmountContainer.childElementCount).toBe(0);

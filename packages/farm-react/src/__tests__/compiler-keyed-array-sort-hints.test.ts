@@ -79,6 +79,94 @@ describe("React AOT keyed-array sort hints", () => {
     expect(result.code).toContain("keyedRowsReorderHintedRuntimeFeature");
   });
 
+  it("lowers every step in one native sort and reverse pipeline", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Table() {
+        const [rows, setRows] = useState([
+          { id: "a", rank: 2, label: "Alpha" },
+          { id: "b", rank: 1, label: "Beta" },
+        ]);
+        return <section>
+          <button onClick={() => setRows((current) =>
+            current
+              .toSorted((left, right) => left.rank - right.rank)
+              .toReversed()
+              .toSorted((left, right) => right.rank - left.rank)
+          )}>Reorder</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </section>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Table"]);
+    expect(result.optimizations.keyedArraySortHints).toBe(2);
+    expect(result.optimizations.keyedArrayReorderHints).toBe(1);
+    expect(result.code.match(/createCompilerKeyedArraySort\(/g)).toHaveLength(2);
+    expect(result.code.match(/createCompilerKeyedArrayReorder\(/g)).toHaveLength(1);
+    expect(result.code).toContain("keyedRowsReorderHintedRuntimeFeature");
+  });
+
+  it("supports a reverse-first pipeline and the native default comparator", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Table() {
+        const [rows, setRows] = useState(["beta", "alpha"]);
+        return <section>
+          <button onClick={() => setRows((current) =>
+            current.toReversed().toSorted().toReversed()
+          )}>Reorder</button>
+          <ul>{rows.map((row) => <li key={row}>{row}</li>)}</ul>
+        </section>;
+      }
+    `);
+
+    expect(result.optimizations.keyedArraySortHints).toBe(1);
+    expect(result.optimizations.keyedArrayReorderHints).toBe(2);
+    expect(result.code.match(/createCompilerKeyedArraySort\(/g)).toHaveLength(1);
+    expect(result.code.match(/createCompilerKeyedArrayReorder\(/g)).toHaveLength(2);
+  });
+
+  it.each([
+    {
+      name: "a referenced comparator",
+      declaration: "const compare = (left, right) => left.rank - right.rank;",
+      update: "current.toSorted(compare).toReversed()",
+    },
+    {
+      name: "a computed outer method",
+      update: 'current.toSorted((left, right) => left.rank - right.rank)["toReversed"]()',
+    },
+    {
+      name: "a non-reorder intermediate method",
+      update: "current.slice().toSorted((left, right) => left.rank - right.rank).toReversed()",
+    },
+    {
+      name: "an invalid reverse argument",
+      update: "current.toSorted((left, right) => left.rank - right.rank).toReversed(true)",
+    },
+  ])(
+    "keeps a pipeline with $name off the reorder fast path",
+    async ({ declaration = "", update }) => {
+      const result = await compile(`
+      import { useState } from "react";
+      export function Table() {
+        const [rows, setRows] = useState([{ id: "a", rank: 1, label: "Alpha" }]);
+        ${declaration}
+        return <section>
+          <button onClick={() => setRows((current) => ${update})}>Reorder</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </section>;
+      }
+    `);
+
+      expect(result.optimizations.keyedArraySortHints).toBe(0);
+      expect(result.optimizations.keyedArrayReorderHints).toBe(0);
+      expect(result.code).not.toContain("createCompilerKeyedArraySort");
+      expect(result.code).not.toContain("createCompilerKeyedArrayReorder");
+    },
+  );
+
   it.each([
     {
       name: "an index-dependent row",
