@@ -394,11 +394,12 @@ setItems((current) => current.toSorted((left, right) => left.rank - right.rank).
 
 Farm evaluates every lookup and call in JavaScript order, carries the same committed token through
 the pipeline, and reconciles only its final result. Index-aware or collection-reading rows,
-arguments to `toReversed()`, referenced comparators, computed methods, chains containing another
-method, block-bodied updaters, custom methods, sparse or subclassed behavior, an unhinted or
-structural intermediate update, nested or React-owned rows, and failed checks keep complete keyed
-reconciliation. Reports count each compiled reverse step as a `keyedArrayReorderHints` entry, and
-modules without one omit the reorder runtime. Farm does not polyfill `Array.prototype.toReversed`.
+arguments to `toReversed()`, referenced comparators, computed methods, chains containing a method
+other than `toSorted()` or `toReversed()`, block-bodied updaters, custom methods, sparse or
+subclassed behavior, an unhinted or structural intermediate update, nested or React-owned rows, and
+failed checks keep complete keyed reconciliation. Reports count each compiled reverse step as a
+`keyedArrayReorderHints` entry, and modules without one omit the reorder runtime. Farm does not
+polyfill `Array.prototype.toReversed`.
 
 A direct native immutable sort can use the same optional reorder runtime:
 

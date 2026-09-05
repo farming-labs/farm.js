@@ -60,8 +60,8 @@ for a queued final permutation, native sort and reverse composition in both orde
 fallback after an unhinted intermediate update, focus and selection preservation, Strict Mode
 hydration, and unmount-before-flush cleanup. Two independent 2,000-commit differential suites,
 each queuing two to four reverses or randomized sorts, match normal React with zero row-key reads.
-The complete 637-test package suite, isolated stress suite, and packaged React 18.3.1 and 19.2.8
-compatibility runs pass.
+For that queued-setter measurement, the then-current complete 637-test package suite, isolated
+stress suite, and packaged React 18.3.1 and 19.2.8 compatibility runs passed.
 
 The optional reverse fixture grows by 42 B gzip to a 12,099 B compiler premium; the sort fixture
 grows by 35 B gzip to 12,130 B. Direct and ordinary keyed fixtures remain byte-for-byte unchanged,

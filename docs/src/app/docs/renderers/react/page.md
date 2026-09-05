@@ -1182,13 +1182,14 @@ then applies one LIS-based reconciliation. A cancelling
 `current.toReversed().toReversed()` pipeline therefore performs no DOM moves.
 
 The first proof requires compiler-owned host rows whose render and key do not observe the index.
-Arguments to `toReversed()`, referenced comparators, computed methods, chains containing another
-method, block-bodied updaters, subclassed or sparse behavior, collection-reading bindings, custom
-methods, an unhinted or structural update between reorder setters, React-owned rows, nested host
-blocks, row conditionals, unrelated dirty dependencies, and any identity mismatch use complete
-keyed reconciliation. No option or component is added. Reports count every compiled reverse step
-as a `keyedArrayReorderHints` entry; modules without one do not retain the optional reorder runtime.
-The application runtime must provide `Array.prototype.toReversed`; Farm does not polyfill it.
+Arguments to `toReversed()`, referenced comparators, computed methods, chains containing a method
+other than `toSorted()` or `toReversed()`, block-bodied updaters, subclassed or sparse
+behavior, collection-reading bindings, custom methods, an unhinted or structural update between
+reorder setters, React-owned rows, nested host blocks, row conditionals, unrelated dirty
+dependencies, and any identity mismatch use complete keyed reconciliation. No option or component
+is added. Reports count every compiled reverse step as a `keyedArrayReorderHints` entry; modules
+without one do not retain the optional reorder runtime. The application runtime must provide
+`Array.prototype.toReversed`; Farm does not polyfill it.
 
 #### Keyed array sort hints
 
