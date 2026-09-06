@@ -13,7 +13,7 @@
   "scripts": {
     "build": "pnpm -r --filter \"./packages/*\" build",
     "dev": "turbo --filter \"./packages/*\" dev",
-    "test": "node --test scripts/pack-public-packages.test.js scripts/release-beta.test.js scripts/publish-beta.test.js scripts/run-prisma-generate.test.js && node scripts/test-packages.js",
+    "test": "node --test scripts/pack-public-packages.test.js scripts/release-beta.test.js scripts/publish-beta.test.js scripts/run-prisma-generate.test.js scripts/pnpm-script-shell.test.js && node scripts/test-packages.js",
     "test:farm": "pnpm --filter @farm.js/core test",
     "test:renderers": "node scripts/test-renderers.mjs",
     "test:ci": "node scripts/run-tests.js",
