@@ -2892,7 +2892,7 @@ async function hydrate() {
   const hydrationController = new AbortController();
   pendingPageHydrationController = hydrationController;
   try {
-    await scheduleFarmIslandHydration({
+    const pageHydration = scheduleFarmIslandHydration({
       container,
       strategy: matched.route.islandStrategy,
       signal: hydrationController.signal,
@@ -2946,14 +2946,13 @@ async function hydrate() {
     });
     ${
       isolatedHydrationEnabled
-        ? `if (
-      matched.route.hasIsolatedClientBoundaries &&
+        ? `const isolatedHydration =
       !hasHydratableLayout(pathname) &&
-      !hydrationController.signal.aborted
-    ) {
-      await hydrateFarmIsolatedClientBoundaries(document, hydrationController.signal);
-    }`
-        : ""
+      document.querySelector('farm-client-boundary[data-farm-client-boundary]')
+        ? hydrateFarmIsolatedClientBoundaries(document, hydrationController.signal)
+        : Promise.resolve();
+    await Promise.all([pageHydration, isolatedHydration]);`
+        : "await pageHydration;"
     }
   } finally {
     if (pendingPageHydrationController === hydrationController) {

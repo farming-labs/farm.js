@@ -226,6 +226,25 @@ describe("scheduleFarmIslandHydration", () => {
     expect(handledClicks).toBe(0);
   });
 
+  it("does not replay a queued interaction after hydration is invalidated", async () => {
+    vi.useFakeTimers();
+    const container = document.getElementById("island")!;
+    const button = container.querySelector("button")!;
+    let handledClicks = 0;
+    const scheduled = scheduleFarmIslandHydration({
+      container,
+      strategy: "interaction",
+      hydrate: () => button.addEventListener("click", () => handledClicks++),
+    });
+
+    button.click();
+    await scheduled;
+    container.removeAttribute("data-farm-island-hydrated");
+    await vi.runAllTimersAsync();
+
+    expect(handledClicks).toBe(0);
+  });
+
   it("cleans every deferred trigger and queued target when boundaries are removed", async () => {
     document.body.innerHTML = `
       <div id="visible"><button type="button">Visible</button></div>

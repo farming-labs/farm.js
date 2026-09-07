@@ -216,6 +216,7 @@ export function createFarmIsolatedHydrationRuntime(options: FarmIsolatedHydratio
       }
       roots.delete(container);
       container.removeAttribute("data-farm-hydrated");
+      container.removeAttribute("data-farm-island-hydrated");
       container.innerHTML = serverHTML;
     });
   };
@@ -420,6 +421,7 @@ export function createFarmIsolatedHydrationRuntime(options: FarmIsolatedHydratio
         }
         roots.delete(container);
         container.removeAttribute("data-farm-hydrated");
+        container.removeAttribute("data-farm-island-hydrated");
       }
     }
   }

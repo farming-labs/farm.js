@@ -148,6 +148,7 @@ export default function RootLayout({ children }) {
 import { FallbackCounter } from "../../components/fallback-counter";
 
 ${options.ssg ? "export const ssg = true;" : ""}
+export const island = "interaction";
 
 export default function FallbackPage() {
   return <main data-fallback-page><FallbackCounter /><a href="/" data-nav-home>Home</a></main>;
@@ -272,8 +273,8 @@ async function resolveInstalledChromiumExecutable(): Promise<string | null> {
   const configured = process.env.FARM_TEST_CHROMIUM_EXECUTABLE_PATH;
   if (configured) return configured;
 
-  const executablePath = chromium.executablePath();
   try {
+    const executablePath = chromium.executablePath();
     await fs.access(executablePath);
     return executablePath;
   } catch {
@@ -565,7 +566,7 @@ export default defineConfig({ integrations: { acme } });
 
     try {
       let randomState = 0x5f3759df;
-      const serverLayoutSentinel = `SERVER_LAYOUT_SENTINEL_${Array.from({ length: 8192 }, () => {
+      const serverLayoutSentinel = `SERVER_LAYOUT_SENTINEL_${Array.from({ length: 16384 }, () => {
         randomState = (randomState * 1664525 + 1013904223) >>> 0;
         return String.fromCharCode(33 + (randomState % 90));
       }).join("")}`;
@@ -766,21 +767,29 @@ export default function SecondPage() {
             });
             page.on("pageerror", (error) => browserErrors.push(error.message));
             await page.goto(response.url);
-            await page.locator('farm-client-boundary[data-farm-hydrated="true"]').nth(3).waitFor();
             const first = page.locator('[data-isolated-counter="first"]');
             const second = page.locator('[data-isolated-counter="second"]');
+            const nested = page.locator("[data-nested-counter]");
+            const pageCounter = page.locator('[data-page-counter="first-page"]');
+            for (const counter of [first, nested, pageCounter]) {
+              await expect
+                .poll(() =>
+                  counter.evaluate((element) =>
+                    element.closest("farm-client-boundary")?.getAttribute("data-farm-hydrated"),
+                  ),
+                )
+                .toBe("true");
+            }
             await first.evaluate((element) => element.setAttribute("data-identity", "retained"));
             await first.click();
-            await page.locator("[data-nested-counter]").click();
-            await page.locator('[data-page-counter="first-page"]').click();
+            await nested.click();
+            await pageCounter.click();
 
             await expect.poll(() => first.textContent()).toBe("3");
             await expect.poll(() => second.textContent()).toBe("5");
-            await expect.poll(() => page.locator("[data-nested-counter]").textContent()).toBe("11");
+            await expect.poll(() => nested.textContent()).toBe("11");
             await expect.poll(() => first.getAttribute("data-identity")).toBe("retained");
-            await expect
-              .poll(() => page.locator('[data-page-counter="first-page"]').textContent())
-              .toBe("1");
+            await expect.poll(() => pageCounter.textContent()).toBe("1");
             await expect
               .poll(() => page.locator('farm-client-boundary[data-farm-hydrated="true"]').count())
               .toBe(4);
@@ -1292,13 +1301,21 @@ await server.listen(Number(process.env.PORT));
   }, 180_000);
 
   it("keeps one isolated ownership plan across development, HMR, SSR, and SSG", async () => {
-    const [developmentRoot, streamingRoot, bufferedRoot, staticRoot] = await Promise.all([
+    const fixtureResults = await Promise.allSettled([
       createIsolatedParityFixture(),
       createIsolatedParityFixture(),
       createIsolatedParityFixture(),
       createIsolatedParityFixture({ ssg: true }),
     ]);
-    const roots = [developmentRoot, streamingRoot, bufferedRoot, staticRoot];
+    const roots = fixtureResults.flatMap((result) =>
+      result.status === "fulfilled" ? [result.value] : [],
+    );
+    const fixtureFailure = fixtureResults.find((result) => result.status === "rejected");
+    if (fixtureFailure?.status === "rejected") {
+      await Promise.allSettled(roots.map((root) => fs.rm(root, { recursive: true, force: true })));
+      throw fixtureFailure.reason;
+    }
+    const [developmentRoot, streamingRoot, bufferedRoot, staticRoot] = roots;
     const assertBoundaryDocument = (html: string) => {
       expect(html).toContain("Parity page");
       expect(html).toContain("SERVER_LAYOUT_SENTINEL_ISOLATED_PARITY");
@@ -1325,6 +1342,38 @@ await server.listen(Number(process.env.PORT));
         },
         "production",
       );
+    const verifyIndependentInitialScheduling = async (url: string) => {
+      const executablePath = await resolveInstalledChromiumExecutable();
+      if (!executablePath) return;
+      const browser = await chromium.launch({ headless: true, executablePath });
+      try {
+        const page = await browser.newPage();
+        const browserErrors: string[] = [];
+        page.on("console", (message) => {
+          if (message.type() === "error") browserErrors.push(message.text());
+        });
+        page.on("pageerror", (error) => browserErrors.push(error.message));
+        await page.goto(new URL("/fallback", url).href);
+
+        await expect
+          .poll(() => page.locator('farm-client-boundary[data-farm-hydrated="true"]').count())
+          .toBe(3);
+        expect(
+          await page.locator("#__farm_page__").getAttribute("data-farm-island-hydrated"),
+        ).toBeNull();
+        await page.locator("[data-stable-counter]").click();
+        await expect
+          .poll(() => page.locator("[data-stable-counter]").textContent())
+          .toBe("stable:1");
+        await page.locator("[data-fallback-counter]").click();
+        await expect
+          .poll(() => page.locator("[data-fallback-counter]").textContent())
+          .toBe("fallback:1");
+        expect(browserErrors).toEqual([]);
+      } finally {
+        await browser.close();
+      }
+    };
 
     try {
       await fs.writeFile(
@@ -1461,6 +1510,7 @@ await server.listen(Number(process.env.PORT));
         } finally {
           await browser.close();
         }
+        await verifyIndependentInitialScheduling(response.url);
       });
 
       const streamingConfig = await resolveParityConfig(
@@ -1477,6 +1527,7 @@ await server.listen(Number(process.env.PORT));
           assertFallbackDocument(
             await fetch(new URL("/fallback", response.url)).then((item) => item.text()),
           );
+          await verifyIndependentInitialScheduling(response.url);
         },
       );
 
