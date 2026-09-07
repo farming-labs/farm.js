@@ -4244,6 +4244,7 @@ function generateVirtualEntryCode(
   manageFarmDocumentPreloads,
   manageFarmLinkHeaderPreloads,
   mergeMetadata,
+  matchesFarmIfNoneMatch,
   normalizeRevalidatePath,
   reportFarmPreloadWarnings,
   renderMetadataHead,
@@ -5327,7 +5328,7 @@ async function handleMetadataImageRequest(request, routePathname) {
       "X-Content-Type-Options": "nosniff",
     });
 
-    if (request.headers.get("if-none-match") === etag) {
+    if (matchesFarmIfNoneMatch(request.headers.get("if-none-match"), etag)) {
       return new Response(null, { status: 304, headers });
     }
 

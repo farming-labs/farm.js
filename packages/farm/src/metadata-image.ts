@@ -1,5 +1,6 @@
 import type { ImageResponseOptions } from "@vercel/og";
 import type { ReactElement } from "react";
+import { matchesFarmIfNoneMatch } from "./server-http";
 
 const REACT_ELEMENT_TYPE = Symbol.for("react.element");
 const REACT_TRANSITIONAL_ELEMENT_TYPE = Symbol.for("react.transitional.element");
@@ -164,12 +165,7 @@ async function finalizeMetadataImageResponse(
   responseHeaders.set("Content-Length", String(body.byteLength));
   responseHeaders.set("X-Content-Type-Options", "nosniff");
 
-  const matchesEntityTag =
-    options.ifNoneMatch?.trim() === "*" ||
-    options.ifNoneMatch
-      ?.split(",")
-      .some((candidate) => candidate.trim().replace(/^W\//, "") === etag);
-  if (matchesEntityTag) {
+  if (matchesFarmIfNoneMatch(options.ifNoneMatch, etag)) {
     return new Response(null, { status: 304, headers: responseHeaders });
   }
 

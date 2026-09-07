@@ -49,6 +49,73 @@ export interface ResolvedFarmServerConfig {
 
 export type FarmRequestBodyErrorCode = "BODY_TOO_LARGE" | "INVALID_CONTENT_LENGTH";
 
+/** Apply the weak entity-tag comparison required by If-None-Match. */
+export function matchesFarmIfNoneMatch(
+  value: string | readonly string[] | null | undefined,
+  etag: string,
+): boolean {
+  const expected = parseEntityTag(trimOptionalWhitespace(etag));
+  if (!expected) return false;
+
+  const values = Array.isArray(value) ? value : [value];
+  const combined = values
+    .filter((header): header is string => typeof header === "string")
+    .join(",");
+  const fieldValue = trimOptionalWhitespace(combined);
+  if (!fieldValue) return false;
+  if (fieldValue === "*") return true;
+
+  let matched = false;
+  let hasEntityTag = false;
+  for (const candidate of splitEntityTags(fieldValue)) {
+    const token = trimOptionalWhitespace(candidate);
+    if (!token) continue;
+
+    const parsed = parseEntityTag(token);
+    if (!parsed) return false;
+    hasEntityTag = true;
+    if (parsed === expected) matched = true;
+  }
+
+  return hasEntityTag && matched;
+}
+
+function trimOptionalWhitespace(value: string): string {
+  return value.replace(/^[\t ]+|[\t ]+$/g, "");
+}
+
+function parseEntityTag(value: string): string | null {
+  const opaqueTag = value.startsWith("W/") ? value.slice(2) : value;
+  if (opaqueTag.length < 2 || opaqueTag[0] !== '"' || opaqueTag.at(-1) !== '"') return null;
+
+  for (let index = 1; index < opaqueTag.length - 1; index++) {
+    const code = opaqueTag.charCodeAt(index);
+    if (code === 0x21 || (code >= 0x23 && code <= 0x7e) || code >= 0x80) continue;
+    return null;
+  }
+
+  return opaqueTag;
+}
+
+function splitEntityTags(value: string): string[] {
+  const tags: string[] = [];
+  let start = 0;
+  let quoted = false;
+
+  for (let index = 0; index < value.length; index++) {
+    const character = value[index];
+    if (character === '"') {
+      quoted = !quoted;
+    } else if (character === "," && !quoted) {
+      tags.push(value.slice(start, index));
+      start = index + 1;
+    }
+  }
+
+  tags.push(value.slice(start));
+  return tags;
+}
+
 export class FarmRequestBodyError extends Error {
   readonly code: FarmRequestBodyErrorCode;
   readonly status: number;

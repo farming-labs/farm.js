@@ -70,7 +70,7 @@ describe("Farm image optimizer", () => {
     const etag = response?.headers.get("etag");
     const cached = await handler(
       new Request(optimizerUrl("/assets/product.png"), {
-        headers: { accept: "image/webp", "if-none-match": etag! },
+        headers: { accept: "image/webp", "if-none-match": `"other", ${etag}` },
       }),
     );
     expect(cached?.status).toBe(304);

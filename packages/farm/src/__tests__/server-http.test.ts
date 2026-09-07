@@ -5,11 +5,29 @@ import { describe, expect, it } from "vitest";
 import { invokeAPIRouteEndpoint } from "../api/runtime";
 import {
   bufferFarmRequestBody,
+  matchesFarmIfNoneMatch,
   readNodeRequestBody,
   resolveFarmServerConfig,
 } from "../server-http";
 
 describe("Farm server HTTP policy", () => {
+  it("matches wildcard, weak, listed, and quoted-comma entity tags", () => {
+    expect(matchesFarmIfNoneMatch("*", '"farm"')).toBe(true);
+    expect(matchesFarmIfNoneMatch('W/"farm"', '"farm"')).toBe(true);
+    expect(matchesFarmIfNoneMatch('"other", W/"farm"', '"farm"')).toBe(true);
+    expect(matchesFarmIfNoneMatch('"farm,docs", "other"', '"farm,docs"')).toBe(true);
+    expect(matchesFarmIfNoneMatch(['"other"', '"farm"'], '"farm"')).toBe(true);
+    expect(matchesFarmIfNoneMatch(', "other",, W/"farm",', '"farm"')).toBe(true);
+    expect(matchesFarmIfNoneMatch('"other"', '"farm"')).toBe(false);
+  });
+
+  it("rejects malformed fields before honoring a matching validator", () => {
+    expect(matchesFarmIfNoneMatch('"farm", invalid', '"farm"')).toBe(false);
+    expect(matchesFarmIfNoneMatch('invalid, "farm"', '"farm"')).toBe(false);
+    expect(matchesFarmIfNoneMatch('*, "farm"', '"farm"')).toBe(false);
+    expect(matchesFarmIfNoneMatch('"farm', '"farm"')).toBe(false);
+  });
+
   it("resolves safe defaults and size strings", () => {
     expect(resolveFarmServerConfig(undefined)).toEqual({
       bodySizeLimit: 10_000_000,

@@ -345,6 +345,13 @@ describe("file route loading.tsx and error.tsx", () => {
     expect(imageResponse.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
     expect(imageResponse.headers.get("etag")).toBe('"0123456789abcdef"');
     expect(imageResponse.body.length).toBeGreaterThan(0);
+
+    const conditionalRequest = createMockRequest("/dashboard/opengraph-image");
+    conditionalRequest.headers["if-none-match"] = '"other", W/"0123456789abcdef"';
+    const notModifiedResponse = createMockResponse();
+    await renderer.renderPage(conditionalRequest, notModifiedResponse);
+    expect(notModifiedResponse.statusCode).toBe(304);
+    expect(notModifiedResponse.body).toBe("");
   });
 
   it("streams deferred route data and serializes it for hydration", async () => {

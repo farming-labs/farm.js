@@ -63,7 +63,7 @@ import {
 import { createFarmLocaleCookie, getFarmLocaleVaryHeaders } from "../i18n/resolver";
 import { localizeFarmHref, localizeFarmPathname } from "../i18n/routing";
 import { sendWebResponse } from "./response";
-import { applyFarmBasePath } from "../base-path";
+import { matchesFarmIfNoneMatch } from "../server-http";
 import { renderFarmFontDevHead } from "../font-vite";
 import { createFarmMetadataImageResponse } from "../metadata-image";
 import { createFarmMetadataRouteResponse } from "../metadata-route";
@@ -2003,7 +2003,7 @@ export class ServerRenderer {
       isVersioned ? "public, max-age=31536000, immutable" : "public, max-age=0, must-revalidate",
     );
 
-    if (req.headers["if-none-match"] === etag) {
+    if (matchesFarmIfNoneMatch(req.headers["if-none-match"], etag)) {
       res.statusCode = 304;
       res.end();
       return;

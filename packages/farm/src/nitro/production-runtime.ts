@@ -2,6 +2,7 @@ export { _runWithAfterRequest } from "../after";
 export {
   bufferFarmRequestBody,
   createFarmRequestBodyErrorResponse,
+  matchesFarmIfNoneMatch,
   readFarmRequestBody,
   resolveFarmServerConfig,
 } from "../server-http";

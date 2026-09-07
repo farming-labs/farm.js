@@ -23,6 +23,7 @@ import {
 import { marked, Renderer } from "marked";
 import { highlight } from "sugar-high";
 import type { FarmLayoutFonts } from "../font";
+import { matchesFarmIfNoneMatch } from "../server-http";
 import {
   resolveFarmDocsFontAssets,
   toFarmDocsPublicFontAssets,
@@ -1769,7 +1770,7 @@ export function createFarmDocsHandler(
         ETag: etag,
         "X-Content-Type-Options": "nosniff",
       });
-      if (request.headers.get("if-none-match") === etag) {
+      if (matchesFarmIfNoneMatch(request.headers.get("if-none-match"), etag)) {
         return new Response(null, { status: 304, headers });
       }
       if (request.method === "HEAD") return new Response(null, { status: 200, headers });
