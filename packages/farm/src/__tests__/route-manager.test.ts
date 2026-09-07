@@ -344,6 +344,9 @@ describe("RouteManager", () => {
         shouldHydrate: true,
         renderPlan: { hydration: "route-island" },
       });
+      expect(routeManager.getIsolatedClientBoundaryModules(root)).toEqual(
+        new Set([path.join(root, "src", "components", "counter.tsx")]),
+      );
     });
 
     it("explains when a route-wide integration provider disables isolated roots", async () => {

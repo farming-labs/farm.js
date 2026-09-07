@@ -1,6 +1,6 @@
 # RFC 0001: Isolated client hydration inside server-rendered layouts
 
-- Status: Proposed
+- Status: Implemented (experimental, off by default)
 - Tracking issue: [#565](https://github.com/farming-labs/farm.js/issues/565)
 - Scope: Standard React renderer (non-RSC)
 
@@ -342,6 +342,25 @@ The feature cannot become the default unless all of the following are true:
 In short: if Farm cannot demonstrate a net win for a route shape, it keeps the current route-wide
 hydration path. Smaller client ownership is the mechanism; measured user-facing performance is the
 goal.
+
+### Recorded cost model
+
+The September 2026 production benchmark ran 25 measured Chrome iterations after five warmups for
+route-wide hydration, isolated hydration, and representative RSC controls. The one-leaf fixture
+reduced client JavaScript from 77.6 KiB to 71.4 KiB gzip, hydration from 52.3 ms to 41.6 ms, and
+post-hydration heap from 3,118.8 KiB to 2,218.4 KiB. Its RSC control measured 70.4 KiB gzip,
+46.7 ms hydration, and 2,312.1 KiB heap. The four-sibling isolated fixture also stayed within the
+latency budget and hydrated faster than its route-wide and RSC controls.
+
+Eight independent roots were the first stress shape to cross the larger of the
+route-wide median confidence interval or 5% hydration budget. Farm therefore keeps graphs with more
+than four statically bounded isolated roots on route-wide hydration. Data-dependent boundary lists
+also stay route-wide because their root cost cannot be proven before streaming. The full
+environment, raw samples, confidence intervals, server and browser costs, and reproduction command are in the
+[isolated hydration benchmark](../benchmarks/isolated-hydration/results/latest.md).
+
+These results satisfy the RFC's experimental implementation gate. They do not change the default;
+graduating from the explicit opt-in remains a separate decision with cross-platform benchmark data.
 
 ## Configuration and rollout
 

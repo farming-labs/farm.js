@@ -106,6 +106,8 @@ interface FarmVitePluginOptions extends FarmConfig {
   openapi?: FarmUserConfig["openapi"];
   images?: FarmUserConfig["images"];
   publicDir?: FarmUserConfig["publicDir"];
+  /** @internal Modules selected by the compiled isolated-hydration ownership plan. */
+  isolatedClientBoundaryModules?: ReadonlySet<string>;
 }
 
 type TypeArtifactSelection = Pick<
@@ -2850,9 +2852,18 @@ export const manifest = getManifest();
             },
           ) === "enabled" && isReactRenderer(resolveFarmRenderer(currentConfig.renderer));
         let isolatedModuleReference: string | null = null;
-        if (isolatedHydrationEnabled && isIsolatableClientBoundarySource(clientBoundarySource)) {
-          const root = currentConfig.root || server?.config.root || process.cwd();
-          const cleanId = id.split("?", 1)[0];
+        const root = currentConfig.root || server?.config.root || process.cwd();
+        const cleanId = id.split("?", 1)[0];
+        const selectedIsolatedModules =
+          options.isolatedClientBoundaryModules ??
+          farmApp?.getRouteManager().getIsolatedClientBoundaryModules(root);
+        const selectedForIsolatedHydration =
+          selectedIsolatedModules?.has(path.resolve(cleanId)) === true;
+        if (
+          isolatedHydrationEnabled &&
+          selectedForIsolatedHydration &&
+          isIsolatableClientBoundarySource(clientBoundarySource)
+        ) {
           isolatedModuleReference = toViteModuleId(cleanId, root);
           const transformedBoundary = transformIsolatedClientBoundaryModule({
             code: transformedCode,
@@ -3129,6 +3140,32 @@ if (import.meta.hot) {
         });
 
         return [];
+      }
+
+      const isolatedHydrationMode = currentFarmConfig?.experimental?.isolatedClientHydration;
+      if (
+        currentSrcRoot &&
+        (isolatedHydrationMode === "enabled" || isolatedHydrationMode === "analyze") &&
+        /\.[cm]?[jt]sx?$/.test(normalizedFile)
+      ) {
+        const routeManager = farmApp?.getRouteManager();
+        if (routeManager) {
+          const previousPlan = JSON.stringify(
+            routeManager.generateClientManifest(currentFarmConfig.root),
+          );
+          routeManager.invalidateClientManifest();
+          const nextPlan = JSON.stringify(
+            routeManager.generateClientManifest(currentFarmConfig.root),
+          );
+          const planChanged = previousPlan !== nextPlan;
+          const manifestModule = server.moduleGraph.getModuleById("/@farm/manifest");
+          if (manifestModule) server.moduleGraph.invalidateModule(manifestModule);
+          if (planChanged) {
+            for (const mod of modules) server.moduleGraph.invalidateModule(mod);
+            server.ws.send({ type: "full-reload", path: "*" });
+            return [];
+          }
+        }
       }
 
       if (normalizedFile.includes("/app/")) {

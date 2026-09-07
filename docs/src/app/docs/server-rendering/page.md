@@ -185,6 +185,10 @@ statically generated HTML. In development, updating a client module rerenders ev
 created from that module without importing or replacing its server-owned layout; sibling boundary
 state stays mounted. If one page needs the route-wide fallback, that fallback stays on the page
 boundary and does not promote otherwise eligible client leaves in its server-owned layout.
+Farm also keeps graphs above four statically bounded isolated roots route-wide. Data-dependent
+boundary lists use the same fallback because their root count is unknown before streaming. This
+measured guard prevents request, marker, root, and hydration overhead from growing past the first
+observed crossover; the [benchmark report](https://github.com/farming-labs/farm.js/blob/main/benchmarks/isolated-hydration/results/latest.md) includes route-wide, isolated, and RSC controls with raw samples.
 
 The export must be one of these static string literals so Farm can analyze it without executing
 application code. Without an explicit route-level `island` export, a route that imports client

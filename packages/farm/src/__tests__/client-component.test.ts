@@ -244,6 +244,136 @@ describe("client component path resolution", () => {
     });
   });
 
+  it("keeps client graphs above the measured isolated-root limit route-wide", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-isolated-client-cost-"));
+    tempDirs.push(root);
+    const layoutFile = path.join(root, "src", "app", "layout.tsx");
+    const componentsDirectory = path.join(root, "src", "components");
+    fs.mkdirSync(path.dirname(layoutFile), { recursive: true });
+    fs.mkdirSync(componentsDirectory, { recursive: true });
+    for (let index = 0; index < 5; index++) {
+      fs.writeFileSync(
+        path.join(componentsDirectory, `counter-${index}.tsx`),
+        `'use client';\nexport default function Counter${index}() { return <button>${index}</button>; }\n`,
+      );
+    }
+    const writeLayout = (boundaryCount: number) => {
+      const imports = Array.from(
+        { length: boundaryCount },
+        (_, index) => `import Counter${index} from "../components/counter-${index}";`,
+      ).join("\n");
+      const children = Array.from(
+        { length: boundaryCount },
+        (_, index) => `<Counter${index} />`,
+      ).join("");
+      fs.writeFileSync(
+        layoutFile,
+        `${imports}\nexport default function Layout() { return <>${children}</>; }\n`,
+      );
+    };
+
+    writeLayout(4);
+    expect(getClientModuleHydrationPlan(layoutFile, root, "enabled")).toMatchObject({
+      shouldHydrate: false,
+      hasIsolatedClientBoundaries: true,
+      isolatedBoundaries: expect.arrayContaining([
+        expect.objectContaining({ modulePath: path.join(componentsDirectory, "counter-3.tsx") }),
+      ]),
+    });
+
+    writeLayout(5);
+    expect(getClientModuleHydrationPlan(layoutFile, root, "enabled")).toMatchObject({
+      shouldHydrate: true,
+      hasIsolatedClientBoundaries: false,
+      isolatedBoundaries: [],
+      costGuardExceeded: true,
+      fallbackReason: "the client graph can create 5 isolated roots, above the measured limit of 4",
+    });
+
+    fs.writeFileSync(
+      layoutFile,
+      `import Counter from "../components/counter-0";\nexport default function Layout() { return <><Counter /><Counter /><Counter /><Counter /><Counter /></>; }\n`,
+    );
+    expect(getClientModuleHydrationPlan(layoutFile, root, "enabled")).toMatchObject({
+      shouldHydrate: true,
+      hasIsolatedClientBoundaries: false,
+      costGuardExceeded: true,
+      fallbackReason: "the client graph can create 5 isolated roots, above the measured limit of 4",
+    });
+
+    fs.writeFileSync(
+      layoutFile,
+      `import First from "../components/counter-0";
+import Second from "../components/counter-0";
+export default function Layout() { return <><First /><First /><First /><Second /><Second /></>; }
+`,
+    );
+    expect(getClientModuleHydrationPlan(layoutFile, root, "enabled")).toMatchObject({
+      shouldHydrate: true,
+      hasIsolatedClientBoundaries: false,
+      costGuardExceeded: true,
+      fallbackReason: "the client graph can create 5 isolated roots, above the measured limit of 4",
+    });
+
+    fs.writeFileSync(
+      layoutFile,
+      `import Counter from "../components/counter-0";\nexport default function Layout() { return <>{[0, 1, 2, 3, 4].map((item) => <Counter key={item} />)}</>; }\n`,
+    );
+    expect(getClientModuleHydrationPlan(layoutFile, root, "enabled")).toMatchObject({
+      shouldHydrate: true,
+      hasIsolatedClientBoundaries: false,
+      costGuardExceeded: true,
+      fallbackReason:
+        "the client boundary count imported from ../components/counter-0 is data-dependent",
+    });
+
+    fs.writeFileSync(
+      layoutFile,
+      `import Counter from "../components/counter-0";
+const counter = <Counter />;
+export default function Layout({ items }) { return <>{items.map(() => counter)}</>; }
+`,
+    );
+    expect(getClientModuleHydrationPlan(layoutFile, root, "enabled")).toMatchObject({
+      shouldHydrate: true,
+      hasIsolatedClientBoundaries: false,
+      costGuardExceeded: true,
+      fallbackReason:
+        "the client boundary count imported from ../components/counter-0 is data-dependent",
+    });
+
+    fs.writeFileSync(
+      layoutFile,
+      `import Counter from "../components/counter-0";
+const renderCounter = (item) => <Counter key={item} />;
+export default function Layout({ items }) { return <>{items.map(renderCounter)}</>; }
+`,
+    );
+    expect(getClientModuleHydrationPlan(layoutFile, root, "enabled")).toMatchObject({
+      shouldHydrate: true,
+      hasIsolatedClientBoundaries: false,
+      costGuardExceeded: true,
+      fallbackReason:
+        "the client boundary count imported from ../components/counter-0 is data-dependent",
+    });
+
+    fs.writeFileSync(
+      layoutFile,
+      `import Counter from "../components/counter-0";
+const formatLabel = (label) => label.toUpperCase()
+const labels = ["one", "two"].map(formatLabel)
+export default function Layout() { return <><Counter />{labels.join(",")}</>; }
+`,
+    );
+    expect(getClientModuleHydrationPlan(layoutFile, root, "enabled")).toMatchObject({
+      shouldHydrate: false,
+      hasIsolatedClientBoundaries: true,
+      isolatedBoundaries: [
+        { modulePath: path.join(componentsDirectory, "counter-0.tsx"), islandStrategy: "load" },
+      ],
+    });
+  });
+
   it("keeps unsupported client export graphs on route-wide hydration", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-isolated-client-fallback-"));
     tempDirs.push(root);

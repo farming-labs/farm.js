@@ -714,6 +714,7 @@ export default function SecondPage() {
       expect(baselineJavaScript).toContain("SERVER_LAYOUT_SENTINEL_");
       expect(baselineJavaScript).not.toContain("data-farm-client-boundary");
       expect(baselineJavaScript).not.toContain("__farm_client_boundary_originals__");
+      expect(baselineJavaScript).not.toContain("Could not hydrate isolated client boundary");
       expect(Buffer.byteLength(clientJavaScript)).toBeLessThan(
         Buffer.byteLength(baselineJavaScript),
       );
@@ -901,6 +902,121 @@ export default function SecondPage() {
           fs.rm(fixtureRoot, { recursive: true, force: true }),
         ),
       );
+    }
+  }, 120_000);
+
+  it("keeps the measured isolated-root overflow route-wide in development and production", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      await fs.mkdir(path.join(root, "src", "components"), { recursive: true });
+      await fs.writeFile(
+        path.join(root, "src", "components", "counter.tsx"),
+        `
+"use client";
+
+import { useState } from "react";
+
+export default function Counter({ name }) {
+  const [count, setCount] = useState(0);
+  return <button data-cost-counter={name} onClick={() => setCount((value) => value + 1)}>{name}:{count}</button>;
+}
+`.trim(),
+      );
+      await fs.writeFile(
+        path.join(root, "src", "app", "page.tsx"),
+        `
+import Counter from "../components/counter";
+
+export default function Page() {
+  return <main>${Array.from(
+    { length: 5 },
+    (_, index) => `<Counter name="counter-${index + 1}" />`,
+  ).join("")}</main>;
+}
+`.trim(),
+      );
+      await fs.writeFile(
+        path.join(root, "index.mjs"),
+        `
+import { createServer } from "@farm.js/core/server";
+
+const server = await createServer({
+  root: process.cwd(),
+  images: { provider: "none" },
+  telemetry: false,
+  experimental: { isolatedClientHydration: "enabled" },
+});
+server.config.server.host = "127.0.0.1";
+await server.listen(Number(process.env.PORT));
+`.trim(),
+      );
+
+      const verifyRouteWideRuntime = async (response: Response) => {
+        expect(response.status).toBe(200);
+        const html = await response.text();
+        expect(html).not.toContain("<farm-client-boundary");
+        expect(html).toMatch(/id="__farm_page__"[^>]*data-farm-client="true"/);
+
+        const executablePath = await resolveInstalledChromiumExecutable();
+        if (!executablePath) return;
+        const browser = await chromium.launch({ headless: true, executablePath });
+        try {
+          const page = await browser.newPage();
+          const browserErrors: string[] = [];
+          page.on("console", (message) => {
+            if (message.type() === "error") browserErrors.push(message.text());
+          });
+          page.on("pageerror", (error) => browserErrors.push(error.message));
+          await page.goto(response.url);
+          const counter = page.locator('[data-cost-counter="counter-3"]');
+          try {
+            await expect
+              .poll(() =>
+                counter.evaluate((element) =>
+                  Object.keys(element).some((key) => key.startsWith("__reactProps$")),
+                ),
+              )
+              .toBe(true);
+            await counter.click();
+            await expect.poll(() => counter.textContent()).toBe("counter-3:1");
+            await expect.poll(() => page.locator("[data-cost-counter]").count()).toBe(5);
+            expect(browserErrors).toEqual([]);
+          } catch (error) {
+            throw new Error(
+              `${String(error)}\nBrowser errors:\n${browserErrors.join("\n")}\nDOM:\n${await page.locator("body").innerHTML()}`,
+            );
+          }
+        } finally {
+          await browser.close();
+        }
+      };
+
+      await runProductionRequest(root, verifyRouteWideRuntime);
+
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          experimental: { isolatedClientHydration: "enabled" },
+          generateBuildId: () => "isolated-cost-guard-test",
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+
+      const clientJavaScript = await readAllClientJavaScript(root);
+      expect(clientJavaScript).toContain("data-cost-counter");
+      expect(clientJavaScript).not.toContain("__farm_client_boundary_originals__");
+      expect(clientJavaScript).not.toContain("Could not hydrate isolated client boundary");
+
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        verifyRouteWideRuntime,
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
     }
   }, 120_000);
 
@@ -1382,6 +1498,65 @@ await server.listen(Number(process.env.PORT));
             expect(browserRequests).toContain("/src/components/live-counter.tsx");
             expect(browserRequests).not.toContain("/src/app/layout.tsx");
             expect(browserRequests).not.toContain("/src/lib/server-sentinel.ts");
+
+            await fs.writeFile(
+              path.join(developmentRoot, "src", "components", "stable-counter.tsx"),
+              `export default function StableCounter() { return <output data-stable-counter>server-stable</output>; }`,
+            );
+            await expect
+              .poll(() => page.locator("[data-stable-counter]").textContent(), {
+                timeout: 10_000,
+              })
+              .toBe("server-stable");
+            await expect
+              .poll(() => page.locator('farm-client-boundary[data-farm-hydrated="true"]').count())
+              .toBe(2);
+
+            await fs.writeFile(
+              path.join(developmentRoot, "src", "components", "page-owner.tsx"),
+              `import LiveCounter from "./live-counter";
+export default function PageOwner() { return <section data-page-owner><LiveCounter name="page" /></section>; }`,
+            );
+            await fs.writeFile(
+              path.join(developmentRoot, "src", "app", "page.tsx"),
+              `import PageOwner from "../components/page-owner";
+export default function Page() { return <main data-parity-page>Parity page <PageOwner /></main>; }`,
+            );
+            await expect.poll(() => page.locator("[data-page-owner]").count()).toBe(1);
+            await expect
+              .poll(() => page.locator('farm-client-boundary[data-farm-hydrated="true"]').count())
+              .toBe(3);
+            await page.evaluate(() => {
+              (
+                window as typeof window & { __farmParityOwnershipDocument?: string }
+              ).__farmParityOwnershipDocument = "stale";
+            });
+            await fs.writeFile(
+              path.join(developmentRoot, "src", "components", "page-owner.tsx"),
+              `import LiveCounter from "./live-counter";
+export const hydrate = true;
+export default function PageOwner() { return <section data-page-owner><LiveCounter name="page" /></section>; }`,
+            );
+            await expect
+              .poll(
+                () =>
+                  page.evaluate(
+                    () =>
+                      (
+                        window as typeof window & {
+                          __farmParityOwnershipDocument?: string;
+                        }
+                      ).__farmParityOwnershipDocument ?? null,
+                  ),
+                { timeout: 10_000 },
+              )
+              .toBeNull();
+            await expect
+              .poll(() => page.locator("#__farm_page__").getAttribute("data-farm-client"))
+              .toBe("true");
+            await expect
+              .poll(() => page.locator('farm-client-boundary[data-farm-hydrated="true"]').count())
+              .toBe(2);
             expect(
               browserErrors,
               `${browserErrors.join("\n")}\nDOM:\n${await page.locator("body").innerHTML()}`,
