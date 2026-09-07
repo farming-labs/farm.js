@@ -3617,6 +3617,7 @@ async function hydrateFarmIsolatedClientBoundaries(scope = document) {
 ${rendererClientImports}
 import { installChunkErrorRecovery, SPARouter } from '@farm.js/core/client'
 import { createClientPluginManager } from '@farm.js/core/plugin/client'
+import { isFarmRouteActive } from '@farm.js/core/router'
 import { scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from '@farm.js/core/internal/client-runtime'
 import { reviveDeferredData } from '@farm.js/core/deferred'
 import {
@@ -3742,26 +3743,10 @@ function findLayouts(pathname) {
   pathname = stripFarmBasePath(pathname);
   const manifest = getManifest();
   const layouts = Object.values(manifest.layouts);
-  const pathnameSegments = pathname === '/'
-    ? []
-    : pathname.replace(/\\/$/, '').split('/').filter(Boolean).map(decodeRouteSegment);
   const matchingLayouts = [];
   
   for (const layout of layouts) {
-    // Root layout matches everything
-    if (layout.pattern === '/') {
-      matchingLayouts.push(layout);
-      continue;
-    }
-    const layoutSegments = layout.pattern.split('/').filter(Boolean);
-    const matchesLayout = layoutSegments.every(
-      (segment, index) => pathnameSegments[index] === segment
-    );
-    const matchesLayoutParent = pathnameSegments.length === layoutSegments.length - 1 &&
-      layoutSegments.slice(0, -1).every(
-        (segment, index) => pathnameSegments[index] === segment
-      );
-    if (matchesLayout || matchesLayoutParent) {
+    if (layout.pattern === '/' || isFarmRouteActive(layout.pattern, pathname, { exact: false })) {
       matchingLayouts.push(layout);
     }
   }
