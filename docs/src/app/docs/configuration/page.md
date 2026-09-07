@@ -365,6 +365,13 @@ An integration provider is route-wide by default because an independent root can
 context. A provider that is safe to instantiate around every isolated root can declare
 `supportsIsolatedHydration: true`; otherwise Farm retains route-wide hydration for the app.
 
+Farm also applies a measured graph-cost guard. Up to four statically bounded isolated roots can use
+the isolated plan. A page or layout with a larger client graph stays on route-wide hydration and
+prints the owner, detected count, and limit. Lists whose boundary count depends on runtime data also
+stay route-wide because Farm cannot prove their root cost before streaming. In the maintained
+25-sample Chrome benchmark, eight independent roots were the first stress shape to exceed the
+route-wide hydration budget. See the [raw samples and full cost table](https://github.com/farming-labs/farm.js/blob/main/benchmarks/isolated-hydration/results/latest.md).
+
 SPA navigation preserves isolated roots that live in a shared layout, including their state and DOM
 identity. Farm unmounts roots in the outgoing route subtree before replacing it, then hydrates only
 the boundaries introduced by the incoming fragment. Superseded navigation work is aborted before it
@@ -374,6 +381,8 @@ This flag does not enable RSC, change the meaning of `"use client"`, or make Ser
 of the wire format. When `experimental.serverComponents` is enabled, the RSC transport remains the
 owner and Farm ignores isolated client hydration. Treat `"enabled"` as an experimental performance
 option and measure the route's client JavaScript and interaction cost before adopting it broadly.
+The maintained benchmark includes equivalent RSC controls rather than assuming the non-RSC path is
+faster.
 
 ## Images
 

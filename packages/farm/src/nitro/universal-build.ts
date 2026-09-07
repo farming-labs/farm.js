@@ -821,6 +821,8 @@ export async function buildUniversal(
     }
     logger.info(`📋 Found ${pageRoutes.length} page routes and ${layoutRoutes.length} layouts`);
 
+    const isolatedClientBoundaryModules = routeManager.getIsolatedClientBoundaryModules(root);
+
     const clientOutputDir = path.join(root, distDir, "client");
     const [productionViteResult] = await productionViteResultPromise;
     if (productionViteResult.status === "rejected") {
@@ -844,6 +846,7 @@ export async function buildUniversal(
         pageRoutes,
         layoutRoutes,
         routeSlots,
+        isolatedClientBoundaryModules,
       );
     const buildSSRBundle = () =>
       buildSSRInMemory(
@@ -857,6 +860,7 @@ export async function buildUniversal(
         pageRoutes,
         layoutRoutes,
         routeSlots,
+        isolatedClientBoundaryModules,
       );
 
     // Route metadata and the client/SSR graphs read independent inputs. Drain
@@ -902,6 +906,7 @@ export async function buildUniversal(
         pageRoutes,
         layoutRoutes,
         routeSlots,
+        isolatedClientBoundaryModules,
       );
     }
 
@@ -1080,6 +1085,7 @@ async function buildClient(
   pageRoutes: UniversalPageRoute[],
   layoutRoutes: Array<{ pattern: string; modulePath: string }> = [],
   routeSlots: UniversalRouteSlot[] = [],
+  isolatedClientBoundaryModules: ReadonlySet<string> = new Set(),
 ) {
   const viteBuild = productionVite.build;
   const { farmPlugin } = await import("../vite");
@@ -1529,7 +1535,7 @@ async function buildClient(
             return null;
           },
         },
-        farmPlugin(config, pluginManager),
+        farmPlugin({ ...config, isolatedClientBoundaryModules }, pluginManager),
         farmEnvironmentFunctionsPlugin(),
       ],
       mode: "production",
@@ -3503,6 +3509,7 @@ async function buildSSRInMemory(
   collectedPageRoutes: readonly UniversalPageRoute[],
   collectedLayoutRoutes: ReadonlyArray<{ pattern: string; modulePath: string }>,
   collectedRouteSlots: readonly UniversalRouteSlot[],
+  isolatedClientBoundaryModules: ReadonlySet<string>,
 ): Promise<{
   bundle: OutputBundle;
   entryFile: string;
@@ -3845,7 +3852,7 @@ async function buildSSRInMemory(
             };
           },
         },
-        farmPlugin(config, pluginManager),
+        farmPlugin({ ...config, isolatedClientBoundaryModules }, pluginManager),
         farmEnvironmentFunctionsPlugin(),
         {
           name: "farm-virtual-ssr-entry",

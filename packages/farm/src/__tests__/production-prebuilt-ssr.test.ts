@@ -713,6 +713,7 @@ export default function SecondPage() {
       expect(baselineJavaScript).toContain("SERVER_LAYOUT_SENTINEL_");
       expect(baselineJavaScript).not.toContain("data-farm-client-boundary");
       expect(baselineJavaScript).not.toContain("__farm_client_boundary_originals__");
+      expect(baselineJavaScript).not.toContain("Could not hydrate isolated client boundary");
       expect(Buffer.byteLength(clientJavaScript)).toBeLessThan(
         Buffer.byteLength(baselineJavaScript),
       );
@@ -892,6 +893,121 @@ export default function SecondPage() {
           fs.rm(fixtureRoot, { recursive: true, force: true }),
         ),
       );
+    }
+  }, 120_000);
+
+  it("keeps the measured isolated-root overflow route-wide in development and production", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      await fs.mkdir(path.join(root, "src", "components"), { recursive: true });
+      await fs.writeFile(
+        path.join(root, "src", "components", "counter.tsx"),
+        `
+"use client";
+
+import { useState } from "react";
+
+export default function Counter({ name }) {
+  const [count, setCount] = useState(0);
+  return <button data-cost-counter={name} onClick={() => setCount((value) => value + 1)}>{name}:{count}</button>;
+}
+`.trim(),
+      );
+      await fs.writeFile(
+        path.join(root, "src", "app", "page.tsx"),
+        `
+import Counter from "../components/counter";
+
+export default function Page() {
+  return <main>${Array.from(
+    { length: 5 },
+    (_, index) => `<Counter name="counter-${index + 1}" />`,
+  ).join("")}</main>;
+}
+`.trim(),
+      );
+      await fs.writeFile(
+        path.join(root, "index.mjs"),
+        `
+import { createServer } from "@farm.js/core/server";
+
+const server = await createServer({
+  root: process.cwd(),
+  images: { provider: "none" },
+  telemetry: false,
+  experimental: { isolatedClientHydration: "enabled" },
+});
+server.config.server.host = "127.0.0.1";
+await server.listen(Number(process.env.PORT));
+`.trim(),
+      );
+
+      const verifyRouteWideRuntime = async (response: Response) => {
+        expect(response.status).toBe(200);
+        const html = await response.text();
+        expect(html).not.toContain("<farm-client-boundary");
+        expect(html).toMatch(/id="__farm_page__"[^>]*data-farm-client="true"/);
+
+        const executablePath = await resolveInstalledChromiumExecutable();
+        if (!executablePath) return;
+        const browser = await chromium.launch({ headless: true, executablePath });
+        try {
+          const page = await browser.newPage();
+          const browserErrors: string[] = [];
+          page.on("console", (message) => {
+            if (message.type() === "error") browserErrors.push(message.text());
+          });
+          page.on("pageerror", (error) => browserErrors.push(error.message));
+          await page.goto(response.url);
+          const counter = page.locator('[data-cost-counter="counter-3"]');
+          try {
+            await expect
+              .poll(() =>
+                counter.evaluate((element) =>
+                  Object.keys(element).some((key) => key.startsWith("__reactProps$")),
+                ),
+              )
+              .toBe(true);
+            await counter.click();
+            await expect.poll(() => counter.textContent()).toBe("counter-3:1");
+            await expect.poll(() => page.locator("[data-cost-counter]").count()).toBe(5);
+            expect(browserErrors).toEqual([]);
+          } catch (error) {
+            throw new Error(
+              `${String(error)}\nBrowser errors:\n${browserErrors.join("\n")}\nDOM:\n${await page.locator("body").innerHTML()}`,
+            );
+          }
+        } finally {
+          await browser.close();
+        }
+      };
+
+      await runProductionRequest(root, verifyRouteWideRuntime);
+
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          experimental: { isolatedClientHydration: "enabled" },
+          generateBuildId: () => "isolated-cost-guard-test",
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+
+      const clientJavaScript = await readAllClientJavaScript(root);
+      expect(clientJavaScript).toContain("data-cost-counter");
+      expect(clientJavaScript).not.toContain("__farm_client_boundary_originals__");
+      expect(clientJavaScript).not.toContain("Could not hydrate isolated client boundary");
+
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        verifyRouteWideRuntime,
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
     }
   }, 120_000);
 

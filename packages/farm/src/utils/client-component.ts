@@ -85,7 +85,19 @@ export interface ClientModuleHydrationPlan extends ClientModuleMetadata {
   isolatedHydrationEligible: boolean;
   hasIsolatedClientBoundaries: boolean;
   isolatedBoundaries: IsolatedClientBoundaryReference[];
+  costGuardExceeded?: true;
   fallbackReason?: string;
+}
+
+/** @internal Largest measured statically bounded independent-root plan. */
+export const FARM_ISOLATED_HYDRATION_MAX_BOUNDARIES = 4;
+
+function isolatedHydrationBoundaryLimit(): number {
+  const benchmarkLimit = Number(process.env.FARM_BENCHMARK_ISOLATED_BOUNDARY_LIMIT);
+  return Number.isSafeInteger(benchmarkLimit) &&
+    benchmarkLimit > FARM_ISOLATED_HYDRATION_MAX_BOUNDARIES
+    ? benchmarkLimit
+    : FARM_ISOLATED_HYDRATION_MAX_BOUNDARIES;
 }
 
 interface ParsedClientModuleMetadata {
@@ -508,7 +520,10 @@ export function getClientModuleHydrationPlan(
   const resolvedPath = resolveModuleSourcePath(modulePath, root);
   const content = readIfExists(resolvedPath ?? "");
   const parsed = parseClientModuleMetadata(content, true);
-  const emptyPlan = (fallbackReason?: string): ClientModuleHydrationPlan => ({
+  const emptyPlan = (
+    fallbackReason?: string,
+    costGuardExceeded = false,
+  ): ClientModuleHydrationPlan => ({
     ...metadata,
     mode,
     legacyShouldHydrate: metadata.shouldHydrate,
@@ -516,6 +531,7 @@ export function getClientModuleHydrationPlan(
     isolatedHydrationEligible: false,
     hasIsolatedClientBoundaries: false,
     isolatedBoundaries: [],
+    ...(costGuardExceeded ? { costGuardExceeded: true as const } : {}),
     ...(fallbackReason ? { fallbackReason } : {}),
   });
 
@@ -533,7 +549,14 @@ export function getClientModuleHydrationPlan(
     return emptyPlan(inspection.fallbackReason);
   }
   if (inspection.fallbackReason) {
-    return emptyPlan(inspection.fallbackReason);
+    return emptyPlan(inspection.fallbackReason, inspection.costGuardExceeded);
+  }
+  const boundaryLimit = isolatedHydrationBoundaryLimit();
+  if (inspection.estimatedBoundaryCount > boundaryLimit) {
+    return emptyPlan(
+      `the client graph can create ${inspection.estimatedBoundaryCount} isolated roots, above the measured limit of ${boundaryLimit}`,
+      true,
+    );
   }
 
   const enabled = mode === "enabled";
@@ -564,42 +587,133 @@ export function isIsolatableClientBoundarySource(content: string | null): boolea
   );
 }
 
+function getStaticImportBindings(content: string | null): Map<string, string[]> {
+  const bindings = new Map<string, string[]>();
+  if (!content) return bindings;
+  const tokens = tokenizeModuleSource(content);
+
+  for (let index = 0; index < tokens.length; index++) {
+    if (tokens[index].value !== "import" || tokens[index - 1]?.value === ".") continue;
+    const first = tokens[index + 1];
+    if (!first || first.value === "type" || first.value === "(" || first.kind === "string") {
+      continue;
+    }
+
+    let fromIndex = -1;
+    for (let cursor = index + 1; cursor < tokens.length; cursor++) {
+      if (tokens[cursor].value === ";") break;
+      if (tokens[cursor].value === "from" && tokens[cursor + 1]?.kind === "string") {
+        fromIndex = cursor;
+        break;
+      }
+    }
+    if (fromIndex === -1) continue;
+    const specifier = tokens[fromIndex + 1].value;
+    const clause = tokens.slice(index + 1, fromIndex);
+    const localNames: string[] = [];
+
+    if (clause[0]?.kind === "identifier" && clause[0].value !== "type") {
+      localNames.push(clause[0].value);
+    }
+    const namespaceAs = clause.findIndex(
+      (token, clauseIndex) => token.value === "*" && clause[clauseIndex + 1]?.value === "as",
+    );
+    if (namespaceAs !== -1 && clause[namespaceAs + 2]?.kind === "identifier") {
+      localNames.push(clause[namespaceAs + 2].value);
+    }
+
+    const openingBrace = clause.findIndex((token) => token.value === "{");
+    const closingBrace = clause.findIndex(
+      (token, clauseIndex) => clauseIndex > openingBrace && token.value === "}",
+    );
+    if (openingBrace !== -1 && closingBrace !== -1) {
+      let entryStart = openingBrace + 1;
+      for (let cursor = entryStart; cursor <= closingBrace; cursor++) {
+        if (cursor !== closingBrace && clause[cursor]?.value !== ",") continue;
+        const entry = clause.slice(entryStart, cursor).filter((token) => token.value !== "type");
+        const asIndex = entry.findIndex((token) => token.value === "as");
+        const local = asIndex === -1 ? entry[0] : entry[asIndex + 1];
+        if (local?.kind === "identifier") localNames.push(local.value);
+        entryStart = cursor + 1;
+      }
+    }
+
+    bindings.set(specifier, Array.from(new Set(localNames)));
+  }
+
+  return bindings;
+}
+
+function countStaticJsxUses(content: string | null, localBindings: string[]): number {
+  if (!content || localBindings.length === 0) return 0;
+  const names = new Set(localBindings);
+  const tokens = tokenizeModuleSource(content);
+  let count = 0;
+  for (let index = 0; index < tokens.length - 1; index++) {
+    if (tokens[index].value === "<" && names.has(tokens[index + 1].value)) count++;
+  }
+  return count;
+}
+
+function hasDynamicJsxCardinality(content: string | null, localBindings: string[]): boolean {
+  if (!content || localBindings.length === 0) return false;
+  const escapedNames = localBindings.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const clientTag = `<\\s*(?:${escapedNames.join("|")})\\b`;
+  return new RegExp(
+    `(?:\\.(?:map|flatMap)\\s*\\(|Array\\.from\\s*\\(|(?:for|while)\\s*\\([^)]*\\))[\\s\\S]{0,10000}${clientTag}`,
+  ).test(content);
+}
+
 function collectIsolatedClientBoundaries(
   ownerPath: string,
   root: string | undefined,
-): { boundaries: IsolatedClientBoundaryReference[]; fallbackReason?: string } {
+): {
+  boundaries: IsolatedClientBoundaryReference[];
+  estimatedBoundaryCount: number;
+  costGuardExceeded?: boolean;
+  fallbackReason?: string;
+} {
   const boundaries = new Map<string, IsolatedClientBoundaryReference>();
-  const visited = new Set<string>();
+  const estimates = new Map<string, number>();
+  const visiting = new Set<string>();
   let fallbackReason: string | undefined;
+  let costGuardExceeded = false;
   const projectRoot = root ? path.resolve(root) : undefined;
 
-  const visit = (moduleSourcePath: string) => {
-    if (fallbackReason || visited.has(moduleSourcePath)) return;
-    visited.add(moduleSourcePath);
+  const visit = (moduleSourcePath: string): number => {
+    if (fallbackReason) return 0;
+    const cached = estimates.get(moduleSourcePath);
+    if (cached !== undefined) return cached;
+    if (visiting.has(moduleSourcePath)) return 0;
+    visiting.add(moduleSourcePath);
     const content = readIfExists(moduleSourcePath);
     const parsed = parseClientModuleMetadata(content, false);
 
     if (parsed.isClientComponent) {
       if (projectRoot && !path.resolve(moduleSourcePath).startsWith(`${projectRoot}${path.sep}`)) {
         fallbackReason = `client boundary ${moduleSourcePath} is outside the application root`;
-        return;
+        return 0;
       }
       if (!isIsolatableClientBoundarySource(content)) {
         fallbackReason = `client boundary ${moduleSourcePath} uses an unsupported export shape`;
-        return;
+        return 0;
       }
       boundaries.set(moduleSourcePath, {
         modulePath: moduleSourcePath,
         islandStrategy: parsed.islandStrategy ?? "load",
       });
-      return;
+      estimates.set(moduleSourcePath, 1);
+      visiting.delete(moduleSourcePath);
+      return 1;
     }
 
     if (parsed.hasHydrateExport) {
       fallbackReason = `imported module ${moduleSourcePath} explicitly exports hydrate = true`;
-      return;
+      return 0;
     }
 
+    const importedBindings = getStaticImportBindings(content);
+    let estimatedBoundaryCount = 0;
     for (const specifier of getImportSpecifiers(content)) {
       const importedPath = resolveImportedModuleSourcePath(moduleSourcePath, specifier, root);
       if (!importedPath) continue;
@@ -607,16 +721,34 @@ function collectIsolatedClientBoundaries(
         const packageMetadata = inspectPackageClientBoundary(importedPath, root, new Set());
         if (packageMetadata.shouldHydrate) {
           fallbackReason = `package client boundary ${specifier} cannot yet be isolated`;
-          return;
+          return 0;
         }
         continue;
       }
-      visit(importedPath);
+      const importedBoundaryCount = visit(importedPath);
+      if (fallbackReason || importedBoundaryCount === 0) continue;
+      const localBindings = importedBindings.get(specifier) ?? [];
+      const staticUses = countStaticJsxUses(content, localBindings);
+      if (staticUses > 0 && hasDynamicJsxCardinality(content, localBindings)) {
+        fallbackReason = `the client boundary count imported from ${specifier} is data-dependent`;
+        costGuardExceeded = true;
+        return 0;
+      }
+      estimatedBoundaryCount += importedBoundaryCount * Math.max(1, staticUses);
     }
+
+    estimates.set(moduleSourcePath, estimatedBoundaryCount);
+    visiting.delete(moduleSourcePath);
+    return estimatedBoundaryCount;
   };
 
-  visit(ownerPath);
-  return { boundaries: Array.from(boundaries.values()), fallbackReason };
+  const estimatedBoundaryCount = visit(ownerPath);
+  return {
+    boundaries: Array.from(boundaries.values()),
+    estimatedBoundaryCount,
+    costGuardExceeded,
+    fallbackReason,
+  };
 }
 
 export function isClientComponentModule(modulePath: string, root?: string): boolean {

@@ -209,6 +209,7 @@ export class RouteManager {
   private clientManifestCache?: {
     projectRoot: string;
     manifest: FarmClientRouteManifest;
+    isolatedClientBoundaryModules: ReadonlySet<string>;
   };
 
   constructor(config: Required<FarmConfig>, viteServer?: ViteDevServer) {
@@ -622,6 +623,12 @@ export class RouteManager {
       entry,
       metadata: getClientModuleHydrationPlan(entry.modulePath, normalizedProjectRoot, isolatedMode),
     }));
+    for (const { entry, metadata } of [...layoutEntries, ...routeEntries]) {
+      if (!metadata.costGuardExceeded) continue;
+      logger.warn(
+        `[Farm.js] isolated hydration kept route-wide for ${entry.modulePath}: ${metadata.fallbackReason}.`,
+      );
+    }
     if (isolatedMode === "analyze") {
       for (const { entry, metadata } of [...layoutEntries, ...routeEntries]) {
         if (!metadata.isolatedHydrationEligible) continue;
@@ -724,12 +731,28 @@ export class RouteManager {
       };
     });
 
+    const isolatedClientBoundaryModules = new Set<string>();
+    for (const { metadata } of [...layoutEntries, ...routeEntries]) {
+      if (!metadata.hasIsolatedClientBoundaries) continue;
+      for (const boundary of metadata.isolatedBoundaries) {
+        isolatedClientBoundaryModules.add(path.resolve(boundary.modulePath));
+      }
+    }
+
     const manifest = { routes, layouts, slots };
     this.clientManifestCache = {
       projectRoot: normalizedProjectRoot,
       manifest,
+      isolatedClientBoundaryModules,
     };
     return manifest;
+  }
+
+  /** @internal Client modules selected by the compiled hydration ownership plan. */
+  getIsolatedClientBoundaryModules(projectRoot: string = this.config.root): ReadonlySet<string> {
+    const normalizedProjectRoot = path.resolve(projectRoot);
+    this.generateClientManifest(normalizedProjectRoot);
+    return this.clientManifestCache?.isolatedClientBoundaryModules ?? new Set();
   }
 
   /**

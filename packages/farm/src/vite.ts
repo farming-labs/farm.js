@@ -106,6 +106,8 @@ interface FarmVitePluginOptions extends FarmConfig {
   openapi?: FarmUserConfig["openapi"];
   images?: FarmUserConfig["images"];
   publicDir?: FarmUserConfig["publicDir"];
+  /** @internal Modules selected by the compiled isolated-hydration ownership plan. */
+  isolatedClientBoundaryModules?: ReadonlySet<string>;
 }
 
 type TypeArtifactSelection = Pick<
@@ -2849,9 +2851,19 @@ export const manifest = getManifest();
             },
           ) === "enabled" && isReactRenderer(resolveFarmRenderer(currentConfig.renderer));
         let isolatedModuleReference: string | null = null;
-        if (isolatedHydrationEnabled && isIsolatableClientBoundarySource(clientBoundarySource)) {
-          const root = currentConfig.root || server?.config.root || process.cwd();
-          const cleanId = id.split("?", 1)[0];
+        const root = currentConfig.root || server?.config.root || process.cwd();
+        const cleanId = id.split("?", 1)[0];
+        const selectedIsolatedModules =
+          options.isolatedClientBoundaryModules ??
+          farmApp?.getRouteManager().getIsolatedClientBoundaryModules(root);
+        const selectedForIsolatedHydration =
+          selectedIsolatedModules === undefined ||
+          selectedIsolatedModules.has(path.resolve(cleanId));
+        if (
+          isolatedHydrationEnabled &&
+          selectedForIsolatedHydration &&
+          isIsolatableClientBoundarySource(clientBoundarySource)
+        ) {
           isolatedModuleReference = toViteModuleId(cleanId, root);
           const transformedBoundary = transformIsolatedClientBoundaryModule({
             code: transformedCode,
