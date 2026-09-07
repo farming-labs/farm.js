@@ -7,6 +7,14 @@ const { test } = require("node:test");
 
 const repoRoot = path.resolve(__dirname, "..");
 
+test("workspace scripts use the pnpm binary installed by the caller", () => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
+
+  for (const [name, script] of Object.entries(manifest.scripts)) {
+    assert.doesNotMatch(script, /\bcorepack\s+pnpm\b/, `${name} invokes Corepack from inside pnpm`);
+  }
+});
+
 /**
  * Runs a package script through pnpm inside a throwaway package that carries
  * the repository's .npmrc, so the test exercises the same script shell the
