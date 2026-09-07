@@ -35,6 +35,19 @@ describe("createFarmRouter", () => {
     });
   });
 
+  it("rejects non-terminal catch-all patterns", () => {
+    expect(() => createFarmRouter(["/docs/[...slug]/edit"])).toThrow(
+      'Catch-all segment "[...slug]" must be the final segment',
+    );
+    expect(() => matchFarmRoute("/docs/*slug/edit", "/docs/guide/edit")).toThrow(
+      'Catch-all segment "*slug" must be the final segment',
+    );
+    expect(() => buildFarmRoutePath("\\docs\\[...slug]\\edit", { slug: "guide" })).toThrow(
+      'Catch-all segment "[...slug]" must be the final segment',
+    );
+    expect(buildFarmRoutePath("/docs/[...slug]/()", { slug: "guide" })).toBe("/docs/guide");
+  });
+
   it("rejects routes that differ only by parameter names", () => {
     expect(() => createFarmRouter(["/users/[id]", "/users/[slug]"])).toThrow(
       'Ambiguous route patterns "/users/[id]" and "/users/[slug]" match the same URLs.',
