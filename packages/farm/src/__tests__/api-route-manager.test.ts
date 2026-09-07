@@ -64,6 +64,34 @@ describe("APIRouteManager", () => {
     expect(error.message).toContain("/api/users/[slug]");
   });
 
+  it("fails discovery for a non-terminal API catch-all", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-api-route-"));
+    tempDirs.push(root);
+    const routeDir = path.join(root, "api", "docs", "[...slug]", "edit");
+    fs.mkdirSync(routeDir, { recursive: true });
+    fs.writeFileSync(path.join(routeDir, "route.ts"), "export const GET = () => new Response();\n");
+    const manager = new APIRouteManager(root, {
+      ssrLoadModule: async () => ({ GET: async () => new Response() }),
+    } as any);
+
+    await expect(manager.discoverRoutes()).rejects.toThrow(
+      'Catch-all segment "[...slug]" must be the final segment',
+    );
+  });
+
+  it("fails discovery for duplicate API parameter names", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-api-route-"));
+    tempDirs.push(root);
+    const routeDir = path.join(root, "api", "teams", "[id]", "members", "[id]");
+    fs.mkdirSync(routeDir, { recursive: true });
+    fs.writeFileSync(path.join(routeDir, "route.ts"), "export const GET = () => new Response();\n");
+    const manager = new APIRouteManager(root, {
+      ssrLoadModule: async () => ({ GET: async () => new Response() }),
+    } as any);
+
+    await expect(manager.discoverRoutes()).rejects.toThrow('Duplicate route parameter "id"');
+  });
+
   it("ignores empty programmatic routes and preserves API-literal syntax", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-api-route-"));
     tempDirs.push(root);

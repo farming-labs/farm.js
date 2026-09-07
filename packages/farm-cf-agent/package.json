@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/cf-agent",
-  "version": "0.1.0-beta.82",
+  "version": "0.1.0-beta.83",
   "description": "First-class Cloudflare Agents integration for Farm.js",
   "keywords": [
     "agents",
@@ -53,6 +53,6 @@
     "wrangler": ">=4.111.0 <5"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.12.0"
   }
 }

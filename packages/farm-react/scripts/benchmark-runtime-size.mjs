@@ -67,6 +67,8 @@ const [
   keyedWindowPositionOn,
   keyedReorderOff,
   keyedReorderOn,
+  keyedMapReorderOff,
+  keyedMapReorderOn,
   keyedSortOff,
   keyedSortOn,
   keyedRollingWindowOff,
@@ -95,6 +97,8 @@ const [
   bundle("keyed-window-position.tsx", true),
   bundle("keyed-reorder.tsx", false),
   bundle("keyed-reorder.tsx", true),
+  bundle("keyed-map-reorder.tsx", false),
+  bundle("keyed-map-reorder.tsx", true),
   bundle("keyed-sort.tsx", false),
   bundle("keyed-sort.tsx", true),
   bundle("keyed-rolling-window.tsx", false),
@@ -218,6 +222,18 @@ if (
   !keyedReorderOn.code.includes("reorderIndexIndependent")
 ) {
   throw new Error("Keyed reorder fixture did not retain its isolated reorder-hint runtime.");
+}
+if (
+  !keyedMapReorderOn.code.includes("FarmCompiledKeyedRows") ||
+  !keyedMapReorderOn.code.includes("keyed-rows:map-reorder-hinted") ||
+  !keyedMapReorderOn.code.includes("reorderIndexIndependent")
+) {
+  throw new Error(
+    `Keyed map-reorder fixture did not retain its isolated runtime: rows=${keyedMapReorderOn.code.includes("FarmCompiledKeyedRows")}, feature=${keyedMapReorderOn.code.includes("keyed-rows:map-reorder-hinted")}, proof=${keyedMapReorderOn.code.includes("reorderIndexIndependent")}.`,
+  );
+}
+if (keyedReorderOn.code.includes("keyed-rows:map-reorder-hinted")) {
+  throw new Error("Reorder-only fixture retained the optional map-reorder runtime.");
 }
 if (
   !keyedSortOn.code.includes("FarmCompiledKeyedRows") ||
@@ -413,6 +429,23 @@ const results = {
         brotli: keyedReorderOn.brotli - keyedReorderOff.brotli,
       },
     },
+    keyedMapReorder: {
+      compilerOff: {
+        raw: keyedMapReorderOff.raw,
+        gzip: keyedMapReorderOff.gzip,
+        brotli: keyedMapReorderOff.brotli,
+      },
+      compilerOn: {
+        raw: keyedMapReorderOn.raw,
+        gzip: keyedMapReorderOn.gzip,
+        brotli: keyedMapReorderOn.brotli,
+      },
+      compilerPremium: {
+        raw: keyedMapReorderOn.raw - keyedMapReorderOff.raw,
+        gzip: keyedMapReorderOn.gzip - keyedMapReorderOff.gzip,
+        brotli: keyedMapReorderOn.brotli - keyedMapReorderOff.brotli,
+      },
+    },
     keyedSort: {
       compilerOff: {
         raw: keyedSortOff.raw,
@@ -534,6 +567,13 @@ if (checkOnly) {
       maximum:
         (reference.fixtures.keyedReorder?.compilerPremium.gzip ??
           results.fixtures.keyedReorder.compilerPremium.gzip) + 256,
+    },
+    {
+      name: "keyed map-reorder compiler premium",
+      current: results.fixtures.keyedMapReorder.compilerPremium.gzip,
+      maximum:
+        (reference.fixtures.keyedMapReorder?.compilerPremium.gzip ??
+          results.fixtures.keyedMapReorder.compilerPremium.gzip) + 256,
     },
     {
       name: "keyed sort compiler premium",

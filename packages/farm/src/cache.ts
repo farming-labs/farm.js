@@ -249,6 +249,11 @@ export class FarmDataCache {
   }
 
   configure(config: FarmCacheUserConfig = {}): void {
+    this.generation++;
+    this.entries.clear();
+    this.inflight.clear();
+    this.invalidatedTagVersions.clear();
+    this.version = 0;
     this.adapter = config.adapter;
     this.namespace = normalizeCacheNamespace(config.namespace || "farm");
     this.local = !config.adapter;
@@ -269,12 +274,6 @@ export class FarmDataCache {
               "cache.lease.pollIntervalMs",
             ),
           };
-    if (!this.local) {
-      this.entries.clear();
-      this.inflight.clear();
-      this.invalidatedTagVersions.clear();
-      this.version = 0;
-    }
   }
 
   get adapterName(): string {
@@ -342,14 +341,19 @@ export class FarmDataCache {
       return this.local ? undefined : this.getEntry<T>(key, options);
     }
 
-    const entry = await this.adapter.get<T>(this.createAdapterKey(key));
+    const generation = this.generation;
+    const adapter = this.adapter;
+    const namespace = this.namespace;
+    const entry = await adapter.get<T>(`${namespace}:entry:${key}`);
+    if (generation !== this.generation) return undefined;
     if (!entry) {
       emitFarmEvent({ type: "cache.miss", key });
       return undefined;
     }
 
     assertFarmCacheEntry(entry, key);
-    const stale = await this.isAdapterEntryStale(entry, options.now);
+    const stale = await this.isAdapterEntryStale(entry, options.now, adapter, namespace);
+    if (generation !== this.generation) return undefined;
     if (stale) {
       emitFarmEvent({
         type: "cache.stale",
@@ -619,42 +623,85 @@ export class FarmDataCache {
     tags: readonly string[],
     generation: number,
   ): Promise<T> {
-    const leaseKey = `${this.namespace}:lease:${key}`;
+    const adapter = this.adapter;
+    const namespace = this.namespace;
+    const lease = { ...this.lease };
+    const leaseKey = `${namespace}:lease:${key}`;
     let leaseToken: string | null | undefined;
 
-    if (this.adapter?.acquireLease && this.adapter.releaseLease && this.lease.enabled) {
-      leaseToken = await this.adapter.acquireLease(leaseKey, this.lease.ttlMs);
+    if (adapter?.acquireLease && adapter.releaseLease && lease.enabled) {
+      leaseToken = await adapter.acquireLease(leaseKey, lease.ttlMs);
       if (!leaseToken) {
-        const shared = await this.waitForAdapterEntry<T>(key);
+        const shared = await this.waitForAdapterEntry<T>(
+          key,
+          adapter,
+          namespace,
+          lease,
+          generation,
+        );
         if (shared) {
           emitFarmEvent({ type: "cache.dedupe", key });
           return shared.value;
         }
-        leaseToken = await this.adapter.acquireLease(leaseKey, this.lease.ttlMs);
+        if (generation === this.generation) {
+          leaseToken = await adapter.acquireLease(leaseKey, lease.ttlMs);
+        }
       }
     }
 
     try {
       const initialCreatedVersion = this.version;
-      const initialTagVersions = await this.getAdapterTagVersions(tags);
+      const initialTagVersions = await this.getAdapterTagVersions(tags, adapter, namespace);
       const value = await producer();
       if (generation === this.generation) {
         await this.writeAsync(key, value, options, initialTagVersions, initialCreatedVersion);
       }
       return value;
     } finally {
-      if (leaseToken && this.adapter?.releaseLease) {
-        await this.adapter.releaseLease(leaseKey, leaseToken);
+      if (leaseToken && adapter?.releaseLease) {
+        await adapter.releaseLease(leaseKey, leaseToken);
       }
     }
   }
 
-  private async waitForAdapterEntry<T>(key: string): Promise<FarmCacheEntry<T> | undefined> {
-    const deadline = Date.now() + this.lease.waitTimeoutMs;
+  private async waitForAdapterEntry<T>(
+    key: string,
+    adapter: FarmCacheAdapter,
+    namespace: string,
+    lease: typeof this.lease,
+    generation: number,
+  ): Promise<FarmCacheEntry<T> | undefined> {
+    const deadline = Date.now() + lease.waitTimeoutMs;
     while (Date.now() < deadline) {
-      await delay(this.lease.pollIntervalMs);
-      const entry = await this.getEntryAsync<T>(key);
-      if (entry) return entry;
+      await delay(lease.pollIntervalMs);
+      if (generation !== this.generation) return undefined;
+      const entry = await adapter.get<T>(`${namespace}:entry:${key}`);
+      if (generation !== this.generation) return undefined;
+      if (!entry) {
+        emitFarmEvent({ type: "cache.miss", key });
+        continue;
+      }
+      assertFarmCacheEntry(entry, key);
+      const stale = await this.isAdapterEntryStale(entry, Date.now(), adapter, namespace);
+      if (generation !== this.generation) return undefined;
+      if (stale) {
+        emitFarmEvent({
+          type: "cache.stale",
+          key,
+          tags: [...entry.tags],
+          revalidate: entry.revalidate,
+        });
+        emitFarmEvent({ type: "cache.miss", key, reason: "stale" });
+      } else {
+        emitFarmEvent({
+          type: "cache.hit",
+          key,
+          tags: [...entry.tags],
+          revalidate: entry.revalidate,
+          stale: false,
+        });
+        return { ...entry, key };
+      }
     }
     return undefined;
   }
@@ -718,12 +765,14 @@ export class FarmDataCache {
 
   private async getAdapterTagVersions(
     tags: readonly string[],
+    adapter = this.adapter,
+    namespace = this.namespace,
   ): Promise<Readonly<Record<string, number>>> {
-    if (!this.adapter?.getTagVersions || tags.length === 0) return {};
+    if (!adapter?.getTagVersions || tags.length === 0) return {};
 
     const normalized = tags.map(normalizeCacheTag);
-    const physicalTags = normalized.map((tag) => this.createAdapterTag(tag));
-    const versions = await this.adapter.getTagVersions(physicalTags);
+    const physicalTags = normalized.map((tag) => `${namespace}:tag:${tag}`);
+    const versions = await adapter.getTagVersions(physicalTags);
     return Object.fromEntries(
       normalized.map((tag, index) => [
         tag,
@@ -732,7 +781,12 @@ export class FarmDataCache {
     );
   }
 
-  private async isAdapterEntryStale(entry: FarmCacheEntry, now = Date.now()): Promise<boolean> {
+  private async isAdapterEntryStale(
+    entry: FarmCacheEntry,
+    now = Date.now(),
+    adapter = this.adapter,
+    namespace = this.namespace,
+  ): Promise<boolean> {
     if (
       typeof entry.revalidate === "number" &&
       entry.revalidate >= 0 &&
@@ -741,7 +795,7 @@ export class FarmDataCache {
       return true;
     }
 
-    const currentVersions = await this.getAdapterTagVersions(entry.tags);
+    const currentVersions = await this.getAdapterTagVersions(entry.tags, adapter, namespace);
     for (const tag of entry.tags) {
       if (
         normalizeAdapterVersion(currentVersions[tag]) >

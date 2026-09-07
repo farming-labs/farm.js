@@ -230,6 +230,20 @@ describe("Farm cron", () => {
     );
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ deleted: 3 });
+
+    const lowercaseScheme = await handler(
+      new Request("https://example.com/api/cleanup", {
+        headers: { authorization: "bearer test-secret" },
+      }),
+    );
+    expect(lowercaseScheme.status).toBe(200);
+
+    const extraWhitespace = await handler(
+      new Request("https://example.com/api/cleanup", {
+        headers: { authorization: "bearer  test-secret" },
+      }),
+    );
+    expect(extraWhitespace.status).toBe(401);
   });
 
   it("fails closed when a production cron route has no secret", async () => {

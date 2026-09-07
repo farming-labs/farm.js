@@ -415,5 +415,12 @@ describe("generateRuntimePathMatcherSource", () => {
     // The only decodeURIComponent left is the one inside the guard's try.
     expect(matcher.split("decodeURIComponent(").length - 1).toBe(1);
     expect(matcher).toContain("function decodeRouteSegment(segment)");
+    expect(matcher).toContain("segment !== decodeRouteSegment(pathnameSegment)");
+
+    const matchRuntimePathPattern = new Function(
+      matcher + "; return matchRuntimePathPattern;",
+    )() as (pattern: string, pathname: string) => Record<string, string> | null;
+    expect(matchRuntimePathPattern("/café", "/caf%C3%A9")).toEqual({});
+    expect(matchRuntimePathPattern("/a%20b", "/a%2520b")).toEqual({});
   });
 });

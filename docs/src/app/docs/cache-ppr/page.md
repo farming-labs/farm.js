@@ -35,6 +35,10 @@ export default defineConfig({
 The adapter is selected once. Routes, queries, endpoints, server functions, ISR, and PPR continue
 using Farm cache keys and invalidation helpers; application handlers do not import a Redis client.
 
+If framework configuration is reloaded or a test calls `configureFarmCache()` again, Farm starts a
+new cache generation. A fill that began under the previous adapter or namespace can still return to
+its original caller, but it cannot populate the newly configured cache.
+
 When a shared adapter is present, Farm uses it as the authoritative cache instead of adding an
 incoherent process-local front cache.
 

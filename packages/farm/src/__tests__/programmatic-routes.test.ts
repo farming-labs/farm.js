@@ -18,6 +18,7 @@ import {
   type InferProgrammaticRouteData,
   type ProgrammaticPageRoute,
 } from "../routes";
+import { parseProgrammaticRoutePath } from "../routes-shared";
 import { RouteManager } from "../routing/route-manager";
 import { createServerFn } from "../server-fn";
 import type { FarmConfig } from "../types";
@@ -54,6 +55,13 @@ function createConfig(root: string): Required<FarmConfig> {
 }
 
 describe("programmatic routes", () => {
+  it("validates parameters with the programmatic bracket syntax", () => {
+    expect(() => parseProgrammaticRoutePath("/teams/[user.id]/members/[user.id]")).toThrow(
+      'Duplicate route parameter "user.id"',
+    );
+    expect(() => parseProgrammaticRoutePath("/literal/:id/:id/*id/*id")).not.toThrow();
+  });
+
   it("owns typed named actions and resolves a default action", async () => {
     const update = createServerFn({
       input: z.object({ id: z.string(), name: z.string() }),
@@ -250,6 +258,42 @@ describe("programmatic routes", () => {
       "/blog/farm-router",
       "/blog/hello-world",
     ]);
+  });
+
+  it("rejects duplicate params in programmatic page routes", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-programmatic-routes-"));
+    tempDirs.push(root);
+    const routesFile = path.join(root, "src", "farm.routes.js");
+    fs.mkdirSync(path.dirname(routesFile), { recursive: true });
+    fs.writeFileSync(routesFile, "export {};\n");
+    const manifest = defineRoutes(({ page }) => [
+      page("/teams/[user.id]/members/[user.id]", { component: () => null }),
+    ]);
+    const manager = new RouteManager(createConfig(root), {
+      config: { root },
+      ssrLoadModule: async () => ({ default: manifest }),
+    } as any);
+    manager.setRendererRuntime(createTestRendererRuntime() as any);
+
+    await expect(manager.discoverRoutes()).rejects.toThrow('Duplicate route parameter "user.id"');
+  });
+
+  it("rejects duplicate params in programmatic layout routes", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-programmatic-routes-"));
+    tempDirs.push(root);
+    const routesFile = path.join(root, "src", "farm.routes.js");
+    fs.mkdirSync(path.dirname(routesFile), { recursive: true });
+    fs.writeFileSync(routesFile, "export {};\n");
+    const manifest = defineRoutes(({ layout }) => [
+      layout("/teams/[id]/members/[id]", { component: ({ children }) => children }),
+    ]);
+    const manager = new RouteManager(createConfig(root), {
+      config: { root },
+      ssrLoadModule: async () => ({ default: manifest }),
+    } as any);
+    manager.setRendererRuntime(createTestRendererRuntime() as any);
+
+    await expect(manager.discoverRoutes()).rejects.toThrow('Duplicate route parameter "id"');
   });
 
   it("rejects duplicate page routes across file and programmatic definitions", async () => {

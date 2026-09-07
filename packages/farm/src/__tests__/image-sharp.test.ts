@@ -2,10 +2,43 @@
 
 import { imageSize } from "image-size";
 import sharp from "sharp";
-import { describe, expect, it } from "vitest";
-import { createSharpImageTransformer } from "../image-sharp";
+import { describe, expect, it, vi } from "vitest";
+import { createNodeImageFetcher, createSharpImageTransformer } from "../image-sharp";
+import { resolveFarmImageConfig } from "../image-config";
+
+const { requestMock } = vi.hoisted(() => ({ requestMock: vi.fn() }));
+
+vi.mock("node:http", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:http")>()),
+  request: requestMock,
+}));
 
 describe("Sharp image adapter", () => {
+  it("rejects invalid upstream status codes without constructing a Response", async () => {
+    const resume = vi.fn();
+    requestMock.mockImplementationOnce((_url, _options, onResponse) => {
+      return {
+        once: vi.fn(),
+        end() {
+          onResponse({ statusCode: 700, resume });
+        },
+      };
+    });
+    const fetchRemote = createNodeImageFetcher(
+      resolveFarmImageConfig({
+        remotePatterns: [{ protocol: "http", hostname: "images.example.test" }],
+      }),
+      (_hostname, _options, callback) => {
+        callback(null, [{ address: "203.0.113.1", family: 4 }]);
+      },
+    );
+
+    await expect(fetchRemote("http://images.example.test/photo.png")).rejects.toThrow(
+      "invalid HTTP status",
+    );
+    expect(resume).toHaveBeenCalledOnce();
+  });
+
   it("performs a real format conversion without enlarging the image", async () => {
     const source = await sharp({
       create: {
