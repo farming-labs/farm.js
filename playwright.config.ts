@@ -15,7 +15,7 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   webServer: {
-    command: "corepack pnpm --dir examples/basic run dev --port 4173",
+    command: "pnpm --dir examples/basic run dev --port 4173",
     url: "http://localhost:4173",
     reuseExistingServer: true,
     timeout: 120_000,

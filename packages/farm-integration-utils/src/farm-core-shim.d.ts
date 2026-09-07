@@ -295,6 +295,7 @@ declare module "@farm.js/core" {
     name: string;
     type: string;
     props?: Record<string, unknown>;
+    supportsIsolatedHydration?: boolean;
     component?: import("react").ComponentType<FarmIntegrationProviderProps>;
   }
 

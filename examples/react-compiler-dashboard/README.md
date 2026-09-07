@@ -310,6 +310,9 @@ The default JSON report is `/tmp/farm-react-dashboard-benchmark.json`; change it
   block-bodied equivalent rereads the complete keyed snapshot; the hinted path isolates the saved
   descriptor and unchanged-binding work while both paths run the same native map, sort, and LIS
   movement.
+- The multi-map reorder control changes one row's label and amount in two consecutive native maps,
+  then sorts the same keyed rows. Its block-bodied equivalent keeps complete reconciliation, while
+  the hinted path proves one flattened source-row lineage and patches the final row once.
 - The sort control compares concise native `toSorted()` with an equivalent block-bodied compiled
   update. Both paths run the same native sort and move the same keyed DOM rows; the hint isolates
   the saved key, descriptor, and binding work while retaining only the required LIS moves.
