@@ -2530,7 +2530,7 @@ ${isolatedHydrationImport}
 ${providerClientCode.imports}
 import { createClientPluginManager, getHashTargetElement, installChunkErrorRecovery, isFarmExternalNavigationURL, reconcileFarmDocumentHead, scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
 import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";
-import { matchFarmRoute } from "@farm.js/core/router";
+import { isFarmRouteActive, matchFarmRoute } from "@farm.js/core/router";
 ${clientPluginEntry.imports}
 ${i18nClientRuntime}
 ${docsNavigationRuntime}
@@ -2567,9 +2567,7 @@ function getApplicableLayouts(pathname) {
   const normalizedPath = getFarmRoutePathname(pathname).replace(/\\/$/, '') || '/';
   
   for (const layout of layoutRoutes) {
-    if (layout.pattern === '/' || 
-        normalizedPath === layout.pattern || 
-        normalizedPath.startsWith(layout.pattern + '/')) {
+    if (layout.pattern === '/' || isFarmRouteActive(layout.pattern, normalizedPath, { exact: false })) {
       applicable.push(layout);
     }
   }
@@ -2684,12 +2682,8 @@ async function createMatchedHydrationElement(matched, pathname, searchParams, se
 }
 
 function matchesRoutePrefix(pathname, pattern) {
-  if (pattern === "/") return true;
-  const pathSegments = getFarmRoutePathname(pathname).split("/").filter(Boolean);
-  const patternSegments = pattern.split("/").filter(Boolean);
-  if (patternSegments.length > pathSegments.length) return false;
-  const candidate = "/" + pathSegments.slice(0, patternSegments.length).join("/");
-  return matchFarmRoute(pattern, candidate) !== null;
+  return pattern === "/" ||
+    isFarmRouteActive(pattern, getFarmRoutePathname(pathname), { exact: false });
 }
 
 function matchInterceptedRouteSlot(pathname, from) {
@@ -4223,6 +4217,7 @@ function generateVirtualEntryCode(
   _setDefaultFarmThemeConfig,
   addMetadataImageReference,
   appendFarmRedirectQuery,
+  applyFarmBasePath,
   applyFarmThemeDocument,
   appendFarmLinkHeader,
   applyProductionMiddlewareHeaders,
@@ -4477,6 +4472,7 @@ ${instrumentationImport}
 ${imageRuntimeImport}
 ${imageNodeRuntimeImport}
 import { farmFontPreloadHeader } from "virtual:farm-font-runtime";
+import { isFarmRouteActive } from "@farm.js/core/router";
 ${rendererServerImports}
 
 const farmPreloadConfig = ${JSON.stringify(config.performance.preload)};
@@ -5598,12 +5594,8 @@ function matchPageRoute(pathname) {
 }
 
 function matchesRoutePrefix(pathname, pattern) {
-  if (pattern === "/") return true;
-  const pathSegments = normalizeRuntimePath(pathname).split("/").filter(Boolean);
-  const patternSegments = normalizeRuntimePath(pattern).split("/").filter(Boolean);
-  if (patternSegments.length > pathSegments.length) return false;
-  const candidate = "/" + pathSegments.slice(0, patternSegments.length).join("/");
-  return matchRuntimePathPattern(pattern, candidate) !== null;
+  return pattern === "/" ||
+    isFarmRouteActive(pattern, normalizeRuntimePath(pathname), { exact: false });
 }
 
 function routeSlotSpecificity(slot) {
@@ -5801,9 +5793,7 @@ function getApplicableLayouts(pathname) {
   for (const layout of layoutRoutes) {
     // Root layout (/) applies to everything
     // Other layouts apply to their path and sub-paths
-    if (layout.pattern === '/' || 
-        normalizedPath === layout.pattern || 
-        normalizedPath.startsWith(layout.pattern + '/')) {
+    if (layout.pattern === '/' || isFarmRouteActive(layout.pattern, normalizedPath, { exact: false })) {
       applicable.push(layout);
     }
   }
@@ -7047,6 +7037,7 @@ async function handleFarmRequestInContext(
   // 404 fallback - render proper HTML page
   emitFarmEvent({ type: "route.notFound", pathname });
   try {
+    const defaultNotFoundHomeHref = applyFarmBasePath("/", farmResolvedRuntimeConfig.basePath);
     // Default 404 page component
     function Default404Page() {
       return React.createElement(React.Fragment, null,
@@ -7067,7 +7058,7 @@ async function handleFarmRequestInContext(
             }, "Not found"),
             React.createElement("a", {
               className: "farm-default-not-found__home",
-              href: "/",
+              href: defaultNotFoundHomeHref,
             }, "GO HOME")
           )
         )
@@ -7154,7 +7145,7 @@ async function handleFarmRequestInContext(
   } catch (error) {
     console.error("404 render error:", error);
     const fallbackDocument = applyFarmThemeDocument(
-      \`<!DOCTYPE html><html><head><title>404</title></head><body><h1>404 - Page Not Found</h1><p>The page \${pathname} doesn't exist.</p><a href="/">Go Home</a></body></html>\`,
+      \`<!DOCTYPE html><html><head><title>404</title></head><body><h1>404 - Page Not Found</h1><p>The page \${pathname} doesn't exist.</p><a href="\${escapeFarmHtmlAttribute(applyFarmBasePath("/", farmResolvedRuntimeConfig.basePath))}">Go Home</a></body></html>\`,
       farmThemeConfig,
       farmResolvedRuntimeConfig.basePath,
       getFarmTheme(request)

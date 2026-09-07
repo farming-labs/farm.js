@@ -129,5 +129,9 @@ describe("route helpers", () => {
     );
     expect(isFarmRouteActive("/users/[id]", "/users", { exact: false })).toBe(false);
     expect(isFarmRouteActive("/users/[id]", "/projects/42/settings", { exact: false })).toBe(false);
+    expect(isFarmRouteActive("/docs/[[...slug]]", "/docs", { exact: false })).toBe(true);
+    expect(isFarmRouteActive("/docs/[[...slug]]", "/docs/core/routing", { exact: false })).toBe(
+      true,
+    );
   });
 });

@@ -12,6 +12,7 @@ import { defer } from "../deferred";
 import { defineIntegration } from "../integrations";
 import { REACT_RENDERER } from "../renderer";
 import { Link } from "../client/link";
+import { setFarmBasePath } from "../base-path";
 
 type MockResponse = FarmResponse & {
   body: string;
@@ -580,6 +581,27 @@ describe("file route loading.tsx and error.tsx", () => {
 });
 
 describe("custom not-found rendering", () => {
+  it("applies the app base path to the default home recovery action", async () => {
+    const response = createMockResponse();
+    const renderer = new ServerRenderer(
+      { ...createConfig(), basePath: "/console" } as Required<FarmConfig>,
+      {
+        matchMetadataRoute: () => null,
+        matchMetadataImage: () => null,
+        matchRoute: () => ({ route: null, params: {}, layouts: [], slots: [] }),
+      } as any,
+    );
+
+    try {
+      await renderer.renderPage(createMockRequest("/console/missing"), response);
+
+      expect(response.statusCode).toBe(404);
+      expect(response.body).toContain('href="/console/"');
+    } finally {
+      setFarmBasePath("/");
+    }
+  });
+
   it("renders a custom not-found page inside integration providers", async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), "farm-not-found-provider-"));
     temporaryDirectories.push(directory);
