@@ -120,7 +120,8 @@ handled by the browser instead of Farm's SPA router. Absolute URI schemes such a
 `sms:`, and same-origin `blob:` URLs are passed through unchanged and are never prefetched as app routes. Literal custom
 schemes such as `customapp:open` are validated from their URI grammar and work without registration.
 Viewport prefetch uses a short scroll guard and is cancelled if its link unmounts before the guard
-expires.
+expires. Intent prefetches are deduplicated while active; after an attempt settles, a later hover,
+focus, or touch can retry while successful route data remains deduplicated by the router cache.
 Internal `Link` hrefs stay app-relative: when `basePath: "/console"` is configured, `href="/about"`
 renders and navigates to `/console/about`. Do not add the base path to route hrefs yourself.
 For a reusable custom-scheme type, use ``ExternalHref<`customapp:${string}`>`` (or declaration-merge
