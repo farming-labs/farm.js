@@ -4801,6 +4801,7 @@ async function hydrate() {
       const hydrationController = new AbortController();
       pendingPageHydrationController = hydrationController;
       await hydrateFarmIsolatedClientBoundaries(rootContainer, hydrationController.signal);
+      if (hydrationController.signal.aborted) return;
       replayPreHydrationClicks();
       return;
     }`
