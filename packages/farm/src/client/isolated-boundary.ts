@@ -134,7 +134,19 @@ export function createFarmIsolatedClientBoundary(
   return FarmIsolatedClientBoundary;
 }
 
-type FarmIsolatedRoot = { unmount(): void };
+type FarmIsolatedRoot = {
+  render(element: React.ReactNode): void;
+  unmount(): void;
+};
+
+interface FarmIsolatedRootRecord {
+  root: FarmIsolatedRoot;
+  reference: string;
+  exportName: string;
+  props: Record<string, unknown>;
+  serverHTML: string;
+  restore(error: unknown): void;
+}
 
 interface FarmIsolatedHydrationRootOptions {
   onUncaughtError?: (error: unknown) => void;
@@ -178,7 +190,7 @@ function findBoundaryPayload(container: Element, boundaryId: string): HTMLScript
 
 /** @internal Shared development and production runtime for isolated React roots. */
 export function createFarmIsolatedHydrationRuntime(options: FarmIsolatedHydrationRuntimeOptions) {
-  const roots = new Map<Element, FarmIsolatedRoot>();
+  const roots = new Map<Element, FarmIsolatedRootRecord>();
   const pending = new Map<Element, AbortController>();
   const report =
     options.report ??
@@ -198,7 +210,7 @@ export function createFarmIsolatedHydrationRuntime(options: FarmIsolatedHydratio
     );
     queueMicrotask(() => {
       try {
-        roots.get(container)?.unmount();
+        roots.get(container)?.root.unmount();
       } catch {
         // React may already have detached a root that failed during hydration.
       }
@@ -227,6 +239,23 @@ export function createFarmIsolatedHydrationRuntime(options: FarmIsolatedHydratio
       return this.state.failed ? null : this.props.children;
     }
   }
+
+  const createBoundaryGraph = (
+    Component: React.ComponentType<any>,
+    props: Record<string, unknown>,
+    restore: (error: unknown) => void,
+  ) => {
+    const componentElement = options.ReactRuntime.createElement(Component, props);
+    const wrappedElement = options.wrap ? options.wrap(componentElement) : componentElement;
+    return wrapFarmIsolatedClientGraph(
+      options.ReactRuntime,
+      options.ReactRuntime.createElement(
+        FarmIsolatedRootErrorBoundary,
+        { onError: restore },
+        wrappedElement,
+      ),
+    );
+  };
 
   async function hydrate(scope: ParentNode = document, signal?: AbortSignal): Promise<void> {
     const candidates = Array.from(
@@ -299,25 +328,22 @@ export function createFarmIsolatedHydrationRuntime(options: FarmIsolatedHydratio
                   failRoot(container, reference, exportName, serverHTML, error);
                   controller.abort();
                 };
-                const componentElement = options.ReactRuntime.createElement(
+                const graphElement = createBoundaryGraph(
                   Component as React.ComponentType<any>,
-                  props,
-                );
-                const wrappedElement = options.wrap
-                  ? options.wrap(componentElement)
-                  : componentElement;
-                const graphElement = wrapFarmIsolatedClientGraph(
-                  options.ReactRuntime,
-                  options.ReactRuntime.createElement(
-                    FarmIsolatedRootErrorBoundary,
-                    { onError: restore },
-                    wrappedElement,
-                  ),
+                  props as Record<string, unknown>,
+                  restore,
                 );
                 const root = options.hydrateRoot(container, graphElement, {
                   onUncaughtError: restore,
                 });
-                roots.set(container, root);
+                roots.set(container, {
+                  root,
+                  reference,
+                  exportName,
+                  props: props as Record<string, unknown>,
+                  serverHTML,
+                  restore,
+                });
                 container.setAttribute("data-farm-hydrated", "true");
               } catch (error) {
                 failRoot(container, reference, exportName, serverHTML, error);
@@ -346,6 +372,39 @@ export function createFarmIsolatedHydrationRuntime(options: FarmIsolatedHydratio
     );
   }
 
+  function updateModule(reference: string, module: Record<string, unknown>): number {
+    const originals = module.__farm_client_boundary_originals__ as
+      | Record<string, unknown>
+      | undefined;
+    let updated = 0;
+
+    for (const [container, record] of roots) {
+      if (record.reference !== reference) continue;
+      const Component = originals?.[record.exportName];
+      if (typeof Component !== "function" && typeof Component !== "object") {
+        failRoot(
+          container,
+          record.reference,
+          record.exportName,
+          record.serverHTML,
+          new Error("updated compiled original export was not found"),
+        );
+        continue;
+      }
+
+      try {
+        record.root.render(
+          createBoundaryGraph(Component as React.ComponentType<any>, record.props, record.restore),
+        );
+        updated++;
+      } catch (error) {
+        failRoot(container, record.reference, record.exportName, record.serverHTML, error);
+      }
+    }
+
+    return updated;
+  }
+
   function dispose(scope: Node): void {
     for (const [container, controller] of pending) {
       if (container === scope || scope.contains(container)) {
@@ -353,10 +412,10 @@ export function createFarmIsolatedHydrationRuntime(options: FarmIsolatedHydratio
         pending.delete(container);
       }
     }
-    for (const [container, root] of roots) {
+    for (const [container, record] of roots) {
       if (container === scope || scope.contains(container)) {
         try {
-          root.unmount();
+          record.root.unmount();
         } catch {
           // The DOM owner may already have removed a failed root.
         }
@@ -369,6 +428,7 @@ export function createFarmIsolatedHydrationRuntime(options: FarmIsolatedHydratio
 
   return {
     hydrate,
+    updateModule,
     dispose,
     rootCount: () => roots.size,
   };

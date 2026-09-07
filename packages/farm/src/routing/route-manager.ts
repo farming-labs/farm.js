@@ -632,23 +632,10 @@ export class RouteManager {
       }
     }
 
-    // A route-wide page root needs its complete layout chain in the browser.
-    // Conservatively retain a layout when any child page still uses that path.
-    for (const layoutEntry of layoutEntries) {
-      if (!layoutEntry.metadata.hasIsolatedClientBoundaries) continue;
-      const conflictsWithRouteRoot = routeEntries.some(
-        ({ entry, metadata }) =>
-          metadata.shouldHydrate &&
-          (layoutEntry.entry.pattern === "/" ||
-            entry.pattern === layoutEntry.entry.pattern ||
-            entry.pattern.startsWith(`${layoutEntry.entry.pattern.replace(/\/$/, "")}/`)),
-      );
-      if (conflictsWithRouteRoot) {
-        layoutEntry.metadata.shouldHydrate = layoutEntry.metadata.legacyShouldHydrate;
-        layoutEntry.metadata.islandStrategy = layoutEntry.metadata.legacyIslandStrategy;
-        layoutEntry.metadata.hasIsolatedClientBoundaries = false;
-      }
-    }
+    // A route-wide layout owns its complete descendant tree, so a client leaf
+    // below it cannot also create an isolated root. A route-wide page does not
+    // conflict with isolated layout leaves because its root starts at the page
+    // boundary, outside those sibling markers.
     for (const routeEntry of routeEntries) {
       if (!routeEntry.metadata.hasIsolatedClientBoundaries) continue;
       const conflictsWithLayoutRoot = layoutEntries.some(

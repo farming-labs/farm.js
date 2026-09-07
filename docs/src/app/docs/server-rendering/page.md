@@ -180,6 +180,12 @@ all four strategies: one boundary's trigger never hydrates another, and an inter
 claimed and replayed once by the boundary that contains it. Removing a boundary cancels its pending
 observer, idle callback, or interaction listener.
 
+Farm uses the same isolated boundary metadata for Vite development, streamed or buffered SSR, and
+statically generated HTML. In development, updating a client module rerenders every live boundary
+created from that module without importing or replacing its server-owned layout; sibling boundary
+state stays mounted. If one page needs the route-wide fallback, that fallback stays on the page
+boundary and does not promote otherwise eligible client leaves in its server-owned layout.
+
 The export must be one of these static string literals so Farm can analyze it without executing
 application code. Without an explicit route-level `island` export, a route that imports client
 boundaries with different strategies safely falls back to `load` because its current route-level

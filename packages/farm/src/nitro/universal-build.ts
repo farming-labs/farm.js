@@ -1207,21 +1207,9 @@ async function buildClient(
     }
   }
 
-  for (const { route, metadata } of routePlans) {
-    if (metadata.shouldHydrate) {
-      for (const layout of clientLayouts) {
-        if (
-          layout.hasIsolatedClientBoundaries &&
-          layoutAppliesToRoute(layout.pattern, route.pattern)
-        ) {
-          layout.shouldHydrate = layout.legacyShouldHydrate;
-          layout.islandStrategy = layout.legacyIslandStrategy;
-          layout.hasIsolatedClientBoundaries = false;
-          layout.isolatedBoundaries = [];
-        }
-      }
-    }
-  }
+  // A route-wide layout owns its descendant page tree and cannot contain an
+  // overlapping isolated root. Route-wide pages are separate roots and can
+  // coexist with isolated client leaves in their server-owned layouts.
   for (const { route, metadata } of routePlans) {
     if (
       metadata.hasIsolatedClientBoundaries &&
@@ -2897,7 +2885,7 @@ async function hydrate() {
   const hydrationController = new AbortController();
   pendingPageHydrationController = hydrationController;
   try {
-    await scheduleFarmIslandHydration({
+    const pageHydration = scheduleFarmIslandHydration({
       container,
       strategy: matched.route.islandStrategy,
       signal: hydrationController.signal,
@@ -2949,6 +2937,16 @@ async function hydrate() {
         }
       },
     });
+    ${
+      isolatedHydrationEnabled
+        ? `const isolatedHydration =
+      !hasHydratableLayout(pathname) &&
+      document.querySelector('farm-client-boundary[data-farm-client-boundary]')
+        ? hydrateFarmIsolatedClientBoundaries(document, hydrationController.signal)
+        : Promise.resolve();
+    await Promise.all([pageHydration, isolatedHydration]);`
+        : "await pageHydration;"
+    }
   } finally {
     if (pendingPageHydrationController === hydrationController) {
       pendingPageHydrationController = null;
@@ -3333,9 +3331,10 @@ ${generateUniversalRouterStateProperties()}
         reactRoot = hydrateRoot(pageContainer, wrappedElement);
         reactRootContainer = pageContainer;
         isHydrated = true;
-      }${
+      }
+      ${
         isolatedHydrationEnabled
-          ? ` else if (matched.route.hasIsolatedClientBoundaries) {
+          ? `if (matched.route.hasIsolatedClientBoundaries && !hydrateLayouts) {
         await hydrateFarmIsolatedClientBoundaries(
           isolatedHydrationScope,
           navigation.controller.signal,
