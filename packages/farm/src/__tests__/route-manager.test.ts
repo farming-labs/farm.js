@@ -7,6 +7,7 @@ import {
   RouteManager,
   shouldSuggestStaticRenderingForI18n,
 } from "../routing/route-manager";
+import { defineIntegration } from "../integrations";
 import type { FarmConfig } from "../types";
 
 /** "/test" is not an absolute path on Windows, so resolve it per platform. */
@@ -285,6 +286,99 @@ describe("RouteManager", () => {
       expect(refreshed).not.toBe(first);
       expect(new Set(refreshed.routes.map((route) => route.pattern))).toEqual(
         new Set(["/", "/about"]),
+      );
+    });
+
+    it("keeps an isolated layout when a sibling page needs route-wide hydration", async () => {
+      const root = await mkdtemp(path.join(os.tmpdir(), "farm-route-local-hydration-"));
+      temporaryDirectories.push(root);
+      await mkdir(path.join(root, "src", "app", "fallback"), { recursive: true });
+      await mkdir(path.join(root, "src", "components"), { recursive: true });
+      await writeFile(
+        path.join(root, "src", "components", "counter.tsx"),
+        `'use client';\nexport default function Counter() { return null; }`,
+      );
+      await writeFile(
+        path.join(root, "src", "components", "fallback.tsx"),
+        `'use client';\nfunction Fallback() { return null; }\nexport { Fallback };`,
+      );
+      await writeFile(
+        path.join(root, "src", "app", "layout.tsx"),
+        `import Counter from "../components/counter";\nexport default function Layout({ children }) { return <><Counter />{children}</>; }`,
+      );
+      await writeFile(
+        path.join(root, "src", "app", "page.tsx"),
+        `export default function Page() { return null; }`,
+      );
+      await writeFile(
+        path.join(root, "src", "app", "fallback", "page.tsx"),
+        `import { Fallback } from "../../components/fallback";\nexport default function Page() { return <Fallback />; }`,
+      );
+      const { globFiles } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) return ["page.tsx", "fallback/page.tsx"];
+        if (pattern.includes("layout")) return ["layout.tsx"];
+        return [];
+      });
+      mockConfig.root = root;
+      mockConfig.experimental = {
+        serverComponents: false,
+        serverActions: false,
+        isolatedClientHydration: "enabled",
+      };
+      routeManager = new RouteManager(mockConfig);
+      await routeManager.discoverRoutes();
+
+      const manifest = routeManager.generateClientManifest(root);
+      expect(manifest.layouts).toEqual([
+        expect.objectContaining({
+          pattern: "/",
+          shouldHydrate: false,
+          hasIsolatedClientBoundaries: true,
+        }),
+      ]);
+      expect(manifest.routes.find((route) => route.pattern === "/")).toMatchObject({
+        shouldHydrate: false,
+      });
+      expect(manifest.routes.find((route) => route.pattern === "/fallback")).toMatchObject({
+        shouldHydrate: true,
+        renderPlan: { hydration: "route-island" },
+      });
+      expect(routeManager.getIsolatedClientBoundaryModules(root)).toEqual(
+        new Set([path.join(root, "src", "components", "counter.tsx")]),
+      );
+    });
+
+    it("explains when a route-wide integration provider disables isolated roots", async () => {
+      const { logger } = await import("../utils");
+      vi.mocked(logger.warn).mockClear();
+      mockConfig.experimental = {
+        serverComponents: false,
+        serverActions: false,
+        isolatedClientHydration: "enabled",
+      };
+      mockConfig.integrations = {
+        acme: defineIntegration({
+          category: "custom",
+          type: "acme",
+          instance: {},
+          providers: [
+            {
+              name: "acme",
+              type: "client",
+              component: { module: "@/components/acme-provider" },
+            },
+          ],
+        }),
+      };
+      routeManager = new RouteManager(mockConfig);
+
+      routeManager.generateClientManifest(mockConfig.root);
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'integration provider "acme" does not declare supportsIsolatedHydration: true',
+        ),
       );
     });
 
