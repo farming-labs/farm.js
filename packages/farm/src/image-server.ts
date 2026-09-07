@@ -27,6 +27,8 @@ export type FarmImageTransformer = (
 
 export interface CreateFarmImageHandlerOptions {
   fetch?: typeof globalThis.fetch;
+  /** Node-only fetcher that validates the DNS result used for remote connections. @internal */
+  fetchRemote?: typeof globalThis.fetch;
   transform: FarmImageTransformer;
   validateRemoteUrl?: (url: URL) => void | Promise<void>;
   onError?: (error: unknown, request: Request) => void;
@@ -108,6 +110,7 @@ export function createFarmImageHandler(
           requestUrl.origin,
           config,
           fetcher,
+          options.fetchRemote,
           options.validateRemoteUrl,
           request.signal,
         );
@@ -333,6 +336,7 @@ async function fetchImageSource(
   requestOrigin: string,
   config: ResolvedFarmImageConfig,
   fetcher: typeof globalThis.fetch,
+  fetchRemote: typeof globalThis.fetch | undefined,
   validateRemoteUrl: CreateFarmImageHandlerOptions["validateRemoteUrl"],
   signal: AbortSignal,
 ): Promise<{ response: Response; url: URL }> {
@@ -340,7 +344,8 @@ async function fetchImageSource(
 
   for (let redirectCount = 0; ; redirectCount += 1) {
     throwIfAborted(signal);
-    const response = await fetcher(currentUrl, {
+    const sourceFetcher = currentUrl.origin === requestOrigin ? fetcher : (fetchRemote ?? fetcher);
+    const response = await sourceFetcher(currentUrl, {
       method: "GET",
       redirect: "manual",
       signal,

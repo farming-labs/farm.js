@@ -1,7 +1,10 @@
 // @vitest-environment node
 
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { describe, expect, it, vi } from "vitest";
 import { resolveFarmImageConfig } from "../image-config";
+import { createNodeImageFetcher } from "../image-sharp";
 import {
   createCloudflareImageTransformer,
   createFarmImageHandler,
@@ -141,6 +144,42 @@ describe("Farm image optimizer", () => {
 
     expect(unconfigured?.status).toBe(400);
     expect(privateAddress?.status).toBe(400);
+  });
+
+  it("blocks a private address resolved by the actual remote connection", async () => {
+    let requests = 0;
+    const server = createServer((_request, response) => {
+      requests++;
+      response.end(PNG);
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as AddressInfo).port;
+    const config = resolveFarmImageConfig({
+      remotePatterns: [{ protocol: "http", hostname: "images.example.test", pathname: "/**" }],
+    });
+    const validateRemoteUrl = vi.fn(async () => undefined);
+    const fetchRemote = createNodeImageFetcher(config, (_hostname, _options, callback) => {
+      callback(null, [{ address: "127.0.0.1", family: 4 }]);
+    });
+    const handler = createFarmImageHandler(config, {
+      fetchRemote,
+      transform: passthroughTransformer(),
+      validateRemoteUrl,
+    });
+
+    try {
+      const response = await handler(
+        new Request(optimizerUrl(`http://images.example.test:${port}/photo.png`)),
+      );
+
+      expect(validateRemoteUrl).toHaveBeenCalledOnce();
+      expect(response?.status).toBe(400);
+      expect(requests).toBe(0);
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
   });
 
   it("revalidates every remote redirect", async () => {

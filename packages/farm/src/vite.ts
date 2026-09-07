@@ -787,10 +787,11 @@ export function farmPlugin(
       const serverConfig = resolveFarmServerConfig(farmConfig.server);
       let imageHandler: FarmImageHandler | null = null;
       if (farmConfig.images.provider !== "none") {
-        const { createNodeImageUrlValidator, createSharpImageTransformer } =
+        const { createNodeImageFetcher, createNodeImageUrlValidator, createSharpImageTransformer } =
           await import("./image-sharp");
         imageHandler = createFarmImageHandler(farmConfig.images, {
           transform: createSharpImageTransformer(),
+          fetchRemote: createNodeImageFetcher(farmConfig.images),
           validateRemoteUrl: createNodeImageUrlValidator(farmConfig.images),
           onError(error) {
             logger.error(
