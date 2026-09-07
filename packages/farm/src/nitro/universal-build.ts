@@ -4339,7 +4339,7 @@ ${integrationRuntimeImport}
       : `import { createCloudflareImageTransformer, createFarmImageHandler } from "@farm.js/core/image/server";`;
   const imageNodeRuntimeImport =
     imageRuntime === "node"
-      ? `import { createNodeImageUrlValidator, createSharpImageTransformer } from "@farm.js/core/image/sharp";`
+      ? `import { createNodeImageFetcher, createNodeImageUrlValidator, createSharpImageTransformer } from "@farm.js/core/image/sharp";`
       : "";
   const apiHandlerCode =
     apiRoutes.length > 0
@@ -4579,6 +4579,7 @@ const farmImageHandler = ${
 })`
         : `createFarmImageHandler(${JSON.stringify(config.images)}, {
   transform: createSharpImageTransformer(),
+  fetchRemote: createNodeImageFetcher(${JSON.stringify(config.images)}),
   validateRemoteUrl: createNodeImageUrlValidator(${JSON.stringify(config.images)}),
   onError(error) { console.error("[Farm Image]", error); },
 })`
