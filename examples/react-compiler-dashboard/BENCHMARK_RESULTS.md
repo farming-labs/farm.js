@@ -13,18 +13,21 @@ complete-reconciliation control.
 
 | Mode   | React median | Two maps + reorder | Compiled control | vs React | vs control |
 | ------ | -----------: | -----------------: | ---------------: | -------: | ---------: |
-| Static |    198.30 ms |           34.20 ms |         47.30 ms |    5.80x |      1.38x |
-| Hybrid |    198.30 ms |           34.20 ms |         46.10 ms |    5.80x |      1.35x |
+| Static |    205.25 ms |           29.70 ms |         39.90 ms |    6.91x |      1.34x |
+| Hybrid |    205.25 ms |           31.90 ms |         39.60 ms |    6.43x |      1.24x |
 
 The independent gate requires at least 4x versus bracketed React and 1.2x versus the compiled
 control in both modes. It passed without lowering either threshold. The run also proved that all
-10,000 original row nodes stayed connected, the edited row retained its DOM identity after moving,
-the final label and amount were correct, and compiled owner executions remained zero.
+10,000 original row nodes stayed connected in the complete expected amount/id order, the edited
+row retained its DOM identity after moving, the final label and amount were correct, and compiled
+owner executions remained zero. The full permutation oracle runs after each latency sample, so its
+assertion work is not included in the update measurement.
 
 Every existing correctness and performance gate passed in the same run, including the general
 regression gate, the 8x optimization-persistence floor, normalized scalability, and the earlier
-single-map reorder gate. The single-map workload remained 5.23x faster than React in static mode
-and 5.28x in hybrid mode, with 1.41x versus its compiled control in both modes.
+single-map reorder gate. In this latest run, the single-map workload was 5.99x faster than React in
+static mode and 5.89x in hybrid mode, with 1.33x and 1.39x versus its compiled control. The section
+below preserves the measurements from the earlier run that introduced that workload.
 
 Compiler tests accept consecutive safe conditional object-spread maps before native sort/reverse
 suffixes and keep structural calls, maps after reordering, and unsupported callbacks on complete
