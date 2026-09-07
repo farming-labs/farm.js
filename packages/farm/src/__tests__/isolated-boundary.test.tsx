@@ -243,6 +243,141 @@ describe("isolated client boundary", () => {
     expect(runtime.rootCount()).toBe(0);
   });
 
+  it("updates every live instance of a changed module without replacing sibling roots", async () => {
+    function Before({ name }: { name: string }) {
+      return <output data-version={name}>before:{name}</output>;
+    }
+    function After({ name }: { name: string }) {
+      return <output data-version={name}>after:{name}</output>;
+    }
+    function StableCounter() {
+      const [count, setCount] = useState(0);
+      return <button onClick={() => setCount((value) => value + 1)}>stable:{count}</button>;
+    }
+    const ChangedBoundary = createFarmIsolatedClientBoundary(
+      React,
+      Before,
+      "/src/changed.tsx",
+      "default",
+      "load",
+    );
+    const StableBoundary = createFarmIsolatedClientBoundary(
+      React,
+      StableCounter,
+      "/src/stable.tsx",
+      "default",
+      "load",
+    );
+    document.body.innerHTML = renderToString(
+      <section data-layout>
+        <ChangedBoundary name="first" />
+        <ChangedBoundary name="second" />
+        <StableBoundary />
+      </section>,
+    );
+    const layout = document.querySelector("[data-layout]");
+    const runtime = createRuntime({
+      "/src/changed.tsx": { __farm_client_boundary_originals__: { default: Before } },
+      "/src/stable.tsx": {
+        __farm_client_boundary_originals__: { default: StableCounter },
+      },
+    });
+
+    await act(async () => runtime.hydrate(document));
+    await act(async () => document.querySelector<HTMLButtonElement>("button")!.click());
+    await act(async () => {
+      expect(
+        runtime.updateModule("/src/changed.tsx", {
+          __farm_client_boundary_originals__: { default: After },
+        }),
+      ).toBe(2);
+    });
+
+    expect(
+      Array.from(document.querySelectorAll("[data-version]")).map((element) => element.textContent),
+    ).toEqual(["after:first", "after:second"]);
+    expect(document.querySelector("button")?.textContent).toBe("stable:1");
+    expect(document.querySelector("[data-layout]")).toBe(layout);
+    expect(runtime.rootCount()).toBe(3);
+  });
+
+  it("updates isolated roots without replacing sibling state with React 18", async () => {
+    const React18 = requireReact18("react") as typeof React;
+    const { hydrateRoot: hydrateRoot18 } = requireReact18("react-dom/client") as {
+      hydrateRoot: typeof hydrateRoot;
+    };
+    const { renderToString: renderToString18 } = requireReact18("react-dom/server") as {
+      renderToString: typeof renderToString;
+    };
+    function Before({ name }: { name: string }) {
+      return React18.createElement("output", { "data-react-18-version": name }, `before:${name}`);
+    }
+    function After({ name }: { name: string }) {
+      return React18.createElement("output", { "data-react-18-version": name }, `after:${name}`);
+    }
+    function StableCounter() {
+      const [count, setCount] = React18.useState(0);
+      return React18.createElement(
+        "button",
+        { onClick: () => setCount((value) => value + 1) },
+        `stable:${count}`,
+      );
+    }
+    const ChangedBoundary = createFarmIsolatedClientBoundary(
+      React18,
+      Before,
+      "/src/react-18-changed.tsx",
+      "default",
+      "load",
+    );
+    const StableBoundary = createFarmIsolatedClientBoundary(
+      React18,
+      StableCounter,
+      "/src/react-18-stable.tsx",
+      "default",
+      "load",
+    );
+    document.body.innerHTML = renderToString18(
+      React18.createElement(
+        "section",
+        { "data-react-18-layout": "" },
+        React18.createElement(ChangedBoundary, { name: "first" }),
+        React18.createElement(ChangedBoundary, { name: "second" }),
+        React18.createElement(StableBoundary),
+      ),
+    );
+    const layout = document.querySelector("[data-react-18-layout]");
+    const runtime = createFarmIsolatedHydrationRuntime({
+      ReactRuntime: React18,
+      hydrateRoot: hydrateRoot18,
+      load: async (reference) => ({
+        __farm_client_boundary_originals__: {
+          default: reference.includes("stable") ? StableCounter : Before,
+        },
+      }),
+      schedule: async ({ hydrate }) => hydrate(),
+    });
+
+    await React18.act(async () => runtime.hydrate(document));
+    await React18.act(async () => document.querySelector<HTMLButtonElement>("button")!.click());
+    await React18.act(async () => {
+      expect(
+        runtime.updateModule("/src/react-18-changed.tsx", {
+          __farm_client_boundary_originals__: { default: After },
+        }),
+      ).toBe(2);
+    });
+
+    expect(
+      Array.from(document.querySelectorAll("[data-react-18-version]")).map(
+        (element) => element.textContent,
+      ),
+    ).toEqual(["after:first", "after:second"]);
+    expect(document.querySelector("button")?.textContent).toBe("stable:1");
+    expect(document.querySelector("[data-react-18-layout]")).toBe(layout);
+    expect(runtime.rootCount()).toBe(3);
+  });
+
   it("keeps a nested client import inside its parent's React root", async () => {
     function Child() {
       const [count, setCount] = useState(0);

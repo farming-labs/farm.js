@@ -2848,12 +2848,14 @@ export const manifest = getManifest();
               ),
             },
           ) === "enabled" && isReactRenderer(resolveFarmRenderer(currentConfig.renderer));
+        let isolatedModuleReference: string | null = null;
         if (isolatedHydrationEnabled && isIsolatableClientBoundarySource(clientBoundarySource)) {
           const root = currentConfig.root || server?.config.root || process.cwd();
           const cleanId = id.split("?", 1)[0];
+          isolatedModuleReference = toViteModuleId(cleanId, root);
           const transformedBoundary = transformIsolatedClientBoundaryModule({
             code: transformedCode,
-            moduleReference: toViteModuleId(cleanId, root),
+            moduleReference: isolatedModuleReference,
             islandStrategy: getIslandStrategyExport(clientBoundarySource) ?? "load",
             parse: (source) => this.parse(source) as unknown as FarmModuleAstNode,
           });
@@ -2881,9 +2883,24 @@ export const manifest = getManifest();
 
         // Add HMR support for client components
         // This ensures React re-renders when the component updates
+        const isolatedHmrUpdate = isolatedModuleReference
+          ? `
+    if (
+      newModule &&
+      newModule.__farm_client_boundary_originals__ &&
+      window.__FARM_ISOLATED_HYDRATION_RUNTIME__
+    ) {
+      window.__FARM_ISOLATED_HYDRATION_RUNTIME__.updateModule(
+        ${JSON.stringify(isolatedModuleReference)},
+        newModule,
+      );
+      return;
+    }`
+          : "";
         const hmrCode = `
 if (import.meta.hot) {
   import.meta.hot.accept((newModule) => {
+    ${isolatedHmrUpdate}
     if (newModule && newModule.default && window.__FARM_REACT_ROOT__) {
       // Re-render with the new component
       const React = window.__FARM_REACT__;
@@ -3592,6 +3609,7 @@ async function hydrateFarmDocsAdapterRuntime() {
   schedule: scheduleFarmIslandHydration,
   wrap: wrapWithIntegrationProviders,
 });
+window.__FARM_ISOLATED_HYDRATION_RUNTIME__ = farmIsolatedHydrationRuntime;
 
 function disposeFarmIsolatedClientBoundaries(scope) {
   farmIsolatedHydrationRuntime.dispose(scope);
@@ -4686,12 +4704,20 @@ async function renderPage(pageData) {
         }
       }
 
+      const hydrationController = new AbortController();
+      if (
+        shouldHydrate${
+          isolatedHydrationEnabled
+            ? " || (hasIsolatedClientBoundaries && !layoutShouldHydrate)"
+            : ""
+        }
+      ) {
+        pendingPageHydrationController = hydrationController;
+      }
       if (shouldHydrate) {
         const hydrationContainer = layoutShouldHydrate
           ? container
           : document.getElementById('__farm_page__') || container;
-        const hydrationController = new AbortController();
-        pendingPageHydrationController = hydrationController;
         const scheduledHydration = scheduleFarmIslandHydration({
           container: hydrationContainer,
           strategy: route.islandStrategy,
@@ -4721,11 +4747,10 @@ async function renderPage(pageData) {
             console.warn('[Farm.js] Deferred island hydration failed:', error);
           });
         }
-      }${
+      }
+      ${
         isolatedHydrationEnabled
-          ? ` else if (hasIsolatedClientBoundaries) {
-        const hydrationController = new AbortController();
-        pendingPageHydrationController = hydrationController;
+          ? `if (hasIsolatedClientBoundaries && !layoutShouldHydrate) {
         await hydrateFarmIsolatedClientBoundaries(
           isolatedHydrationScope,
           hydrationController.signal,
@@ -4914,6 +4939,20 @@ async function hydrate() {
           }
         },
       });
+      ${
+        isolatedHydrationEnabled
+          ? `if (
+        hasIsolatedClientBoundaries &&
+        !layoutShouldHydrate &&
+        !hydrationController.signal.aborted
+      ) {
+        await hydrateFarmIsolatedClientBoundaries(
+          rootContainer,
+          hydrationController.signal,
+        );
+      }`
+          : ""
+      }
     } finally {
       if (pendingPageHydrationController === hydrationController) {
         pendingPageHydrationController = null;

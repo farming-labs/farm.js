@@ -1208,21 +1208,9 @@ async function buildClient(
     }
   }
 
-  for (const { route, metadata } of routePlans) {
-    if (metadata.shouldHydrate) {
-      for (const layout of clientLayouts) {
-        if (
-          layout.hasIsolatedClientBoundaries &&
-          layoutAppliesToRoute(layout.pattern, route.pattern)
-        ) {
-          layout.shouldHydrate = layout.legacyShouldHydrate;
-          layout.islandStrategy = layout.legacyIslandStrategy;
-          layout.hasIsolatedClientBoundaries = false;
-          layout.isolatedBoundaries = [];
-        }
-      }
-    }
-  }
+  // A route-wide layout owns its descendant page tree and cannot contain an
+  // overlapping isolated root. Route-wide pages are separate roots and can
+  // coexist with isolated client leaves in their server-owned layouts.
   for (const { route, metadata } of routePlans) {
     if (
       metadata.hasIsolatedClientBoundaries &&
@@ -2950,6 +2938,17 @@ async function hydrate() {
         }
       },
     });
+    ${
+      isolatedHydrationEnabled
+        ? `if (
+      matched.route.hasIsolatedClientBoundaries &&
+      !hasHydratableLayout(pathname) &&
+      !hydrationController.signal.aborted
+    ) {
+      await hydrateFarmIsolatedClientBoundaries(document, hydrationController.signal);
+    }`
+        : ""
+    }
   } finally {
     if (pendingPageHydrationController === hydrationController) {
       pendingPageHydrationController = null;
@@ -3334,9 +3333,10 @@ ${generateUniversalRouterStateProperties()}
         reactRoot = hydrateRoot(pageContainer, wrappedElement);
         reactRootContainer = pageContainer;
         isHydrated = true;
-      }${
+      }
+      ${
         isolatedHydrationEnabled
-          ? ` else if (matched.route.hasIsolatedClientBoundaries) {
+          ? `if (matched.route.hasIsolatedClientBoundaries && !hydrateLayouts) {
         await hydrateFarmIsolatedClientBoundaries(
           isolatedHydrationScope,
           navigation.controller.signal,
