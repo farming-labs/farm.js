@@ -47,5 +47,8 @@
     "@types/prompts": "^2.4.9",
     "tsdown": "^0.15.7",
     "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=22.12.0"
   }
 }

@@ -84,6 +84,36 @@ test("inspects a project without starting its runtime", async () => {
   }
 });
 
+test("enforces the Node 22.12 runtime baseline", async () => {
+  const root = await createTempProject();
+  const originalNodeVersion = Object.getOwnPropertyDescriptor(process.versions, "node");
+
+  try {
+    Object.defineProperty(process.versions, "node", {
+      ...originalNodeVersion,
+      configurable: true,
+      value: "22.11.0",
+    });
+    const unsupported = await runFarmDoctor({ root, offline: true });
+    const unsupportedCheck = unsupported.checks.find((check) => check.code === "NODE_UNSUPPORTED");
+    assert.equal(unsupportedCheck?.status, "fail");
+    assert.equal(unsupportedCheck?.action, "Upgrade Node.js to version 22.12 or newer.");
+
+    Object.defineProperty(process.versions, "node", {
+      ...originalNodeVersion,
+      configurable: true,
+      value: "22.12.0",
+    });
+    const supported = await runFarmDoctor({ root, offline: true });
+    assert.ok(supported.checks.some((check) => check.code === "NODE_SUPPORTED"));
+  } finally {
+    if (originalNodeVersion) {
+      Object.defineProperty(process.versions, "node", originalNodeVersion);
+    }
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("reports missing cron routes and ephemeral serverless storage", async () => {
   const root = await createTempProject({
     target: "vercel",

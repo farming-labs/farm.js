@@ -665,5 +665,8 @@
     "rolldown": "1.2.0",
     "sharp": "^0.34.5",
     "vite-rolldown": "npm:vite@8.1.5"
+  },
+  "engines": {
+    "node": ">=22.12.0"
   }
 }
