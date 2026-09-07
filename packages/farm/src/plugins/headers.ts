@@ -19,14 +19,30 @@ function appendConfiguredLinkHeader(res: FarmResponse, value: string): void {
   }
 }
 
+function appendConfiguredSetCookieHeader(res: FarmResponse, value: string): void {
+  const current = res.getHeader("Set-Cookie");
+  if (current === undefined) {
+    res.setHeader("Set-Cookie", value);
+    return;
+  }
+
+  const values = (Array.isArray(current) ? current : [current]).map(String);
+  if (!values.includes(value)) {
+    res.setHeader("Set-Cookie", [...values, value]);
+  }
+}
+
 function applyResponseHeaders(
   res: FarmResponse,
   matchedHeaders: readonly HeaderConfig["headers"][],
 ): void {
   for (const headers of matchedHeaders) {
     for (const header of headers) {
-      if (header.key.toLowerCase() === "link") {
+      const key = header.key.toLowerCase();
+      if (key === "link") {
         appendConfiguredLinkHeader(res, header.value);
+      } else if (key === "set-cookie") {
+        appendConfiguredSetCookieHeader(res, header.value);
       } else {
         res.setHeader(header.key, header.value);
       }
@@ -36,8 +52,20 @@ function applyResponseHeaders(
 
 function applyWriteHeadHeaders(res: FarmResponse, headers: unknown): void {
   if (Array.isArray(headers)) {
+    let setCookieWritten = false;
     for (let index = 0; index + 1 < headers.length; index += 2) {
-      res.setHeader(String(headers[index]), headers[index + 1]);
+      const key = String(headers[index]);
+      const value = headers[index + 1] as string | number | readonly string[];
+      if (key.toLowerCase() === "set-cookie" && setCookieWritten) {
+        const current = res.getHeader("Set-Cookie");
+        const values = (Array.isArray(current) ? current : [current]).filter(
+          (entry) => entry !== undefined,
+        );
+        res.setHeader("Set-Cookie", [...values, ...(Array.isArray(value) ? value : [value])]);
+      } else {
+        res.setHeader(key, value);
+        if (key.toLowerCase() === "set-cookie") setCookieWritten = true;
+      }
     }
     return;
   }

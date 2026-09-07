@@ -12,6 +12,7 @@ import { defer } from "../deferred";
 import { defineIntegration } from "../integrations";
 import { REACT_RENDERER } from "../renderer";
 import { Link } from "../client/link";
+import { setFarmBasePath } from "../base-path";
 
 type MockResponse = FarmResponse & {
   body: string;
@@ -278,12 +279,15 @@ describe("file route loading.tsx and error.tsx", () => {
           modulePath: manifestModulePath,
           outputName: "manifest.webmanifest",
         },
+        basePath: "/console",
       },
     );
 
     await renderer.renderPage(createMockRequest("/dashboard"), response);
 
-    expect(response.body).toContain('<link rel="manifest" href="/dashboard/manifest.webmanifest">');
+    expect(response.body).toContain(
+      '<link rel="manifest" href="/console/dashboard/manifest.webmanifest">',
+    );
   });
 
   it("renders and serves a fingerprinted static metadata image", async () => {
@@ -316,13 +320,14 @@ describe("file route loading.tsx and error.tsx", () => {
       {
         opengraphImage: true,
         staticImage: { modulePath: imagePath, staticInfo },
+        basePath: "/console",
       },
     );
 
     const pageResponse = createMockResponse();
     await renderer.renderPage(createMockRequest("/dashboard"), pageResponse);
     expect(pageResponse.body).toContain(
-      '<meta property="og:image" content="/dashboard/opengraph-image?v=0123456789abcdef">',
+      '<meta property="og:image" content="/console/dashboard/opengraph-image?v=0123456789abcdef">',
     );
     expect(pageResponse.body).toContain('<meta property="og:image:width" content="2">');
     expect(pageResponse.body).toContain(
@@ -587,6 +592,27 @@ describe("file route loading.tsx and error.tsx", () => {
 });
 
 describe("custom not-found rendering", () => {
+  it("applies the app base path to the default home recovery action", async () => {
+    const response = createMockResponse();
+    const renderer = new ServerRenderer(
+      { ...createConfig(), basePath: "/console" } as Required<FarmConfig>,
+      {
+        matchMetadataRoute: () => null,
+        matchMetadataImage: () => null,
+        matchRoute: () => ({ route: null, params: {}, layouts: [], slots: [] }),
+      } as any,
+    );
+
+    try {
+      await renderer.renderPage(createMockRequest("/console/missing"), response);
+
+      expect(response.statusCode).toBe(404);
+      expect(response.body).toContain('href="/console/"');
+    } finally {
+      setFarmBasePath("/");
+    }
+  });
+
   it("renders a custom not-found page inside integration providers", async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), "farm-not-found-provider-"));
     temporaryDirectories.push(directory);

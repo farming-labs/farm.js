@@ -66,7 +66,7 @@ export {
   resolveFarmTrailingSlashRedirect,
   setFarmTrailingSlashPreference,
 } from "../trailing-slash";
-export { setFarmBasePath } from "../base-path";
+export { applyFarmBasePath, setFarmBasePath } from "../base-path";
 
 export function appendFarmLinkHeader(headers: Headers, value: string): void {
   const current = headers.get("Link");

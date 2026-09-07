@@ -71,7 +71,7 @@ import {
   resolveFarmTrailingSlashRedirect,
   setFarmTrailingSlashPreference,
 } from "../trailing-slash";
-import { setFarmBasePath } from "../base-path";
+import { applyFarmBasePath, setFarmBasePath } from "../base-path";
 import { DEFAULT_NOT_FOUND_STYLES } from "../components/not-found-styles";
 import {
   createDefaultErrorMarkup,
@@ -1797,9 +1797,10 @@ export class ServerRenderer {
           manifestMatch.params,
         );
         const snapshot = getFarmI18nClientSnapshot();
-        metadata.manifest = snapshot
+        const localizedHref = snapshot
           ? localizeFarmHref(rawHref, snapshot.locale, snapshot)
           : rawHref;
+        metadata.manifest = applyFarmBasePath(localizedHref, this.config.basePath);
       }
     }
 
@@ -1822,7 +1823,8 @@ export class ServerRenderer {
 
     const rawHref = this.routeManager.resolveMetadataImagePath(match.image, match.params);
     const snapshot = getFarmI18nClientSnapshot();
-    const href = snapshot ? localizeFarmHref(rawHref, snapshot.locale, snapshot) : rawHref;
+    const localizedHref = snapshot ? localizeFarmHref(rawHref, snapshot.locale, snapshot) : rawHref;
+    const href = applyFarmBasePath(localizedHref, this.config.basePath);
     const reference: FarmMetadataImageReference = {
       kind,
       href,
@@ -2700,7 +2702,8 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
     }
 
     // Render the shared adaptive fallback when the app does not provide its own page.
-    const defaultContent = `<style>${DEFAULT_NOT_FOUND_STYLES}</style><main class="farm-default-not-found" aria-labelledby="farm-default-not-found-title" aria-describedby="farm-default-not-found-description"><div class="farm-default-not-found__content"><h1 id="farm-default-not-found-title" class="farm-default-not-found__code">404</h1><p id="farm-default-not-found-description" class="farm-default-not-found__description">Not found</p><a class="farm-default-not-found__home" href="/">GO HOME</a></div></main>`;
+    const homeHref = escapeHtmlAttribute(applyFarmBasePath("/", this.config.basePath));
+    const defaultContent = `<style>${DEFAULT_NOT_FOUND_STYLES}</style><main class="farm-default-not-found" aria-labelledby="farm-default-not-found-title" aria-describedby="farm-default-not-found-description"><div class="farm-default-not-found__content"><h1 id="farm-default-not-found-title" class="farm-default-not-found__code">404</h1><p id="farm-default-not-found-description" class="farm-default-not-found__description">Not found</p><a class="farm-default-not-found__home" href="${homeHref}">GO HOME</a></div></main>`;
 
     const html = this.createFullHTML(defaultContent, false, pathname);
     res.setHeader("Content-Type", "text/html; charset=utf-8");

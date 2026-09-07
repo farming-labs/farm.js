@@ -116,6 +116,48 @@ describe("config route plugins", () => {
     );
   });
 
+  it("preserves configured and handler Set-Cookie fields", async () => {
+    const plugin = createHeadersPlugin([
+      {
+        source: "/account",
+        headers: [
+          { key: "Set-Cookie", value: "theme=dark; Path=/" },
+          { key: "set-cookie", value: "locale=en; Path=/" },
+        ],
+      },
+    ]);
+    const res = createResponse();
+
+    await runBeforeRequest(plugin, createRequest("/account"), res);
+    expect(res.getHeader("Set-Cookie")).toEqual(["theme=dark; Path=/", "locale=en; Path=/"]);
+
+    res.writeHead(200, {
+      "Set-Cookie": ["session=abc; Path=/; HttpOnly", "notice=seen; Path=/"],
+    });
+
+    expect(res.getHeader("Set-Cookie")).toEqual([
+      "session=abc; Path=/; HttpOnly",
+      "notice=seen; Path=/",
+      "theme=dark; Path=/",
+      "locale=en; Path=/",
+    ]);
+  });
+
+  it("does not duplicate configured cookies while finalizing writeHead", async () => {
+    const plugin = createHeadersPlugin([
+      {
+        source: "/account",
+        headers: [{ key: "Set-Cookie", value: "theme=dark; Path=/" }],
+      },
+    ]);
+    const res = createResponse();
+
+    await runBeforeRequest(plugin, createRequest("/account"), res);
+    res.writeHead(200);
+
+    expect(res.getHeader("Set-Cookie")).toBe("theme=dark; Path=/");
+  });
+
   it("interpolates named and numbered rewrite captures", async () => {
     const named = createRewritesPlugin([
       {
