@@ -1608,6 +1608,7 @@ export default function PageOwner() { return <section data-page-owner><LiveCount
           assertFallbackDocument(
             await fetch(new URL("/fallback", response.url)).then((item) => item.text()),
           );
+          await verifyIndependentInitialScheduling(response.url);
         },
       );
 
