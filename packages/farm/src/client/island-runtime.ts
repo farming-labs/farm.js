@@ -79,7 +79,12 @@ function finishIslandHydration(container: Element, activatingTarget?: Element | 
 
   for (const target of targets) {
     window.setTimeout(() => {
-      if (container.isConnected && target.isConnected && container.contains(target)) {
+      if (
+        container.getAttribute("data-farm-island-hydrated") === "true" &&
+        container.isConnected &&
+        target.isConnected &&
+        container.contains(target)
+      ) {
         replayClick(target);
       }
     }, 0);

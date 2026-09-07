@@ -80,13 +80,16 @@ describe("isolated client boundary", () => {
     };
 
     const html = renderToString(<Boundary value={value} />);
-    const payload = html.match(/<script[^>]*>([\s\S]*?)<\/script>/)?.[1] ?? "";
+    document.body.innerHTML = html;
+    const payload =
+      document.querySelector<HTMLScriptElement>(
+        'script[type="application/json"][data-farm-client-props]',
+      )?.textContent ?? "";
     expect(payload).not.toContain("<");
     expect(payload).not.toContain(">");
     expect(payload).not.toContain("&");
     expect(payload).toContain("\\u003c/script\\u003e");
 
-    document.body.innerHTML = html;
     const runtime = createRuntime({
       "/src/values.tsx": { __farm_client_boundary_originals__: { default: Values } },
     });
@@ -240,6 +243,8 @@ describe("isolated client boundary", () => {
     container.querySelector<HTMLButtonElement>("button")!.click();
     await Promise.resolve();
 
+    expect(schedule).toHaveBeenCalledTimes(1);
+    expect(container.hasAttribute("data-farm-island-hydrated")).toBe(false);
     expect(runtime.rootCount()).toBe(0);
   });
 
@@ -671,6 +676,7 @@ describe("isolated client boundary", () => {
 
     expect(container.innerHTML).toBe(serverHTML);
     expect(container.hasAttribute("data-farm-hydrated")).toBe(false);
+    expect(container.hasAttribute("data-farm-island-hydrated")).toBe(false);
     expect(runtime.rootCount()).toBe(0);
     expect(report).toHaveBeenCalledWith(
       expect.stringContaining("/src/broken.tsx#default"),
