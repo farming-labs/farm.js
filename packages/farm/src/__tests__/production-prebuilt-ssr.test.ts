@@ -907,6 +907,7 @@ export default function SecondPage() {
 
   it("keeps the measured isolated-root overflow route-wide in development and production", async () => {
     const root = await createProductionFixture();
+    const developmentRoot = await createProductionFixture();
 
     try {
       await fs.mkdir(path.join(root, "src", "components"), { recursive: true });
@@ -937,7 +938,7 @@ export default function Page() {
 `.trim(),
       );
       await fs.writeFile(
-        path.join(root, "index.mjs"),
+        path.join(developmentRoot, "index.mjs"),
         `
 import { createServer } from "@farm.js/core/server";
 
@@ -951,6 +952,10 @@ server.config.server.host = "127.0.0.1";
 await server.listen(Number(process.env.PORT));
 `.trim(),
       );
+      await fs.cp(path.join(root, "src"), path.join(developmentRoot, "src"), {
+        recursive: true,
+        force: true,
+      });
 
       const verifyRouteWideRuntime = async (response: Response) => {
         expect(response.status).toBe(200);
@@ -992,7 +997,7 @@ await server.listen(Number(process.env.PORT));
         }
       };
 
-      await runProductionRequest(root, verifyRouteWideRuntime);
+      await runProductionRequest(developmentRoot, verifyRouteWideRuntime);
 
       const config = await resolveConfig(
         {
@@ -1016,7 +1021,11 @@ await server.listen(Number(process.env.PORT));
         verifyRouteWideRuntime,
       );
     } finally {
-      await fs.rm(root, { recursive: true, force: true });
+      await Promise.all(
+        [root, developmentRoot].map((fixtureRoot) =>
+          fs.rm(fixtureRoot, { recursive: true, force: true }),
+        ),
+      );
     }
   }, 120_000);
 
