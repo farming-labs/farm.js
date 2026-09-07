@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { applyFarmBasePath, stripFarmBasePath } from "../base-path";
+import { FarmApp } from "../app";
 
 describe("Farm base paths", () => {
   it("applies the base path only to app-relative hrefs", () => {
@@ -12,5 +13,12 @@ describe("Farm base paths", () => {
     expect(stripFarmBasePath("/console/reports", "/console")).toBe("/reports");
     expect(stripFarmBasePath("/console", "/console")).toBe("/");
     expect(stripFarmBasePath("/reports", "/console")).toBe("/reports");
+  });
+
+  it("uses the canonical base path for direct FarmApp theme cookies", () => {
+    const config = new FarmApp({ basePath: " docs//guides/ ", theme: {} }).getConfig();
+
+    expect(config.basePath).toBe("/docs/guides");
+    expect(config.theme.cookiePath).toBe("/docs/guides");
   });
 });
