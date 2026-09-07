@@ -10,6 +10,7 @@ import { getFarmRouteContext } from "./route-context";
 import { normalizeFarmRouteRuntimeConfig, type FarmRouteRuntimeConfig } from "./route-runtime";
 import type { ServerFn } from "./server-fn";
 import type { FarmServerRendererRuntime } from "./renderer";
+import { parseProgrammaticRoutePath as parseSharedProgrammaticRoutePath } from "./routes-shared";
 import type {
   FarmAppContext,
   LayoutProps,
@@ -964,16 +965,7 @@ export function parseProgrammaticRoutePath(
   routePath: string,
   type: ParsedRoute["type"] = "page",
 ): ParsedRoute {
-  const fileName = type === "layout" ? "layout.tsx" : "page.tsx";
-  const normalized = normalizeRoutePath(routePath);
-  const filePath =
-    normalized === "/" ? fileName : `${normalized.slice(1).replace(/\/+$/, "")}/${fileName}`;
-
-  return {
-    filePath,
-    type,
-    segments: normalized === "/" ? [] : normalized.slice(1).split("/").map(parseRouteSegment),
-  };
+  return parseSharedProgrammaticRoutePath(routePath, type);
 }
 
 export function createRouteModuleFromProgrammaticPage(
@@ -1482,38 +1474,6 @@ function normalizeRoutePath(routePath: string): string {
   const withSlash = routePath.startsWith("/") ? routePath : `/${routePath}`;
   const withoutTrailing = withSlash.length > 1 ? withSlash.replace(/\/+$/, "") : withSlash;
   return withoutTrailing || "/";
-}
-
-function parseRouteSegment(segment: string): ParsedRoute["segments"][number] {
-  if (segment.startsWith("[") && segment.endsWith("]")) {
-    let name = segment.slice(1, -1);
-    let isOptional = false;
-    let isCatchAll = false;
-
-    if (name.startsWith("[") && name.endsWith("]")) {
-      isOptional = true;
-      name = name.slice(1, -1);
-    }
-
-    if (name.startsWith("...")) {
-      isCatchAll = true;
-      name = name.slice(3);
-    }
-
-    return {
-      segment: name,
-      isDynamic: true,
-      isOptional,
-      isCatchAll,
-    };
-  }
-
-  return {
-    segment,
-    isDynamic: false,
-    isOptional: false,
-    isCatchAll: false,
-  };
 }
 
 function normalizeApiMethods(
