@@ -167,10 +167,7 @@ export class MiddlewareManager {
   /**
    * Load a middleware file
    */
-  private async loadMiddleware(
-    filePath: string,
-    routePath: string,
-  ): Promise<DiscoveredMiddleware | null> {
+  private async loadMiddleware(filePath: string, routePath: string): Promise<DiscoveredMiddleware> {
     try {
       // Load the module
       let module: any;
@@ -183,10 +180,7 @@ export class MiddlewareManager {
 
       const normalized = normalizeMiddlewareModule(module, routePath);
       if (!normalized) {
-        logger.warn(
-          `Middleware file ${filePath} must export a default handler or a named middleware handler`,
-        );
-        return null;
+        throw new Error("must export a default handler or a named middleware handler");
       }
 
       return {
@@ -197,8 +191,7 @@ export class MiddlewareManager {
         source: "file",
       };
     } catch (error) {
-      logger.error(`Failed to load middleware ${filePath}: ${error}`);
-      return null;
+      throw new Error(`Failed to load middleware ${filePath}: ${error}`);
     }
   }
 

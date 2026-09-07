@@ -1739,6 +1739,84 @@ describe("Named request middleware", () => {
     }
   });
 
+  it("keeps the last valid middleware when an HMR reload fails", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-middleware-reload-"));
+    const appDir = path.join(root, "src", "app");
+    const middlewareFile = path.join(appDir, "middleware.ts");
+    await fs.mkdir(appDir, { recursive: true });
+    await fs.writeFile(middlewareFile, "export {};\n");
+    const handler = vi.fn();
+    const viteServer = {
+      ssrLoadModule: vi
+        .fn()
+        .mockResolvedValueOnce({ default: handler })
+        .mockRejectedValueOnce(new SyntaxError("Unexpected token")),
+    };
+
+    try {
+      const manager = new MiddlewareManager(appDir, viteServer as never);
+      await manager.discover();
+      expect(manager.getMiddlewares()).toHaveLength(1);
+
+      await expect(manager.reload()).rejects.toThrow(`Failed to load middleware ${middlewareFile}`);
+      expect(manager.getMiddlewares()).toHaveLength(1);
+      expect(manager.getMiddlewares()[0]?.handlers).toEqual([handler]);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("fails initial discovery when a middleware module cannot load", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-middleware-invalid-"));
+    const appDir = path.join(root, "src", "app");
+    const middlewareFile = path.join(appDir, "middleware.ts");
+    await fs.mkdir(appDir, { recursive: true });
+    await fs.writeFile(middlewareFile, "export {};\n");
+    const viteServer = {
+      ssrLoadModule: vi.fn().mockRejectedValue(new SyntaxError("Unexpected token")),
+    };
+
+    try {
+      const manager = new MiddlewareManager(appDir, viteServer as never);
+      await expect(manager.discover()).rejects.toThrow(
+        `Failed to load middleware ${middlewareFile}`,
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("propagates initial discovery failures through the standalone Vite plugin", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-middleware-plugin-invalid-"));
+    const middlewareFile = path.join(root, "src", "app", "middleware.ts");
+    await fs.mkdir(path.dirname(middlewareFile), { recursive: true });
+    await fs.writeFile(middlewareFile, "export {};\n");
+    const loadError = new SyntaxError("Unexpected token");
+    const server = {
+      config: { root },
+      ssrLoadModule: vi.fn().mockRejectedValue(loadError),
+      moduleGraph: { invalidateModule: vi.fn() },
+      ws: { send: vi.fn() },
+    };
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      const plugin = farmMiddlewarePlugin();
+      (plugin.configureServer as (server: any) => void)(server);
+
+      await expect((server as any).__farmMiddleware__.waitForDiscovery()).rejects.toThrow(
+        `Failed to load middleware ${middlewareFile}`,
+      );
+      expect((server as any).__farmMiddleware__.isReady()).toBe(false);
+      await expect(
+        (server as any).__farmMiddleware__.execute(createMockRequest("/"), createMockResponse()),
+      ).rejects.toThrow(`Failed to load middleware ${middlewareFile}`);
+    } finally {
+      errorSpy.mockRestore();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("preserves Response short-circuiting", async () => {
     const normalized = normalizeMiddlewareModule(
       {
