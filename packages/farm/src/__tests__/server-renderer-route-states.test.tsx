@@ -12,6 +12,7 @@ import { defer } from "../deferred";
 import { defineIntegration } from "../integrations";
 import { REACT_RENDERER } from "../renderer";
 import { Link } from "../client/link";
+import { setFarmBasePath } from "../base-path";
 
 type MockResponse = FarmResponse & {
   body: string;
@@ -591,10 +592,14 @@ describe("custom not-found rendering", () => {
       } as any,
     );
 
-    await renderer.renderPage(createMockRequest("/console/missing"), response);
+    try {
+      await renderer.renderPage(createMockRequest("/console/missing"), response);
 
-    expect(response.statusCode).toBe(404);
-    expect(response.body).toContain('href="/console/"');
+      expect(response.statusCode).toBe(404);
+      expect(response.body).toContain('href="/console/"');
+    } finally {
+      setFarmBasePath("/");
+    }
   });
 
   it("renders a custom not-found page inside integration providers", async () => {
