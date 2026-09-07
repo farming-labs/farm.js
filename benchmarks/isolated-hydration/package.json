@@ -1,0 +1,13 @@
+{
+  "name": "farm-isolated-hydration-benchmark",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "bench": "node run.mjs",
+    "verify": "node run.mjs --verify-results"
+  },
+  "engines": {
+    "node": ">=22.19.0 <23 || >=24.11.0"
+  }
+}

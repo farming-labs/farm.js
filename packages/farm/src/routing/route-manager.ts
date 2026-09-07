@@ -39,8 +39,10 @@ import type { ViteDevServer } from "vite";
 import {
   getClientModuleHydrationPlan,
   getClientModuleMetadata,
+  resolveFarmIsolatedClientHydrationMode,
   type IsolatedClientBoundaryReference,
 } from "../utils/client-component";
+import { getIntegrationProviders } from "../integrations";
 import type { MetadataImageKind } from "../metadata";
 import type { FarmIslandStrategy } from "../island";
 import type { FarmServerRendererRuntime } from "../renderer";
@@ -208,6 +210,7 @@ export class RouteManager {
   private clientManifestCache?: {
     projectRoot: string;
     manifest: FarmClientRouteManifest;
+    isolatedClientBoundaryModules: ReadonlySet<string>;
   };
 
   constructor(config: Required<FarmConfig>, viteServer?: ViteDevServer) {
@@ -590,7 +593,28 @@ export class RouteManager {
       return absolutePath;
     };
 
-    const isolatedMode = this.config.experimental?.isolatedClientHydration ?? "off";
+    const integrationProviders = getIntegrationProviders(this.config.integrations).filter(
+      (provider) => provider.component || provider.type === "clerk",
+    );
+    const unsupportedIntegrationProvider = integrationProviders.find(
+      (provider) => provider.supportsIsolatedHydration !== true,
+    );
+    if (
+      this.config.experimental?.isolatedClientHydration === "enabled" &&
+      this.config.experimental?.serverComponents !== true &&
+      unsupportedIntegrationProvider
+    ) {
+      logger.warn(
+        `[Farm.js] isolated hydration kept route-wide because integration provider "${unsupportedIntegrationProvider.name}" does not declare supportsIsolatedHydration: true.`,
+      );
+    }
+    const isolatedMode = resolveFarmIsolatedClientHydrationMode(
+      this.config.experimental?.isolatedClientHydration,
+      {
+        serverComponents: this.config.experimental?.serverComponents === true,
+        hasUnsupportedIntegrationProvider: Boolean(unsupportedIntegrationProvider),
+      },
+    );
     const layoutEntries = Array.from(this.layouts.values()).map((entry) => ({
       entry,
       metadata: getClientModuleHydrationPlan(entry.modulePath, normalizedProjectRoot, isolatedMode),
@@ -600,32 +624,25 @@ export class RouteManager {
       entry,
       metadata: getClientModuleHydrationPlan(entry.modulePath, normalizedProjectRoot, isolatedMode),
     }));
+    for (const { entry, metadata } of [...layoutEntries, ...routeEntries]) {
+      if (!metadata.costGuardExceeded) continue;
+      logger.warn(
+        `[Farm.js] isolated hydration kept route-wide for ${entry.modulePath}: ${metadata.fallbackReason}.`,
+      );
+    }
     if (isolatedMode === "analyze") {
       for (const { entry, metadata } of [...layoutEntries, ...routeEntries]) {
         if (!metadata.isolatedHydrationEligible) continue;
         logger.info(
-          `[Farm.js] isolated hydration analysis: ${entry.modulePath} can keep ${metadata.isolatedBoundaries.length} client boundary${metadata.isolatedBoundaries.length === 1 ? "" : "ies"} while excluding its server owner from the browser graph.`,
+          `[Farm.js] isolated hydration analysis: ${entry.modulePath} can keep ${metadata.isolatedBoundaries.length} client ${metadata.isolatedBoundaries.length === 1 ? "boundary" : "boundaries"} while excluding its server owner from the browser graph.`,
         );
       }
     }
 
-    // A route-wide page root needs its complete layout chain in the browser.
-    // Conservatively retain a layout when any child page still uses that path.
-    for (const layoutEntry of layoutEntries) {
-      if (!layoutEntry.metadata.hasIsolatedClientBoundaries) continue;
-      const conflictsWithRouteRoot = routeEntries.some(
-        ({ entry, metadata }) =>
-          metadata.shouldHydrate &&
-          (layoutEntry.entry.pattern === "/" ||
-            entry.pattern === layoutEntry.entry.pattern ||
-            entry.pattern.startsWith(`${layoutEntry.entry.pattern.replace(/\/$/, "")}/`)),
-      );
-      if (conflictsWithRouteRoot) {
-        layoutEntry.metadata.shouldHydrate = layoutEntry.metadata.legacyShouldHydrate;
-        layoutEntry.metadata.islandStrategy = layoutEntry.metadata.legacyIslandStrategy;
-        layoutEntry.metadata.hasIsolatedClientBoundaries = false;
-      }
-    }
+    // A route-wide layout owns its complete descendant tree, so a client leaf
+    // below it cannot also create an isolated root. A route-wide page does not
+    // conflict with isolated layout leaves because its root starts at the page
+    // boundary, outside those sibling markers.
     for (const routeEntry of routeEntries) {
       if (!routeEntry.metadata.hasIsolatedClientBoundaries) continue;
       const conflictsWithLayoutRoot = layoutEntries.some(
@@ -715,12 +732,28 @@ export class RouteManager {
       };
     });
 
+    const isolatedClientBoundaryModules = new Set<string>();
+    for (const { metadata } of [...layoutEntries, ...routeEntries]) {
+      if (!metadata.hasIsolatedClientBoundaries) continue;
+      for (const boundary of metadata.isolatedBoundaries) {
+        isolatedClientBoundaryModules.add(path.resolve(boundary.modulePath));
+      }
+    }
+
     const manifest = { routes, layouts, slots };
     this.clientManifestCache = {
       projectRoot: normalizedProjectRoot,
       manifest,
+      isolatedClientBoundaryModules,
     };
     return manifest;
+  }
+
+  /** @internal Client modules selected by the compiled hydration ownership plan. */
+  getIsolatedClientBoundaryModules(projectRoot: string = this.config.root): ReadonlySet<string> {
+    const normalizedProjectRoot = path.resolve(projectRoot);
+    this.generateClientManifest(normalizedProjectRoot);
+    return this.clientManifestCache?.isolatedClientBoundaryModules ?? new Set();
   }
 
   /**

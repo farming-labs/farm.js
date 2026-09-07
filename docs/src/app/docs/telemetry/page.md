@@ -73,8 +73,14 @@ export default defineConfig({
 });
 ```
 
-Set `FARM_TELEMETRY=0` or `FARM_TELEMETRY_DISABLED=1` only in selected deployment environments
-when, for example, previews should be excluded while production remains enabled.
+Vercel preview, development, and custom-environment deployments are skipped automatically from
+`VERCEL_ENV` and `VERCEL_TARGET_ENV`. Farm does not classify deployments from the hostname suffix,
+so a production website whose public domain ends in `.vercel.app` remains eligible. On another
+provider, set `FARM_TELEMETRY=0` or `FARM_TELEMETRY_DISABLED=1` in preview environments while
+leaving production enabled.
+
+The Farm-owned endpoint removes the Vercel-confirmed legacy preview aliases that were stored before
+this runtime guard existed. It does not guess whether a deployment is a preview from its hostname.
 
 After the first non-health production request, Farm schedules a check-in through the deployment
 runtime's background-work hook. It does not wait for the network before handling or returning the
@@ -84,9 +90,8 @@ is eligible for a later best-effort retry. Multiple instances update the same si
 The check-in contains only the detected origin, `@farm.js/core` version, renderer name, and deploy
 target. It does not contain a visitor or installation identifier, the full request URL beyond the
 reported origin, headers, cookies, IP address, user-agent string, or application data. Fully static
-exports have no server runtime and therefore do not send production-site check-ins. Public preview
-deployments can report their own HTTPS origin; disable telemetry in the preview environment if those
-should not appear.
+exports have no server runtime and therefore do not send production-site check-ins. Vercel preview,
+development, and custom-environment deployments do not send production-site check-ins.
 
 Set `telemetry: false` and redeploy to stop future check-ins. An inactive site disappears from the
 maintainer dashboard after the retention window.
@@ -133,9 +138,10 @@ Because the public clients contain no ingestion secret, dashboard origins are us
 than verified domain-ownership records.
 
 Raw telemetry events and inactive production-site records are retained for 90 days by default and
-are pruned by the ingestion service. Aggregated package-download counts remain available
-independently through npm's public download statistics. A deployment operator can change the
-retention window with `FARM_TELEMETRY_RETENTION_DAYS`.
+are pruned by the ingestion service. The verified legacy Vercel preview records are also removed
+during this maintenance pass. Aggregated package-download counts remain available independently
+through npm's public download statistics. A deployment operator can change the retention window
+with `FARM_TELEMETRY_RETENTION_DAYS`.
 
 For local endpoint development only, `FARM_TELEMETRY_ENDPOINT` and
 `FARM_TELEMETRY_SITE_ENDPOINT` can point at an HTTPS URL or an HTTP localhost address. Released

@@ -552,7 +552,7 @@ export function createCompilerKeyedMapUpdate(
   return value;
 }
 
-/** @internal Executes a proven native map at the start of a keyed reorder pipeline. */
+/** @internal Executes a proven native map before the reorder suffix of a keyed pipeline. */
 export function createCompilerKeyedArrayMapPipeline(
   previous: unknown,
   method: unknown,
@@ -582,21 +582,21 @@ export function createCompilerKeyedArrayMapPipeline(
     }
 
     const committedSource = COMPILER_KEYED_COMMITTED_COLLECTIONS.has(previousTarget);
-    const previousReorder = committedSource
+    const previousMapPipeline = committedSource
       ? undefined
-      : COMPILER_KEYED_ARRAY_REORDERS.get(previousTarget);
-    if (
-      !committedSource &&
-      (!previousReorder ||
-        !previousReorder.mapped ||
-        previousReorder.resultLength !== previous.length)
-    ) {
+      : COMPILER_KEYED_ARRAY_MAP_PIPELINES.get(previousTarget);
+    const previousReorder =
+      committedSource || previousMapPipeline
+        ? undefined
+        : COMPILER_KEYED_ARRAY_REORDERS.get(previousTarget);
+    const previousSource =
+      previousMapPipeline || (previousReorder?.mapped ? previousReorder : undefined);
+    if (!committedSource && (!previousSource || previousSource.resultLength !== previous.length)) {
       return value;
     }
-    const sourceToken =
-      previousReorder?.sourceToken || compilerKeyedCollectionToken(previousTarget);
+    const sourceToken = previousSource?.sourceToken || compilerKeyedCollectionToken(previousTarget);
     if (!sourceToken) return value;
-    const previousMappedItemSources = previousReorder?.mappedItemSources;
+    const previousMappedItemSources = previousSource?.mappedItemSources;
     const mappedItemSources = new Map<unknown, unknown>();
     for (let index = 0; index < value.length; index += 1) {
       const previousDescriptor = Object.getOwnPropertyDescriptor(previous, index);
@@ -610,6 +610,8 @@ export function createCompilerKeyedArrayMapPipeline(
         return value;
       }
       const previousItem = previousDescriptor.value;
+      // Keep every replacement directly connected to the committed row instead of retaining a
+      // chain of intermediate map results.
       const sourceItem = previousMappedItemSources?.has(previousItem)
         ? previousMappedItemSources.get(previousItem)
         : previousItem;
@@ -618,7 +620,7 @@ export function createCompilerKeyedArrayMapPipeline(
     }
     COMPILER_KEYED_ARRAY_MAP_PIPELINES.set(valueTarget, {
       sourceToken,
-      sourceLength: previousReorder?.sourceLength || previous.length,
+      sourceLength: previousSource?.sourceLength ?? previous.length,
       resultLength: value.length,
       mappedItemSources,
     });
