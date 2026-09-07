@@ -330,6 +330,21 @@ export default function Layout() { return <><First /><First /><First /><Second /
     fs.writeFileSync(
       layoutFile,
       `import Counter from "../components/counter-0";
+const counter = <Counter />;
+export default function Layout({ items }) { return <>{items.map(() => counter)}</>; }
+`,
+    );
+    expect(getClientModuleHydrationPlan(layoutFile, root, "enabled")).toMatchObject({
+      shouldHydrate: true,
+      hasIsolatedClientBoundaries: false,
+      costGuardExceeded: true,
+      fallbackReason:
+        "the client boundary count imported from ../components/counter-0 is data-dependent",
+    });
+
+    fs.writeFileSync(
+      layoutFile,
+      `import Counter from "../components/counter-0";
 const renderCounter = (item) => <Counter key={item} />;
 export default function Layout({ items }) { return <>{items.map(renderCounter)}</>; }
 `,
@@ -340,6 +355,22 @@ export default function Layout({ items }) { return <>{items.map(renderCounter)}<
       costGuardExceeded: true,
       fallbackReason:
         "the client boundary count imported from ../components/counter-0 is data-dependent",
+    });
+
+    fs.writeFileSync(
+      layoutFile,
+      `import Counter from "../components/counter-0";
+const formatLabel = (label) => label.toUpperCase()
+const labels = ["one", "two"].map(formatLabel)
+export default function Layout() { return <><Counter />{labels.join(",")}</>; }
+`,
+    );
+    expect(getClientModuleHydrationPlan(layoutFile, root, "enabled")).toMatchObject({
+      shouldHydrate: false,
+      hasIsolatedClientBoundaries: true,
+      isolatedBoundaries: [
+        { modulePath: path.join(componentsDirectory, "counter-0.tsx"), islandStrategy: "load" },
+      ],
     });
   });
 

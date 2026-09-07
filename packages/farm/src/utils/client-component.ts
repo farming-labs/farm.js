@@ -666,14 +666,189 @@ function countStaticJsxUses(content: string | null, localBindings: string[]): nu
   return count;
 }
 
+function findMatchingToken(
+  tokens: ModuleSourceToken[],
+  openingIndex: number,
+  opening: string,
+  closing: string,
+): number {
+  let depth = 0;
+  for (let index = openingIndex; index < tokens.length; index++) {
+    if (tokens[index].value === opening) depth++;
+    if (tokens[index].value !== closing) continue;
+    depth--;
+    if (depth === 0) return index;
+  }
+  return tokens.length - 1;
+}
+
+function containsClientJsx(
+  tokens: ModuleSourceToken[],
+  start: number,
+  end: number,
+  clientBindings: Set<string>,
+): boolean {
+  for (let index = start; index < end; index++) {
+    if (tokens[index].value === "<" && clientBindings.has(tokens[index + 1]?.value)) return true;
+  }
+  return false;
+}
+
+function findStatementEnd(tokens: ModuleSourceToken[], start: number): number {
+  let parentheses = 0;
+  let brackets = 0;
+  let braces = 0;
+  const statementStarters = new Set([
+    "class",
+    "const",
+    "export",
+    "function",
+    "import",
+    "let",
+    "var",
+  ]);
+  for (let index = start; index < tokens.length; index++) {
+    const value = tokens[index].value;
+    if (
+      index > start &&
+      parentheses === 0 &&
+      brackets === 0 &&
+      braces === 0 &&
+      tokens[index].line > tokens[index - 1].line &&
+      statementStarters.has(value)
+    ) {
+      return index;
+    }
+    if (value === ";" && parentheses === 0 && brackets === 0 && braces === 0) return index;
+    if (value === "(") parentheses++;
+    if (value === ")") parentheses--;
+    if (value === "[") brackets++;
+    if (value === "]") brackets--;
+    if (value === "{") braces++;
+    if (value === "}") braces--;
+  }
+  return tokens.length;
+}
+
+function getClientRenderingHelpers(
+  tokens: ModuleSourceToken[],
+  clientBindings: Set<string>,
+): Set<string> {
+  const helperBodies = new Map<string, [start: number, end: number]>();
+  for (let index = 0; index < tokens.length; index++) {
+    let helperName: string | undefined;
+    let bodyStart = -1;
+    let bodyEnd = -1;
+
+    if (tokens[index].value === "function" && tokens[index + 1]?.kind === "identifier") {
+      helperName = tokens[index + 1].value;
+      const parametersStart = tokens.findIndex(
+        (token, tokenIndex) => tokenIndex > index + 1 && token.value === "(",
+      );
+      const parametersEnd =
+        parametersStart === -1 ? index + 1 : findMatchingToken(tokens, parametersStart, "(", ")");
+      bodyStart = tokens.findIndex(
+        (token, tokenIndex) => tokenIndex > parametersEnd && token.value === "{",
+      );
+      if (bodyStart !== -1) bodyEnd = findMatchingToken(tokens, bodyStart, "{", "}");
+    } else if (
+      (tokens[index].value === "const" ||
+        tokens[index].value === "let" ||
+        tokens[index].value === "var") &&
+      tokens[index + 1]?.kind === "identifier"
+    ) {
+      helperName = tokens[index + 1].value;
+      let assignmentIndex = -1;
+      let arrowIndex = -1;
+      for (let cursor = index + 2; cursor < tokens.length; cursor++) {
+        if (tokens[cursor].value === ";") break;
+        if (assignmentIndex === -1 && tokens[cursor].value === "=") assignmentIndex = cursor;
+        if (tokens[cursor].value === "=" && tokens[cursor + 1]?.value === ">") {
+          arrowIndex = cursor;
+          break;
+        }
+      }
+      if (arrowIndex !== -1) {
+        bodyStart = arrowIndex + 2;
+        bodyEnd =
+          tokens[bodyStart]?.value === "{"
+            ? findMatchingToken(tokens, bodyStart, "{", "}")
+            : findStatementEnd(tokens, bodyStart);
+      } else if (assignmentIndex !== -1) {
+        bodyStart = assignmentIndex + 1;
+        bodyEnd = findStatementEnd(tokens, bodyStart);
+      }
+    }
+
+    if (helperName && bodyStart !== -1 && bodyEnd !== -1) {
+      helperBodies.set(helperName, [bodyStart, bodyEnd]);
+    }
+  }
+
+  const helpers = new Set<string>();
+  let addedHelper = true;
+  while (addedHelper) {
+    addedHelper = false;
+    for (const [helperName, [bodyStart, bodyEnd]] of helperBodies) {
+      if (helpers.has(helperName)) continue;
+      const rendersClientBoundary =
+        containsClientJsx(tokens, bodyStart, bodyEnd, clientBindings) ||
+        tokens.slice(bodyStart, bodyEnd).some((token) => helpers.has(token.value));
+      if (!rendersClientBoundary) continue;
+      helpers.add(helperName);
+      addedHelper = true;
+    }
+  }
+  return helpers;
+}
+
 function hasDynamicJsxCardinality(content: string | null, localBindings: string[]): boolean {
   if (!content || localBindings.length === 0) return false;
-  const escapedNames = localBindings.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  const clientTag = `<\\s*(?:${escapedNames.join("|")})\\b`;
-  const hasClientElement = new RegExp(clientTag).test(content);
-  const hasRuntimeIterator =
-    /\.(?:map|flatMap)\s*\(|Array\.from\s*\(|(?:for|while)\s*\([^)]*\)/.test(content);
-  return hasClientElement && hasRuntimeIterator;
+  const clientBindings = new Set(localBindings);
+  const tokens = tokenizeModuleSource(content);
+  const renderingHelpers = getClientRenderingHelpers(tokens, clientBindings);
+  const containsDynamicRenderer = (start: number, end: number) =>
+    containsClientJsx(tokens, start, end, clientBindings) ||
+    tokens.slice(start, end).some((token) => renderingHelpers.has(token.value));
+
+  for (let index = 0; index < tokens.length; index++) {
+    let callStart = -1;
+    if (
+      tokens[index].value === "." &&
+      (tokens[index + 1]?.value === "map" || tokens[index + 1]?.value === "flatMap") &&
+      tokens[index + 2]?.value === "("
+    ) {
+      callStart = index + 2;
+    } else if (
+      tokens[index].value === "Array" &&
+      tokens[index + 1]?.value === "." &&
+      tokens[index + 2]?.value === "from" &&
+      tokens[index + 3]?.value === "("
+    ) {
+      callStart = index + 3;
+    }
+    if (callStart !== -1) {
+      const callEnd = findMatchingToken(tokens, callStart, "(", ")");
+      if (containsDynamicRenderer(callStart + 1, callEnd)) return true;
+      index = callEnd;
+      continue;
+    }
+
+    if (
+      (tokens[index].value === "for" || tokens[index].value === "while") &&
+      tokens[index + 1]?.value === "("
+    ) {
+      const conditionEnd = findMatchingToken(tokens, index + 1, "(", ")");
+      const bodyStart = conditionEnd + 1;
+      const bodyEnd =
+        tokens[bodyStart]?.value === "{"
+          ? findMatchingToken(tokens, bodyStart, "{", "}")
+          : tokens.findIndex((token, tokenIndex) => tokenIndex > bodyStart && token.value === ";");
+      if (containsDynamicRenderer(bodyStart, bodyEnd === -1 ? tokens.length : bodyEnd)) return true;
+    }
+  }
+
+  return false;
 }
 
 function collectIsolatedClientBoundaries(

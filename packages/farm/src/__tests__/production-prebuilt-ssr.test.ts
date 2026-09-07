@@ -1511,6 +1511,52 @@ await server.listen(Number(process.env.PORT));
             await expect
               .poll(() => page.locator('farm-client-boundary[data-farm-hydrated="true"]').count())
               .toBe(2);
+
+            await fs.writeFile(
+              path.join(developmentRoot, "src", "components", "page-owner.tsx"),
+              `import LiveCounter from "./live-counter";
+export default function PageOwner() { return <section data-page-owner><LiveCounter name="page" /></section>; }`,
+            );
+            await fs.writeFile(
+              path.join(developmentRoot, "src", "app", "page.tsx"),
+              `import PageOwner from "../components/page-owner";
+export default function Page() { return <main data-parity-page>Parity page <PageOwner /></main>; }`,
+            );
+            await expect.poll(() => page.locator("[data-page-owner]").count()).toBe(1);
+            await expect
+              .poll(() => page.locator('farm-client-boundary[data-farm-hydrated="true"]').count())
+              .toBe(3);
+            await page.evaluate(() => {
+              (
+                window as typeof window & { __farmParityOwnershipDocument?: string }
+              ).__farmParityOwnershipDocument = "stale";
+            });
+            await fs.writeFile(
+              path.join(developmentRoot, "src", "components", "page-owner.tsx"),
+              `import LiveCounter from "./live-counter";
+export const hydrate = true;
+export default function PageOwner() { return <section data-page-owner><LiveCounter name="page" /></section>; }`,
+            );
+            await expect
+              .poll(
+                () =>
+                  page.evaluate(
+                    () =>
+                      (
+                        window as typeof window & {
+                          __farmParityOwnershipDocument?: string;
+                        }
+                      ).__farmParityOwnershipDocument ?? null,
+                  ),
+                { timeout: 10_000 },
+              )
+              .toBeNull();
+            await expect
+              .poll(() => page.locator("#__farm_page__").getAttribute("data-farm-client"))
+              .toBe("true");
+            await expect
+              .poll(() => page.locator('farm-client-boundary[data-farm-hydrated="true"]').count())
+              .toBe(2);
             expect(
               browserErrors,
               `${browserErrors.join("\n")}\nDOM:\n${await page.locator("body").innerHTML()}`,

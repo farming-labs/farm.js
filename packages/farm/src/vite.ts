@@ -3150,16 +3150,14 @@ if (import.meta.hot) {
       ) {
         const routeManager = farmApp?.getRouteManager();
         if (routeManager) {
-          const previousModules = new Set(
-            routeManager.getIsolatedClientBoundaryModules(currentFarmConfig.root),
+          const previousPlan = JSON.stringify(
+            routeManager.generateClientManifest(currentFarmConfig.root),
           );
           routeManager.invalidateClientManifest();
-          const nextModules = new Set(
-            routeManager.getIsolatedClientBoundaryModules(currentFarmConfig.root),
+          const nextPlan = JSON.stringify(
+            routeManager.generateClientManifest(currentFarmConfig.root),
           );
-          const planChanged =
-            previousModules.size !== nextModules.size ||
-            [...previousModules].some((modulePath) => !nextModules.has(modulePath));
+          const planChanged = previousPlan !== nextPlan;
           const manifestModule = server.moduleGraph.getModuleById("/@farm/manifest");
           if (manifestModule) server.moduleGraph.invalidateModule(manifestModule);
           if (planChanged) {
