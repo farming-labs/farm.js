@@ -774,6 +774,286 @@ export default function SecondPage() {
     }
   }, 120_000);
 
+  it("keeps isolated scheduling and interaction replay boundary-local in development and production", async () => {
+    const root = await createProductionFixture();
+    const developmentRoot = await createProductionFixture();
+
+    try {
+      const componentSource = (strategy: "load" | "interaction" | "visible" | "idle") =>
+        `
+"use client";
+
+import { useEffect, useState } from "react";
+
+export const island = "${strategy}";
+
+export default function StrategyCounter() {
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    const lifecycle = ((globalThis as any).__farmStrategyLifecycle ||= { mounts: [], unmounts: [] });
+    lifecycle.mounts.push("${strategy}");
+    return () => lifecycle.unmounts.push("${strategy}");
+  }, []);
+  return (
+    <button data-strategy="${strategy}" onClick={() => setCount((value) => value + 1)}>
+      ${strategy}:{count}
+    </button>
+  );
+}
+`.trim();
+      for (const strategy of ["load", "interaction", "visible", "idle"] as const) {
+        const file = path.join(root, "src", "components", `${strategy}.tsx`);
+        await fs.mkdir(path.dirname(file), { recursive: true });
+        await fs.writeFile(file, componentSource(strategy));
+      }
+      await fs.mkdir(path.join(root, "src", "app", "second"), { recursive: true });
+      await fs.writeFile(
+        path.join(root, "src", "app", "page.tsx"),
+        `
+import Load from "../components/load";
+import Interaction from "../components/interaction";
+import Visible from "../components/visible";
+import Idle from "../components/idle";
+
+export default function Page() {
+  return (
+    <main>
+      <h1>Scheduling</h1>
+      <a href="/second" data-nav-second>Second page</a>
+      <Load />
+      <Interaction />
+      <div style={{ marginTop: 5000 }}><Visible /></div>
+      <Idle />
+    </main>
+  );
+}
+`.trim(),
+      );
+      await fs.writeFile(
+        path.join(root, "src", "app", "second", "page.tsx"),
+        `export default function SecondPage() { return <main><h1>Second page</h1></main>; }`,
+      );
+      await fs.cp(path.join(root, "src"), path.join(developmentRoot, "src"), {
+        recursive: true,
+        force: true,
+      });
+      await fs.writeFile(
+        path.join(developmentRoot, "index.mjs"),
+        `
+import { createServer } from "@farm.js/core/server";
+
+const server = await createServer({
+  root: process.cwd(),
+  images: { provider: "none" },
+  experimental: { isolatedClientHydration: "enabled" },
+});
+server.config.server.host = "127.0.0.1";
+await server.listen(Number(process.env.PORT));
+`.trim(),
+      );
+
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          experimental: { isolatedClientHydration: "enabled" },
+          generateBuildId: () => "isolated-scheduling-test",
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+
+      const executablePath = await resolveInstalledChromiumExecutable();
+      const verifyScheduling = async (url: string) => {
+        if (!executablePath) return;
+        const browser = await chromium.launch({ headless: true, executablePath });
+        try {
+          const page = await browser.newPage();
+          const browserErrors: string[] = [];
+          page.on("console", (message) => {
+            if (message.type() === "error") {
+              const location = message.location().url;
+              if (location.endsWith("/favicon.ico")) return;
+              browserErrors.push(`${message.text()} (${location})`);
+            }
+          });
+          page.on("pageerror", (error) => browserErrors.push(error.message));
+          try {
+            await page.addInitScript(() => {
+              const state = globalThis as any;
+              state.__farmVisibleObservers = [];
+              state.__farmIdleCallbacks = [];
+              state.__farmIdlePending = new Map();
+              state.__farmObserverDisconnects = 0;
+              state.__farmIdleCancellations = 0;
+              state.IntersectionObserver = class {
+                callback: IntersectionObserverCallback;
+                target?: Element;
+                constructor(callback: IntersectionObserverCallback) {
+                  this.callback = callback;
+                  state.__farmVisibleObservers.push(this);
+                }
+                observe(target: Element) {
+                  this.target = target;
+                }
+                disconnect() {
+                  state.__farmObserverDisconnects++;
+                }
+              };
+              let idleId = 0;
+              state.requestIdleCallback = (callback: IdleRequestCallback) => {
+                const id = ++idleId;
+                state.__farmIdleCallbacks.push(callback);
+                state.__farmIdlePending.set(id, callback);
+                return id;
+              };
+              state.cancelIdleCallback = (id: number) => {
+                state.__farmIdleCancellations++;
+                state.__farmIdlePending.delete(id);
+              };
+            });
+            await page.goto(url);
+
+            const boundary = (strategy: string) =>
+              page.locator(`farm-client-boundary[data-farm-island-strategy="${strategy}"]`);
+            await boundary("load").locator('[data-strategy="load"]').waitFor();
+            await expect
+              .poll(() => boundary("load").getAttribute("data-farm-hydrated"))
+              .toBe("true");
+            for (const strategy of ["interaction", "visible", "idle"]) {
+              expect(await boundary(strategy).getAttribute("data-farm-hydrated")).toBeNull();
+            }
+
+            await page.locator('[data-strategy="interaction"]').click();
+            await expect
+              .poll(() => page.locator('[data-strategy="interaction"]').textContent())
+              .toBe("interaction:1");
+            expect(await boundary("visible").getAttribute("data-farm-hydrated")).toBeNull();
+            expect(await boundary("idle").getAttribute("data-farm-hydrated")).toBeNull();
+
+            await page.evaluate(() => {
+              const state = globalThis as any;
+              for (const observer of state.__farmVisibleObservers) {
+                observer.callback([{ isIntersecting: true, target: observer.target }], observer);
+              }
+            });
+            await expect
+              .poll(() => page.locator('[data-strategy="visible"]').textContent())
+              .toBe("visible:0");
+            expect(await boundary("idle").getAttribute("data-farm-hydrated")).toBeNull();
+
+            await page.evaluate(() => {
+              const state = globalThis as any;
+              for (const callback of state.__farmIdleCallbacks) {
+                callback({ didTimeout: false, timeRemaining: () => 10 });
+              }
+            });
+            await expect
+              .poll(() => boundary("idle").getAttribute("data-farm-hydrated"))
+              .toBe("true");
+
+            await page.evaluate(() => {
+              const state = globalThis as any;
+              for (const observer of state.__farmVisibleObservers) {
+                observer.callback([{ isIntersecting: true, target: observer.target }], observer);
+              }
+              for (const callback of state.__farmIdleCallbacks) {
+                callback({ didTimeout: false, timeRemaining: () => 10 });
+              }
+            });
+            await page.locator('[data-strategy="interaction"]').click();
+            await page.locator('[data-strategy="visible"]').click();
+            await expect
+              .poll(() => page.locator('[data-strategy="interaction"]').textContent())
+              .toBe("interaction:2");
+            await expect
+              .poll(() => page.locator('[data-strategy="visible"]').textContent())
+              .toBe("visible:1");
+            await expect
+              .poll(() => page.evaluate(() => (globalThis as any).__farmStrategyLifecycle.mounts))
+              .toEqual(["load", "interaction", "visible", "idle"]);
+
+            await page.reload();
+            await expect
+              .poll(() => boundary("load").getAttribute("data-farm-hydrated"))
+              .toBe("true");
+            await expect
+              .poll(() => page.evaluate(() => (globalThis as any).__farmStrategyLifecycle.mounts))
+              .toEqual(["load"]);
+            await page.evaluate(() => {
+              const state = globalThis as any;
+              const queue = (state.__FARM_PREHYDRATION_CLICK_QUEUE__ ||= []);
+              for (const strategy of ["interaction", "visible", "idle"]) {
+                queue.push({ target: document.querySelector(`[data-strategy="${strategy}"]`) });
+              }
+            });
+            await page.locator("[data-nav-second]").click();
+            await expect.poll(() => page.locator("h1").textContent()).toBe("Second page");
+            expect(
+              await page.evaluate(
+                () => (globalThis as any).__FARM_PREHYDRATION_CLICK_QUEUE__.length,
+              ),
+            ).toBe(0);
+            const cleanup = await page.evaluate(() => ({
+              observers: (globalThis as any).__farmObserverDisconnects,
+              idle: (globalThis as any).__farmIdleCancellations,
+            }));
+            expect(cleanup.observers).toBeGreaterThanOrEqual(1);
+            expect(cleanup.idle).toBeGreaterThanOrEqual(1);
+
+            await page.evaluate(() => {
+              const state = globalThis as any;
+              for (const observer of state.__farmVisibleObservers) {
+                observer.callback([{ isIntersecting: true, target: observer.target }], observer);
+              }
+              for (const callback of state.__farmIdleCallbacks) {
+                callback({ didTimeout: false, timeRemaining: () => 10 });
+              }
+            });
+            await page.waitForTimeout(20);
+            expect(
+              await page.evaluate(() => (globalThis as any).__farmStrategyLifecycle.mounts),
+            ).toEqual(["load"]);
+            expect(browserErrors).toEqual([]);
+          } catch (error) {
+            throw new Error(
+              `${String(error)}\nBrowser errors:\n${browserErrors.join("\n")}\nDOM:\n${await page.locator("body").innerHTML()}`,
+            );
+          }
+        } finally {
+          await browser.close();
+        }
+      };
+
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          const html = await response.text();
+          for (const strategy of ["load", "interaction", "visible", "idle"]) {
+            expect(html).toContain(`data-farm-island-strategy="${strategy}"`);
+          }
+          expect(html.match(/<farm-client-boundary/g)).toHaveLength(4);
+          await verifyScheduling(response.url);
+        },
+      );
+
+      if (executablePath) {
+        await runProductionRequest(developmentRoot, async (response) => {
+          expect(response.status).toBe(200);
+          await verifyScheduling(response.url);
+        });
+      }
+    } finally {
+      await Promise.all(
+        [root, developmentRoot].map((fixtureRoot) =>
+          fs.rm(fixtureRoot, { recursive: true, force: true }),
+        ),
+      );
+    }
+  }, 180_000);
+
   it("retries an incomplete Rolldown client bundle after the parallel SSR build", async () => {
     const root = await createProductionFixture();
 

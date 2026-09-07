@@ -9,6 +9,7 @@ import {
   createFarmIsolatedClientBoundary,
   createFarmIsolatedHydrationRuntime,
 } from "../client/isolated-boundary";
+import { scheduleFarmIslandHydration } from "../client/island-runtime";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -208,6 +209,42 @@ describe("isolated client boundary", () => {
     act(() => runtime.dispose(container));
 
     expect(cleanupConnected).toEqual([true]);
+    expect(runtime.rootCount()).toBe(0);
+  });
+
+  it("schedules a pending boundary once and cancels it when its subtree is disposed", async () => {
+    function Deferred() {
+      return <button>Deferred</button>;
+    }
+    const Boundary = createFarmIsolatedClientBoundary(
+      React,
+      Deferred,
+      "/src/deferred.tsx",
+      "default",
+      "interaction",
+    );
+    document.body.innerHTML = renderToString(<Boundary />);
+    const container = document.querySelector("farm-client-boundary")!;
+    const schedule = vi.fn(scheduleFarmIslandHydration);
+    const runtime = createFarmIsolatedHydrationRuntime({
+      ReactRuntime: React,
+      hydrateRoot,
+      load: async () => ({ __farm_client_boundary_originals__: { default: Deferred } }),
+      schedule,
+    });
+
+    await runtime.hydrate(document);
+    await runtime.hydrate(document);
+    expect(schedule).toHaveBeenCalledOnce();
+    expect(schedule.mock.calls[0]?.[0].signal?.aborted).toBe(false);
+
+    runtime.dispose(container);
+    expect(schedule.mock.calls[0]?.[0].signal?.aborted).toBe(true);
+    container.querySelector<HTMLButtonElement>("button")!.click();
+    await Promise.resolve();
+
+    expect(schedule).toHaveBeenCalledTimes(1);
+    expect(container.hasAttribute("data-farm-island-hydrated")).toBe(false);
     expect(runtime.rootCount()).toBe(0);
   });
 
@@ -452,7 +489,7 @@ describe("isolated client boundary", () => {
       load: async () => {
         throw failure;
       },
-      schedule: async ({ hydrate }) => hydrate(),
+      schedule: scheduleFarmIslandHydration,
       report,
     });
 
@@ -460,6 +497,9 @@ describe("isolated client boundary", () => {
     await Promise.resolve();
 
     expect(document.querySelector("farm-client-boundary")?.innerHTML).toBe(serverHTML);
+    expect(
+      document.querySelector("farm-client-boundary")?.hasAttribute("data-farm-island-hydrated"),
+    ).toBe(false);
     expect(runtime.rootCount()).toBe(0);
     expect(report).toHaveBeenCalledWith(
       expect.stringContaining("/src/missing.tsx#default"),
@@ -501,6 +541,7 @@ describe("isolated client boundary", () => {
 
     expect(container.innerHTML).toBe(serverHTML);
     expect(container.hasAttribute("data-farm-hydrated")).toBe(false);
+    expect(container.hasAttribute("data-farm-island-hydrated")).toBe(false);
     expect(runtime.rootCount()).toBe(0);
     expect(report).toHaveBeenCalledWith(
       expect.stringContaining("/src/broken.tsx#default"),
