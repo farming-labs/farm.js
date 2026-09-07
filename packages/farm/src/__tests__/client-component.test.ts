@@ -303,7 +303,36 @@ describe("client component path resolution", () => {
 
     fs.writeFileSync(
       layoutFile,
+      `import First from "../components/counter-0";
+import Second from "../components/counter-0";
+export default function Layout() { return <><First /><First /><First /><Second /><Second /></>; }
+`,
+    );
+    expect(getClientModuleHydrationPlan(layoutFile, root, "enabled")).toMatchObject({
+      shouldHydrate: true,
+      hasIsolatedClientBoundaries: false,
+      costGuardExceeded: true,
+      fallbackReason: "the client graph can create 5 isolated roots, above the measured limit of 4",
+    });
+
+    fs.writeFileSync(
+      layoutFile,
       `import Counter from "../components/counter-0";\nexport default function Layout() { return <>{[0, 1, 2, 3, 4].map((item) => <Counter key={item} />)}</>; }\n`,
+    );
+    expect(getClientModuleHydrationPlan(layoutFile, root, "enabled")).toMatchObject({
+      shouldHydrate: true,
+      hasIsolatedClientBoundaries: false,
+      costGuardExceeded: true,
+      fallbackReason:
+        "the client boundary count imported from ../components/counter-0 is data-dependent",
+    });
+
+    fs.writeFileSync(
+      layoutFile,
+      `import Counter from "../components/counter-0";
+const renderCounter = (item) => <Counter key={item} />;
+export default function Layout({ items }) { return <>{items.map(renderCounter)}</>; }
+`,
     );
     expect(getClientModuleHydrationPlan(layoutFile, root, "enabled")).toMatchObject({
       shouldHydrate: true,

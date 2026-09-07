@@ -12,9 +12,9 @@ All variants render the same static layout, client counters, and two-page naviga
 
 The stress series finds the point where independent-root overhead outweighs excluding the server
 layout. The checked-in report records that crossover and the guard chosen from it.
-The runner raises the internal `FARM_BENCHMARK_ISOLATED_BOUNDARY_LIMIT` only for those stress builds
-so it can continue measuring past the normal fallback point. Application builds use the measured
-limit and cannot select the stress plan by configuration.
+The runner uses a benchmark-internal build marker scoped to its generated fixture directory for
+those stress builds, so it can continue measuring past the normal fallback point. Application
+builds use the measured limit and cannot select the stress plan by configuration.
 
 ## Measurements
 
@@ -45,6 +45,9 @@ BENCH_ITERATIONS=25 pnpm benchmark:isolated-hydration
 `BENCH_ITERATIONS` defaults to 25 measured browser and server samples after five warmups.
 `FARM_BENCH_CHROME_PATH` can point to a Chrome or Chromium executable. The runner otherwise uses
 Playwright's Chromium, or native Chrome on macOS when available.
+
+`BENCH_SHAPES` and `BENCH_MODES` can narrow a local diagnostic run. Filtered runs write only to
+`.generated/partial-results.json`; they never replace or validate the canonical report.
 
 Verify the checked-in samples and source guard without rebuilding the fixtures:
 

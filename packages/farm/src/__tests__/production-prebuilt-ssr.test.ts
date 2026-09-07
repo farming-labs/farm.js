@@ -1498,6 +1498,19 @@ await server.listen(Number(process.env.PORT));
             expect(browserRequests).toContain("/src/components/live-counter.tsx");
             expect(browserRequests).not.toContain("/src/app/layout.tsx");
             expect(browserRequests).not.toContain("/src/lib/server-sentinel.ts");
+
+            await fs.writeFile(
+              path.join(developmentRoot, "src", "components", "stable-counter.tsx"),
+              `export default function StableCounter() { return <output data-stable-counter>server-stable</output>; }`,
+            );
+            await expect
+              .poll(() => page.locator("[data-stable-counter]").textContent(), {
+                timeout: 10_000,
+              })
+              .toBe("server-stable");
+            await expect
+              .poll(() => page.locator('farm-client-boundary[data-farm-hydrated="true"]').count())
+              .toBe(2);
             expect(
               browserErrors,
               `${browserErrors.join("\n")}\nDOM:\n${await page.locator("body").innerHTML()}`,

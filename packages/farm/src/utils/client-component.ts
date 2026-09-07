@@ -93,8 +93,16 @@ export interface ClientModuleHydrationPlan extends ClientModuleMetadata {
 export const FARM_ISOLATED_HYDRATION_MAX_BOUNDARIES = 4;
 
 function isolatedHydrationBoundaryLimit(): number {
-  const benchmarkLimit = Number(process.env.FARM_BENCHMARK_ISOLATED_BOUNDARY_LIMIT);
-  return Number.isSafeInteger(benchmarkLimit) &&
+  const benchmarkRoot = process.env.FARM_INTERNAL_ISOLATED_HYDRATION_BENCHMARK_ROOT;
+  const benchmarkLimit = Number(process.env.FARM_INTERNAL_ISOLATED_HYDRATION_BENCHMARK_LIMIT);
+  const resolvedBenchmarkRoot = benchmarkRoot ? path.resolve(benchmarkRoot) : null;
+  const isBenchmarkFixture =
+    process.env.FARM_INTERNAL_BENCHMARK === "isolated-hydration" &&
+    resolvedBenchmarkRoot !== null &&
+    (process.cwd() === resolvedBenchmarkRoot ||
+      process.cwd().startsWith(`${resolvedBenchmarkRoot}${path.sep}`));
+  return isBenchmarkFixture &&
+    Number.isSafeInteger(benchmarkLimit) &&
     benchmarkLimit > FARM_ISOLATED_HYDRATION_MAX_BOUNDARIES
     ? benchmarkLimit
     : FARM_ISOLATED_HYDRATION_MAX_BOUNDARIES;
@@ -638,7 +646,10 @@ function getStaticImportBindings(content: string | null): Map<string, string[]> 
       }
     }
 
-    bindings.set(specifier, Array.from(new Set(localNames)));
+    bindings.set(
+      specifier,
+      Array.from(new Set([...(bindings.get(specifier) ?? []), ...localNames])),
+    );
   }
 
   return bindings;
@@ -659,9 +670,10 @@ function hasDynamicJsxCardinality(content: string | null, localBindings: string[
   if (!content || localBindings.length === 0) return false;
   const escapedNames = localBindings.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
   const clientTag = `<\\s*(?:${escapedNames.join("|")})\\b`;
-  return new RegExp(
-    `(?:\\.(?:map|flatMap)\\s*\\(|Array\\.from\\s*\\(|(?:for|while)\\s*\\([^)]*\\))[\\s\\S]{0,10000}${clientTag}`,
-  ).test(content);
+  const hasClientElement = new RegExp(clientTag).test(content);
+  const hasRuntimeIterator =
+    /\.(?:map|flatMap)\s*\(|Array\.from\s*\(|(?:for|while)\s*\([^)]*\)/.test(content);
+  return hasClientElement && hasRuntimeIterator;
 }
 
 function collectIsolatedClientBoundaries(
@@ -714,7 +726,7 @@ function collectIsolatedClientBoundaries(
 
     const importedBindings = getStaticImportBindings(content);
     let estimatedBoundaryCount = 0;
-    for (const specifier of getImportSpecifiers(content)) {
+    for (const specifier of new Set(getImportSpecifiers(content))) {
       const importedPath = resolveImportedModuleSourcePath(moduleSourcePath, specifier, root);
       if (!importedPath) continue;
       if (!specifier.startsWith(".") && !specifier.startsWith("/")) {

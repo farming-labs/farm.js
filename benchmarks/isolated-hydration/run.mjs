@@ -33,6 +33,7 @@ const requestedModes = new Set(
     .map((value) => value.trim())
     .filter(Boolean),
 );
+const isPartialRun = requestedShapes.size > 0 || requestedModes.size > 0;
 const shapes = [
   { id: "leaf", boundaries: 1, staticNodes: 768, includeRsc: true },
   { id: "siblings", boundaries: 4, staticNodes: 384, includeRsc: true },
@@ -42,6 +43,17 @@ const shapes = [
   { id: "stress-64", boundaries: 64, staticNodes: 128, includeRsc: false },
 ].filter((shape) => requestedShapes.size === 0 || requestedShapes.has(shape.id));
 const activeChildren = new Set();
+
+function assertSupportedNode() {
+  const [major, minor] = process.versions.node.split(".").map(Number);
+  const supported = (major === 22 && minor >= 19) || (major === 24 && minor >= 11) || major > 24;
+  if (!supported) {
+    throw new Error(
+      "Use Node 22.19+ below 23, or Node 24.11+ for comparable isolated hydration results. Current: " +
+        process.versions.node,
+    );
+  }
+}
 
 function round(value, digits = 3) {
   const factor = 10 ** digits;
@@ -385,7 +397,11 @@ async function buildVariant(shape, mode) {
         cwd: root,
         env:
           mode === "isolated" && shape.id.startsWith("stress-")
-            ? { FARM_BENCHMARK_ISOLATED_BOUNDARY_LIMIT: "1024" }
+            ? {
+                FARM_INTERNAL_BENCHMARK: "isolated-hydration",
+                FARM_INTERNAL_ISOLATED_HYDRATION_BENCHMARK_ROOT: generatedDirectory,
+                FARM_INTERNAL_ISOLATED_HYDRATION_BENCHMARK_LIMIT: "1024",
+              }
             : {},
       },
     );
@@ -577,9 +593,10 @@ async function measureColdBrowser(browser, variant, shape) {
       1_000,
     heapBytes: metric(after.metrics, "JSHeapUsedSize"),
     requestCount: requests.filter((url) => url.startsWith(origin)).length,
-    scriptRequestCount: resourceEntries.filter(
-      (entry) => entry.initiatorType === "script" && entry.name.startsWith(origin),
-    ).length,
+    scriptRequestCount: resourceEntries.filter((entry) => {
+      if (!entry.name.startsWith(origin)) return false;
+      return /\.(?:m?js)(?:$|[?#])/.test(entry.name);
+    }).length,
     executedScriptResources: new Set(executedScripts.map((script) => script.url)).size,
   };
   await context.close();
@@ -590,7 +607,15 @@ async function measureWarmNavigation(browser, variant, shape) {
   const page = await browser.newPage();
   await page.goto(variant.url, { waitUntil: "domcontentloaded" });
   await waitForHydration(page, variant.mode, shape.boundaries);
-  await clickAndMeasure(page, '[data-counter="0"]');
+  const counterCount = await page.locator("[data-counter]").count();
+  if (counterCount !== shape.boundaries) {
+    throw new Error(
+      `${shape.id}/${variant.mode} rendered ${counterCount} counters, expected ${shape.boundaries}`,
+    );
+  }
+  for (let index = 0; index < counterCount; index += 1) {
+    await clickAndMeasure(page, `[data-counter="${index}"]`);
+  }
   const samples = [];
   const retainedLayout = await page.locator("[data-server-owner]").elementHandle();
   for (let index = 0; index < warmups + iterations; index += 1) {
@@ -598,7 +623,9 @@ async function measureWarmNavigation(browser, variant, shape) {
     const navigationMs = await navigateAndMeasure(page, destination);
     if (index >= warmups) samples.push(navigationMs);
   }
-  const stateRetained = (await page.locator('[data-counter="0"]').textContent()) === "counter-0:1";
+  const stateRetained = (await page.locator("[data-counter]").allTextContents()).every(
+    (value, index) => value === `counter-${index}:1`,
+  );
   const layoutRetained = retainedLayout
     ? await retainedLayout.evaluate(
         (element) => element === document.querySelector("[data-server-owner]"),
@@ -839,6 +866,17 @@ async function main() {
   }
 
   results.crossoverBoundaryCount = findCrossover(results);
+  if (isPartialRun) {
+    await mkdir(generatedDirectory, { recursive: true });
+    await writeFile(
+      path.join(generatedDirectory, "partial-results.json"),
+      `${JSON.stringify(results, null, 2)}\n`,
+    );
+    process.stdout.write(
+      "\nPartial results written to benchmarks/isolated-hydration/.generated/partial-results.json; canonical results were not changed.\n",
+    );
+    return;
+  }
   validateResults(results);
   await mkdir(resultsDirectory, { recursive: true });
   await writeFile(
@@ -858,6 +896,10 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 }
 
 if (process.argv.includes("--verify-results")) {
+  assertSupportedNode();
+  if (isPartialRun) {
+    throw new Error("BENCH_SHAPES and BENCH_MODES cannot be used with --verify-results");
+  }
   const recorded = JSON.parse(await readFile(path.join(resultsDirectory, "latest.json"), "utf8"));
   const currentGuard = await readGuardMaximum();
   if (recorded.guardMaximumBoundaries !== currentGuard) {
@@ -868,5 +910,6 @@ if (process.argv.includes("--verify-results")) {
   validateResults(recorded);
   process.stdout.write("Recorded isolated hydration results satisfy the cost guards.\n");
 } else {
+  assertSupportedNode();
   await main();
 }

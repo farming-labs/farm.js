@@ -2857,8 +2857,7 @@ export const manifest = getManifest();
           options.isolatedClientBoundaryModules ??
           farmApp?.getRouteManager().getIsolatedClientBoundaryModules(root);
         const selectedForIsolatedHydration =
-          selectedIsolatedModules === undefined ||
-          selectedIsolatedModules.has(path.resolve(cleanId));
+          selectedIsolatedModules?.has(path.resolve(cleanId)) === true;
         if (
           isolatedHydrationEnabled &&
           selectedForIsolatedHydration &&
@@ -3140,6 +3139,34 @@ if (import.meta.hot) {
         });
 
         return [];
+      }
+
+      const isolatedHydrationMode = currentFarmConfig?.experimental?.isolatedClientHydration;
+      if (
+        currentSrcRoot &&
+        (isolatedHydrationMode === "enabled" || isolatedHydrationMode === "analyze") &&
+        /\.[cm]?[jt]sx?$/.test(normalizedFile)
+      ) {
+        const routeManager = farmApp?.getRouteManager();
+        if (routeManager) {
+          const previousModules = new Set(
+            routeManager.getIsolatedClientBoundaryModules(currentFarmConfig.root),
+          );
+          routeManager.invalidateClientManifest();
+          const nextModules = new Set(
+            routeManager.getIsolatedClientBoundaryModules(currentFarmConfig.root),
+          );
+          const planChanged =
+            previousModules.size !== nextModules.size ||
+            [...previousModules].some((modulePath) => !nextModules.has(modulePath));
+          const manifestModule = server.moduleGraph.getModuleById("/@farm/manifest");
+          if (manifestModule) server.moduleGraph.invalidateModule(manifestModule);
+          if (planChanged) {
+            for (const mod of modules) server.moduleGraph.invalidateModule(mod);
+            server.ws.send({ type: "full-reload", path: "*" });
+            return [];
+          }
+        }
       }
 
       if (normalizedFile.includes("/app/")) {
