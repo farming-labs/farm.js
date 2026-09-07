@@ -15,10 +15,10 @@ import {
   createRoute,
   createRouteModuleFromProgrammaticPage,
   defineRoutes,
+  parseProgrammaticRoutePath,
   type InferProgrammaticRouteData,
   type ProgrammaticPageRoute,
 } from "../routes";
-import { parseProgrammaticRoutePath } from "../routes-shared";
 import { RouteManager } from "../routing/route-manager";
 import { createServerFn } from "../server-fn";
 import type { FarmConfig } from "../types";
@@ -60,6 +60,9 @@ describe("programmatic routes", () => {
       'Duplicate route parameter "user.id"',
     );
     expect(() => parseProgrammaticRoutePath("/literal/:id/:id/*id/*id")).not.toThrow();
+    expect(() => parseProgrammaticRoutePath("/docs/[...slug]/edit")).toThrow(
+      'Catch-all segment "[...slug]" must be the final segment',
+    );
   });
 
   it("owns typed named actions and resolves a default action", async () => {
