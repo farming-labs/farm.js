@@ -127,8 +127,8 @@ async function inspectBuild(compilerMode) {
       "The compiler build did not emit a keyed Map-lookup target.",
     );
     assert(
-      compilerReport.summary.keyedMapUpdateHints > 0,
-      "The compiler build did not emit a mutation-aware keyed-map update hint.",
+      compilerReport.summary.keyedMapUpdateHints >= 6,
+      "The compiler build did not emit every single-map, consecutive-map, and map-reorder hint.",
     );
     assert(
       compilerReport.summary.keyedArrayAppendHints > 0,
@@ -1339,6 +1339,80 @@ async function measureTrial(browser, trial, compilerMode, port) {
           },
         );
 
+        const prepareMultiMapUpdate = async () => {
+          await create10000();
+          const rows = [...table.querySelectorAll("tbody tr")];
+          const expected = rows.map((row, index) => {
+            const label = row.querySelector("td:nth-child(2)")?.textContent;
+            const amountText = row.querySelector("td:nth-child(4)")?.textContent;
+            const amount = Number(amountText?.slice(1));
+            if (label === undefined || !Number.isFinite(amount)) {
+              throw new Error("Multi-map source row is invalid.");
+            }
+            return {
+              amount: index % 10 === 0 ? amount + 1 : amount,
+              label: index % 10 === 0 ? `${label} reviewed` : label,
+              row,
+            };
+          });
+          return { expected, rows };
+        };
+
+        const runMultiMapUpdate = async (action, prepared) => {
+          if (!prepared) throw new Error("Multi-map expectation is missing.");
+          const first = prepared.expected[0];
+          await runTableAction(action, () => {
+            const row = table.querySelector("tbody tr");
+            return (
+              row === first.row &&
+              row.querySelector("td:nth-child(2)")?.textContent === first.label &&
+              row.querySelector("td:nth-child(4)")?.textContent === `$${first.amount}`
+            );
+          });
+          return () => {
+            const nextRows = [...table.querySelectorAll("tbody tr")];
+            if (nextRows.length !== prepared.expected.length) {
+              throw new Error("Multi-map row count changed.");
+            }
+            for (let index = 0; index < prepared.expected.length; index += 1) {
+              const expected = prepared.expected[index];
+              const row = nextRows[index];
+              if (
+                row !== expected.row ||
+                !row.isConnected ||
+                row.querySelector("td:nth-child(2)")?.textContent !== expected.label ||
+                row.querySelector("td:nth-child(4)")?.textContent !== `$${expected.amount}`
+              ) {
+                throw new Error(`Multi-map row ${index} did not match its expected update.`);
+              }
+            }
+          };
+        };
+
+        const measureMultiMapUpdate = async (action) => {
+          for (let sample = 0; sample < warmupSamples; sample += 1) {
+            const prepared = await prepareMultiMapUpdate();
+            const verify = await runMultiMapUpdate(action, prepared);
+            verify();
+          }
+          const timings = [];
+          for (let sample = 0; sample < tableSamples; sample += 1) {
+            const prepared = await prepareMultiMapUpdate();
+            const startedAt = performance.now();
+            const verify = await runMultiMapUpdate(action, prepared);
+            timings.push(performance.now() - startedAt);
+            verify();
+          }
+          return timings;
+        };
+
+        const tableMultiMapUpdate = await measureMultiMapUpdate(() =>
+          tableButton("table-multi-map-update").click(),
+        );
+        const tableMultiMapUpdateSnapshot = await measureMultiMapUpdate(() =>
+          tableButton("table-multi-map-update-snapshot").click(),
+        );
+
         const tableSwap = await measureTable(
           async () => ensure1000(),
           async () => {
@@ -1700,6 +1774,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
             filterReorderPipelineSnapshot: tableFilterReorderPipelineSnapshot,
             mapReorderPipeline: tableMapReorderPipeline,
             mapReorderPipelineSnapshot: tableMapReorderPipelineSnapshot,
+            multiMapUpdate: tableMultiMapUpdate,
+            multiMapUpdateSnapshot: tableMultiMapUpdateSnapshot,
             multiMapReorderPipeline: tableMultiMapReorderPipeline,
             multiMapReorderPipelineSnapshot: tableMultiMapReorderPipelineSnapshot,
             mapLookup: tableMapLookup,
@@ -1826,6 +1902,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
         filterReorderPipelineSnapshot: timingSummary(result.table.filterReorderPipelineSnapshot),
         mapReorderPipeline: timingSummary(result.table.mapReorderPipeline),
         mapReorderPipelineSnapshot: timingSummary(result.table.mapReorderPipelineSnapshot),
+        multiMapUpdate: timingSummary(result.table.multiMapUpdate),
+        multiMapUpdateSnapshot: timingSummary(result.table.multiMapUpdateSnapshot),
         multiMapReorderPipeline: timingSummary(result.table.multiMapReorderPipeline),
         multiMapReorderPipelineSnapshot: timingSummary(
           result.table.multiMapReorderPipelineSnapshot,
@@ -2004,6 +2082,8 @@ const tableMetrics = [
   "filterReorderPipelineSnapshot",
   "mapReorderPipeline",
   "mapReorderPipelineSnapshot",
+  "multiMapUpdate",
+  "multiMapUpdateSnapshot",
   "multiMapReorderPipeline",
   "multiMapReorderPipelineSnapshot",
   "snapshotMembership",
@@ -2136,6 +2216,29 @@ const keyedUpdateSpeedups = keyedUpdateCases.flatMap(([group, metric]) =>
 );
 const keyedUpdateRegressions = keyedUpdateSpeedups.filter(
   ({ speedup }) => !Number.isFinite(speedup) || speedup < keyedUpdateMinimumSpeedup,
+);
+// Consecutive safe map stages should compare their committed and final item identities once, then
+// patch each final changed row once. Compare the concise chain with React and a block-bodied
+// compiled control that deliberately takes complete keyed reconciliation.
+const keyedMultiMapUpdateMinimumSpeedup = 8;
+const keyedMultiMapUpdateMinimumSnapshotSpeedup = 2;
+const keyedMultiMapUpdateResults = ["static", "hybrid"].map((mode) => {
+  const updateMedianMs = comparisons.table.multiMapUpdate[mode].medianMs;
+  const snapshotMedianMs = comparisons.table.multiMapUpdateSnapshot[mode].medianMs;
+  return {
+    mode,
+    snapshotMedianMs,
+    snapshotSpeedup: snapshotMedianMs / updateMedianMs,
+    speedup: comparisons.table.multiMapUpdate[`${mode}VsBaseline`].speedup,
+    updateMedianMs,
+  };
+});
+const keyedMultiMapUpdateRegressions = keyedMultiMapUpdateResults.filter(
+  ({ snapshotSpeedup, speedup }) =>
+    !Number.isFinite(speedup) ||
+    speedup < keyedMultiMapUpdateMinimumSpeedup ||
+    !Number.isFinite(snapshotSpeedup) ||
+    snapshotSpeedup < keyedMultiMapUpdateMinimumSnapshotSpeedup,
 );
 // A compiler-proven functional append already creates the new array and DOM rows. The append hint
 // avoids rescanning every existing key and binding before mounting only the appended suffix. Compare
@@ -2833,6 +2936,7 @@ const passed =
   performanceRegressions.length === 0 &&
   scalabilityRegressions.length === 0 &&
   keyedUpdateRegressions.length === 0 &&
+  keyedMultiMapUpdateRegressions.length === 0 &&
   keyedAppendRegressions.length === 0 &&
   keyedPrependRegressions.length === 0 &&
   keyedSliceRegressions.length === 0 &&
@@ -2875,6 +2979,13 @@ const report = {
     regressions: keyedUpdateRegressions,
     speedups: keyedUpdateSpeedups,
     status: keyedUpdateRegressions.length === 0 ? "PASS" : "FAIL",
+  },
+  keyedMultiMapUpdateHintGate: {
+    minimumSnapshotSpeedup: keyedMultiMapUpdateMinimumSnapshotSpeedup,
+    minimumSpeedup: keyedMultiMapUpdateMinimumSpeedup,
+    regressions: keyedMultiMapUpdateRegressions,
+    results: keyedMultiMapUpdateResults,
+    status: keyedMultiMapUpdateRegressions.length === 0 ? "PASS" : "FAIL",
   },
   keyedAppendHintGate: {
     minimumSnapshotSpeedup: keyedAppendMinimumSnapshotSpeedup,

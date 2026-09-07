@@ -2,6 +2,37 @@
 
 Latest run: 2026-09-07
 
+## Consecutive same-order keyed maps — 2026-09-07
+
+The 10,000-row table now measures a concise functional setter that updates the label and amount of
+every tenth row in two consecutive native `map()` calls. Farm executes both calls in source order,
+then compares the committed and final item identities once, validates every final changed key and
+position, and patches each changed row once. The equivalent block-bodied setter runs the same
+application work but remains on complete compiled keyed reconciliation.
+
+| Mode   | React median | Two-map update | Compiled control | vs React | vs control |
+| ------ | -----------: | -------------: | ---------------: | -------: | ---------: |
+| Static |     57.80 ms |        4.90 ms |         12.80 ms |   11.80x |      2.61x |
+| Hybrid |     57.80 ms |        5.00 ms |         13.50 ms |   11.56x |      2.70x |
+
+The independent gate requires at least 8x versus bracketed React and 2x versus the compiled control
+in both modes. It passed without changing either threshold. After every measured update, a separate
+oracle verified the final labels and amounts, order, connection, and original DOM identity of all
+10,000 rows. Both compiler reports emitted all six expected keyed-map calls, and compiled owner
+executions stayed at zero.
+
+Compiler coverage rejects an unsupported mapper anywhere in the chain. Runtime coverage preserves
+custom methods and native errors, falls back for sparse or subclassed arrays and changed keys,
+patches different rows or one twice-updated row exactly once, hydrates in Strict Mode, drops queued
+work after unmount, and matches ordinary React through 2,000 deterministic queued two-map updates.
+The complete React suite passed 688 tests plus three stress tests, and compatibility passed on React
+18.3.1 and 19.2.8.
+
+No public API or runtime capability was added. The existing optional keyed map/reorder runtime
+remains 13,158 B gzip, and the compiler-selected core still removes 83.4% of the complete runtime
+premium. The accepted default-count run used 10 samples per compiler mode, 20 bracketing React
+samples, Chrome 152.0.7977.82, Node.js 23.11.0, and Apple M1 macOS arm64.
+
 ## Consecutive same-key maps composed with native reorder — 2026-09-07
 
 The 10,000-row table now measures a concise functional setter that changes one row's label and

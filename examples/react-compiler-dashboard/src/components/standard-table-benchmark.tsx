@@ -1023,6 +1023,44 @@ export function StandardTableBenchmark() {
           Update every 10th
         </button>
         <button
+          data-action="table-multi-map-update"
+          type="button"
+          onClick={() => {
+            setRows((current) =>
+              current
+                .map((row, index) =>
+                  index % 10 === 0 ? { ...row, label: `${row.label} reviewed` } : row,
+                )
+                .map((row, index) =>
+                  index % 10 === 0 ? { ...row, amount: row.amount + 1 } : row,
+                ),
+            );
+            setOperation("review and reprice every 10th");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Review + reprice every 10th
+        </button>
+        <button
+          data-action="table-multi-map-update-snapshot"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              return current
+                .map((row, index) =>
+                  index % 10 === 0 ? { ...row, label: `${row.label} reviewed` } : row,
+                )
+                .map((row, index) =>
+                  index % 10 === 0 ? { ...row, amount: row.amount + 1 } : row,
+                );
+            });
+            setOperation("review and reprice every 10th (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Review + reprice every 10th (snapshot control)
+        </button>
+        <button
           data-action="table-mark"
           type="button"
           onClick={() => {
