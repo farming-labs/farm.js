@@ -4216,6 +4216,7 @@ function generateVirtualEntryCode(
   _runWithMiddlewareData,
   _setDefaultFarmThemeConfig,
   addMetadataImageReference,
+  applyFarmBasePath,
   applyFarmThemeDocument,
   appendFarmLinkHeader,
   applyProductionMiddlewareHeaders,
@@ -7030,6 +7031,7 @@ async function handleFarmRequestInContext(
   // 404 fallback - render proper HTML page
   emitFarmEvent({ type: "route.notFound", pathname });
   try {
+    const defaultNotFoundHomeHref = applyFarmBasePath("/", farmResolvedRuntimeConfig.basePath);
     // Default 404 page component
     function Default404Page() {
       return React.createElement(React.Fragment, null,
@@ -7050,7 +7052,7 @@ async function handleFarmRequestInContext(
             }, "Not found"),
             React.createElement("a", {
               className: "farm-default-not-found__home",
-              href: "/",
+              href: defaultNotFoundHomeHref,
             }, "GO HOME")
           )
         )
@@ -7137,7 +7139,7 @@ async function handleFarmRequestInContext(
   } catch (error) {
     console.error("404 render error:", error);
     const fallbackDocument = applyFarmThemeDocument(
-      \`<!DOCTYPE html><html><head><title>404</title></head><body><h1>404 - Page Not Found</h1><p>The page \${pathname} doesn't exist.</p><a href="/">Go Home</a></body></html>\`,
+      \`<!DOCTYPE html><html><head><title>404</title></head><body><h1>404 - Page Not Found</h1><p>The page \${pathname} doesn't exist.</p><a href="\${escapeFarmHtmlAttribute(applyFarmBasePath("/", farmResolvedRuntimeConfig.basePath))}">Go Home</a></body></html>\`,
       farmThemeConfig,
       farmResolvedRuntimeConfig.basePath,
       getFarmTheme(request)
