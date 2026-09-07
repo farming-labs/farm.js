@@ -71,7 +71,10 @@ export const GET = cronRoute(async () => {
 });
 ```
 
-`cronRoute()` verifies `Authorization: Bearer <CRON_SECRET>` whenever `CRON_SECRET` exists. In production it fails closed when the secret is missing, so a forgotten environment variable does not silently expose a mutating route.
+`cronRoute()` verifies `Authorization: Bearer <CRON_SECRET>` whenever `CRON_SECRET` exists.
+The standard authentication scheme is case-insensitive, so schedulers may send either `Bearer` or
+`bearer`. In production it fails closed when the secret is missing, so a forgotten environment
+variable does not silently expose a mutating route.
 
 Set the same value in the application and scheduler environment:
 
