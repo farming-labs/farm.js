@@ -1433,6 +1433,7 @@ await server.listen(Number(process.env.PORT));
           assertFallbackDocument(
             await fetch(new URL("/fallback", response.url)).then((item) => item.text()),
           );
+          await verifyIndependentInitialScheduling(response.url);
         },
       );
 
