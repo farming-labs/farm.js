@@ -2,6 +2,39 @@
 
 Date: 2026-08-29
 
+## Same-key map composed with native reorder — 2026-09-07
+
+The 10,000-row table now measures a concise functional setter that replaces one row through
+`map()` and then restores amount order with native `toSorted()`. The compiler carries each mapped
+replacement back to its committed source row, so the runtime validates only the replacement key,
+prepares its changed bindings, and runs one LIS for the final permutation. Every unchanged row
+keeps its DOM node without another key, descriptor, or binding read. The equivalent block-bodied
+updater remains the complete-reconciliation control.
+
+| Mode   | React median | Map + reorder | Compiled control | vs React | vs control |
+| ------ | -----------: | ------------: | ---------------: | -------: | ---------: |
+| Static |    176.60 ms |      33.70 ms |         46.40 ms |    5.24x |      1.38x |
+| Hybrid |    176.60 ms |      32.20 ms |         42.80 ms |    5.48x |      1.33x |
+
+The new gate requires at least 4x versus bracketed React and 1.2x versus the compiled control in
+both modes, and passed without lowering either threshold. The run also proved that all 10,000
+original row nodes survived, and passed every value assertion, zero-owner-execution check, the
+general regression gate, every existing keyed optimization gate, the 8x
+optimization-persistence floor, and normalized scalability checks.
+
+Compiler tests accept one safe conditional object-spread map followed by native sort/reverse
+suffixes and reject referenced or unconditional mappers, structural calls in the same chain, and
+map calls after reordering. Runtime coverage checks queued map/sort/reverse composition, changed-key
+and custom-method fallback before DOM writes, delegated events, controlled-input focus and
+selection, Strict Mode hydration, unmount-before-flush cleanup, and 2,000 deterministic updates
+against normal React. The stress comparison completed in 24.88 seconds after replacement-lineage
+reuse, compared with 48.49 seconds for the earlier all-key-validation implementation on the same
+machine.
+
+The new map-reorder runtime is selected only for modules that emit the composed hint, and the size
+suite verifies that reorder-only applications do not retain it. The recorded browser run used
+Chrome 152.0.7977.82, Node.js 23.11.0, and Apple M1 macOS arm64.
+
 ## Structural prefixes composed with native reorders — 2026-09-06
 
 The 10,000-row table now measures one concise setter that filters one row and then executes two
