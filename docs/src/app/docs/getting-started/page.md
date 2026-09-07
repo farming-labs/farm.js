@@ -8,7 +8,8 @@ section: "Start"
 
 Create a Farm.js app, understand the files that matter, and run the development server.
 
-Farm requires Node.js 22.12 or newer.
+Farm requires Node.js 22.13 or newer. This is the first Node 22 release that exposes
+the built-in `node:sqlite` module without an experimental command-line flag.
 
 ## Create an app
 

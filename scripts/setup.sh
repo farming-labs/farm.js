@@ -18,8 +18,8 @@ fi
 NODE_VERSION=$(node --version | cut -d'v' -f2)
 NODE_MAJOR=$(echo "$NODE_VERSION" | cut -d'.' -f1)
 NODE_MINOR=$(echo "$NODE_VERSION" | cut -d'.' -f2)
-if [ "$NODE_MAJOR" -lt 22 ] || { [ "$NODE_MAJOR" -eq 22 ] && [ "$NODE_MINOR" -lt 12 ]; }; then
-    echo "❌ Node.js 22.12 or newer is required. Current version: $(node --version)"
+if [ "$NODE_MAJOR" -lt 22 ] || { [ "$NODE_MAJOR" -eq 22 ] && [ "$NODE_MINOR" -lt 13 ]; }; then
+    echo "❌ Node.js 22.13 or newer is required. Current version: $(node --version)"
     exit 1
 fi
 

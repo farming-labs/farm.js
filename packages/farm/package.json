@@ -667,6 +667,6 @@
     "vite-rolldown": "npm:vite@8.1.5"
   },
   "engines": {
-    "node": ">=22.12.0"
+    "node": ">=22.13.0"
   }
 }
