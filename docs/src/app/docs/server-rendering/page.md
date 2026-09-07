@@ -163,8 +163,9 @@ splits production route modules behind dynamic imports. Deferred routes therefor
 their route chunk until its trigger while preserving the initial SSR output.
 
 These strategies control hydration of the initial server-rendered document. During client-side
-navigation, the navigation itself signals user intent, so Farm loads and renders the destination
-route immediately instead of leaving the previous route visible while waiting for another trigger.
+navigation, the navigation itself signals user intent, so Farm loads and renders a route-wide
+destination immediately instead of leaving the previous route visible while waiting for another
+trigger.
 
 | Strategy      | Hydration trigger                                                     |
 | ------------- | --------------------------------------------------------------------- |
@@ -172,6 +173,22 @@ route immediately instead of leaving the previous route visible while waiting fo
 | `interaction` | The first button-like click; Farm replays that click after hydration. |
 | `visible`     | When the route boundary approaches the viewport.                      |
 | `idle`        | During browser idle time, with a timeout fallback.                    |
+
+With [isolated client hydration](/docs/configuration#isolated-client-hydration), each eligible
+client module keeps its own strategy, including after SPA navigation. Sibling boundaries can mix
+all four strategies: one boundary's trigger never hydrates another, and an interaction click is
+claimed and replayed once by the boundary that contains it. Removing a boundary cancels its pending
+observer, idle callback, or interaction listener.
+
+Farm uses the same isolated boundary metadata for Vite development, streamed or buffered SSR, and
+statically generated HTML. In development, updating a client module rerenders every live boundary
+created from that module without importing or replacing its server-owned layout; sibling boundary
+state stays mounted. If one page needs the route-wide fallback, that fallback stays on the page
+boundary and does not promote otherwise eligible client leaves in its server-owned layout.
+Farm also keeps graphs above four statically bounded isolated roots route-wide. Data-dependent
+boundary lists use the same fallback because their root count is unknown before streaming. This
+measured guard prevents request, marker, root, and hydration overhead from growing past the first
+observed crossover; the [benchmark report](https://github.com/farming-labs/farm.js/blob/main/benchmarks/isolated-hydration/results/latest.md) includes route-wide, isolated, and RSC controls with raw samples.
 
 The export must be one of these static string literals so Farm can analyze it without executing
 application code. Without an explicit route-level `island` export, a route that imports client
@@ -197,7 +214,9 @@ components support.
 split without changing runtime behavior, or to `"enabled"` to hydrate safe leaves independently.
 Unsupported routes keep the existing route-wide ownership model. See
 [Isolated client hydration](/docs/configuration#isolated-client-hydration) for the modes and safety
-rules.
+rules. This experiment is disabled when RSC owns the route. Integration providers also keep the
+route-wide root unless they explicitly declare that they can be recreated around independent
+isolated roots.
 
 ## Automatic optimized boundaries
 

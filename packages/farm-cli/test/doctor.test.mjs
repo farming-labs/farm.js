@@ -84,7 +84,7 @@ test("inspects a project without starting its runtime", async () => {
   }
 });
 
-test("enforces the Node 22.12 runtime baseline", async () => {
+test("enforces the Node 22.13 runtime baseline", async () => {
   const root = await createTempProject();
   const originalNodeVersion = Object.getOwnPropertyDescriptor(process.versions, "node");
 
@@ -92,17 +92,17 @@ test("enforces the Node 22.12 runtime baseline", async () => {
     Object.defineProperty(process.versions, "node", {
       ...originalNodeVersion,
       configurable: true,
-      value: "22.11.0",
+      value: "22.12.0",
     });
     const unsupported = await runFarmDoctor({ root, offline: true });
     const unsupportedCheck = unsupported.checks.find((check) => check.code === "NODE_UNSUPPORTED");
     assert.equal(unsupportedCheck?.status, "fail");
-    assert.equal(unsupportedCheck?.action, "Upgrade Node.js to version 22.12 or newer.");
+    assert.equal(unsupportedCheck?.action, "Upgrade Node.js to version 22.13 or newer.");
 
     Object.defineProperty(process.versions, "node", {
       ...originalNodeVersion,
       configurable: true,
-      value: "22.12.0",
+      value: "22.13.0",
     });
     const supported = await runFarmDoctor({ root, offline: true });
     assert.ok(supported.checks.some((check) => check.code === "NODE_SUPPORTED"));
