@@ -113,6 +113,29 @@ describe("parseRoutePath", () => {
     ]);
   });
 
+  it("rejects a catch-all directory before another route segment", () => {
+    expect(() => parseRoutePath("docs/[...slug]/edit/page.tsx")).toThrow(
+      'Catch-all segment "[...slug]" must be the final segment',
+    );
+    expect(() => parseRoutePath("docs/[[...slug]]/edit/page.tsx")).toThrow(
+      'Catch-all segment "[[...slug]]" must be the final segment',
+    );
+  });
+
+  it("rejects duplicate parameter names in one file route", () => {
+    expect(() => parseRoutePath("teams/[id]/members/[id]/page.tsx")).toThrow(
+      'Duplicate route parameter "id"',
+    );
+    expect(() => parseRoutePath("docs/[section]/[...section]/page.tsx")).toThrow(
+      'Duplicate route parameter "section"',
+    );
+    for (const fileName of ["layout.tsx", "loading.tsx", "error.tsx"]) {
+      expect(() => parseRoutePath(`teams/[id]/members/[id]/${fileName}`)).toThrow(
+        'Duplicate route parameter "id"',
+      );
+    }
+  });
+
   it("should parse root page", () => {
     const result = parseRoutePath("page.tsx");
     expect(result.segments).toEqual([]);
@@ -159,6 +182,33 @@ describe("matchRoute", () => {
     const result = matchRoute("/users/123", segments);
     expect(result.matches).toBe(true);
     expect(result.params).toEqual({ id: "123" });
+  });
+
+  it("decodes dynamic, catch-all, and static URL segments", () => {
+    expect(
+      matchRoute("/users/hello%20farm", parseRoutePath("users/[id]/page.tsx").segments),
+    ).toEqual({ matches: true, params: { id: "hello farm" } });
+    expect(
+      matchRoute("/docs/guides/caf%C3%A9", parseRoutePath("docs/[...slug]/page.tsx").segments),
+    ).toEqual({ matches: true, params: { slug: "guides/café" } });
+    expect(matchRoute("/caf%C3%A9", parseRoutePath("café/page.tsx").segments)).toEqual({
+      matches: true,
+      params: {},
+    });
+    expect(matchRoutePrefix("/caf%C3%A9/menu", parseRoutePath("café/layout.tsx").segments)).toBe(
+      true,
+    );
+    expect(matchRoute("/a%2520b", parseRoutePath("a%20b/page.tsx").segments)).toEqual({
+      matches: true,
+      params: {},
+    });
+  });
+
+  it("keeps malformed URL segments literal while matching", () => {
+    expect(matchRoute("/users/%E0%A4%A", parseRoutePath("users/[id]/page.tsx").segments)).toEqual({
+      matches: true,
+      params: { id: "%E0%A4%A" },
+    });
   });
 
   it("should match dynamic segments containing dots", () => {

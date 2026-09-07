@@ -214,6 +214,16 @@ React and 1.25x faster than the compiled control. Package tests also cover filte
 composition, queued filter-then-sort updates, 2,000 randomized removals, controlled-input focus and
 selection, hydration, cleanup, and conservative fallback.
 
+Same-key map-and-reorder pipelines have their own 10,000-row comparison. One concise setter
+reprices a single row through `map()` and immediately restores amount order with `toSorted()`; the
+block-bodied form performs the same JavaScript and DOM-visible work through complete compiled
+reconciliation. Both compiler modes must remain at least 4x faster than React and 1.2x faster than
+that compiled control. The assertion retains all 10,000 row elements, moves the edited row to its
+exact final position, and verifies its text and amount. Package tests separately cover queued
+edits, map/sort/reverse composition, changed-key and custom-method fallback, delegated events,
+controlled-input focus and selection, 2,000 differential updates, Strict Mode hydration, and
+unmount-before-flush cleanup.
+
 Native keyed-array sorting has its own 10,000-row comparison. Concise `toSorted()` is measured
 against bracketed React and an equivalent block-bodied compiled control. Both compiler modes must
 remain at least 4x faster than React and 1.25x faster than the compiled control. The report must
@@ -296,6 +306,10 @@ The default JSON report is `/tmp/farm-react-dashboard-benchmark.json`; change it
 - The reorder-pipeline control executes two native reversals inside one functional setter. Its
   block-bodied equivalent stays on complete reconciliation, isolating the build-time lowering of
   native sort/reverse-only call chains.
+- The map-reorder control changes one item identity and then sorts the same keyed rows. Its
+  block-bodied equivalent rereads the complete keyed snapshot; the hinted path isolates the saved
+  descriptor and unchanged-binding work while both paths run the same native map, sort, and LIS
+  movement.
 - The sort control compares concise native `toSorted()` with an equivalent block-bodied compiled
   update. Both paths run the same native sort and move the same keyed DOM rows; the hint isolates
   the saved key, descriptor, and binding work while retaining only the required LIS moves.
