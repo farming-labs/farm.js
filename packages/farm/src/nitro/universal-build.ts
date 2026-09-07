@@ -2530,7 +2530,7 @@ ${isolatedHydrationImport}
 ${providerClientCode.imports}
 import { createClientPluginManager, getHashTargetElement, installChunkErrorRecovery, isFarmExternalNavigationURL, reconcileFarmDocumentHead, scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
 import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";
-import { matchFarmRoute } from "@farm.js/core/router";
+import { isFarmRouteActive, matchFarmRoute } from "@farm.js/core/router";
 ${clientPluginEntry.imports}
 ${i18nClientRuntime}
 ${docsNavigationRuntime}
@@ -2567,9 +2567,7 @@ function getApplicableLayouts(pathname) {
   const normalizedPath = getFarmRoutePathname(pathname).replace(/\\/$/, '') || '/';
   
   for (const layout of layoutRoutes) {
-    if (layout.pattern === '/' || 
-        normalizedPath === layout.pattern || 
-        normalizedPath.startsWith(layout.pattern + '/')) {
+    if (layout.pattern === '/' || isFarmRouteActive(layout.pattern, normalizedPath, { exact: false })) {
       applicable.push(layout);
     }
   }
@@ -2684,12 +2682,8 @@ async function createMatchedHydrationElement(matched, pathname, searchParams, se
 }
 
 function matchesRoutePrefix(pathname, pattern) {
-  if (pattern === "/") return true;
-  const pathSegments = getFarmRoutePathname(pathname).split("/").filter(Boolean);
-  const patternSegments = pattern.split("/").filter(Boolean);
-  if (patternSegments.length > pathSegments.length) return false;
-  const candidate = "/" + pathSegments.slice(0, patternSegments.length).join("/");
-  return matchFarmRoute(pattern, candidate) !== null;
+  return pattern === "/" ||
+    isFarmRouteActive(pattern, getFarmRoutePathname(pathname), { exact: false });
 }
 
 function matchInterceptedRouteSlot(pathname, from) {
@@ -4476,6 +4470,7 @@ ${instrumentationImport}
 ${imageRuntimeImport}
 ${imageNodeRuntimeImport}
 import { farmFontPreloadHeader } from "virtual:farm-font-runtime";
+import { isFarmRouteActive } from "@farm.js/core/router";
 ${rendererServerImports}
 
 const farmPreloadConfig = ${JSON.stringify(config.performance.preload)};
@@ -5596,12 +5591,8 @@ function matchPageRoute(pathname) {
 }
 
 function matchesRoutePrefix(pathname, pattern) {
-  if (pattern === "/") return true;
-  const pathSegments = normalizeRuntimePath(pathname).split("/").filter(Boolean);
-  const patternSegments = normalizeRuntimePath(pattern).split("/").filter(Boolean);
-  if (patternSegments.length > pathSegments.length) return false;
-  const candidate = "/" + pathSegments.slice(0, patternSegments.length).join("/");
-  return matchRuntimePathPattern(pattern, candidate) !== null;
+  return pattern === "/" ||
+    isFarmRouteActive(pattern, normalizeRuntimePath(pathname), { exact: false });
 }
 
 function routeSlotSpecificity(slot) {
@@ -5799,9 +5790,7 @@ function getApplicableLayouts(pathname) {
   for (const layout of layoutRoutes) {
     // Root layout (/) applies to everything
     // Other layouts apply to their path and sub-paths
-    if (layout.pattern === '/' || 
-        normalizedPath === layout.pattern || 
-        normalizedPath.startsWith(layout.pattern + '/')) {
+    if (layout.pattern === '/' || isFarmRouteActive(layout.pattern, normalizedPath, { exact: false })) {
       applicable.push(layout);
     }
   }
