@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/cli",
-  "version": "0.1.0-beta.82",
+  "version": "0.1.0-beta.83",
   "description": "CLI for Farm.js framework",
   "keywords": [
     "@farm.js/cli",
@@ -46,5 +46,8 @@
     "@types/node": "^20.10.5",
     "tsdown": "^0.15.7",
     "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=22.12.0"
   }
 }

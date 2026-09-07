@@ -416,6 +416,28 @@ reorder fall back. Reports count each compiled step in the existing filter, slic
 counter, and modules without those operations omit their optional runtimes. Farm does not polyfill
 `Array.prototype.toReversed`.
 
+A compiler-safe same-key map may also precede the native reorder suffix:
+
+```tsx
+setItems((current) =>
+  current
+    .map((item) => (item.id === editedId ? { ...item, rank: nextRank } : item))
+    .toSorted((left, right) => left.rank - right.rank),
+);
+```
+
+Farm executes the native map and reorder calls normally, verifies the committed token, dense-array
+shape, a one-to-one source-item match, and every replacement key before touching the DOM, then runs
+one LIS and patches bindings only for changed item identities. Unchanged rows need no second key or
+binding read. Queued supported map-and-reorder setters compose against the same committed rows. The
+initial proof requires an inline synchronous
+conditional mapper that returns either the original item or an object-spread replacement, plus
+index-independent compiler-owned host rows. Changed keys, referenced or block-bodied callbacks,
+unconditional replacements, `thisArg`, structural calls in the same chain, computed or custom
+methods, sparse or subclassed arrays, collection-reading bindings, nested or React-owned rows, and
+failed checks use complete keyed reconciliation. Reports use the existing map, sort, and reorder
+hint counters, and unrelated modules do not retain this optional runtime.
+
 A direct native immutable sort can use the same optional reorder runtime:
 
 ```tsx

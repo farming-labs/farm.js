@@ -120,7 +120,8 @@ handled by the browser instead of Farm's SPA router. Absolute URI schemes such a
 `sms:`, and same-origin `blob:` URLs are passed through unchanged and are never prefetched as app routes. Literal custom
 schemes such as `customapp:open` are validated from their URI grammar and work without registration.
 Viewport prefetch uses a short scroll guard and is cancelled if its link unmounts before the guard
-expires.
+expires. Intent prefetches are deduplicated while active; after an attempt settles, a later hover,
+focus, or touch can retry while successful route data remains deduplicated by the router cache.
 Internal `Link` hrefs stay app-relative: when `basePath: "/console"` is configured, `href="/about"`
 renders and navigates to `/console/about`. Do not add the base path to route hrefs yourself.
 For a reusable custom-scheme type, use ``ExternalHref<`customapp:${string}`>`` (or declaration-merge
@@ -171,6 +172,17 @@ const href = router.build("/docs/[[...slug]]", {
 ```
 
 This returns `/docs/core/routing`. Optional catch-all params can be omitted, static routes win over dynamic routes, and route groups such as `(marketing)` do not appear in the URL.
+
+Route matching decodes each URL path segment once before comparing static names or exposing
+`params`. Route names remain literal (including `%`), and malformed percent escapes remain literal
+instead of aborting the request.
+
+A required or optional catch-all must be the final URL segment. Farm reports paths such as
+`docs/[...slug]/edit/page.tsx` during route discovery because the catch-all would otherwise consume
+the `edit` segment and make the route unreachable.
+
+Each dynamic segment in one route must have a unique parameter name. Farm rejects paths such as
+`teams/[id]/members/[id]/page.tsx` instead of silently replacing the outer `id` value.
 For navigation state, `router.isActive(pattern, pathname, { exact: false })` also matches
 descendants after dynamic segments, such as `/users/42/settings` for `/users/[id]`.
 

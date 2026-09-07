@@ -1210,6 +1210,45 @@ reorder step in its existing hint counter; modules without those steps do not re
 runtimes. The application runtime must provide `Array.prototype.toReversed`; Farm does not polyfill
 it.
 
+#### Same-key map and reorder pipelines
+
+A common data-table update changes one row and immediately restores a sorted order:
+
+```tsx
+setItems((current) =>
+  current
+    .map((item) => (item.id === editedId ? { ...item, rank: nextRank, label: nextLabel } : item))
+    .toSorted((left, right) => left.rank - right.rank),
+);
+```
+
+For a concise functional setter, Farm can prepare the safe same-key `map()` and the following
+native `toSorted()` or `toReversed()` calls as one update pipeline. JavaScript still performs the
+map and reorder normally. The compiler records only enough provenance to prove that the final
+array came from the currently committed keyed rows.
+
+Before changing the DOM, the runtime verifies ordinary dense arrays, exact native methods, the
+committed collection token, equal lengths, a unique one-to-one source-item match, and the key of
+every replacement item. It prepares all changed binding values and DOM targets first, runs one LIS
+reconciliation for the final order, and patches bindings only for rows whose item identity changed.
+Unchanged rows need no second key or binding read. Existing row elements, delegated handlers,
+controlled inputs, focus, and text selection stay attached to their keys. Multiple supported
+map-and-reorder setters queued before one compiler flush compose against the same committed
+collection and expose only the final state.
+
+The initial proof accepts one inline, synchronous, compiler-safe map callback that returns the
+original item on one conditional branch and an object-spread replacement on the other. It requires
+compiler-owned host rows whose render and key do not observe the index. Referenced or block-bodied
+callbacks, unconditional replacements, changed or duplicate keys, `thisArg`, structural methods in
+the same chain, computed or custom methods, sparse or subclassed arrays, collection-reading
+bindings, React-owned rows, nested host blocks, row conditionals, unrelated dirty dependencies, or
+failed runtime validation use complete keyed reconciliation before any fast-path DOM write.
+
+No API or option is added. Reports count the prepared map and reorder calls through the existing
+`keyedMapUpdateHints`, `keyedArraySortHints`, and `keyedArrayReorderHints` fields. Modules that do
+not contain a supported map-and-reorder pipeline do not retain its optional runtime. Farm does not
+polyfill `Array.prototype.toSorted` or `Array.prototype.toReversed`.
+
 #### Keyed array sort hints
 
 A direct native immutable sort can reuse every keyed row while changing only its DOM position:
@@ -2068,6 +2107,11 @@ The package and example test suites verify more than generated code:
   React; targeted tests cover filter/slice/reorder pipelines, queued filter-then-sort updates,
   surviving controlled-input focus and selection, exact DOM identity, custom-method and identity
   fallback, StrictMode hydration, and unmount-before-flush cleanup;
+- 2,000 deterministic same-key edits followed by native sorting match normal React; targeted tests
+  require one changed-row binding read, preserve every keyed DOM node, compose queued map/sort and
+  map/sort/reverse pipelines, dispatch moved-row events with the newest item and index, preserve
+  controlled-input focus and selection, and cover changed-key and custom-method fallback, Strict
+  Mode hydration, and unmount-before-flush cleanup;
 - 1,000 deterministic exact-position insertions, single and contiguous-range removals, single-row
   replacements, and exact-window replacements match normal React; compiler tests cover guarded
   runtime positions plus literal and compiler-safe runtime delete counts, while targeted removal

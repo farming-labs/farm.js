@@ -152,7 +152,7 @@ Pass a `loader` prop when an application already uses an image CDN. The loader r
 
 ## Security model
 
-The optimizer accepts only configured widths and qualities. It does not forward browser cookies or authorization headers, limits response bodies, checks file signatures instead of trusting `Content-Type`, revalidates redirect destinations, and blocks loopback, link-local, and private network targets.
+The optimizer accepts only configured widths and qualities. It does not forward browser cookies or authorization headers, limits response bodies, checks file signatures instead of trusting `Content-Type`, revalidates redirect destinations, and blocks loopback, link-local, and private network targets. On Node, Farm validates the DNS addresses used by the actual image connection so a hostname cannot switch to a private target between an earlier check and the fetch.
 Formats explicitly rejected with `q=0` are never emitted. Farm uses the configured format order to
 break equal-quality ties and keeps the source format when the client only sends wildcard ranges.
 
