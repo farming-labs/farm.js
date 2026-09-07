@@ -12,6 +12,7 @@ import {
   Terminal,
 } from "lucide-react";
 import { getPrisma } from "../../lib/prisma";
+import { farmProductionSiteWhere } from "../../lib/telemetry-sites";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -177,8 +178,9 @@ async function loadTelemetryData(limit: number): Promise<TelemetryData> {
         select: { identityHash: true },
       }),
       prisma.farmTelemetryEvent.count({ where: { eventType: "project_created" } }),
-      prisma.farmProductionSite.count(),
+      prisma.farmProductionSite.count({ where: farmProductionSiteWhere }),
       prisma.farmProductionSite.findMany({
+        where: farmProductionSiteWhere,
         orderBy: { lastSeenAt: "desc" },
         take: 250,
         select: {
