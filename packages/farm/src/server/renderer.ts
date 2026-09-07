@@ -63,6 +63,7 @@ import {
 import { createFarmLocaleCookie, getFarmLocaleVaryHeaders } from "../i18n/resolver";
 import { localizeFarmHref, localizeFarmPathname } from "../i18n/routing";
 import { sendWebResponse } from "./response";
+import { applyFarmBasePath } from "../base-path";
 import { renderFarmFontDevHead } from "../font-vite";
 import { createFarmMetadataImageResponse } from "../metadata-image";
 import { createFarmMetadataRouteResponse } from "../metadata-route";
@@ -1796,9 +1797,10 @@ export class ServerRenderer {
           manifestMatch.params,
         );
         const snapshot = getFarmI18nClientSnapshot();
-        metadata.manifest = snapshot
+        const localizedHref = snapshot
           ? localizeFarmHref(rawHref, snapshot.locale, snapshot)
           : rawHref;
+        metadata.manifest = applyFarmBasePath(localizedHref, this.config.basePath);
       }
     }
 
@@ -1821,7 +1823,8 @@ export class ServerRenderer {
 
     const rawHref = this.routeManager.resolveMetadataImagePath(match.image, match.params);
     const snapshot = getFarmI18nClientSnapshot();
-    const href = snapshot ? localizeFarmHref(rawHref, snapshot.locale, snapshot) : rawHref;
+    const localizedHref = snapshot ? localizeFarmHref(rawHref, snapshot.locale, snapshot) : rawHref;
+    const href = applyFarmBasePath(localizedHref, this.config.basePath);
     const reference: FarmMetadataImageReference = {
       kind,
       href,
