@@ -1696,7 +1696,7 @@ function matchRuntimePathPattern(pattern, pathname) {
       continue;
     }
 
-    if (segment !== pathnameSegment) return null;
+    if (segment !== decodeRouteSegment(pathnameSegment)) return null;
     pathIndex++;
   }
 
