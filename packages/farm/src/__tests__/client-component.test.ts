@@ -744,6 +744,28 @@ export function Chart() {}
     expect(source).not.toContain("Could not preload layout:");
   });
 
+  it("scopes isolated root disposal and hydration to SPA navigation subtrees", () => {
+    const developmentSource = fs.readFileSync(path.join(process.cwd(), "src", "vite.ts"), "utf-8");
+    const productionSource = fs.readFileSync(
+      path.join(process.cwd(), "src", "nitro", "universal-build.ts"),
+      "utf-8",
+    );
+
+    for (const source of [developmentSource, productionSource]) {
+      const disposeTarget = source.indexOf("disposeFarmIsolatedClientBoundaries(currentTarget);");
+      const replaceTarget = source.indexOf("currentTarget.replaceWith(nextTarget);");
+      expect(disposeTarget).toBeGreaterThan(-1);
+      expect(replaceTarget).toBeGreaterThan(disposeTarget);
+      expect(source).toContain("isolatedHydrationScope");
+      expect(source).toMatch(
+        /hydrateFarmIsolatedClientBoundaries\(\s*isolatedHydrationScope,\s*(?:hydrationController|navigation\.controller)\.signal,/,
+      );
+    }
+
+    expect(productionSource).toContain("disposeFarmIsolatedClientBoundaries(document);");
+    expect(developmentSource).toContain("if (hydrationController.signal.aborted) return;");
+  });
+
   it("uses a document swap when generated SPA navigation leaves the app root", () => {
     const source = fs.readFileSync(
       path.join(process.cwd(), "src", "nitro", "universal-build.ts"),

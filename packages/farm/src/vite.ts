@@ -4549,11 +4549,13 @@ function replaceNavigationBoundary(container, fragment, currentPatterns, nextPat
     : fragment.querySelector('#__farm_page__');
 
   if (!currentTarget || !nextTarget) {
+    ${isolatedHydrationEnabled ? "disposeFarmIsolatedClientBoundaries(container);" : ""}
     container.replaceChildren(fragment);
     activateFragmentScripts(container);
-    return;
+    return container;
   }
 
+  ${isolatedHydrationEnabled ? "disposeFarmIsolatedClientBoundaries(currentTarget);" : ""}
   currentTarget.replaceWith(nextTarget);
   activateFragmentScripts(nextTarget);
   if (fragmentTreeRoot && fragmentTreeRoot !== nextTarget) fragmentTreeRoot.remove();
@@ -4569,6 +4571,7 @@ function replaceNavigationBoundary(container, fragment, currentPatterns, nextPat
     activateFragmentScripts(support);
     setTimeout(() => support.remove(), 0);
   }
+  return nextTarget;
 }
 
 let activeLayoutPatterns = readActiveLayoutPatterns();
@@ -4682,8 +4685,9 @@ async function renderPage(pageData) {
         },
       );
     } else {
-      ${isolatedHydrationEnabled ? "disposeFarmIsolatedClientBoundaries(container);" : ""}
+      ${isolatedHydrationEnabled ? "let isolatedHydrationScope = container;" : ""}
       if (activeLayoutShouldHydrate) {
+        ${isolatedHydrationEnabled ? "disposeFarmIsolatedClientBoundaries(container);" : ""}
         if (appRoot) { try { appRoot.unmount(); } catch (error) {} appRoot = null; }
         if (reactRoot) { try { reactRoot.unmount(); } catch (error) {} reactRoot = null; }
         container.replaceChildren(fragment);
@@ -4692,7 +4696,11 @@ async function renderPage(pageData) {
         if (appRoot) { try { appRoot.unmount(); } catch (error) {} appRoot = null; }
         if (reactRoot) { try { reactRoot.unmount(); } catch (error) {} reactRoot = null; }
         delete window.__FARM_REACT_ROOT__;
-        replaceNavigationBoundary(container, fragment, activeLayoutPatterns, layoutPatterns);
+        ${
+          isolatedHydrationEnabled
+            ? "isolatedHydrationScope = replaceNavigationBoundary(container, fragment, activeLayoutPatterns, layoutPatterns) || container;"
+            : "replaceNavigationBoundary(container, fragment, activeLayoutPatterns, layoutPatterns);"
+        }
       }
 
       if (shouldHydrate) {
@@ -4733,7 +4741,13 @@ async function renderPage(pageData) {
       }${
         isolatedHydrationEnabled
           ? ` else if (hasIsolatedClientBoundaries) {
-        await hydrateFarmIsolatedClientBoundaries(container);
+        const hydrationController = new AbortController();
+        pendingPageHydrationController = hydrationController;
+        await hydrateFarmIsolatedClientBoundaries(
+          isolatedHydrationScope,
+          hydrationController.signal,
+        );
+        if (hydrationController.signal.aborted) return;
       }`
           : ""
       }
@@ -4801,7 +4815,10 @@ async function hydrate() {
         ? `const hasIsolatedClientBoundaries =
       window.__FARM_HAS_ISOLATED_CLIENT_BOUNDARIES__ === true;
     if (hasIsolatedClientBoundaries && !pageShouldHydrate && !layoutShouldHydrate) {
-      await hydrateFarmIsolatedClientBoundaries(rootContainer);
+      const hydrationController = new AbortController();
+      pendingPageHydrationController = hydrationController;
+      await hydrateFarmIsolatedClientBoundaries(rootContainer, hydrationController.signal);
+      if (hydrationController.signal.aborted) return;
       replayPreHydrationClicks();
       return;
     }`
