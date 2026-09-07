@@ -38,5 +38,49 @@ export function stripFarmBasePath(pathname: string, basePath = getFarmBasePath()
 
 export function normalizeFarmBasePath(basePath: string | undefined): string {
   if (!basePath || basePath === "/") return "";
-  return `/${basePath}`.replace(/\/{2,}/g, "/").replace(/\/+$/, "");
+
+  const hasUnstableCharacters = (candidate: string) =>
+    candidate.includes("\\") ||
+    Array.from(candidate).some((character) => {
+      const code = character.charCodeAt(0);
+      return code <= 31 || (code >= 127 && code <= 159);
+    });
+
+  if (hasUnstableCharacters(basePath)) {
+    throw new Error("Farm basePath cannot contain backslashes or control characters.");
+  }
+
+  const pathname = basePath.trim();
+  if (!pathname || pathname === "/") return "";
+  if (pathname.includes("?") || pathname.includes("#")) {
+    throw new Error("Farm basePath cannot contain a query string or hash.");
+  }
+  if (pathname.startsWith("//") || /^[a-z][a-z\d+.-]*:\/\//i.test(pathname)) {
+    throw new Error('Farm basePath must be a pathname such as "/docs", not a URL.');
+  }
+
+  for (const segment of pathname.split("/")) {
+    let decoded = segment;
+    try {
+      decoded = decodeURIComponent(segment);
+    } catch {
+      // Malformed escapes remain literal in URL pathnames and cannot be dot segments.
+    }
+    if (hasUnstableCharacters(decoded)) {
+      throw new Error("Farm basePath cannot contain backslashes or control characters.");
+    }
+    if (decoded.includes("/")) {
+      throw new Error("Farm basePath cannot contain percent-encoded path separators.");
+    }
+    if (decoded === "." || decoded === "..") {
+      throw new Error('Farm basePath cannot contain "." or ".." path segments.');
+    }
+  }
+
+  return `/${pathname}`.replace(/\/{2,}/g, "/").replace(/\/+$/, "");
+}
+
+/** Normalize a configured application base path while preserving `/` for root. */
+export function normalizeFarmConfigBasePath(basePath: string | undefined): string {
+  return normalizeFarmBasePath(basePath) || "/";
 }
