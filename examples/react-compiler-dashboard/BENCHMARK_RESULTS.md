@@ -2,6 +2,39 @@
 
 Date: 2026-08-29
 
+## Structural prefixes composed with native reorders — 2026-09-06
+
+The 10,000-row table now measures one concise setter that filters one row and then executes two
+native `toReversed()` calls. The final order matches the surviving source order, so the workload
+isolates structural composition from DOM movement. The compiler carries the filter survivor map
+through both immutable reorder results, validates every surviving item and key before writing,
+disconnects only the rejected row, preserves all 9,999 surviving DOM nodes, and skips map and LIS
+work when the final permutation keeps survivor order. The equivalent block-bodied updater remains
+the compiled fallback control.
+
+| Mode   | React median | Composed pipeline | Compiled control | vs React | vs control |
+| ------ | -----------: | ----------------: | ---------------: | -------: | ---------: |
+| Static |     92.85 ms |          23.10 ms |         32.40 ms |    4.02x |      1.40x |
+| Hybrid |     92.85 ms |          24.70 ms |         37.30 ms |    3.76x |      1.51x |
+
+The independent gate requires at least 2x versus bracketed React and 1.25x versus the compiled
+control in both modes. The full production run passed that gate, the general regression and
+scalability gates, every older optimization gate, all DOM identity assertions, and zero-owner-
+execution checks without lowering a threshold. Both compiler reports emitted two filter hints and
+seven reorder hints, including the filter/reorder pipeline.
+
+Compiler coverage accepts compiler-safe `filter()` and bounded `slice()` prefixes followed by
+native `toSorted()` and `toReversed()` suffixes, while rejecting structural calls after a reorder,
+referenced predicates, custom methods, and index-dependent rows. Runtime coverage preserves
+controlled-input focus and selection, proves atomic fallback before DOM writes, exercises queued
+updates, Strict Mode hydration, and unmount-before-flush cleanup, and compares 2,000 randomized
+filter/sort/reverse updates with normal React.
+
+The combined reconciler and structural metadata helpers live only in the every-hints runtime tier.
+The runtime-size guard passes: a reorder-only fixture remains 12,151 B gzip and the compiler-
+selected core removes 82.9% of the complete compatibility-runtime premium. The recorded run used
+Chrome 152.0.7977.82, Node.js 23.11.0, and Apple M1 macOS arm64.
+
 ## Native reorder pipelines in one setter — 2026-09-05
 
 The 10,000-row table now measures two native `toReversed()` calls chained inside one concise

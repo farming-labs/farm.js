@@ -127,6 +127,42 @@ describe("React AOT keyed-array sort hints", () => {
     expect(result.code.match(/createCompilerKeyedArrayReorder\(/g)).toHaveLength(2);
   });
 
+  it("lowers a structural prefix followed by native reorder steps", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Table() {
+        const [rows, setRows] = useState([
+          { id: "a", rank: 2, visible: true, label: "Alpha" },
+          { id: "b", rank: 1, visible: false, label: "Beta" },
+          { id: "c", rank: 3, visible: true, label: "Gamma" },
+        ]);
+        return <section>
+          <button onClick={() => setRows((current) =>
+            current
+              .filter((row) => row.visible)
+              .slice(0, 2)
+              .toSorted((left, right) => left.rank - right.rank)
+              .toReversed()
+          )}>Keep and reorder</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </section>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Table"]);
+    expect(result.optimizations.keyedArrayFilterHints).toBe(1);
+    expect(result.optimizations.keyedArraySliceHints).toBe(1);
+    expect(result.optimizations.keyedArraySortHints).toBe(1);
+    expect(result.optimizations.keyedArrayReorderHints).toBe(1);
+    expect(result.code.match(/createCompilerKeyedArrayFilter\(/g)).toHaveLength(1);
+    expect(result.code.match(/createCompilerKeyedArraySlice\(/g)).toHaveLength(1);
+    expect(result.code.match(/createCompilerKeyedArrayStructuralSort\(/g)).toHaveLength(1);
+    expect(result.code.match(/createCompilerKeyedArrayStructuralReorder\(/g)).toHaveLength(1);
+    expect(result.code).not.toContain("createCompilerKeyedArraySort");
+    expect(result.code).not.toContain("createCompilerKeyedArrayReorder");
+    expect(result.code).toContain("keyedRowsEveryHintedRuntimeFeature");
+  });
+
   it.each([
     {
       name: "a referenced comparator",
@@ -138,8 +174,18 @@ describe("React AOT keyed-array sort hints", () => {
       update: 'current.toSorted((left, right) => left.rank - right.rank)["toReversed"]()',
     },
     {
-      name: "a non-reorder intermediate method",
+      name: "a no-op slice without a structural hint",
       update: "current.slice().toSorted((left, right) => left.rank - right.rank).toReversed()",
+    },
+    {
+      name: "a structural method after reordering",
+      update:
+        "current.toSorted((left, right) => left.rank - right.rank).filter((row) => row.visible)",
+    },
+    {
+      name: "a referenced filter predicate",
+      declaration: "const visible = (row) => row.visible;",
+      update: "current.filter(visible).toReversed()",
     },
     {
       name: "an invalid reverse argument",
@@ -224,6 +270,31 @@ describe("React AOT keyed-array sort hints", () => {
     `);
 
     expect(result.optimizations.keyedArraySortHints).toBe(0);
+    expect(result.code).not.toContain("createCompilerKeyedArraySort");
+  });
+
+  it("keeps an index-dependent structural reorder on complete reconciliation", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Table() {
+        const [rows, setRows] = useState([
+          { id: "a", rank: 2, visible: true },
+          { id: "b", rank: 1, visible: false },
+        ]);
+        return <section>
+          <button onClick={() => setRows((current) =>
+            current
+              .filter((row) => row.visible)
+              .toSorted((left, right) => left.rank - right.rank)
+          )}>Keep and sort</button>
+          <ul>{rows.map((row, index) => <li key={row.id}>{index}: {row.id}</li>)}</ul>
+        </section>;
+      }
+    `);
+
+    expect(result.optimizations.keyedArrayFilterHints).toBe(0);
+    expect(result.optimizations.keyedArraySortHints).toBe(0);
+    expect(result.code).not.toContain("createCompilerKeyedArrayFilter");
     expect(result.code).not.toContain("createCompilerKeyedArraySort");
   });
 });

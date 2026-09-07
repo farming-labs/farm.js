@@ -394,12 +394,27 @@ setItems((current) => current.toSorted((left, right) => left.rank - right.rank).
 
 Farm evaluates every lookup and call in JavaScript order, carries the same committed token through
 the pipeline, and reconciles only its final result. Index-aware or collection-reading rows,
-arguments to `toReversed()`, referenced comparators, computed methods, chains containing a method
-other than `toSorted()` or `toReversed()`, block-bodied updaters, custom methods, sparse or
-subclassed behavior, an unhinted or structural intermediate update, nested or React-owned rows, and
-failed checks keep complete keyed reconciliation. Reports count each compiled reverse step as a
-`keyedArrayReorderHints` entry, and modules without one omit the reorder runtime. Farm does not
-polyfill `Array.prototype.toReversed`.
+arguments to `toReversed()`, referenced comparators, computed methods, block-bodied updaters, custom
+methods, sparse or subclassed behavior, structural calls after reordering, an unhinted intermediate
+update, nested or React-owned rows, and failed checks keep complete keyed reconciliation.
+
+A compiler-safe `filter()` or bounded `slice()` prefix may precede the native reorder suffix:
+
+```tsx
+setItems((current) =>
+  current
+    .filter((item) => item.visible)
+    .toSorted((left, right) => left.rank - right.rank)
+    .toReversed(),
+);
+```
+
+Farm validates the complete survivor set and final order before the first DOM write, removes only
+rejected rows, and applies LIS once to the survivors. Concise filter/slice and reorder setters also
+compose when queued in that order before one flush. Unsupported calls or a structural call after a
+reorder fall back. Reports count each compiled step in the existing filter, slice, sort, or reverse
+counter, and modules without those operations omit their optional runtimes. Farm does not polyfill
+`Array.prototype.toReversed`.
 
 A direct native immutable sort can use the same optional reorder runtime:
 
@@ -419,10 +434,10 @@ reconcile only their final permutation. The native sorting work itself is unchan
 
 Index-aware or collection-reading rows, referenced comparators, block-bodied updaters, computed or
 unsupported chained calls, custom methods, sparse or subclassed arrays, duplicate item identities,
-unhinted or structural intermediate updates, nested or React-owned rows, and failed checks keep
-complete keyed reconciliation. Reports count each compiled sort step as a `keyedArraySortHints`
-entry; sort shares the optional reorder runtime, and Farm does not polyfill
-`Array.prototype.toSorted`.
+unhinted intermediate updates, structural calls after reordering, nested or React-owned rows, and
+failed checks keep complete keyed reconciliation. A compiler-safe filter/slice prefix is supported.
+Reports count each compiled sort step as a `keyedArraySortHints` entry; sort shares the optional
+reorder runtime, and Farm does not polyfill `Array.prototype.toSorted`.
 
 Concise immutable filters on a direct keyed array can carry removal positions into the same
 optional runtime:
@@ -723,7 +738,8 @@ reasons aggregated by count. Its summary and per-module `optimizations` also rep
 `keyedCollectionUpdateHints`, the number of compiler-proven native Set/Map mutation sites; and
 `keyedMapUpdateHints`, the number of compiler-proven direct keyed `map()` update sites; and
 `keyedArrayAppendHints`, the number of compiler-proven direct keyed-array append sites; and
-`keyedArrayFilterHints`, the number of compiler-proven direct keyed-array filter sites; and
+`keyedArrayFilterHints`, the number of compiler-proven keyed-array filter sites, including supported
+structural reorder pipelines; and
 `keyedArrayPrependHints`, the number of compiler-proven direct keyed-array prepend sites; and
 `keyedArrayPositionHints`, the number of compiler-proven native exact-position insertion, single or
 contiguous-range removal, single-row replacement, or exact-window replacement sites, including
@@ -733,8 +749,9 @@ and
 `keyedArraySortHints`, the number of compiler-proven native keyed-array sort steps; and
 `keyedArrayRollingWindowHints`, the number of compiler-proven retained-tail plus incoming-suffix
 sites; and
-`keyedArraySliceHints`, the number of compiler-proven direct keyed-array slice sites with literal or
-guarded compiler-safe runtime bounds. A custom project-relative `reportFile` also enables reporting.
+`keyedArraySliceHints`, the number of compiler-proven keyed-array slice sites with literal or guarded
+compiler-safe runtime bounds, including supported structural reorder pipelines. A custom
+project-relative `reportFile` also enables reporting.
 
 The runtime test compares the same counter interaction on both paths: ordinary React performs a
 second component render and commit, while the compiled component remains at one render and one

@@ -135,8 +135,8 @@ async function inspectBuild(compilerMode) {
       "The compiler build did not emit a keyed-array append hint.",
     );
     assert(
-      compilerReport.summary.keyedArrayFilterHints > 0,
-      "The compiler build did not emit a keyed-array filter hint.",
+      compilerReport.summary.keyedArrayFilterHints >= 2,
+      "The compiler build did not emit both keyed-array filter hints.",
     );
     assert(
       compilerReport.summary.keyedArrayPrependHints > 0,
@@ -147,8 +147,8 @@ async function inspectBuild(compilerMode) {
       "The compiler build did not emit the keyed-array exact-position hints.",
     );
     assert(
-      compilerReport.summary.keyedArrayReorderHints > 0,
-      "The compiler build did not emit a keyed-array reorder hint.",
+      compilerReport.summary.keyedArrayReorderHints >= 7,
+      "The compiler build did not emit every keyed-array reorder pipeline step.",
     );
     assert(
       compilerReport.summary.keyedArraySortHints > 0,
@@ -1164,6 +1164,40 @@ async function measureTrial(browser, trial, compilerMode, port) {
           },
         );
 
+        const measureFilterReorderPipeline = async (action) => {
+          const rows = [...table.querySelectorAll("tbody tr")];
+          const survivors = rows.filter(
+            (row) => Number(row.getAttribute("data-row-id")) % 10_000 !== 5_001,
+          );
+          const removed = rows.filter(
+            (row) => Number(row.getAttribute("data-row-id")) % 10_000 === 5_001,
+          );
+          await runTableAction(action, () => {
+            const nextRows = table.querySelectorAll("tbody tr");
+            return (
+              nextRows.length === survivors.length &&
+              rowsMatch(nextRows, survivors) &&
+              removed.every((row) => !row.isConnected)
+            );
+          });
+        };
+
+        const tableFilterReorderPipeline = await measureTable(
+          async () => ensure10000(),
+          async () =>
+            measureFilterReorderPipeline(() =>
+              tableButton("table-filter-reorder-pipeline").click(),
+            ),
+        );
+
+        const tableFilterReorderPipelineSnapshot = await measureTable(
+          async () => ensure10000(),
+          async () =>
+            measureFilterReorderPipeline(() =>
+              tableButton("table-filter-reorder-pipeline-snapshot").click(),
+            ),
+        );
+
         const tableSort = await measureTable(
           async () => create10000(),
           async () => {
@@ -1556,6 +1590,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
             denseMapLookup: tableDenseMapLookup,
             denseMembership: tableDenseMembership,
             executionsAdded: Number(tableExecutions.textContent) - initialTableExecutions,
+            filterReorderPipeline: tableFilterReorderPipeline,
+            filterReorderPipelineSnapshot: tableFilterReorderPipelineSnapshot,
             mapLookup: tableMapLookup,
             membership: tableMembership,
             prepend: tablePrepend,
@@ -1676,6 +1712,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
         denseMapLookup: timingSummary(result.table.denseMapLookup),
         denseMembership: timingSummary(result.table.denseMembership),
         executionsAdded: result.table.executionsAdded,
+        filterReorderPipeline: timingSummary(result.table.filterReorderPipeline),
+        filterReorderPipelineSnapshot: timingSummary(result.table.filterReorderPipelineSnapshot),
         mapLookup: timingSummary(result.table.mapLookup),
         membership: timingSummary(result.table.membership),
         prepend: timingSummary(result.table.prepend),
@@ -1846,6 +1884,8 @@ const tableMetrics = [
   "mapLookup",
   "denseMembership",
   "denseMapLookup",
+  "filterReorderPipeline",
+  "filterReorderPipelineSnapshot",
   "snapshotMembership",
   "snapshotMapLookup",
   "slicePrefix",
@@ -2436,6 +2476,29 @@ const keyedReorderPipelineRegressions = keyedReorderPipelineResults.filter(
     !Number.isFinite(snapshotSpeedup) ||
     snapshotSpeedup < keyedReorderPipelineMinimumSnapshotSpeedup,
 );
+// Filtering followed by native reorder steps changes membership and order in one setter. The
+// hinted path must preserve every surviving row, remove rejected rows, and stay ahead of React and
+// the equivalent block-bodied compiled control at 10,000 rows.
+const keyedStructuralReorderMinimumSpeedup = 2;
+const keyedStructuralReorderMinimumSnapshotSpeedup = 1.25;
+const keyedStructuralReorderResults = ["static", "hybrid"].map((mode) => {
+  const pipelineMedianMs = comparisons.table.filterReorderPipeline[mode].medianMs;
+  const snapshotMedianMs = comparisons.table.filterReorderPipelineSnapshot[mode].medianMs;
+  return {
+    mode,
+    pipelineMedianMs,
+    snapshotMedianMs,
+    snapshotSpeedup: snapshotMedianMs / pipelineMedianMs,
+    speedup: comparisons.table.filterReorderPipeline[`${mode}VsBaseline`].speedup,
+  };
+});
+const keyedStructuralReorderRegressions = keyedStructuralReorderResults.filter(
+  ({ snapshotSpeedup, speedup }) =>
+    !Number.isFinite(speedup) ||
+    speedup < keyedStructuralReorderMinimumSpeedup ||
+    !Number.isFinite(snapshotSpeedup) ||
+    snapshotSpeedup < keyedStructuralReorderMinimumSnapshotSpeedup,
+);
 // A direct native toSorted() exposes a permutation while preserving every keyed row object. The
 // hinted path validates that permutation by item identity, uses LIS to move only the required DOM
 // nodes, and avoids key, descriptor, and binding reads. Compare it with React and the equivalent
@@ -2622,6 +2685,7 @@ const passed =
   keyedReorderRegressions.length === 0 &&
   keyedQueuedReorderRegressions.length === 0 &&
   keyedReorderPipelineRegressions.length === 0 &&
+  keyedStructuralReorderRegressions.length === 0 &&
   keyedSortRegressions.length === 0 &&
   keyedFilterRegressions.length === 0 &&
   keyedIdentityRegressions.length === 0 &&
@@ -2773,6 +2837,13 @@ const report = {
     regressions: keyedReorderPipelineRegressions,
     results: keyedReorderPipelineResults,
     status: keyedReorderPipelineRegressions.length === 0 ? "PASS" : "FAIL",
+  },
+  keyedStructuralReorderHintGate: {
+    minimumSnapshotSpeedup: keyedStructuralReorderMinimumSnapshotSpeedup,
+    minimumSpeedup: keyedStructuralReorderMinimumSpeedup,
+    regressions: keyedStructuralReorderRegressions,
+    results: keyedStructuralReorderResults,
+    status: keyedStructuralReorderRegressions.length === 0 ? "PASS" : "FAIL",
   },
   keyedSortHintGate: {
     minimumSnapshotSpeedup: keyedSortMinimumSnapshotSpeedup,
