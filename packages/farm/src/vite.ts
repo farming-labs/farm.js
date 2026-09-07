@@ -4789,9 +4789,7 @@ async function hydrate() {
       typeof window.__FARM_PAGE_SHOULD_HYDRATE__ === 'boolean'
         ? window.__FARM_PAGE_SHOULD_HYDRATE__
         : isClientComponent ||
-          findRoute(window.location.pathname)?.route?.${
-            isolatedHydrationEnabled ? "pageShouldHydrate" : "shouldHydrate"
-          } === true;
+          findRoute(window.location.pathname)?.route?.shouldHydrate === true;
     const layoutShouldHydrate = window.__FARM_LAYOUT_SHOULD_HYDRATE__ === true;
     const shouldHydrate =
       window.__FARM_SHOULD_HYDRATE__ === true ||
@@ -4804,6 +4802,7 @@ async function hydrate() {
       const hydrationController = new AbortController();
       pendingPageHydrationController = hydrationController;
       await hydrateFarmIsolatedClientBoundaries(rootContainer, hydrationController.signal);
+      if (hydrationController.signal.aborted) return;
       return;
     }`
         : ""

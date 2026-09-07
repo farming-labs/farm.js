@@ -143,8 +143,8 @@ async function resolveInstalledChromiumExecutable(): Promise<string | null> {
   const configured = process.env.FARM_TEST_CHROMIUM_EXECUTABLE_PATH;
   if (configured) return configured;
 
-  const executablePath = chromium.executablePath();
   try {
+    const executablePath = chromium.executablePath();
     await fs.access(executablePath);
     return executablePath;
   } catch {
@@ -436,7 +436,7 @@ export default defineConfig({ integrations: { acme } });
 
     try {
       let randomState = 0x5f3759df;
-      const serverLayoutSentinel = `SERVER_LAYOUT_SENTINEL_${Array.from({ length: 8192 }, () => {
+      const serverLayoutSentinel = `SERVER_LAYOUT_SENTINEL_${Array.from({ length: 16384 }, () => {
         randomState = (randomState * 1664525 + 1013904223) >>> 0;
         return String.fromCharCode(33 + (randomState % 90));
       }).join("")}`;
@@ -636,21 +636,29 @@ export default function SecondPage() {
             });
             page.on("pageerror", (error) => browserErrors.push(error.message));
             await page.goto(response.url);
-            await page.locator('farm-client-boundary[data-farm-hydrated="true"]').nth(3).waitFor();
             const first = page.locator('[data-isolated-counter="first"]');
             const second = page.locator('[data-isolated-counter="second"]');
+            const nested = page.locator("[data-nested-counter]");
+            const pageCounter = page.locator('[data-page-counter="first-page"]');
+            for (const counter of [first, nested, pageCounter]) {
+              await expect
+                .poll(() =>
+                  counter.evaluate((element) =>
+                    element.closest("farm-client-boundary")?.getAttribute("data-farm-hydrated"),
+                  ),
+                )
+                .toBe("true");
+            }
             await first.evaluate((element) => element.setAttribute("data-identity", "retained"));
             await first.click();
-            await page.locator("[data-nested-counter]").click();
-            await page.locator('[data-page-counter="first-page"]').click();
+            await nested.click();
+            await pageCounter.click();
 
             await expect.poll(() => first.textContent()).toBe("3");
             await expect.poll(() => second.textContent()).toBe("5");
-            await expect.poll(() => page.locator("[data-nested-counter]").textContent()).toBe("11");
+            await expect.poll(() => nested.textContent()).toBe("11");
             await expect.poll(() => first.getAttribute("data-identity")).toBe("retained");
-            await expect
-              .poll(() => page.locator('[data-page-counter="first-page"]').textContent())
-              .toBe("1");
+            await expect.poll(() => pageCounter.textContent()).toBe("1");
             await expect
               .poll(() => page.locator('farm-client-boundary[data-farm-hydrated="true"]').count())
               .toBe(4);
