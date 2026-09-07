@@ -909,6 +909,42 @@ export function StandardTableBenchmark() {
           Reprice + sort one row (snapshot control)
         </button>
         <button
+          data-action="table-multi-map-reorder-pipeline"
+          type="button"
+          onClick={() => {
+            setRows((current) =>
+              current
+                .map((row) =>
+                  row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
+                )
+                .map((row) => (row.id % 10_000 === 5_001 ? { ...row, amount: -2 } : row))
+                .toSorted((left, right) => left.amount - right.amount || left.id - right.id),
+            );
+            setOperation("review, reprice, and sort one row");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Review + reprice + sort one row
+        </button>
+        <button
+          data-action="table-multi-map-reorder-pipeline-snapshot"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              return current
+                .map((row) =>
+                  row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
+                )
+                .map((row) => (row.id % 10_000 === 5_001 ? { ...row, amount: -2 } : row))
+                .toSorted((left, right) => left.amount - right.amount || left.id - right.id);
+            });
+            setOperation("review, reprice, and sort one row (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Review + reprice + sort one row (snapshot control)
+        </button>
+        <button
           data-action="table-sort"
           type="button"
           onClick={() => {

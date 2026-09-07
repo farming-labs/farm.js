@@ -23,6 +23,7 @@ describe("integration providers", () => {
     });
     const providers = getIntegrationProviders({ acme });
     expect(providers[0]?.component).toBe(AcmeProvider);
+    expect(providers[0]?.supportsIsolatedHydration).toBeUndefined();
 
     const renderer = new ServerRenderer(
       {
@@ -62,6 +63,24 @@ describe("integration providers", () => {
     expect(generated.runtime).toContain('name: "acme"');
     expect(generated.runtime).toContain('FarmIntegrationProviderModule0["AcmeProvider"]');
     expect(generated.runtime).toContain("React.createElement(provider.Component");
+  });
+
+  it("preserves an explicit isolated-root capability declaration", () => {
+    const acme = defineIntegration({
+      category: "custom",
+      type: "acme",
+      instance: {},
+      providers: [
+        {
+          name: "acme",
+          type: "client",
+          component: { module: "@/components/acme-provider" },
+          supportsIsolatedHydration: true,
+        },
+      ],
+    });
+
+    expect(getIntegrationProviders({ acme })[0]?.supportsIsolatedHydration).toBe(true);
   });
 
   it("resolves provider paths relative to the app root", () => {
