@@ -25,11 +25,14 @@ import { builtinModules, createRequire } from "module";
 import { isDeepStrictEqual } from "node:util";
 import { logger, toPosixPath, toViteModuleId } from "../utils";
 import {
+  enforceFarmIsolatedHydrationRouteBudget,
   getClientModuleHydrationPlan,
   getClientModuleMetadata,
   resolveFarmIsolatedClientHydrationMode,
+  type ClientModuleHydrationPlan,
   type IsolatedClientBoundaryReference,
 } from "../utils/client-component";
+import type { FarmIsolatedClientHydrationMode } from "../types";
 import { isFarmMarkdownPageFile } from "../app-markdown";
 import type { ProgrammaticRedirectRoute } from "../routes";
 import type { NitroConfig } from "nitro/config";
@@ -821,6 +824,7 @@ export async function buildUniversal(
     logger.info(`📋 Found ${pageRoutes.length} page routes and ${layoutRoutes.length} layouts`);
 
     const isolatedClientBoundaryModules = routeManager.getIsolatedClientBoundaryModules(root);
+    const hydrationPlanCache = new Map<string, ClientModuleHydrationPlan>();
 
     const clientOutputDir = path.join(root, distDir, "client");
     const [productionViteResult] = await productionViteResultPromise;
@@ -846,6 +850,7 @@ export async function buildUniversal(
         layoutRoutes,
         routeSlots,
         isolatedClientBoundaryModules,
+        hydrationPlanCache,
       );
     const buildSSRBundle = () =>
       buildSSRInMemory(
@@ -860,6 +865,7 @@ export async function buildUniversal(
         layoutRoutes,
         routeSlots,
         isolatedClientBoundaryModules,
+        hydrationPlanCache,
       );
 
     // Route metadata and the client/SSR graphs read independent inputs. Drain
@@ -906,6 +912,7 @@ export async function buildUniversal(
         layoutRoutes,
         routeSlots,
         isolatedClientBoundaryModules,
+        hydrationPlanCache,
       );
     }
 
@@ -1075,6 +1082,21 @@ async function validateClientBuildOutput(
 /**
  * Build client bundle (to disk) with hydration for "use client" components
  */
+function getCachedClientModuleHydrationPlan(
+  modulePath: string,
+  root: string,
+  mode: FarmIsolatedClientHydrationMode,
+  cache: Map<string, ClientModuleHydrationPlan>,
+): ClientModuleHydrationPlan {
+  const key = `${path.resolve(root)}\0${mode}\0${path.resolve(modulePath)}`;
+  let plan = cache.get(key);
+  if (!plan) {
+    plan = getClientModuleHydrationPlan(modulePath, root, mode);
+    cache.set(key, plan);
+  }
+  return { ...plan, isolatedBoundaries: [...plan.isolatedBoundaries] };
+}
+
 async function buildClient(
   productionVite: FarmProductionViteRuntime,
   config: ResolvedFarmConfig,
@@ -1085,6 +1107,7 @@ async function buildClient(
   layoutRoutes: Array<{ pattern: string; modulePath: string }> = [],
   routeSlots: UniversalRouteSlot[] = [],
   isolatedClientBoundaryModules: ReadonlySet<string> = new Set(),
+  hydrationPlanCache: Map<string, ClientModuleHydrationPlan> = new Map(),
 ) {
   const viteBuild = productionVite.build;
   const { farmPlugin } = await import("../vite");
@@ -1134,13 +1157,20 @@ async function buildClient(
 
   const clientLayouts = layoutRoutes.map((layout) => {
     try {
-      const metadata = getClientModuleHydrationPlan(layout.modulePath, root, isolatedMode);
+      const metadata = getCachedClientModuleHydrationPlan(
+        layout.modulePath,
+        root,
+        isolatedMode,
+        hydrationPlanCache,
+      );
       return {
         ...layout,
         shouldHydrate: metadata.shouldHydrate,
         islandStrategy: metadata.islandStrategy,
         legacyShouldHydrate: metadata.legacyShouldHydrate,
         legacyIslandStrategy: metadata.legacyIslandStrategy,
+        mode: metadata.mode,
+        estimatedIsolatedRootCount: metadata.estimatedIsolatedRootCount,
         hasIsolatedClientBoundaries: metadata.hasIsolatedClientBoundaries,
         isolatedHydrationEligible: metadata.isolatedHydrationEligible,
         isolatedBoundaries: metadata.isolatedBoundaries,
@@ -1153,6 +1183,8 @@ async function buildClient(
         islandStrategy: null,
         legacyShouldHydrate: false,
         legacyIslandStrategy: null,
+        mode: isolatedMode,
+        estimatedIsolatedRootCount: 0,
         hasIsolatedClientBoundaries: false,
         isolatedHydrationEligible: false,
         isolatedBoundaries: [],
@@ -1192,12 +1224,33 @@ async function buildClient(
           islandStrategy: null,
           legacyShouldHydrate: false,
           legacyIslandStrategy: null,
+          mode: isolatedMode,
+          estimatedIsolatedRootCount: 0,
           hasIsolatedClientBoundaries: false,
           isolatedBoundaries: [] as IsolatedClientBoundaryReference[],
           suppressedAsyncHydration: undefined,
         }
-      : getClientModuleHydrationPlan(route.modulePath, root, isolatedMode),
+      : getCachedClientModuleHydrationPlan(
+          route.modulePath,
+          root,
+          isolatedMode,
+          hydrationPlanCache,
+        ),
   }));
+
+  enforceFarmIsolatedHydrationRouteBudget(
+    clientLayouts.map((layout) => ({
+      pattern: layout.pattern,
+      depth: layout.pattern.split("/").filter(Boolean).length,
+      metadata: layout,
+    })),
+    routePlans.map(({ route, metadata }) => ({
+      pattern: route.pattern,
+      depth: route.pattern.split("/").filter(Boolean).length,
+      metadata,
+    })),
+    layoutAppliesToRoute,
+  );
 
   if (isolatedMode === "analyze") {
     for (const { entry, metadata } of [
@@ -1210,23 +1263,6 @@ async function buildClient(
       logger.info(
         `📊 Isolated hydration analysis: ${entry.modulePath} can exclude its server owner and hydrate ${metadata.isolatedBoundaries.length} client ${metadata.isolatedBoundaries.length === 1 ? "boundary" : "boundaries"}.`,
       );
-    }
-  }
-
-  // A route-wide layout owns its descendant page tree and cannot contain an
-  // overlapping isolated root. Route-wide pages are separate roots and can
-  // coexist with isolated client leaves in their server-owned layouts.
-  for (const { route, metadata } of routePlans) {
-    if (
-      metadata.hasIsolatedClientBoundaries &&
-      clientLayouts.some(
-        (layout) => layout.shouldHydrate && layoutAppliesToRoute(layout.pattern, route.pattern),
-      )
-    ) {
-      metadata.shouldHydrate = metadata.legacyShouldHydrate;
-      metadata.islandStrategy = metadata.legacyIslandStrategy;
-      metadata.hasIsolatedClientBoundaries = false;
-      metadata.isolatedBoundaries = [];
     }
   }
 
@@ -3161,8 +3197,8 @@ ${generateUniversalRouterStateProperties()}
         if (hasHydratableLayout(pathname)) {
           pageElement = createLayoutPageBoundary(matched.route, pageElement);
         }
-        const wrappedElement = wrapWithIntegrationProviders(
-          wrapWithLayouts(pageElement, pathname, params),
+        const wrappedElement = wrapFarmRouteClientGraph(
+          wrapWithIntegrationProviders(wrapWithLayouts(pageElement, pathname, params)),
         );
 
         await farmClientRuntime.markNavigationLoaded(clientNavigation, {
@@ -3516,6 +3552,7 @@ async function buildSSRInMemory(
   collectedLayoutRoutes: ReadonlyArray<{ pattern: string; modulePath: string }>,
   collectedRouteSlots: readonly UniversalRouteSlot[],
   isolatedClientBoundaryModules: ReadonlySet<string>,
+  hydrationPlanCache: Map<string, ClientModuleHydrationPlan>,
 ): Promise<{
   bundle: OutputBundle;
   entryFile: string;
@@ -3731,6 +3768,7 @@ async function buildSSRInMemory(
     preset,
     i18nCatalogs,
     isolatedClientBoundaryModules,
+    hydrationPlanCache,
   );
 
   // Find a temporary file path for the virtual entry
@@ -4043,6 +4081,7 @@ function generateVirtualEntryCode(
   preset: string,
   i18nCatalogs: FarmI18nCatalogs,
   isolatedClientBoundaryModules: ReadonlySet<string>,
+  hydrationPlanCache: Map<string, ClientModuleHydrationPlan>,
 ): string {
   const hasPluginRuntime = hasRuntimeIntegrationConfig || hasConfiguredRuntimePlugins;
   const adapterOwnsDocsRuntime = Boolean(
@@ -4112,35 +4151,42 @@ function generateVirtualEntryCode(
     routePattern.startsWith(`${layoutPattern}/`);
   const layoutHydrationPlans = layoutRoutes.map((layout) => ({
     ...layout,
-    hydration: getClientModuleHydrationPlan(layout.modulePath, config.root, isolatedHydrationMode),
+    hydration: getCachedClientModuleHydrationPlan(
+      layout.modulePath,
+      config.root,
+      isolatedHydrationMode,
+      hydrationPlanCache,
+    ),
   }));
   const pageHydrationPlans = new Map(
     pageRoutes
       .filter((route) => !isFarmMarkdownPageFile(route.modulePath))
       .map((route) => [
         route.modulePath,
-        getClientModuleHydrationPlan(route.modulePath, config.root, isolatedHydrationMode),
+        getCachedClientModuleHydrationPlan(
+          route.modulePath,
+          config.root,
+          isolatedHydrationMode,
+          hydrationPlanCache,
+        ),
       ]),
   );
 
-  // Match the production client plan: a route-wide layout owns its full
-  // descendant tree, so an overlapping isolated page graph must fall back to
-  // the route-wide metadata used before isolated hydration was enabled.
-  for (const route of pageRoutes) {
-    const hydration = pageHydrationPlans.get(route.modulePath);
-    if (
-      hydration?.hasIsolatedClientBoundaries &&
-      layoutHydrationPlans.some(
-        (layout) =>
-          layout.hydration.shouldHydrate && layoutAppliesToRoute(layout.pattern, route.pattern),
-      )
-    ) {
-      hydration.shouldHydrate = hydration.legacyShouldHydrate;
-      hydration.islandStrategy = hydration.legacyIslandStrategy;
-      hydration.hasIsolatedClientBoundaries = false;
-      hydration.isolatedBoundaries = [];
-    }
-  }
+  enforceFarmIsolatedHydrationRouteBudget(
+    layoutHydrationPlans.map((layout) => ({
+      pattern: layout.pattern,
+      depth: layout.pattern.split("/").filter(Boolean).length,
+      metadata: layout.hydration,
+    })),
+    pageRoutes
+      .filter((route) => !isFarmMarkdownPageFile(route.modulePath))
+      .map((route) => ({
+        pattern: route.pattern,
+        depth: route.pattern.split("/").filter(Boolean).length,
+        metadata: pageHydrationPlans.get(route.modulePath)!,
+      })),
+    layoutAppliesToRoute,
+  );
   const providerServerImports = [
     providerServerModules.hasClerkProvider
       ? `import { ClerkProvider as FarmClerkProvider } from "@clerk/react";`

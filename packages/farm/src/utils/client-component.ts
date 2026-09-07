@@ -82,6 +82,7 @@ export interface ClientModuleHydrationPlan extends ClientModuleMetadata {
   mode: FarmIsolatedClientHydrationMode;
   legacyShouldHydrate: boolean;
   legacyIslandStrategy: FarmIslandStrategy | null;
+  estimatedIsolatedRootCount: number;
   isolatedHydrationEligible: boolean;
   hasIsolatedClientBoundaries: boolean;
   isolatedBoundaries: IsolatedClientBoundaryReference[];
@@ -531,11 +532,13 @@ export function getClientModuleHydrationPlan(
   const emptyPlan = (
     fallbackReason?: string,
     costGuardExceeded = false,
+    estimatedIsolatedRootCount = 0,
   ): ClientModuleHydrationPlan => ({
     ...metadata,
     mode,
     legacyShouldHydrate: metadata.shouldHydrate,
     legacyIslandStrategy: metadata.islandStrategy,
+    estimatedIsolatedRootCount,
     isolatedHydrationEligible: false,
     hasIsolatedClientBoundaries: false,
     isolatedBoundaries: [],
@@ -557,13 +560,18 @@ export function getClientModuleHydrationPlan(
     return emptyPlan(inspection.fallbackReason);
   }
   if (inspection.fallbackReason) {
-    return emptyPlan(inspection.fallbackReason, inspection.costGuardExceeded);
+    return emptyPlan(
+      inspection.fallbackReason,
+      inspection.costGuardExceeded,
+      inspection.estimatedBoundaryCount,
+    );
   }
   const boundaryLimit = isolatedHydrationBoundaryLimit();
   if (inspection.estimatedBoundaryCount > boundaryLimit) {
     return emptyPlan(
       `the client graph can create ${inspection.estimatedBoundaryCount} isolated roots, above the measured limit of ${boundaryLimit}`,
       true,
+      inspection.estimatedBoundaryCount,
     );
   }
 
@@ -575,10 +583,114 @@ export function getClientModuleHydrationPlan(
     mode,
     legacyShouldHydrate: metadata.shouldHydrate,
     legacyIslandStrategy: metadata.islandStrategy,
+    estimatedIsolatedRootCount: inspection.estimatedBoundaryCount,
     isolatedHydrationEligible: true,
     hasIsolatedClientBoundaries: enabled,
     isolatedBoundaries: inspection.boundaries,
   };
+}
+
+interface FarmIsolatedHydrationRoutePlan {
+  mode: FarmIsolatedClientHydrationMode;
+  shouldHydrate: boolean;
+  islandStrategy: FarmIslandStrategy | null;
+  legacyShouldHydrate: boolean;
+  legacyIslandStrategy: FarmIslandStrategy | null;
+  estimatedIsolatedRootCount: number;
+  hasIsolatedClientBoundaries: boolean;
+  isolatedBoundaries: IsolatedClientBoundaryReference[];
+  costGuardExceeded?: true;
+  fallbackReason?: string;
+}
+
+interface FarmIsolatedHydrationRouteOwner {
+  pattern: string;
+  depth: number;
+  metadata: FarmIsolatedHydrationRoutePlan;
+}
+
+function restoreRouteWideHydration(
+  metadata: FarmIsolatedHydrationRoutePlan,
+  fallbackReason?: string,
+): void {
+  metadata.shouldHydrate = metadata.legacyShouldHydrate;
+  metadata.islandStrategy = metadata.legacyIslandStrategy;
+  metadata.hasIsolatedClientBoundaries = false;
+  metadata.isolatedBoundaries = [];
+  if (fallbackReason) {
+    metadata.costGuardExceeded = true;
+    metadata.fallbackReason = fallbackReason;
+  }
+}
+
+/** @internal Applies the measured root budget to each complete layout and page chain. */
+export function enforceFarmIsolatedHydrationRouteBudget(
+  layouts: FarmIsolatedHydrationRouteOwner[],
+  routes: FarmIsolatedHydrationRouteOwner[],
+  layoutAppliesToRoute: (layoutPattern: string, routePattern: string) => boolean,
+): void {
+  const boundaryLimit = isolatedHydrationBoundaryLimit();
+  const sortedLayouts = [...layouts].sort((left, right) => left.depth - right.depth);
+
+  for (const route of routes) {
+    if (route.metadata.mode !== "enabled") continue;
+    const applicableLayouts = sortedLayouts.filter((layout) =>
+      layoutAppliesToRoute(layout.pattern, route.pattern),
+    );
+    if (applicableLayouts.some((layout) => layout.metadata.shouldHydrate)) continue;
+
+    const layoutRootCount = applicableLayouts.reduce(
+      (count, layout) =>
+        count +
+        (layout.metadata.hasIsolatedClientBoundaries
+          ? layout.metadata.estimatedIsolatedRootCount
+          : 0),
+      0,
+    );
+    const routeRootCount = route.metadata.hasIsolatedClientBoundaries
+      ? route.metadata.estimatedIsolatedRootCount
+      : 0;
+    const totalRootCount = layoutRootCount + routeRootCount;
+    if (totalRootCount <= boundaryLimit) continue;
+
+    let accumulatedLayoutRoots = 0;
+    const overflowingLayout = applicableLayouts.find((layout) => {
+      if (layout.metadata.hasIsolatedClientBoundaries) {
+        accumulatedLayoutRoots += layout.metadata.estimatedIsolatedRootCount;
+      }
+      return accumulatedLayoutRoots > boundaryLimit;
+    });
+    const fallbackReason = `the matched route ${route.pattern} can create ${totalRootCount} isolated roots, above the measured limit of ${boundaryLimit}`;
+
+    if (overflowingLayout) {
+      restoreRouteWideHydration(overflowingLayout.metadata, fallbackReason);
+    } else if (route.metadata.hasIsolatedClientBoundaries) {
+      restoreRouteWideHydration(route.metadata, fallbackReason);
+    }
+  }
+
+  for (const layout of sortedLayouts) {
+    const hasRouteWideAncestor = sortedLayouts.some(
+      (ancestor) =>
+        ancestor !== layout &&
+        ancestor.depth < layout.depth &&
+        ancestor.metadata.shouldHydrate &&
+        layoutAppliesToRoute(ancestor.pattern, layout.pattern),
+    );
+    if (hasRouteWideAncestor && layout.metadata.hasIsolatedClientBoundaries) {
+      restoreRouteWideHydration(layout.metadata);
+    }
+  }
+
+  for (const route of routes) {
+    const hasRouteWideLayout = sortedLayouts.some(
+      (layout) =>
+        layout.metadata.shouldHydrate && layoutAppliesToRoute(layout.pattern, route.pattern),
+    );
+    if (hasRouteWideLayout && route.metadata.hasIsolatedClientBoundaries) {
+      restoreRouteWideHydration(route.metadata);
+    }
+  }
 }
 
 /**

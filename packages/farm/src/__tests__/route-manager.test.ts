@@ -349,6 +349,110 @@ describe("RouteManager", () => {
       );
     });
 
+    it("enforces the isolated-root budget across every layout in a matched route", async () => {
+      const root = await mkdtemp(path.join(os.tmpdir(), "farm-route-hydration-budget-"));
+      temporaryDirectories.push(root);
+      await mkdir(path.join(root, "src", "app", "safe"), { recursive: true });
+      await mkdir(path.join(root, "src", "app", "overflow"), { recursive: true });
+      await mkdir(path.join(root, "src", "components"), { recursive: true });
+
+      const componentNames = [
+        "root-one",
+        "root-two",
+        "safe-one",
+        "safe-two",
+        "overflow-one",
+        "overflow-two",
+        "overflow-three",
+      ];
+      await Promise.all(
+        componentNames.map((name) =>
+          writeFile(
+            path.join(root, "src", "components", `${name}.tsx`),
+            `'use client';\nexport default function Counter() { return <button>${name}</button>; }`,
+          ),
+        ),
+      );
+      await writeFile(
+        path.join(root, "src", "app", "layout.tsx"),
+        `import One from "../components/root-one";
+import Two from "../components/root-two";
+export default function Layout({ children }) { return <><One /><Two />{children}</>; }`,
+      );
+      await writeFile(
+        path.join(root, "src", "app", "safe", "layout.tsx"),
+        `import One from "../../components/safe-one";
+import Two from "../../components/safe-two";
+export default function Layout({ children }) { return <><One /><Two />{children}</>; }`,
+      );
+      await writeFile(
+        path.join(root, "src", "app", "overflow", "layout.tsx"),
+        `import One from "../../components/overflow-one";
+import Two from "../../components/overflow-two";
+import Three from "../../components/overflow-three";
+export default function Layout({ children }) { return <><One /><Two /><Three />{children}</>; }`,
+      );
+      await Promise.all(
+        ["page.tsx", "safe/page.tsx", "overflow/page.tsx"].map((file) =>
+          writeFile(
+            path.join(root, "src", "app", file),
+            `export default function Page() { return <main>${file}</main>; }`,
+          ),
+        ),
+      );
+
+      const { globFiles, logger } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) {
+          return ["page.tsx", "safe/page.tsx", "overflow/page.tsx"];
+        }
+        if (pattern.includes("layout")) {
+          return ["layout.tsx", "safe/layout.tsx", "overflow/layout.tsx"];
+        }
+        return [];
+      });
+      vi.mocked(logger.warn).mockClear();
+      mockConfig.root = root;
+      mockConfig.experimental = {
+        serverComponents: false,
+        serverActions: false,
+        isolatedClientHydration: "enabled",
+      };
+      routeManager = new RouteManager(mockConfig);
+      await routeManager.discoverRoutes();
+
+      const manifest = routeManager.generateClientManifest(root);
+      const rootLayout = manifest.layouts.find((layout) => layout.pattern === "/");
+      const safeLayout = manifest.layouts.find((layout) => layout.pattern === "/safe");
+      const overflowLayout = manifest.layouts.find((layout) => layout.pattern === "/overflow");
+
+      expect(rootLayout).toMatchObject({
+        shouldHydrate: false,
+        hasIsolatedClientBoundaries: true,
+      });
+      expect(rootLayout?.isolatedBoundaries).toHaveLength(2);
+      expect(safeLayout).toMatchObject({
+        shouldHydrate: false,
+        hasIsolatedClientBoundaries: true,
+      });
+      expect(safeLayout?.isolatedBoundaries).toHaveLength(2);
+      expect(overflowLayout).toMatchObject({ shouldHydrate: true });
+      expect(overflowLayout?.hasIsolatedClientBoundaries).toBeUndefined();
+      expect(overflowLayout?.isolatedBoundaries).toBeUndefined();
+      expect(routeManager.getIsolatedClientBoundaryModules(root)).toEqual(
+        new Set(
+          ["root-one", "root-two", "safe-one", "safe-two"].map((name) =>
+            path.join(root, "src", "components", `${name}.tsx`),
+          ),
+        ),
+      );
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining(
+          "the matched route /overflow can create 5 isolated roots, above the measured limit of 4",
+        ),
+      );
+    });
+
     it("explains when a route-wide integration provider disables isolated roots", async () => {
       const { logger } = await import("../utils");
       vi.mocked(logger.warn).mockClear();
