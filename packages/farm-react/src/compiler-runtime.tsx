@@ -529,8 +529,7 @@ function compilerKeyedCollectionChangedKeys(
   return changedKeys;
 }
 
-/** @internal Records compiler-proven same-order Array.map metadata and returns the Array. */
-export function createCompilerKeyedMapUpdate(
+function recordCompilerKeyedMapUpdate(
   previous: unknown,
   value: unknown,
   changedIndices: readonly number[],
@@ -550,6 +549,88 @@ export function createCompilerKeyedMapUpdate(
     });
   }
   return value;
+}
+
+/**
+ * @internal Executes a compiler-proven Array.map pipeline and records its final same-order delta.
+ * The three-argument value/index form remains accepted for older generated output.
+ */
+export function createCompilerKeyedMapUpdate(
+  previous: unknown,
+  valueOrPipeline: unknown,
+  changedIndices?: unknown,
+): unknown {
+  if (Array.isArray(changedIndices)) {
+    return recordCompilerKeyedMapUpdate(previous, valueOrPipeline, changedIndices);
+  }
+  if (changedIndices !== undefined || typeof valueOrPipeline !== "function") {
+    return valueOrPipeline;
+  }
+
+  let eligible = true;
+  let mapCalls = 0;
+  const applyMap = (collection: unknown, method: unknown, callback: unknown): unknown => {
+    mapCalls += 1;
+    const value = NATIVE_REFLECT_APPLY(
+      method as (...values: readonly unknown[]) => unknown,
+      collection,
+      [callback],
+    );
+    if (method !== NATIVE_ARRAY_MAP) {
+      eligible = false;
+      return value;
+    }
+    try {
+      if (
+        !Array.isArray(collection) ||
+        !Array.isArray(value) ||
+        Object.getPrototypeOf(collection) !== NATIVE_ARRAY_PROTOTYPE ||
+        Object.getPrototypeOf(value) !== NATIVE_ARRAY_PROTOTYPE ||
+        value.length !== collection.length
+      ) {
+        eligible = false;
+      }
+    } catch {
+      eligible = false;
+    }
+    return value;
+  };
+  const value = NATIVE_REFLECT_APPLY(
+    valueOrPipeline as (...values: readonly unknown[]) => unknown,
+    undefined,
+    [previous, applyMap],
+  );
+  if (!eligible || mapCalls === 0) return value;
+
+  try {
+    if (
+      !Array.isArray(previous) ||
+      !Array.isArray(value) ||
+      Object.getPrototypeOf(previous) !== NATIVE_ARRAY_PROTOTYPE ||
+      Object.getPrototypeOf(value) !== NATIVE_ARRAY_PROTOTYPE ||
+      value.length !== previous.length
+    ) {
+      return value;
+    }
+    const finalChangedIndices: number[] = [];
+    for (let index = 0; index < previous.length; index += 1) {
+      const previousDescriptor = Object.getOwnPropertyDescriptor(previous, index);
+      const mappedDescriptor = Object.getOwnPropertyDescriptor(value, index);
+      if (
+        !previousDescriptor ||
+        !("value" in previousDescriptor) ||
+        !mappedDescriptor ||
+        !("value" in mappedDescriptor)
+      ) {
+        return value;
+      }
+      if (mappedDescriptor.value !== previousDescriptor.value) finalChangedIndices.push(index);
+    }
+    return recordCompilerKeyedMapUpdate(previous, value, finalChangedIndices);
+  } catch {
+    // Metadata must never change the result of a successful native update.
+    return value;
+  }
 }
 
 /** @internal Executes a proven native map before the reorder suffix of a keyed pipeline. */

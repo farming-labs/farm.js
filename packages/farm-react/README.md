@@ -220,19 +220,27 @@ updates such as:
 
 ```tsx
 setItems((current) =>
-  current.map((item) => (item.id === targetId ? { ...item, selected: !item.selected } : item)),
+  current
+    .map((item) => (item.id === targetId ? { ...item, label: nextLabel } : item))
+    .map((item) => (item.id === targetId ? { ...item, selected: !item.selected } : item)),
 );
 ```
 
-The generated native `map()` records which indexes returned new item identities. Farm then
-validates that length, keys, and positions are unchanged and patches only those row instances. The
-user's `map()` remains O(n); this removes the keyed runtime's second full key-and-binding scan.
-Queued hints compose. Key changes, structural edits, relevant mixed dependencies, and failed runtime
-checks use the existing complete reconciliation and LIS path. Non-functional setters, derived
-collections, block-bodied or mutating mappers, and other unproven forms are simply not hinted. No
-new option is required. A compiler report exposes the emitted-site count as
-`keyedMapUpdateHints`. The separate hint runtime capability is imported only when that count is
-nonzero, so direct-only and ordinary keyed builds do not retain it.
+Farm executes every generated native `map()` and then compares the committed and final item
+identities once. It validates final length, keys, and positions and patches each final changed row
+once; intermediate arrays never receive DOM work. Every user `map()` remains O(n); this removes the
+keyed runtime's second full key-and-binding scan. Queued hints compose. The source method lookup,
+native result, callback order, and thrown errors are preserved.
+
+Each stage requires an inline synchronous conditional mapper that returns the original item or an
+object-spread replacement. An unsupported mapper anywhere in the chain disables the complete
+setter hint. Custom methods still execute but record no metadata. Key changes, structural edits,
+sparse or subclassed arrays, relevant mixed dependencies, and failed runtime checks use the
+existing complete reconciliation and LIS path. Non-functional setters, derived collections,
+block-bodied or mutating mappers, and other unproven forms are simply not hinted. No new option is
+required. A compiler report counts prepared map calls as `keyedMapUpdateHints`. The separate hint
+runtime capability is imported only when that count is nonzero, so direct-only and ordinary keyed
+builds do not retain it.
 
 The same optional runtime recognizes conservative immutable appends on a direct keyed array:
 
@@ -760,7 +768,7 @@ reasons aggregated by count. Its summary and per-module `optimizations` also rep
 `keyedMapLookupTargets`, the number of native-Map keyed lookup bindings;
 `keyedMembershipTargets`, the number of native-Set membership bindings;
 `keyedCollectionUpdateHints`, the number of compiler-proven native Set/Map mutation sites; and
-`keyedMapUpdateHints`, the number of compiler-proven direct keyed `map()` update sites; and
+`keyedMapUpdateHints`, the number of compiler-proven keyed `map()` update calls; and
 `keyedArrayAppendHints`, the number of compiler-proven direct keyed-array append sites; and
 `keyedArrayFilterHints`, the number of compiler-proven keyed-array filter sites, including supported
 structural reorder pipelines; and
@@ -783,9 +791,9 @@ commit and updates its two bindings directly. This is a deterministic structural
 assertion; it is not presented as a cross-machine timing benchmark.
 
 Application and prototype calls, dynamic style objects, handlers outside JSX events, nested,
-computed, and rest props patterns, async handlers, unkeyed or index-keyed lists, chained maps,
-unsupported conditional roots, effects, and more advanced hook support intentionally stay on React
-in this release. Compiler-owned keyed rows support either one dedicated host-only map/`List` or
+computed, and rest props patterns, async handlers, unkeyed or index-keyed lists, unsupported map
+chains, unsupported conditional roots, effects, and more advanced hook support intentionally stay
+on React in this release. Compiler-owned keyed rows support either one dedicated host-only map/`List` or
 one or more non-interactive ranges in a nested or component-root host container. A dedicated
 non-interactive row may also contain multiple recursive logical or ternary host branches beside
 stateful static host siblings, plus recursively nested non-interactive keyed ranges scoped by every

@@ -1173,6 +1173,43 @@ function isSafeKeyedMapResult(
   );
 }
 
+function keyedMapUpdatePipeline(
+  expression: t.Expression,
+  parameterName: string,
+  safeGlobals: ReadonlySet<string>,
+): readonly t.ArrowFunctionExpression[] | undefined {
+  const outerCallbacks: t.ArrowFunctionExpression[] = [];
+  let current = expression;
+  while (
+    t.isCallExpression(current) &&
+    current.arguments.length === 1 &&
+    t.isMemberExpression(current.callee) &&
+    !current.callee.computed &&
+    t.isIdentifier(current.callee.property, { name: "map" }) &&
+    t.isExpression(current.callee.object)
+  ) {
+    const callback = current.arguments[0];
+    if (
+      !t.isArrowFunctionExpression(callback) ||
+      callback.async ||
+      callback.generator ||
+      callback.params.length === 0 ||
+      callback.params.length > 3 ||
+      callback.params.some((parameter) => !t.isIdentifier(parameter)) ||
+      !t.isExpression(callback.body) ||
+      !isSafeKeyedMapResult(callback.body, callback.params[0] as t.Identifier, safeGlobals)
+    ) {
+      return undefined;
+    }
+    outerCallbacks.push(callback);
+    current = current.callee.object;
+  }
+  if (!t.isIdentifier(current, { name: parameterName }) || outerCallbacks.length === 0) {
+    return undefined;
+  }
+  return outerCallbacks.reverse();
+}
+
 function rewriteKeyedMapUpdateHints(
   root: t.JSXElement,
   hintedStateIndices: ReadonlySet<number>,
@@ -1198,75 +1235,52 @@ function rewriteKeyedMapUpdateHints(
         updater.generator ||
         updater.params.length !== 1 ||
         !t.isIdentifier(updater.params[0]) ||
-        !t.isCallExpression(updater.body) ||
-        !t.isMemberExpression(updater.body.callee) ||
-        updater.body.callee.computed ||
-        !t.isIdentifier(updater.body.callee.object, {
-          name: updater.params[0].name,
-        }) ||
-        !t.isIdentifier(updater.body.callee.property, { name: "map" })
+        !t.isExpression(updater.body)
       ) {
         return;
       }
-      const callback = updater.body.arguments[0];
-      if (
-        !t.isArrowFunctionExpression(callback) ||
-        callback.async ||
-        callback.generator ||
-        callback.params.length === 0 ||
-        callback.params.length > 3 ||
-        callback.params.some((parameter) => !t.isIdentifier(parameter)) ||
-        !t.isExpression(callback.body)
-      ) {
-        return;
-      }
-      const item = callback.params[0] as t.Identifier;
-      if (!isSafeKeyedMapResult(callback.body, item, safeGlobals)) return;
+      const callbacks = keyedMapUpdatePipeline(updater.body, updater.params[0].name, safeGlobals);
+      if (!callbacks) return;
 
-      const changedIndices = path.scope.generateUidIdentifier("farmChangedIndices");
-      const mappedItem = path.scope.generateUidIdentifier("farmMappedItem");
-      const nextValue = path.scope.generateUidIdentifier("farmNextItems");
-      const index = t.isIdentifier(callback.params[1])
-        ? t.cloneNode(callback.params[1])
-        : path.scope.generateUidIdentifier("farmMapIndex");
-      const wrappedCallback = t.cloneNode(callback, true);
-      if (wrappedCallback.params.length === 1) wrappedCallback.params.push(t.cloneNode(index));
-      wrappedCallback.body = t.blockStatement([
-        t.variableDeclaration("const", [
-          t.variableDeclarator(t.cloneNode(mappedItem), t.cloneNode(callback.body, true)),
-        ]),
-        t.ifStatement(
-          t.binaryExpression("!==", t.cloneNode(mappedItem), t.cloneNode(item)),
-          t.expressionStatement(
-            t.callExpression(
-              t.memberExpression(t.cloneNode(changedIndices), t.identifier("push")),
-              [t.cloneNode(index)],
-            ),
-          ),
-        ),
-        t.returnStatement(t.cloneNode(mappedItem)),
-      ]);
-
-      const mapCall = t.cloneNode(updater.body, true);
-      mapCall.arguments[0] = wrappedCallback;
       const previous = t.cloneNode(updater.params[0]);
+      const pipelineValue = path.scope.generateUidIdentifier("farmMapValue");
+      const applyMap = path.scope.generateUidIdentifier("farmApplyMap");
+      const statements: t.Statement[] = [];
+      let current: t.Expression = t.cloneNode(pipelineValue);
+      for (let index = 0; index < callbacks.length; index += 1) {
+        const method = path.scope.generateUidIdentifier(`farmMap${index + 1}`);
+        const nextValue = path.scope.generateUidIdentifier(`farmMappedItems${index + 1}`);
+        statements.push(
+          t.variableDeclaration("const", [
+            t.variableDeclarator(
+              t.cloneNode(method),
+              t.memberExpression(t.cloneNode(current), t.identifier("map")),
+            ),
+          ]),
+          t.variableDeclaration("const", [
+            t.variableDeclarator(
+              t.cloneNode(nextValue),
+              t.callExpression(t.cloneNode(applyMap), [
+                t.cloneNode(current),
+                t.cloneNode(method),
+                t.cloneNode(callbacks[index], true),
+              ]),
+            ),
+          ]),
+        );
+        current = nextValue;
+      }
       path.node.arguments[0] = t.arrowFunctionExpression(
         [t.cloneNode(previous)],
-        t.blockStatement([
-          t.variableDeclaration("const", [
-            t.variableDeclarator(t.cloneNode(changedIndices), t.arrayExpression([])),
-          ]),
-          t.variableDeclaration("const", [t.variableDeclarator(t.cloneNode(nextValue), mapCall)]),
-          t.returnStatement(
-            t.callExpression(t.cloneNode(helperIdentifier), [
-              t.cloneNode(previous),
-              t.cloneNode(nextValue),
-              t.cloneNode(changedIndices),
-            ]),
+        t.callExpression(t.cloneNode(helperIdentifier), [
+          t.cloneNode(previous),
+          t.arrowFunctionExpression(
+            [t.cloneNode(pipelineValue), t.cloneNode(applyMap)],
+            t.blockStatement([...statements, t.returnStatement(t.cloneNode(current))]),
           ),
         ]),
       );
-      count += 1;
+      count += callbacks.length;
       path.skip();
     },
   });

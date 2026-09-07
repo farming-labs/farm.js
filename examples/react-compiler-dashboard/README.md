@@ -214,6 +214,15 @@ React and 1.25x faster than the compiled control. Package tests also cover filte
 composition, queued filter-then-sort updates, 2,000 randomized removals, controlled-input focus and
 selection, hydration, cleanup, and conservative fallback.
 
+Consecutive same-order maps have their own 10,000-row comparison. One concise setter updates the
+label and amount of every tenth row in two native `map()` stages. The block-bodied form performs the
+same JavaScript and DOM-visible work through complete compiled reconciliation. Both compiler modes
+must remain at least 8x faster than React and 2x faster than that compiled control. After every
+sample the assertion verifies all 10,000 final values, row positions, connections, and DOM
+identities. Package tests separately cover one committed-to-final identity comparison, one final
+patch per row, changed keys, custom methods, subclassed arrays, native errors, queued updates,
+Strict Mode hydration, and unmount-before-flush cleanup.
+
 Same-key map-and-reorder pipelines have their own 10,000-row comparison. One concise setter
 reprices a single row through `map()` and immediately restores amount order with `toSorted()`; the
 block-bodied form performs the same JavaScript and DOM-visible work through complete compiled
@@ -310,6 +319,9 @@ The default JSON report is `/tmp/farm-react-dashboard-benchmark.json`; change it
   block-bodied equivalent rereads the complete keyed snapshot; the hinted path isolates the saved
   descriptor and unchanged-binding work while both paths run the same native map, sort, and LIS
   movement.
+- The multi-map update control changes every tenth row in two same-order native maps. Its
+  block-bodied equivalent rereads all 10,000 keys and bindings; the hinted path compares the
+  committed and final arrays once and patches each final changed row once.
 - The multi-map reorder control changes one row's label and amount in two consecutive native maps,
   then sorts the same keyed rows. Its block-bodied equivalent keeps complete reconciliation, while
   the hinted path proves one flattened source-row lineage and patches the final row once.

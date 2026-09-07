@@ -363,9 +363,9 @@ local native `Map`.
 native `Set`.
 `keyedCollectionUpdateHints` counts proven native Set/Map mutation sites that can carry their
 executed keys to the runtime.
-`keyedMapUpdateHints` counts setter sites where the compiler proved that a direct keyed collection
-can report its changed row indexes while an immutable `map()` runs. The same counts appear per
-module.
+`keyedMapUpdateHints` counts map calls where the compiler proved that a direct keyed collection can
+report its changed row indexes while one or more consecutive immutable `map()` stages run. The same
+counts appear per module.
 `keyedArrayAppendHints` counts setter sites where the compiler proved a direct keyed array append
 and can hand the appended suffix to the runtime. `keyedArrayFilterHints` counts concise keyed-array
 filter sites that can report removed positions. `keyedArrayPrependHints` counts setter sites where
@@ -875,29 +875,36 @@ The compiler can remove the runtime's second full-row scan for a common immutabl
 
 ```tsx
 setItems((current) =>
-  current.map((item) => (item.id === targetId ? { ...item, selected: !item.selected } : item)),
+  current
+    .map((item) => (item.id === targetId ? { ...item, label: nextLabel } : item))
+    .map((item) => (item.id === targetId ? { ...item, selected: !item.selected } : item)),
 );
 ```
 
 This needs no option or component primitive. At build time, Farm recognizes a functional setter on
-the direct `useState` collection used by a compiled keyed map or `List`. The mapper must be a concise
-arrow expression with a conditional result: one branch returns the original item and the other
-returns a new object that spreads that item. The condition and replacement values must use the
-compiler's safe expression subset. The hint runtime is retained only in modules where at least one
-such site is emitted; direct-only and ordinary keyed builds do not import that capability.
+the direct `useState` collection used by a compiled keyed map or `List`. The setter may contain one
+or more consecutive `map()` calls. Every mapper must be a concise arrow expression with a
+conditional result: one branch returns the original item and the other returns a new object that
+spreads that item. The conditions and replacement values must use the compiler's safe expression
+subset. The hint runtime is retained only in modules where at least one such call is emitted;
+direct-only and ordinary keyed builds do not import that capability.
 
-The generated mapper records an index only when the returned item has a different identity. The
-user's `map()` still runs and is still O(n); the optimization avoids reading every key and every row
-binding again after it finishes. Farm validates that the array length and each reported row's key
-and index are unchanged, then patches only those row instances. Multiple hinted functional updates
-queued in one compiler flush are combined.
+Every native `map()` still runs and is still O(n). After the complete chain succeeds, Farm compares
+the committed and final item identities once, validates the final key and position for every
+changed row, and patches each final row once. Intermediate arrays never receive DOM work. The
+optimization removes the runtime's second full key-and-binding scan rather than removing the
+application's map work. Multiple hinted functional updates queued in one compiler flush are
+combined.
 
-If a key changes, an insert, removal, or reorder occurs, a relevant second dependency changes, or a
-runtime check fails, Farm discards the hint and runs the existing complete keyed reconciliation and
-LIS path. Derived collections, non-functional setters, block-bodied mappers, mutating replacements,
-and other unproven shapes also keep that existing path. This is an optimization hint, not a new
-correctness contract or a way to bypass React fallback behavior. The compiler report exposes the
-number of emitted sites as `keyedMapUpdateHints`.
+Farm preserves each source property lookup and call. It records metadata only after an exact native
+`Array.prototype.map` succeeds on ordinary dense arrays. A custom method, sparse or subclassed
+array, unsupported mapper anywhere in the chain, changed key, insert, removal, reorder, relevant
+second dependency, or failed runtime check uses the existing complete keyed reconciliation and LIS
+path. Native results and thrown mapper or method errors are preserved. Derived collections,
+non-functional setters, block-bodied mappers, mutating replacements, and other unproven shapes also
+keep that existing path. This is an optimization hint, not a new correctness contract or a way to
+bypass React fallback behavior. The compiler report exposes the number of prepared map calls as
+`keyedMapUpdateHints`.
 
 #### Keyed array append hints
 
@@ -2020,16 +2027,19 @@ The package and example test suites verify more than generated code:
 - compiler-owned host rows patch text, attributes, and styles in place, preserve focus and text
   selection, use the LIS minimum for measured rotations and reversals, and remount through React
   when runtime keys are duplicated;
-- mutation-aware keyed `map()` updates patch only compiler-reported same-key row indexes, compose
-  queued hints across multiple keyed boundaries, ignore unrelated state in the same flush, and
-  reject key changes or mixed unhinted collection updates into the complete reconciliation path;
+- mutation-aware keyed `map()` updates compose consecutive safe stages, compare the committed and
+  final row identities once, patch each final same-key row once, compose queued hints across
+  multiple keyed boundaries, ignore unrelated state in the same flush, and reject key changes,
+  custom methods, sparse or subclassed arrays, or mixed unhinted updates into the complete
+  reconciliation path;
 - compiler-proven immutable Set/Map updaters carry exact native mutation keys across queued
   updates, compact long persistent snapshot chains, and fall back before binding reads for unsafe
   keys, values, collections, or ownership;
 - 2,000 deterministic hinted Set mutations and 2,000 deterministic hinted Map mutations match
   normal React while evaluating only changed present-row keys;
-- a 2,048-row instrumentation test changes one item with one key read and one binding read, while
-  2,000 deterministic queued updates match normal React with one compiled owner execution;
+- a 2,048-row instrumentation test changes one item through two maps with one key read and one
+  binding read; separate stages that change two rows read exactly those two keys and bindings; and
+  2,000 deterministic queued two-map updates match normal React with one compiled owner execution;
 - keyed DOM ranges preserve static siblings around multiple lists, support adjacent empty ranges
   and exact component roots, apply LIS independently per range, and remount the complete container
   through React when keys or parent-driven static markup invalidate adoption;
