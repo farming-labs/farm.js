@@ -17,7 +17,15 @@ describe("Farm server HTTP policy", () => {
     expect(matchesFarmIfNoneMatch('"other", W/"farm"', '"farm"')).toBe(true);
     expect(matchesFarmIfNoneMatch('"farm,docs", "other"', '"farm,docs"')).toBe(true);
     expect(matchesFarmIfNoneMatch(['"other"', '"farm"'], '"farm"')).toBe(true);
+    expect(matchesFarmIfNoneMatch(', "other",, W/"farm",', '"farm"')).toBe(true);
     expect(matchesFarmIfNoneMatch('"other"', '"farm"')).toBe(false);
+  });
+
+  it("rejects malformed fields before honoring a matching validator", () => {
+    expect(matchesFarmIfNoneMatch('"farm", invalid', '"farm"')).toBe(false);
+    expect(matchesFarmIfNoneMatch('invalid, "farm"', '"farm"')).toBe(false);
+    expect(matchesFarmIfNoneMatch('*, "farm"', '"farm"')).toBe(false);
+    expect(matchesFarmIfNoneMatch('"farm', '"farm"')).toBe(false);
   });
 
   it("resolves safe defaults and size strings", () => {

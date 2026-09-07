@@ -54,18 +54,47 @@ export function matchesFarmIfNoneMatch(
   value: string | readonly string[] | null | undefined,
   etag: string,
 ): boolean {
-  const expected = etag.trim().replace(/^W\//, "");
-  const values = Array.isArray(value) ? value : [value];
+  const expected = parseEntityTag(trimOptionalWhitespace(etag));
+  if (!expected) return false;
 
-  for (const header of values) {
-    if (!header) continue;
-    for (const candidate of splitEntityTags(header)) {
-      const normalized = candidate.trim();
-      if (normalized === "*" || normalized.replace(/^W\//, "") === expected) return true;
-    }
+  const values = Array.isArray(value) ? value : [value];
+  const combined = values
+    .filter((header): header is string => typeof header === "string")
+    .join(",");
+  const fieldValue = trimOptionalWhitespace(combined);
+  if (!fieldValue) return false;
+  if (fieldValue === "*") return true;
+
+  let matched = false;
+  let hasEntityTag = false;
+  for (const candidate of splitEntityTags(fieldValue)) {
+    const token = trimOptionalWhitespace(candidate);
+    if (!token) continue;
+
+    const parsed = parseEntityTag(token);
+    if (!parsed) return false;
+    hasEntityTag = true;
+    if (parsed === expected) matched = true;
   }
 
-  return false;
+  return hasEntityTag && matched;
+}
+
+function trimOptionalWhitespace(value: string): string {
+  return value.replace(/^[\t ]+|[\t ]+$/g, "");
+}
+
+function parseEntityTag(value: string): string | null {
+  const opaqueTag = value.startsWith("W/") ? value.slice(2) : value;
+  if (opaqueTag.length < 2 || opaqueTag[0] !== '"' || opaqueTag.at(-1) !== '"') return null;
+
+  for (let index = 1; index < opaqueTag.length - 1; index++) {
+    const code = opaqueTag.charCodeAt(index);
+    if (code === 0x21 || (code >= 0x23 && code <= 0x7e) || code >= 0x80) continue;
+    return null;
+  }
+
+  return opaqueTag;
 }
 
 function splitEntityTags(value: string): string[] {
