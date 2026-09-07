@@ -339,6 +339,12 @@ export interface FarmIntegrationProvider {
   name: string;
   type: string;
   props?: Record<string, unknown>;
+  /**
+   * The provider can be instantiated independently around each isolated
+   * client root without relying on context or state owned by the route root.
+   * Providers are treated as route-wide unless they explicitly opt in.
+   */
+  supportsIsolatedHydration?: boolean;
   component?:
     | ComponentType<FarmIntegrationProviderProps>
     | FarmIntegrationProviderComponentReference;
@@ -1253,6 +1259,7 @@ export function getIntegrationProviders(
         name: provider.name,
         type: provider.type,
         props: provider.props,
+        supportsIsolatedHydration: provider.supportsIsolatedHydration,
         component: provider.component,
       });
     }

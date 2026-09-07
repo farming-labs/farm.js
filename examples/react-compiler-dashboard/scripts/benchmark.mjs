@@ -1198,38 +1198,110 @@ async function measureTrial(browser, trial, compilerMode, port) {
             ),
         );
 
-        const measureMapReorderPipeline = async (action) => {
+        const prepareMapReorderPipeline = async (expectedAmount) => {
+          await create10000();
           const rows = [...table.querySelectorAll("tbody tr")];
-          const target = rows.find(
-            (row) => Number(row.getAttribute("data-row-id")) % 10_000 === 5_001,
-          );
+          const orderedRows = rows.map((row) => {
+            const id = Number(row.getAttribute("data-row-id"));
+            const amountText = row.querySelector("td:nth-child(4)")?.textContent;
+            const amount = Number(amountText?.slice(1));
+            if (!Number.isFinite(id) || !Number.isFinite(amount)) {
+              throw new Error("Map-reorder source row is invalid.");
+            }
+            return {
+              amount: id % 10_000 === 5_001 ? expectedAmount : amount,
+              id,
+              row,
+            };
+          });
+          orderedRows.sort((left, right) => left.amount - right.amount || left.id - right.id);
+          const target = orderedRows.find(({ id }) => id % 10_000 === 5_001)?.row;
           if (!target) throw new Error("Map-reorder target row is missing.");
+          return { expectedRows: orderedRows.map(({ row }) => row), rows, target };
+        };
+
+        const measureMapReorderPipeline = async (
+          action,
+          prepared,
+          expectedLabelSuffix = " repriced",
+          expectedAmount = -1,
+        ) => {
+          if (!prepared) throw new Error("Map-reorder expectation is missing.");
+          const { expectedRows, rows, target } = prepared;
           await runTableAction(action, () => {
             const nextRows = table.querySelectorAll("tbody tr");
             return (
               nextRows.length === 10_000 &&
               nextRows[0] === target &&
-              rows.every((row) => row.isConnected) &&
-              target.querySelector("td:nth-child(2)")?.textContent?.endsWith(" repriced") === true &&
-              target.querySelector("td:nth-child(4)")?.textContent === "$-1"
+              target
+                .querySelector("td:nth-child(2)")
+                ?.textContent?.endsWith(expectedLabelSuffix) === true &&
+              target.querySelector("td:nth-child(4)")?.textContent === `$${expectedAmount}`
             );
           });
+          return () => {
+            const nextRows = table.querySelectorAll("tbody tr");
+            if (
+              nextRows.length !== 10_000 ||
+              !rowsMatch(nextRows, expectedRows) ||
+              rows.some((row) => !row.isConnected)
+            ) {
+              throw new Error("Map-reorder rows do not match the complete expected permutation.");
+            }
+          };
         };
 
-        const tableMapReorderPipeline = await measureTable(
-          async () => create10000(),
-          async () =>
-            measureMapReorderPipeline(() =>
-              tableButton("table-map-reorder-pipeline").click(),
-            ),
+        const measureMapReorderTable = async (
+          action,
+          expectedAmount,
+          expectedLabelSuffix = " repriced",
+        ) => {
+          for (let sample = 0; sample < warmupSamples; sample += 1) {
+            const prepared = await prepareMapReorderPipeline(expectedAmount);
+            const verify = await measureMapReorderPipeline(
+              action,
+              prepared,
+              expectedLabelSuffix,
+              expectedAmount,
+            );
+            verify();
+          }
+          const timings = [];
+          for (let sample = 0; sample < tableSamples; sample += 1) {
+            const prepared = await prepareMapReorderPipeline(expectedAmount);
+            const startedAt = performance.now();
+            const verify = await measureMapReorderPipeline(
+              action,
+              prepared,
+              expectedLabelSuffix,
+              expectedAmount,
+            );
+            timings.push(performance.now() - startedAt);
+            verify();
+          }
+          return timings;
+        };
+
+        const tableMapReorderPipeline = await measureMapReorderTable(
+          () => tableButton("table-map-reorder-pipeline").click(),
+          -1,
         );
 
-        const tableMapReorderPipelineSnapshot = await measureTable(
-          async () => create10000(),
-          async () =>
-            measureMapReorderPipeline(() =>
-              tableButton("table-map-reorder-pipeline-snapshot").click(),
-            ),
+        const tableMapReorderPipelineSnapshot = await measureMapReorderTable(
+          () => tableButton("table-map-reorder-pipeline-snapshot").click(),
+          -1,
+        );
+
+        const tableMultiMapReorderPipeline = await measureMapReorderTable(
+          () => tableButton("table-multi-map-reorder-pipeline").click(),
+          -2,
+          " reviewed",
+        );
+
+        const tableMultiMapReorderPipelineSnapshot = await measureMapReorderTable(
+          () => tableButton("table-multi-map-reorder-pipeline-snapshot").click(),
+          -2,
+          " reviewed",
         );
 
         const tableSort = await measureTable(
@@ -1628,6 +1700,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
             filterReorderPipelineSnapshot: tableFilterReorderPipelineSnapshot,
             mapReorderPipeline: tableMapReorderPipeline,
             mapReorderPipelineSnapshot: tableMapReorderPipelineSnapshot,
+            multiMapReorderPipeline: tableMultiMapReorderPipeline,
+            multiMapReorderPipelineSnapshot: tableMultiMapReorderPipelineSnapshot,
             mapLookup: tableMapLookup,
             membership: tableMembership,
             prepend: tablePrepend,
@@ -1752,6 +1826,10 @@ async function measureTrial(browser, trial, compilerMode, port) {
         filterReorderPipelineSnapshot: timingSummary(result.table.filterReorderPipelineSnapshot),
         mapReorderPipeline: timingSummary(result.table.mapReorderPipeline),
         mapReorderPipelineSnapshot: timingSummary(result.table.mapReorderPipelineSnapshot),
+        multiMapReorderPipeline: timingSummary(result.table.multiMapReorderPipeline),
+        multiMapReorderPipelineSnapshot: timingSummary(
+          result.table.multiMapReorderPipelineSnapshot,
+        ),
         mapLookup: timingSummary(result.table.mapLookup),
         membership: timingSummary(result.table.membership),
         prepend: timingSummary(result.table.prepend),
@@ -1926,6 +2004,8 @@ const tableMetrics = [
   "filterReorderPipelineSnapshot",
   "mapReorderPipeline",
   "mapReorderPipelineSnapshot",
+  "multiMapReorderPipeline",
+  "multiMapReorderPipelineSnapshot",
   "snapshotMembership",
   "snapshotMapLookup",
   "slicePrefix",
@@ -2562,6 +2642,29 @@ const keyedMapReorderRegressions = keyedMapReorderResults.filter(
     !Number.isFinite(snapshotSpeedup) ||
     snapshotSpeedup < keyedMapReorderMinimumSnapshotSpeedup,
 );
+// Multiple safe map stages should keep one flat source-row lineage and still reconcile only the
+// final permutation. Compare the concise two-map setter with React and its block-bodied compiled
+// control at 10,000 rows.
+const keyedMultiMapReorderMinimumSpeedup = 4;
+const keyedMultiMapReorderMinimumSnapshotSpeedup = 1.2;
+const keyedMultiMapReorderResults = ["static", "hybrid"].map((mode) => {
+  const pipelineMedianMs = comparisons.table.multiMapReorderPipeline[mode].medianMs;
+  const snapshotMedianMs = comparisons.table.multiMapReorderPipelineSnapshot[mode].medianMs;
+  return {
+    mode,
+    pipelineMedianMs,
+    snapshotMedianMs,
+    snapshotSpeedup: snapshotMedianMs / pipelineMedianMs,
+    speedup: comparisons.table.multiMapReorderPipeline[`${mode}VsBaseline`].speedup,
+  };
+});
+const keyedMultiMapReorderRegressions = keyedMultiMapReorderResults.filter(
+  ({ snapshotSpeedup, speedup }) =>
+    !Number.isFinite(speedup) ||
+    speedup < keyedMultiMapReorderMinimumSpeedup ||
+    !Number.isFinite(snapshotSpeedup) ||
+    snapshotSpeedup < keyedMultiMapReorderMinimumSnapshotSpeedup,
+);
 // A direct native toSorted() exposes a permutation while preserving every keyed row object. The
 // hinted path validates that permutation by item identity, uses LIS to move only the required DOM
 // nodes, and avoids key, descriptor, and binding reads. Compare it with React and the equivalent
@@ -2750,6 +2853,7 @@ const passed =
   keyedReorderPipelineRegressions.length === 0 &&
   keyedStructuralReorderRegressions.length === 0 &&
   keyedMapReorderRegressions.length === 0 &&
+  keyedMultiMapReorderRegressions.length === 0 &&
   keyedSortRegressions.length === 0 &&
   keyedFilterRegressions.length === 0 &&
   keyedIdentityRegressions.length === 0 &&
@@ -2915,6 +3019,13 @@ const report = {
     regressions: keyedMapReorderRegressions,
     results: keyedMapReorderResults,
     status: keyedMapReorderRegressions.length === 0 ? "PASS" : "FAIL",
+  },
+  keyedMultiMapReorderHintGate: {
+    minimumSnapshotSpeedup: keyedMultiMapReorderMinimumSnapshotSpeedup,
+    minimumSpeedup: keyedMultiMapReorderMinimumSpeedup,
+    regressions: keyedMultiMapReorderRegressions,
+    results: keyedMultiMapReorderResults,
+    status: keyedMultiMapReorderRegressions.length === 0 ? "PASS" : "FAIL",
   },
   keyedSortHintGate: {
     minimumSnapshotSpeedup: keyedSortMinimumSnapshotSpeedup,
