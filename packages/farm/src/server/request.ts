@@ -22,13 +22,16 @@ const requestStore = getRequestStore();
 _setCurrentRequestResolver(() => requestStore.getStore());
 
 export function createWebRequestFromFarmRequest(req: FarmRequest): Request {
-  const forwardedHost = req.headers["x-forwarded-host"];
-  const host = Array.isArray(forwardedHost)
-    ? forwardedHost[0]
-    : forwardedHost || req.headers.host || "localhost";
-  const forwardedProto = req.headers["x-forwarded-proto"];
-  const proto = Array.isArray(forwardedProto) ? forwardedProto[0] : forwardedProto || "http";
-  const fullUrl = new URL(req.url || "/", `${proto}://${host}`).toString();
+  const forwardedHost = firstForwardedHeaderValue(req.headers["x-forwarded-host"]);
+  const fallbackHost = firstForwardedHeaderValue(req.headers.host) || "localhost";
+  const forwardedProto = firstForwardedHeaderValue(req.headers["x-forwarded-proto"]);
+  const normalizedProto = forwardedProto?.toLowerCase();
+  const proto =
+    normalizedProto === "https" || normalizedProto === "http" ? normalizedProto : "http";
+  const fullUrl = new URL(
+    req.url || "/",
+    resolveRequestOrigin(proto, forwardedHost, fallbackHost),
+  ).toString();
 
   const headers = new Headers();
   for (const [key, value] of Object.entries(req.headers)) {
@@ -58,6 +61,27 @@ export function createWebRequestFromFarmRequest(req: FarmRequest): Request {
   }
 
   return new Request(fullUrl, init);
+}
+
+function firstForwardedHeaderValue(value: string | string[] | undefined): string | undefined {
+  const first = Array.isArray(value) ? value[0] : value;
+  const token = first?.split(",", 1)[0]?.trim();
+  return token || undefined;
+}
+
+function resolveRequestOrigin(proto: "http" | "https", host: string | undefined, fallback: string) {
+  for (const candidate of [host, fallback, "localhost"]) {
+    if (!candidate) continue;
+    if (/[\s/?#@\\]/u.test(candidate)) continue;
+    try {
+      const url = new URL(`${proto}://${candidate}`);
+      if (url.username || url.password || url.pathname !== "/" || url.search || url.hash) continue;
+      return url.origin;
+    } catch {
+      // Try the next host instead of turning an untrusted proxy header into a 500.
+    }
+  }
+  return `${proto}://localhost`;
 }
 
 export async function _runWithCurrentRequest<T>(
