@@ -161,6 +161,33 @@ describe("matchRoute", () => {
     expect(result.params).toEqual({ id: "123" });
   });
 
+  it("decodes dynamic, catch-all, and static URL segments", () => {
+    expect(
+      matchRoute("/users/hello%20farm", parseRoutePath("users/[id]/page.tsx").segments),
+    ).toEqual({ matches: true, params: { id: "hello farm" } });
+    expect(
+      matchRoute("/docs/guides/caf%C3%A9", parseRoutePath("docs/[...slug]/page.tsx").segments),
+    ).toEqual({ matches: true, params: { slug: "guides/café" } });
+    expect(matchRoute("/caf%C3%A9", parseRoutePath("café/page.tsx").segments)).toEqual({
+      matches: true,
+      params: {},
+    });
+    expect(matchRoutePrefix("/caf%C3%A9/menu", parseRoutePath("café/layout.tsx").segments)).toBe(
+      true,
+    );
+    expect(matchRoute("/a%2520b", parseRoutePath("a%20b/page.tsx").segments)).toEqual({
+      matches: true,
+      params: {},
+    });
+  });
+
+  it("keeps malformed URL segments literal while matching", () => {
+    expect(matchRoute("/users/%E0%A4%A", parseRoutePath("users/[id]/page.tsx").segments)).toEqual({
+      matches: true,
+      params: { id: "%E0%A4%A" },
+    });
+  });
+
   it("should match dynamic segments containing dots", () => {
     const segments = [
       { segment: "user", isDynamic: true, isOptional: false, isCatchAll: false },

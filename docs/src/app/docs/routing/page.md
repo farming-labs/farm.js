@@ -171,6 +171,10 @@ const href = router.build("/docs/[[...slug]]", {
 ```
 
 This returns `/docs/core/routing`. Optional catch-all params can be omitted, static routes win over dynamic routes, and route groups such as `(marketing)` do not appear in the URL.
+
+Route matching decodes each URL path segment once before comparing static names or exposing
+`params`. Route names remain literal (including `%`), and malformed percent escapes remain literal
+instead of aborting the request.
 For navigation state, `router.isActive(pattern, pathname, { exact: false })` also matches
 descendants after dynamic segments, such as `/users/42/settings` for `/users/[id]`.
 

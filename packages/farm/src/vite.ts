@@ -3679,9 +3679,17 @@ function matchSegment(urlSegment, routeSegment) {
   return { [routeSegment.segment]: urlSegment };
 }
 
+function decodeRouteSegment(segment) {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}
+
 function matchRoute(pathname, routeSegments) {
   const normalizedPath = pathname === '/' ? '' : pathname.replace(/^\\//, '').replace(/\\/$/, '');
-  const pathSegments = normalizedPath ? normalizedPath.split('/') : [];
+  const pathSegments = normalizedPath ? normalizedPath.split('/').map(decodeRouteSegment) : [];
   
   // Handle catch-all routes
   const hasCatchAll = routeSegments.some(s => s.isCatchAll);
@@ -3733,7 +3741,9 @@ function findLayouts(pathname) {
   pathname = stripFarmBasePath(pathname);
   const manifest = getManifest();
   const layouts = Object.values(manifest.layouts);
-  const normalizedPath = pathname === '/' ? '/' : pathname.replace(/\\/$/, '');
+  const pathnameSegments = pathname === '/'
+    ? []
+    : pathname.replace(/\\/$/, '').split('/').filter(Boolean).map(decodeRouteSegment);
   const matchingLayouts = [];
   
   for (const layout of layouts) {
@@ -3742,9 +3752,15 @@ function findLayouts(pathname) {
       matchingLayouts.push(layout);
       continue;
     }
-    // Check if pathname starts with layout pattern
-    if (normalizedPath.startsWith(layout.pattern) || 
-        normalizedPath === layout.pattern.replace(/\\/[^/]+$/, '')) {
+    const layoutSegments = layout.pattern.split('/').filter(Boolean);
+    const matchesLayout = layoutSegments.every(
+      (segment, index) => pathnameSegments[index] === segment
+    );
+    const matchesLayoutParent = pathnameSegments.length === layoutSegments.length - 1 &&
+      layoutSegments.slice(0, -1).every(
+        (segment, index) => pathnameSegments[index] === segment
+      );
+    if (matchesLayout || matchesLayoutParent) {
       matchingLayouts.push(layout);
     }
   }
