@@ -13,8 +13,8 @@ complete-reconciliation control.
 
 | Mode   | React median | Two maps + reorder | Compiled control | vs React | vs control |
 | ------ | -----------: | -----------------: | ---------------: | -------: | ---------: |
-| Static |    205.25 ms |           29.70 ms |         39.90 ms |    6.91x |      1.34x |
-| Hybrid |    205.25 ms |           31.90 ms |         39.60 ms |    6.43x |      1.24x |
+| Static |    206.45 ms |           32.10 ms |         44.30 ms |    6.43x |      1.38x |
+| Hybrid |    206.45 ms |           32.40 ms |         44.30 ms |    6.37x |      1.37x |
 
 The independent gate requires at least 4x versus bracketed React and 1.2x versus the compiled
 control in both modes. It passed without lowering either threshold. The run also proved that all
@@ -25,8 +25,8 @@ assertion work is not included in the update measurement.
 
 Every existing correctness and performance gate passed in the same run, including the general
 regression gate, the 8x optimization-persistence floor, normalized scalability, and the earlier
-single-map reorder gate. In this latest run, the single-map workload was 5.99x faster than React in
-static mode and 5.89x in hybrid mode, with 1.33x and 1.39x versus its compiled control. The section
+single-map reorder gate. In this latest run, the single-map workload was 6.86x faster than React in
+static mode and 6.31x in hybrid mode, with 1.49x and 1.28x versus its compiled control. The section
 below preserves the measurements from the earlier run that introduced that workload.
 
 Compiler tests accept consecutive safe conditional object-spread maps before native sort/reverse
@@ -34,8 +34,7 @@ suffixes and keep structural calls, maps after reordering, and unsupported callb
 reconciliation. Runtime coverage proves same-row and different-row lineage, one final patch per
 changed row, queued composition, changed-key and custom-method fallback, native errors, delegated
 events, controlled-input focus and selection, Strict Mode hydration, unmount-before-flush cleanup,
-and 2,000 deterministic two-map updates against normal React. That differential run completed in
-17.11 seconds on this machine.
+and 2,000 deterministic two-map updates against normal React.
 
 No public API or runtime feature is added. The existing optional map-reorder runtime grew by 15 B
 gzip to a 13,158 B compiler premium, while reorder-only modules still omit it and the core-only
