@@ -163,6 +163,147 @@ describe("React AOT keyed-array sort hints", () => {
     expect(result.code).toContain("keyedRowsEveryHintedRuntimeFeature");
   });
 
+  it("lowers a same-key map followed by a native sort as one reorder pipeline", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Table({ editedId, nextRank }) {
+        const [rows, setRows] = useState([
+          { id: "a", label: "Alpha", rank: 1 },
+          { id: "b", label: "Beta", rank: 2 },
+        ]);
+        return <section>
+          <button onClick={() => setRows((current) => current
+            .map((row) => row.id === editedId ? { ...row, rank: nextRank } : row)
+            .toSorted((left, right) => left.rank - right.rank)
+          )}>Edit and sort</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}: {row.rank}</li>)}</ul>
+        </section>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Table"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.optimizations.keyedMapUpdateHints).toBe(1);
+    expect(result.optimizations.keyedArraySortHints).toBe(1);
+    expect(result.code).toContain("createCompilerKeyedArrayMapPipeline");
+    expect(result.code).toContain("createCompilerKeyedArrayMapReorder");
+    expect(result.code).toContain("keyedRowsMapReorderHintedRuntimeFeature");
+    expect(result.code).toContain("reorderIndexIndependent");
+    expect(result.code).not.toContain("createCompilerKeyedMapUpdate");
+    expect(result.code).not.toContain("createCompilerKeyedArraySort");
+  });
+
+  it("keeps each reorder step in a mapped sort and reverse pipeline", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Table({ editedId }) {
+        const [rows, setRows] = useState([
+          { id: "a", label: "Alpha", rank: 1 },
+          { id: "b", label: "Beta", rank: 2 },
+        ]);
+        return <section>
+          <button onClick={() => setRows((current) => current
+            .map((row) => row.id === editedId ? { ...row, rank: row.rank + 1 } : row)
+            .toSorted((left, right) => left.rank - right.rank)
+            .toReversed()
+          )}>Edit and reorder</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </section>;
+      }
+    `);
+
+    expect(result.optimizations.keyedMapUpdateHints).toBe(1);
+    expect(result.optimizations.keyedArraySortHints).toBe(1);
+    expect(result.optimizations.keyedArrayReorderHints).toBe(1);
+    expect(result.code.match(/createCompilerKeyedArrayMapReorder/g)).toHaveLength(4);
+  });
+
+  it("does not lower map and reorder pipelines for host-backed keyed rows", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Table({ editedId, nextRank }) {
+        const [rows, setRows] = useState([
+          { id: "a", label: "Alpha", rank: 1, visible: true },
+          { id: "b", label: "Beta", rank: 2, visible: false },
+        ]);
+        return <section>
+          <button onClick={() => setRows((current) => current
+            .map((row) => row.id === editedId ? { ...row, rank: nextRank } : row)
+            .toSorted((left, right) => left.rank - right.rank)
+          )}>Edit and sort</button>
+          <ul>{rows.map((row) => (
+            <li key={row.id}>
+              <span>{row.label}: {row.rank}</span>
+              <div>{row.visible && <strong>{row.label}</strong>}</div>
+            </li>
+          ))}</ul>
+        </section>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Table"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.code).toContain("keyedRowsHostRuntimeFeature");
+    expect(result.optimizations.keyedMapUpdateHints).toBe(0);
+    expect(result.optimizations.keyedArraySortHints).toBe(0);
+    expect(result.code).not.toContain("createCompilerKeyedArrayMapPipeline");
+    expect(result.code).not.toContain("createCompilerKeyedArrayMapReorder");
+  });
+
+  it.each([
+    {
+      name: "an unconditional replacement",
+      pipeline:
+        "current.map((row) => ({ ...row, rank: row.rank + 1 })).toSorted((a, b) => a.rank - b.rank)",
+    },
+    {
+      name: "a referenced mapper",
+      declaration: "const updateRow = (row) => row.id === editedId ? { ...row, rank: 0 } : row;",
+      pipeline: "current.map(updateRow).toSorted((a, b) => a.rank - b.rank)",
+    },
+    {
+      name: "a block-bodied mapper",
+      pipeline:
+        "current.map((row) => { return row.id === editedId ? { ...row, rank: 0 } : row; }).toSorted((a, b) => a.rank - b.rank)",
+    },
+    {
+      name: "a map thisArg",
+      pipeline:
+        "current.map((row) => row.id === editedId ? { ...row, rank: 0 } : row, null).toSorted((a, b) => a.rank - b.rank)",
+    },
+    {
+      name: "a computed map method",
+      pipeline:
+        'current["map"]((row) => row.id === editedId ? { ...row, rank: 0 } : row).toSorted((a, b) => a.rank - b.rank)',
+    },
+    {
+      name: "a structural step after map",
+      pipeline:
+        "current.map((row) => row.id === editedId ? { ...row, rank: 0 } : row).filter((row) => row.rank > 0).toSorted((a, b) => a.rank - b.rank)",
+    },
+    {
+      name: "a map after reorder",
+      pipeline:
+        "current.toSorted((a, b) => a.rank - b.rank).map((row) => row.id === editedId ? { ...row, rank: 0 } : row)",
+    },
+  ])("keeps $name on complete reconciliation", async ({ declaration = "", pipeline }) => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Table({ editedId }) {
+        const [rows, setRows] = useState([{ id: "a", rank: 1 }]);
+        ${declaration}
+        return <section>
+          <button onClick={() => setRows((current) => ${pipeline})}>Update</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.rank}</li>)}</ul>
+        </section>;
+      }
+    `);
+
+    expect(result.optimizations.keyedArraySortHints).toBe(0);
+    expect(result.code).not.toContain("createCompilerKeyedArrayMapPipeline");
+    expect(result.code).not.toContain("keyedRowsMapReorderHintedRuntimeFeature");
+  });
+
   it.each([
     {
       name: "a referenced comparator",

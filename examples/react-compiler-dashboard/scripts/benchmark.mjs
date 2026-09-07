@@ -1198,6 +1198,40 @@ async function measureTrial(browser, trial, compilerMode, port) {
             ),
         );
 
+        const measureMapReorderPipeline = async (action) => {
+          const rows = [...table.querySelectorAll("tbody tr")];
+          const target = rows.find(
+            (row) => Number(row.getAttribute("data-row-id")) % 10_000 === 5_001,
+          );
+          if (!target) throw new Error("Map-reorder target row is missing.");
+          await runTableAction(action, () => {
+            const nextRows = table.querySelectorAll("tbody tr");
+            return (
+              nextRows.length === 10_000 &&
+              nextRows[0] === target &&
+              rows.every((row) => row.isConnected) &&
+              target.querySelector("td:nth-child(2)")?.textContent?.endsWith(" repriced") === true &&
+              target.querySelector("td:nth-child(4)")?.textContent === "$-1"
+            );
+          });
+        };
+
+        const tableMapReorderPipeline = await measureTable(
+          async () => create10000(),
+          async () =>
+            measureMapReorderPipeline(() =>
+              tableButton("table-map-reorder-pipeline").click(),
+            ),
+        );
+
+        const tableMapReorderPipelineSnapshot = await measureTable(
+          async () => create10000(),
+          async () =>
+            measureMapReorderPipeline(() =>
+              tableButton("table-map-reorder-pipeline-snapshot").click(),
+            ),
+        );
+
         const tableSort = await measureTable(
           async () => create10000(),
           async () => {
@@ -1592,6 +1626,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
             executionsAdded: Number(tableExecutions.textContent) - initialTableExecutions,
             filterReorderPipeline: tableFilterReorderPipeline,
             filterReorderPipelineSnapshot: tableFilterReorderPipelineSnapshot,
+            mapReorderPipeline: tableMapReorderPipeline,
+            mapReorderPipelineSnapshot: tableMapReorderPipelineSnapshot,
             mapLookup: tableMapLookup,
             membership: tableMembership,
             prepend: tablePrepend,
@@ -1714,6 +1750,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
         executionsAdded: result.table.executionsAdded,
         filterReorderPipeline: timingSummary(result.table.filterReorderPipeline),
         filterReorderPipelineSnapshot: timingSummary(result.table.filterReorderPipelineSnapshot),
+        mapReorderPipeline: timingSummary(result.table.mapReorderPipeline),
+        mapReorderPipelineSnapshot: timingSummary(result.table.mapReorderPipelineSnapshot),
         mapLookup: timingSummary(result.table.mapLookup),
         membership: timingSummary(result.table.membership),
         prepend: timingSummary(result.table.prepend),
@@ -1886,6 +1924,8 @@ const tableMetrics = [
   "denseMapLookup",
   "filterReorderPipeline",
   "filterReorderPipelineSnapshot",
+  "mapReorderPipeline",
+  "mapReorderPipelineSnapshot",
   "snapshotMembership",
   "snapshotMapLookup",
   "slicePrefix",
@@ -2499,6 +2539,29 @@ const keyedStructuralReorderRegressions = keyedStructuralReorderResults.filter(
     !Number.isFinite(snapshotSpeedup) ||
     snapshotSpeedup < keyedStructuralReorderMinimumSnapshotSpeedup,
 );
+// Editing one same-key row and immediately sorting it should reuse all keyed DOM rows, patch only
+// the changed bindings, and run one LIS against the final order. Compare the concise hinted setter
+// with React and the equivalent block-bodied compiled control at 10,000 rows.
+const keyedMapReorderMinimumSpeedup = 4;
+const keyedMapReorderMinimumSnapshotSpeedup = 1.2;
+const keyedMapReorderResults = ["static", "hybrid"].map((mode) => {
+  const pipelineMedianMs = comparisons.table.mapReorderPipeline[mode].medianMs;
+  const snapshotMedianMs = comparisons.table.mapReorderPipelineSnapshot[mode].medianMs;
+  return {
+    mode,
+    pipelineMedianMs,
+    snapshotMedianMs,
+    snapshotSpeedup: snapshotMedianMs / pipelineMedianMs,
+    speedup: comparisons.table.mapReorderPipeline[`${mode}VsBaseline`].speedup,
+  };
+});
+const keyedMapReorderRegressions = keyedMapReorderResults.filter(
+  ({ snapshotSpeedup, speedup }) =>
+    !Number.isFinite(speedup) ||
+    speedup < keyedMapReorderMinimumSpeedup ||
+    !Number.isFinite(snapshotSpeedup) ||
+    snapshotSpeedup < keyedMapReorderMinimumSnapshotSpeedup,
+);
 // A direct native toSorted() exposes a permutation while preserving every keyed row object. The
 // hinted path validates that permutation by item identity, uses LIS to move only the required DOM
 // nodes, and avoids key, descriptor, and binding reads. Compare it with React and the equivalent
@@ -2686,6 +2749,7 @@ const passed =
   keyedQueuedReorderRegressions.length === 0 &&
   keyedReorderPipelineRegressions.length === 0 &&
   keyedStructuralReorderRegressions.length === 0 &&
+  keyedMapReorderRegressions.length === 0 &&
   keyedSortRegressions.length === 0 &&
   keyedFilterRegressions.length === 0 &&
   keyedIdentityRegressions.length === 0 &&
@@ -2844,6 +2908,13 @@ const report = {
     regressions: keyedStructuralReorderRegressions,
     results: keyedStructuralReorderResults,
     status: keyedStructuralReorderRegressions.length === 0 ? "PASS" : "FAIL",
+  },
+  keyedMapReorderHintGate: {
+    minimumSnapshotSpeedup: keyedMapReorderMinimumSnapshotSpeedup,
+    minimumSpeedup: keyedMapReorderMinimumSpeedup,
+    regressions: keyedMapReorderRegressions,
+    results: keyedMapReorderResults,
+    status: keyedMapReorderRegressions.length === 0 ? "PASS" : "FAIL",
   },
   keyedSortHintGate: {
     minimumSnapshotSpeedup: keyedSortMinimumSnapshotSpeedup,
