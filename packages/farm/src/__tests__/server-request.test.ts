@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { createWebRequestFromFarmRequest } from "../server/request";
+import {
+  _runWithCurrentRequest,
+  createWebRequestFromFarmRequest,
+  getCurrentRequest,
+} from "../server/request";
 import type { FarmRequest } from "../types";
 
 function request(headers: FarmRequest["headers"], url = "/account?tab=profile"): FarmRequest {
@@ -41,5 +45,37 @@ describe("createWebRequestFromFarmRequest", () => {
     );
 
     expect(result.url).toBe("http://farm.test/account?tab=profile");
+  });
+
+  it("accepts case-insensitive protocols and rejects host delimiters", () => {
+    const result = createWebRequestFromFarmRequest(
+      request({
+        host: "farm.test",
+        "x-forwarded-host": "evil.test/path",
+        "x-forwarded-proto": "HTTPS",
+      }),
+    );
+
+    expect(result.url).toBe("https://farm.test/account?tab=profile");
+  });
+});
+
+describe("server request store", () => {
+  it("exposes the current request during server execution", async () => {
+    const current = new Request("https://farmjs.dev/server-demo", {
+      headers: {
+        cookie: "demo=1",
+      },
+    });
+
+    await _runWithCurrentRequest(current, async () => {
+      const result = getCurrentRequest();
+      expect(result.url).toBe("https://farmjs.dev/server-demo");
+      expect(result.headers.get("cookie")).toBe("demo=1");
+    });
+  });
+
+  it("throws when no request context is active", () => {
+    expect(() => getCurrentRequest()).toThrow("No current request is available");
   });
 });

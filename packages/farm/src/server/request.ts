@@ -25,7 +25,9 @@ export function createWebRequestFromFarmRequest(req: FarmRequest): Request {
   const forwardedHost = firstForwardedHeaderValue(req.headers["x-forwarded-host"]);
   const fallbackHost = firstForwardedHeaderValue(req.headers.host) || "localhost";
   const forwardedProto = firstForwardedHeaderValue(req.headers["x-forwarded-proto"]);
-  const proto = forwardedProto === "https" || forwardedProto === "http" ? forwardedProto : "http";
+  const normalizedProto = forwardedProto?.toLowerCase();
+  const proto =
+    normalizedProto === "https" || normalizedProto === "http" ? normalizedProto : "http";
   const fullUrl = new URL(
     req.url || "/",
     resolveRequestOrigin(proto, forwardedHost, fallbackHost),
@@ -70,8 +72,11 @@ function firstForwardedHeaderValue(value: string | string[] | undefined): string
 function resolveRequestOrigin(proto: "http" | "https", host: string | undefined, fallback: string) {
   for (const candidate of [host, fallback, "localhost"]) {
     if (!candidate) continue;
+    if (/[\s/?#@\\]/u.test(candidate)) continue;
     try {
-      return new URL(`${proto}://${candidate}`).origin;
+      const url = new URL(`${proto}://${candidate}`);
+      if (url.username || url.password || url.pathname !== "/" || url.search || url.hash) continue;
+      return url.origin;
     } catch {
       // Try the next host instead of turning an untrusted proxy header into a 500.
     }
