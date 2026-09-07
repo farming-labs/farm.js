@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createFarmProductionSiteReporter,
   detectFarmProductionSiteOrigin,
@@ -12,7 +12,13 @@ const originalEnvironment = {
   DO_NOT_TRACK: process.env.DO_NOT_TRACK,
   FARM_TELEMETRY: process.env.FARM_TELEMETRY,
   FARM_TELEMETRY_DISABLED: process.env.FARM_TELEMETRY_DISABLED,
+  VERCEL_ENV: process.env.VERCEL_ENV,
+  VERCEL_TARGET_ENV: process.env.VERCEL_TARGET_ENV,
 };
+
+beforeEach(() => {
+  for (const key of Object.keys(originalEnvironment)) delete process.env[key];
+});
 
 afterEach(() => {
   for (const [key, value] of Object.entries(originalEnvironment)) {
@@ -159,6 +165,52 @@ describe("production-site telemetry reporting", () => {
     reporter.report("https://preview.localhost/products");
 
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["preview", undefined],
+    ["development", undefined],
+    [undefined, "preview"],
+    ["production", "staging"],
+  ])(
+    "does not report a Vercel non-production deployment (%s, %s)",
+    (environment, targetEnvironment) => {
+      if (environment === undefined) delete process.env.VERCEL_ENV;
+      else process.env.VERCEL_ENV = environment;
+      if (targetEnvironment === undefined) delete process.env.VERCEL_TARGET_ENV;
+      else process.env.VERCEL_TARGET_ENV = targetEnvironment;
+      const send = vi.fn<typeof fetch>();
+      const reporter = createFarmProductionSiteReporter({
+        renderer: "react",
+        deployTarget: "vercel",
+        fetch: send,
+      });
+
+      reporter.report("https://docs-git-feature-owner.vercel.app/private");
+
+      expect(send).not.toHaveBeenCalled();
+    },
+  );
+
+  it("continues to report a production site on a vercel.app domain", () => {
+    process.env.VERCEL_ENV = "production";
+    process.env.VERCEL_TARGET_ENV = "production";
+    const send = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 202 }));
+    const reporter = createFarmProductionSiteReporter({
+      renderer: "react",
+      deployTarget: "vercel",
+      fetch: send,
+    });
+
+    reporter.report("https://farm-git-tools.vercel.app/products");
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        body: expect.stringContaining('"siteUrl":"https://farm-git-tools.vercel.app"'),
+      }),
+    );
   });
 
   it("bounds automatically detected origins per running instance", async () => {

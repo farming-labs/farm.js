@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
+import { chromium } from "@playwright/test";
 import { describe, expect, it, vi } from "vitest";
 import { build } from "../build";
 import { loadFarmProductionVite, type FarmProductionViteRuntime } from "../build/production-vite";
@@ -60,6 +61,136 @@ export default function Page() {
 
   return root;
 }
+
+function isolatedParityCounterSource(version: string): string {
+  return `
+"use client";
+
+import { useState } from "react";
+
+export default function LiveCounter({ name }) {
+  const [count, setCount] = useState(0);
+  return (
+    <button data-live-counter={name} onClick={() => setCount((value) => value + 1)}>
+      ${version}:{name}:{count}
+    </button>
+  );
+}
+`.trim();
+}
+
+async function createIsolatedParityFixture(options: { ssg?: boolean } = {}): Promise<string> {
+  const root = await createProductionFixture();
+  await fs.writeFile(
+    path.join(root, "src", "lib", "server-sentinel.ts"),
+    `export const serverSentinel = "SERVER_LAYOUT_SENTINEL_ISOLATED_PARITY";`,
+  );
+  await fs.mkdir(path.join(root, "src", "components"), { recursive: true });
+  await fs.writeFile(
+    path.join(root, "src", "components", "live-counter.tsx"),
+    isolatedParityCounterSource("before"),
+  );
+  await fs.writeFile(
+    path.join(root, "src", "components", "stable-counter.tsx"),
+    `
+"use client";
+
+import { useState } from "react";
+
+export default function StableCounter() {
+  const [count, setCount] = useState(0);
+  return <button data-stable-counter onClick={() => setCount((value) => value + 1)}>stable:{count}</button>;
+}
+`.trim(),
+  );
+  await fs.writeFile(
+    path.join(root, "src", "components", "fallback-counter.tsx"),
+    `
+"use client";
+
+import { useState } from "react";
+
+function FallbackCounter() {
+  const [count, setCount] = useState(0);
+  return <button data-fallback-counter onClick={() => setCount((value) => value + 1)}>fallback:{count}</button>;
+}
+
+export { FallbackCounter };
+`.trim(),
+  );
+  await fs.writeFile(
+    path.join(root, "src", "app", "layout.tsx"),
+    `
+import LiveCounter from "../components/live-counter";
+import StableCounter from "../components/stable-counter";
+import { serverSentinel } from "../lib/server-sentinel";
+
+export default function RootLayout({ children }) {
+  return (
+    <section data-parity-layout data-server-sentinel={serverSentinel}>
+      <LiveCounter name="first" />
+      <LiveCounter name="second" />
+      <StableCounter />
+      {children}
+    </section>
+  );
+}
+`.trim(),
+  );
+  await fs.writeFile(
+    path.join(root, "src", "app", "page.tsx"),
+    `${options.ssg ? "export const ssg = true;\n\n" : ""}export default function Page() { return <main data-parity-page>Parity page <a href="/fallback" data-nav-fallback>Fallback</a></main>; }`,
+  );
+  await fs.mkdir(path.join(root, "src", "app", "fallback"), { recursive: true });
+  await fs.writeFile(
+    path.join(root, "src", "app", "fallback", "page.tsx"),
+    `
+import { FallbackCounter } from "../../components/fallback-counter";
+
+${options.ssg ? "export const ssg = true;" : ""}
+export const island = "interaction";
+
+export default function FallbackPage() {
+  return <main data-fallback-page><FallbackCounter /><a href="/" data-nav-home>Home</a></main>;
+}
+`.trim(),
+  );
+  return root;
+}
+
+type IsolatedBoundaryMetadata = {
+  reference: string;
+  exportName: string;
+  strategy: string;
+};
+
+function readIsolatedBoundaryMetadata(html: string): IsolatedBoundaryMetadata[] {
+  const readAttribute = (attributes: string, name: string) =>
+    attributes.match(new RegExp(`${name}="([^"]*)"`))?.[1] ?? "";
+  return Array.from(html.matchAll(/<farm-client-boundary\b([^>]*)>/g), ([, attributes]) => ({
+    reference: readAttribute(attributes, "data-farm-client-boundary"),
+    exportName: readAttribute(attributes, "data-farm-client-export"),
+    strategy: readAttribute(attributes, "data-farm-island-strategy"),
+  }));
+}
+
+const isolatedParityMetadata: IsolatedBoundaryMetadata[] = [
+  {
+    reference: "/src/components/live-counter.tsx",
+    exportName: "default",
+    strategy: "load",
+  },
+  {
+    reference: "/src/components/live-counter.tsx",
+    exportName: "default",
+    strategy: "load",
+  },
+  {
+    reference: "/src/components/stable-counter.tsx",
+    exportName: "default",
+    strategy: "load",
+  },
+];
 
 async function linkReact18(root: string): Promise<void> {
   const fixtureModules = path.resolve(packageRoot, "../../examples/simple-demo/node_modules");
@@ -136,6 +267,19 @@ async function readAllClientJavaScript(root: string): Promise<string> {
     return contents.join("\n");
   };
   return readDirectory(path.join(root, ".farm", "client"));
+}
+
+async function resolveInstalledChromiumExecutable(): Promise<string | null> {
+  const configured = process.env.FARM_TEST_CHROMIUM_EXECUTABLE_PATH;
+  if (configured) return configured;
+
+  try {
+    const executablePath = chromium.executablePath();
+    await fs.access(executablePath);
+    return executablePath;
+  } catch {
+    return null;
+  }
 }
 
 async function runProductionRequest(
@@ -416,42 +560,126 @@ export default defineConfig({ integrations: { acme } });
     }
   });
 
-  it("isolates a client leaf without shipping its server layout", async () => {
+  it("isolates client leaves and preserves shared roots across navigation", async () => {
     const root = await createProductionFixture();
     const baselineRoot = await createProductionFixture();
 
     try {
       let randomState = 0x5f3759df;
-      const serverLayoutSentinel = `SERVER_LAYOUT_SENTINEL_${Array.from({ length: 8192 }, () => {
+      const serverLayoutSentinel = `SERVER_LAYOUT_SENTINEL_${Array.from({ length: 16384 }, () => {
         randomState = (randomState * 1664525 + 1013904223) >>> 0;
         return String.fromCharCode(33 + (randomState % 90));
       }).join("")}`;
       const counterSource = `
 "use client";
 
+import { useEffect, useRef, useState } from "react";
+
+export default function Counter({ name, initial = 0 }) {
+  const [count, setCount] = useState(initial);
+  const ref = useRef(null);
+  useEffect(() => {
+    const container = ref.current?.closest("farm-client-boundary");
+    globalThis.__farmIsolatedLifecycle = globalThis.__farmIsolatedLifecycle || [];
+    globalThis.__farmIsolatedLifecycle.push({ type: "mount", name });
+    return () => globalThis.__farmIsolatedLifecycle.push({
+      type: "unmount",
+      name,
+      connected: container?.isConnected === true,
+    });
+  }, [name]);
+  return <button ref={ref} data-isolated-counter={name} onClick={() => setCount(count + 1)}>{count}</button>;
+}
+`.trim();
+      const pageCounterSource = `
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+
+export default function PageCounter({ name }) {
+  const [count, setCount] = useState(0);
+  const ref = useRef(null);
+  useEffect(() => {
+    const container = ref.current?.closest("farm-client-boundary");
+    globalThis.__farmIsolatedLifecycle = globalThis.__farmIsolatedLifecycle || [];
+    globalThis.__farmIsolatedLifecycle.push({ type: "mount", name });
+    return () => globalThis.__farmIsolatedLifecycle.push({
+      type: "unmount",
+      name,
+      connected: container?.isConnected === true,
+    });
+  }, [name]);
+  return <button ref={ref} data-page-counter={name} onClick={() => setCount(count + 1)}>{count}</button>;
+}
+`.trim();
+      const childSource = `
+"use client";
+
 import { useState } from "react";
 
-export default function Counter({ initial = 0 }) {
-  const [count, setCount] = useState(initial);
-  return <button data-isolated-counter onClick={() => setCount(count + 1)}>{count}</button>;
+export default function ChildCounter() {
+  const [count, setCount] = useState(10);
+  return <button data-nested-counter onClick={() => setCount(count + 1)}>{count}</button>;
+}
+`.trim();
+      const parentSource = `
+"use client";
+
+import ChildCounter from "./child-counter";
+
+export default function ParentCounter() {
+  return <section data-parent-counter><ChildCounter /></section>;
 }
 `.trim();
       const layoutSource = `
 import Counter from "../components/counter";
+import ParentCounter from "../components/parent-counter";
 
 const serverLayoutSentinel = ${JSON.stringify(serverLayoutSentinel)};
 
 export default function RootLayout({ children }) {
-  return <html data-server-layout={serverLayoutSentinel}><body><Counter initial={2} />{children}</body></html>;
+  return <html data-server-layout={serverLayoutSentinel}><body><nav><a data-nav-first href="/">First</a><a data-nav-second href="/second">Second</a></nav><Counter name="first" initial={2} /><Counter name="second" initial={5} /><ParentCounter />{children}</body></html>;
+}
+`.trim();
+      const firstPageSource = `
+import PageCounter from "../components/page-counter";
+
+export default function Page() {
+  return <main><h1>First page</h1><PageCounter name="first-page" /></main>;
+}
+`.trim();
+      const secondPageSource = `
+import PageCounter from "../../components/page-counter";
+
+export default function SecondPage() {
+  return <main><h1>Second page</h1><PageCounter name="second-page" /></main>;
 }
 `.trim();
       for (const fixtureRoot of [root, baselineRoot]) {
         await fs.mkdir(path.join(fixtureRoot, "src", "components"), { recursive: true });
+        await fs.mkdir(path.join(fixtureRoot, "src", "app", "second"), { recursive: true });
         await fs.writeFile(
           path.join(fixtureRoot, "src", "components", "counter.tsx"),
           counterSource,
         );
+        await fs.writeFile(
+          path.join(fixtureRoot, "src", "components", "child-counter.tsx"),
+          childSource,
+        );
+        await fs.writeFile(
+          path.join(fixtureRoot, "src", "components", "parent-counter.tsx"),
+          parentSource,
+        );
+        await fs.writeFile(
+          path.join(fixtureRoot, "src", "components", "page-counter.tsx"),
+          pageCounterSource,
+        );
         await fs.writeFile(path.join(fixtureRoot, "src", "app", "layout.tsx"), layoutSource);
+        await fs.writeFile(path.join(fixtureRoot, "src", "app", "page.tsx"), firstPageSource);
+        await fs.writeFile(
+          path.join(fixtureRoot, "src", "app", "second", "page.tsx"),
+          secondPageSource,
+        );
       }
 
       const config = await resolveConfig(
@@ -484,8 +712,9 @@ export default function RootLayout({ children }) {
       await build(baselineConfig, { root: baselineRoot, preset: "node-server" });
       const baselineJavaScript = await readAllClientJavaScript(baselineRoot);
       expect(baselineJavaScript).toContain("SERVER_LAYOUT_SENTINEL_");
-      expect(baselineJavaScript).not.toContain("farm-client-boundary");
+      expect(baselineJavaScript).not.toContain("data-farm-client-boundary");
       expect(baselineJavaScript).not.toContain("__farm_client_boundary_originals__");
+      expect(baselineJavaScript).not.toContain("Could not hydrate isolated client boundary");
       expect(Buffer.byteLength(clientJavaScript)).toBeLessThan(
         Buffer.byteLength(baselineJavaScript),
       );
@@ -514,8 +743,157 @@ export default function RootLayout({ children }) {
           expect(html).toContain("SERVER_LAYOUT_SENTINEL_");
           expect(html).toContain('data-farm-client-boundary="/src/components/counter.tsx"');
           expect(html).toContain('data-farm-client-export="default"');
-          expect(html).toContain('data-isolated-counter="true"');
+          expect(html).toContain('data-isolated-counter="first"');
+          expect(html).toContain('data-isolated-counter="second"');
+          expect(html).toContain("data-nested-counter");
           expect(html).toContain(">2</button>");
+          expect(html).toContain('data-page-counter="first-page"');
+          expect(html.match(/<farm-client-boundary/g)).toHaveLength(4);
+          expect(html).not.toContain(
+            'data-farm-client-boundary="/src/components/child-counter.tsx"',
+          );
+
+          const executablePath = await resolveInstalledChromiumExecutable();
+          if (!executablePath) return;
+          const browser = await chromium.launch({
+            headless: true,
+            executablePath,
+          });
+          try {
+            const page = await browser.newPage();
+            const browserErrors: string[] = [];
+            page.on("console", (message) => {
+              if (message.type() === "error") browserErrors.push(message.text());
+            });
+            page.on("pageerror", (error) => browserErrors.push(error.message));
+            await page.goto(response.url);
+            const first = page.locator('[data-isolated-counter="first"]');
+            const second = page.locator('[data-isolated-counter="second"]');
+            const nested = page.locator("[data-nested-counter]");
+            const pageCounter = page.locator('[data-page-counter="first-page"]');
+            for (const counter of [first, nested, pageCounter]) {
+              await expect
+                .poll(() =>
+                  counter.evaluate((element) =>
+                    element.closest("farm-client-boundary")?.getAttribute("data-farm-hydrated"),
+                  ),
+                )
+                .toBe("true");
+            }
+            await first.evaluate((element) => element.setAttribute("data-identity", "retained"));
+            await first.click();
+            await nested.click();
+            await pageCounter.click();
+
+            await expect.poll(() => first.textContent()).toBe("3");
+            await expect.poll(() => second.textContent()).toBe("5");
+            await expect.poll(() => nested.textContent()).toBe("11");
+            await expect.poll(() => first.getAttribute("data-identity")).toBe("retained");
+            await expect.poll(() => pageCounter.textContent()).toBe("1");
+            await expect
+              .poll(() => page.locator('farm-client-boundary[data-farm-hydrated="true"]').count())
+              .toBe(4);
+
+            await page.locator("[data-nav-second]").click();
+            await expect.poll(() => page.locator("h1").textContent()).toBe("Second page");
+            await page.locator('[data-page-counter="second-page"]').click();
+            await expect.poll(() => first.textContent()).toBe("3");
+            await expect.poll(() => first.getAttribute("data-identity")).toBe("retained");
+            await expect
+              .poll(() => page.locator('[data-page-counter="second-page"]').textContent())
+              .toBe("1");
+
+            await page.goBack();
+            await expect.poll(() => page.locator("h1").textContent()).toBe("First page");
+            await page.goForward();
+            await expect.poll(() => page.locator("h1").textContent()).toBe("Second page");
+            await page.evaluate(() =>
+              (
+                window as typeof window & {
+                  __FARM_SPA_ROUTER__: {
+                    navigate(href: string, options: { replace: boolean }): Promise<void>;
+                  };
+                }
+              ).__FARM_SPA_ROUTER__.navigate("/", { replace: true }),
+            );
+            await expect.poll(() => page.locator("h1").textContent()).toBe("First page");
+
+            let releaseInterruptedRequest: (() => void) | undefined;
+            const interruptedRequest = new Promise<void>((resolve) => {
+              releaseInterruptedRequest = resolve;
+            });
+            await page.route("**/second?interrupt=1", async (route) => {
+              await interruptedRequest;
+              await route.continue().catch(() => undefined);
+            });
+            const requestStarted = page.waitForRequest((request) =>
+              request.url().endsWith("/second?interrupt=1"),
+            );
+            await page.evaluate(() => {
+              void (
+                window as typeof window & {
+                  __FARM_SPA_ROUTER__: { navigate(href: string): Promise<void> };
+                }
+              ).__FARM_SPA_ROUTER__.navigate("/second?interrupt=1");
+            });
+            const request = await requestStarted;
+            const requestSettled = Promise.race([
+              page.waitForEvent("requestfinished", {
+                predicate: (candidate) => candidate === request,
+              }),
+              page.waitForEvent("requestfailed", {
+                predicate: (candidate) => candidate === request,
+              }),
+            ]);
+            await page.evaluate(() =>
+              (
+                window as typeof window & {
+                  __FARM_SPA_ROUTER__: {
+                    navigate(href: string, options: { replace: boolean }): Promise<void>;
+                  };
+                }
+              ).__FARM_SPA_ROUTER__.navigate("/", { replace: true }),
+            );
+            releaseInterruptedRequest?.();
+            await requestSettled;
+
+            await expect.poll(() => page.url()).toMatch(/\/$/);
+            await expect.poll(() => page.locator("h1").textContent()).toBe("First page");
+            await expect.poll(() => first.textContent()).toBe("3");
+            await expect.poll(() => first.getAttribute("data-identity")).toBe("retained");
+            await expect
+              .poll(() => page.locator('farm-client-boundary[data-farm-hydrated="true"]').count())
+              .toBe(4);
+
+            const lifecycle = await page.evaluate(
+              () =>
+                (
+                  globalThis as typeof globalThis & {
+                    __farmIsolatedLifecycle?: Array<{
+                      type: string;
+                      name: string;
+                      connected?: boolean;
+                    }>;
+                  }
+                ).__farmIsolatedLifecycle ?? [],
+            );
+            const mounts = lifecycle.filter((event) => event.type === "mount");
+            const unmounts = lifecycle.filter((event) => event.type === "unmount");
+            expect(mounts.filter((event) => event.name === "first")).toHaveLength(1);
+            expect(mounts.filter((event) => event.name === "second")).toHaveLength(1);
+            expect(unmounts.filter((event) => event.name === "first")).toHaveLength(0);
+            expect(unmounts.filter((event) => event.name === "second")).toHaveLength(0);
+            expect(mounts.filter((event) => event.name === "first-page")).toHaveLength(3);
+            expect(mounts.filter((event) => event.name === "second-page")).toHaveLength(2);
+            expect(unmounts).toHaveLength(4);
+            expect(unmounts.every((event) => event.connected === true)).toBe(true);
+            expect(
+              browserErrors,
+              `${browserErrors.join("\n")}\nDOM:\n${await page.locator("body").innerHTML()}`,
+            ).toEqual([]);
+          } finally {
+            await browser.close();
+          }
         },
       );
     } finally {
@@ -526,6 +904,740 @@ export default function RootLayout({ children }) {
       );
     }
   }, 120_000);
+
+  it("keeps the measured isolated-root overflow route-wide in development and production", async () => {
+    const root = await createProductionFixture();
+    const developmentRoot = await createProductionFixture();
+
+    try {
+      await fs.mkdir(path.join(root, "src", "components"), { recursive: true });
+      await fs.writeFile(
+        path.join(root, "src", "components", "counter.tsx"),
+        `
+"use client";
+
+import { useState } from "react";
+
+export default function Counter({ name }) {
+  const [count, setCount] = useState(0);
+  return <button data-cost-counter={name} onClick={() => setCount((value) => value + 1)}>{name}:{count}</button>;
+}
+`.trim(),
+      );
+      await fs.writeFile(
+        path.join(root, "src", "app", "page.tsx"),
+        `
+import Counter from "../components/counter";
+
+export default function Page() {
+  return <main>${Array.from(
+    { length: 5 },
+    (_, index) => `<Counter name="counter-${index + 1}" />`,
+  ).join("")}</main>;
+}
+`.trim(),
+      );
+      await fs.writeFile(
+        path.join(developmentRoot, "index.mjs"),
+        `
+import { createServer } from "@farm.js/core/server";
+
+const server = await createServer({
+  root: process.cwd(),
+  images: { provider: "none" },
+  telemetry: false,
+  experimental: { isolatedClientHydration: "enabled" },
+});
+server.config.server.host = "127.0.0.1";
+await server.listen(Number(process.env.PORT));
+`.trim(),
+      );
+      await fs.cp(path.join(root, "src"), path.join(developmentRoot, "src"), {
+        recursive: true,
+        force: true,
+      });
+
+      const verifyRouteWideRuntime = async (response: Response) => {
+        expect(response.status).toBe(200);
+        const html = await response.text();
+        expect(html).not.toContain("<farm-client-boundary");
+        expect(html).toMatch(/id="__farm_page__"[^>]*data-farm-client="true"/);
+
+        const executablePath = await resolveInstalledChromiumExecutable();
+        if (!executablePath) return;
+        const browser = await chromium.launch({ headless: true, executablePath });
+        try {
+          const page = await browser.newPage();
+          const browserErrors: string[] = [];
+          page.on("console", (message) => {
+            if (message.type() === "error") browserErrors.push(message.text());
+          });
+          page.on("pageerror", (error) => browserErrors.push(error.message));
+          await page.goto(response.url);
+          const counter = page.locator('[data-cost-counter="counter-3"]');
+          try {
+            await expect
+              .poll(() =>
+                counter.evaluate((element) =>
+                  Object.keys(element).some((key) => key.startsWith("__reactProps$")),
+                ),
+              )
+              .toBe(true);
+            await counter.click();
+            await expect.poll(() => counter.textContent()).toBe("counter-3:1");
+            await expect.poll(() => page.locator("[data-cost-counter]").count()).toBe(5);
+            expect(browserErrors).toEqual([]);
+          } catch (error) {
+            throw new Error(
+              `${String(error)}\nBrowser errors:\n${browserErrors.join("\n")}\nDOM:\n${await page.locator("body").innerHTML()}`,
+            );
+          }
+        } finally {
+          await browser.close();
+        }
+      };
+
+      await runProductionRequest(developmentRoot, verifyRouteWideRuntime);
+
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          experimental: { isolatedClientHydration: "enabled" },
+          generateBuildId: () => "isolated-cost-guard-test",
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+
+      const clientJavaScript = await readAllClientJavaScript(root);
+      expect(clientJavaScript).toContain("data-cost-counter");
+      expect(clientJavaScript).not.toContain("__farm_client_boundary_originals__");
+      expect(clientJavaScript).not.toContain("Could not hydrate isolated client boundary");
+
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        verifyRouteWideRuntime,
+      );
+    } finally {
+      await Promise.all(
+        [root, developmentRoot].map((fixtureRoot) =>
+          fs.rm(fixtureRoot, { recursive: true, force: true }),
+        ),
+      );
+    }
+  }, 120_000);
+
+  it("keeps isolated scheduling and interaction replay boundary-local in development and production", async () => {
+    const root = await createProductionFixture();
+    const developmentRoot = await createProductionFixture();
+
+    try {
+      const componentSource = (strategy: "load" | "interaction" | "visible" | "idle") =>
+        `
+"use client";
+
+import { useEffect, useState } from "react";
+
+export const island = "${strategy}";
+
+export default function StrategyCounter() {
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    const lifecycle = ((globalThis as any).__farmStrategyLifecycle ||= { mounts: [], unmounts: [] });
+    lifecycle.mounts.push("${strategy}");
+    return () => lifecycle.unmounts.push("${strategy}");
+  }, []);
+  return (
+    <button data-strategy="${strategy}" onClick={() => setCount((value) => value + 1)}>
+      ${strategy}:{count}
+    </button>
+  );
+}
+`.trim();
+      for (const strategy of ["load", "interaction", "visible", "idle"] as const) {
+        const file = path.join(root, "src", "components", `${strategy}.tsx`);
+        await fs.mkdir(path.dirname(file), { recursive: true });
+        await fs.writeFile(file, componentSource(strategy));
+      }
+      await fs.mkdir(path.join(root, "src", "app", "second"), { recursive: true });
+      await fs.writeFile(
+        path.join(root, "src", "app", "page.tsx"),
+        `
+import Load from "../components/load";
+import Interaction from "../components/interaction";
+import Visible from "../components/visible";
+import Idle from "../components/idle";
+
+export default function Page() {
+  return (
+    <main>
+      <h1>Scheduling</h1>
+      <a href="/second" data-nav-second>Second page</a>
+      <Load />
+      <Interaction />
+      <div style={{ marginTop: 5000 }}><Visible /></div>
+      <Idle />
+    </main>
+  );
+}
+`.trim(),
+      );
+      await fs.writeFile(
+        path.join(root, "src", "app", "second", "page.tsx"),
+        `export default function SecondPage() { return <main><h1>Second page</h1></main>; }`,
+      );
+      await fs.cp(path.join(root, "src"), path.join(developmentRoot, "src"), {
+        recursive: true,
+        force: true,
+      });
+      await fs.writeFile(
+        path.join(developmentRoot, "index.mjs"),
+        `
+import { createServer } from "@farm.js/core/server";
+
+const server = await createServer({
+  root: process.cwd(),
+  images: { provider: "none" },
+  experimental: { isolatedClientHydration: "enabled" },
+});
+server.config.server.host = "127.0.0.1";
+await server.listen(Number(process.env.PORT));
+`.trim(),
+      );
+
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          experimental: { isolatedClientHydration: "enabled" },
+          generateBuildId: () => "isolated-scheduling-test",
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+
+      const executablePath = await resolveInstalledChromiumExecutable();
+      const verifyScheduling = async (url: string) => {
+        if (!executablePath) return;
+        const browser = await chromium.launch({ headless: true, executablePath });
+        try {
+          const page = await browser.newPage();
+          const browserErrors: string[] = [];
+          page.on("console", (message) => {
+            if (message.type() === "error") {
+              const location = message.location().url;
+              if (location.endsWith("/favicon.ico")) return;
+              browserErrors.push(`${message.text()} (${location})`);
+            }
+          });
+          page.on("pageerror", (error) => browserErrors.push(error.message));
+          try {
+            await page.addInitScript(() => {
+              const state = globalThis as any;
+              state.__farmVisibleObservers = [];
+              state.__farmIdleCallbacks = [];
+              state.__farmIdlePending = new Map();
+              state.__farmObserverDisconnects = 0;
+              state.__farmIdleCancellations = 0;
+              state.IntersectionObserver = class {
+                callback: IntersectionObserverCallback;
+                target?: Element;
+                constructor(callback: IntersectionObserverCallback) {
+                  this.callback = callback;
+                  state.__farmVisibleObservers.push(this);
+                }
+                observe(target: Element) {
+                  this.target = target;
+                }
+                disconnect() {
+                  state.__farmObserverDisconnects++;
+                }
+              };
+              let idleId = 0;
+              state.requestIdleCallback = (callback: IdleRequestCallback) => {
+                const id = ++idleId;
+                state.__farmIdleCallbacks.push(callback);
+                state.__farmIdlePending.set(id, callback);
+                return id;
+              };
+              state.cancelIdleCallback = (id: number) => {
+                state.__farmIdleCancellations++;
+                state.__farmIdlePending.delete(id);
+              };
+            });
+            await page.goto(url);
+
+            const boundary = (strategy: string) =>
+              page.locator(`farm-client-boundary[data-farm-island-strategy="${strategy}"]`);
+            await boundary("load").locator('[data-strategy="load"]').waitFor();
+            await expect
+              .poll(() => boundary("load").getAttribute("data-farm-hydrated"))
+              .toBe("true");
+            for (const strategy of ["interaction", "visible", "idle"]) {
+              expect(await boundary(strategy).getAttribute("data-farm-hydrated")).toBeNull();
+            }
+
+            await page.locator('[data-strategy="interaction"]').click();
+            await expect
+              .poll(() => page.locator('[data-strategy="interaction"]').textContent())
+              .toBe("interaction:1");
+            expect(await boundary("visible").getAttribute("data-farm-hydrated")).toBeNull();
+            expect(await boundary("idle").getAttribute("data-farm-hydrated")).toBeNull();
+
+            await page.evaluate(() => {
+              const state = globalThis as any;
+              for (const observer of state.__farmVisibleObservers) {
+                observer.callback([{ isIntersecting: true, target: observer.target }], observer);
+              }
+            });
+            await expect
+              .poll(() => page.locator('[data-strategy="visible"]').textContent())
+              .toBe("visible:0");
+            expect(await boundary("idle").getAttribute("data-farm-hydrated")).toBeNull();
+
+            await page.evaluate(() => {
+              const state = globalThis as any;
+              for (const callback of state.__farmIdleCallbacks) {
+                callback({ didTimeout: false, timeRemaining: () => 10 });
+              }
+            });
+            await expect
+              .poll(() => boundary("idle").getAttribute("data-farm-hydrated"))
+              .toBe("true");
+
+            await page.evaluate(() => {
+              const state = globalThis as any;
+              for (const observer of state.__farmVisibleObservers) {
+                observer.callback([{ isIntersecting: true, target: observer.target }], observer);
+              }
+              for (const callback of state.__farmIdleCallbacks) {
+                callback({ didTimeout: false, timeRemaining: () => 10 });
+              }
+            });
+            await page.locator('[data-strategy="interaction"]').click();
+            await page.locator('[data-strategy="visible"]').click();
+            await expect
+              .poll(() => page.locator('[data-strategy="interaction"]').textContent())
+              .toBe("interaction:2");
+            await expect
+              .poll(() => page.locator('[data-strategy="visible"]').textContent())
+              .toBe("visible:1");
+            await expect
+              .poll(() => page.evaluate(() => (globalThis as any).__farmStrategyLifecycle.mounts))
+              .toEqual(["load", "interaction", "visible", "idle"]);
+
+            await page.reload();
+            await expect
+              .poll(() => boundary("load").getAttribute("data-farm-hydrated"))
+              .toBe("true");
+            await expect
+              .poll(() => page.evaluate(() => (globalThis as any).__farmStrategyLifecycle.mounts))
+              .toEqual(["load"]);
+            await page.evaluate(() => {
+              const state = globalThis as any;
+              const queue = (state.__FARM_PREHYDRATION_CLICK_QUEUE__ ||= []);
+              for (const strategy of ["interaction", "visible", "idle"]) {
+                queue.push({ target: document.querySelector(`[data-strategy="${strategy}"]`) });
+              }
+            });
+            await page.locator("[data-nav-second]").click();
+            await expect.poll(() => page.locator("h1").textContent()).toBe("Second page");
+            expect(
+              await page.evaluate(
+                () => (globalThis as any).__FARM_PREHYDRATION_CLICK_QUEUE__.length,
+              ),
+            ).toBe(0);
+            const cleanup = await page.evaluate(() => ({
+              observers: (globalThis as any).__farmObserverDisconnects,
+              idle: (globalThis as any).__farmIdleCancellations,
+            }));
+            expect(cleanup.observers).toBeGreaterThanOrEqual(1);
+            expect(cleanup.idle).toBeGreaterThanOrEqual(1);
+
+            await page.evaluate(() => {
+              const state = globalThis as any;
+              for (const observer of state.__farmVisibleObservers) {
+                observer.callback([{ isIntersecting: true, target: observer.target }], observer);
+              }
+              for (const callback of state.__farmIdleCallbacks) {
+                callback({ didTimeout: false, timeRemaining: () => 10 });
+              }
+            });
+            await page.waitForTimeout(20);
+            expect(
+              await page.evaluate(() => (globalThis as any).__farmStrategyLifecycle.mounts),
+            ).toEqual(["load"]);
+            expect(browserErrors).toEqual([]);
+          } catch (error) {
+            throw new Error(
+              `${String(error)}\nBrowser errors:\n${browserErrors.join("\n")}\nDOM:\n${await page.locator("body").innerHTML()}`,
+            );
+          }
+        } finally {
+          await browser.close();
+        }
+      };
+
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          const html = await response.text();
+          for (const strategy of ["load", "interaction", "visible", "idle"]) {
+            expect(html).toContain(`data-farm-island-strategy="${strategy}"`);
+          }
+          expect(html.match(/<farm-client-boundary/g)).toHaveLength(4);
+          await verifyScheduling(response.url);
+        },
+      );
+
+      if (executablePath) {
+        await runProductionRequest(developmentRoot, async (response) => {
+          expect(response.status).toBe(200);
+          await verifyScheduling(response.url);
+        });
+      }
+    } finally {
+      await Promise.all(
+        [root, developmentRoot].map((fixtureRoot) =>
+          fs.rm(fixtureRoot, { recursive: true, force: true }),
+        ),
+      );
+    }
+  }, 180_000);
+
+  it("keeps one isolated ownership plan across development, HMR, SSR, and SSG", async () => {
+    const fixtureResults = await Promise.allSettled([
+      createIsolatedParityFixture(),
+      createIsolatedParityFixture(),
+      createIsolatedParityFixture(),
+      createIsolatedParityFixture({ ssg: true }),
+    ]);
+    const roots = fixtureResults.flatMap((result) =>
+      result.status === "fulfilled" ? [result.value] : [],
+    );
+    const fixtureFailure = fixtureResults.find((result) => result.status === "rejected");
+    if (fixtureFailure?.status === "rejected") {
+      await Promise.allSettled(roots.map((root) => fs.rm(root, { recursive: true, force: true })));
+      throw fixtureFailure.reason;
+    }
+    const [developmentRoot, streamingRoot, bufferedRoot, staticRoot] = roots;
+    const assertBoundaryDocument = (html: string) => {
+      expect(html).toContain("Parity page");
+      expect(html).toContain("SERVER_LAYOUT_SENTINEL_ISOLATED_PARITY");
+      expect(readIsolatedBoundaryMetadata(html)).toEqual(isolatedParityMetadata);
+    };
+    const assertFallbackDocument = (html: string) => {
+      expect(html).toContain("data-fallback-counter");
+      expect(html).toMatch(/id="__farm_page__"[^>]*data-farm-client="true"/);
+      expect(readIsolatedBoundaryMetadata(html)).toEqual(isolatedParityMetadata);
+    };
+    const assertProductionOwnership = async (root: string) => {
+      const clientJavaScript = await readAllClientJavaScript(root);
+      expect(clientJavaScript).toContain("__farm_client_boundary_originals__");
+      expect(clientJavaScript).not.toContain("SERVER_LAYOUT_SENTINEL_ISOLATED_PARITY");
+    };
+    const resolveParityConfig = (root: string, buildId: string) =>
+      resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          experimental: { isolatedClientHydration: "enabled" },
+          generateBuildId: () => buildId,
+        },
+        "production",
+      );
+    const verifyIndependentInitialScheduling = async (url: string) => {
+      const executablePath = await resolveInstalledChromiumExecutable();
+      if (!executablePath) return;
+      const browser = await chromium.launch({ headless: true, executablePath });
+      try {
+        const page = await browser.newPage();
+        const browserErrors: string[] = [];
+        page.on("console", (message) => {
+          if (message.type() === "error") browserErrors.push(message.text());
+        });
+        page.on("pageerror", (error) => browserErrors.push(error.message));
+        await page.goto(new URL("/fallback", url).href);
+
+        await expect
+          .poll(() => page.locator('farm-client-boundary[data-farm-hydrated="true"]').count())
+          .toBe(3);
+        expect(
+          await page.locator("#__farm_page__").getAttribute("data-farm-island-hydrated"),
+        ).toBeNull();
+        await page.locator("[data-stable-counter]").click();
+        await expect
+          .poll(() => page.locator("[data-stable-counter]").textContent())
+          .toBe("stable:1");
+        await page.locator("[data-fallback-counter]").click();
+        await expect
+          .poll(() => page.locator("[data-fallback-counter]").textContent())
+          .toBe("fallback:1");
+        expect(browserErrors).toEqual([]);
+      } finally {
+        await browser.close();
+      }
+    };
+
+    try {
+      await fs.writeFile(
+        path.join(developmentRoot, "index.mjs"),
+        `
+import { createServer } from "@farm.js/core/server";
+
+const server = await createServer({
+  root: process.cwd(),
+  images: { provider: "none" },
+  experimental: { isolatedClientHydration: "enabled" },
+});
+server.config.server.host = "127.0.0.1";
+await server.listen(Number(process.env.PORT));
+`.trim(),
+      );
+      await runProductionRequest(developmentRoot, async (response) => {
+        expect(response.status).toBe(200);
+        assertBoundaryDocument(await response.text());
+        const fallbackResponse = await fetch(new URL("/fallback", response.url));
+        expect(fallbackResponse.status).toBe(200);
+        assertFallbackDocument(await fallbackResponse.text());
+
+        const executablePath = await resolveInstalledChromiumExecutable();
+        if (!executablePath) return;
+        const browser = await chromium.launch({ headless: true, executablePath });
+        try {
+          const page = await browser.newPage();
+          const browserErrors: string[] = [];
+          const browserRequests: string[] = [];
+          page.on("request", (request) => browserRequests.push(new URL(request.url()).pathname));
+          page.on("console", (message) => {
+            if (message.type() === "error") {
+              browserErrors.push(`${message.text()} (${message.location().url})`);
+            }
+          });
+          page.on("pageerror", (error) => browserErrors.push(error.message));
+          try {
+            await page.goto(response.url);
+            await expect
+              .poll(() => page.locator('farm-client-boundary[data-farm-hydrated="true"]').count())
+              .toBe(3);
+            await page.locator("[data-parity-layout]").evaluate((element) => {
+              element.setAttribute("data-layout-identity", "retained");
+              (
+                window as typeof window & { __farmParityHmrDocument?: string }
+              ).__farmParityHmrDocument = "retained";
+            });
+            await page.locator('[data-live-counter="first"]').click();
+            await page.locator("[data-stable-counter]").click();
+            await expect
+              .poll(() => page.locator('[data-live-counter="first"]').textContent())
+              .toBe("before:first:1");
+            await expect
+              .poll(() => page.locator("[data-stable-counter]").textContent())
+              .toBe("stable:1");
+
+            await fs.writeFile(
+              path.join(developmentRoot, "src", "components", "live-counter.tsx"),
+              isolatedParityCounterSource("after"),
+            );
+            await expect
+              .poll(
+                () =>
+                  page
+                    .locator("[data-live-counter]")
+                    .evaluateAll((elements) => elements.map((element) => element.textContent)),
+                { timeout: 10_000 },
+              )
+              .toEqual(["after:first:0", "after:second:0"]);
+
+            expect(await page.locator("[data-stable-counter]").textContent()).toBe("stable:1");
+            expect(
+              await page.locator("[data-parity-layout]").getAttribute("data-layout-identity"),
+            ).toBe("retained");
+            expect(
+              await page.evaluate(
+                () =>
+                  (window as typeof window & { __farmParityHmrDocument?: string })
+                    .__farmParityHmrDocument,
+              ),
+            ).toBe("retained");
+            expect(
+              await page.evaluate(() =>
+                (
+                  window as typeof window & {
+                    __FARM_ISOLATED_HYDRATION_RUNTIME__?: { rootCount(): number };
+                  }
+                ).__FARM_ISOLATED_HYDRATION_RUNTIME__?.rootCount(),
+              ),
+            ).toBe(3);
+
+            await page.locator("[data-nav-fallback]").click();
+            await expect
+              .poll(() => page.locator("[data-fallback-counter]").textContent())
+              .toBe("fallback:0");
+            await page.locator("[data-fallback-counter]").click();
+            await expect
+              .poll(() => page.locator("[data-fallback-counter]").textContent())
+              .toBe("fallback:1");
+            expect(await page.locator("[data-stable-counter]").textContent()).toBe("stable:1");
+            expect(
+              await page.locator("[data-parity-layout]").getAttribute("data-layout-identity"),
+            ).toBe("retained");
+            await page.locator("[data-nav-home]").click();
+            await expect.poll(() => page.locator("[data-parity-page]").count()).toBe(1);
+            expect(await page.locator("[data-stable-counter]").textContent()).toBe("stable:1");
+            expect(
+              await page
+                .locator("[data-live-counter]")
+                .evaluateAll((elements) => elements.map((element) => element.textContent)),
+            ).toEqual(["after:first:0", "after:second:0"]);
+            expect(
+              await page.evaluate(() =>
+                (
+                  window as typeof window & {
+                    __FARM_ISOLATED_HYDRATION_RUNTIME__?: { rootCount(): number };
+                  }
+                ).__FARM_ISOLATED_HYDRATION_RUNTIME__?.rootCount(),
+              ),
+            ).toBe(3);
+            expect(browserRequests).toContain("/src/components/live-counter.tsx");
+            expect(browserRequests).not.toContain("/src/app/layout.tsx");
+            expect(browserRequests).not.toContain("/src/lib/server-sentinel.ts");
+
+            await fs.writeFile(
+              path.join(developmentRoot, "src", "components", "stable-counter.tsx"),
+              `export default function StableCounter() { return <output data-stable-counter>server-stable</output>; }`,
+            );
+            await expect
+              .poll(() => page.locator("[data-stable-counter]").textContent(), {
+                timeout: 10_000,
+              })
+              .toBe("server-stable");
+            await expect
+              .poll(() => page.locator('farm-client-boundary[data-farm-hydrated="true"]').count())
+              .toBe(2);
+
+            await fs.writeFile(
+              path.join(developmentRoot, "src", "components", "page-owner.tsx"),
+              `import LiveCounter from "./live-counter";
+export default function PageOwner() { return <section data-page-owner><LiveCounter name="page" /></section>; }`,
+            );
+            await fs.writeFile(
+              path.join(developmentRoot, "src", "app", "page.tsx"),
+              `import PageOwner from "../components/page-owner";
+export default function Page() { return <main data-parity-page>Parity page <PageOwner /></main>; }`,
+            );
+            await expect.poll(() => page.locator("[data-page-owner]").count()).toBe(1);
+            await expect
+              .poll(() => page.locator('farm-client-boundary[data-farm-hydrated="true"]').count())
+              .toBe(3);
+            await page.evaluate(() => {
+              (
+                window as typeof window & { __farmParityOwnershipDocument?: string }
+              ).__farmParityOwnershipDocument = "stale";
+            });
+            await fs.writeFile(
+              path.join(developmentRoot, "src", "components", "page-owner.tsx"),
+              `import LiveCounter from "./live-counter";
+export const hydrate = true;
+export default function PageOwner() { return <section data-page-owner><LiveCounter name="page" /></section>; }`,
+            );
+            await expect
+              .poll(
+                () =>
+                  page.evaluate(
+                    () =>
+                      (
+                        window as typeof window & {
+                          __farmParityOwnershipDocument?: string;
+                        }
+                      ).__farmParityOwnershipDocument ?? null,
+                  ),
+                { timeout: 10_000 },
+              )
+              .toBeNull();
+            await expect
+              .poll(() => page.locator("#__farm_page__").getAttribute("data-farm-client"))
+              .toBe("true");
+            await expect
+              .poll(() => page.locator('farm-client-boundary[data-farm-hydrated="true"]').count())
+              .toBe(2);
+            expect(
+              browserErrors,
+              `${browserErrors.join("\n")}\nDOM:\n${await page.locator("body").innerHTML()}`,
+            ).toEqual([]);
+          } catch (error) {
+            throw new Error(
+              `${String(error)}\nBrowser errors:\n${browserErrors.join("\n")}\nRequests:\n${browserRequests.join("\n")}\nDOM:\n${await page.locator("body").innerHTML()}`,
+            );
+          }
+        } finally {
+          await browser.close();
+        }
+        await verifyIndependentInitialScheduling(response.url);
+      });
+
+      const streamingConfig = await resolveParityConfig(
+        streamingRoot,
+        "isolated-parity-streaming-test",
+      );
+      expect(streamingConfig.renderer.capabilities?.streaming?.node).toBe(true);
+      await build(streamingConfig, { root: streamingRoot, preset: "node-server" });
+      await assertProductionOwnership(streamingRoot);
+      await runProductionRequest(
+        path.join(streamingRoot, ".farm", ".output", "server"),
+        async (response) => {
+          assertBoundaryDocument(await response.text());
+          assertFallbackDocument(
+            await fetch(new URL("/fallback", response.url)).then((item) => item.text()),
+          );
+          await verifyIndependentInitialScheduling(response.url);
+        },
+      );
+
+      const bufferedConfig = await resolveParityConfig(
+        bufferedRoot,
+        "isolated-parity-buffered-test",
+      );
+      bufferedConfig.renderer = {
+        ...bufferedConfig.renderer,
+        capabilities: { streaming: { node: false, web: false } },
+      };
+      expect(bufferedConfig.renderer.capabilities?.streaming?.node).toBe(false);
+      await build(bufferedConfig, { root: bufferedRoot, preset: "node-server" });
+      await assertProductionOwnership(bufferedRoot);
+      await runProductionRequest(
+        path.join(bufferedRoot, ".farm", ".output", "server"),
+        async (response) => {
+          assertBoundaryDocument(await response.text());
+          assertFallbackDocument(
+            await fetch(new URL("/fallback", response.url)).then((item) => item.text()),
+          );
+          await verifyIndependentInitialScheduling(response.url);
+        },
+      );
+
+      const staticConfig = await resolveParityConfig(staticRoot, "isolated-parity-static-test");
+      await build(staticConfig, { root: staticRoot, preset: "node-server" });
+      await assertProductionOwnership(staticRoot);
+      const staticHtml = await fs.readFile(
+        path.join(staticRoot, ".farm", ".output", "public", "index.html"),
+        "utf8",
+      );
+      assertBoundaryDocument(staticHtml);
+      const staticFallbackHtml = await fs.readFile(
+        path.join(staticRoot, ".farm", ".output", "public", "fallback", "index.html"),
+        "utf8",
+      );
+      assertFallbackDocument(staticFallbackHtml);
+    } finally {
+      await Promise.all(roots.map((root) => fs.rm(root, { recursive: true, force: true })));
+    }
+  }, 180_000);
 
   it("retries an incomplete Rolldown client bundle after the parallel SSR build", async () => {
     const root = await createProductionFixture();

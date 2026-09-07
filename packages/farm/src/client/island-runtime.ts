@@ -70,13 +70,25 @@ function replayClick(target: Element): void {
 }
 
 function finishIslandHydration(container: Element, activatingTarget?: Element | null): void {
-  container.setAttribute("data-farm-island-hydrated", "true");
-
   const targets = new Set<Element>();
   if (activatingTarget?.isConnected) targets.add(activatingTarget);
   for (const target of takeQueuedTargets(container)) if (target.isConnected) targets.add(target);
 
-  for (const target of targets) window.setTimeout(() => replayClick(target), 0);
+  if (!container.isConnected) return;
+  container.setAttribute("data-farm-island-hydrated", "true");
+
+  for (const target of targets) {
+    window.setTimeout(() => {
+      if (
+        container.getAttribute("data-farm-island-hydrated") === "true" &&
+        container.isConnected &&
+        target.isConnected &&
+        container.contains(target)
+      ) {
+        replayClick(target);
+      }
+    }, 0);
+  }
 }
 
 /**
@@ -96,7 +108,8 @@ export function scheduleFarmIslandHydration<T>({
     return Promise.resolve()
       .then(() => (signal?.aborted ? undefined : hydrate()))
       .then((value) => {
-        if (!signal?.aborted) finishIslandHydration(container);
+        if (signal?.aborted) return undefined;
+        finishIslandHydration(container);
         return value;
       });
   }
