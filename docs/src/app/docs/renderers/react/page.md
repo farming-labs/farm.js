@@ -376,9 +376,9 @@ exact retained interval after runtime validation.
 contiguous-range removals, single-row replacements, and exact-window replacements with a guarded
 position.
 `keyedArrayReorderHints` counts native keyed-array reverse steps whose complete permutation can be
-validated, including steps in a supported reorder-only pipeline.
+validated, including steps after a supported filter/slice prefix.
 `keyedArraySortHints` counts native keyed-array sort steps whose resulting permutation can be
-validated without rebuilding keyed rows, including steps in a supported reorder-only pipeline.
+validated without rebuilding keyed rows, including steps after a supported filter/slice prefix.
 `keyedArrayRollingWindowHints` counts direct keyed-array updates that retain a proven sliced tail
 and append an incoming suffix.
 `selected` is `true` when an annotation explicitly requested compilation. Module paths are relative
@@ -1181,15 +1181,34 @@ The runtime validates only the final identity permutation against the committed 
 then applies one LIS-based reconciliation. A cancelling
 `current.toReversed().toReversed()` pipeline therefore performs no DOM moves.
 
+A compiler-safe `filter()` or bounded `slice()` prefix may run before one or more native reorder
+steps in the same concise setter:
+
+```tsx
+setItems((current) =>
+  current
+    .filter((item) => item.visible)
+    .toSorted((left, right) => left.rank - right.rank)
+    .toReversed(),
+);
+```
+
+Farm executes every native method normally, carries the structural survivor proof into the final
+reorder result, and validates the complete operation before touching the DOM. It removes only
+rejected rows, uses LIS once for the surviving final order, and preserves every surviving element,
+handler, and form control without recreating descriptors or rereading bindings. A concise filter
+or slice setter followed by a concise reorder setter in the same batch uses the same proof.
+
 The first proof requires compiler-owned host rows whose render and key do not observe the index.
 Arguments to `toReversed()`, referenced comparators, computed methods, chains containing a method
-other than `toSorted()` or `toReversed()`, block-bodied updaters, subclassed or sparse
-behavior, collection-reading bindings, custom methods, an unhinted or structural update between
-reorder setters, React-owned rows, nested host blocks, row conditionals, unrelated dirty
-dependencies, and any identity mismatch use complete keyed reconciliation. No option or component
-is added. Reports count every compiled reverse step as a `keyedArrayReorderHints` entry; modules
-without one do not retain the optional reorder runtime. The application runtime must provide
-`Array.prototype.toReversed`; Farm does not polyfill it.
+outside the supported `filter()`/`slice()` prefix and `toSorted()`/`toReversed()` suffix,
+block-bodied updaters, subclassed or sparse behavior, collection-reading bindings, custom methods,
+structural calls after reordering, an unhinted intermediate update, React-owned rows, nested host
+blocks, row conditionals, unrelated dirty dependencies, and any identity mismatch use complete
+keyed reconciliation. No option or component is added. Reports count every compiled structural and
+reorder step in its existing hint counter; modules without those steps do not retain their optional
+runtimes. The application runtime must provide `Array.prototype.toReversed`; Farm does not polyfill
+it.
 
 #### Keyed array sort hints
 
@@ -1217,12 +1236,12 @@ rows.
 
 This proof requires compiler-owned host rows whose render and key do not observe the row index.
 Referenced comparators, block-bodied updaters, computed methods, custom methods, sparse or subclassed
-arrays, duplicate item identities, collection-reading bindings, an unhinted or structural update
-between queued sorts, React-owned rows, nested host blocks, row conditionals, unrelated dirty
-dependencies, and failed validation keep complete keyed reconciliation. Native
-sort/reverse-only chains are supported; other chained calls fall back. Reports count each compiled
-sort step as a `keyedArraySortHints` entry. Sort shares the optional reorder runtime, and Farm does
-not polyfill `Array.prototype.toSorted`.
+arrays, duplicate item identities, collection-reading bindings, an unhinted intermediate update,
+structural calls after reordering, React-owned rows, nested host blocks, row conditionals, unrelated
+dirty dependencies, and failed validation keep complete keyed reconciliation. Native sort/reverse
+chains may start with compiler-safe `filter()` and bounded `slice()` calls; other chained calls fall
+back. Reports count each compiled sort step as a `keyedArraySortHints` entry. Sort shares the
+optional reorder runtime, and Farm does not polyfill `Array.prototype.toSorted`.
 
 #### Keyed array filter hints
 
@@ -2045,6 +2064,10 @@ The package and example test suites verify more than generated code:
 - 2,000 deterministic randomized keyed-array removals match normal React; targeted tests require
   zero surviving descriptor and binding reads, preserve DOM identity, and cover queued filters,
   unhinted-chain fallback, collection-reading rows, StrictMode hydration, and unmount cleanup;
+- 2,000 deterministic randomized removals followed by native sorting and reversal match normal
+  React; targeted tests cover filter/slice/reorder pipelines, queued filter-then-sort updates,
+  surviving controlled-input focus and selection, exact DOM identity, custom-method and identity
+  fallback, StrictMode hydration, and unmount-before-flush cleanup;
 - 1,000 deterministic exact-position insertions, single and contiguous-range removals, single-row
   replacements, and exact-window replacements match normal React; compiler tests cover guarded
   runtime positions plus literal and compiler-safe runtime delete counts, while targeted removal

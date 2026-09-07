@@ -839,6 +839,38 @@ export function StandardTableBenchmark() {
           Reverse pipeline (snapshot control)
         </button>
         <button
+          data-action="table-filter-reorder-pipeline"
+          type="button"
+          onClick={() => {
+            setRows((current) =>
+              current
+                .filter((item) => item.id % 10_000 !== 5_001)
+                .toReversed()
+                .toReversed(),
+            );
+            setOperation("filter and reorder rows in one setter");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Filter + reorder pipeline
+        </button>
+        <button
+          data-action="table-filter-reorder-pipeline-snapshot"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              return current
+                .filter((item) => item.id % 10_000 !== 5_001)
+                .toReversed()
+                .toReversed();
+            });
+            setOperation("filter and reorder rows (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Filter + reorder pipeline (snapshot control)
+        </button>
+        <button
           data-action="table-sort"
           type="button"
           onClick={() => {

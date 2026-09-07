@@ -206,6 +206,14 @@ once, retain every DOM node, and remain at least 2x faster than React and 1.25x 
 equivalent block-bodied compiled control. Package tests compile mixed sort/reverse pipelines and
 compare 2,000 deterministic two-to-four-step pipelines with normal React.
 
+Structural reorder pipelines add an independent 10,000-row comparison. One concise setter filters
+one row and then evaluates two native reversals, while the block-bodied version remains the compiled
+fallback control. Farm must validate membership and final order before touching the DOM, preserve
+all 9,999 surviving row identities, remove only the rejected row, and remain at least 2x faster than
+React and 1.25x faster than the compiled control. Package tests also cover filter/slice/sort/reverse
+composition, queued filter-then-sort updates, 2,000 randomized removals, controlled-input focus and
+selection, hydration, cleanup, and conservative fallback.
+
 Native keyed-array sorting has its own 10,000-row comparison. Concise `toSorted()` is measured
 against bracketed React and an equivalent block-bodied compiled control. Both compiler modes must
 remain at least 4x faster than React and 1.25x faster than the compiled control. The report must

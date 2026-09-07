@@ -76,6 +76,7 @@ interface CompilerKeyedArrayReorderHint {
   readonly sourceToken: object;
   readonly sourceLength: number;
   readonly resultLength: number;
+  readonly structuralUpdate?: CompilerKeyedArrayFilterHint;
 }
 
 type CompilerKeyedCollectionKind = "set" | "map";
@@ -236,6 +237,21 @@ function compilerKeyedArrayFilterSurvivors(
   if (!target || !sourceToken || !Array.isArray(value)) return undefined;
   const update = COMPILER_KEYED_ARRAY_FILTERS.get(target);
   if (!update || update.sourceToken !== sourceToken) return undefined;
+  return compilerKeyedArrayFilterSurvivorsFromUpdate(
+    update,
+    sourceToken,
+    expectedLength,
+    value.length,
+  );
+}
+
+function compilerKeyedArrayFilterSurvivorsFromUpdate(
+  update: CompilerKeyedArrayFilterHint,
+  sourceToken: object | undefined,
+  expectedLength: number,
+  resultLength: number,
+): { readonly indices: readonly number[]; readonly keysStable: boolean } | undefined {
+  if (!sourceToken || update.sourceToken !== sourceToken) return undefined;
   const updates: CompilerKeyedArrayFilterHint[] = [];
   for (
     let current: CompilerKeyedArrayFilterHint | undefined = update;
@@ -279,7 +295,25 @@ function compilerKeyedArrayFilterSurvivors(
     if (current.resultLength !== current.sourceLength - removed.size) return undefined;
     survivors = survivors.filter((_sourceIndex, index) => !removed.has(index));
   }
-  return survivors.length === value.length ? { indices: survivors, keysStable } : undefined;
+  return survivors.length === resultLength ? { indices: survivors, keysStable } : undefined;
+}
+
+function compilerKeyedArrayFilterSource(
+  update: CompilerKeyedArrayFilterHint,
+  resultLength: number,
+): { readonly sourceLength: number; readonly sourceToken: object } | undefined {
+  if (update.resultLength !== resultLength) return undefined;
+  let current = update;
+  while (current.previous) {
+    if (
+      current.sourceToken !== current.previous.sourceToken ||
+      current.sourceLength !== current.previous.resultLength
+    ) {
+      return undefined;
+    }
+    current = current.previous;
+  }
+  return { sourceLength: current.sourceLength, sourceToken: current.sourceToken };
 }
 
 function compilerKeyedArrayPrependLength(
@@ -452,7 +486,7 @@ function compilerKeyedArrayReorder(
     !update ||
     update.sourceToken !== sourceToken ||
     update.sourceLength !== expectedLength ||
-    update.resultLength !== expectedLength ||
+    (!update.structuralUpdate && update.resultLength !== expectedLength) ||
     update.resultLength !== value.length
   ) {
     return undefined;
@@ -1078,6 +1112,107 @@ export function createCompilerKeyedArraySort(
     // Metadata must never change the result of a successful native update.
   }
   return value;
+}
+
+function recordCompilerKeyedArrayStructuralReorder(
+  previous: unknown,
+  value: unknown,
+  kind: CompilerKeyedArrayReorderHint["kind"],
+): unknown {
+  try {
+    const previousTarget = compilerObject(previous);
+    const valueTarget = compilerObject(value);
+    if (!previousTarget || !valueTarget || !Array.isArray(previous) || !Array.isArray(value)) {
+      return value;
+    }
+
+    const previousUpdate = COMPILER_KEYED_ARRAY_REORDERS.get(previousTarget);
+    const structuralUpdate =
+      previousUpdate?.structuralUpdate ||
+      (!previousUpdate ? COMPILER_KEYED_ARRAY_FILTERS.get(previousTarget) : undefined);
+    const structuralSource = structuralUpdate
+      ? compilerKeyedArrayFilterSource(structuralUpdate, previous.length)
+      : undefined;
+    if (
+      !structuralUpdate ||
+      !structuralSource ||
+      (previousUpdate && previousUpdate.resultLength !== previous.length)
+    ) {
+      return value;
+    }
+    const sourceToken = previousUpdate?.sourceToken || structuralSource?.sourceToken;
+    if (!sourceToken) return value;
+    COMPILER_KEYED_ARRAY_REORDERS.set(valueTarget, {
+      kind: previousUpdate ? "permutation" : kind,
+      sourceToken,
+      sourceLength: previousUpdate?.sourceLength || structuralSource.sourceLength,
+      resultLength: value.length,
+      structuralUpdate,
+    });
+  } catch {
+    // Metadata must never change the result of a successful native update.
+  }
+  return value;
+}
+
+/** @internal Executes a native reverse after a compiler-proven filter or slice pipeline. */
+export function createCompilerKeyedArrayStructuralReorder(
+  previous: unknown,
+  method: unknown,
+): unknown {
+  const value = NATIVE_REFLECT_APPLY(
+    method as (...values: readonly unknown[]) => unknown,
+    previous,
+    [],
+  );
+  try {
+    if (
+      !Array.isArray(previous) ||
+      !Array.isArray(value) ||
+      Object.getPrototypeOf(previous) !== NATIVE_ARRAY_PROTOTYPE ||
+      Object.getPrototypeOf(value) !== NATIVE_ARRAY_PROTOTYPE ||
+      method !== NATIVE_ARRAY_TO_REVERSED ||
+      value.length !== previous.length
+    ) {
+      return value;
+    }
+  } catch {
+    return value;
+  }
+  return recordCompilerKeyedArrayStructuralReorder(previous, value, "reverse");
+}
+
+/** @internal Executes a native sort after a compiler-proven filter or slice pipeline. */
+export function createCompilerKeyedArrayStructuralSort(
+  previous: unknown,
+  method: unknown,
+  ...args: readonly unknown[]
+): unknown {
+  const value = NATIVE_REFLECT_APPLY(
+    method as (...values: readonly unknown[]) => unknown,
+    previous,
+    args,
+  );
+  try {
+    if (
+      !Array.isArray(previous) ||
+      !Array.isArray(value) ||
+      Object.getPrototypeOf(previous) !== NATIVE_ARRAY_PROTOTYPE ||
+      Object.getPrototypeOf(value) !== NATIVE_ARRAY_PROTOTYPE ||
+      method !== NATIVE_ARRAY_TO_SORTED ||
+      args.length > 1 ||
+      (args.length === 1 && args[0] !== undefined && typeof args[0] !== "function") ||
+      value.length !== previous.length
+    ) {
+      return value;
+    }
+    for (let index = 0; index < previous.length; index += 1) {
+      if (!(index in previous)) return value;
+    }
+  } catch {
+    return value;
+  }
+  return recordCompilerKeyedArrayStructuralReorder(previous, value, "permutation");
 }
 
 /** @internal Preserves a proven native collection mutation while recording its executed key. */
@@ -4408,7 +4543,7 @@ const keyedCompleteUpdateRuntime: KeyedUpdateRuntime = {
 const keyedEveryUpdateRuntime: KeyedUpdateRuntime = {
   ...keyedCompleteUpdateRuntime,
   position: reconcileCompilerKeyedArrayPosition,
-  reorder: reconcileCompilerKeyedArrayReorder,
+  reorder: reconcileCompilerKeyedArrayReorderWithStructural,
 };
 
 const keyedBatchEveryUpdateRuntime: KeyedUpdateRuntime = {
@@ -5289,6 +5424,122 @@ function reconcileCompilerKeyedArrayPositionWithWindow(
   );
 }
 
+function reconcileCompilerKeyedArrayStructuralReorder(
+  props: CompilerKeyedRowsBlockProps,
+  dirtyState: ReadonlySet<number>,
+  collectionToken: object | undefined,
+  instances: ReadonlyMap<string, CompilerKeyedRowInstance>,
+  root: Element,
+  reactOwnedRows: boolean,
+): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined {
+  if (
+    reactOwnedRows ||
+    props.hostBlocks ||
+    (props.conditionals?.length || 0) > 0 ||
+    !props.filterIndexIndependent ||
+    !props.reorderIndexIndependent ||
+    props.collectionDependency === undefined
+  ) {
+    return undefined;
+  }
+  const collectionDependency = props.collectionDependency;
+  if (props.bindings.some((binding) => binding.dependencies?.includes(collectionDependency))) {
+    return undefined;
+  }
+  const dependencies = props.dependencies || props.structureDependencies;
+  const relevantDirty = (dependencies || []).filter((index) => dirtyState.has(index));
+  if (relevantDirty.length !== 1 || relevantDirty[0] !== collectionDependency) {
+    return undefined;
+  }
+
+  const finalValue = props.items();
+  const update = compilerKeyedArrayReorder(finalValue, collectionToken, instances.size);
+  if (!update?.structuralUpdate || !Array.isArray(finalValue)) return undefined;
+  const survivorResult = compilerKeyedArrayFilterSurvivorsFromUpdate(
+    update.structuralUpdate,
+    collectionToken,
+    instances.size,
+    finalValue.length,
+  );
+  if (!survivorResult) return undefined;
+
+  const previousInstances = [...instances.values()];
+  const prepared = (() => {
+    try {
+      const survivors: CompilerKeyedRowInstance[] = [];
+      let previousSourceIndex = -1;
+      for (const sourceIndex of survivorResult.indices) {
+        const instance = previousInstances[sourceIndex];
+        if (sourceIndex <= previousSourceIndex || !instance || instance.index !== sourceIndex) {
+          return undefined;
+        }
+        previousSourceIndex = sourceIndex;
+        survivors.push(instance);
+      }
+
+      let preservesSurvivorOrder = true;
+      for (let targetIndex = 0; targetIndex < finalValue.length; targetIndex += 1) {
+        const item = finalValue[targetIndex];
+        const instance = survivors[targetIndex];
+        if (!Object.is(instance.item, item)) {
+          preservesSurvivorOrder = false;
+          break;
+        }
+        if (keyedRowIdentity(props.rowKey(item, targetIndex)) !== instance.key) return undefined;
+      }
+      if (preservesSurvivorOrder) {
+        return { nextInstances: survivors, sequence: undefined };
+      }
+
+      const survivorInstances = new Map<unknown, CompilerKeyedRowInstance>();
+      for (const instance of survivors) {
+        if (survivorInstances.has(instance.item)) return undefined;
+        survivorInstances.set(instance.item, instance);
+      }
+
+      const nextInstances: CompilerKeyedRowInstance[] = [];
+      const sequence: number[] = [];
+      for (let targetIndex = 0; targetIndex < finalValue.length; targetIndex += 1) {
+        const item = finalValue[targetIndex];
+        const instance = survivorInstances.get(item);
+        if (
+          !instance ||
+          !Object.is(instance.item, item) ||
+          keyedRowIdentity(props.rowKey(item, targetIndex)) !== instance.key
+        ) {
+          return undefined;
+        }
+        survivorInstances.delete(item);
+        nextInstances.push(instance);
+        sequence.push(instance.index);
+      }
+      if (survivorInstances.size > 0) return undefined;
+      return { nextInstances, sequence };
+    } catch {
+      return undefined;
+    }
+  })();
+  if (!prepared) return undefined;
+
+  let survivorCursor = 0;
+  for (let sourceIndex = 0; sourceIndex < previousInstances.length; sourceIndex += 1) {
+    if (survivorResult.indices[survivorCursor] === sourceIndex) {
+      survivorCursor += 1;
+      continue;
+    }
+    const instance = previousInstances[sourceIndex];
+    instance.scope?.cleanup();
+    instance.element.remove();
+  }
+  if (prepared.sequence) {
+    reorderCompilerKeyedRows(root, prepared.nextInstances, prepared.sequence, null);
+  }
+  for (let index = 0; index < prepared.nextInstances.length; index += 1) {
+    prepared.nextInstances[index].index = index;
+  }
+  return new Map(prepared.nextInstances.map((instance) => [instance.key, instance]));
+}
+
 function reconcileCompilerKeyedArrayReorder(
   props: CompilerKeyedRowsBlockProps,
   dirtyState: ReadonlySet<number>,
@@ -5318,7 +5569,9 @@ function reconcileCompilerKeyedArrayReorder(
 
   const finalValue = props.items();
   const update = compilerKeyedArrayReorder(finalValue, collectionToken, instances.size);
-  if (!update || !Array.isArray(finalValue)) return undefined;
+  if (!update || update.structuralUpdate || !Array.isArray(finalValue)) {
+    return undefined;
+  }
 
   const previousInstances = [...instances.values()];
   if (update.kind === "permutation") {
@@ -5405,6 +5658,15 @@ function reconcileCompilerKeyedArrayReorder(
     (activeElement as HTMLElement).focus({ preventScroll: true });
   }
   return new Map(previousInstances.map((instance) => [instance.key, instance]));
+}
+
+function reconcileCompilerKeyedArrayReorderWithStructural(
+  ...args: Parameters<typeof reconcileCompilerKeyedArrayReorder>
+): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined {
+  return (
+    reconcileCompilerKeyedArrayStructuralReorder(...args) ||
+    reconcileCompilerKeyedArrayReorder(...args)
+  );
 }
 
 function reconcileCompilerKeyedArrayPrepend(
@@ -6581,8 +6843,14 @@ function createKeyedRowsBlockComponent(
           this.hasReactOwnedRows(),
         );
         if (reorderedInstances) {
+          const removedRows = reorderedInstances.size < this.instances.size;
           this.instances = new Map(reorderedInstances);
           this.rebuildElementIndex(this.instances);
+          if (removedRows) {
+            const keys = [...this.instances.keys()];
+            this.pruneEventHandlers(keys);
+            this.pruneConditionalListeners(keys);
+          }
           this.commitCurrentCollection(dirtyState);
           afterCommit?.();
           return;
