@@ -39,8 +39,10 @@ import type { ViteDevServer } from "vite";
 import {
   getClientModuleHydrationPlan,
   getClientModuleMetadata,
+  resolveFarmIsolatedClientHydrationMode,
   type IsolatedClientBoundaryReference,
 } from "../utils/client-component";
+import { getIntegrationProviders } from "../integrations";
 import type { MetadataImageKind } from "../metadata";
 import type { FarmIslandStrategy } from "../island";
 import type { FarmServerRendererRuntime } from "../renderer";
@@ -590,7 +592,28 @@ export class RouteManager {
       return absolutePath;
     };
 
-    const isolatedMode = this.config.experimental?.isolatedClientHydration ?? "off";
+    const integrationProviders = getIntegrationProviders(this.config.integrations).filter(
+      (provider) => provider.component || provider.type === "clerk",
+    );
+    const unsupportedIntegrationProvider = integrationProviders.find(
+      (provider) => provider.supportsIsolatedHydration !== true,
+    );
+    if (
+      this.config.experimental?.isolatedClientHydration === "enabled" &&
+      this.config.experimental?.serverComponents !== true &&
+      unsupportedIntegrationProvider
+    ) {
+      logger.warn(
+        `[Farm.js] isolated hydration kept route-wide because integration provider "${unsupportedIntegrationProvider.name}" does not declare supportsIsolatedHydration: true.`,
+      );
+    }
+    const isolatedMode = resolveFarmIsolatedClientHydrationMode(
+      this.config.experimental?.isolatedClientHydration,
+      {
+        serverComponents: this.config.experimental?.serverComponents === true,
+        hasUnsupportedIntegrationProvider: Boolean(unsupportedIntegrationProvider),
+      },
+    );
     const layoutEntries = Array.from(this.layouts.values()).map((entry) => ({
       entry,
       metadata: getClientModuleHydrationPlan(entry.modulePath, normalizedProjectRoot, isolatedMode),
@@ -604,7 +627,7 @@ export class RouteManager {
       for (const { entry, metadata } of [...layoutEntries, ...routeEntries]) {
         if (!metadata.isolatedHydrationEligible) continue;
         logger.info(
-          `[Farm.js] isolated hydration analysis: ${entry.modulePath} can keep ${metadata.isolatedBoundaries.length} client boundary${metadata.isolatedBoundaries.length === 1 ? "" : "ies"} while excluding its server owner from the browser graph.`,
+          `[Farm.js] isolated hydration analysis: ${entry.modulePath} can keep ${metadata.isolatedBoundaries.length} client ${metadata.isolatedBoundaries.length === 1 ? "boundary" : "boundaries"} while excluding its server owner from the browser graph.`,
         );
       }
     }

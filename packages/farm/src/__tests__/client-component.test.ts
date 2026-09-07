@@ -10,6 +10,7 @@ import {
   hasHydrateExport,
   hasUseClientDirective,
   isClientComponentModule,
+  resolveFarmIsolatedClientHydrationMode,
   resolveModuleSourcePath,
   shouldHydrateModule,
   stripUseClientDirective,
@@ -27,6 +28,23 @@ afterEach(() => {
 });
 
 describe("client component path resolution", () => {
+  it("keeps RSC and providers that own route context on route-wide hydration", () => {
+    expect(resolveFarmIsolatedClientHydrationMode("enabled", { serverComponents: true })).toBe(
+      "off",
+    );
+    expect(
+      resolveFarmIsolatedClientHydrationMode("enabled", {
+        hasUnsupportedIntegrationProvider: true,
+      }),
+    ).toBe("off");
+    expect(
+      resolveFarmIsolatedClientHydrationMode("analyze", {
+        hasUnsupportedIntegrationProvider: true,
+      }),
+    ).toBe("analyze");
+    expect(resolveFarmIsolatedClientHydrationMode("enabled")).toBe("enabled");
+  });
+
   it("detects and strips top-level client directives", () => {
     const source = '"use client";\n\nexport default function Page() { return null; }\n';
 

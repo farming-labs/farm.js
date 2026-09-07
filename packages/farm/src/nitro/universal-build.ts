@@ -27,6 +27,7 @@ import { logger, toPosixPath, toViteModuleId } from "../utils";
 import {
   getClientModuleHydrationPlan,
   getClientModuleMetadata,
+  resolveFarmIsolatedClientHydrationMode,
   type IsolatedClientBoundaryReference,
 } from "../utils/client-component";
 import { isFarmMarkdownPageFile } from "../app-markdown";
@@ -1102,7 +1103,28 @@ async function buildClient(
     isolatedBoundaries: IsolatedClientBoundaryReference[];
   }> = [];
 
-  const isolatedMode = config.experimental?.isolatedClientHydration ?? "off";
+  const integrationProviders = getIntegrationProviders(config.integrations).filter(
+    (provider) => provider.component || provider.type === "clerk",
+  );
+  const unsupportedIntegrationProvider = integrationProviders.find(
+    (provider) => provider.supportsIsolatedHydration !== true,
+  );
+  if (
+    config.experimental?.isolatedClientHydration === "enabled" &&
+    config.experimental?.serverComponents !== true &&
+    unsupportedIntegrationProvider
+  ) {
+    logger.warn(
+      `[Farm.js] isolated hydration kept route-wide because integration provider "${unsupportedIntegrationProvider.name}" does not declare supportsIsolatedHydration: true.`,
+    );
+  }
+  const isolatedMode = resolveFarmIsolatedClientHydrationMode(
+    config.experimental?.isolatedClientHydration,
+    {
+      serverComponents: config.experimental?.serverComponents === true,
+      hasUnsupportedIntegrationProvider: Boolean(unsupportedIntegrationProvider),
+    },
+  );
 
   const clientLayouts = layoutRoutes.map((layout) => {
     try {
@@ -1180,7 +1202,7 @@ async function buildClient(
         continue;
       }
       logger.info(
-        `📊 Isolated hydration analysis: ${entry.modulePath} can exclude its server owner and hydrate ${metadata.isolatedBoundaries.length} client boundary${metadata.isolatedBoundaries.length === 1 ? "" : "ies"}.`,
+        `📊 Isolated hydration analysis: ${entry.modulePath} can exclude its server owner and hydrate ${metadata.isolatedBoundaries.length} client ${metadata.isolatedBoundaries.length === 1 ? "boundary" : "boundaries"}.`,
       );
     }
   }
@@ -2458,6 +2480,9 @@ document.addEventListener("click", function(e) {
   }`);
   });
   const isolatedHydrationEnabled = isolatedBoundaryModules.size > 0;
+  const isolatedHydrationImport = isolatedHydrationEnabled
+    ? `import { createFarmIsolatedHydrationRuntime } from "@farm.js/core/internal/isolated-boundary";`
+    : "";
   const isolatedHydrationRuntime = isolatedHydrationEnabled
     ? `const farmIsolatedBoundaryLoaders = {
 ${Array.from(isolatedBoundaryModules.entries())
@@ -2467,61 +2492,24 @@ ${Array.from(isolatedBoundaryModules.entries())
   )
   .join("\n")}
 };
-const farmIsolatedBoundaryRoots = new Map();
+const farmIsolatedHydrationRuntime = createFarmIsolatedHydrationRuntime({
+  ReactRuntime: React,
+  hydrateRoot,
+  load: async function(reference) {
+    const loader = farmIsolatedBoundaryLoaders[reference];
+    if (!loader) throw new Error("isolated client boundary loader was not found: " + reference);
+    return loader();
+  },
+  schedule: scheduleFarmIslandHydration,
+  wrap: wrapWithIntegrationProviders,
+});
 
 function disposeFarmIsolatedClientBoundaries(scope) {
-  for (const [container, root] of farmIsolatedBoundaryRoots) {
-    if (container === scope || scope.contains(container)) {
-      try { root.unmount(); } catch {}
-      farmIsolatedBoundaryRoots.delete(container);
-    }
-  }
+  farmIsolatedHydrationRuntime.dispose(scope);
 }
 
 async function hydrateFarmIsolatedClientBoundaries(scope = document, signal) {
-  const candidates = Array.from(scope.querySelectorAll("farm-client-boundary[data-farm-client-boundary]"));
-  const boundaries = candidates.filter((container) => {
-    if (farmIsolatedBoundaryRoots.has(container)) return false;
-    return !container.parentElement?.closest("farm-client-boundary[data-farm-client-boundary]");
-  });
-  await Promise.all(boundaries.map(async (container) => {
-    const reference = container.getAttribute("data-farm-client-boundary");
-    const exportName = container.getAttribute("data-farm-client-export") || "default";
-    const strategy = container.getAttribute("data-farm-island-strategy") || "load";
-    const loader = reference ? farmIsolatedBoundaryLoaders[reference] : null;
-    if (!reference || !loader) {
-      console.warn("[Farm.js] Missing isolated client boundary loader:", reference);
-      return;
-    }
-    const scheduled = scheduleFarmIslandHydration({
-      container,
-      strategy,
-      hydrate: async function() {
-        try {
-          if (signal?.aborted || !container.isConnected) return;
-          const module = await loader();
-          if (signal?.aborted || !container.isConnected) return;
-          const Component = module.__farm_client_boundary_originals__?.[exportName];
-          if (typeof Component !== "function" && typeof Component !== "object") {
-            throw new Error("compiled original export was not found");
-          }
-          const props = JSON.parse(container.getAttribute("data-farm-client-props") || "{}");
-          const root = hydrateRoot(
-            container,
-            wrapWithIntegrationProviders(React.createElement(Component, props)),
-          );
-          farmIsolatedBoundaryRoots.set(container, root);
-        } catch (error) {
-          console.warn(
-            "[Farm.js] Could not hydrate isolated client boundary " + reference + "#" + exportName + ". Server HTML was preserved.",
-            error,
-          );
-        }
-      },
-    });
-    if (strategy === "load") await scheduled;
-    else void scheduled.catch((error) => console.warn("[Farm.js] Deferred boundary hydration failed:", error));
-  }));
+  await farmIsolatedHydrationRuntime.hydrate(scope, signal);
 }`
     : "";
   clientRouteSlots.forEach((slot, index) => {
@@ -2544,6 +2532,7 @@ async function hydrateFarmIsolatedClientBoundaries(scope = document, signal) {
 ${cssImport}
 ${layoutImports}
 ${rendererClientImports}
+${isolatedHydrationImport}
 ${providerClientCode.imports}
 import { createClientPluginManager, getHashTargetElement, installChunkErrorRecovery, isFarmExternalNavigationURL, reconcileFarmDocumentHead, scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
 import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";

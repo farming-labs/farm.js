@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
+import { chromium } from "@playwright/test";
 import { describe, expect, it, vi } from "vitest";
 import { build } from "../build";
 import { loadFarmProductionVite, type FarmProductionViteRuntime } from "../build/production-vite";
@@ -136,6 +137,19 @@ async function readAllClientJavaScript(root: string): Promise<string> {
     return contents.join("\n");
   };
   return readDirectory(path.join(root, ".farm", "client"));
+}
+
+async function resolveInstalledChromiumExecutable(): Promise<string | null> {
+  const configured = process.env.FARM_TEST_CHROMIUM_EXECUTABLE_PATH;
+  if (configured) return configured;
+
+  try {
+    const executablePath = chromium.executablePath();
+    await fs.access(executablePath);
+    return executablePath;
+  } catch {
+    return null;
+  }
 }
 
 async function runProductionRequest(
@@ -422,7 +436,7 @@ export default defineConfig({ integrations: { acme } });
 
     try {
       let randomState = 0x5f3759df;
-      const serverLayoutSentinel = `SERVER_LAYOUT_SENTINEL_${Array.from({ length: 8192 }, () => {
+      const serverLayoutSentinel = `SERVER_LAYOUT_SENTINEL_${Array.from({ length: 16384 }, () => {
         randomState = (randomState * 1664525 + 1013904223) >>> 0;
         return String.fromCharCode(33 + (randomState % 90));
       }).join("")}`;
@@ -431,18 +445,38 @@ export default defineConfig({ integrations: { acme } });
 
 import { useState } from "react";
 
-export default function Counter({ initial = 0 }) {
+export default function Counter({ name, initial = 0 }) {
   const [count, setCount] = useState(initial);
-  return <button data-isolated-counter onClick={() => setCount(count + 1)}>{count}</button>;
+  return <button data-isolated-counter={name} onClick={() => setCount(count + 1)}>{count}</button>;
+}
+`.trim();
+      const childSource = `
+"use client";
+
+import { useState } from "react";
+
+export default function ChildCounter() {
+  const [count, setCount] = useState(10);
+  return <button data-nested-counter onClick={() => setCount(count + 1)}>{count}</button>;
+}
+`.trim();
+      const parentSource = `
+"use client";
+
+import ChildCounter from "./child-counter";
+
+export default function ParentCounter() {
+  return <section data-parent-counter><ChildCounter /></section>;
 }
 `.trim();
       const layoutSource = `
 import Counter from "../components/counter";
+import ParentCounter from "../components/parent-counter";
 
 const serverLayoutSentinel = ${JSON.stringify(serverLayoutSentinel)};
 
 export default function RootLayout({ children }) {
-  return <html data-server-layout={serverLayoutSentinel}><body><Counter initial={2} />{children}</body></html>;
+  return <html data-server-layout={serverLayoutSentinel}><body><Counter name="first" initial={2} /><Counter name="second" initial={5} /><ParentCounter />{children}</body></html>;
 }
 `.trim();
       for (const fixtureRoot of [root, baselineRoot]) {
@@ -450,6 +484,14 @@ export default function RootLayout({ children }) {
         await fs.writeFile(
           path.join(fixtureRoot, "src", "components", "counter.tsx"),
           counterSource,
+        );
+        await fs.writeFile(
+          path.join(fixtureRoot, "src", "components", "child-counter.tsx"),
+          childSource,
+        );
+        await fs.writeFile(
+          path.join(fixtureRoot, "src", "components", "parent-counter.tsx"),
+          parentSource,
         );
         await fs.writeFile(path.join(fixtureRoot, "src", "app", "layout.tsx"), layoutSource);
       }
@@ -514,8 +556,59 @@ export default function RootLayout({ children }) {
           expect(html).toContain("SERVER_LAYOUT_SENTINEL_");
           expect(html).toContain('data-farm-client-boundary="/src/components/counter.tsx"');
           expect(html).toContain('data-farm-client-export="default"');
-          expect(html).toContain('data-isolated-counter="true"');
+          expect(html).toContain('data-isolated-counter="first"');
+          expect(html).toContain('data-isolated-counter="second"');
+          expect(html).toContain("data-nested-counter");
           expect(html).toContain(">2</button>");
+          expect(html.match(/<farm-client-boundary/g)).toHaveLength(3);
+          expect(html).not.toContain(
+            'data-farm-client-boundary="/src/components/child-counter.tsx"',
+          );
+
+          const executablePath = await resolveInstalledChromiumExecutable();
+          if (!executablePath) return;
+          const browser = await chromium.launch({
+            headless: true,
+            executablePath,
+          });
+          try {
+            const page = await browser.newPage();
+            const browserErrors: string[] = [];
+            page.on("console", (message) => {
+              if (message.type() === "error") browserErrors.push(message.text());
+            });
+            page.on("pageerror", (error) => browserErrors.push(error.message));
+            await page.goto(response.url);
+            const first = page.locator('[data-isolated-counter="first"]');
+            const second = page.locator('[data-isolated-counter="second"]');
+            const nested = page.locator("[data-nested-counter]");
+            for (const counter of [first, nested]) {
+              await expect
+                .poll(() =>
+                  counter.evaluate((element) =>
+                    element.closest("farm-client-boundary")?.getAttribute("data-farm-hydrated"),
+                  ),
+                )
+                .toBe("true");
+            }
+            await second.evaluate((element) => element.setAttribute("data-identity", "retained"));
+            await first.click();
+            await nested.click();
+
+            await expect.poll(() => first.textContent()).toBe("3");
+            await expect.poll(() => second.textContent()).toBe("5");
+            await expect.poll(() => nested.textContent()).toBe("11");
+            await expect.poll(() => second.getAttribute("data-identity")).toBe("retained");
+            await expect
+              .poll(() => page.locator('farm-client-boundary[data-farm-hydrated="true"]').count())
+              .toBe(3);
+            expect(
+              browserErrors,
+              `${browserErrors.join("\n")}\nDOM:\n${await page.locator("body").innerHTML()}`,
+            ).toEqual([]);
+          } finally {
+            await browser.close();
+          }
         },
       );
     } finally {
