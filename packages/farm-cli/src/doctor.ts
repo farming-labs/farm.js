@@ -384,21 +384,21 @@ function applySafeProjectFixes(
 
 function collectNodeCheck(checks: FarmDoctorCheck[]): void {
   const [major = 0, minor = 0] = process.versions.node.split(".").map(Number);
-  const supported = major > 22 || (major === 22 && minor >= 12);
+  const supported = major > 22 || (major === 22 && minor >= 13);
   checks.push(
     supported
       ? {
           status: "pass",
           code: "NODE_SUPPORTED",
           title: "Node.js is supported",
-          message: `Node ${process.versions.node} satisfies Farm's Node 22.12+ baseline.`,
+          message: `Node ${process.versions.node} satisfies Farm's Node 22.13+ baseline.`,
         }
       : {
           status: "fail",
           code: "NODE_UNSUPPORTED",
           title: "Node.js is too old",
-          message: `Node ${process.versions.node} does not satisfy Farm's Node 22.12+ baseline.`,
-          action: "Upgrade Node.js to version 22.12 or newer.",
+          message: `Node ${process.versions.node} does not satisfy Farm's Node 22.13+ baseline.`,
+          action: "Upgrade Node.js to version 22.13 or newer.",
         },
   );
 }
