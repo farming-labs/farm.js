@@ -2875,7 +2875,9 @@ async function hydrate() {
     !matched.route.pageShouldHydrate &&
     !hasHydratableLayout(pathname)
   ) {
-    await hydrateFarmIsolatedClientBoundaries(document);
+    const hydrationController = new AbortController();
+    pendingPageHydrationController = hydrationController;
+    await hydrateFarmIsolatedClientBoundaries(document, hydrationController.signal);
     return;
   }`
       : ""
@@ -3001,6 +3003,7 @@ function replaceSharedLayoutBoundary(currentRoot, nextRoot) {
     : nextRoot.querySelector("#__farm_page__");
 
   if (!currentTarget || !nextTarget) return false;
+  ${isolatedHydrationEnabled ? "disposeFarmIsolatedClientBoundaries(currentTarget);" : ""}
   currentTarget.replaceWith(nextTarget);
   activateNavigationScripts(nextTarget);
   if (nextTreeRoot && nextTreeRoot !== nextTarget) nextTreeRoot.remove();
@@ -3014,7 +3017,7 @@ function replaceSharedLayoutBoundary(currentRoot, nextRoot) {
     activateNavigationScripts(support);
     setTimeout(function() { support.remove(); }, 0);
   }
-  return true;
+  return nextTarget;
 }
 
 // SPA Router
@@ -3301,12 +3304,17 @@ ${generateUniversalRouterStateProperties()}
     }
 
     const rootWasReactOwned = reactRootContainer === currentRoot;
-    ${isolatedHydrationEnabled ? "disposeFarmIsolatedClientBoundaries(currentRoot);" : ""}
     resetReactRoot();
     resetRouteSlotRoots();
-    if (rootWasReactOwned || !replaceSharedLayoutBoundary(currentRoot, newRoot)) {
+    const replacedSharedBoundary = rootWasReactOwned
+      ? null
+      : replaceSharedLayoutBoundary(currentRoot, newRoot);
+    let isolatedHydrationScope = replacedSharedBoundary || currentRoot;
+    if (!replacedSharedBoundary) {
+      ${isolatedHydrationEnabled ? "disposeFarmIsolatedClientBoundaries(currentRoot);" : ""}
       currentRoot.innerHTML = newRoot.innerHTML;
       activateNavigationScripts(currentRoot);
+      isolatedHydrationScope = currentRoot;
     }
     window.__FARM_ROUTE_SLOTS__ = nextRouteSlots;
     hydrateInitialRouteSlots();
@@ -3329,7 +3337,10 @@ ${generateUniversalRouterStateProperties()}
       }${
         isolatedHydrationEnabled
           ? ` else if (matched.route.hasIsolatedClientBoundaries) {
-        await hydrateFarmIsolatedClientBoundaries(currentRoot, navigation.controller.signal);
+        await hydrateFarmIsolatedClientBoundaries(
+          isolatedHydrationScope,
+          navigation.controller.signal,
+        );
         if (!isNavigationCurrent()) return false;
       }`
           : ""
@@ -3343,6 +3354,7 @@ ${generateUniversalRouterStateProperties()}
 
     resetReactRoot();
     resetRouteSlotRoots();
+    ${isolatedHydrationEnabled ? "disposeFarmIsolatedClientBoundaries(document);" : ""}
 
     Array.from(document.documentElement.attributes).forEach(function(attr) {
       if (!doc.documentElement.hasAttribute(attr.name)) {

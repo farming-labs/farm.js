@@ -365,6 +365,11 @@ An integration provider is route-wide by default because an independent root can
 context. A provider that is safe to instantiate around every isolated root can declare
 `supportsIsolatedHydration: true`; otherwise Farm retains route-wide hydration for the app.
 
+SPA navigation preserves isolated roots that live in a shared layout, including their state and DOM
+identity. Farm unmounts roots in the outgoing route subtree before replacing it, then hydrates only
+the boundaries introduced by the incoming fragment. Superseded navigation work is aborted before it
+can hydrate stale HTML.
+
 This flag does not enable RSC, change the meaning of `"use client"`, or make Server Components part
 of the wire format. When `experimental.serverComponents` is enabled, the RSC transport remains the
 owner and Farm ignores isolated client hydration. Treat `"enabled"` as an experimental performance

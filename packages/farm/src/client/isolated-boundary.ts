@@ -317,7 +317,7 @@ export function createFarmIsolatedHydrationRuntime(options: FarmIsolatedHydratio
 
   function dispose(scope: Node): void {
     for (const [container, root] of roots) {
-      if (container === scope || (scope instanceof Element && scope.contains(container))) {
+      if (container === scope || scope.contains(container)) {
         try {
           root.unmount();
         } catch {

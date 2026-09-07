@@ -1,7 +1,7 @@
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import React, { act, useState } from "react";
+import React, { act, useEffect, useRef, useState } from "react";
 import { hydrateRoot } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -172,6 +172,40 @@ describe("isolated client boundary", () => {
     expect(document.querySelector('[data-counter="second"]')).toBe(secondIdentity);
     expect(runtime.rootCount()).toBe(2);
     expect(document.querySelectorAll('[data-farm-hydrated="true"]')).toHaveLength(2);
+  });
+
+  it("unmounts a root exactly once before its container is removed", async () => {
+    const cleanupConnected: boolean[] = [];
+    function Lifecycle() {
+      const ref = useRef<HTMLButtonElement>(null);
+      useEffect(() => {
+        const container = ref.current?.closest("farm-client-boundary");
+        return () => {
+          cleanupConnected.push(container?.isConnected === true);
+        };
+      }, []);
+      return <button ref={ref}>Mounted</button>;
+    }
+    const Boundary = createFarmIsolatedClientBoundary(
+      React,
+      Lifecycle,
+      "/src/lifecycle.tsx",
+      "default",
+      "load",
+    );
+    document.body.innerHTML = renderToString(<Boundary />);
+    const container = document.querySelector("farm-client-boundary")!;
+    const runtime = createRuntime({
+      "/src/lifecycle.tsx": { __farm_client_boundary_originals__: { default: Lifecycle } },
+    });
+
+    await act(async () => runtime.hydrate(document));
+    act(() => runtime.dispose(container));
+    container.remove();
+    act(() => runtime.dispose(container));
+
+    expect(cleanupConnected).toEqual([true]);
+    expect(runtime.rootCount()).toBe(0);
   });
 
   it("keeps a nested client import inside its parent's React root", async () => {

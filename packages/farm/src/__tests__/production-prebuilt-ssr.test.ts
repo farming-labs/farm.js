@@ -430,7 +430,7 @@ export default defineConfig({ integrations: { acme } });
     }
   });
 
-  it("isolates a client leaf without shipping its server layout", async () => {
+  it("isolates client leaves and preserves shared roots across navigation", async () => {
     const root = await createProductionFixture();
     const baselineRoot = await createProductionFixture();
 
@@ -443,11 +443,43 @@ export default defineConfig({ integrations: { acme } });
       const counterSource = `
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export default function Counter({ name, initial = 0 }) {
   const [count, setCount] = useState(initial);
-  return <button data-isolated-counter={name} onClick={() => setCount(count + 1)}>{count}</button>;
+  const ref = useRef(null);
+  useEffect(() => {
+    const container = ref.current?.closest("farm-client-boundary");
+    globalThis.__farmIsolatedLifecycle = globalThis.__farmIsolatedLifecycle || [];
+    globalThis.__farmIsolatedLifecycle.push({ type: "mount", name });
+    return () => globalThis.__farmIsolatedLifecycle.push({
+      type: "unmount",
+      name,
+      connected: container?.isConnected === true,
+    });
+  }, [name]);
+  return <button ref={ref} data-isolated-counter={name} onClick={() => setCount(count + 1)}>{count}</button>;
+}
+`.trim();
+      const pageCounterSource = `
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+
+export default function PageCounter({ name }) {
+  const [count, setCount] = useState(0);
+  const ref = useRef(null);
+  useEffect(() => {
+    const container = ref.current?.closest("farm-client-boundary");
+    globalThis.__farmIsolatedLifecycle = globalThis.__farmIsolatedLifecycle || [];
+    globalThis.__farmIsolatedLifecycle.push({ type: "mount", name });
+    return () => globalThis.__farmIsolatedLifecycle.push({
+      type: "unmount",
+      name,
+      connected: container?.isConnected === true,
+    });
+  }, [name]);
+  return <button ref={ref} data-page-counter={name} onClick={() => setCount(count + 1)}>{count}</button>;
 }
 `.trim();
       const childSource = `
@@ -476,11 +508,26 @@ import ParentCounter from "../components/parent-counter";
 const serverLayoutSentinel = ${JSON.stringify(serverLayoutSentinel)};
 
 export default function RootLayout({ children }) {
-  return <html data-server-layout={serverLayoutSentinel}><body><Counter name="first" initial={2} /><Counter name="second" initial={5} /><ParentCounter />{children}</body></html>;
+  return <html data-server-layout={serverLayoutSentinel}><body><nav><a data-nav-first href="/">First</a><a data-nav-second href="/second">Second</a></nav><Counter name="first" initial={2} /><Counter name="second" initial={5} /><ParentCounter />{children}</body></html>;
+}
+`.trim();
+      const firstPageSource = `
+import PageCounter from "../components/page-counter";
+
+export default function Page() {
+  return <main><h1>First page</h1><PageCounter name="first-page" /></main>;
+}
+`.trim();
+      const secondPageSource = `
+import PageCounter from "../../components/page-counter";
+
+export default function SecondPage() {
+  return <main><h1>Second page</h1><PageCounter name="second-page" /></main>;
 }
 `.trim();
       for (const fixtureRoot of [root, baselineRoot]) {
         await fs.mkdir(path.join(fixtureRoot, "src", "components"), { recursive: true });
+        await fs.mkdir(path.join(fixtureRoot, "src", "app", "second"), { recursive: true });
         await fs.writeFile(
           path.join(fixtureRoot, "src", "components", "counter.tsx"),
           counterSource,
@@ -493,7 +540,16 @@ export default function RootLayout({ children }) {
           path.join(fixtureRoot, "src", "components", "parent-counter.tsx"),
           parentSource,
         );
+        await fs.writeFile(
+          path.join(fixtureRoot, "src", "components", "page-counter.tsx"),
+          pageCounterSource,
+        );
         await fs.writeFile(path.join(fixtureRoot, "src", "app", "layout.tsx"), layoutSource);
+        await fs.writeFile(path.join(fixtureRoot, "src", "app", "page.tsx"), firstPageSource);
+        await fs.writeFile(
+          path.join(fixtureRoot, "src", "app", "second", "page.tsx"),
+          secondPageSource,
+        );
       }
 
       const config = await resolveConfig(
@@ -526,7 +582,7 @@ export default function RootLayout({ children }) {
       await build(baselineConfig, { root: baselineRoot, preset: "node-server" });
       const baselineJavaScript = await readAllClientJavaScript(baselineRoot);
       expect(baselineJavaScript).toContain("SERVER_LAYOUT_SENTINEL_");
-      expect(baselineJavaScript).not.toContain("farm-client-boundary");
+      expect(baselineJavaScript).not.toContain("data-farm-client-boundary");
       expect(baselineJavaScript).not.toContain("__farm_client_boundary_originals__");
       expect(Buffer.byteLength(clientJavaScript)).toBeLessThan(
         Buffer.byteLength(baselineJavaScript),
@@ -560,7 +616,8 @@ export default function RootLayout({ children }) {
           expect(html).toContain('data-isolated-counter="second"');
           expect(html).toContain("data-nested-counter");
           expect(html).toContain(">2</button>");
-          expect(html.match(/<farm-client-boundary/g)).toHaveLength(3);
+          expect(html).toContain('data-page-counter="first-page"');
+          expect(html.match(/<farm-client-boundary/g)).toHaveLength(4);
           expect(html).not.toContain(
             'data-farm-client-boundary="/src/components/child-counter.tsx"',
           );
@@ -579,20 +636,118 @@ export default function RootLayout({ children }) {
             });
             page.on("pageerror", (error) => browserErrors.push(error.message));
             await page.goto(response.url);
-            await page.locator('farm-client-boundary[data-farm-hydrated="true"]').nth(2).waitFor();
+            await page.locator('farm-client-boundary[data-farm-hydrated="true"]').nth(3).waitFor();
             const first = page.locator('[data-isolated-counter="first"]');
             const second = page.locator('[data-isolated-counter="second"]');
-            await second.evaluate((element) => element.setAttribute("data-identity", "retained"));
+            await first.evaluate((element) => element.setAttribute("data-identity", "retained"));
             await first.click();
             await page.locator("[data-nested-counter]").click();
+            await page.locator('[data-page-counter="first-page"]').click();
 
             await expect.poll(() => first.textContent()).toBe("3");
             await expect.poll(() => second.textContent()).toBe("5");
             await expect.poll(() => page.locator("[data-nested-counter]").textContent()).toBe("11");
-            await expect.poll(() => second.getAttribute("data-identity")).toBe("retained");
+            await expect.poll(() => first.getAttribute("data-identity")).toBe("retained");
+            await expect
+              .poll(() => page.locator('[data-page-counter="first-page"]').textContent())
+              .toBe("1");
             await expect
               .poll(() => page.locator('farm-client-boundary[data-farm-hydrated="true"]').count())
-              .toBe(3);
+              .toBe(4);
+
+            await page.locator("[data-nav-second]").click();
+            await expect.poll(() => page.locator("h1").textContent()).toBe("Second page");
+            await page.locator('[data-page-counter="second-page"]').click();
+            await expect.poll(() => first.textContent()).toBe("3");
+            await expect.poll(() => first.getAttribute("data-identity")).toBe("retained");
+            await expect
+              .poll(() => page.locator('[data-page-counter="second-page"]').textContent())
+              .toBe("1");
+
+            await page.goBack();
+            await expect.poll(() => page.locator("h1").textContent()).toBe("First page");
+            await page.goForward();
+            await expect.poll(() => page.locator("h1").textContent()).toBe("Second page");
+            await page.evaluate(() =>
+              (
+                window as typeof window & {
+                  __FARM_SPA_ROUTER__: {
+                    navigate(href: string, options: { replace: boolean }): Promise<void>;
+                  };
+                }
+              ).__FARM_SPA_ROUTER__.navigate("/", { replace: true }),
+            );
+            await expect.poll(() => page.locator("h1").textContent()).toBe("First page");
+
+            let releaseInterruptedRequest: (() => void) | undefined;
+            const interruptedRequest = new Promise<void>((resolve) => {
+              releaseInterruptedRequest = resolve;
+            });
+            await page.route("**/second?interrupt=1", async (route) => {
+              await interruptedRequest;
+              await route.continue().catch(() => undefined);
+            });
+            const requestStarted = page.waitForRequest((request) =>
+              request.url().endsWith("/second?interrupt=1"),
+            );
+            await page.evaluate(() => {
+              void (
+                window as typeof window & {
+                  __FARM_SPA_ROUTER__: { navigate(href: string): Promise<void> };
+                }
+              ).__FARM_SPA_ROUTER__.navigate("/second?interrupt=1");
+            });
+            const request = await requestStarted;
+            const requestSettled = Promise.race([
+              page.waitForEvent("requestfinished", {
+                predicate: (candidate) => candidate === request,
+              }),
+              page.waitForEvent("requestfailed", {
+                predicate: (candidate) => candidate === request,
+              }),
+            ]);
+            await page.evaluate(() =>
+              (
+                window as typeof window & {
+                  __FARM_SPA_ROUTER__: {
+                    navigate(href: string, options: { replace: boolean }): Promise<void>;
+                  };
+                }
+              ).__FARM_SPA_ROUTER__.navigate("/", { replace: true }),
+            );
+            releaseInterruptedRequest?.();
+            await requestSettled;
+
+            await expect.poll(() => page.url()).toMatch(/\/$/);
+            await expect.poll(() => page.locator("h1").textContent()).toBe("First page");
+            await expect.poll(() => first.textContent()).toBe("3");
+            await expect.poll(() => first.getAttribute("data-identity")).toBe("retained");
+            await expect
+              .poll(() => page.locator('farm-client-boundary[data-farm-hydrated="true"]').count())
+              .toBe(4);
+
+            const lifecycle = await page.evaluate(
+              () =>
+                (
+                  globalThis as typeof globalThis & {
+                    __farmIsolatedLifecycle?: Array<{
+                      type: string;
+                      name: string;
+                      connected?: boolean;
+                    }>;
+                  }
+                ).__farmIsolatedLifecycle ?? [],
+            );
+            const mounts = lifecycle.filter((event) => event.type === "mount");
+            const unmounts = lifecycle.filter((event) => event.type === "unmount");
+            expect(mounts.filter((event) => event.name === "first")).toHaveLength(1);
+            expect(mounts.filter((event) => event.name === "second")).toHaveLength(1);
+            expect(unmounts.filter((event) => event.name === "first")).toHaveLength(0);
+            expect(unmounts.filter((event) => event.name === "second")).toHaveLength(0);
+            expect(mounts.filter((event) => event.name === "first-page")).toHaveLength(3);
+            expect(mounts.filter((event) => event.name === "second-page")).toHaveLength(2);
+            expect(unmounts).toHaveLength(4);
+            expect(unmounts.every((event) => event.connected === true)).toBe(true);
             expect(
               browserErrors,
               `${browserErrors.join("\n")}\nDOM:\n${await page.locator("body").innerHTML()}`,
