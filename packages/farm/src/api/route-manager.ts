@@ -22,6 +22,7 @@ import {
 import { isFarmAPIRouteFileName } from "./route-files";
 import {
   AmbiguousRouteError,
+  assertUniqueRouteParameters,
   getRoutePatternShape,
   NonTerminalCatchAllRouteError,
 } from "../routing/specificity";
@@ -374,6 +375,7 @@ export class APIRouteManager {
   }
 
   private registerRouteShape(routePath: string, filePath: string, appDir: string): void {
+    assertUniqueRouteParameters(routePath, "api");
     const shape = getRoutePatternShape(routePath, "api");
     const existing = this.routeShapes.get(shape);
 

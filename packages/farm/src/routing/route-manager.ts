@@ -71,6 +71,7 @@ import { getFarmRendererComponentExtensions } from "../renderer";
 import type { ApplicationMetadataRouteKind } from "../metadata-route";
 import {
   AmbiguousRouteError,
+  assertUniqueRouteParameters,
   compareRouteSpecificity,
   getRoutePatternShape,
   type RouteSegmentSpecificity,
@@ -815,6 +816,7 @@ export class RouteManager {
   }
 
   private registerPageRoute(entry: RouteEntry): void {
+    assertUniqueRouteParameters(entry.pattern);
     const shape = getRoutePatternShape(entry.pattern);
     const existing = this.pageRouteShapes.get(shape);
 

@@ -14,6 +14,13 @@ export class NonTerminalCatchAllRouteError extends TypeError {
   }
 }
 
+export class DuplicateRouteParameterError extends AmbiguousRouteError {
+  constructor(message: string) {
+    super(message);
+    this.name = "DuplicateRouteParameterError";
+  }
+}
+
 const SEGMENT_RANK: Record<RouteSegmentSpecificity, number> = {
   static: 4,
   dynamic: 3,
@@ -44,6 +51,29 @@ export function compareRouteSpecificity(
 export type RoutePatternSyntax = "page" | "router" | "api";
 
 const ROUTER_PARAMETER_NAME = "[A-Za-z0-9_$-]+";
+const PAGE_PARAMETER_PATTERN = /^(?:\[\[\.\.\.(.+)\]\]|\[\.\.\.(.+)\]|\[(.+)\])$/;
+const ROUTER_PARAMETER_PATTERN =
+  /^(?:\[\[\.\.\.([A-Za-z0-9_$-]+)\]\]|\[\.\.\.([A-Za-z0-9_$-]+)\]|\[([A-Za-z0-9_$-]+)\]|:([A-Za-z0-9_$-]+)|\*([A-Za-z0-9_$-]+)\??)$/;
+
+export function assertUniqueRouteParameters(
+  pattern: string,
+  syntax: RoutePatternSyntax = "page",
+): void {
+  const parameterPattern = syntax === "router" ? ROUTER_PARAMETER_PATTERN : PAGE_PARAMETER_PATTERN;
+  const names = new Set<string>();
+
+  for (const segment of splitRoutePattern(pattern, syntax)) {
+    const match = parameterPattern.exec(segment);
+    const name = match?.slice(1).find(Boolean);
+    if (!name) continue;
+    if (names.has(name)) {
+      throw new DuplicateRouteParameterError(
+        `Duplicate route parameter "${name}" in route "${pattern}". Each dynamic segment must use a unique name.`,
+      );
+    }
+    names.add(name);
+  }
+}
 
 function splitRoutePattern(pattern: string, syntax: RoutePatternSyntax): string[] {
   return pattern

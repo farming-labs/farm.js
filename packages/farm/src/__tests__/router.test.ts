@@ -48,6 +48,15 @@ describe("createFarmRouter", () => {
     expect(buildFarmRoutePath("/docs/[...slug]/()", { slug: "guide" })).toBe("/docs/guide");
   });
 
+  it("rejects duplicate parameter names within a route", () => {
+    expect(() => createFarmRouter(["/teams/[id]/members/[id]"])).toThrow(
+      'Duplicate route parameter "id"',
+    );
+    expect(() => matchFarmRoute("/docs/:slug/*slug", "/docs/core/routing")).toThrow(
+      'Duplicate route parameter "slug"',
+    );
+  });
+
   it("rejects routes that differ only by parameter names", () => {
     expect(() => createFarmRouter(["/users/[id]", "/users/[slug]"])).toThrow(
       'Ambiguous route patterns "/users/[id]" and "/users/[slug]" match the same URLs.',
