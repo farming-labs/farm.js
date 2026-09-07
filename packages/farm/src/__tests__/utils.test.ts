@@ -113,6 +113,15 @@ describe("parseRoutePath", () => {
     ]);
   });
 
+  it("rejects a catch-all directory before another route segment", () => {
+    expect(() => parseRoutePath("docs/[...slug]/edit/page.tsx")).toThrow(
+      'Catch-all segment "[...slug]" must be the final segment',
+    );
+    expect(() => parseRoutePath("docs/[[...slug]]/edit/page.tsx")).toThrow(
+      'Catch-all segment "[[...slug]]" must be the final segment',
+    );
+  });
+
   it("should parse root page", () => {
     const result = parseRoutePath("page.tsx");
     expect(result.segments).toEqual([]);

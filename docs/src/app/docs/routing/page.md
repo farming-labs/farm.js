@@ -175,6 +175,10 @@ This returns `/docs/core/routing`. Optional catch-all params can be omitted, sta
 Route matching decodes each URL path segment once before comparing static names or exposing
 `params`. Route names remain literal (including `%`), and malformed percent escapes remain literal
 instead of aborting the request.
+
+A required or optional catch-all must be the final URL segment. Farm reports paths such as
+`docs/[...slug]/edit/page.tsx` during route discovery because the catch-all would otherwise consume
+the `edit` segment and make the route unreachable.
 For navigation state, `router.isActive(pattern, pathname, { exact: false })` also matches
 descendants after dynamic segments, such as `/users/42/settings` for `/users/[id]`.
 

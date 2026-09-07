@@ -20,7 +20,11 @@ import {
   type APIRouteMatch,
 } from "./runtime";
 import { isFarmAPIRouteFileName } from "./route-files";
-import { AmbiguousRouteError, getRoutePatternShape } from "../routing/specificity";
+import {
+  AmbiguousRouteError,
+  getRoutePatternShape,
+  NonTerminalCatchAllRouteError,
+} from "../routing/specificity";
 
 export interface APIRoute extends FarmRouteRuntimeConfig {
   path: string;
@@ -274,7 +278,8 @@ export class APIRouteManager {
     if (
       this.throwOnLoadError ||
       error instanceof APIRouteConflictError ||
-      error instanceof AmbiguousRouteError
+      error instanceof AmbiguousRouteError ||
+      error instanceof NonTerminalCatchAllRouteError
     ) {
       throw error;
     }
