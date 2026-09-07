@@ -1,6 +1,6 @@
 import type { RouteSegment, ParsedRoute } from "./types";
 import path from "path";
-import { assertTerminalCatchAll } from "./routing/specificity";
+import { assertTerminalCatchAll, assertUniqueRouteParameters } from "./routing/specificity";
 import { decodeRouteSegment } from "./utils/decode";
 
 export function parseRoutePath(filePath: string): ParsedRoute {
@@ -11,6 +11,7 @@ export function parseRoutePath(filePath: string): ParsedRoute {
   const fileName = pathParts.pop() || "";
   const fileType = getRouteType(fileName);
   assertTerminalCatchAll(`/${pathParts.join("/")}`);
+  assertUniqueRouteParameters(`/${pathParts.join("/")}`);
 
   for (const part of pathParts) {
     // Route groups like `(marketing)` organize files without adding URL

@@ -122,6 +122,20 @@ describe("parseRoutePath", () => {
     );
   });
 
+  it("rejects duplicate parameter names in one file route", () => {
+    expect(() => parseRoutePath("teams/[id]/members/[id]/page.tsx")).toThrow(
+      'Duplicate route parameter "id"',
+    );
+    expect(() => parseRoutePath("docs/[section]/[...section]/page.tsx")).toThrow(
+      'Duplicate route parameter "section"',
+    );
+    for (const fileName of ["layout.tsx", "loading.tsx", "error.tsx"]) {
+      expect(() => parseRoutePath(`teams/[id]/members/[id]/${fileName}`)).toThrow(
+        'Duplicate route parameter "id"',
+      );
+    }
+  });
+
   it("should parse root page", () => {
     const result = parseRoutePath("page.tsx");
     expect(result.segments).toEqual([]);

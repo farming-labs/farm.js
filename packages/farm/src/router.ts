@@ -1,6 +1,7 @@
 import {
   AmbiguousRouteError,
   assertTerminalCatchAll,
+  assertUniqueRouteParameters,
   compareRouteSpecificity,
   getRoutePatternShape,
   type RouteSegmentSpecificity,
@@ -196,6 +197,7 @@ function normalizeRouteInput<TMeta>(
 
 function parseRoutePattern(pattern: string): RouterSegment[] {
   assertTerminalCatchAll(pattern, "router");
+  assertUniqueRouteParameters(pattern, "router");
   return splitPathname(pattern)
     .filter((part) => !isRouteGroup(part))
     .map((part) => {
