@@ -26,6 +26,7 @@ import {
   getIslandStrategyExport,
   hasUseClientDirective,
   isIsolatableClientBoundarySource,
+  resolveFarmIsolatedClientHydrationMode,
   stripUseClientDirective,
 } from "./utils/client-component";
 import {
@@ -105,6 +106,8 @@ interface FarmVitePluginOptions extends FarmConfig {
   openapi?: FarmUserConfig["openapi"];
   images?: FarmUserConfig["images"];
   publicDir?: FarmUserConfig["publicDir"];
+  /** @internal Modules selected by the compiled isolated-hydration ownership plan. */
+  isolatedClientBoundaryModules?: ReadonlySet<string>;
 }
 
 type TypeArtifactSelection = Pick<
@@ -2660,9 +2663,21 @@ window.__FARM_MANIFEST__ = ${inlineValue({
         const generatedDevIndicatorsClientRuntime = farmApp
           ? generateFarmDevIndicatorsClientRuntime(farmApp.getConfig().devIndicators)
           : "";
+        const integrationProviders = isReactRenderer(renderer)
+          ? getIntegrationProviders(integrations)
+          : [];
+        const isolatedHydrationMode = resolveFarmIsolatedClientHydrationMode(
+          resolvedConfig?.experimental?.isolatedClientHydration,
+          {
+            serverComponents: resolvedConfig?.experimental?.serverComponents === true,
+            hasUnsupportedIntegrationProvider: integrationProviders
+              .filter((provider) => provider.component || provider.type === "clerk")
+              .some((provider) => provider.supportsIsolatedHydration !== true),
+          },
+        );
 
         return generateClientCode(
-          isReactRenderer(renderer) ? getIntegrationProviders(integrations) : [],
+          integrationProviders,
           [
             ...getIntegrationDocumentNavigationMatchers(integrations),
             ...(docsRuntime?.getFarmDocsDocumentNavigationMatchers(docs) ?? []),
@@ -2675,7 +2690,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           resolvedConfig?.publicRuntimeConfig || options.publicRuntimeConfig,
           isReactRenderer(renderer) ? docs?.adapter?.react : undefined,
           renderer,
-          resolvedConfig?.experimental?.isolatedClientHydration === "enabled",
+          isolatedHydrationMode === "enabled",
           resolvedConfig?.trailingSlash ?? false,
           resolvedConfig?.basePath ?? "/",
         );
@@ -2825,16 +2840,36 @@ export const manifest = getManifest();
         transformed = true;
 
         const currentConfig = (farmApp?.getConfig() ?? options) as FarmVitePluginOptions;
+        const configuredProviders = getIntegrationProviders(currentConfig.integrations).filter(
+          (provider) => provider.component || provider.type === "clerk",
+        );
         const isolatedHydrationEnabled =
-          currentConfig.experimental?.isolatedClientHydration === "enabled" &&
-          currentConfig.experimental?.serverComponents !== true &&
-          isReactRenderer(resolveFarmRenderer(currentConfig.renderer));
-        if (isolatedHydrationEnabled && isIsolatableClientBoundarySource(clientBoundarySource)) {
-          const root = currentConfig.root || server?.config.root || process.cwd();
-          const cleanId = id.split("?", 1)[0];
+          resolveFarmIsolatedClientHydrationMode(
+            currentConfig.experimental?.isolatedClientHydration,
+            {
+              serverComponents: currentConfig.experimental?.serverComponents === true,
+              hasUnsupportedIntegrationProvider: configuredProviders.some(
+                (provider) => provider.supportsIsolatedHydration !== true,
+              ),
+            },
+          ) === "enabled" && isReactRenderer(resolveFarmRenderer(currentConfig.renderer));
+        let isolatedModuleReference: string | null = null;
+        const root = currentConfig.root || server?.config.root || process.cwd();
+        const cleanId = id.split("?", 1)[0];
+        const selectedIsolatedModules =
+          options.isolatedClientBoundaryModules ??
+          farmApp?.getRouteManager().getIsolatedClientBoundaryModules(root);
+        const selectedForIsolatedHydration =
+          selectedIsolatedModules?.has(path.resolve(cleanId)) === true;
+        if (
+          isolatedHydrationEnabled &&
+          selectedForIsolatedHydration &&
+          isIsolatableClientBoundarySource(clientBoundarySource)
+        ) {
+          isolatedModuleReference = toViteModuleId(cleanId, root);
           const transformedBoundary = transformIsolatedClientBoundaryModule({
             code: transformedCode,
-            moduleReference: toViteModuleId(cleanId, root),
+            moduleReference: isolatedModuleReference,
             islandStrategy: getIslandStrategyExport(clientBoundarySource) ?? "load",
             parse: (source) => this.parse(source) as unknown as FarmModuleAstNode,
           });
@@ -2862,9 +2897,24 @@ export const manifest = getManifest();
 
         // Add HMR support for client components
         // This ensures React re-renders when the component updates
+        const isolatedHmrUpdate = isolatedModuleReference
+          ? `
+    if (
+      newModule &&
+      newModule.__farm_client_boundary_originals__ &&
+      window.__FARM_ISOLATED_HYDRATION_RUNTIME__
+    ) {
+      window.__FARM_ISOLATED_HYDRATION_RUNTIME__.updateModule(
+        ${JSON.stringify(isolatedModuleReference)},
+        newModule,
+      );
+      return;
+    }`
+          : "";
         const hmrCode = `
 if (import.meta.hot) {
   import.meta.hot.accept((newModule) => {
+    ${isolatedHmrUpdate}
     if (newModule && newModule.default && window.__FARM_REACT_ROOT__) {
       // Re-render with the new component
       const React = window.__FARM_REACT__;
@@ -3092,6 +3142,32 @@ if (import.meta.hot) {
         });
 
         return [];
+      }
+
+      const isolatedHydrationMode = currentFarmConfig?.experimental?.isolatedClientHydration;
+      if (
+        currentSrcRoot &&
+        (isolatedHydrationMode === "enabled" || isolatedHydrationMode === "analyze") &&
+        /\.[cm]?[jt]sx?$/.test(normalizedFile)
+      ) {
+        const routeManager = farmApp?.getRouteManager();
+        if (routeManager) {
+          const previousPlan = JSON.stringify(
+            routeManager.generateClientManifest(currentFarmConfig.root),
+          );
+          routeManager.invalidateClientManifest();
+          const nextPlan = JSON.stringify(
+            routeManager.generateClientManifest(currentFarmConfig.root),
+          );
+          const planChanged = previousPlan !== nextPlan;
+          const manifestModule = server.moduleGraph.getModuleById("/@farm/manifest");
+          if (manifestModule) server.moduleGraph.invalidateModule(manifestModule);
+          if (planChanged) {
+            for (const mod of modules) server.moduleGraph.invalidateModule(mod);
+            server.ws.send({ type: "full-reload", path: "*" });
+            return [];
+          }
+        }
       }
 
       if (normalizedFile.includes("/app/")) {
@@ -3546,6 +3622,9 @@ function generateClientCode(
   const rendererClientImports = isReactRenderer(renderer)
     ? `import React from 'react'\nimport { hydrateRoot, createRoot } from 'react-dom/client'`
     : `import React, { hydrateRoot, createRoot } from ${JSON.stringify(renderer.client)}`;
+  const isolatedHydrationImport = isolatedHydrationEnabled
+    ? `import { createFarmIsolatedHydrationRuntime } from '@farm.js/core/internal/isolated-boundary'`
+    : "";
   const docsAdapterImportBlock = docsAdapterReact
     ? `import * as FarmDocsAdapterReact from ${JSON.stringify(docsAdapterReact)};
 
@@ -3563,60 +3642,27 @@ async function hydrateFarmDocsAdapterRuntime() {
 }`
     : `async function hydrateFarmDocsAdapterRuntime() { return false; }`;
   const isolatedHydrationRuntime = isolatedHydrationEnabled
-    ? `const farmIsolatedBoundaryRoots = new Map();
+    ? `const farmIsolatedHydrationRuntime = createFarmIsolatedHydrationRuntime({
+  ReactRuntime: React,
+  hydrateRoot,
+  load: (reference) => import(/* @vite-ignore */ reference),
+  schedule: scheduleFarmIslandHydration,
+  wrap: wrapWithIntegrationProviders,
+});
+window.__FARM_ISOLATED_HYDRATION_RUNTIME__ = farmIsolatedHydrationRuntime;
 
 function disposeFarmIsolatedClientBoundaries(scope) {
-  for (const [container, root] of farmIsolatedBoundaryRoots) {
-    if (container === scope || scope.contains(container)) {
-      try { root.unmount(); } catch {}
-      farmIsolatedBoundaryRoots.delete(container);
-    }
-  }
+  farmIsolatedHydrationRuntime.dispose(scope);
 }
 
-async function hydrateFarmIsolatedClientBoundaries(scope = document) {
-  const candidates = Array.from(scope.querySelectorAll('farm-client-boundary[data-farm-client-boundary]'));
-  const boundaries = candidates.filter((container) => {
-    if (farmIsolatedBoundaryRoots.has(container)) return false;
-    return !container.parentElement?.closest('farm-client-boundary[data-farm-client-boundary]');
-  });
-  await Promise.all(boundaries.map(async (container) => {
-    const reference = container.getAttribute('data-farm-client-boundary');
-    const exportName = container.getAttribute('data-farm-client-export') || 'default';
-    const strategy = container.getAttribute('data-farm-island-strategy') || 'load';
-    if (!reference) return;
-    const scheduled = scheduleFarmIslandHydration({
-      container,
-      strategy,
-      hydrate: async () => {
-        try {
-          const module = await import(/* @vite-ignore */ reference);
-          const Component = module.__farm_client_boundary_originals__?.[exportName];
-          if (typeof Component !== 'function' && typeof Component !== 'object') {
-            throw new Error('compiled original export was not found');
-          }
-          const props = JSON.parse(container.getAttribute('data-farm-client-props') || '{}');
-          const root = hydrateRoot(
-            container,
-            wrapWithIntegrationProviders(React.createElement(Component, props)),
-          );
-          farmIsolatedBoundaryRoots.set(container, root);
-        } catch (error) {
-          console.warn(
-            '[Farm.js] Could not hydrate isolated client boundary ' + reference + '#' + exportName + '. Server HTML was preserved.',
-            error,
-          );
-        }
-      },
-    });
-    if (strategy === 'load') await scheduled;
-    else void scheduled.catch((error) => console.warn('[Farm.js] Deferred boundary hydration failed:', error));
-  }));
+async function hydrateFarmIsolatedClientBoundaries(scope = document, signal) {
+  await farmIsolatedHydrationRuntime.hydrate(scope, signal);
 }`
     : "";
 
   return `
 ${rendererClientImports}
+${isolatedHydrationImport}
 import { installChunkErrorRecovery, SPARouter } from '@farm.js/core/client'
 import { createClientPluginManager } from '@farm.js/core/plugin/client'
 import { scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from '@farm.js/core/internal/client-runtime'
@@ -4560,11 +4606,13 @@ function replaceNavigationBoundary(container, fragment, currentPatterns, nextPat
     : fragment.querySelector('#__farm_page__');
 
   if (!currentTarget || !nextTarget) {
+    ${isolatedHydrationEnabled ? "disposeFarmIsolatedClientBoundaries(container);" : ""}
     container.replaceChildren(fragment);
     activateFragmentScripts(container);
-    return;
+    return container;
   }
 
+  ${isolatedHydrationEnabled ? "disposeFarmIsolatedClientBoundaries(currentTarget);" : ""}
   currentTarget.replaceWith(nextTarget);
   activateFragmentScripts(nextTarget);
   if (fragmentTreeRoot && fragmentTreeRoot !== nextTarget) fragmentTreeRoot.remove();
@@ -4580,6 +4628,7 @@ function replaceNavigationBoundary(container, fragment, currentPatterns, nextPat
     activateFragmentScripts(support);
     setTimeout(() => support.remove(), 0);
   }
+  return nextTarget;
 }
 
 let activeLayoutPatterns = readActiveLayoutPatterns();
@@ -4693,8 +4742,9 @@ async function renderPage(pageData) {
         },
       );
     } else {
-      ${isolatedHydrationEnabled ? "disposeFarmIsolatedClientBoundaries(container);" : ""}
+      ${isolatedHydrationEnabled ? "let isolatedHydrationScope = container;" : ""}
       if (activeLayoutShouldHydrate) {
+        ${isolatedHydrationEnabled ? "disposeFarmIsolatedClientBoundaries(container);" : ""}
         if (appRoot) { try { appRoot.unmount(); } catch (error) {} appRoot = null; }
         if (reactRoot) { try { reactRoot.unmount(); } catch (error) {} reactRoot = null; }
         container.replaceChildren(fragment);
@@ -4703,15 +4753,27 @@ async function renderPage(pageData) {
         if (appRoot) { try { appRoot.unmount(); } catch (error) {} appRoot = null; }
         if (reactRoot) { try { reactRoot.unmount(); } catch (error) {} reactRoot = null; }
         delete window.__FARM_REACT_ROOT__;
-        replaceNavigationBoundary(container, fragment, activeLayoutPatterns, layoutPatterns);
+        ${
+          isolatedHydrationEnabled
+            ? "isolatedHydrationScope = replaceNavigationBoundary(container, fragment, activeLayoutPatterns, layoutPatterns) || container;"
+            : "replaceNavigationBoundary(container, fragment, activeLayoutPatterns, layoutPatterns);"
+        }
       }
 
+      const hydrationController = new AbortController();
+      if (
+        shouldHydrate${
+          isolatedHydrationEnabled
+            ? " || (hasIsolatedClientBoundaries && !layoutShouldHydrate)"
+            : ""
+        }
+      ) {
+        pendingPageHydrationController = hydrationController;
+      }
       if (shouldHydrate) {
         const hydrationContainer = layoutShouldHydrate
           ? container
           : document.getElementById('__farm_page__') || container;
-        const hydrationController = new AbortController();
-        pendingPageHydrationController = hydrationController;
         const scheduledHydration = scheduleFarmIslandHydration({
           container: hydrationContainer,
           strategy: route.islandStrategy,
@@ -4741,10 +4803,15 @@ async function renderPage(pageData) {
             console.warn('[Farm.js] Deferred island hydration failed:', error);
           });
         }
-      }${
+      }
+      ${
         isolatedHydrationEnabled
-          ? ` else if (hasIsolatedClientBoundaries) {
-        await hydrateFarmIsolatedClientBoundaries(container);
+          ? `if (hasIsolatedClientBoundaries && !layoutShouldHydrate) {
+        await hydrateFarmIsolatedClientBoundaries(
+          isolatedHydrationScope,
+          hydrationController.signal,
+        );
+        if (hydrationController.signal.aborted) return;
       }`
           : ""
       }
@@ -4788,10 +4855,12 @@ async function hydrate() {
     // Check if this is a client component (set by SSR)
     const isClientComponent = window.__FARM_IS_CLIENT__ === true;
     const modulePath = window.__FARM_PAGE_MODULE__;
-
-    if (!modulePath) {
-      console.error('[Farm.js] No page module path found')
-      return
+    ${
+      isolatedHydrationEnabled
+        ? `const hasIsolatedClientBoundaries =
+      window.__FARM_HAS_ISOLATED_CLIENT_BOUNDARIES__ === true ||
+      Boolean(rootContainer.querySelector('farm-client-boundary[data-farm-client-boundary]'));`
+        : ""
     }
 
     let pageProps = normalizeServerProps(window.__FARM_PROPS__);
@@ -4800,7 +4869,8 @@ async function hydrate() {
     const pageShouldHydrate =
       typeof window.__FARM_PAGE_SHOULD_HYDRATE__ === 'boolean'
         ? window.__FARM_PAGE_SHOULD_HYDRATE__
-        : isClientComponent || findRoute(window.location.pathname)?.route?.shouldHydrate === true;
+        : isClientComponent ||
+          findRoute(window.location.pathname)?.route?.shouldHydrate === true;
     const layoutShouldHydrate = window.__FARM_LAYOUT_SHOULD_HYDRATE__ === true;
     const shouldHydrate =
       window.__FARM_SHOULD_HYDRATE__ === true ||
@@ -4809,17 +4879,21 @@ async function hydrate() {
     const hydratedSlots = await hydrateInitialRouteSlots();
     ${
       isolatedHydrationEnabled
-        ? `const hasIsolatedClientBoundaries =
-      window.__FARM_HAS_ISOLATED_CLIENT_BOUNDARIES__ === true;
-    if (hasIsolatedClientBoundaries && !pageShouldHydrate && !layoutShouldHydrate) {
-      await hydrateFarmIsolatedClientBoundaries(rootContainer);
-      replayPreHydrationClicks();
+        ? `if (hasIsolatedClientBoundaries && !pageShouldHydrate && !layoutShouldHydrate) {
+      const hydrationController = new AbortController();
+      pendingPageHydrationController = hydrationController;
+      await hydrateFarmIsolatedClientBoundaries(rootContainer, hydrationController.signal);
+      if (hydrationController.signal.aborted) return;
       return;
     }`
         : ""
     }
     if (!shouldHydrate) {
       if (hydratedSlots) replayPreHydrationClicks();
+      return
+    }
+    if (!modulePath) {
+      console.error('[Farm.js] No page module path found')
       return
     }
 
@@ -4859,7 +4933,7 @@ async function hydrate() {
     const hydrationController = new AbortController();
     pendingPageHydrationController = hydrationController;
     try {
-      await scheduleFarmIslandHydration({
+      const pageHydration = scheduleFarmIslandHydration({
         container: pageContainer,
         strategy: islandStrategy,
         signal: hydrationController.signal,
@@ -4920,6 +4994,16 @@ async function hydrate() {
           }
         },
       });
+      ${
+        isolatedHydrationEnabled
+          ? `const isolatedHydration =
+        hasIsolatedClientBoundaries &&
+        !layoutShouldHydrate
+          ? hydrateFarmIsolatedClientBoundaries(rootContainer, hydrationController.signal)
+          : Promise.resolve();
+      await Promise.all([pageHydration, isolatedHydration]);`
+          : "await pageHydration;"
+      }
     } finally {
       if (pendingPageHydrationController === hydrationController) {
         pendingPageHydrationController = null;

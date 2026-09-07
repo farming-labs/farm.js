@@ -364,13 +364,40 @@ The option has three modes:
 An eligible boundary is a local, statically analyzable `"use client"` module with a default or
 named capitalized component export and serializable props. Farm preserves its server-rendered HTML,
 emits the client component as a separate browser chunk, and hydrates that leaf as its own React
-root. Package boundaries, re-export graphs, ambiguous exports, and routes that still require
-route-wide hydration retain the existing behavior. If runtime props cannot be serialized, Farm
-preserves the SSR output and leaves that boundary inert instead of executing unsafe client code.
+root. Sibling leaves receive independent roots. Client components imported by another client
+component stay in their parent's root, so Farm never creates overlapping roots for one client
+graph. Props travel in an HTML-safe, non-executable JSON payload. Plain objects, arrays, strings,
+booleans, finite numbers, and `null` are supported.
+
+Package boundaries, re-export graphs, ambiguous exports, React-element children, functions,
+symbols, class instances, circular objects, and routes that still require shared React context keep
+the route-wide path when Farm can identify them statically. If an unsupported value is discovered
+only while rendering, Farm preserves the SSR output and leaves that boundary inert with a
+development diagnostic. Module-load and root-render failures likewise restore the original server
+HTML and report the boundary reference plus the original error.
+
+An integration provider is route-wide by default because an independent root cannot inherit its
+context. A provider that is safe to instantiate around every isolated root can declare
+`supportsIsolatedHydration: true`; otherwise Farm retains route-wide hydration for the app.
+
+Farm also applies a measured graph-cost guard. Up to four statically bounded isolated roots can use
+the isolated plan. A page or layout with a larger client graph stays on route-wide hydration and
+prints the owner, detected count, and limit. Lists whose boundary count depends on runtime data also
+stay route-wide because Farm cannot prove their root cost before streaming. In the maintained
+25-sample Chrome benchmark, eight independent roots were the first stress shape to exceed the
+route-wide hydration budget. See the [raw samples and full cost table](https://github.com/farming-labs/farm.js/blob/main/benchmarks/isolated-hydration/results/latest.md).
+
+SPA navigation preserves isolated roots that live in a shared layout, including their state and DOM
+identity. Farm unmounts roots in the outgoing route subtree before replacing it, then hydrates only
+the boundaries introduced by the incoming fragment. Superseded navigation work is aborted before it
+can hydrate stale HTML.
 
 This flag does not enable RSC, change the meaning of `"use client"`, or make Server Components part
-of the wire format. Treat `"enabled"` as an experimental performance option and measure the route's
-client JavaScript and interaction cost before adopting it broadly.
+of the wire format. When `experimental.serverComponents` is enabled, the RSC transport remains the
+owner and Farm ignores isolated client hydration. Treat `"enabled"` as an experimental performance
+option and measure the route's client JavaScript and interaction cost before adopting it broadly.
+The maintained benchmark includes equivalent RSC controls rather than assuming the non-RSC path is
+faster.
 
 ## Images
 

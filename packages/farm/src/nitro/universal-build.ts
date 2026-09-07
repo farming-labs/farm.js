@@ -27,6 +27,7 @@ import { logger, toPosixPath, toViteModuleId } from "../utils";
 import {
   getClientModuleHydrationPlan,
   getClientModuleMetadata,
+  resolveFarmIsolatedClientHydrationMode,
   type IsolatedClientBoundaryReference,
 } from "../utils/client-component";
 import { isFarmMarkdownPageFile } from "../app-markdown";
@@ -819,6 +820,8 @@ export async function buildUniversal(
     }
     logger.info(`📋 Found ${pageRoutes.length} page routes and ${layoutRoutes.length} layouts`);
 
+    const isolatedClientBoundaryModules = routeManager.getIsolatedClientBoundaryModules(root);
+
     const clientOutputDir = path.join(root, distDir, "client");
     const [productionViteResult] = await productionViteResultPromise;
     if (productionViteResult.status === "rejected") {
@@ -842,6 +845,7 @@ export async function buildUniversal(
         pageRoutes,
         layoutRoutes,
         routeSlots,
+        isolatedClientBoundaryModules,
       );
     const buildSSRBundle = () =>
       buildSSRInMemory(
@@ -855,6 +859,7 @@ export async function buildUniversal(
         pageRoutes,
         layoutRoutes,
         routeSlots,
+        isolatedClientBoundaryModules,
       );
 
     // Route metadata and the client/SSR graphs read independent inputs. Drain
@@ -900,6 +905,7 @@ export async function buildUniversal(
         pageRoutes,
         layoutRoutes,
         routeSlots,
+        isolatedClientBoundaryModules,
       );
     }
 
@@ -1078,6 +1084,7 @@ async function buildClient(
   pageRoutes: UniversalPageRoute[],
   layoutRoutes: Array<{ pattern: string; modulePath: string }> = [],
   routeSlots: UniversalRouteSlot[] = [],
+  isolatedClientBoundaryModules: ReadonlySet<string> = new Set(),
 ) {
   const viteBuild = productionVite.build;
   const { farmPlugin } = await import("../vite");
@@ -1102,7 +1109,28 @@ async function buildClient(
     isolatedBoundaries: IsolatedClientBoundaryReference[];
   }> = [];
 
-  const isolatedMode = config.experimental?.isolatedClientHydration ?? "off";
+  const integrationProviders = getIntegrationProviders(config.integrations).filter(
+    (provider) => provider.component || provider.type === "clerk",
+  );
+  const unsupportedIntegrationProvider = integrationProviders.find(
+    (provider) => provider.supportsIsolatedHydration !== true,
+  );
+  if (
+    config.experimental?.isolatedClientHydration === "enabled" &&
+    config.experimental?.serverComponents !== true &&
+    unsupportedIntegrationProvider
+  ) {
+    logger.warn(
+      `[Farm.js] isolated hydration kept route-wide because integration provider "${unsupportedIntegrationProvider.name}" does not declare supportsIsolatedHydration: true.`,
+    );
+  }
+  const isolatedMode = resolveFarmIsolatedClientHydrationMode(
+    config.experimental?.isolatedClientHydration,
+    {
+      serverComponents: config.experimental?.serverComponents === true,
+      hasUnsupportedIntegrationProvider: Boolean(unsupportedIntegrationProvider),
+    },
+  );
 
   const clientLayouts = layoutRoutes.map((layout) => {
     try {
@@ -1180,26 +1208,14 @@ async function buildClient(
         continue;
       }
       logger.info(
-        `📊 Isolated hydration analysis: ${entry.modulePath} can exclude its server owner and hydrate ${metadata.isolatedBoundaries.length} client boundary${metadata.isolatedBoundaries.length === 1 ? "" : "ies"}.`,
+        `📊 Isolated hydration analysis: ${entry.modulePath} can exclude its server owner and hydrate ${metadata.isolatedBoundaries.length} client ${metadata.isolatedBoundaries.length === 1 ? "boundary" : "boundaries"}.`,
       );
     }
   }
 
-  for (const { route, metadata } of routePlans) {
-    if (metadata.shouldHydrate) {
-      for (const layout of clientLayouts) {
-        if (
-          layout.hasIsolatedClientBoundaries &&
-          layoutAppliesToRoute(layout.pattern, route.pattern)
-        ) {
-          layout.shouldHydrate = layout.legacyShouldHydrate;
-          layout.islandStrategy = layout.legacyIslandStrategy;
-          layout.hasIsolatedClientBoundaries = false;
-          layout.isolatedBoundaries = [];
-        }
-      }
-    }
-  }
+  // A route-wide layout owns its descendant page tree and cannot contain an
+  // overlapping isolated root. Route-wide pages are separate roots and can
+  // coexist with isolated client leaves in their server-owned layouts.
   for (const { route, metadata } of routePlans) {
     if (
       metadata.hasIsolatedClientBoundaries &&
@@ -1518,7 +1534,7 @@ async function buildClient(
             return null;
           },
         },
-        farmPlugin(config, pluginManager),
+        farmPlugin({ ...config, isolatedClientBoundaryModules }, pluginManager),
         farmEnvironmentFunctionsPlugin(),
       ],
       mode: "production",
@@ -2458,6 +2474,9 @@ document.addEventListener("click", function(e) {
   }`);
   });
   const isolatedHydrationEnabled = isolatedBoundaryModules.size > 0;
+  const isolatedHydrationImport = isolatedHydrationEnabled
+    ? `import { createFarmIsolatedHydrationRuntime } from "@farm.js/core/internal/isolated-boundary";`
+    : "";
   const isolatedHydrationRuntime = isolatedHydrationEnabled
     ? `const farmIsolatedBoundaryLoaders = {
 ${Array.from(isolatedBoundaryModules.entries())
@@ -2467,61 +2486,24 @@ ${Array.from(isolatedBoundaryModules.entries())
   )
   .join("\n")}
 };
-const farmIsolatedBoundaryRoots = new Map();
+const farmIsolatedHydrationRuntime = createFarmIsolatedHydrationRuntime({
+  ReactRuntime: React,
+  hydrateRoot,
+  load: async function(reference) {
+    const loader = farmIsolatedBoundaryLoaders[reference];
+    if (!loader) throw new Error("isolated client boundary loader was not found: " + reference);
+    return loader();
+  },
+  schedule: scheduleFarmIslandHydration,
+  wrap: wrapWithIntegrationProviders,
+});
 
 function disposeFarmIsolatedClientBoundaries(scope) {
-  for (const [container, root] of farmIsolatedBoundaryRoots) {
-    if (container === scope || scope.contains(container)) {
-      try { root.unmount(); } catch {}
-      farmIsolatedBoundaryRoots.delete(container);
-    }
-  }
+  farmIsolatedHydrationRuntime.dispose(scope);
 }
 
 async function hydrateFarmIsolatedClientBoundaries(scope = document, signal) {
-  const candidates = Array.from(scope.querySelectorAll("farm-client-boundary[data-farm-client-boundary]"));
-  const boundaries = candidates.filter((container) => {
-    if (farmIsolatedBoundaryRoots.has(container)) return false;
-    return !container.parentElement?.closest("farm-client-boundary[data-farm-client-boundary]");
-  });
-  await Promise.all(boundaries.map(async (container) => {
-    const reference = container.getAttribute("data-farm-client-boundary");
-    const exportName = container.getAttribute("data-farm-client-export") || "default";
-    const strategy = container.getAttribute("data-farm-island-strategy") || "load";
-    const loader = reference ? farmIsolatedBoundaryLoaders[reference] : null;
-    if (!reference || !loader) {
-      console.warn("[Farm.js] Missing isolated client boundary loader:", reference);
-      return;
-    }
-    const scheduled = scheduleFarmIslandHydration({
-      container,
-      strategy,
-      hydrate: async function() {
-        try {
-          if (signal?.aborted || !container.isConnected) return;
-          const module = await loader();
-          if (signal?.aborted || !container.isConnected) return;
-          const Component = module.__farm_client_boundary_originals__?.[exportName];
-          if (typeof Component !== "function" && typeof Component !== "object") {
-            throw new Error("compiled original export was not found");
-          }
-          const props = JSON.parse(container.getAttribute("data-farm-client-props") || "{}");
-          const root = hydrateRoot(
-            container,
-            wrapWithIntegrationProviders(React.createElement(Component, props)),
-          );
-          farmIsolatedBoundaryRoots.set(container, root);
-        } catch (error) {
-          console.warn(
-            "[Farm.js] Could not hydrate isolated client boundary " + reference + "#" + exportName + ". Server HTML was preserved.",
-            error,
-          );
-        }
-      },
-    });
-    if (strategy === "load") await scheduled;
-    else void scheduled.catch((error) => console.warn("[Farm.js] Deferred boundary hydration failed:", error));
-  }));
+  await farmIsolatedHydrationRuntime.hydrate(scope, signal);
 }`
     : "";
   clientRouteSlots.forEach((slot, index) => {
@@ -2544,6 +2526,7 @@ async function hydrateFarmIsolatedClientBoundaries(scope = document, signal) {
 ${cssImport}
 ${layoutImports}
 ${rendererClientImports}
+${isolatedHydrationImport}
 ${providerClientCode.imports}
 import { createClientPluginManager, getHashTargetElement, installChunkErrorRecovery, isFarmExternalNavigationURL, reconcileFarmDocumentHead, scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
 import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";
@@ -2885,7 +2868,9 @@ async function hydrate() {
     !matched.route.pageShouldHydrate &&
     !hasHydratableLayout(pathname)
   ) {
-    await hydrateFarmIsolatedClientBoundaries(document);
+    const hydrationController = new AbortController();
+    pendingPageHydrationController = hydrationController;
+    await hydrateFarmIsolatedClientBoundaries(document, hydrationController.signal);
     return;
   }`
       : ""
@@ -2906,7 +2891,7 @@ async function hydrate() {
   const hydrationController = new AbortController();
   pendingPageHydrationController = hydrationController;
   try {
-    await scheduleFarmIslandHydration({
+    const pageHydration = scheduleFarmIslandHydration({
       container,
       strategy: matched.route.islandStrategy,
       signal: hydrationController.signal,
@@ -2958,6 +2943,16 @@ async function hydrate() {
         }
       },
     });
+    ${
+      isolatedHydrationEnabled
+        ? `const isolatedHydration =
+      !hasHydratableLayout(pathname) &&
+      document.querySelector('farm-client-boundary[data-farm-client-boundary]')
+        ? hydrateFarmIsolatedClientBoundaries(document, hydrationController.signal)
+        : Promise.resolve();
+    await Promise.all([pageHydration, isolatedHydration]);`
+        : "await pageHydration;"
+    }
   } finally {
     if (pendingPageHydrationController === hydrationController) {
       pendingPageHydrationController = null;
@@ -3011,6 +3006,7 @@ function replaceSharedLayoutBoundary(currentRoot, nextRoot) {
     : nextRoot.querySelector("#__farm_page__");
 
   if (!currentTarget || !nextTarget) return false;
+  ${isolatedHydrationEnabled ? "disposeFarmIsolatedClientBoundaries(currentTarget);" : ""}
   currentTarget.replaceWith(nextTarget);
   activateNavigationScripts(nextTarget);
   if (nextTreeRoot && nextTreeRoot !== nextTarget) nextTreeRoot.remove();
@@ -3024,7 +3020,7 @@ function replaceSharedLayoutBoundary(currentRoot, nextRoot) {
     activateNavigationScripts(support);
     setTimeout(function() { support.remove(); }, 0);
   }
-  return true;
+  return nextTarget;
 }
 
 // SPA Router
@@ -3311,12 +3307,17 @@ ${generateUniversalRouterStateProperties()}
     }
 
     const rootWasReactOwned = reactRootContainer === currentRoot;
-    ${isolatedHydrationEnabled ? "disposeFarmIsolatedClientBoundaries(currentRoot);" : ""}
     resetReactRoot();
     resetRouteSlotRoots();
-    if (rootWasReactOwned || !replaceSharedLayoutBoundary(currentRoot, newRoot)) {
+    const replacedSharedBoundary = rootWasReactOwned
+      ? null
+      : replaceSharedLayoutBoundary(currentRoot, newRoot);
+    let isolatedHydrationScope = replacedSharedBoundary || currentRoot;
+    if (!replacedSharedBoundary) {
+      ${isolatedHydrationEnabled ? "disposeFarmIsolatedClientBoundaries(currentRoot);" : ""}
       currentRoot.innerHTML = newRoot.innerHTML;
       activateNavigationScripts(currentRoot);
+      isolatedHydrationScope = currentRoot;
     }
     window.__FARM_ROUTE_SLOTS__ = nextRouteSlots;
     hydrateInitialRouteSlots();
@@ -3336,10 +3337,14 @@ ${generateUniversalRouterStateProperties()}
         reactRoot = hydrateRoot(pageContainer, wrappedElement);
         reactRootContainer = pageContainer;
         isHydrated = true;
-      }${
+      }
+      ${
         isolatedHydrationEnabled
-          ? ` else if (matched.route.hasIsolatedClientBoundaries) {
-        await hydrateFarmIsolatedClientBoundaries(currentRoot, navigation.controller.signal);
+          ? `if (matched.route.hasIsolatedClientBoundaries && !hydrateLayouts) {
+        await hydrateFarmIsolatedClientBoundaries(
+          isolatedHydrationScope,
+          navigation.controller.signal,
+        );
         if (!isNavigationCurrent()) return false;
       }`
           : ""
@@ -3353,6 +3358,7 @@ ${generateUniversalRouterStateProperties()}
 
     resetReactRoot();
     resetRouteSlotRoots();
+    ${isolatedHydrationEnabled ? "disposeFarmIsolatedClientBoundaries(document);" : ""}
 
     Array.from(document.documentElement.attributes).forEach(function(attr) {
       if (!doc.documentElement.hasAttribute(attr.name)) {
@@ -3501,6 +3507,7 @@ async function buildSSRInMemory(
   collectedPageRoutes: readonly UniversalPageRoute[],
   collectedLayoutRoutes: ReadonlyArray<{ pattern: string; modulePath: string }>,
   collectedRouteSlots: readonly UniversalRouteSlot[],
+  isolatedClientBoundaryModules: ReadonlySet<string>,
 ): Promise<{
   bundle: OutputBundle;
   entryFile: string;
@@ -3843,7 +3850,7 @@ async function buildSSRInMemory(
             };
           },
         },
-        farmPlugin(config, pluginManager),
+        farmPlugin({ ...config, isolatedClientBoundaryModules }, pluginManager),
         farmEnvironmentFunctionsPlugin(),
         {
           name: "farm-virtual-ssr-entry",

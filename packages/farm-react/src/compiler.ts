@@ -1993,10 +1993,9 @@ function keyedArrayReorderPipeline(
   let structuralSteps = 0;
   let reorderSteps = 0;
   let reachedReorder = false;
-  for (let index = 0; index < steps.length; index += 1) {
-    const step = steps[index];
+  for (const step of steps) {
     if (step.kind === "map") {
-      if (index !== 0 || reachedReorder || structuralSteps > 0) return undefined;
+      if (reachedReorder || structuralSteps > 0) return undefined;
       mapSteps += 1;
     } else if (step.kind === "filter" || step.kind === "slice") {
       if (reachedReorder) return undefined;
@@ -2006,9 +2005,9 @@ function keyedArrayReorderPipeline(
       reorderSteps += 1;
     }
   }
-  if (mapSteps > 1 || (mapSteps > 0 && structuralSteps > 0)) return undefined;
+  if (mapSteps > 0 && structuralSteps > 0) return undefined;
   if (reorderSteps < 1) return undefined;
-  if (mapSteps === 1 && reorderSteps >= 1) return steps;
+  if (mapSteps > 0 && reorderSteps >= 1) return steps;
   if (structuralSteps < 1 && reorderSteps < 2) return undefined;
   return steps;
 }

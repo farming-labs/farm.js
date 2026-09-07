@@ -1217,15 +1217,17 @@ A common data-table update changes one row and immediately restores a sorted ord
 ```tsx
 setItems((current) =>
   current
-    .map((item) => (item.id === editedId ? { ...item, rank: nextRank, label: nextLabel } : item))
+    .map((item) => (item.id === editedId ? { ...item, label: nextLabel } : item))
+    .map((item) => (item.id === editedId ? { ...item, rank: nextRank } : item))
     .toSorted((left, right) => left.rank - right.rank),
 );
 ```
 
-For a concise functional setter, Farm can prepare the safe same-key `map()` and the following
-native `toSorted()` or `toReversed()` calls as one update pipeline. JavaScript still performs the
-map and reorder normally. The compiler records only enough provenance to prove that the final
-array came from the currently committed keyed rows.
+For a concise functional setter, Farm can prepare one or more consecutive safe same-key `map()`
+calls and the following native `toSorted()` or `toReversed()` calls as one update pipeline.
+JavaScript still performs every map and reorder normally. After each map, the compiler runtime
+flattens replacement lineage back to the committed source row, so any number of accepted stages
+still needs one final keyed reconciliation rather than a growing chain of intermediate snapshots.
 
 Before changing the DOM, the runtime verifies ordinary dense arrays, exact native methods, the
 committed collection token, equal lengths, a unique one-to-one source-item match, and the key of
@@ -1236,7 +1238,7 @@ controlled inputs, focus, and text selection stay attached to their keys. Multip
 map-and-reorder setters queued before one compiler flush compose against the same committed
 collection and expose only the final state.
 
-The initial proof accepts one inline, synchronous, compiler-safe map callback that returns the
+The proof requires every map callback to be inline, synchronous, compiler-safe, and to return the
 original item on one conditional branch and an object-spread replacement on the other. It requires
 compiler-owned host rows whose render and key do not observe the index. Referenced or block-bodied
 callbacks, unconditional replacements, changed or duplicate keys, `thisArg`, structural methods in

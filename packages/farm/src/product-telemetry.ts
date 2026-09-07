@@ -101,6 +101,10 @@ export function createFarmProductionSiteReporter(
   return {
     report(requestUrl, waitUntil) {
       if (productionTelemetryDisabled()) return;
+      if (!isProductionDeploymentEnvironment()) {
+        debug("production-site check-in skipped outside a production deployment");
+        return;
+      }
 
       const siteUrl = detectFarmProductionSiteOrigin(requestUrl);
       if (!siteUrl) return;
@@ -206,6 +210,27 @@ function productionTelemetryDisabled(): boolean {
   if (process.env.DO_NOT_TRACK !== undefined && !isFalse(process.env.DO_NOT_TRACK)) return true;
   if (isTrue(process.env.FARM_TELEMETRY_DISABLED)) return true;
   return isFalse(process.env.FARM_TELEMETRY);
+}
+
+/**
+ * Vercel exposes the deployment environment at build and runtime. Only its
+ * production environment represents a production site; preview, development,
+ * and custom targets must not create dashboard entries. Other deployment
+ * providers remain eligible when no Vercel environment metadata is present.
+ */
+function isProductionDeploymentEnvironment(): boolean {
+  const environment = normalizeEnvironment(process.env.VERCEL_ENV);
+  const targetEnvironment = normalizeEnvironment(process.env.VERCEL_TARGET_ENV);
+
+  if (!environment && !targetEnvironment) return true;
+  if (environment && environment !== "production") return false;
+  if (targetEnvironment && targetEnvironment !== "production") return false;
+  return true;
+}
+
+function normalizeEnvironment(value: string | undefined): string | undefined {
+  const normalized = value?.trim().toLowerCase();
+  return normalized || undefined;
 }
 
 function sanitizeDetail(value: string | undefined, fallback: string): string {
