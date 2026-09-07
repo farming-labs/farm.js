@@ -7,6 +7,7 @@ import {
   RouteManager,
   shouldSuggestStaticRenderingForI18n,
 } from "../routing/route-manager";
+import { defineIntegration } from "../integrations";
 import type { FarmConfig } from "../types";
 
 /** "/test" is not an absolute path on Windows, so resolve it per platform. */
@@ -285,6 +286,39 @@ describe("RouteManager", () => {
       expect(refreshed).not.toBe(first);
       expect(new Set(refreshed.routes.map((route) => route.pattern))).toEqual(
         new Set(["/", "/about"]),
+      );
+    });
+
+    it("explains when a route-wide integration provider disables isolated roots", async () => {
+      const { logger } = await import("../utils");
+      vi.mocked(logger.warn).mockClear();
+      mockConfig.experimental = {
+        serverComponents: false,
+        serverActions: false,
+        isolatedClientHydration: "enabled",
+      };
+      mockConfig.integrations = {
+        acme: defineIntegration({
+          category: "custom",
+          type: "acme",
+          instance: {},
+          providers: [
+            {
+              name: "acme",
+              type: "client",
+              component: { module: "@/components/acme-provider" },
+            },
+          ],
+        }),
+      };
+      routeManager = new RouteManager(mockConfig);
+
+      routeManager.generateClientManifest(mockConfig.root);
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'integration provider "acme" does not declare supportsIsolatedHydration: true',
+        ),
       );
     });
 

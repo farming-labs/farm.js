@@ -107,6 +107,18 @@ const RESOLVABLE_SOURCE_EXTENSIONS = [
   ".cjs",
 ] as const;
 
+export function resolveFarmIsolatedClientHydrationMode(
+  mode: FarmIsolatedClientHydrationMode | undefined,
+  options: {
+    serverComponents?: boolean;
+    hasUnsupportedIntegrationProvider?: boolean;
+  } = {},
+): FarmIsolatedClientHydrationMode {
+  if (options.serverComponents) return "off";
+  if (mode === "enabled" && options.hasUnsupportedIntegrationProvider) return "off";
+  return mode ?? "off";
+}
+
 export function hasUseClientDirective(content: string | null): boolean {
   if (!content) {
     return false;

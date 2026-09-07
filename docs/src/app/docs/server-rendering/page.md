@@ -197,7 +197,9 @@ components support.
 split without changing runtime behavior, or to `"enabled"` to hydrate safe leaves independently.
 Unsupported routes keep the existing route-wide ownership model. See
 [Isolated client hydration](/docs/configuration#isolated-client-hydration) for the modes and safety
-rules.
+rules. This experiment is disabled when RSC owns the route. Integration providers also keep the
+route-wide root unless they explicitly declare that they can be recreated around independent
+isolated roots.
 
 ## Automatic optimized boundaries
 
