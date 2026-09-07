@@ -279,12 +279,15 @@ describe("file route loading.tsx and error.tsx", () => {
           modulePath: manifestModulePath,
           outputName: "manifest.webmanifest",
         },
+        basePath: "/console",
       },
     );
 
     await renderer.renderPage(createMockRequest("/dashboard"), response);
 
-    expect(response.body).toContain('<link rel="manifest" href="/dashboard/manifest.webmanifest">');
+    expect(response.body).toContain(
+      '<link rel="manifest" href="/console/dashboard/manifest.webmanifest">',
+    );
   });
 
   it("renders and serves a fingerprinted static metadata image", async () => {
@@ -317,13 +320,14 @@ describe("file route loading.tsx and error.tsx", () => {
       {
         opengraphImage: true,
         staticImage: { modulePath: imagePath, staticInfo },
+        basePath: "/console",
       },
     );
 
     const pageResponse = createMockResponse();
     await renderer.renderPage(createMockRequest("/dashboard"), pageResponse);
     expect(pageResponse.body).toContain(
-      '<meta property="og:image" content="/dashboard/opengraph-image?v=0123456789abcdef">',
+      '<meta property="og:image" content="/console/dashboard/opengraph-image?v=0123456789abcdef">',
     );
     expect(pageResponse.body).toContain('<meta property="og:image:width" content="2">');
     expect(pageResponse.body).toContain(

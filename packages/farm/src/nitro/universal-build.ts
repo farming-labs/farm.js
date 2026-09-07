@@ -5281,10 +5281,11 @@ function createMetadataImageReference(match, locale) {
   const basePath = match.pagePath === "/" ? "" : match.pagePath;
   const version = image.sourceType === "static" ? "?v=" + image.staticInfo.hash : "";
   const href = basePath + "/" + image.fileName + version;
+  const localizedHref = locale ? localizeFarmHref(href, locale, farmI18nConfig) : href;
 
   return {
     kind: image.kind,
-    href: locale ? localizeFarmHref(href, locale, farmI18nConfig) : href,
+    href: applyFarmBasePath(localizedHref),
     width: metadata?.width ?? metadata?.size?.width,
     height: metadata?.height ?? metadata?.size?.height,
     alt: metadata?.alt,
@@ -5403,7 +5404,8 @@ function getMatchingApplicationMetadataRoute(pathname, kind) {
 function createApplicationMetadataHref(match, locale) {
   const basePath = match.routePath === "/" ? "" : match.routePath;
   const href = basePath + "/" + match.metadata.outputName;
-  return locale ? localizeFarmHref(href, locale, farmI18nConfig) : href;
+  const localizedHref = locale ? localizeFarmHref(href, locale, farmI18nConfig) : href;
+  return applyFarmBasePath(localizedHref);
 }
 
 async function handleApplicationMetadataRouteRequest(request, routePathname) {
