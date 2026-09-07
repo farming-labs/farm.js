@@ -139,6 +139,19 @@ async function readAllClientJavaScript(root: string): Promise<string> {
   return readDirectory(path.join(root, ".farm", "client"));
 }
 
+async function resolveInstalledChromiumExecutable(): Promise<string | null> {
+  const configured = process.env.FARM_TEST_CHROMIUM_EXECUTABLE_PATH;
+  if (configured) return configured;
+
+  const executablePath = chromium.executablePath();
+  try {
+    await fs.access(executablePath);
+    return executablePath;
+  } catch {
+    return null;
+  }
+}
+
 async function runProductionRequest(
   serverDir: string,
   assertion: (response: Response) => Promise<void>,
@@ -552,11 +565,11 @@ export default function RootLayout({ children }) {
             'data-farm-client-boundary="/src/components/child-counter.tsx"',
           );
 
+          const executablePath = await resolveInstalledChromiumExecutable();
+          if (!executablePath) return;
           const browser = await chromium.launch({
             headless: true,
-            ...(process.env.FARM_TEST_CHROMIUM_EXECUTABLE_PATH
-              ? { executablePath: process.env.FARM_TEST_CHROMIUM_EXECUTABLE_PATH }
-              : {}),
+            executablePath,
           });
           try {
             const page = await browser.newPage();
