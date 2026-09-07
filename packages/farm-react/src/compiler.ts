@@ -371,6 +371,7 @@ type CompilerRuntimeFeatureName =
   | "keyed-rows-batch-position-hinted"
   | "keyed-rows-window-position-hinted"
   | "keyed-rows-reorder-hinted"
+  | "keyed-rows-map-reorder-hinted"
   | "keyed-rows-all-hinted"
   | "keyed-rows-every-hinted"
   | "keyed-rows-batch-every-hinted"
@@ -432,6 +433,7 @@ const COMPILER_RUNTIME_FEATURE_EXPORTS: Record<CompilerRuntimeFeatureName, strin
   "keyed-rows-batch-position-hinted": "keyedRowsBatchPositionHintedRuntimeFeature",
   "keyed-rows-window-position-hinted": "keyedRowsWindowPositionHintedRuntimeFeature",
   "keyed-rows-reorder-hinted": "keyedRowsReorderHintedRuntimeFeature",
+  "keyed-rows-map-reorder-hinted": "keyedRowsMapReorderHintedRuntimeFeature",
   "keyed-rows-all-hinted": "keyedRowsAllHintedRuntimeFeature",
   "keyed-rows-every-hinted": "keyedRowsEveryHintedRuntimeFeature",
   "keyed-rows-batch-every-hinted": "keyedRowsBatchEveryHintedRuntimeFeature",
@@ -497,6 +499,7 @@ function runtimeFeaturesForPlans(
   keyedArrayBatchInsertHints: boolean,
   keyedArrayWindowReplaceHints: boolean,
   keyedArrayReorderHints: boolean,
+  keyedArrayMapReorderHints: boolean,
   keyedArrayRollingWindowHints: boolean,
 ): CompilerRuntimeFeatureName[] {
   const features = new Set<CompilerRuntimeFeatureName>();
@@ -538,17 +541,19 @@ function runtimeFeaturesForPlans(
             ? "-all-hinted"
             : keyedArrayPositionHints
               ? "-position-hinted"
-              : keyedArrayReorderHints
-                ? "-reorder-hinted"
-                : keyedArrayFilterHints && keyedArrayPrependHints
-                  ? "-filter-prepend-hinted"
-                  : keyedArrayFilterHints
-                    ? "-filter-hinted"
-                    : keyedArrayPrependHints
-                      ? "-prepend-hinted"
-                      : keyedMapUpdateHints
-                        ? "-hinted"
-                        : "";
+              : keyedArrayMapReorderHints && keyedRowsFeature === "keyed-rows"
+                ? "-map-reorder-hinted"
+                : keyedArrayReorderHints
+                  ? "-reorder-hinted"
+                  : keyedArrayFilterHints && keyedArrayPrependHints
+                    ? "-filter-prepend-hinted"
+                    : keyedArrayFilterHints
+                      ? "-filter-hinted"
+                      : keyedArrayPrependHints
+                        ? "-prepend-hinted"
+                        : keyedMapUpdateHints
+                          ? "-hinted"
+                          : "";
     features.add(`${keyedRowsFeature}${hintSuffix}` as CompilerRuntimeFeatureName);
   }
   return [...features].sort();
@@ -1887,6 +1892,10 @@ type KeyedArrayReorderPipelineStep =
       readonly predicate: t.ArrowFunctionExpression;
     }
   | {
+      readonly callback: t.ArrowFunctionExpression;
+      readonly kind: "map";
+    }
+  | {
       readonly bounds: readonly t.Expression[];
       readonly kind: "slice";
     }
@@ -1911,7 +1920,23 @@ function keyedArrayReorderPipeline(
     t.isExpression(current.callee.object)
   ) {
     const methodName = current.callee.property.name;
-    if (methodName === "filter") {
+    if (methodName === "map") {
+      if (current.arguments.length !== 1) return undefined;
+      const callback = current.arguments[0];
+      if (
+        !t.isArrowFunctionExpression(callback) ||
+        callback.async ||
+        callback.generator ||
+        callback.params.length === 0 ||
+        callback.params.length > 3 ||
+        callback.params.some((parameter) => !t.isIdentifier(parameter)) ||
+        !t.isExpression(callback.body) ||
+        !isSafeKeyedMapResult(callback.body, callback.params[0] as t.Identifier, safeGlobals)
+      ) {
+        return undefined;
+      }
+      outerSteps.push({ callback, kind: "map" });
+    } else if (methodName === "filter") {
       if (current.arguments.length !== 1) return undefined;
       const predicate = current.arguments[0];
       if (
@@ -1964,11 +1989,16 @@ function keyedArrayReorderPipeline(
     return undefined;
   }
   const steps = outerSteps.reverse();
+  let mapSteps = 0;
   let structuralSteps = 0;
   let reorderSteps = 0;
   let reachedReorder = false;
-  for (const step of steps) {
-    if (step.kind === "filter" || step.kind === "slice") {
+  for (let index = 0; index < steps.length; index += 1) {
+    const step = steps[index];
+    if (step.kind === "map") {
+      if (index !== 0 || reachedReorder || structuralSteps > 0) return undefined;
+      mapSteps += 1;
+    } else if (step.kind === "filter" || step.kind === "slice") {
       if (reachedReorder) return undefined;
       structuralSteps += 1;
     } else {
@@ -1976,7 +2006,10 @@ function keyedArrayReorderPipeline(
       reorderSteps += 1;
     }
   }
-  if (reorderSteps < 1 || (structuralSteps < 1 && reorderSteps < 2)) return undefined;
+  if (mapSteps > 1 || (mapSteps > 0 && structuralSteps > 0)) return undefined;
+  if (reorderSteps < 1) return undefined;
+  if (mapSteps === 1 && reorderSteps >= 1) return steps;
+  if (structuralSteps < 1 && reorderSteps < 2) return undefined;
   return steps;
 }
 
@@ -1985,14 +2018,20 @@ function rewriteKeyedArrayReorderPipelineHints(
   hintedStateIndices: ReadonlySet<number>,
   statesBySetter: ReadonlyMap<string, StateBinding>,
   filterHelperIdentifier: t.Identifier,
+  mapHelperIdentifier: t.Identifier,
+  mapReorderHelperIdentifier: t.Identifier,
   reorderHelperIdentifier: t.Identifier,
   structuralReorderHelperIdentifier: t.Identifier,
   sliceHelperIdentifier: t.Identifier,
   sortHelperIdentifier: t.Identifier,
   structuralSortHelperIdentifier: t.Identifier,
   safeGlobals: ReadonlySet<string>,
+  allowMapPipelines: boolean,
 ): {
   filterCount: number;
+  mapCount: number;
+  mapReorderCount: number;
+  mapSortCount: number;
   root: t.JSXElement;
   reorderCount: number;
   sliceCount: number;
@@ -2005,6 +2044,9 @@ function rewriteKeyedArrayReorderPipelineHints(
     return {
       root: t.cloneNode(root, true),
       filterCount: 0,
+      mapCount: 0,
+      mapReorderCount: 0,
+      mapSortCount: 0,
       reorderCount: 0,
       sliceCount: 0,
       sortCount: 0,
@@ -2016,6 +2058,9 @@ function rewriteKeyedArrayReorderPipelineHints(
   const file = expressionFile(t.cloneNode(root, true));
   const stateIndices = new Set<number>();
   let filterCount = 0;
+  let mapCount = 0;
+  let mapReorderCount = 0;
+  let mapSortCount = 0;
   let reorderCount = 0;
   let sliceCount = 0;
   let sortCount = 0;
@@ -2045,49 +2090,63 @@ function rewriteKeyedArrayReorderPipelineHints(
       const structuralPipeline = steps.some(
         (step) => step.kind === "filter" || step.kind === "slice",
       );
+      const mapPipeline = steps.some((step) => step.kind === "map");
+      if (mapPipeline && !allowMapPipelines) return;
 
       const previous = t.cloneNode(updater.params[0]);
       const statements: t.Statement[] = [];
       let value: t.Expression = t.cloneNode(previous);
       for (const step of steps) {
         const methodName =
-          step.kind === "filter"
-            ? "filter"
-            : step.kind === "slice"
-              ? "slice"
-              : step.kind === "reverse"
-                ? "toReversed"
-                : "toSorted";
+          step.kind === "map"
+            ? "map"
+            : step.kind === "filter"
+              ? "filter"
+              : step.kind === "slice"
+                ? "slice"
+                : step.kind === "reverse"
+                  ? "toReversed"
+                  : "toSorted";
         const method = path.scope.generateUidIdentifier(
           step.kind === "filter"
             ? "farmFilter"
-            : step.kind === "slice"
-              ? "farmSlice"
-              : step.kind === "reverse"
-                ? "farmToReversed"
-                : "farmToSorted",
+            : step.kind === "map"
+              ? "farmMap"
+              : step.kind === "slice"
+                ? "farmSlice"
+                : step.kind === "reverse"
+                  ? "farmToReversed"
+                  : "farmToSorted",
         );
         const result = path.scope.generateUidIdentifier("farmPipelineValue");
         const helper =
-          step.kind === "filter"
-            ? filterHelperIdentifier
-            : step.kind === "slice"
-              ? sliceHelperIdentifier
-              : step.kind === "reverse"
-                ? structuralPipeline
-                  ? structuralReorderHelperIdentifier
-                  : reorderHelperIdentifier
-                : structuralPipeline
-                  ? structuralSortHelperIdentifier
-                  : sortHelperIdentifier;
+          step.kind === "map"
+            ? mapHelperIdentifier
+            : step.kind === "filter"
+              ? filterHelperIdentifier
+              : step.kind === "slice"
+                ? sliceHelperIdentifier
+                : step.kind === "reverse"
+                  ? mapPipeline
+                    ? mapReorderHelperIdentifier
+                    : structuralPipeline
+                      ? structuralReorderHelperIdentifier
+                      : reorderHelperIdentifier
+                  : mapPipeline
+                    ? mapReorderHelperIdentifier
+                    : structuralPipeline
+                      ? structuralSortHelperIdentifier
+                      : sortHelperIdentifier;
         const args =
-          step.kind === "filter"
-            ? [t.cloneNode(step.predicate, true)]
-            : step.kind === "slice"
-              ? step.bounds.map((bound) => t.cloneNode(bound, true))
-              : step.kind === "sort" && step.comparator
-                ? [t.cloneNode(step.comparator, true)]
-                : [];
+          step.kind === "map"
+            ? [t.cloneNode(step.callback, true)]
+            : step.kind === "filter"
+              ? [t.cloneNode(step.predicate, true)]
+              : step.kind === "slice"
+                ? step.bounds.map((bound) => t.cloneNode(bound, true))
+                : step.kind === "sort" && step.comparator
+                  ? [t.cloneNode(step.comparator, true)]
+                  : [];
         statements.push(
           t.variableDeclaration("const", [
             t.variableDeclarator(
@@ -2107,13 +2166,16 @@ function rewriteKeyedArrayReorderPipelineHints(
           ]),
         );
         value = t.cloneNode(result);
-        if (step.kind === "filter") filterCount += 1;
+        if (step.kind === "map") mapCount += 1;
+        else if (step.kind === "filter") filterCount += 1;
         else if (step.kind === "slice") sliceCount += 1;
         else if (step.kind === "reverse") {
           reorderCount += 1;
+          if (mapPipeline) mapReorderCount += 1;
           if (structuralPipeline) structuralReorderCount += 1;
         } else {
           sortCount += 1;
+          if (mapPipeline) mapSortCount += 1;
           if (structuralPipeline) structuralSortCount += 1;
         }
       }
@@ -2129,6 +2191,9 @@ function rewriteKeyedArrayReorderPipelineHints(
   return {
     root: (file.program.body[0] as t.ExpressionStatement).expression as t.JSXElement,
     filterCount,
+    mapCount,
+    mapReorderCount,
+    mapSortCount,
     reorderCount,
     sliceCount,
     sortCount,
@@ -7106,6 +7171,8 @@ function compileCandidate(
   keyedMapUpdateIdentifier: t.Identifier,
   keyedArrayAppendIdentifier: t.Identifier,
   keyedArrayFilterIdentifier: t.Identifier,
+  keyedArrayMapPipelineIdentifier: t.Identifier,
+  keyedArrayMapReorderIdentifier: t.Identifier,
   keyedArrayPrependIdentifier: t.Identifier,
   keyedArrayPositionIdentifier: t.Identifier,
   keyedArrayBatchInsertIdentifier: t.Identifier,
@@ -7137,6 +7204,9 @@ function compileCandidate(
   },
   compilerUsage: {
     keyedArrayBatchInsertHints: number;
+    keyedArrayMapReorderHints: number;
+    keyedArrayMapSortHints: number;
+    keyedArrayMapUpdateHints: number;
     keyedArrayStructuralReorderHints: number;
     keyedArrayStructuralSortHints: number;
     keyedArrayWindowReplaceHints: number;
@@ -7610,14 +7680,22 @@ function compileCandidate(
     shiftedIndexIndependentStateIndices,
     statesBySetter,
     keyedArrayFilterIdentifier,
+    keyedArrayMapPipelineIdentifier,
+    keyedArrayMapReorderIdentifier,
     keyedArrayReorderIdentifier,
     keyedArrayStructuralReorderIdentifier,
     keyedArraySliceIdentifier,
     keyedArraySortIdentifier,
     keyedArrayStructuralSortIdentifier,
     safeGlobals,
+    (blockAnalysis.plans || []).every(
+      (plan) =>
+        plan.kind !== "keyed-rows" ||
+        (plan.conditionals.length === 0 && !plan.descriptorBlocks?.size),
+    ),
   );
   let appliedPipelineFilterHints = 0;
+  let appliedPipelineMapHints = 0;
   let appliedPipelineReorderHints = 0;
   let appliedPipelineSliceHints = 0;
   let appliedPipelineSortHints = 0;
@@ -7649,17 +7727,23 @@ function compileCandidate(
       blockAnalysis = hintedBlockAnalysis;
       analysis = hintedAnalysis;
       appliedPipelineFilterHints = reorderPipelineHintedRoot.filterCount;
+      appliedPipelineMapHints = reorderPipelineHintedRoot.mapCount;
+      appliedKeyedMapUpdateHints += reorderPipelineHintedRoot.mapCount;
       appliedPipelineReorderHints = reorderPipelineHintedRoot.reorderCount;
       appliedPipelineSliceHints = reorderPipelineHintedRoot.sliceCount;
       appliedPipelineSortHints = reorderPipelineHintedRoot.sortCount;
       appliedPipelineHintedStateIndices = reorderPipelineHintedRoot.stateIndices;
       optimizationCounts.keyedArrayFilterHints += reorderPipelineHintedRoot.filterCount;
+      optimizationCounts.keyedMapUpdateHints += reorderPipelineHintedRoot.mapCount;
       optimizationCounts.keyedArrayReorderHints += reorderPipelineHintedRoot.reorderCount;
       optimizationCounts.keyedArraySliceHints += reorderPipelineHintedRoot.sliceCount;
       optimizationCounts.keyedArraySortHints += reorderPipelineHintedRoot.sortCount;
       compilerUsage.keyedArrayStructuralReorderHints +=
         reorderPipelineHintedRoot.structuralReorderCount;
       compilerUsage.keyedArrayStructuralSortHints += reorderPipelineHintedRoot.structuralSortCount;
+      compilerUsage.keyedArrayMapUpdateHints += reorderPipelineHintedRoot.mapCount;
+      compilerUsage.keyedArrayMapReorderHints += reorderPipelineHintedRoot.mapReorderCount;
+      compilerUsage.keyedArrayMapSortHints += reorderPipelineHintedRoot.mapSortCount;
     }
   }
   const reorderHintedRoot = rewriteKeyedArrayReorderHints(
@@ -7915,6 +7999,7 @@ function compileCandidate(
     appliedKeyedArrayBatchInsertHints > 0,
     appliedKeyedArrayWindowReplaceHints > 0,
     appliedKeyedArrayReorderHints > 0 || appliedKeyedArraySortHints > 0,
+    appliedPipelineMapHints > 0,
     appliedKeyedArrayRollingWindowHints > 0,
   );
   markShortCircuitBindings(analysis.bindings || []);
@@ -8126,6 +8211,9 @@ export async function compileReactModule(
   };
   const compilerUsage = {
     keyedArrayBatchInsertHints: 0,
+    keyedArrayMapReorderHints: 0,
+    keyedArrayMapSortHints: 0,
+    keyedArrayMapUpdateHints: 0,
     keyedArrayStructuralReorderHints: 0,
     keyedArrayStructuralSortHints: 0,
     keyedArrayWindowReplaceHints: 0,
@@ -8175,6 +8263,12 @@ export async function compileReactModule(
         );
         const keyedArrayFilterIdentifier = programPath.scope.generateUidIdentifier(
           "createCompilerKeyedArrayFilter",
+        );
+        const keyedArrayMapPipelineIdentifier = programPath.scope.generateUidIdentifier(
+          "createCompilerKeyedArrayMapPipeline",
+        );
+        const keyedArrayMapReorderIdentifier = programPath.scope.generateUidIdentifier(
+          "createCompilerKeyedArrayMapReorder",
         );
         const keyedArrayPrependIdentifier = programPath.scope.generateUidIdentifier(
           "createCompilerKeyedArrayPrepend",
@@ -8236,6 +8330,8 @@ export async function compileReactModule(
             keyedMapUpdateIdentifier,
             keyedArrayAppendIdentifier,
             keyedArrayFilterIdentifier,
+            keyedArrayMapPipelineIdentifier,
+            keyedArrayMapReorderIdentifier,
             keyedArrayPrependIdentifier,
             keyedArrayPositionIdentifier,
             keyedArrayBatchInsertIdentifier,
@@ -8278,11 +8374,23 @@ export async function compileReactModule(
                   createComponentIdentifier,
                   t.identifier("createCompiledComponentWithFeatures"),
                 ),
-                ...(optimizationCounts.keyedMapUpdateHints > 0
+                ...(optimizationCounts.keyedMapUpdateHints > compilerUsage.keyedArrayMapUpdateHints
                   ? [
                       t.importSpecifier(
                         keyedMapUpdateIdentifier,
                         t.identifier("createCompilerKeyedMapUpdate"),
+                      ),
+                    ]
+                  : []),
+                ...(compilerUsage.keyedArrayMapUpdateHints > 0
+                  ? [
+                      t.importSpecifier(
+                        keyedArrayMapPipelineIdentifier,
+                        t.identifier("createCompilerKeyedArrayMapPipeline"),
+                      ),
+                      t.importSpecifier(
+                        keyedArrayMapReorderIdentifier,
+                        t.identifier("createCompilerKeyedArrayMapReorder"),
                       ),
                     ]
                   : []),
@@ -8337,7 +8445,8 @@ export async function compileReactModule(
                     ]
                   : []),
                 ...(optimizationCounts.keyedArrayReorderHints >
-                compilerUsage.keyedArrayStructuralReorderHints
+                compilerUsage.keyedArrayStructuralReorderHints +
+                  compilerUsage.keyedArrayMapReorderHints
                   ? [
                       t.importSpecifier(
                         keyedArrayReorderIdentifier,
@@ -8354,7 +8463,7 @@ export async function compileReactModule(
                     ]
                   : []),
                 ...(optimizationCounts.keyedArraySortHints >
-                compilerUsage.keyedArrayStructuralSortHints
+                compilerUsage.keyedArrayStructuralSortHints + compilerUsage.keyedArrayMapSortHints
                   ? [
                       t.importSpecifier(
                         keyedArraySortIdentifier,

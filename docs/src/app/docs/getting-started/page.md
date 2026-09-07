@@ -8,6 +8,8 @@ section: "Start"
 
 Create a Farm.js app, understand the files that matter, and run the development server.
 
+Farm requires Node.js 22.12 or newer.
+
 ## Create an app
 
 Farm keeps the first project small: an app directory, a config file, package metadata, and TypeScript. Vite config and platform config are optional escape hatches, not required setup.

@@ -50,6 +50,34 @@ describe("config helpers", () => {
     expect(defineFarmConfig(config)).toBe(config);
   });
 
+  it("canonicalizes the application basePath", async () => {
+    await expect(
+      resolveConfig({ basePath: " docs//guides/ ", theme: {} }, "production"),
+    ).resolves.toMatchObject({
+      basePath: "/docs/guides",
+      theme: { cookiePath: "/docs/guides" },
+    });
+    await expect(resolveConfig({ basePath: "/" }, "production")).resolves.toMatchObject({
+      basePath: "/",
+    });
+  });
+
+  it("rejects application base paths that browsers reinterpret", async () => {
+    for (const basePath of [
+      "/docs/../admin",
+      "/docs/%2e%2e/admin",
+      "/docs/%2e%2e%2fadmin",
+      "/%2F%2Fevil.example/docs",
+      "/docs?preview=1",
+      "/docs#preview",
+      "/docs\\admin",
+      "https://example.com/docs",
+      "//example.com/docs",
+    ]) {
+      await expect(resolveConfig({ basePath }, "production")).rejects.toThrow("Farm basePath");
+    }
+  });
+
   it("preserves a configured cache adapter and namespace", async () => {
     const adapter = {
       name: "test-cache",

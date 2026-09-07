@@ -51,6 +51,7 @@ import {
 import path from "path";
 import { logger } from "./utils";
 import { normalizeFarmDeploymentId } from "./deployment";
+import { normalizeFarmConfigBasePath } from "./base-path";
 import { resolveFarmDevtoolsConfig, type ResolvedFarmDevtoolsConfig } from "./devtools-config";
 import {
   resolveFarmDevIndicatorsConfig,
@@ -946,6 +947,7 @@ export async function resolveConfig(
       process.env.CF_PAGES_COMMIT_SHA ||
       (mode === "production" ? await generateBuildId() : "development"),
   );
+  const basePath = normalizeFarmConfigBasePath(userConfig.basePath);
 
   const resolved: ResolvedFarmConfig = {
     [FARM_RESOLVED_CUSTOM_CONTEXT]: typeof userConfig.context === "function",
@@ -954,7 +956,7 @@ export async function resolveConfig(
     extends: userConfig.extends || [],
     layers: layerResolution.layers,
     outDir: userConfig.outDir || "dist",
-    basePath: userConfig.basePath || "/",
+    basePath,
     renderer: resolveFarmRenderer(userConfig.renderer),
     preset: deploy.preset || "node-server",
     deploy,
@@ -991,7 +993,7 @@ export async function resolveConfig(
     routeRules,
     images: resolveFarmImageConfig(userConfig.images),
     performance: resolveFarmPerformanceConfig(userConfig.performance),
-    theme: resolveFarmThemeConfig(userConfig.theme, userConfig.basePath || "/"),
+    theme: resolveFarmThemeConfig(userConfig.theme, basePath),
     publicDir: userConfig.publicDir || "public",
     i18n: resolveFarmI18nConfig(userConfig.i18n, { root, mode }),
     openapi: {

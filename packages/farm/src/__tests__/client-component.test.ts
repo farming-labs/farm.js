@@ -831,6 +831,10 @@ export function Chart() {}
     expect(source).toContain("const layouts = Array.isArray(window.__FARM_LAYOUTS__)");
     expect(source).toContain("? window.__FARM_LAYOUTS__");
     expect(source).toContain(": findLayouts(window.location.pathname);");
+    expect(source).toContain("const pathnameSegments = pathname === '/'");
+    expect(source).toContain("pathnameSegments[index] === segment");
+    expect(source).not.toContain("map(decodeRouteSegment).join('/')");
+    expect(source).toContain("return urlSegment === routeSegment.segment ? {} : null;");
     expect(source).toMatch(
       /tryHydrateImportedPage\(\s+pageContainer,[\s\S]*?layouts,[\s\S]*?layoutShouldHydrate,/,
     );

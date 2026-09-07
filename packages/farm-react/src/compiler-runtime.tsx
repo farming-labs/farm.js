@@ -76,7 +76,16 @@ interface CompilerKeyedArrayReorderHint {
   readonly sourceToken: object;
   readonly sourceLength: number;
   readonly resultLength: number;
+  readonly mapped?: boolean;
+  readonly mappedItemSources?: ReadonlyMap<unknown, unknown>;
   readonly structuralUpdate?: CompilerKeyedArrayFilterHint;
+}
+
+interface CompilerKeyedArrayMapPipelineHint {
+  readonly sourceToken: object;
+  readonly sourceLength: number;
+  readonly resultLength: number;
+  readonly mappedItemSources: ReadonlyMap<unknown, unknown>;
 }
 
 type CompilerKeyedCollectionKind = "set" | "map";
@@ -131,6 +140,10 @@ const COMPILER_KEYED_ARRAY_REORDERS = /* @__PURE__ */ new WeakMap<
   object,
   CompilerKeyedArrayReorderHint
 >();
+const COMPILER_KEYED_ARRAY_MAP_PIPELINES = /* @__PURE__ */ new WeakMap<
+  object,
+  CompilerKeyedArrayMapPipelineHint
+>();
 const COMPILER_KEYED_COLLECTION_DRAFTS = /* @__PURE__ */ new WeakMap<
   object,
   CompilerKeyedCollectionDraft
@@ -143,6 +156,7 @@ const COMPILER_KEYED_COMMITTED_COLLECTIONS = /* @__PURE__ */ new WeakSet<object>
 const NATIVE_ARRAY_PROTOTYPE = Array.prototype;
 const NATIVE_ARRAY_ITERATOR = Array.prototype[Symbol.iterator];
 const NATIVE_ARRAY_FILTER = Array.prototype.filter;
+const NATIVE_ARRAY_MAP = Array.prototype.map;
 const NATIVE_ARRAY_SLICE = Array.prototype.slice;
 const NATIVE_ARRAY_TO_SPLICED = (
   Array.prototype as unknown as { toSpliced?: (...args: readonly unknown[]) => unknown }
@@ -534,6 +548,142 @@ export function createCompilerKeyedMapUpdate(
       changedIndices,
       ...(previousUpdate ? { previous: previousUpdate } : {}),
     });
+  }
+  return value;
+}
+
+/** @internal Executes a proven native map at the start of a keyed reorder pipeline. */
+export function createCompilerKeyedArrayMapPipeline(
+  previous: unknown,
+  method: unknown,
+  callback: unknown,
+): unknown {
+  const value = NATIVE_REFLECT_APPLY(
+    method as (...values: readonly unknown[]) => unknown,
+    previous,
+    [callback],
+  );
+
+  try {
+    const previousTarget = compilerObject(previous);
+    const valueTarget = compilerObject(value);
+    if (
+      !previousTarget ||
+      !valueTarget ||
+      !Array.isArray(previous) ||
+      !Array.isArray(value) ||
+      Object.getPrototypeOf(previous) !== NATIVE_ARRAY_PROTOTYPE ||
+      Object.getPrototypeOf(value) !== NATIVE_ARRAY_PROTOTYPE ||
+      method !== NATIVE_ARRAY_MAP ||
+      typeof callback !== "function" ||
+      value.length !== previous.length
+    ) {
+      return value;
+    }
+
+    const committedSource = COMPILER_KEYED_COMMITTED_COLLECTIONS.has(previousTarget);
+    const previousReorder = committedSource
+      ? undefined
+      : COMPILER_KEYED_ARRAY_REORDERS.get(previousTarget);
+    if (
+      !committedSource &&
+      (!previousReorder ||
+        !previousReorder.mapped ||
+        previousReorder.resultLength !== previous.length)
+    ) {
+      return value;
+    }
+    const sourceToken =
+      previousReorder?.sourceToken || compilerKeyedCollectionToken(previousTarget);
+    if (!sourceToken) return value;
+    const previousMappedItemSources = previousReorder?.mappedItemSources;
+    const mappedItemSources = new Map<unknown, unknown>();
+    for (let index = 0; index < value.length; index += 1) {
+      const previousDescriptor = Object.getOwnPropertyDescriptor(previous, index);
+      const mappedDescriptor = Object.getOwnPropertyDescriptor(value, index);
+      if (
+        !previousDescriptor ||
+        !("value" in previousDescriptor) ||
+        !mappedDescriptor ||
+        !("value" in mappedDescriptor)
+      ) {
+        return value;
+      }
+      const previousItem = previousDescriptor.value;
+      const sourceItem = previousMappedItemSources?.has(previousItem)
+        ? previousMappedItemSources.get(previousItem)
+        : previousItem;
+      const mappedItem = mappedDescriptor.value;
+      if (!Object.is(mappedItem, sourceItem)) mappedItemSources.set(mappedItem, sourceItem);
+    }
+    COMPILER_KEYED_ARRAY_MAP_PIPELINES.set(valueTarget, {
+      sourceToken,
+      sourceLength: previousReorder?.sourceLength || previous.length,
+      resultLength: value.length,
+      mappedItemSources,
+    });
+  } catch {
+    // Metadata must never change the result of a successful native update.
+  }
+  return value;
+}
+
+/** @internal Executes a native reorder after a proven same-key map pipeline. */
+export function createCompilerKeyedArrayMapReorder(
+  previous: unknown,
+  method: unknown,
+  ...args: readonly unknown[]
+): unknown {
+  const value = NATIVE_REFLECT_APPLY(
+    method as (...values: readonly unknown[]) => unknown,
+    previous,
+    args,
+  );
+
+  try {
+    const previousTarget = compilerObject(previous);
+    const valueTarget = compilerObject(value);
+    if (
+      !previousTarget ||
+      !valueTarget ||
+      !Array.isArray(previous) ||
+      !Array.isArray(value) ||
+      Object.getPrototypeOf(previous) !== NATIVE_ARRAY_PROTOTYPE ||
+      Object.getPrototypeOf(value) !== NATIVE_ARRAY_PROTOTYPE ||
+      value.length !== previous.length ||
+      (method !== NATIVE_ARRAY_TO_REVERSED && method !== NATIVE_ARRAY_TO_SORTED) ||
+      (method === NATIVE_ARRAY_TO_REVERSED && args.length !== 0) ||
+      (method === NATIVE_ARRAY_TO_SORTED &&
+        (args.length > 1 ||
+          (args.length === 1 && args[0] !== undefined && typeof args[0] !== "function")))
+    ) {
+      return value;
+    }
+    for (let index = 0; index < previous.length; index += 1) {
+      if (
+        !Object.prototype.hasOwnProperty.call(previous, index) ||
+        !Object.prototype.hasOwnProperty.call(value, index)
+      ) {
+        return value;
+      }
+    }
+
+    const mapPipeline = COMPILER_KEYED_ARRAY_MAP_PIPELINES.get(previousTarget);
+    const previousReorder = mapPipeline
+      ? undefined
+      : COMPILER_KEYED_ARRAY_REORDERS.get(previousTarget);
+    const source = mapPipeline || (previousReorder?.mapped ? previousReorder : undefined);
+    if (!source || source.resultLength !== previous.length) return value;
+    COMPILER_KEYED_ARRAY_REORDERS.set(valueTarget, {
+      kind: "permutation",
+      sourceToken: source.sourceToken,
+      sourceLength: source.sourceLength,
+      resultLength: value.length,
+      mapped: true,
+      mappedItemSources: source.mappedItemSources,
+    });
+  } catch {
+    // Metadata must never change the result of a successful native update.
   }
   return value;
 }
@@ -4535,6 +4685,11 @@ const keyedReorderUpdateRuntime: KeyedUpdateRuntime = {
   reorder: reconcileCompilerKeyedArrayReorder,
 };
 
+const keyedMapReorderUpdateRuntime: KeyedUpdateRuntime = {
+  ...keyedUpdateRuntime,
+  reorder: reconcileCompilerKeyedArrayReorderWithMap,
+};
+
 const keyedCompleteUpdateRuntime: KeyedUpdateRuntime = {
   ...keyedFilterPrependUpdateRuntime,
   rollingWindow: reconcileCompilerKeyedArrayRollingWindow,
@@ -4543,7 +4698,7 @@ const keyedCompleteUpdateRuntime: KeyedUpdateRuntime = {
 const keyedEveryUpdateRuntime: KeyedUpdateRuntime = {
   ...keyedCompleteUpdateRuntime,
   position: reconcileCompilerKeyedArrayPosition,
-  reorder: reconcileCompilerKeyedArrayReorderWithStructural,
+  reorder: reconcileCompilerKeyedArrayReorderWithMapAndStructural,
 };
 
 const keyedBatchEveryUpdateRuntime: KeyedUpdateRuntime = {
@@ -4630,6 +4785,102 @@ function reconcileCompilerKeyedMapUpdate(
     conditionalChanges,
     fallback: false,
   };
+}
+
+function reconcileCompilerKeyedArrayMapReorder(
+  props: CompilerKeyedRowsBlockProps,
+  dirtyState: ReadonlySet<number>,
+  collectionToken: object | undefined,
+  instances: ReadonlyMap<string, CompilerKeyedRowInstance>,
+  root: Element,
+  reactOwnedRows: boolean,
+  preparedReorder?: CompilerPreparedKeyedArrayReorder,
+): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined {
+  if (
+    reactOwnedRows ||
+    props.hostBlocks ||
+    (props.conditionals?.length || 0) > 0 ||
+    !props.reorderIndexIndependent ||
+    props.collectionDependency === undefined
+  ) {
+    return undefined;
+  }
+  const collectionDependency = props.collectionDependency;
+  if (props.bindings.some((binding) => binding.dependencies?.includes(collectionDependency))) {
+    return undefined;
+  }
+  const dependencies = props.dependencies || props.structureDependencies;
+  const relevantDirty = (dependencies || []).filter((index) => dirtyState.has(index));
+  if (relevantDirty.length !== 1 || relevantDirty[0] !== collectionDependency) {
+    return undefined;
+  }
+
+  const finalValue = preparedReorder?.value ?? props.items();
+  const update =
+    preparedReorder?.update ||
+    compilerKeyedArrayReorder(finalValue, collectionToken, instances.size);
+  if (
+    !update?.mapped ||
+    !update.mappedItemSources ||
+    update.structuralUpdate ||
+    !Array.isArray(finalValue)
+  ) {
+    return undefined;
+  }
+
+  const previousInstances = [...instances.values()];
+  const prepared = (() => {
+    try {
+      const instancesByItem = new Map<unknown, CompilerKeyedRowInstance>();
+      for (let sourceIndex = 0; sourceIndex < previousInstances.length; sourceIndex += 1) {
+        const instance = previousInstances[sourceIndex];
+        if (instance.index !== sourceIndex || instancesByItem.has(instance.item)) return undefined;
+        instancesByItem.set(instance.item, instance);
+      }
+
+      const nextInstances: CompilerKeyedRowInstance[] = [];
+      const sequence: number[] = [];
+      const changed: Array<{
+        bindingUpdates: CompilerPreparedKeyedRowBindingUpdate[];
+        instance: CompilerKeyedRowInstance;
+        item: unknown;
+        index: number;
+      }> = [];
+      for (let targetIndex = 0; targetIndex < finalValue.length; targetIndex += 1) {
+        const item = finalValue[targetIndex];
+        const sourceItem = update.mappedItemSources.has(item)
+          ? update.mappedItemSources.get(item)
+          : item;
+        const instance = instancesByItem.get(sourceItem);
+        if (!instance) return undefined;
+        instancesByItem.delete(sourceItem);
+        nextInstances.push(instance);
+        sequence.push(instance.index);
+        if (!Object.is(instance.item, item)) {
+          if (keyedRowIdentity(props.rowKey(item, targetIndex)) !== instance.key) return undefined;
+          const bindingUpdates = prepareKeyedRowBindingUpdates(props, instance, item, targetIndex);
+          if (!bindingUpdates) return undefined;
+          changed.push({ bindingUpdates, instance, item, index: targetIndex });
+        }
+      }
+      if (instancesByItem.size > 0) return undefined;
+      return { changed, nextInstances, sequence };
+    } catch {
+      return undefined;
+    }
+  })();
+  if (!prepared) return undefined;
+
+  reorderCompilerKeyedRows(root, prepared.nextInstances, prepared.sequence, null);
+  for (const { bindingUpdates, instance, item, index } of prepared.changed) {
+    applyPreparedKeyedRowBindingUpdates(props, instance, bindingUpdates);
+    instance.item = item;
+    instance.index = index;
+  }
+  for (let index = 0; index < prepared.nextInstances.length; index += 1) {
+    prepared.nextInstances[index].index = index;
+  }
+  return new Map(prepared.nextInstances.map((instance) => [instance.key, instance]));
 }
 
 function reconcileCompilerKeyedArrayAppend(
@@ -5431,6 +5682,7 @@ function reconcileCompilerKeyedArrayStructuralReorder(
   instances: ReadonlyMap<string, CompilerKeyedRowInstance>,
   root: Element,
   reactOwnedRows: boolean,
+  preparedReorder?: CompilerPreparedKeyedArrayReorder,
 ): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined {
   if (
     reactOwnedRows ||
@@ -5452,8 +5704,10 @@ function reconcileCompilerKeyedArrayStructuralReorder(
     return undefined;
   }
 
-  const finalValue = props.items();
-  const update = compilerKeyedArrayReorder(finalValue, collectionToken, instances.size);
+  const finalValue = preparedReorder?.value ?? props.items();
+  const update =
+    preparedReorder?.update ||
+    compilerKeyedArrayReorder(finalValue, collectionToken, instances.size);
   if (!update?.structuralUpdate || !Array.isArray(finalValue)) return undefined;
   const survivorResult = compilerKeyedArrayFilterSurvivorsFromUpdate(
     update.structuralUpdate,
@@ -5547,6 +5801,7 @@ function reconcileCompilerKeyedArrayReorder(
   instances: ReadonlyMap<string, CompilerKeyedRowInstance>,
   root: Element,
   reactOwnedRows: boolean,
+  preparedReorder?: CompilerPreparedKeyedArrayReorder,
 ): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined {
   if (
     reactOwnedRows ||
@@ -5567,9 +5822,11 @@ function reconcileCompilerKeyedArrayReorder(
     return undefined;
   }
 
-  const finalValue = props.items();
-  const update = compilerKeyedArrayReorder(finalValue, collectionToken, instances.size);
-  if (!update || update.structuralUpdate || !Array.isArray(finalValue)) {
+  const finalValue = preparedReorder?.value ?? props.items();
+  const update =
+    preparedReorder?.update ||
+    compilerKeyedArrayReorder(finalValue, collectionToken, instances.size);
+  if (!update || update.mapped || update.structuralUpdate || !Array.isArray(finalValue)) {
     return undefined;
   }
 
@@ -5660,12 +5917,76 @@ function reconcileCompilerKeyedArrayReorder(
   return new Map(previousInstances.map((instance) => [instance.key, instance]));
 }
 
-function reconcileCompilerKeyedArrayReorderWithStructural(
+interface CompilerPreparedKeyedArrayReorder {
+  readonly update: CompilerKeyedArrayReorderHint | undefined;
+  readonly value: unknown;
+}
+
+function prepareCompilerKeyedArrayReorder(
+  args: Parameters<typeof reconcileCompilerKeyedArrayReorder>,
+): CompilerPreparedKeyedArrayReorder | undefined {
+  const [props, dirtyState, collectionToken, instances, , reactOwnedRows] = args;
+  if (
+    reactOwnedRows ||
+    props.hostBlocks ||
+    (props.conditionals?.length || 0) > 0 ||
+    !props.reorderIndexIndependent ||
+    props.collectionDependency === undefined
+  ) {
+    return undefined;
+  }
+  const collectionDependency = props.collectionDependency;
+  if (props.bindings.some((binding) => binding.dependencies?.includes(collectionDependency))) {
+    return undefined;
+  }
+  const dependencies = props.dependencies || props.structureDependencies;
+  const relevantDirty = (dependencies || []).filter((index) => dirtyState.has(index));
+  if (relevantDirty.length !== 1 || relevantDirty[0] !== collectionDependency) {
+    return undefined;
+  }
+
+  const value = props.items();
+  return {
+    update: compilerKeyedArrayReorder(value, collectionToken, instances.size),
+    value,
+  };
+}
+
+function callPreparedCompilerKeyedArrayReorder(
+  reconcile: typeof reconcileCompilerKeyedArrayReorder,
+  args: Parameters<typeof reconcileCompilerKeyedArrayReorder>,
+  prepared: CompilerPreparedKeyedArrayReorder,
+): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined {
+  return reconcile(args[0], args[1], args[2], args[3], args[4], args[5], prepared);
+}
+
+function reconcileCompilerKeyedArrayReorderWithMap(
   ...args: Parameters<typeof reconcileCompilerKeyedArrayReorder>
 ): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined {
-  return (
-    reconcileCompilerKeyedArrayStructuralReorder(...args) ||
-    reconcileCompilerKeyedArrayReorder(...args)
+  const prepared = prepareCompilerKeyedArrayReorder(args);
+  if (!prepared) return undefined;
+  return callPreparedCompilerKeyedArrayReorder(
+    prepared.update?.mapped
+      ? reconcileCompilerKeyedArrayMapReorder
+      : reconcileCompilerKeyedArrayReorder,
+    args,
+    prepared,
+  );
+}
+
+function reconcileCompilerKeyedArrayReorderWithMapAndStructural(
+  ...args: Parameters<typeof reconcileCompilerKeyedArrayReorder>
+): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined {
+  const prepared = prepareCompilerKeyedArrayReorder(args);
+  if (!prepared) return undefined;
+  return callPreparedCompilerKeyedArrayReorder(
+    prepared.update?.mapped
+      ? reconcileCompilerKeyedArrayMapReorder
+      : prepared.update?.structuralUpdate
+        ? reconcileCompilerKeyedArrayStructuralReorder
+        : reconcileCompilerKeyedArrayReorder,
+    args,
+    prepared,
   );
 }
 
@@ -7508,6 +7829,15 @@ export const keyedRowsReorderHintedRuntimeFeature: CompilerRuntimeFeature = {
   create: (owner) => ({
     KeyedRows: createKeyedRowsBlockComponent(owner, {
       keyedUpdates: keyedReorderUpdateRuntime,
+    }),
+  }),
+};
+
+export const keyedRowsMapReorderHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:map-reorder-hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner, {
+      keyedUpdates: keyedMapReorderUpdateRuntime,
     }),
   }),
 };

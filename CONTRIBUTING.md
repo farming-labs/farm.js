@@ -8,7 +8,7 @@ Repository architecture, package boundaries, verification expectations, and pull
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 22.12 or newer
 - pnpm 8+
 
 ### Getting Started

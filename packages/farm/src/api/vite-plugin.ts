@@ -36,7 +36,11 @@ import {
   resolveFarmServerConfig,
 } from "../server-http";
 import { createCliColors } from "../cli-colors";
-import { AmbiguousRouteError, getRoutePatternShape } from "../routing/specificity";
+import {
+  AmbiguousRouteError,
+  assertUniqueRouteParameters,
+  getRoutePatternShape,
+} from "../routing/specificity";
 
 export interface FarmApiPluginOptions {
   /** Source directory containing the api folder (default: 'src') */
@@ -98,6 +102,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
   };
 
   const registerRouteShape = (routePath: string, filePath: string): void => {
+    assertUniqueRouteParameters(routePath, "api");
     const shape = getRoutePatternShape(routePath, "api");
     const existing = routeShapes.get(shape);
     if (existing && existing.routePath !== routePath) {
