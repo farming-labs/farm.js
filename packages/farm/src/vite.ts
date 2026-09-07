@@ -4774,10 +4774,12 @@ async function hydrate() {
     // Check if this is a client component (set by SSR)
     const isClientComponent = window.__FARM_IS_CLIENT__ === true;
     const modulePath = window.__FARM_PAGE_MODULE__;
-
-    if (!modulePath) {
-      console.error('[Farm.js] No page module path found')
-      return
+    ${
+      isolatedHydrationEnabled
+        ? `const hasIsolatedClientBoundaries =
+      window.__FARM_HAS_ISOLATED_CLIENT_BOUNDARIES__ === true ||
+      Boolean(rootContainer.querySelector('farm-client-boundary[data-farm-client-boundary]'));`
+        : ""
     }
 
     let pageProps = normalizeServerProps(window.__FARM_PROPS__);
@@ -4786,7 +4788,10 @@ async function hydrate() {
     const pageShouldHydrate =
       typeof window.__FARM_PAGE_SHOULD_HYDRATE__ === 'boolean'
         ? window.__FARM_PAGE_SHOULD_HYDRATE__
-        : isClientComponent || findRoute(window.location.pathname)?.route?.shouldHydrate === true;
+        : isClientComponent ||
+          findRoute(window.location.pathname)?.route?.${
+            isolatedHydrationEnabled ? "pageShouldHydrate" : "shouldHydrate"
+          } === true;
     const layoutShouldHydrate = window.__FARM_LAYOUT_SHOULD_HYDRATE__ === true;
     const shouldHydrate =
       window.__FARM_SHOULD_HYDRATE__ === true ||
@@ -4795,19 +4800,20 @@ async function hydrate() {
     const hydratedSlots = await hydrateInitialRouteSlots();
     ${
       isolatedHydrationEnabled
-        ? `const hasIsolatedClientBoundaries =
-      window.__FARM_HAS_ISOLATED_CLIENT_BOUNDARIES__ === true;
-    if (hasIsolatedClientBoundaries && !pageShouldHydrate && !layoutShouldHydrate) {
+        ? `if (hasIsolatedClientBoundaries && !pageShouldHydrate && !layoutShouldHydrate) {
       const hydrationController = new AbortController();
       pendingPageHydrationController = hydrationController;
       await hydrateFarmIsolatedClientBoundaries(rootContainer, hydrationController.signal);
-      replayPreHydrationClicks();
       return;
     }`
         : ""
     }
     if (!shouldHydrate) {
       if (hydratedSlots) replayPreHydrationClicks();
+      return
+    }
+    if (!modulePath) {
+      console.error('[Farm.js] No page module path found')
       return
     }
 

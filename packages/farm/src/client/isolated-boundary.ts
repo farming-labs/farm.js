@@ -179,6 +179,7 @@ function findBoundaryPayload(container: Element, boundaryId: string): HTMLScript
 /** @internal Shared development and production runtime for isolated React roots. */
 export function createFarmIsolatedHydrationRuntime(options: FarmIsolatedHydrationRuntimeOptions) {
   const roots = new Map<Element, FarmIsolatedRoot>();
+  const pending = new Map<Element, AbortController>();
   const report =
     options.report ??
     ((message: string, error?: unknown) => console.warn(`[Farm.js] ${message}`, error));
@@ -237,7 +238,7 @@ export function createFarmIsolatedHydrationRuntime(options: FarmIsolatedHydratio
       candidates.unshift(scope);
     }
     const boundaries = candidates.filter((container) => {
-      if (roots.has(container)) return false;
+      if (roots.has(container) || pending.has(container)) return false;
       return !container.parentElement?.closest("farm-client-boundary[data-farm-client-boundary]");
     });
 
@@ -254,68 +255,103 @@ export function createFarmIsolatedHydrationRuntime(options: FarmIsolatedHydratio
           return;
         }
 
-        const scheduled = options.schedule({
-          container,
-          strategy,
-          signal,
-          hydrate: async () => {
-            if (signal?.aborted || !container.isConnected) return;
-            const serverHTML = container.innerHTML;
-            try {
-              const module = await options.load(reference);
-              if (signal?.aborted || !container.isConnected) return;
-              const originals = module.__farm_client_boundary_originals__ as
-                | Record<string, unknown>
-                | undefined;
-              const Component = originals?.[exportName];
-              if (typeof Component !== "function" && typeof Component !== "object") {
-                throw new Error("compiled original export was not found");
-              }
-              const payload = findBoundaryPayload(container, boundaryId);
-              if (!payload) throw new Error(`serialized props ${boundaryId} were not found`);
-              const props = JSON.parse(payload.textContent || "{}");
-              if (!props || typeof props !== "object" || Array.isArray(props)) {
-                throw new Error("serialized props must be an object");
-              }
+        const controller = new AbortController();
+        pending.set(container, controller);
+        const abort = () => controller.abort();
+        if (signal?.aborted) abort();
+        else signal?.addEventListener("abort", abort, { once: true });
+        const cleanup = () => {
+          signal?.removeEventListener("abort", abort);
+          if (pending.get(container) === controller) pending.delete(container);
+        };
 
-              let rootFailure: unknown;
-              const restore = (error: unknown) => {
-                if (rootFailure !== undefined) return;
-                rootFailure = error;
+        let scheduled: Promise<unknown>;
+        try {
+          scheduled = options.schedule({
+            container,
+            strategy,
+            signal: controller.signal,
+            hydrate: async () => {
+              if (controller.signal.aborted || !container.isConnected) return;
+              const serverHTML = container.innerHTML;
+              try {
+                const module = await options.load(reference);
+                if (controller.signal.aborted || !container.isConnected) return;
+                const originals = module.__farm_client_boundary_originals__ as
+                  | Record<string, unknown>
+                  | undefined;
+                const Component = originals?.[exportName];
+                if (typeof Component !== "function" && typeof Component !== "object") {
+                  throw new Error("compiled original export was not found");
+                }
+                const payload = findBoundaryPayload(container, boundaryId);
+                if (!payload) throw new Error(`serialized props ${boundaryId} were not found`);
+                const props = JSON.parse(payload.textContent || "{}");
+                if (!props || typeof props !== "object" || Array.isArray(props)) {
+                  throw new Error("serialized props must be an object");
+                }
+
+                let rootFailure: unknown;
+                const restore = (error: unknown) => {
+                  if (rootFailure !== undefined) return;
+                  rootFailure = error;
+                  failRoot(container, reference, exportName, serverHTML, error);
+                  controller.abort();
+                };
+                const componentElement = options.ReactRuntime.createElement(
+                  Component as React.ComponentType<any>,
+                  props,
+                );
+                const wrappedElement = options.wrap
+                  ? options.wrap(componentElement)
+                  : componentElement;
+                const graphElement = wrapFarmIsolatedClientGraph(
+                  options.ReactRuntime,
+                  options.ReactRuntime.createElement(
+                    FarmIsolatedRootErrorBoundary,
+                    { onError: restore },
+                    wrappedElement,
+                  ),
+                );
+                const root = options.hydrateRoot(container, graphElement, {
+                  onUncaughtError: restore,
+                });
+                roots.set(container, root);
+                container.setAttribute("data-farm-hydrated", "true");
+              } catch (error) {
                 failRoot(container, reference, exportName, serverHTML, error);
-              };
-              const componentElement = options.ReactRuntime.createElement(
-                Component as React.ComponentType<any>,
-                props,
-              );
-              const wrappedElement = options.wrap
-                ? options.wrap(componentElement)
-                : componentElement;
-              const graphElement = wrapFarmIsolatedClientGraph(
-                options.ReactRuntime,
-                options.ReactRuntime.createElement(
-                  FarmIsolatedRootErrorBoundary,
-                  { onError: restore },
-                  wrappedElement,
-                ),
-              );
-              const root = options.hydrateRoot(container, graphElement, {
-                onUncaughtError: restore,
-              });
-              roots.set(container, root);
-              container.setAttribute("data-farm-hydrated", "true");
-            } catch (error) {
-              failRoot(container, reference, exportName, serverHTML, error);
+                controller.abort();
+              }
+            },
+          });
+        } catch (error) {
+          failRoot(container, reference, exportName, container.innerHTML, error);
+          controller.abort();
+          cleanup();
+          return;
+        }
+
+        const tracked = Promise.resolve(scheduled)
+          .catch((error) => {
+            if (!controller.signal.aborted) {
+              failRoot(container, reference, exportName, container.innerHTML, error);
+              controller.abort();
             }
-          },
-        });
-        if (strategy === "load") await scheduled;
-        else void scheduled.catch((error) => report("Deferred boundary hydration failed.", error));
+          })
+          .finally(cleanup);
+        if (strategy === "load") await tracked;
+        else void tracked;
       }),
     );
   }
 
   function dispose(scope: Node): void {
+    for (const [container, controller] of pending) {
+      if (container === scope || scope.contains(container)) {
+        controller.abort();
+        pending.delete(container);
+      }
+    }
     for (const [container, root] of roots) {
       if (container === scope || scope.contains(container)) {
         try {

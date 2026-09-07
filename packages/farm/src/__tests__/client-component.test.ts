@@ -760,6 +760,18 @@ export function Chart() {}
 
     expect(productionSource).toContain("disposeFarmIsolatedClientBoundaries(document);");
     expect(developmentSource).toContain("if (hydrationController.signal.aborted) return;");
+    expect(developmentSource).toContain(
+      "Boolean(rootContainer.querySelector('farm-client-boundary[data-farm-client-boundary]'))",
+    );
+    const isolatedBootstrap = developmentSource.indexOf(
+      "if (hasIsolatedClientBoundaries && !pageShouldHydrate && !layoutShouldHydrate)",
+    );
+    const missingModuleGuard = developmentSource.indexOf("if (!modulePath)", isolatedBootstrap);
+    expect(isolatedBootstrap).toBeGreaterThan(-1);
+    expect(missingModuleGuard).toBeGreaterThan(isolatedBootstrap);
+    expect(developmentSource).not.toContain(
+      "await hydrateFarmIsolatedClientBoundaries(rootContainer, hydrationController.signal);\n      replayPreHydrationClicks();",
+    );
   });
 
   it("uses a document swap when generated SPA navigation leaves the app root", () => {

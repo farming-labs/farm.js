@@ -163,8 +163,9 @@ splits production route modules behind dynamic imports. Deferred routes therefor
 their route chunk until its trigger while preserving the initial SSR output.
 
 These strategies control hydration of the initial server-rendered document. During client-side
-navigation, the navigation itself signals user intent, so Farm loads and renders the destination
-route immediately instead of leaving the previous route visible while waiting for another trigger.
+navigation, the navigation itself signals user intent, so Farm loads and renders a route-wide
+destination immediately instead of leaving the previous route visible while waiting for another
+trigger.
 
 | Strategy      | Hydration trigger                                                     |
 | ------------- | --------------------------------------------------------------------- |
@@ -172,6 +173,12 @@ route immediately instead of leaving the previous route visible while waiting fo
 | `interaction` | The first button-like click; Farm replays that click after hydration. |
 | `visible`     | When the route boundary approaches the viewport.                      |
 | `idle`        | During browser idle time, with a timeout fallback.                    |
+
+With [isolated client hydration](/docs/configuration#isolated-client-hydration), each eligible
+client module keeps its own strategy, including after SPA navigation. Sibling boundaries can mix
+all four strategies: one boundary's trigger never hydrates another, and an interaction click is
+claimed and replayed once by the boundary that contains it. Removing a boundary cancels its pending
+observer, idle callback, or interaction listener.
 
 The export must be one of these static string literals so Farm can analyze it without executing
 application code. Without an explicit route-level `island` export, a route that imports client
