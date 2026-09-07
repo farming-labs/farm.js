@@ -1680,7 +1680,9 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             return;
           }
 
-          const redirectMatch = farmApp.getRouteManager().matchRedirect(requestPathname);
+          const redirectMatch = farmApp
+            .getRouteManager()
+            .matchRedirect(requestPathname, parsedRequestUrl.search);
           if (redirectMatch) {
             res.statusCode = redirectMatch.statusCode;
             res.setHeader("Location", redirectMatch.destination);

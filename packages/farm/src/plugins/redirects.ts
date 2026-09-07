@@ -3,6 +3,7 @@ import type { RedirectConfig } from "../config";
 import type { FarmRequest, FarmResponse } from "../types";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
 import { isFarmRedirectStatus } from "../navigation-errors";
+import { appendFarmRedirectQuery } from "../redirect-query";
 import {
   compileConfigRoutePattern,
   interpolateConfigRouteDestination,
@@ -56,11 +57,12 @@ export function createRedirectsPlugin(
       for (const { redirect, pattern } of compiledRedirects) {
         const match = pathname.match(pattern.regex);
         if (match) {
-          const destination = localizeConfigRouteDestination(
+          const localizedDestination = localizeConfigRouteDestination(
             interpolateConfigRouteDestination(redirect.destination, match, pattern.tokens),
             routePath.locale,
             i18n,
           );
+          const destination = appendFarmRedirectQuery(localizedDestination, url.search);
 
           const statusCode = redirect.statusCode ?? (redirect.permanent ? 308 : 307);
 

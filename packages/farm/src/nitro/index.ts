@@ -288,7 +288,7 @@ export default defineEventHandler(async (event: H3Event) => {
     const apiBasePath = farmRegistry.apiBasePath || '/api';
     const isAPIPath = apiBasePath !== '/' &&
       (pathname === apiBasePath || pathname.startsWith(apiBasePath + '/'));
-    const redirectMatch = routeManager.matchRedirect(pathname);
+    const redirectMatch = routeManager.matchRedirect(pathname, url.search);
     if (redirectMatch) {
       setResponseStatus(event, redirectMatch.statusCode);
       setHeader(event, 'Location', redirectMatch.destination);

@@ -608,8 +608,8 @@ Farm's `redirects()`, `rewrites()`, and `headers()` config functions use the sam
 syntax. `:name` captures one path segment, while `:name*` and plain `*` capture the remaining
 characters. Redirect and rewrite destinations can reuse named captures or use numbered captures
 such as `$1`. All other source characters are matched literally.
-For rewrites, the incoming query string is preserved when the destination has no query. A query
-written in the destination replaces the incoming query string.
+For redirects and rewrites, the incoming query string is preserved when the destination has no
+query. A query written in the destination replaces the incoming query string.
 Rewrites use after-files semantics in development and production: an existing Farm page, API,
 integration, docs, image, or metadata route wins, and the rewrite is considered only as a fallback.
 Configured response headers are applied after route handlers in both modes, so they win when the
