@@ -252,6 +252,9 @@ describe("programmatic routes", () => {
       statusCode: 308,
       params: { slug: "hello-world" },
     });
+    expect(manager.matchRedirect("/old-blog/hello-world", "?from=archive")).toMatchObject({
+      destination: "/blog/hello-world?from=archive",
+    });
 
     const ssgPages = await manager.collectSSGPages();
     expect(ssgPages.ssg.map((page) => page.urlPath).sort()).toEqual([

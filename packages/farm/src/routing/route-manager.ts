@@ -66,6 +66,7 @@ import {
   stripFarmLocaleFromPathname,
 } from "../i18n/routing";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
+import { appendFarmRedirectQuery } from "../redirect-query";
 import { createRouteSlotContainerId, parseRouteSlotFile } from "./route-slots";
 import { getFarmRendererComponentExtensions } from "../renderer";
 import type { ApplicationMetadataRouteKind } from "../metadata-route";
@@ -391,7 +392,10 @@ export class RouteManager {
     return Array.from(this.redirects.values()).map((entry) => entry.definition);
   }
 
-  matchRedirect(pathname: string): {
+  matchRedirect(
+    pathname: string,
+    search = "",
+  ): {
     redirect: ProgrammaticRedirectRoute;
     destination: string;
     statusCode: number;
@@ -411,9 +415,12 @@ export class RouteManager {
 
       return {
         redirect: redirectEntry.definition,
-        destination: this.localizeRedirectDestination(
-          interpolateRedirectDestination(redirectEntry.definition.destination, match.params),
-          localeMatch?.locale,
+        destination: appendFarmRedirectQuery(
+          this.localizeRedirectDestination(
+            interpolateRedirectDestination(redirectEntry.definition.destination, match.params),
+            localeMatch?.locale,
+          ),
+          search,
         ),
         statusCode,
         params: match.params,

@@ -4215,6 +4215,7 @@ function generateVirtualEntryCode(
   _runWithMiddlewareData,
   _setDefaultFarmThemeConfig,
   addMetadataImageReference,
+  appendFarmRedirectQuery,
   applyFarmThemeDocument,
   appendFarmLinkHeader,
   applyProductionMiddlewareHeaders,
@@ -5463,16 +5464,17 @@ function interpolateRedirectDestination(destination, params) {
   return result;
 }
 
-function matchRedirectRoute(pathname, locale) {
+function matchRedirectRoute(pathname, locale, search) {
   for (const redirect of redirectRoutes) {
     const params = matchRuntimePathPattern(redirect.source, pathname);
     if (!params) continue;
     const destination = interpolateRedirectDestination(redirect.destination, params);
+    const localizedDestination =
+      locale && destination.startsWith("/") && !destination.startsWith("//")
+        ? localizeFarmHref(destination, locale, farmI18nConfig)
+        : destination;
     return {
-      destination:
-        locale && destination.startsWith("/") && !destination.startsWith("//")
-          ? localizeFarmHref(destination, locale, farmI18nConfig)
-          : destination,
+      destination: appendFarmRedirectQuery(localizedDestination, search),
       statusCode: redirect.statusCode ?? (redirect.permanent ? 308 : 307),
     };
   }
@@ -6066,7 +6068,11 @@ async function handleFarmRequestInContext(
   // targets re-enter this handler so middleware and request-local state observe
   // the rewritten URL; external destinations are proxied transparently.
   if (!configuredRewriteApplied) {
-    const redirectMatch = matchRedirectRoute(routePathname, farmLocaleResolution?.locale);
+    const redirectMatch = matchRedirectRoute(
+      routePathname,
+      farmLocaleResolution?.locale,
+      url.search,
+    );
     if (redirectMatch) {
       return new Response("Redirecting to " + redirectMatch.destination, {
         status: redirectMatch.statusCode,

@@ -65,6 +65,25 @@ describe("config route plugins", () => {
     });
   });
 
+  it("preserves a redirect query unless the destination declares one", async () => {
+    const preserve = createRedirectsPlugin([{ source: "/old", destination: "/new#details" }]);
+    const replace = createRedirectsPlugin([
+      { source: "/legacy", destination: "/current?view=compact" },
+    ]);
+    const preserveResponse = createResponse();
+    const replaceResponse = createResponse();
+
+    await runBeforeRequest(preserve, createRequest("/old?campaign=launch"), preserveResponse);
+    await runBeforeRequest(replace, createRequest("/legacy?view=full"), replaceResponse);
+
+    expect(preserveResponse.writeHead).toHaveBeenCalledWith(307, {
+      Location: "/new?campaign=launch#details",
+    });
+    expect(replaceResponse.writeHead).toHaveBeenCalledWith(307, {
+      Location: "/current?view=compact",
+    });
+  });
+
   it("treats regular-expression characters as literals", async () => {
     const plugin = createRedirectsPlugin([{ source: "/promo.html", destination: "/offer" }]);
     const req = createRequest("/promoXhtml");

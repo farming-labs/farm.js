@@ -132,6 +132,12 @@ describe("production middleware runtime", () => {
         "index.mjs",
       );
       const serverModule = await import(`${pathToFileURL(entryPath).href}?t=${Date.now()}`);
+      const redirectResponse = await serverModule.default.fetch(
+        new Request("https://example.test/legacy?campaign=launch"),
+      );
+      expect(redirectResponse.status).toBe(308);
+      expect(redirectResponse.headers.get("location")).toBe("/dashboard?campaign=launch");
+
       (globalThis as any).__farmMiddlewareEvents = [];
       const response = await serverModule.default.fetch(
         new Request("https://example.test/dashboard/settings"),

@@ -114,7 +114,7 @@ async function defaultHandler({
   const sr = serverRenderer || managers.serverRenderer;
   const activeDeploymentId = deploymentId || managers.deploymentId;
 
-  const redirectMatch = rm?.matchRedirect(pathname);
+  const redirectMatch = rm?.matchRedirect(pathname, url.search);
   if (redirectMatch) {
     return new Response(`Redirecting to ${redirectMatch.destination}`, {
       status: redirectMatch.statusCode,

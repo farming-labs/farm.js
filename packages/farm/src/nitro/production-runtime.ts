@@ -66,6 +66,7 @@ export {
   setFarmTrailingSlashPreference,
 } from "../trailing-slash";
 export { setFarmBasePath } from "../base-path";
+export { appendFarmRedirectQuery } from "../redirect-query";
 
 export function appendFarmLinkHeader(headers: Headers, value: string): void {
   const current = headers.get("Link");

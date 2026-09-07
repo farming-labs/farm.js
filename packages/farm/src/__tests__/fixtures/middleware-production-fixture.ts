@@ -49,6 +49,9 @@ export default {
     path: "/media/image",
     qualities: [60],
   },
+  redirects() {
+    return [{ source: "/legacy", destination: "/dashboard", permanent: true }];
+  },
   context({ request, path }) {
     return {
       tenant: request.headers.get("x-farm-tenant") || "public",
