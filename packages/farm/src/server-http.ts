@@ -49,6 +49,44 @@ export interface ResolvedFarmServerConfig {
 
 export type FarmRequestBodyErrorCode = "BODY_TOO_LARGE" | "INVALID_CONTENT_LENGTH";
 
+/** Apply the weak entity-tag comparison required by If-None-Match. */
+export function matchesFarmIfNoneMatch(
+  value: string | readonly string[] | null | undefined,
+  etag: string,
+): boolean {
+  const expected = etag.trim().replace(/^W\//, "");
+  const values = Array.isArray(value) ? value : [value];
+
+  for (const header of values) {
+    if (!header) continue;
+    for (const candidate of splitEntityTags(header)) {
+      const normalized = candidate.trim();
+      if (normalized === "*" || normalized.replace(/^W\//, "") === expected) return true;
+    }
+  }
+
+  return false;
+}
+
+function splitEntityTags(value: string): string[] {
+  const tags: string[] = [];
+  let start = 0;
+  let quoted = false;
+
+  for (let index = 0; index < value.length; index++) {
+    const character = value[index];
+    if (character === '"') {
+      quoted = !quoted;
+    } else if (character === "," && !quoted) {
+      tags.push(value.slice(start, index));
+      start = index + 1;
+    }
+  }
+
+  tags.push(value.slice(start));
+  return tags;
+}
+
 export class FarmRequestBodyError extends Error {
   readonly code: FarmRequestBodyErrorCode;
   readonly status: number;

@@ -361,7 +361,7 @@ describe("createFarmDocsHandler", () => {
 
     const etag = imageResponse?.headers.get("etag");
     const notModified = await handler(
-      new Request(imageUrl!, { headers: { "if-none-match": etag! } }),
+      new Request(imageUrl!, { headers: { "if-none-match": `"other", W/${etag}` } }),
     );
     expect(notModified?.status).toBe(304);
     expect(await notModified?.text()).toBe("");

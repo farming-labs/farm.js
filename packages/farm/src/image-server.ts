@@ -4,6 +4,7 @@ import type {
   FarmImageRemotePattern,
   ResolvedFarmImageConfig,
 } from "./image-config";
+import { matchesFarmIfNoneMatch } from "./server-http";
 
 export interface FarmImageTransformInput {
   source: Uint8Array;
@@ -534,7 +535,7 @@ function createOptimizedImageResponse(
   if (image.contentType === "image/svg+xml" && config.dangerouslyAllowSVG) {
     headers.set("content-security-policy", "default-src 'none'; sandbox");
   }
-  if (request.headers.get("if-none-match") === image.etag) {
+  if (matchesFarmIfNoneMatch(request.headers.get("if-none-match"), image.etag)) {
     headers.delete("content-length");
     return new Response(null, { status: 304, headers });
   }
