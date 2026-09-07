@@ -240,7 +240,7 @@ export function isCronRequestAuthorized(
   }
 
   const authorization = request.headers.get("authorization") || "";
-  const bearer = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
+  const bearer = /^Bearer (.*)$/i.exec(authorization)?.[1] || "";
   return bearer === secret || request.headers.get("x-farm-cron-secret") === secret;
 }
 

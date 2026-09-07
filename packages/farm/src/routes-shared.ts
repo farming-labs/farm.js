@@ -1,4 +1,5 @@
 import type { ParsedRoute } from "./types";
+import { assertUniqueRouteParameters } from "./routing/specificity";
 
 export const PROGRAMMATIC_ROUTE_FILE_NAMES = [
   "farm.route.ts",
@@ -88,6 +89,7 @@ export function parseProgrammaticRoutePath(
 ): ParsedRoute {
   const fileName = type === "layout" ? "layout.tsx" : "page.tsx";
   const normalized = normalizeProgrammaticRoutePath(routePath);
+  assertUniqueRouteParameters(normalized);
   const filePath =
     normalized === "/" ? fileName : `${normalized.slice(1).replace(/\/+$/, "")}/${fileName}`;
 

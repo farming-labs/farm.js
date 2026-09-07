@@ -335,7 +335,7 @@ function LinkInner<TRoute extends string = DefaultRouteHref, THref extends strin
 ) {
   const elementRef = useRef<HTMLAnchorElement | null>(null);
   const intentTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const hasPrefetched = useRef(false);
+  const activePrefetch = useRef<symbol | null>(null);
   const farm = useOptionalFarm();
 
   const { intent, viewport, render } = normalizePrefetch(prefetch);
@@ -351,15 +351,23 @@ function LinkInner<TRoute extends string = DefaultRouteHref, THref extends strin
   const isExternal = isExternalUrl(resolvedHref);
 
   const doPrefetch = useCallback(() => {
-    if (isExternal || hasPrefetched.current) return;
+    if (isExternal || activePrefetch.current) return;
     const router = getRouter();
     if (!router) return;
-    hasPrefetched.current = true;
-    router.prefetch(resolvedHref);
+    const token = Symbol(resolvedHref);
+    activePrefetch.current = token;
+    const reset = () => {
+      if (activePrefetch.current === token) activePrefetch.current = null;
+    };
+    try {
+      void router.prefetch(resolvedHref).then(reset, reset);
+    } catch {
+      reset();
+    }
   }, [resolvedHref, isExternal]);
 
   useEffect(() => {
-    hasPrefetched.current = false;
+    activePrefetch.current = null;
   }, [resolvedHref]);
 
   useEffect(() => {
@@ -382,7 +390,7 @@ function LinkInner<TRoute extends string = DefaultRouteHref, THref extends strin
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
     const tryRenderPrefetch = () => {
-      if (cancelled || hasPrefetched.current) return;
+      if (cancelled || activePrefetch.current) return;
 
       const router = getRouter();
       if (!router) {
@@ -390,8 +398,7 @@ function LinkInner<TRoute extends string = DefaultRouteHref, THref extends strin
         return;
       }
 
-      hasPrefetched.current = true;
-      router.prefetch(resolvedHref);
+      doPrefetch();
     };
 
     tryRenderPrefetch();
@@ -402,7 +409,7 @@ function LinkInner<TRoute extends string = DefaultRouteHref, THref extends strin
         clearTimeout(timeoutId);
       }
     };
-  }, [render, isExternal, resolvedHref]);
+  }, [render, isExternal, resolvedHref, doPrefetch]);
 
   useEffect(() => {
     return () => {
@@ -421,7 +428,7 @@ function LinkInner<TRoute extends string = DefaultRouteHref, THref extends strin
   }, []);
 
   const scheduleIntentPrefetch = useCallback(() => {
-    if (isExternal || !intent || hasPrefetched.current) return;
+    if (isExternal || !intent || activePrefetch.current) return;
     cancelIntent();
     intentTimeoutRef.current = setTimeout(() => {
       intentTimeoutRef.current = null;

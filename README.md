@@ -327,7 +327,7 @@ Visit [farmjs.dev](https://farmjs.dev) for comprehensive documentation, guides, 
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 22.12 or newer
 - pnpm 8+
 
 ### Setup

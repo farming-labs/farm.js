@@ -286,8 +286,7 @@ function snapshotSSRRebundleOptions(config: NitroConfig) {
 
 async function canUseRolldownBuilder(): Promise<boolean> {
   const [major = 0, minor = 0] = process.versions.node.split(".").map(Number);
-  const isSupportedNode =
-    (major === 20 && minor >= 19) || major > 22 || (major === 22 && minor >= 12);
+  const isSupportedNode = major > 22 || (major === 22 && minor >= 12);
   if (!isSupportedNode) {
     return false;
   }
@@ -296,7 +295,7 @@ async function canUseRolldownBuilder(): Promise<boolean> {
     await import("rolldown");
     return true;
   } catch {
-    // Rolldown is optional so Node 18 and --no-optional installs retain Rollup.
+    // Rolldown is optional so --no-optional installs retain Rollup.
     return false;
   }
 }
@@ -1706,7 +1705,7 @@ function matchRuntimePathPattern(pattern, pathname) {
       continue;
     }
 
-    if (segment !== pathnameSegment) return null;
+    if (segment !== decodeRouteSegment(pathnameSegment)) return null;
     pathIndex++;
   }
 
@@ -4340,7 +4339,7 @@ ${integrationRuntimeImport}
       : `import { createCloudflareImageTransformer, createFarmImageHandler } from "@farm.js/core/image/server";`;
   const imageNodeRuntimeImport =
     imageRuntime === "node"
-      ? `import { createNodeImageUrlValidator, createSharpImageTransformer } from "@farm.js/core/image/sharp";`
+      ? `import { createNodeImageFetcher, createNodeImageUrlValidator, createSharpImageTransformer } from "@farm.js/core/image/sharp";`
       : "";
   const apiHandlerCode =
     apiRoutes.length > 0
@@ -4580,6 +4579,7 @@ const farmImageHandler = ${
 })`
         : `createFarmImageHandler(${JSON.stringify(config.images)}, {
   transform: createSharpImageTransformer(),
+  fetchRemote: createNodeImageFetcher(${JSON.stringify(config.images)}),
   validateRemoteUrl: createNodeImageUrlValidator(${JSON.stringify(config.images)}),
   onError(error) { console.error("[Farm Image]", error); },
 })`

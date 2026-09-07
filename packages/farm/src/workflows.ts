@@ -232,6 +232,9 @@ export function createFarmWorkflowRequestHandler(options: FarmWorkflowHTTPHandle
     } catch (error) {
       const response = createFarmRequestBodyErrorResponse(error);
       if (response) return response;
+      if (error instanceof SyntaxError) {
+        return Response.json({ error: "Invalid workflow request body." }, { status: 400 });
+      }
       throw error;
     }
     const module = await options.loadModule(workflow);
@@ -645,7 +648,14 @@ async function readPayload(event) {
   const bytes = await readFarmRequestBody(event.req, bodySizeLimit);
   const text = new TextDecoder().decode(bytes);
   if (!text) return {};
-  return JSON.parse(text);
+  const contentType = (getHeader(event, "content-type") || "").split(";", 1)[0].trim().toLowerCase();
+  if (
+    contentType === "application/json" ||
+    (contentType.startsWith("application/") && contentType.endsWith("+json"))
+  ) {
+    return JSON.parse(text);
+  }
+  return { text };
 }
 
 export default new H3()
@@ -710,16 +720,18 @@ async function readWorkflowPayload(request: Request, bodySizeLimit: number): Pro
   const bytes = await readFarmRequestBody(request, bodySizeLimit);
   const text = new TextDecoder().decode(bytes);
   if (!text) return {};
-  const contentType = request.headers.get("content-type") || "";
-  if (contentType.includes("application/json")) {
-    try {
-      return JSON.parse(text);
-    } catch {
-      return {};
-    }
+  const contentType = (request.headers.get("content-type") || "")
+    .split(";", 1)[0]
+    .trim()
+    .toLowerCase();
+  if (
+    contentType === "application/json" ||
+    (contentType.startsWith("application/") && contentType.endsWith("+json"))
+  ) {
+    return JSON.parse(text);
   }
 
-  return text ? { text } : {};
+  return { text };
 }
 
 function readScheduledTime(payload: unknown): number | string | undefined {

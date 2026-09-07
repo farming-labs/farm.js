@@ -17,31 +17,26 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            node-version: 20
-            test_args: --skip-incompatible
-          - os: ubuntu-latest
-            node-version: 22
+            node-version: "22.12"
             test_args: --skip-incompatible --only-with-node-engine
           - os: ubuntu-latest
-            node-version: 24
+            node-version: "24"
             test_args: --skip-incompatible --only-with-node-engine
-          # No --only-with-node-engine: @farm.js/core declares no engines field and
-          # would otherwise be skipped, which is the suite this entry exists to cover.
           - os: windows-latest
-            node-version: 24
+            node-version: "24"
             test_args: --skip-incompatible
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node-version }}
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
 
       - name: Get pnpm store directory
         shell: bash
@@ -49,7 +44,7 @@ jobs:
           echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
 
       - name: Setup pnpm cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ env.STORE_PATH }}
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
@@ -65,7 +60,7 @@ jobs:
           NODE_OPTIONS: --max-old-space-size=8192
 
       - name: Check committed generated types
-        if: matrix.os == 'ubuntu-latest' && matrix.node-version == 20
+        if: matrix.os == 'ubuntu-latest' && matrix.node-version == '22.12'
         run: pnpm --dir docs exec farm generate --check
 
       - name: Run tests
@@ -102,15 +97,15 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: "22.12"
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -127,15 +122,15 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: "22.12"
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -158,15 +153,15 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: "22.12"
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -188,22 +183,22 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - node-version: 22
+          - node-version: "22.12"
             build_args: --skip-incompatible
-          - node-version: 24
+          - node-version: "24"
             build_args: --skip-incompatible --only-with-node-engine
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node-version }}
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -223,15 +218,15 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: "22.12"
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -246,7 +241,7 @@ jobs:
 
       - name: Upload Playwright failure artifacts
         if: ${{ failure() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: framework-e2e-playwright
           path: |

@@ -273,6 +273,21 @@ mount, and shortcut together.
 | experimental  | Auditing or enabling opt-in rendering experiments such as isolated hydration.     |
 | openapi       | Publishing API reference docs.                                                    |
 
+## Application base path
+
+Set `basePath` when the complete application is mounted below the origin root. Farm applies the
+canonical path consistently to routes, links, assets, and runtime endpoints:
+
+```ts title="farm.config.ts"
+export default defineConfig({
+  basePath: "/console",
+});
+```
+
+Farm accepts a leading-slash or bare pathname and removes duplicate and trailing slashes. It rejects
+URLs, query strings, hashes, backslashes, control characters, and `.` or `..` segments because a
+browser could otherwise resolve a different path than Farm's server router.
+
 ## Trailing slashes
 
 Application page URLs omit a trailing slash by default. Set `trailingSlash: true` to generate

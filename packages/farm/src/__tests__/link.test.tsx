@@ -151,6 +151,30 @@ describe("Link", () => {
       vi.useRealTimers();
     });
 
+    it("allows a later intent to retry after prefetch settles", async () => {
+      vi.useFakeTimers();
+      prefetch.mockRejectedValueOnce(new Error("temporary prefetch failure"));
+      const el = render(
+        createElement(Link, { href: "/docs", prefetch: "intent", prefetchDelay: 10 }),
+      ) as HTMLAnchorElement;
+
+      act(() => {
+        el.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+        vi.advanceTimersByTime(10);
+      });
+      await act(async () => {});
+
+      act(() => {
+        el.dispatchEvent(new MouseEvent("mouseout", { bubbles: true }));
+        el.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+        vi.advanceTimersByTime(10);
+      });
+
+      expect(prefetch).toHaveBeenCalledTimes(2);
+      expect(prefetch).toHaveBeenLastCalledWith("/docs");
+      vi.useRealTimers();
+    });
+
     it("prefetch=intent cancels pending prefetch on blur", () => {
       vi.useFakeTimers();
       const el = render(

@@ -1,5 +1,7 @@
 import type { RouteSegment, ParsedRoute } from "./types";
 import path from "path";
+import { assertTerminalCatchAll, assertUniqueRouteParameters } from "./routing/specificity";
+import { decodeRouteSegment } from "./utils/decode";
 
 export function parseRoutePath(filePath: string): ParsedRoute {
   const segments: RouteSegment[] = [];
@@ -8,6 +10,8 @@ export function parseRoutePath(filePath: string): ParsedRoute {
 
   const fileName = pathParts.pop() || "";
   const fileType = getRouteType(fileName);
+  assertTerminalCatchAll(`/${pathParts.join("/")}`);
+  assertUniqueRouteParameters(`/${pathParts.join("/")}`);
 
   for (const part of pathParts) {
     // Route groups like `(marketing)` organize files without adding URL
@@ -91,7 +95,7 @@ export function matchRoute(
   url: string,
   segments: RouteSegment[],
 ): { params: Record<string, string>; matches: boolean } {
-  const urlParts = url.split("/").filter(Boolean);
+  const urlParts = url.split("/").filter(Boolean).map(decodeRouteSegment);
   const params: Record<string, string> = {};
   if (segments.length === 0) {
     return { params, matches: urlParts.length === 0 };
@@ -137,7 +141,7 @@ export function matchRoute(
 
 /** Match a route segment chain as an owner of the pathname or one of its descendants. */
 export function matchRoutePrefix(url: string, segments: RouteSegment[]): boolean {
-  const urlParts = url.split("/").filter(Boolean);
+  const urlParts = url.split("/").filter(Boolean).map(decodeRouteSegment);
   let urlIndex = 0;
 
   for (const segment of segments) {
