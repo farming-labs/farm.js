@@ -27,6 +27,14 @@ test("workspace scripts use the pnpm binary installed by the caller", () => {
   }
 });
 
+test("CI type-check does not rerun package builds", () => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
+  const workflow = fs.readFileSync(path.join(repoRoot, ".github", "workflows", "ci.yml"), "utf8");
+
+  assert.equal(manifest.scripts["type-check:ci"], "turbo type-check --only");
+  assert.match(workflow, /^\s*run: pnpm type-check:ci$/m);
+});
+
 /**
  * Runs a package script through pnpm inside a throwaway package that carries
  * the repository's .npmrc, so the test exercises the same script shell the

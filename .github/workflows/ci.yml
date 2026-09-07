@@ -72,7 +72,7 @@ jobs:
           TMP: ${{ runner.temp }}
 
       - name: Type check
-        run: pnpm type-check
+        run: pnpm type-check:ci
         env:
           NODE_OPTIONS: --max-old-space-size=8192
 

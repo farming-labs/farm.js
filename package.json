@@ -42,6 +42,7 @@
     "lint:fix": "oxlint --fix . && oxfmt .",
     "format:check": "oxfmt --check .",
     "type-check": "turbo type-check",
+    "type-check:ci": "turbo type-check --only",
     "clean": "turbo clean",
     "bump": "bumpp",
     "version-packages": "pnpm run bump",
