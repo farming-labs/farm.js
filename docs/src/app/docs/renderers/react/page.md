@@ -135,6 +135,36 @@ compiler: {
 
 Omitting `experimental.compiler` or setting it to `false` disables the transform.
 
+### Combine the compiler with isolated hydration
+
+The compiler and [isolated client hydration](/docs/configuration#isolated-client-hydration) optimize
+different parts of the same client component. Isolated hydration keeps the server-owned layout out
+of the browser graph and gives an eligible client leaf its own root. The compiler keeps React in
+charge of that root's SSR, hydration, events, and unmounting, then patches compiler-proven state
+bindings directly after mount.
+
+```ts
+import { defineConfig } from "@farm.js/core";
+import { react } from "@farm.js/react";
+
+export default defineConfig({
+  renderer: react({
+    experimental: {
+      compiler: true,
+    },
+  }),
+  experimental: {
+    isolatedClientHydration: "enabled",
+  },
+});
+```
+
+Farm's maintained [isolated hydration benchmark](https://github.com/farming-labs/farm.js/blob/main/benchmarks/isolated-hydration/results/latest.md)
+builds the same route-wide and isolated fixtures with the compiler off and on. Compiler builds must
+prove that every measured component compiled. The cost guard checks initial transfer, hydration,
+heap, and repeated state updates separately so a steady-state compiler win cannot hide an isolated
+root startup regression.
+
 ### Configuration API
 
 ```ts

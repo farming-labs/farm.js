@@ -189,13 +189,16 @@ Farm also keeps graphs above four statically bounded isolated roots route-wide. 
 boundary lists use the same fallback because their root count is unknown before streaming. This
 measured guard prevents request, marker, root, and hydration overhead from growing past the first
 observed crossover; the [benchmark report](https://github.com/farming-labs/farm.js/blob/main/benchmarks/isolated-hydration/results/latest.md) includes route-wide, isolated, and RSC controls with raw samples.
+The representative fixtures also run route-wide and isolated hydration with Farm's experimental
+React compiler enabled, proving both the initial hydration cost and repeated state-update cost of
+the combined path.
 
 The export must be one of these static string literals so Farm can analyze it without executing
 application code. Without an explicit route-level `island` export, a route that imports client
 boundaries with different strategies safely falls back to `load` because its current route-level
 React-compatible root cannot schedule those children independently. Keep interactive leaves small today; a
-future compiler boundary can reuse the same export for independently hydrated nested component
-islands.
+eligible leaves can also use Farm's experimental React compiler for direct state binding updates
+after their independent roots mount.
 
 ### Async pages stay server-only
 

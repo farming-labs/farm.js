@@ -35,14 +35,40 @@ const requestedModes = new Set(
 );
 const isPartialRun = requestedShapes.size > 0 || requestedModes.size > 0;
 const shapes = [
-  { id: "leaf", boundaries: 1, staticNodes: 768, includeRsc: true },
-  { id: "siblings", boundaries: 4, staticNodes: 384, includeRsc: true },
+  {
+    id: "leaf",
+    boundaries: 1,
+    staticNodes: 768,
+    staticDetailNodes: 64,
+    includeCompiler: true,
+    includeRsc: true,
+  },
+  {
+    id: "siblings",
+    boundaries: 4,
+    staticNodes: 384,
+    staticDetailNodes: 16,
+    includeCompiler: true,
+    includeRsc: true,
+  },
   { id: "stress-8", boundaries: 8, staticNodes: 128, includeRsc: false },
   { id: "stress-16", boundaries: 16, staticNodes: 128, includeRsc: false },
   { id: "stress-32", boundaries: 32, staticNodes: 128, includeRsc: false },
   { id: "stress-64", boundaries: 64, staticNodes: 128, includeRsc: false },
 ].filter((shape) => requestedShapes.size === 0 || requestedShapes.has(shape.id));
 const activeChildren = new Set();
+
+function usesCompiler(mode) {
+  return mode === "route-wide-compiler" || mode === "isolated-compiler";
+}
+
+function usesIsolatedHydration(mode) {
+  return mode === "isolated" || mode === "isolated-compiler";
+}
+
+function usesRouteWideHydration(mode) {
+  return mode === "route-wide" || mode === "route-wide-compiler";
+}
 
 function assertSupportedNode() {
   const [major, minor] = process.versions.node.split(".").map(Number);
@@ -199,15 +225,32 @@ function staticMarkup(nodeCount) {
   ).join("\n");
 }
 
-function counterSource(index) {
+function counterSource(index, staticDetailNodes = 0) {
+  const staticDetail = staticDetailNodes
+    ? Array.from(
+        { length: staticDetailNodes },
+        (_, detailIndex) =>
+          `<span data-counter-detail="${detailIndex}">detail-${detailIndex}</span>`,
+      ).join("\n")
+    : "";
   return `
 "use client";
 
 import { useState } from "react";
 
+let counterExecutions = 0;
+
 export default function Counter${index}() {
   const [count, setCount] = useState(0);
-  return <button data-counter="${index}" onClick={() => setCount((value) => value + 1)}>counter-${index}:{count}</button>;
+  return (
+    <section
+      data-counter-card="${index}"
+      data-counter-executions={typeof window === "undefined" ? 1 : ++counterExecutions}
+    >
+      <button data-counter="${index}" onClick={() => setCount((value) => value + 1)}>counter-${index}:{count}</button>
+      <div aria-hidden="true">${staticDetail}</div>
+    </section>
+  );
 }
 `.trim();
 }
@@ -222,13 +265,20 @@ async function linkFixtureDependency(root, name, source) {
   );
 }
 
-async function linkFixtureDependencies(root, rsc) {
+async function linkFixtureDependencies(root, rsc, explicitReactRenderer = false) {
   const simpleModules = path.join(repositoryRoot, "examples", "simple-demo", "node_modules");
   const rscModules = path.join(repositoryRoot, "examples", "rsc-demo", "node_modules");
   const rendererModules = rsc ? rscModules : simpleModules;
   await linkFixtureDependency(root, "@farm.js/core", path.join(repositoryRoot, "packages", "farm"));
   await linkFixtureDependency(root, "react", path.join(rendererModules, "react"));
   await linkFixtureDependency(root, "react-dom", path.join(rendererModules, "react-dom"));
+  if (explicitReactRenderer) {
+    await linkFixtureDependency(
+      root,
+      "@farm.js/react",
+      path.join(repositoryRoot, "packages", "farm-react"),
+    );
+  }
   if (!rsc) return;
 
   await linkFixtureDependency(
@@ -277,14 +327,20 @@ export default function RootLayout({ children }${type}) {
 `.trim();
 }
 
-async function writeStandardFixture(root, shape, isolated) {
-  await linkFixtureDependencies(root, false);
+async function writeStandardFixture(root, shape, mode) {
+  const compiler = usesCompiler(mode);
+  const isolated = usesIsolatedHydration(mode);
+  const compareCompiler = shape.includeCompiler === true;
+  await linkFixtureDependencies(root, false, compareCompiler);
   const sourceRoot = path.join(root, "src");
   await mkdir(path.join(sourceRoot, "app", "next"), { recursive: true });
   await mkdir(path.join(sourceRoot, "components"), { recursive: true });
   await Promise.all(
     Array.from({ length: shape.boundaries }, (_, index) =>
-      writeFile(path.join(sourceRoot, "components", `counter-${index}.tsx`), counterSource(index)),
+      writeFile(
+        path.join(sourceRoot, "components", `counter-${index}.tsx`),
+        counterSource(index, shape.staticDetailNodes),
+      ),
     ),
   );
   await writeFile(path.join(sourceRoot, "app", "globals.css"), "");
@@ -299,11 +355,11 @@ async function writeStandardFixture(root, shape, isolated) {
   );
   await writeFile(
     path.join(root, "farm.config.ts"),
-    `import { defineConfig } from "@farm.js/core";\nexport default defineConfig({ images: { provider: "none" }, experimental: { isolatedClientHydration: "${isolated ? "enabled" : "off"}" } });\n`,
+    `${compareCompiler ? 'import { react } from "@farm.js/react";\n' : ""}import { defineConfig } from "@farm.js/core";\nexport default defineConfig({${compareCompiler ? ` renderer: react({ experimental: { compiler: ${compiler ? "{ report: true }" : "false"} } }),` : ""} images: { provider: "none" }, experimental: { isolatedClientHydration: "${isolated ? "enabled" : "off"}" } });\n`,
   );
   await writeFile(
     path.join(root, "package.json"),
-    `${JSON.stringify({ name: `farm-isolated-${shape.id}-${isolated ? "on" : "off"}`, private: true, type: "module" }, null, 2)}\n`,
+    `${JSON.stringify({ name: `farm-isolated-${shape.id}-${mode}`, private: true, type: "module" }, null, 2)}\n`,
   );
 }
 
@@ -314,7 +370,10 @@ async function writeRscFixture(root, shape) {
   await mkdir(path.join(sourceRoot, "components"), { recursive: true });
   await Promise.all(
     Array.from({ length: shape.boundaries }, (_, index) =>
-      writeFile(path.join(sourceRoot, "components", `counter-${index}.tsx`), counterSource(index)),
+      writeFile(
+        path.join(sourceRoot, "components", `counter-${index}.tsx`),
+        counterSource(index, shape.staticDetailNodes),
+      ),
     ),
   );
   await writeFile(path.join(sourceRoot, "layout.tsx"), layoutSource(shape, true));
@@ -384,7 +443,7 @@ async function buildVariant(shape, mode) {
     // Older Vite RSC releases then require one normal invocation to consume them.
     if (!existsSync(path.join(root, ".output", "server", "index.mjs"))) await buildRsc();
   } else {
-    await writeStandardFixture(root, shape, mode === "isolated");
+    await writeStandardFixture(root, shape, mode);
     await run(
       process.execPath,
       [
@@ -396,7 +455,7 @@ async function buildVariant(shape, mode) {
       {
         cwd: root,
         env:
-          mode === "isolated" && shape.id.startsWith("stress-")
+          usesIsolatedHydration(mode) && shape.id.startsWith("stress-")
             ? {
                 FARM_INTERNAL_BENCHMARK: "isolated-hydration",
                 FARM_INTERNAL_ISOLATED_HYDRATION_BENCHMARK_ROOT: generatedDirectory,
@@ -412,11 +471,23 @@ async function buildVariant(shape, mode) {
   const clientFiles = (await walkFiles(clientDirectory)).filter((file) => file.endsWith(".js"));
   const clientBuffers = await Promise.all(clientFiles.map((file) => readFile(file)));
   const clientText = Buffer.concat(clientBuffers).toString("utf8");
-  if (mode !== "route-wide" && clientText.includes(serverSentinel)) {
+  if (!usesRouteWideHydration(mode) && mode !== "rsc" && clientText.includes(serverSentinel)) {
     throw new Error(`${shape.id}/${mode} leaked its server-layout sentinel into client JavaScript`);
   }
-  if (mode === "route-wide" && !clientText.includes(serverSentinel)) {
+  if (usesRouteWideHydration(mode) && !clientText.includes(serverSentinel)) {
     throw new Error(`${shape.id}/${mode} did not include the route-wide layout control`);
+  }
+  let compilerReport;
+  if (usesCompiler(mode)) {
+    compilerReport = JSON.parse(
+      await readFile(path.join(root, ".farm", "react-compiler.json"), "utf8"),
+    );
+    const compiledComponents = new Set(compilerReport.modules.flatMap((module) => module.compiled));
+    for (let index = 0; index < shape.boundaries; index += 1) {
+      if (!compiledComponents.has(`Counter${index}`)) {
+        throw new Error(`${shape.id}/${mode} did not compile Counter${index}`);
+      }
+    }
   }
   return {
     root,
@@ -425,6 +496,7 @@ async function buildVariant(shape, mode) {
     clientDirectory,
     clientFiles,
     clientJavaScript: sumSizes(clientBuffers),
+    compilerReport: compilerReport?.summary,
     serverEntry:
       mode === "rsc"
         ? path.join(root, ".output", "server", "index.mjs")
@@ -486,10 +558,10 @@ function metric(metrics, name) {
 
 async function waitForHydration(page, mode, boundaryCount) {
   return page.evaluate(
-    ({ hydrationMode, expectedBoundaries }) =>
+    ({ isolated, expectedBoundaries }) =>
       new Promise((resolve) => {
         const check = () => {
-          if (hydrationMode === "isolated") {
+          if (isolated) {
             if (
               document.querySelectorAll('farm-client-boundary[data-farm-hydrated="true"]')
                 .length === expectedBoundaries
@@ -508,7 +580,7 @@ async function waitForHydration(page, mode, boundaryCount) {
         };
         check();
       }),
-    { hydrationMode: mode, expectedBoundaries: boundaryCount },
+    { isolated: usesIsolatedHydration(mode), expectedBoundaries: boundaryCount },
   );
 }
 
@@ -640,12 +712,66 @@ async function measureWarmNavigation(browser, variant, shape) {
   return summarize(samples);
 }
 
-async function measureBrowser(browser, variant, shape) {
-  const coldSamples = [];
-  for (let index = 0; index < warmups + iterations; index += 1) {
-    const sample = await measureColdBrowser(browser, variant, shape);
-    if (index >= warmups) coldSamples.push(sample);
-  }
+async function measureSteadyStateUpdates(browser, variant, shape) {
+  const page = await browser.newPage();
+  await page.goto(variant.url, { waitUntil: "domcontentloaded" });
+  await waitForHydration(page, variant.mode, shape.boundaries);
+  const measurement = await page.evaluate(
+    async ({ measuredSamples, warmupSamples, updatesPerSample }) => {
+      const target = document.querySelector('[data-counter="0"]');
+      if (!(target instanceof HTMLButtonElement)) throw new Error("Missing benchmark counter");
+      const owner = target.closest("[data-counter-executions]");
+      if (!(owner instanceof HTMLElement)) throw new Error("Missing counter execution marker");
+
+      const readCount = () => Number(target.textContent?.split(":").at(-1));
+      const initialOwnerExecutions = Number(owner.dataset.counterExecutions);
+      const updateOnce = () =>
+        new Promise((resolve, reject) => {
+          const expected = readCount() + 1;
+          const timeout = setTimeout(() => {
+            observer.disconnect();
+            reject(new Error(`Counter did not reach ${expected}`));
+          }, 10_000);
+          const finish = () => {
+            if (readCount() !== expected) return;
+            clearTimeout(timeout);
+            observer.disconnect();
+            resolve();
+          };
+          const observer = new MutationObserver(finish);
+          observer.observe(target, { subtree: true, characterData: true, childList: true });
+          target.click();
+          finish();
+        });
+
+      for (let sample = 0; sample < warmupSamples; sample += 1) {
+        for (let update = 0; update < updatesPerSample; update += 1) await updateOnce();
+      }
+      const timings = [];
+      for (let sample = 0; sample < measuredSamples; sample += 1) {
+        const startedAt = performance.now();
+        for (let update = 0; update < updatesPerSample; update += 1) await updateOnce();
+        timings.push((performance.now() - startedAt) / updatesPerSample);
+      }
+      const expectedCount = (warmupSamples + measuredSamples) * updatesPerSample;
+      if (readCount() !== expectedCount) {
+        throw new Error(`Counter ended at ${readCount()}, expected ${expectedCount}`);
+      }
+      return {
+        timings,
+        ownerExecutionDelta: Number(owner.dataset.counterExecutions) - initialOwnerExecutions,
+      };
+    },
+    { measuredSamples: iterations, warmupSamples: warmups, updatesPerSample: 10 },
+  );
+  await page.close();
+  return {
+    ...summarize(measurement.timings),
+    ownerExecutionDelta: measurement.ownerExecutionDelta,
+  };
+}
+
+function summarizeBrowserSamples(coldSamples, variant, shape) {
   const summarizeKey = (key) => summarize(coldSamples.map((sample) => sample[key]));
   return {
     totalInteractiveMs: summarizeKey("totalInteractiveMs"),
@@ -657,9 +783,44 @@ async function measureBrowser(browser, variant, shape) {
     requestCount: summarizeKey("requestCount"),
     scriptRequestCount: summarizeKey("scriptRequestCount"),
     executedScriptResources: summarizeKey("executedScriptResources"),
-    rootCount: variant.mode === "isolated" ? shape.boundaries : 1,
-    warmNavigationMs: await measureWarmNavigation(browser, variant, shape),
+    rootCount: usesIsolatedHydration(variant.mode) ? shape.boundaries : 1,
   };
+}
+
+async function measureBrowserCohort(variants, shape, browserOptions) {
+  const entries = [];
+  try {
+    for (const variant of variants) {
+      entries.push({
+        variant,
+        browser: await chromium.launch(browserOptions),
+        coldSamples: [],
+      });
+    }
+
+    // Rotate the first mode every round. All variants therefore experience the
+    // same host-load window without sharing browser heap, code caches, or JIT state.
+    for (let index = 0; index < warmups + iterations; index += 1) {
+      const offset = index % entries.length;
+      const round = [...entries.slice(offset), ...entries.slice(0, offset)];
+      for (const entry of round) {
+        const sample = await measureColdBrowser(entry.browser, entry.variant, shape);
+        if (index >= warmups) entry.coldSamples.push(sample);
+      }
+    }
+
+    const measurements = new Map();
+    for (const entry of entries) {
+      measurements.set(entry.variant.mode, {
+        ...summarizeBrowserSamples(entry.coldSamples, entry.variant, shape),
+        steadyStateUpdateMs: await measureSteadyStateUpdates(entry.browser, entry.variant, shape),
+        warmNavigationMs: await measureWarmNavigation(entry.browser, entry.variant, shape),
+      });
+    }
+    return measurements;
+  } finally {
+    await Promise.all(entries.map((entry) => entry.browser.close()));
+  }
 }
 
 function formatBytes(bytes) {
@@ -683,7 +844,7 @@ function runtimeRows(results) {
   for (const [shape, modes] of Object.entries(results.shapes)) {
     for (const [mode, result] of Object.entries(modes)) {
       rows.push(
-        `| ${shape} | ${mode} | ${result.server.responseMs.p50.toFixed(2)} ms | ${result.browser.scriptMs.p50.toFixed(2)} ms | ${result.browser.compileMs.p50.toFixed(2)} ms | ${result.browser.hydrationMs.p50.toFixed(2)} ms | ${result.browser.firstInteractionMs.p50.toFixed(2)} ms | ${result.browser.requestCount.p50} / ${result.browser.scriptRequestCount.p50} / ${result.browser.executedScriptResources.p50} | ${formatBytes(result.browser.heapBytes.p50)} | ${result.browser.rootCount} | ${result.browser.warmNavigationMs.p50.toFixed(2)} ms |`,
+        `| ${shape} | ${mode} | ${result.server.responseMs.p50.toFixed(2)} ms | ${result.browser.scriptMs.p50.toFixed(2)} ms | ${result.browser.compileMs.p50.toFixed(2)} ms | ${result.browser.hydrationMs.p50.toFixed(2)} ms | ${result.browser.firstInteractionMs.p50.toFixed(2)} ms | ${result.browser.steadyStateUpdateMs.p50.toFixed(2)} ms | ${result.browser.requestCount.p50} / ${result.browser.scriptRequestCount.p50} / ${result.browser.executedScriptResources.p50} | ${formatBytes(result.browser.heapBytes.p50)} | ${result.browser.rootCount} | ${result.browser.warmNavigationMs.p50.toFixed(2)} ms |`,
       );
     }
   }
@@ -733,6 +894,44 @@ function validateResults(results) {
     }
   }
 
+  for (const shape of shapes.filter((candidate) => candidate.includeCompiler)) {
+    const modes = results.shapes[shape.id];
+    const routeWideCompiler = modes?.["route-wide-compiler"];
+    const isolatedCompiler = modes?.["isolated-compiler"];
+    const isolated = modes?.isolated;
+    if (!routeWideCompiler || !isolatedCompiler || !isolated) continue;
+    if (!routeWideCompiler.compilerReport?.compiled || !isolatedCompiler.compilerReport?.compiled) {
+      throw new Error(`${shape.id} is missing compiler coverage proof`);
+    }
+    if (
+      shape.id === "leaf" &&
+      isolatedCompiler.clientJavaScript.gzip >= routeWideCompiler.clientJavaScript.gzip
+    ) {
+      throw new Error(`${shape.id} compiler build did not reduce isolated client JavaScript`);
+    }
+    if (isolatedCompiler.browser.heapBytes.p50 >= routeWideCompiler.browser.heapBytes.p50) {
+      throw new Error(`${shape.id} compiler build did not reduce isolated browser heap`);
+    }
+    if (
+      isolatedCompiler.browser.hydrationMs.p50 >
+      allowedRegression(routeWideCompiler.browser.hydrationMs)
+    ) {
+      throw new Error(`${shape.id} compiler build exceeded the route-wide hydration budget`);
+    }
+    if (
+      isolatedCompiler.browser.steadyStateUpdateMs.medianCi95[1] >
+      isolated.browser.steadyStateUpdateMs.medianCi95[0]
+    ) {
+      throw new Error(`${shape.id} compiler update confidence intervals are not separated`);
+    }
+    if (isolatedCompiler.browser.steadyStateUpdateMs.ownerExecutionDelta !== 0) {
+      throw new Error(`${shape.id} compiler updates reran their component owner`);
+    }
+    if (isolated.browser.steadyStateUpdateMs.ownerExecutionDelta <= 0) {
+      throw new Error(`${shape.id} React control did not rerun its component owner`);
+    }
+  }
+
   for (const shape of shapes.filter(
     (candidate) => candidate.boundaries <= results.guardMaximumBoundaries,
   )) {
@@ -776,7 +975,7 @@ function createMarkdown(results) {
     "# Isolated hydration benchmark",
     "",
     `Generated ${results.generatedAt} on ${results.environment.platform} ${results.environment.arch}, Node ${results.environment.node}, ${results.environment.browser}.`,
-    `${iterations} measured browser and server iterations after ${warmups} warmups. Latency cells show p50; raw samples, p95, and bootstrap median confidence intervals are in \`latest.json\`.`,
+    `${results.iterations} measured browser iterations after ${results.warmups} warmups, and ${results.serverIterations} measured server iterations after ${results.serverWarmups} warmups. Latency cells show p50; raw samples, p95, and bootstrap median confidence intervals are in \`latest.json\`.`,
     "",
     "## Transfer and document cost",
     "",
@@ -788,8 +987,8 @@ function createMarkdown(results) {
     "",
     "Requests are reported as total / script resources / executed script resources.",
     "",
-    "| shape | mode | SSR response | script | compile | hydration | first interaction | requests | heap | roots | warm nav |",
-    "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+    "| shape | mode | SSR response | script | compile | hydration | first interaction | steady update | requests | heap | roots | warm nav |",
+    "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ...runtimeRows(results),
     "",
     crossover
@@ -797,6 +996,8 @@ function createMarkdown(results) {
       : "No crossover was observed in the measured stress range. The guard remains conservative at the largest accepted fixture.",
     "",
     "The RSC rows are controls built with Farm's RSC plugin and optimized server boundary enabled. They use the same layout, counters, and navigation workload; they are not treated as route-wide fallbacks for the standard renderer.",
+    "",
+    "The compiler rows enable Farm's experimental React compiler for the same route-wide and isolated fixtures. The build fails unless every counter appears in the compiler report. Steady update measures ten sequential state updates per sample and records owner executions: the React control must rerun its owner while the compiled control must keep that count unchanged. The combined path must preserve the isolated startup benefit and show the compiler's direct-update benefit without relying on a silent fallback.",
     "",
   ].join("\n");
 }
@@ -810,12 +1011,16 @@ async function main() {
     existsSync("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
       ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
       : undefined);
-  const browser = await chromium.launch(executablePath ? { executablePath } : undefined);
-  const browserVersion = await browser.version();
+  const browserOptions = executablePath ? { executablePath } : undefined;
+  const versionBrowser = await chromium.launch(browserOptions);
+  const browserVersion = await versionBrowser.version();
+  await versionBrowser.close();
   const results = {
     generatedAt: new Date().toISOString(),
     iterations,
     warmups,
+    serverIterations,
+    serverWarmups,
     environment: {
       platform: os.platform(),
       release: os.release(),
@@ -830,39 +1035,55 @@ async function main() {
     shapes: {},
   };
 
-  try {
-    for (const shape of shapes) {
-      results.shapes[shape.id] = {};
-      const modes = (
-        shape.includeRsc ? ["route-wide", "isolated", "rsc"] : ["route-wide", "isolated"]
-      ).filter((mode) => requestedModes.size === 0 || requestedModes.has(mode));
+  for (const shape of shapes) {
+    results.shapes[shape.id] = {};
+    const modes = [
+      "route-wide",
+      "isolated",
+      ...(shape.includeCompiler ? ["route-wide-compiler", "isolated-compiler"] : []),
+      ...(shape.includeRsc ? ["rsc"] : []),
+    ].filter((mode) => requestedModes.size === 0 || requestedModes.has(mode));
+    const variants = [];
+    const runningVariants = [];
+    try {
       for (const mode of modes) {
-        process.stdout.write(`\n== ${shape.id} / ${mode} ==\n`);
-        const variant = await buildVariant(shape, mode);
+        process.stdout.write(`\n== Building ${shape.id} / ${mode} ==\n`);
+        variants.push(await buildVariant(shape, mode));
+      }
+      for (const variant of variants) {
         const running = await startVariant(variant);
         variant.url = running.url;
-        try {
-          const server = await measureServer(running.url);
-          const browserMetrics = await measureBrowser(browser, variant, shape);
-          results.shapes[shape.id][mode] = {
-            buildMs: variant.buildMs,
-            clientJavaScript: variant.clientJavaScript,
-            clientChunks: variant.clientFiles.length,
-            server,
-            browser: browserMetrics,
-          };
-          process.stdout.write(
-            `JS ${formatBytes(variant.clientJavaScript.gzip)}, hydrate ${browserMetrics.hydrationMs.p50.toFixed(2)}ms, interaction ${browserMetrics.firstInteractionMs.p50.toFixed(2)}ms, heap ${formatBytes(browserMetrics.heapBytes.p50)}, nav ${browserMetrics.warmNavigationMs.p50.toFixed(2)}ms\n`,
-          );
-        } catch (error) {
-          throw new Error(`${String(error)}\n${running.logs()}`);
-        } finally {
-          await stopChild(running.child);
-        }
+        const runningVariant = { variant, running, server: undefined };
+        runningVariants.push(runningVariant);
+        runningVariant.server = await measureServer(running.url);
       }
+
+      process.stdout.write(`\n== Measuring ${shape.id} cohort ==\n`);
+      const browserMeasurements = await measureBrowserCohort(variants, shape, browserOptions);
+      for (const { variant, server } of runningVariants) {
+        const browserMetrics = browserMeasurements.get(variant.mode);
+        if (!browserMetrics) throw new Error(`Missing browser metrics for ${variant.mode}`);
+        results.shapes[shape.id][variant.mode] = {
+          buildMs: variant.buildMs,
+          clientJavaScript: variant.clientJavaScript,
+          clientChunks: variant.clientFiles.length,
+          compilerReport: variant.compilerReport,
+          server,
+          browser: browserMetrics,
+        };
+        process.stdout.write(
+          `${variant.mode}: JS ${formatBytes(variant.clientJavaScript.gzip)}, hydrate ${browserMetrics.hydrationMs.p50.toFixed(2)}ms, interaction ${browserMetrics.firstInteractionMs.p50.toFixed(2)}ms, update ${browserMetrics.steadyStateUpdateMs.p50.toFixed(2)}ms, heap ${formatBytes(browserMetrics.heapBytes.p50)}, nav ${browserMetrics.warmNavigationMs.p50.toFixed(2)}ms\n`,
+        );
+      }
+    } catch (error) {
+      const logs = runningVariants
+        .map(({ running }) => running.logs())
+        .filter(Boolean)
+        .join("\n");
+      throw new Error(`${String(error)}${logs ? `\n${logs}` : ""}`);
+    } finally {
+      await Promise.all(runningVariants.map(({ running }) => stopChild(running.child)));
     }
-  } finally {
-    await browser.close();
   }
 
   results.crossoverBoundaryCount = findCrossover(results);
