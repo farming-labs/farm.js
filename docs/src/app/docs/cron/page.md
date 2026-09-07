@@ -227,4 +227,8 @@ Farm's local `--cron` runner prevents overlap inside one development process. Th
 | Run short best-effort work after an HTTP response                                | [`after()`](/docs/after)                    |
 | Durable retries, long-running steps, queues, status, cancellation, or dashboards | [Jobs Integration](/docs/integrations/jobs) |
 
-The older `defineCron()` workflow-module API remains available for compatibility. New applications should use `cron` config plus an ordinary API route so local, deployment, security, and testing behavior share one model.
+The older `defineCron()` workflow-module API remains available for compatibility. Its HTTP trigger
+parses `application/json` and `application/*+json` bodies as JSON, wraps other non-empty bodies as
+`{ text }`, and rejects malformed JSON consistently in development and production. New applications
+should use `cron` config plus an ordinary API route so local, deployment, security, and testing
+behavior share one model.

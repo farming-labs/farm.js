@@ -121,6 +121,66 @@ describe("Farm workflows", () => {
     expect(run).toHaveBeenCalledOnce();
   });
 
+  it("parses workflow bodies consistently by content type", async () => {
+    const workflow = {
+      id: "sync-users",
+      filePath: "/virtual/sync-users.ts",
+      routePath: "/api/_farm/workflows/sync-users",
+    };
+    const run = vi.fn(async (ctx) => ctx.payload);
+    const handler = createFarmWorkflowRequestHandler({
+      workflows: [workflow],
+      config: resolveWorkflowsConfig(undefined),
+      loadModule: async () => ({ default: { run } }),
+    });
+    const url = "https://example.com/api/_farm/workflows/sync-users";
+
+    const textResponse = await handler(
+      new Request(url, {
+        method: "POST",
+        headers: { "content-type": "text/plain" },
+        body: "refresh catalog",
+      }),
+    );
+    expect(textResponse?.status).toBe(200);
+    await expect(textResponse?.json()).resolves.toMatchObject({
+      result: { text: "refresh catalog" },
+    });
+
+    const vendorJsonResponse = await handler(
+      new Request(url, {
+        method: "POST",
+        headers: { "content-type": "application/farm+json; charset=utf-8" },
+        body: JSON.stringify({ cursor: "next" }),
+      }),
+    );
+    expect(vendorJsonResponse?.status).toBe(200);
+    await expect(vendorJsonResponse?.json()).resolves.toMatchObject({
+      result: { cursor: "next" },
+    });
+
+    const nonApplicationJsonResponse = await handler(
+      new Request(url, {
+        method: "POST",
+        headers: { "content-type": "text/event+json" },
+        body: JSON.stringify({ cursor: "text" }),
+      }),
+    );
+    await expect(nonApplicationJsonResponse?.json()).resolves.toMatchObject({
+      result: { text: '{"cursor":"text"}' },
+    });
+
+    const malformedResponse = await handler(
+      new Request(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{broken",
+      }),
+    );
+    expect(malformedResponse?.status).toBe(400);
+    expect(run).toHaveBeenCalledTimes(3);
+  });
+
   it("protects workflow metadata and supports GET scheduler payloads", async () => {
     const workflow = {
       id: "sync-users",
@@ -239,7 +299,72 @@ describe("Farm workflows", () => {
     expect(handlerSource).toContain("authorization.match(/^Bearer");
     expect(handlerSource).not.toContain('searchParams.get("secret")');
     expect(handlerSource).toContain("function decodeRouteSegment(segment)");
+    expect(handlerSource).toContain('contentType.startsWith("application/")');
+    expect(handlerSource).toContain('contentType.endsWith("+json")');
+    expect(handlerSource).toContain("return { text }");
     expect(handlerSource).not.toContain("decodeURIComponent(event.context.params");
+
+    const readPayloadStart = handlerSource.indexOf("async function readPayload(event)");
+    const readPayloadEnd = handlerSource.indexOf("\n\nexport default", readPayloadStart);
+    expect(readPayloadStart).toBeGreaterThan(-1);
+    expect(readPayloadEnd).toBeGreaterThan(readPayloadStart);
+    const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+    const generatedReadPayload = (await AsyncFunction(
+      "readFarmRequestBody",
+      "getHeader",
+      "bodySizeLimit",
+      "searchParamsToObject",
+      `${handlerSource.slice(readPayloadStart, readPayloadEnd)}; return readPayload;`,
+    )(
+      async (request: Request) => new Uint8Array(await request.arrayBuffer()),
+      (event: { req: Request }, name: string) => event.req.headers.get(name),
+      1234,
+      (searchParams: URLSearchParams) => Object.fromEntries(searchParams),
+    )) as (event: { req: Request; url: URL }) => Promise<unknown>;
+    const generatedTextEvent = {
+      req: new Request("https://example.com/api/_farm/workflows/sync", {
+        method: "POST",
+        headers: { "content-type": "text/event+json" },
+        body: '{"cursor":"text"}',
+      }),
+      url: new URL("https://example.com/api/_farm/workflows/sync"),
+    };
+    await expect(generatedReadPayload(generatedTextEvent)).resolves.toEqual({
+      text: '{"cursor":"text"}',
+    });
+
+    const branchStart = handlerSource.indexOf("    let payload;", readPayloadEnd);
+    const branchEnd = handlerSource.indexOf("    const result = await runTask", branchStart);
+    expect(branchStart).toBeGreaterThan(readPayloadEnd);
+    expect(branchEnd).toBeGreaterThan(branchStart);
+    const executeGeneratedPayloadBranch = AsyncFunction(
+      "event",
+      "readPayload",
+      "createFarmRequestBodyErrorResponse",
+      "json",
+      `${handlerSource.slice(branchStart, branchEnd)}; return payload;`,
+    ) as (
+      event: { req: Request; url: URL },
+      readPayload: typeof generatedReadPayload,
+      createErrorResponse: (error: unknown) => Response | null,
+      json: (value: unknown, status?: number) => Response,
+    ) => Promise<unknown>;
+    const malformedEvent = {
+      req: new Request("https://example.com/api/_farm/workflows/sync", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{broken",
+      }),
+      url: new URL("https://example.com/api/_farm/workflows/sync"),
+    };
+    const malformedResponse = await executeGeneratedPayloadBranch(
+      malformedEvent,
+      generatedReadPayload,
+      () => null,
+      (value, status = 200) => Response.json(value, { status }),
+    );
+    expect(malformedResponse).toBeInstanceOf(Response);
+    expect((malformedResponse as Response).status).toBe(400);
   });
 
   it("emits only internal imports the production runtime actually exports", async () => {
