@@ -1,6 +1,43 @@
 # Complex dashboard and 21,000-row peak result
 
-Date: 2026-08-29
+Latest run: 2026-09-07
+
+## Consecutive same-key maps composed with native reorder — 2026-09-07
+
+The 10,000-row table now measures a concise functional setter that changes one row's label and
+amount in two consecutive native `map()` calls, then restores amount order with native
+`toSorted()`. Each accepted map flattens its replacements back to the committed source rows, so the
+runtime validates the final replacement key, prepares the final binding values once, and runs one
+LIS for the final permutation. The equivalent block-bodied updater remains the
+complete-reconciliation control.
+
+| Mode   | React median | Two maps + reorder | Compiled control | vs React | vs control |
+| ------ | -----------: | -----------------: | ---------------: | -------: | ---------: |
+| Static |    198.30 ms |           34.20 ms |         47.30 ms |    5.80x |      1.38x |
+| Hybrid |    198.30 ms |           34.20 ms |         46.10 ms |    5.80x |      1.35x |
+
+The independent gate requires at least 4x versus bracketed React and 1.2x versus the compiled
+control in both modes. It passed without lowering either threshold. The run also proved that all
+10,000 original row nodes stayed connected, the edited row retained its DOM identity after moving,
+the final label and amount were correct, and compiled owner executions remained zero.
+
+Every existing correctness and performance gate passed in the same run, including the general
+regression gate, the 8x optimization-persistence floor, normalized scalability, and the earlier
+single-map reorder gate. The single-map workload remained 5.23x faster than React in static mode
+and 5.28x in hybrid mode, with 1.41x versus its compiled control in both modes.
+
+Compiler tests accept consecutive safe conditional object-spread maps before native sort/reverse
+suffixes and keep structural calls, maps after reordering, and unsupported callbacks on complete
+reconciliation. Runtime coverage proves same-row and different-row lineage, one final patch per
+changed row, queued composition, changed-key and custom-method fallback, native errors, delegated
+events, controlled-input focus and selection, Strict Mode hydration, unmount-before-flush cleanup,
+and 2,000 deterministic two-map updates against normal React. That differential run completed in
+17.11 seconds on this machine.
+
+No public API or runtime feature is added. The existing optional map-reorder runtime grew by 15 B
+gzip to a 13,158 B compiler premium, while reorder-only modules still omit it and the core-only
+runtime retains its 83.4% reduction versus the complete compatibility runtime. The browser run used
+Chrome 152.0.7977.82, Node.js 23.11.0, and Apple M1 macOS arm64.
 
 ## Same-key map composed with native reorder — 2026-09-07
 

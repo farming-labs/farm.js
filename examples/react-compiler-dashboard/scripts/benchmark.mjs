@@ -1198,7 +1198,11 @@ async function measureTrial(browser, trial, compilerMode, port) {
             ),
         );
 
-        const measureMapReorderPipeline = async (action) => {
+        const measureMapReorderPipeline = async (
+          action,
+          expectedLabelSuffix = " repriced",
+          expectedAmount = "$-1",
+        ) => {
           const rows = [...table.querySelectorAll("tbody tr")];
           const target = rows.find(
             (row) => Number(row.getAttribute("data-row-id")) % 10_000 === 5_001,
@@ -1210,8 +1214,10 @@ async function measureTrial(browser, trial, compilerMode, port) {
               nextRows.length === 10_000 &&
               nextRows[0] === target &&
               rows.every((row) => row.isConnected) &&
-              target.querySelector("td:nth-child(2)")?.textContent?.endsWith(" repriced") === true &&
-              target.querySelector("td:nth-child(4)")?.textContent === "$-1"
+              target
+                .querySelector("td:nth-child(2)")
+                ?.textContent?.endsWith(expectedLabelSuffix) === true &&
+              target.querySelector("td:nth-child(4)")?.textContent === expectedAmount
             );
           });
         };
@@ -1229,6 +1235,26 @@ async function measureTrial(browser, trial, compilerMode, port) {
           async () =>
             measureMapReorderPipeline(() =>
               tableButton("table-map-reorder-pipeline-snapshot").click(),
+            ),
+        );
+
+        const tableMultiMapReorderPipeline = await measureTable(
+          async () => create10000(),
+          async () =>
+            measureMapReorderPipeline(
+              () => tableButton("table-multi-map-reorder-pipeline").click(),
+              " reviewed",
+              "$-2",
+            ),
+        );
+
+        const tableMultiMapReorderPipelineSnapshot = await measureTable(
+          async () => create10000(),
+          async () =>
+            measureMapReorderPipeline(
+              () => tableButton("table-multi-map-reorder-pipeline-snapshot").click(),
+              " reviewed",
+              "$-2",
             ),
         );
 
@@ -1628,6 +1654,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
             filterReorderPipelineSnapshot: tableFilterReorderPipelineSnapshot,
             mapReorderPipeline: tableMapReorderPipeline,
             mapReorderPipelineSnapshot: tableMapReorderPipelineSnapshot,
+            multiMapReorderPipeline: tableMultiMapReorderPipeline,
+            multiMapReorderPipelineSnapshot: tableMultiMapReorderPipelineSnapshot,
             mapLookup: tableMapLookup,
             membership: tableMembership,
             prepend: tablePrepend,
@@ -1752,6 +1780,10 @@ async function measureTrial(browser, trial, compilerMode, port) {
         filterReorderPipelineSnapshot: timingSummary(result.table.filterReorderPipelineSnapshot),
         mapReorderPipeline: timingSummary(result.table.mapReorderPipeline),
         mapReorderPipelineSnapshot: timingSummary(result.table.mapReorderPipelineSnapshot),
+        multiMapReorderPipeline: timingSummary(result.table.multiMapReorderPipeline),
+        multiMapReorderPipelineSnapshot: timingSummary(
+          result.table.multiMapReorderPipelineSnapshot,
+        ),
         mapLookup: timingSummary(result.table.mapLookup),
         membership: timingSummary(result.table.membership),
         prepend: timingSummary(result.table.prepend),
@@ -1926,6 +1958,8 @@ const tableMetrics = [
   "filterReorderPipelineSnapshot",
   "mapReorderPipeline",
   "mapReorderPipelineSnapshot",
+  "multiMapReorderPipeline",
+  "multiMapReorderPipelineSnapshot",
   "snapshotMembership",
   "snapshotMapLookup",
   "slicePrefix",
@@ -2562,6 +2596,29 @@ const keyedMapReorderRegressions = keyedMapReorderResults.filter(
     !Number.isFinite(snapshotSpeedup) ||
     snapshotSpeedup < keyedMapReorderMinimumSnapshotSpeedup,
 );
+// Multiple safe map stages should keep one flat source-row lineage and still reconcile only the
+// final permutation. Compare the concise two-map setter with React and its block-bodied compiled
+// control at 10,000 rows.
+const keyedMultiMapReorderMinimumSpeedup = 4;
+const keyedMultiMapReorderMinimumSnapshotSpeedup = 1.2;
+const keyedMultiMapReorderResults = ["static", "hybrid"].map((mode) => {
+  const pipelineMedianMs = comparisons.table.multiMapReorderPipeline[mode].medianMs;
+  const snapshotMedianMs = comparisons.table.multiMapReorderPipelineSnapshot[mode].medianMs;
+  return {
+    mode,
+    pipelineMedianMs,
+    snapshotMedianMs,
+    snapshotSpeedup: snapshotMedianMs / pipelineMedianMs,
+    speedup: comparisons.table.multiMapReorderPipeline[`${mode}VsBaseline`].speedup,
+  };
+});
+const keyedMultiMapReorderRegressions = keyedMultiMapReorderResults.filter(
+  ({ snapshotSpeedup, speedup }) =>
+    !Number.isFinite(speedup) ||
+    speedup < keyedMultiMapReorderMinimumSpeedup ||
+    !Number.isFinite(snapshotSpeedup) ||
+    snapshotSpeedup < keyedMultiMapReorderMinimumSnapshotSpeedup,
+);
 // A direct native toSorted() exposes a permutation while preserving every keyed row object. The
 // hinted path validates that permutation by item identity, uses LIS to move only the required DOM
 // nodes, and avoids key, descriptor, and binding reads. Compare it with React and the equivalent
@@ -2750,6 +2807,7 @@ const passed =
   keyedReorderPipelineRegressions.length === 0 &&
   keyedStructuralReorderRegressions.length === 0 &&
   keyedMapReorderRegressions.length === 0 &&
+  keyedMultiMapReorderRegressions.length === 0 &&
   keyedSortRegressions.length === 0 &&
   keyedFilterRegressions.length === 0 &&
   keyedIdentityRegressions.length === 0 &&
@@ -2915,6 +2973,13 @@ const report = {
     regressions: keyedMapReorderRegressions,
     results: keyedMapReorderResults,
     status: keyedMapReorderRegressions.length === 0 ? "PASS" : "FAIL",
+  },
+  keyedMultiMapReorderHintGate: {
+    minimumSnapshotSpeedup: keyedMultiMapReorderMinimumSnapshotSpeedup,
+    minimumSpeedup: keyedMultiMapReorderMinimumSpeedup,
+    regressions: keyedMultiMapReorderRegressions,
+    results: keyedMultiMapReorderResults,
+    status: keyedMultiMapReorderRegressions.length === 0 ? "PASS" : "FAIL",
   },
   keyedSortHintGate: {
     minimumSnapshotSpeedup: keyedSortMinimumSnapshotSpeedup,
