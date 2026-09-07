@@ -15,9 +15,11 @@ if ! command -v pnpm &> /dev/null; then
 fi
 
 # Check Node.js version
-NODE_VERSION=$(node --version | cut -d'v' -f2 | cut -d'.' -f1)
-if [ "$NODE_VERSION" -lt 18 ]; then
-    echo "❌ Node.js 18+ is required. Current version: $(node --version)"
+NODE_VERSION=$(node --version | cut -d'v' -f2)
+NODE_MAJOR=$(echo "$NODE_VERSION" | cut -d'.' -f1)
+NODE_MINOR=$(echo "$NODE_VERSION" | cut -d'.' -f2)
+if [ "$NODE_MAJOR" -lt 22 ] || { [ "$NODE_MAJOR" -eq 22 ] && [ "$NODE_MINOR" -lt 12 ]; }; then
+    echo "❌ Node.js 22.12 or newer is required. Current version: $(node --version)"
     exit 1
 fi
 

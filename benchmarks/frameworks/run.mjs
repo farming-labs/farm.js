@@ -354,9 +354,9 @@ function printHelp() {
 
 function assertSupportedNode(selected) {
   const [major, minor] = process.versions.node.split(".").map(Number);
-  if (major < 20 || (major === 20 && minor < 19) || major % 2 !== 0) {
+  if (major < 22 || (major === 22 && minor < 12) || major % 2 !== 0) {
     throw new Error(
-      "Use an even-numbered LTS Node release >=20.19 for comparable runs. Current: " +
+      "Use an even-numbered LTS Node release >=22.12 for comparable runs. Current: " +
         process.versions.node,
     );
   }
