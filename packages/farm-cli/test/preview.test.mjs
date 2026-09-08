@@ -379,6 +379,41 @@ test("keeps the gateway session alive after one local request fails", async () =
   }
 });
 
+test("cancels streaming local health probe responses", async () => {
+  const app = await createStreamingTestServer();
+  const gateway = await createPreviewGatewayTestServer();
+  const plan = createPreviewGatewayPlan(
+    {
+      localUrl: `http://localhost:${app.port}`,
+      host: "localhost",
+      port: app.port,
+      source: "port",
+    },
+    { gatewayUrl: gateway.url, name: "probe-cleanup" },
+  );
+
+  try {
+    const preview = runPreviewGateway(plan, {
+      pollTimeoutMs: 25,
+      localProbeIntervalMs: 20,
+      localProbeTimeoutMs: 200,
+    });
+
+    await gateway.waitForSession();
+    await Promise.race([
+      app.waitForCancellation(),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("streaming health probe was not cancelled")), 500),
+      ),
+    ]);
+    await app.close();
+    await preview;
+  } finally {
+    await app.close().catch(() => undefined);
+    await gateway.close();
+  }
+});
+
 test("falls back to gateway polling while the hosted native relay is unavailable", async () => {
   const app = await createTestServer();
   const gateway = await createPreviewGatewayTestServer();
@@ -493,6 +528,34 @@ async function createTestServer(handler) {
 
   return {
     port: address.port,
+    close: () =>
+      new Promise((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      }),
+  };
+}
+
+async function createStreamingTestServer() {
+  let resolveCancellation;
+  const cancellation = new Promise((resolve) => {
+    resolveCancellation = resolve;
+  });
+  const server = createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "text/plain" });
+    res.write("streaming");
+    res.once("close", resolveCancellation);
+  });
+
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, resolve);
+  });
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+
+  return {
+    port: address.port,
+    waitForCancellation: () => cancellation,
     close: () =>
       new Promise((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()));
