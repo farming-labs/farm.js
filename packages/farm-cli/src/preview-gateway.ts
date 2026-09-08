@@ -270,6 +270,7 @@ export async function forwardGatewayRequest(
     body: hasBody
       ? Buffer.from(request.body || "", request.encoding === "base64" ? "base64" : "utf8")
       : undefined,
+    redirect: "manual",
   });
 
   const responseHeaders: Record<string, string | string[]> = {};
