@@ -18,6 +18,7 @@ describe("createWebRequestFromFarmRequest", () => {
         "x-forwarded-host": "app.example.com, internal:3000",
         "x-forwarded-proto": "https, http",
       }),
+      { trustProxy: true },
     );
 
     expect(result.url).toBe("https://app.example.com/account?tab=profile");
@@ -30,6 +31,7 @@ describe("createWebRequestFromFarmRequest", () => {
         "x-forwarded-host": ["app.example.com", "internal:3000"],
         "x-forwarded-proto": ["https", "http"],
       }),
+      { trustProxy: true },
     );
 
     expect(result.url).toBe("https://app.example.com/account?tab=profile");
@@ -42,6 +44,7 @@ describe("createWebRequestFromFarmRequest", () => {
         "x-forwarded-host": "not a valid host",
         "x-forwarded-proto": "javascript",
       }),
+      { trustProxy: true },
     );
 
     expect(result.url).toBe("http://farm.test/account?tab=profile");
@@ -54,9 +57,40 @@ describe("createWebRequestFromFarmRequest", () => {
         "x-forwarded-host": "evil.test/path",
         "x-forwarded-proto": "HTTPS",
       }),
+      { trustProxy: true },
     );
 
     expect(result.url).toBe("https://farm.test/account?tab=profile");
+  });
+
+  it("ignores forwarded authority unless trustProxy is enabled", () => {
+    const direct = createWebRequestFromFarmRequest(
+      request({
+        host: "farm.test",
+        "x-forwarded-host": "attacker.example",
+        "x-forwarded-proto": "https",
+      }),
+    );
+    const proxied = createWebRequestFromFarmRequest(
+      request({
+        host: "internal:3000",
+        "x-forwarded-host": "app.example.com",
+        "x-forwarded-proto": "https",
+      }),
+      { trustProxy: true },
+    );
+
+    expect(direct.url).toBe("http://farm.test/account?tab=profile");
+    expect(proxied.url).toBe("https://app.example.com/account?tab=profile");
+  });
+
+  it("uses the trusted context origin for middleware Request conversion", () => {
+    const result = createWebRequestFromFarmRequest(
+      request({ host: "internal:3000", "x-forwarded-host": "ignored.example" }),
+      { origin: "https://app.example.com" },
+    );
+
+    expect(result.url).toBe("https://app.example.com/account?tab=profile");
   });
 });
 

@@ -997,7 +997,9 @@ export class ServerRenderer {
     await this.initialize();
     setFarmBasePath(this.config.basePath);
     setFarmTrailingSlashPreference(this.config.trailingSlash);
-    const request = createWebRequestFromFarmRequest(req);
+    const request = createWebRequestFromFarmRequest(req, {
+      trustProxy: this.config.server?.trustProxy,
+    });
     const runtime = this.i18nRuntime;
 
     if (runtime?.config.enabled) {
@@ -1125,7 +1127,9 @@ export class ServerRenderer {
       pluginExposedContext = getRequestContextSnapshot(req as object, {
         exposedOnly: true,
       });
-      const currentRequest = createWebRequestFromFarmRequest(req);
+      const currentRequest = createWebRequestFromFarmRequest(req, {
+        trustProxy: this.config.server?.trustProxy,
+      });
       const routeContext = await this.resolveRouteContext({
         request: currentRequest,
         rawRequest: req,
@@ -1881,7 +1885,9 @@ export class ServerRenderer {
         );
       }
 
-      const request = createWebRequestFromFarmRequest(req);
+      const request = createWebRequestFromFarmRequest(req, {
+        trustProxy: this.config.server?.trustProxy,
+      });
       const url = new URL(request.url);
       const value =
         typeof routeModule.default === "function"

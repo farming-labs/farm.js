@@ -23,7 +23,7 @@ export interface ResolvedFarmServerHealthConfig {
 export interface FarmServerConfig {
   /** Maximum request body size for API routes, integrations, workflows, and uploads. */
   bodySizeLimit?: number | string;
-  /** Trust proxy-provided client IP headers. Enable only behind a trusted proxy. */
+  /** Trust proxy-provided client address and request authority headers. Enable only behind a trusted proxy. */
   trustProxy?: boolean;
   /** Maximum time for a Node client to send complete request headers. */
   headersTimeout?: FarmServerDuration;

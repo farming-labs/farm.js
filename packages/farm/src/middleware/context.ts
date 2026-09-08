@@ -5,6 +5,8 @@
 import type { IncomingMessage, ServerResponse } from "http";
 import type { ViteDevServer } from "vite";
 import type { MiddlewareContext, CookieJar, CookieOptions } from "./types";
+import type { FarmServerConfig, ResolvedFarmServerConfig } from "../server-http";
+import { resolveFarmRequestURL } from "../server/request";
 import { parseMiddlewareCookieHeader } from "./cookie-header";
 
 /**
@@ -102,8 +104,9 @@ export function createContext(
   res: ServerResponse,
   viteServer?: ViteDevServer,
   parent?: MiddlewareContext["parent"],
+  server?: FarmServerConfig | ResolvedFarmServerConfig,
 ): MiddlewareContext {
-  const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+  const url = resolveFarmRequestURL(req, { trustProxy: server?.trustProxy });
   const headers = new Map<string, string>();
   const data = parent?.data ? new Map(parent.data) : new Map<string, any>();
   const locals = parent?.locals ? new Map(parent.locals) : new Map<string, any>();

@@ -1077,6 +1077,7 @@ export function farmPlugin(
         server,
         farmConfig.middleware,
         farmConfig.i18n,
+        farmConfig.server,
       );
       await middlewareManager.discover();
       if (pm) {
