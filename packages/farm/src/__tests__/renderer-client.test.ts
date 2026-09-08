@@ -91,6 +91,35 @@ describe("renderer-neutral client primitives", () => {
     expect(ping).toHaveBeenCalledWith(undefined);
   });
 
+  it("settles after an older concurrent action finishes last", async () => {
+    const resolvers = new Map<number, (value: string) => void>();
+    const save = vi.fn(
+      (input: number) =>
+        new Promise<string>((resolve) => {
+          resolvers.set(input, resolve);
+        }),
+    ) as unknown as ServerFn<number, string>;
+    const action = createRendererAction(save);
+
+    const first = action.submit(1);
+    const second = action.submit(2);
+    resolvers.get(2)?.("second");
+    await expect(second).resolves.toBe("second");
+    expect(action.getSnapshot()).toMatchObject({
+      pending: true,
+      status: "pending",
+      data: "second",
+    });
+
+    resolvers.get(1)?.("first");
+    await expect(first).resolves.toBe("first");
+    expect(action.getSnapshot()).toMatchObject({
+      pending: false,
+      status: "success",
+      data: "second",
+    });
+  });
+
   it("shares query cache state and supports forced refetches", async () => {
     let version = 0;
     const query = (async ({ id }: { id: string }) => ({ id, version: ++version })) as ServerQuery<
