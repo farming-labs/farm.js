@@ -744,6 +744,27 @@ describe("createFarmDocsHandler", () => {
     await expect(handler(new Request("http://farm.test/dashboard"))).resolves.toBeNull();
   });
 
+  it("returns bodyless HEAD responses for docs pages and public artifacts", async () => {
+    const { root, docs } = await createDocsFixture();
+    const handler = createFarmDocsHandler(docs, { root, srcDir: "src" });
+
+    for (const pathname of ["/docs/guide", "/docs/guide.md", "/llms.txt"]) {
+      const getResponse = await handler(new Request(`http://farm.test${pathname}`));
+      const headResponse = await handler(
+        new Request(`http://farm.test${pathname}`, { method: "HEAD" }),
+      );
+
+      expect(headResponse?.status).toBe(getResponse?.status);
+      expect(headResponse?.headers.get("content-type")).toBe(
+        getResponse?.headers.get("content-type"),
+      );
+      expect(headResponse?.headers.get("cache-control")).toBe(
+        getResponse?.headers.get("cache-control"),
+      );
+      await expect(headResponse?.text()).resolves.toBe("");
+    }
+  });
+
   it("softens a trailing .js in the sidebar brand title", async () => {
     const { root, docs } = await createDocsFixture();
     const handler = createFarmDocsHandler(
@@ -814,6 +835,13 @@ describe("createDocsAPI", () => {
         entry: "docs",
       },
     });
+
+    const headResponse = await handler(
+      new Request("http://farm.test/api/docs?format=config", { method: "HEAD" }),
+    );
+    expect(headResponse?.status).toBe(200);
+    expect(headResponse?.headers.get("content-type")).toBe("application/json");
+    await expect(headResponse?.text()).resolves.toBe("");
   });
 
   it("creates Next-style GET and POST route handlers for Farm API routes", async () => {

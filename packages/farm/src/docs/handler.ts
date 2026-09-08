@@ -791,6 +791,15 @@ function createFarmDocsPublicResponse(
   return null;
 }
 
+function omitFarmDocsHeadBody(request: Request, response: Response): Response {
+  if (request.method !== "HEAD") return response;
+  return new Response(null, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
+}
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, "&amp;")
@@ -1782,7 +1791,7 @@ export function createFarmDocsHandler(
     }
 
     const publicResponse = createFarmDocsPublicResponse(contentDir, docs, request);
-    if (publicResponse) return publicResponse;
+    if (publicResponse) return omitFarmDocsHeadBody(request, publicResponse);
 
     if (!isFarmDocsRequest(docs, request)) return null;
 
@@ -1791,19 +1800,22 @@ export function createFarmDocsHandler(
 
     if (shouldReturnMarkdown(request)) {
       const origin = new URL(request.url).origin;
-      return new Response(
-        renderDocsMarkdownDocument(toFarmDocsMarkdownPage(page), {
-          origin,
-          llms: docs.config.llmsTxt ?? true,
-          sitemap: docs.config.sitemap,
-        }),
-        {
-          status: 200,
-          headers: {
-            "Content-Type": "text/markdown; charset=utf-8",
-            "Cache-Control": "public, max-age=60",
+      return omitFarmDocsHeadBody(
+        request,
+        new Response(
+          renderDocsMarkdownDocument(toFarmDocsMarkdownPage(page), {
+            origin,
+            llms: docs.config.llmsTxt ?? true,
+            sitemap: docs.config.sitemap,
+          }),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "text/markdown; charset=utf-8",
+              "Cache-Control": "public, max-age=60",
+            },
           },
-        },
+        ),
       );
     }
 
@@ -1815,26 +1827,29 @@ export function createFarmDocsHandler(
       ? renderFarmLayoutFontPreloadHeader(layoutFonts)
       : fallbackFontPreloadHeader;
 
-    return new Response(
-      renderPixelDocsHtml(
-        page,
-        discoverFarmDocsPages(contentDir, docs),
-        docs,
-        options.clientEntry || "/farm-client.js",
-        faviconHref,
-        requestUrl,
-        activeFontAssets,
-        usesLayoutFonts ? options.fontStylesheetHref : undefined,
-        options.globalStylesheetHref,
-      ),
-      {
-        status: 200,
-        headers: {
-          "Content-Type": "text/html; charset=utf-8",
-          "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300",
-          ...(fontPreloadHeader ? { Link: fontPreloadHeader } : {}),
+    return omitFarmDocsHeadBody(
+      request,
+      new Response(
+        renderPixelDocsHtml(
+          page,
+          discoverFarmDocsPages(contentDir, docs),
+          docs,
+          options.clientEntry || "/farm-client.js",
+          faviconHref,
+          requestUrl,
+          activeFontAssets,
+          usesLayoutFonts ? options.fontStylesheetHref : undefined,
+          options.globalStylesheetHref,
+        ),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "text/html; charset=utf-8",
+            "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300",
+            ...(fontPreloadHeader ? { Link: fontPreloadHeader } : {}),
+          },
         },
-      },
+      ),
     );
   };
 }
