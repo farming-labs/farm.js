@@ -45,6 +45,8 @@ const testSource = String.raw`
     createCompilerKeyedArrayAppend,
     createCompilerKeyedArrayBatchInsert,
     createCompilerKeyedArrayFilter,
+    createCompilerKeyedArrayMapPipeline,
+    createCompilerKeyedArrayMapReorder,
     createCompilerKeyedArrayPositionUpdate,
     createCompilerKeyedArrayPrepend,
     createCompilerKeyedArrayReorder,
@@ -91,6 +93,7 @@ const testSource = String.raw`
   flushSync(() => root.unmount());
 
   let reverseCompatibilityRows = () => undefined;
+  let mapReverseParityCompatibilityRows = () => undefined;
   let insertCompatibilityRows = () => undefined;
   let removeCompatibilityRow = () => undefined;
   let replaceCompatibilityRows = () => undefined;
@@ -112,6 +115,16 @@ const testSource = String.raw`
         state[0].set((previous) =>
           createCompilerKeyedArrayReorder(previous, previous.toReversed),
         );
+      mapReverseParityCompatibilityRows = () =>
+        state[0].set((previous) => {
+          const mapped = createCompilerKeyedArrayMapPipeline(
+            previous,
+            previous.map,
+            (item) => item.id === "b" ? { ...item, label: "Beta parity" } : item,
+          );
+          const reversed = createCompilerKeyedArrayMapReorder(mapped, mapped.toReversed);
+          return createCompilerKeyedArrayMapReorder(reversed, reversed.toReversed);
+        });
       removeCompatibilityRow = () =>
         state[0].set((previous) =>
           createCompilerKeyedArrayPositionUpdate(
@@ -234,6 +247,13 @@ const testSource = String.raw`
   await Promise.resolve();
   await Promise.resolve();
   assert.equal(reorderContainer.querySelector("li:first-child"), reorderGamma);
+  assert.equal(reorderContainer.querySelector("li:last-child"), reorderAlpha);
+  assert.equal(reorderExecutions, 1);
+  mapReverseParityCompatibilityRows();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(reorderContainer.querySelector("li:first-child"), reorderGamma);
+  assert.equal(reorderContainer.querySelector("[data-key='b']").textContent, "Beta parity");
   assert.equal(reorderContainer.querySelector("li:last-child"), reorderAlpha);
   assert.equal(reorderExecutions, 1);
   const reorderBeta = reorderContainer.querySelector("[data-key='b']");

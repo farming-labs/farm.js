@@ -291,6 +291,35 @@ describe("React AOT keyed-array sort hints", () => {
     expect(result.code).toContain("keyedRowsMapReorderHintedRuntimeFeature");
   });
 
+  it("preserves every step in an exact mapped reverse-parity pipeline", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Table({ editedId, nextLabel }) {
+        const [rows, setRows] = useState([
+          { id: "a", label: "Alpha" },
+          { id: "b", label: "Beta" },
+        ]);
+        return <section>
+          <button onClick={() => setRows((current) => current
+            .map((row) => row.id === editedId ? { ...row, label: nextLabel } : row)
+            .toReversed()
+            .toReversed()
+            .toReversed()
+          )}>Edit and reverse</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </section>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Table"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.optimizations.keyedMapUpdateHints).toBe(1);
+    expect(result.optimizations.keyedArrayReorderHints).toBe(3);
+    expect(result.code.match(/createCompilerKeyedArrayMapPipeline\(/g)).toHaveLength(1);
+    expect(result.code.match(/createCompilerKeyedArrayMapReorder\(/g)).toHaveLength(3);
+    expect(result.code).toContain("keyedRowsMapReorderHintedRuntimeFeature");
+  });
+
   it("does not lower map and reorder pipelines for host-backed keyed rows", async () => {
     const result = await compile(`
       import { useState } from "react";

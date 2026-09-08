@@ -194,17 +194,19 @@ correctness, hydration, and cleanup.
 
 Queued native reorders have another independent 10,000-row comparison. One event queues two
 concise `toReversed()` setters, so the final order equals the committed order. Farm must validate
-that final permutation once, retain every DOM node, perform no intermediate DOM moves, and remain
+that exact identity once without building the generic item map or running LIS, retain every DOM
+node, perform no intermediate DOM moves, and remain
 at least 2x faster than React and 1.25x faster than the equivalent block-bodied compiled control.
 Package tests also cover queued sorts, mixed sort/reverse chains, thousands of randomized batches,
 unsafe fallback, focus and selection, hydration, and cleanup.
 
 Native reorder pipelines have a separate 10,000-row comparison. One functional setter evaluates
 `current.toReversed().toReversed()`, so the final order again equals the committed order without
-using two queued React updates. Farm must preserve both native calls, validate the final permutation
-once, retain every DOM node, and remain at least 2x faster than React and 1.25x faster than the
-equivalent block-bodied compiled control. Package tests compile mixed sort/reverse pipelines and
-compare 2,000 deterministic two-to-four-step pipelines with normal React.
+using two queued React updates. Farm must preserve both native calls, validate exact identity
+without the generic item map or LIS, retain every DOM node, and remain at least 2x faster than React
+and 1.25x faster than the equivalent block-bodied compiled control. Package tests compile mixed
+sort/reverse pipelines and compare 2,000 deterministic two-to-four-step pipelines with normal
+React.
 
 Structural reorder pipelines add an independent 10,000-row comparison. One concise setter filters
 one row and then evaluates two native reversals, while the block-bodied version remains the compiled
@@ -240,6 +242,14 @@ least 4x faster than React and 1.2x faster than the compiled control. The assert
 reversed order, every original DOM identity and connection, and the changed row values. The hinted
 path validates mirrored row lineage and uses the minimum `n - 1` moves without a source-item map or
 LIS pass.
+
+Mapped reverse parity has an independent 10,000-row comparison. Two safe native maps update one
+row, then two native reversals restore committed order. Farm must patch the changed row without
+moving any DOM row or constructing the generic source-item map/LIS sequence. Both compiler modes
+must remain at least 8x faster than React and 1.5x faster than the equivalent block-bodied compiled
+control. The assertion checks all final values, positions, identities, and connections. Package
+tests compare one to four reversals across 2,000 deterministic updates and cover queued parity,
+changed-key and subclass fallback, Strict Mode hydration, and cleanup.
 
 Native keyed-array sorting has its own 10,000-row comparison. Concise `toSorted()` is measured
 against bracketed React and an equivalent block-bodied compiled control. Both compiler modes must
@@ -337,6 +347,10 @@ The default JSON report is `/tmp/farm-react-dashboard-benchmark.json`; change it
 - The multi-map reverse control changes the same row through two native maps and then reverses all
   rows. Its block-bodied equivalent performs the same maps and connected DOM moves, while the
   hinted path validates mirrored lineage directly and skips the temporary source map and LIS pass.
+- The multi-map reverse-parity control changes the same row through two native maps and then
+  reverses twice. Its block-bodied equivalent keeps complete reconciliation; the hinted path
+  validates exact committed order, patches the row once, and performs no generic item-map, LIS, or
+  DOM-movement work.
 - The sort control compares concise native `toSorted()` with an equivalent block-bodied compiled
   update. Both paths run the same native sort and move the same keyed DOM rows; the hint isolates
   the saved key, descriptor, and binding work while retaining only the required LIS moves.
