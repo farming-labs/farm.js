@@ -50,6 +50,7 @@ export async function startTypeScriptPreviewAgent(
   try {
     ready = await waitForReady(socket, options);
   } catch (error) {
+    await terminateSocket(socket);
     socket.off("error", onSocketError);
     throw error;
   }
@@ -287,6 +288,14 @@ function closeSocket(socket: WebSocket) {
   return new Promise<void>((resolve) => {
     socket.once("close", () => resolve());
     socket.close(1000, "Preview agent stopped");
+  });
+}
+
+function terminateSocket(socket: WebSocket) {
+  if (socket.readyState === socket.CLOSED) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    socket.once("close", () => resolve());
+    socket.terminate();
   });
 }
 
