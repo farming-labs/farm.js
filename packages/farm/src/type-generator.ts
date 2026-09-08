@@ -1,7 +1,10 @@
 import { readFileSync, existsSync, readdirSync, mkdirSync } from "fs";
 import { join, relative, dirname } from "path";
+import { initSync, parse } from "es-module-lexer";
 import { writeFileIfChanged } from "./write-file-if-changed";
 import { isFarmAPIRouteFileName } from "./api/route-files";
+
+let moduleLexerInitialized = false;
 
 const API_CLIENT_METHOD_SEGMENTS = new Set([
   "get",
@@ -120,34 +123,47 @@ export class APITypeGenerator {
   }
 
   private extractExportedMethods(content: string): string[] {
-    const methods: string[] = [];
+    if (!moduleLexerInitialized) {
+      initSync();
+      moduleLexerInitialized = true;
+    }
     const httpMethods = ["GET", "HEAD", "QUERY", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"];
-    const namedExports = new Set<string>();
+    const [, exports] = parse(content);
+    const valueExports = new Set(
+      exports
+        .filter((specifier) => !this.isTypeOnlyExportSpecifier(content, specifier.s))
+        .map((specifier) => specifier.n),
+    );
+    return httpMethods.filter((method) => valueExports.has(method));
+  }
 
-    for (const match of content.matchAll(/export\s*\{([\s\S]*?)\}/g)) {
-      for (const specifier of match[1].split(",")) {
-        const normalized = specifier.trim().replace(/^type\s+/, "");
-        if (!normalized) continue;
+  private isTypeOnlyExportSpecifier(content: string, exportNameStart: number): boolean {
+    let cursor = exportNameStart - 1;
 
-        const alias = normalized.match(/^([A-Za-z_$][\w$]*)\s+as\s+([A-Za-z_$][\w$]*)$/);
-        const exportedName = alias?.[2] ?? normalized.match(/^([A-Za-z_$][\w$]*)$/)?.[1];
-        if (exportedName) namedExports.add(exportedName);
+    while (cursor >= 0) {
+      while (cursor >= 0 && /\s/.test(content[cursor])) cursor--;
+
+      if (content.slice(cursor - 1, cursor + 1) === "*/") {
+        const commentStart = content.lastIndexOf("/*", cursor - 1);
+        if (commentStart >= 0) {
+          cursor = commentStart - 1;
+          continue;
+        }
       }
+
+      const lineStart = content.lastIndexOf("\n", cursor) + 1;
+      const lineCommentStart = content.indexOf("//", lineStart);
+      if (lineCommentStart >= 0 && lineCommentStart <= cursor) {
+        cursor = lineCommentStart - 1;
+        continue;
+      }
+
+      break;
     }
 
-    for (const method of httpMethods) {
-      // Look for a direct declaration or the name exposed by an export list.
-      const patterns = [
-        new RegExp(`export\\s+(?:const|let|var)\\s+${method}\\s*(?::|=)`, "g"),
-        new RegExp(`export\\s+(?:async\\s+)?function\\s+${method}\\s*\\(`, "g"),
-      ];
-
-      if (namedExports.has(method) || patterns.some((pattern) => pattern.test(content))) {
-        methods.push(method);
-      }
-    }
-
-    return methods;
+    const tokenEnd = cursor + 1;
+    while (cursor >= 0 && /[A-Za-z0-9_$]/.test(content[cursor])) cursor--;
+    return content.slice(cursor + 1, tokenEnd) === "type";
   }
 
   /**

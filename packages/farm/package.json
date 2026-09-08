@@ -615,6 +615,7 @@
     "@vitejs/plugin-react": "^4.2.1",
     "better-call": "^1.0.19",
     "db0": "^0.3.4",
+    "es-module-lexer": "2.0.0",
     "esbuild": "^0.28.0",
     "fast-glob": "^3.3.2",
     "h3": "2.0.1-rc.5",

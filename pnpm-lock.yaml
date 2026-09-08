@@ -1505,6 +1505,9 @@ importers:
       db0:
         specifier: ^0.3.4
         version: 0.3.4(drizzle-orm@0.45.2)
+      es-module-lexer:
+        specifier: 2.0.0
+        version: 2.0.0
       esbuild:
         specifier: ^0.28.0
         version: 0.28.1

@@ -35,6 +35,9 @@ export const POST = createEndpoint(
 
 You can also manually export GET, POST, PATCH, and other handlers from the route file. Farm keeps this familiar while layering typed helpers around it.
 
+Generated API client types follow runtime value exports. Comments, string examples, and type-only
+exports named after HTTP methods do not create callable endpoints.
+
 **src/app/api/status/route.ts**
 
 ```ts
