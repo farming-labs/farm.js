@@ -945,6 +945,46 @@ export function StandardTableBenchmark() {
           Review + reprice + sort one row (snapshot control)
         </button>
         <button
+          data-action="table-multi-map-reverse-pipeline"
+          type="button"
+          onClick={() => {
+            setRows((current) =>
+              current
+                .map((row) =>
+                  row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
+                )
+                .map((row) =>
+                  row.id % 10_000 === 5_001 ? { ...row, amount: row.amount + 1 } : row,
+                )
+                .toReversed(),
+            );
+            setOperation("review, reprice, and reverse rows");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Review + reprice + reverse rows
+        </button>
+        <button
+          data-action="table-multi-map-reverse-pipeline-snapshot"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              return current
+                .map((row) =>
+                  row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
+                )
+                .map((row) =>
+                  row.id % 10_000 === 5_001 ? { ...row, amount: row.amount + 1 } : row,
+                )
+                .toReversed();
+            });
+            setOperation("review, reprice, and reverse rows (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Review + reprice + reverse rows (snapshot control)
+        </button>
+        <button
           data-action="table-sort"
           type="button"
           onClick={() => {

@@ -1304,6 +1304,67 @@ async function measureTrial(browser, trial, compilerMode, port) {
           " reviewed",
         );
 
+        const prepareMultiMapReversePipeline = async () => {
+          await create10000();
+          const rows = [...table.querySelectorAll("tbody tr")];
+          const target = rows.find(
+            (row) => Number(row.getAttribute("data-row-id")) % 10_000 === 5_001,
+          );
+          const amountText = target?.querySelector("td:nth-child(4)")?.textContent;
+          const amount = Number(amountText?.slice(1));
+          if (!target || !Number.isFinite(amount)) {
+            throw new Error("Mapped-reverse target row is invalid.");
+          }
+          return { expectedRows: [...rows].reverse(), rows, target, amount: amount + 1 };
+        };
+
+        const measureMultiMapReversePipeline = async (action, prepared) => {
+          if (!prepared) throw new Error("Mapped-reverse expectation is missing.");
+          const { expectedRows, rows, target, amount } = prepared;
+          await runTableAction(action, () => {
+            const nextRows = table.querySelectorAll("tbody tr");
+            return (
+              nextRows.length === 10_000 &&
+              nextRows[0] === expectedRows[0] &&
+              target.querySelector("td:nth-child(2)")?.textContent?.endsWith(" reviewed") ===
+                true &&
+              target.querySelector("td:nth-child(4)")?.textContent === `$${amount}`
+            );
+          });
+          return () => {
+            const nextRows = table.querySelectorAll("tbody tr");
+            if (!rowsMatch(nextRows, expectedRows) || rows.some((row) => !row.isConnected)) {
+              throw new Error("Mapped-reverse rows do not match the complete expected reversal.");
+            }
+          };
+        };
+
+        const measureMultiMapReverseTable = async (action) => {
+          for (let sample = 0; sample < warmupSamples; sample += 1) {
+            const verify = await measureMultiMapReversePipeline(
+              action,
+              await prepareMultiMapReversePipeline(),
+            );
+            verify();
+          }
+          const timings = [];
+          for (let sample = 0; sample < tableSamples; sample += 1) {
+            const prepared = await prepareMultiMapReversePipeline();
+            const startedAt = performance.now();
+            const verify = await measureMultiMapReversePipeline(action, prepared);
+            timings.push(performance.now() - startedAt);
+            verify();
+          }
+          return timings;
+        };
+
+        const tableMultiMapReversePipeline = await measureMultiMapReverseTable(() =>
+          tableButton("table-multi-map-reverse-pipeline").click(),
+        );
+        const tableMultiMapReversePipelineSnapshot = await measureMultiMapReverseTable(() =>
+          tableButton("table-multi-map-reverse-pipeline-snapshot").click(),
+        );
+
         const tableSort = await measureTable(
           async () => create10000(),
           async () => {
@@ -1778,6 +1839,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
             multiMapUpdateSnapshot: tableMultiMapUpdateSnapshot,
             multiMapReorderPipeline: tableMultiMapReorderPipeline,
             multiMapReorderPipelineSnapshot: tableMultiMapReorderPipelineSnapshot,
+            multiMapReversePipeline: tableMultiMapReversePipeline,
+            multiMapReversePipelineSnapshot: tableMultiMapReversePipelineSnapshot,
             mapLookup: tableMapLookup,
             membership: tableMembership,
             prepend: tablePrepend,
@@ -1907,6 +1970,10 @@ async function measureTrial(browser, trial, compilerMode, port) {
         multiMapReorderPipeline: timingSummary(result.table.multiMapReorderPipeline),
         multiMapReorderPipelineSnapshot: timingSummary(
           result.table.multiMapReorderPipelineSnapshot,
+        ),
+        multiMapReversePipeline: timingSummary(result.table.multiMapReversePipeline),
+        multiMapReversePipelineSnapshot: timingSummary(
+          result.table.multiMapReversePipelineSnapshot,
         ),
         mapLookup: timingSummary(result.table.mapLookup),
         membership: timingSummary(result.table.membership),
@@ -2086,6 +2153,8 @@ const tableMetrics = [
   "multiMapUpdateSnapshot",
   "multiMapReorderPipeline",
   "multiMapReorderPipelineSnapshot",
+  "multiMapReversePipeline",
+  "multiMapReversePipelineSnapshot",
   "snapshotMembership",
   "snapshotMapLookup",
   "slicePrefix",
@@ -2768,6 +2837,28 @@ const keyedMultiMapReorderRegressions = keyedMultiMapReorderResults.filter(
     !Number.isFinite(snapshotSpeedup) ||
     snapshotSpeedup < keyedMultiMapReorderMinimumSnapshotSpeedup,
 );
+// A compiler-proven map chain followed directly by toReversed() has an exact permutation. It
+// should use the minimum-move reverse path instead of allocating an item map and running LIS.
+const keyedMultiMapReverseMinimumSpeedup = 4;
+const keyedMultiMapReverseMinimumSnapshotSpeedup = 1.2;
+const keyedMultiMapReverseResults = ["static", "hybrid"].map((mode) => {
+  const pipelineMedianMs = comparisons.table.multiMapReversePipeline[mode].medianMs;
+  const snapshotMedianMs = comparisons.table.multiMapReversePipelineSnapshot[mode].medianMs;
+  return {
+    mode,
+    pipelineMedianMs,
+    snapshotMedianMs,
+    snapshotSpeedup: snapshotMedianMs / pipelineMedianMs,
+    speedup: comparisons.table.multiMapReversePipeline[`${mode}VsBaseline`].speedup,
+  };
+});
+const keyedMultiMapReverseRegressions = keyedMultiMapReverseResults.filter(
+  ({ snapshotSpeedup, speedup }) =>
+    !Number.isFinite(speedup) ||
+    speedup < keyedMultiMapReverseMinimumSpeedup ||
+    !Number.isFinite(snapshotSpeedup) ||
+    snapshotSpeedup < keyedMultiMapReverseMinimumSnapshotSpeedup,
+);
 // A direct native toSorted() exposes a permutation while preserving every keyed row object. The
 // hinted path validates that permutation by item identity, uses LIS to move only the required DOM
 // nodes, and avoids key, descriptor, and binding reads. Compare it with React and the equivalent
@@ -2958,6 +3049,7 @@ const passed =
   keyedStructuralReorderRegressions.length === 0 &&
   keyedMapReorderRegressions.length === 0 &&
   keyedMultiMapReorderRegressions.length === 0 &&
+  keyedMultiMapReverseRegressions.length === 0 &&
   keyedSortRegressions.length === 0 &&
   keyedFilterRegressions.length === 0 &&
   keyedIdentityRegressions.length === 0 &&
@@ -3137,6 +3229,13 @@ const report = {
     regressions: keyedMultiMapReorderRegressions,
     results: keyedMultiMapReorderResults,
     status: keyedMultiMapReorderRegressions.length === 0 ? "PASS" : "FAIL",
+  },
+  keyedMultiMapReverseHintGate: {
+    minimumSnapshotSpeedup: keyedMultiMapReverseMinimumSnapshotSpeedup,
+    minimumSpeedup: keyedMultiMapReverseMinimumSpeedup,
+    regressions: keyedMultiMapReverseRegressions,
+    results: keyedMultiMapReverseResults,
+    status: keyedMultiMapReverseRegressions.length === 0 ? "PASS" : "FAIL",
   },
   keyedSortHintGate: {
     minimumSnapshotSpeedup: keyedSortMinimumSnapshotSpeedup,

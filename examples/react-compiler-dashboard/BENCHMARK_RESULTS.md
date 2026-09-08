@@ -1,6 +1,42 @@
 # Complex dashboard and 21,000-row peak result
 
-Latest run: 2026-09-07
+Latest run: 2026-09-08
+
+## Direct mapped reverse specialization — 2026-09-08
+
+A compiler-proven chain of safe `map()` calls followed directly by native `toReversed()` now uses
+an exact reverse path. The runtime validates every mirrored row and any changed replacement before
+touching the DOM, then performs the required minimum of 9,999 connected row moves. It does not
+allocate the general source-item lookup map or run LIS, and unchanged rows skip lineage lookups.
+
+The existing 10,000-row benchmark was extended with two native maps that update one row before a
+complete reversal. The block-bodied compiled control performs the same application work but uses
+the general keyed reconciliation path.
+
+| Mode   | General path before | Exact reverse | Compiled control | vs React | vs control |
+| ------ | ------------------: | ------------: | ---------------: | -------: | ---------: |
+| Static | 24.70 ms | 24.60 ms | 35.30 ms | 11.48x | 1.43x |
+| Hybrid | 25.80 ms | 24.60 ms | 37.00 ms | 11.48x | 1.50x |
+
+The end-to-end latency change against the former path is intentionally modest because both paths
+execute the same maps and must move the same 9,999 DOM rows. The larger comparison with the control
+isolates the avoided generic reconciliation work. Both compiler modes passed the 4x React and 1.2x
+compiled-control floors, the complete correctness oracle, and every existing regression gate.
+
+Correctness checks verify the complete final order and values, preserve all 10,000 row nodes and
+their connectivity, and cover changed keys, custom methods, Array subclasses, delegated events,
+controlled-input focus and selection, Strict Mode hydration, unmount cleanup, and 2,000 randomized
+mapped reversals. A preceding sort, a map after a queued reorder, ambiguous ownership, or failed
+validation remains on the general path or falls back to React before any DOM mutation.
+
+The isolated optional runtime changed from 13,390 B to 13,378 B gzip, remaining below the 13,399 B
+ceiling. The complete dashboard compiler chunk changed from 26,919 B to 26,903 B gzip, while the
+6,480 B compiler-off chunk was unchanged. This adds no public API or observability counter.
+
+Numbers are local medians from 10 table samples per compiler mode with 20 bracketing React samples,
+Chrome 152.0.7977.82, Node.js 23.11.0, and Apple M1 macOS arm64. Timing varies by machine; the
+deterministic correctness, move-count, descriptor-read, and runtime-size checks are the primary
+safety controls.
 
 ## One lineage scan for consecutive maps before reorder — 2026-09-07
 
