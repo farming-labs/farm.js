@@ -117,6 +117,11 @@ export function scanProgrammaticPagePaths(source: string): string[] {
 }
 
 export function normalizeProgrammaticRoutePath(routePath: string): string {
+  if (routePath.includes("?") || routePath.includes("#")) {
+    throw new TypeError(
+      `Programmatic route path "${routePath}" must be a pathname without a query string or hash.`,
+    );
+  }
   const withSlash = routePath.startsWith("/") ? routePath : `/${routePath}`;
   const withoutTrailing = withSlash.length > 1 ? withSlash.replace(/\/+$/, "") : withSlash;
   return withoutTrailing || "/";

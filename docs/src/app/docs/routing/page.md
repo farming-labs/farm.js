@@ -276,6 +276,8 @@ Use stable keys per scroll container. If two elements share a key, the latest mo
 ## Route data cache
 
 Programmatic routes can cache the value returned from `data.main`. This is useful for product pages, docs pages, dashboards, and other route data that should be reused during server rendering or prefetching.
+The first `createRoute` argument is a pathname pattern only; declare typed search parameters with
+`search` and add query strings or hashes when building a navigation URL.
 
 ```tsx
 import { createRoute, invalidate } from "@farm.js/core";
