@@ -279,6 +279,26 @@ describe("Farm image optimizer", () => {
     expect(response?.status).toBe(499);
     await expect(response?.text()).resolves.toBe("Image request cancelled");
   });
+
+  it("returns the optimizer response when its error reporter throws", async () => {
+    const upstreamError = new Error("upstream failed");
+    const onError = vi.fn(() => {
+      throw new Error("reporter failed");
+    });
+    const handler = createFarmImageHandler(resolveFarmImageConfig(undefined), {
+      fetch: vi.fn(async () => {
+        throw upstreamError;
+      }) as typeof fetch,
+      transform: passthroughTransformer(),
+      onError,
+    });
+
+    const response = await handler(new Request(optimizerUrl("/photo.png")));
+
+    expect(onError).toHaveBeenCalledWith(upstreamError, expect.any(Request));
+    expect(response?.status).toBe(500);
+    await expect(response?.text()).resolves.toBe("Image optimization failed");
+  });
 });
 
 describe("image runtime adapters", () => {
