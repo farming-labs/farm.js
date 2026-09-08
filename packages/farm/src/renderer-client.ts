@@ -179,6 +179,7 @@ export function createRendererAction<TInput, TResult, TError extends Error = Err
   const initialResult = options.initialResult ?? null;
   let requestId = 0;
   let pendingCount = 0;
+  let latestSettledStatus: FarmActionSnapshot<TResult, TError>["status"] = "idle";
   let snapshot: FarmActionSnapshot<TResult, TError> = {
     pending: false,
     status: "idle",
@@ -215,6 +216,7 @@ export function createRendererAction<TInput, TResult, TError extends Error = Err
         const result = await serverFn(input as TInput | FormData);
         pendingCount = Math.max(0, pendingCount - 1);
         if (currentRequest === requestId) {
+          latestSettledStatus = "success";
           update({
             pending: pendingCount > 0,
             status: pendingCount > 0 ? "pending" : "success",
@@ -223,12 +225,15 @@ export function createRendererAction<TInput, TResult, TError extends Error = Err
           });
           options.onSuccess?.(result);
           options.onSettled?.(result, null);
+        } else if (pendingCount === 0) {
+          update({ ...snapshot, pending: false, status: latestSettledStatus });
         }
         return result;
       } catch (cause) {
         pendingCount = Math.max(0, pendingCount - 1);
         const error = normalizeRendererClientError(cause) as TError;
         if (currentRequest === requestId) {
+          latestSettledStatus = "error";
           update({
             pending: pendingCount > 0,
             status: pendingCount > 0 ? "pending" : "error",
@@ -242,6 +247,8 @@ export function createRendererAction<TInput, TResult, TError extends Error = Err
           });
           options.onError?.(error);
           options.onSettled?.(null, error);
+        } else if (pendingCount === 0) {
+          update({ ...snapshot, pending: false, status: latestSettledStatus });
         }
         throw error;
       }
@@ -249,6 +256,7 @@ export function createRendererAction<TInput, TResult, TError extends Error = Err
     reset() {
       requestId += 1;
       pendingCount = 0;
+      latestSettledStatus = "idle";
       update({ pending: false, status: "idle", data: initialResult, error: null });
     },
   } as FarmAction<TInput, TResult, TError>;
