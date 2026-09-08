@@ -43,6 +43,11 @@ export interface RunPreviewGatewayOptions {
   localProbeTimeoutMs?: number;
   maxRequests?: number;
   maxConcurrentRequests?: number;
+  requestTimeoutMs?: number;
+}
+
+export interface ForwardGatewayRequestOptions {
+  signal?: AbortSignal;
 }
 
 const DEFAULT_GATEWAY_URL = "https://preview.farming-labs.dev";
@@ -51,6 +56,7 @@ const DEFAULT_POLL_TIMEOUT_MS = 15000;
 const DEFAULT_LOCAL_PROBE_INTERVAL_MS = 2000;
 const DEFAULT_LOCAL_PROBE_TIMEOUT_MS = 1000;
 const DEFAULT_MAX_CONCURRENT_REQUESTS = 25;
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const HOP_BY_HOP_HEADERS = new Set([
   "connection",
   "content-length",
@@ -122,7 +128,12 @@ export async function runPreviewGateway(
     const startedAt = Date.now();
 
     try {
-      const response = await forwardGatewayRequest(plan.target, request);
+      const response = await forwardGatewayRequest(plan.target, request, {
+        signal: AbortSignal.any([
+          controller.signal,
+          AbortSignal.timeout(options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS),
+        ]),
+      });
       await sendGatewayResponse(plan, session, request.id, response, controller.signal);
       handledRequests += 1;
       logger.info(
@@ -250,6 +261,7 @@ function getSetCookies(headers: Headers): string[] {
 export async function forwardGatewayRequest(
   target: PreviewTarget,
   request: PreviewGatewayRequest,
+  options: ForwardGatewayRequestOptions = {},
 ): Promise<PreviewGatewayResponse> {
   const headers = new Headers();
   for (const [key, value] of Object.entries(request.headers || {})) {
@@ -271,6 +283,7 @@ export async function forwardGatewayRequest(
       ? Buffer.from(request.body || "", request.encoding === "base64" ? "base64" : "utf8")
       : undefined,
     redirect: "manual",
+    signal: options.signal,
   });
 
   const responseHeaders: Record<string, string | string[]> = {};
