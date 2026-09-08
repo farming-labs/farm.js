@@ -1,5 +1,3 @@
-// @vitest-environment node
-
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -187,6 +185,8 @@ describe("APITypeGenerator", () => {
         'const example = "export const PATCH = () => null";',
         "type OPTIONS = () => Response;",
         "export type { OPTIONS };",
+        "type HEAD = () => Response;",
+        "export { type HEAD };",
         "export const POST = () => new Response(example);",
       ].join("\n"),
     );

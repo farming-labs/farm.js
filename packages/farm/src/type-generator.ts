@@ -1,8 +1,10 @@
 import { readFileSync, existsSync, readdirSync, mkdirSync } from "fs";
 import { join, relative, dirname } from "path";
+import { initSync, parse } from "es-module-lexer";
 import { writeFileIfChanged } from "./write-file-if-changed";
 import { isFarmAPIRouteFileName } from "./api/route-files";
-import { buildSync, type Loader } from "esbuild";
+
+initSync();
 
 const API_CLIENT_METHOD_SEGMENTS = new Set([
   "get",
@@ -74,7 +76,7 @@ export class APITypeGenerator {
   ): APIRouteInfo | null {
     try {
       const content = readFileSync(filePath, "utf-8");
-      const methods = this.extractExportedMethods(content, filePath);
+      const methods = this.extractExportedMethods(content);
 
       if (methods.length === 0) {
         return null;
@@ -95,30 +97,21 @@ export class APITypeGenerator {
     }
   }
 
-  private extractExportedMethods(content: string, filePath: string): string[] {
-    const result = buildSync({
-      bundle: false,
-      format: "esm",
-      logLevel: "silent",
-      metafile: true,
-      platform: "neutral",
-      stdin: {
-        contents: content,
-        loader: this.getEsbuildLoader(filePath),
-        sourcefile: filePath,
-      },
-      write: false,
-    });
+  private extractExportedMethods(content: string): string[] {
     const httpMethods = ["GET", "HEAD", "QUERY", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"];
+    const [, exports] = parse(content);
     const valueExports = new Set(
-      Object.values(result.metafile.outputs).flatMap((output) => output.exports),
+      exports
+        .filter((specifier) => {
+          const clauseStart = Math.max(
+            content.lastIndexOf("{", specifier.s),
+            content.lastIndexOf(",", specifier.s),
+          );
+          return !/\btype\s*$/.test(content.slice(clauseStart + 1, specifier.s));
+        })
+        .map((specifier) => specifier.n),
     );
     return httpMethods.filter((method) => valueExports.has(method));
-  }
-
-  private getEsbuildLoader(filePath: string): Loader {
-    const extension = filePath.slice(filePath.lastIndexOf(".") + 1).toLowerCase();
-    return extension === "tsx" || extension === "jsx" || extension === "js" ? extension : "ts";
   }
 
   /**
