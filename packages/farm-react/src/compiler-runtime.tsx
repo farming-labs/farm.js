@@ -551,26 +551,13 @@ function recordCompilerKeyedMapUpdate(
   return value;
 }
 
-/**
- * @internal Executes a compiler-proven Array.map pipeline and records its final same-order delta.
- * The three-argument value/index form remains accepted for older generated output.
- */
-export function createCompilerKeyedMapUpdate(
+function executeCompilerKeyedMapPipeline(
   previous: unknown,
-  valueOrPipeline: unknown,
-  changedIndices?: unknown,
+  pipeline: (...values: readonly unknown[]) => unknown,
+  record: (previous: unknown, value: unknown) => unknown,
 ): unknown {
-  if (Array.isArray(changedIndices)) {
-    return recordCompilerKeyedMapUpdate(previous, valueOrPipeline, changedIndices);
-  }
-  if (changedIndices !== undefined || typeof valueOrPipeline !== "function") {
-    return valueOrPipeline;
-  }
-
   let eligible = true;
-  let mapCalls = 0;
   const applyMap = (collection: unknown, method: unknown, callback: unknown): unknown => {
-    mapCalls += 1;
     const value = NATIVE_REFLECT_APPLY(
       method as (...values: readonly unknown[]) => unknown,
       collection,
@@ -581,13 +568,7 @@ export function createCompilerKeyedMapUpdate(
       return value;
     }
     try {
-      if (
-        !Array.isArray(collection) ||
-        !Array.isArray(value) ||
-        Object.getPrototypeOf(collection) !== NATIVE_ARRAY_PROTOTYPE ||
-        Object.getPrototypeOf(value) !== NATIVE_ARRAY_PROTOTYPE ||
-        value.length !== collection.length
-      ) {
+      if (!Array.isArray(value) || Object.getPrototypeOf(value) !== NATIVE_ARRAY_PROTOTYPE) {
         eligible = false;
       }
     } catch {
@@ -595,13 +576,11 @@ export function createCompilerKeyedMapUpdate(
     }
     return value;
   };
-  const value = NATIVE_REFLECT_APPLY(
-    valueOrPipeline as (...values: readonly unknown[]) => unknown,
-    undefined,
-    [previous, applyMap],
-  );
-  if (!eligible || mapCalls === 0) return value;
+  const value = NATIVE_REFLECT_APPLY(pipeline, undefined, [previous, applyMap]);
+  return eligible ? record(previous, value) : value;
+}
 
+function recordCompilerKeyedMapPipelineUpdate(previous: unknown, value: unknown): unknown {
   try {
     if (
       !Array.isArray(previous) ||
@@ -633,18 +612,29 @@ export function createCompilerKeyedMapUpdate(
   }
 }
 
-/** @internal Executes a proven native map before the reorder suffix of a keyed pipeline. */
-export function createCompilerKeyedArrayMapPipeline(
+/**
+ * @internal Executes a compiler-proven Array.map pipeline and records its final same-order delta.
+ * The three-argument value/index form remains accepted for older generated output.
+ */
+export function createCompilerKeyedMapUpdate(
   previous: unknown,
-  method: unknown,
-  callback: unknown,
+  valueOrPipeline: unknown,
+  changedIndices?: unknown,
 ): unknown {
-  const value = NATIVE_REFLECT_APPLY(
-    method as (...values: readonly unknown[]) => unknown,
+  if (Array.isArray(changedIndices)) {
+    return recordCompilerKeyedMapUpdate(previous, valueOrPipeline, changedIndices);
+  }
+  if (changedIndices !== undefined || typeof valueOrPipeline !== "function") {
+    return valueOrPipeline;
+  }
+  return executeCompilerKeyedMapPipeline(
     previous,
-    [callback],
+    valueOrPipeline as (...values: readonly unknown[]) => unknown,
+    recordCompilerKeyedMapPipelineUpdate,
   );
+}
 
+function recordCompilerKeyedArrayMapPipeline(previous: unknown, value: unknown): unknown {
   try {
     const previousTarget = compilerObject(previous);
     const valueTarget = compilerObject(value);
@@ -655,8 +645,6 @@ export function createCompilerKeyedArrayMapPipeline(
       !Array.isArray(value) ||
       Object.getPrototypeOf(previous) !== NATIVE_ARRAY_PROTOTYPE ||
       Object.getPrototypeOf(value) !== NATIVE_ARRAY_PROTOTYPE ||
-      method !== NATIVE_ARRAY_MAP ||
-      typeof callback !== "function" ||
       value.length !== previous.length
     ) {
       return value;
@@ -709,6 +697,31 @@ export function createCompilerKeyedArrayMapPipeline(
     // Metadata must never change the result of a successful native update.
   }
   return value;
+}
+
+/**
+ * @internal Executes proven native maps before the reorder suffix of a keyed pipeline.
+ * The three-argument form remains accepted for older generated output.
+ */
+export function createCompilerKeyedArrayMapPipeline(
+  previous: unknown,
+  methodOrPipeline: unknown,
+  callback?: unknown,
+): unknown {
+  if (callback !== undefined) {
+    const value = NATIVE_REFLECT_APPLY(
+      methodOrPipeline as (...values: readonly unknown[]) => unknown,
+      previous,
+      [callback],
+    );
+    if (methodOrPipeline !== NATIVE_ARRAY_MAP) return value;
+    return recordCompilerKeyedArrayMapPipeline(previous, value);
+  }
+  return executeCompilerKeyedMapPipeline(
+    previous,
+    methodOrPipeline as (...values: readonly unknown[]) => unknown,
+    recordCompilerKeyedArrayMapPipeline,
+  );
 }
 
 /** @internal Executes a native reorder after a proven same-key map pipeline. */

@@ -16,9 +16,11 @@ export default defineConfig({
       "src/__tests__/compiler-runtime-recursive-host-blocks.test.tsx",
       "src/__tests__/compiler-runtime-keyed-array-reorder-hints.test.tsx",
       "src/__tests__/compiler-runtime-keyed-array-sort-hints.test.tsx",
+      "src/__tests__/compiler-runtime-keyed-array-map-reorder-hints.test.tsx",
     ],
     setupFiles: ["src/__tests__/stress.setup.ts"],
-    testNamePattern: /3,000 deterministic recursive updates|4,096 rows/,
+    testNamePattern:
+      /2,000 deterministic mapped reorder updates|3,000 deterministic recursive updates|4,096 rows/,
     testTimeout: 30_000,
   },
 });

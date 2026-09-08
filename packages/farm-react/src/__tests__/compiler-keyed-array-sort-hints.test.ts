@@ -1,4 +1,7 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
+import { transformWithEsbuild } from "vite";
 import { compileReactModule } from "../compiler";
 import { normalizeReactCompilerOptions } from "../index";
 
@@ -243,10 +246,19 @@ describe("React AOT keyed-array sort hints", () => {
     expect(result.optimizations.keyedMapUpdateHints).toBe(2);
     expect(result.optimizations.keyedArraySortHints).toBe(1);
     expect(result.optimizations.keyedArrayReorderHints).toBe(1);
-    expect(result.code.match(/createCompilerKeyedArrayMapPipeline\(/g)).toHaveLength(2);
+    expect(result.code.match(/createCompilerKeyedArrayMapPipeline\(/g)).toHaveLength(1);
+    expect(result.code.match(/_farmApplyMap\d*\(/g)).toHaveLength(2);
     expect(result.code.match(/createCompilerKeyedArrayMapReorder\(/g)).toHaveLength(2);
     expect(result.code).toContain("keyedRowsMapReorderHintedRuntimeFeature");
     expect(result.code).not.toContain("createCompilerKeyedMapUpdate");
+    await expect(
+      transformWithEsbuild(result.code, "/app/KeyedArraySortHints.tsx", {
+        loader: "tsx",
+        jsx: "automatic",
+      }),
+    ).resolves.toMatchObject({
+      code: expect.stringContaining("createCompilerKeyedArrayMapPipeline"),
+    });
   });
 
   it("does not lower map and reorder pipelines for host-backed keyed rows", async () => {

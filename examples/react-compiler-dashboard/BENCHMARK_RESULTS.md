@@ -2,6 +2,42 @@
 
 Latest run: 2026-09-07
 
+## One lineage scan for consecutive maps before reorder — 2026-09-07
+
+The compiler now emits two or more safe same-key `map()` calls before a native reorder as one
+runtime proof boundary. Every native method lookup, callback, result, and error still occurs in
+source order, but the runtime compares property descriptors only between the committed input and
+the final mapped array. A three-row instrumentation test observes six descriptor reads instead of
+the twelve required by two independent lineage scans.
+
+The existing 10,000-row multi-map reorder workload and its thresholds were unchanged. It updates
+one row in two native maps and restores order through native `toSorted()`; the equivalent
+block-bodied control performs the same application work through complete keyed reconciliation.
+
+| Mode   | Before | After | Median change | vs React | vs control |
+| ------ | -----: | ----: | ------------: | -------: | ---------: |
+| Static | 32.10 ms | 29.60 ms | 7.8% lower | 8.15x | 1.43x |
+| Hybrid | 31.60 ms | 31.90 ms | 0.9% higher | 7.56x | 1.33x |
+
+Both modes passed the existing 4x React and 1.2x compiled-control floors, the correctness oracle,
+and the general regression gate. The small hybrid difference is within ordinary run-to-run noise;
+the deterministic descriptor instrumentation proves that the removed intermediate scan does not
+depend on timing. All 10,000 original row nodes kept their identity, final values and order matched
+the oracle, all six expected map hints remained reported, and compiled owner executions stayed at
+zero.
+
+Focused coverage also preserves the older single-map helper form, invalidates the entire grouped
+hint when a later method is custom, falls back for Array subclasses, propagates native errors, and
+checks queued updates, changed keys, delegated events, controlled-input focus and selection,
+Strict Mode hydration, and unmount cleanup. The 2,000-update React differential is now included in
+the serial stress suite, and compatibility passed on React 18.3.1 and 19.2.8.
+
+Compiler-off and unrelated reorder-only bundles are unchanged. The optional map/reorder runtime
+premium is 13,263 B gzip, 105 B above the earlier single-scan implementation, and the complete
+dashboard build changed from 26,852 B to 26,892 B gzip in static mode and from 26,849 B to 26,890 B
+in hybrid mode. The run used 10 table samples per compiler mode, 20 bracketing React samples,
+Chrome 151.0.7922.34, Node.js 23.11.0, and Apple M1 macOS arm64.
+
 ## Consecutive same-order keyed maps — 2026-09-07
 
 The 10,000-row table now measures a concise functional setter that updates the label and amount of
