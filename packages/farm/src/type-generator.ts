@@ -106,16 +106,39 @@ export class APITypeGenerator {
     const [, exports] = parse(content);
     const valueExports = new Set(
       exports
-        .filter((specifier) => {
-          const clauseStart = Math.max(
-            content.lastIndexOf("{", specifier.s),
-            content.lastIndexOf(",", specifier.s),
-          );
-          return !/\btype\s*$/.test(content.slice(clauseStart + 1, specifier.s));
-        })
+        .filter((specifier) => !this.isTypeOnlyExportSpecifier(content, specifier.s))
         .map((specifier) => specifier.n),
     );
     return httpMethods.filter((method) => valueExports.has(method));
+  }
+
+  private isTypeOnlyExportSpecifier(content: string, exportNameStart: number): boolean {
+    let cursor = exportNameStart - 1;
+
+    while (cursor >= 0) {
+      while (cursor >= 0 && /\s/.test(content[cursor])) cursor--;
+
+      if (content.slice(cursor - 1, cursor + 1) === "*/") {
+        const commentStart = content.lastIndexOf("/*", cursor - 1);
+        if (commentStart >= 0) {
+          cursor = commentStart - 1;
+          continue;
+        }
+      }
+
+      const lineStart = content.lastIndexOf("\n", cursor) + 1;
+      const lineCommentStart = content.indexOf("//", lineStart);
+      if (lineCommentStart >= 0 && lineCommentStart <= cursor) {
+        cursor = lineCommentStart - 1;
+        continue;
+      }
+
+      break;
+    }
+
+    const tokenEnd = cursor + 1;
+    while (cursor >= 0 && /[A-Za-z0-9_$]/.test(content[cursor])) cursor--;
+    return content.slice(cursor + 1, tokenEnd) === "type";
   }
 
   /**

@@ -186,7 +186,7 @@ describe("APITypeGenerator", () => {
         "type OPTIONS = () => Response;",
         "export type { OPTIONS };",
         "type HEAD = () => Response;",
-        "export { type HEAD };",
+        "export { type /* remains type-only */ HEAD };",
         "export const POST = () => new Response(example);",
       ].join("\n"),
     );
