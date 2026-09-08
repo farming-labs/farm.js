@@ -47,6 +47,26 @@ function hintedMap(
   return createCompilerKeyedArrayMapPipeline(items, items.map, callback) as Item[];
 }
 
+function hintedMaps(
+  items: Item[],
+  firstCallback: (item: Item, index: number, items: Item[]) => Item,
+  secondCallback: (item: Item, index: number, items: Item[]) => Item,
+): Item[] {
+  return createCompilerKeyedArrayMapPipeline(
+    items,
+    (
+      current: unknown,
+      applyMap: (collection: unknown, method: unknown, callback: unknown) => unknown,
+    ) => {
+      const firstItems = current as Item[];
+      const firstMap = firstItems.map;
+      const first = applyMap(firstItems, firstMap, firstCallback) as Item[];
+      const secondMap = first.map;
+      return applyMap(first, secondMap, secondCallback);
+    },
+  ) as Item[];
+}
+
 function hintedSort(items: Item[]): Item[] {
   return createCompilerKeyedArrayMapReorder(
     items,
@@ -69,8 +89,9 @@ function mappedSort(items: Item[], id: string, rank: number, label?: string): It
 
 function multiMappedSort(items: Item[], id: string, rank: number, label: string): Item[] {
   return hintedSort(
-    hintedMap(
-      hintedMap(items, (item) => (item.id === id ? { ...item, label } : item)),
+    hintedMaps(
+      items,
+      (item) => (item.id === id ? { ...item, label } : item),
       (item) => (item.id === id ? { ...item, rank } : item),
     ),
   );
@@ -118,10 +139,9 @@ function createHarness(initialItems: Item[]) {
       editTwoAndSort = (labelId, rankId) =>
         state[0].set((previous) =>
           hintedSort(
-            hintedMap(
-              hintedMap(previous as Item[], (item) =>
-                item.id === labelId ? { ...item, label: `${item.label} labeled` } : item,
-              ),
+            hintedMaps(
+              previous as Item[],
+              (item) => (item.id === labelId ? { ...item, label: `${item.label} labeled` } : item),
               (item) => (item.id === rankId ? { ...item, rank: 4 } : item),
             ),
           ),
@@ -165,17 +185,27 @@ function createHarness(initialItems: Item[]) {
         });
       customSecondMap = () =>
         state[0].set((previous) => {
-          const first = hintedMap(previous as Item[], (item) =>
-            item.id === "a" ? { ...item, label: "First map" } : item,
-          );
-          const map = function (
-            this: Item[],
-            callback: (item: Item, index: number, items: Item[]) => Item,
-          ) {
-            return Array.prototype.map.call(this, callback);
-          };
-          const second = createCompilerKeyedArrayMapPipeline(first, map, (item: Item) =>
-            item.id === "b" ? { ...item, rank: 0 } : item,
+          const second = createCompilerKeyedArrayMapPipeline(
+            previous,
+            (
+              current: unknown,
+              applyMap: (collection: unknown, method: unknown, callback: unknown) => unknown,
+            ) => {
+              const source = current as Item[];
+              const firstMap = source.map;
+              const first = applyMap(source, firstMap, (item: Item) =>
+                item.id === "a" ? { ...item, label: "First map" } : item,
+              ) as Item[];
+              const customMap = function (
+                this: Item[],
+                callback: (item: Item, index: number, items: Item[]) => Item,
+              ) {
+                return Array.prototype.map.call(this, callback);
+              };
+              return applyMap(first, customMap, (item: Item) =>
+                item.id === "b" ? { ...item, rank: 0 } : item,
+              );
+            },
           ) as Item[];
           return createCompilerKeyedArrayMapReorder(
             second,
@@ -335,6 +365,47 @@ describe("compiled keyed-array map and reorder hints", () => {
     expect(harness.counters.bindings).toBe(1);
   });
 
+  it("records consecutive map lineage with one source-to-result scan", async () => {
+    const initialItems: Item[] = [
+      { id: "a", label: "Alpha", rank: 1 },
+      { id: "b", label: "Beta", rank: 2 },
+      { id: "c", label: "Gamma", rank: 3 },
+    ];
+    const harness = createHarness(initialItems);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Table />));
+
+    let finalItems: Item[] | undefined;
+    let descriptorReads = 0;
+    const readDescriptor = Object.getOwnPropertyDescriptor;
+    vi.spyOn(Object, "getOwnPropertyDescriptor").mockImplementation((target, key) => {
+      if (target === initialItems || target === finalItems) descriptorReads += 1;
+      return readDescriptor(target, key);
+    });
+    const mapped = createCompilerKeyedArrayMapPipeline(
+      initialItems,
+      (
+        current: unknown,
+        applyMap: (collection: unknown, method: unknown, callback: unknown) => unknown,
+      ) => {
+        const source = current as Item[];
+        const first = applyMap(source, source.map, (item: Item) =>
+          item.id === "a" ? { ...item, label: "Alpha newest" } : item,
+        ) as Item[];
+        finalItems = applyMap(first, first.map, (item: Item) =>
+          item.id === "a" ? { ...item, rank: 4 } : item,
+        ) as Item[];
+        return finalItems;
+      },
+    );
+
+    expect(mapped).toBe(finalItems);
+    expect(descriptorReads).toBe(initialItems.length * 2);
+  });
+
   it("keeps source lineage for different rows changed by separate map stages", async () => {
     const harness = createHarness([
       { id: "a", label: "Alpha", rank: 1 },
@@ -438,14 +509,42 @@ describe("compiled keyed-array map and reorder hints", () => {
     expect(harness.counters.bindings).toBe(2);
   });
 
+  it("falls back for Array subclasses while preserving native results and keyed identity", async () => {
+    class ItemList extends Array<Item> {}
+    const initialItems = new ItemList();
+    initialItems.push({ id: "a", label: "Alpha", rank: 2 }, { id: "b", label: "Beta", rank: 1 });
+    const harness = createHarness(initialItems);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Table />));
+    const rows = new Map(
+      [...container.querySelectorAll("li")].map((row) => [row.dataset.key, row]),
+    );
+    harness.counters.bindings = 0;
+
+    await act(async () => {
+      harness.editTwiceAndSort("a", 3, "Alpha subclass");
+      await flushCompilerUpdates();
+    });
+
+    expect(labels(container)).toEqual(["Beta:1", "Alpha subclass:3"]);
+    expect(container.querySelector('[data-key="a"]')).toBe(rows.get("a"));
+    expect(container.querySelector('[data-key="b"]')).toBe(rows.get("b"));
+    expect(harness.counters.bindings).toBe(2);
+  });
+
   it("preserves a native error thrown by a later map stage", () => {
     const items: Item[] = [{ id: "a", label: "Alpha", rank: 1 }];
-    const first = hintedMap(items, (item) => item);
-
     expect(() =>
-      hintedMap(first, () => {
-        throw new Error("second map failed");
-      }),
+      hintedMaps(
+        items,
+        (item) => item,
+        () => {
+          throw new Error("second map failed");
+        },
+      ),
     ).toThrow("second map failed");
   });
 

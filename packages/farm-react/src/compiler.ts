@@ -2109,7 +2109,61 @@ function rewriteKeyedArrayReorderPipelineHints(
       const previous = t.cloneNode(updater.params[0]);
       const statements: t.Statement[] = [];
       let value: t.Expression = t.cloneNode(previous);
-      for (const step of steps) {
+      const leadingMapCount = mapPipeline ? steps.findIndex((step) => step.kind !== "map") : 0;
+      let stepIndex = 0;
+      if (leadingMapCount > 1) {
+        const pipelineValue = path.scope.generateUidIdentifier("farmMapValue");
+        const applyMap = path.scope.generateUidIdentifier("farmApplyMap");
+        const pipelineStatements: t.Statement[] = [];
+        let current: t.Expression = t.cloneNode(pipelineValue);
+        for (; stepIndex < leadingMapCount; stepIndex += 1) {
+          const step = steps[stepIndex];
+          if (step.kind !== "map") break;
+          const method = path.scope.generateUidIdentifier(`farmMap${stepIndex + 1}`);
+          const result = path.scope.generateUidIdentifier(`farmMappedItems${stepIndex + 1}`);
+          pipelineStatements.push(
+            t.variableDeclaration("const", [
+              t.variableDeclarator(
+                t.cloneNode(method),
+                t.memberExpression(t.cloneNode(current), t.identifier("map")),
+              ),
+            ]),
+            t.variableDeclaration("const", [
+              t.variableDeclarator(
+                t.cloneNode(result),
+                t.callExpression(t.cloneNode(applyMap), [
+                  t.cloneNode(current),
+                  t.cloneNode(method),
+                  t.cloneNode(step.callback, true),
+                ]),
+              ),
+            ]),
+          );
+          current = t.cloneNode(result);
+        }
+        const result = path.scope.generateUidIdentifier("farmPipelineValue");
+        statements.push(
+          t.variableDeclaration("const", [
+            t.variableDeclarator(
+              t.cloneNode(result),
+              t.callExpression(t.cloneNode(mapHelperIdentifier), [
+                t.cloneNode(previous),
+                t.arrowFunctionExpression(
+                  [t.cloneNode(pipelineValue), t.cloneNode(applyMap)],
+                  t.blockStatement([
+                    ...pipelineStatements,
+                    t.returnStatement(t.cloneNode(current)),
+                  ]),
+                ),
+              ]),
+            ),
+          ]),
+        );
+        value = t.cloneNode(result);
+        mapCount += leadingMapCount;
+      }
+      for (; stepIndex < steps.length; stepIndex += 1) {
+        const step = steps[stepIndex];
         const methodName =
           step.kind === "map"
             ? "map"

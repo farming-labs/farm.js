@@ -1232,9 +1232,12 @@ setItems((current) =>
 
 For a concise functional setter, Farm can prepare one or more consecutive safe same-key `map()`
 calls and the following native `toSorted()` or `toReversed()` calls as one update pipeline.
-JavaScript still performs every map and reorder normally. After each map, the compiler runtime
-flattens replacement lineage back to the committed source row, so any number of accepted stages
-still needs one final keyed reconciliation rather than a growing chain of intermediate snapshots.
+JavaScript still performs every map and reorder normally. For two or more accepted maps, the
+compiler runtime checks each native call as it completes but records replacement lineage only once,
+by comparing the committed input with the final mapped result. The intermediate arrays need no
+separate full scan, and the final replacements still point directly to their committed source rows.
+The reorder suffix then needs one final keyed reconciliation rather than a growing chain of
+intermediate snapshots.
 
 Before changing the DOM, the runtime verifies ordinary dense arrays, exact native methods, the
 committed collection token, equal lengths, a unique one-to-one source-item match, and the key of
@@ -2120,10 +2123,11 @@ The package and example test suites verify more than generated code:
   surviving controlled-input focus and selection, exact DOM identity, custom-method and identity
   fallback, StrictMode hydration, and unmount-before-flush cleanup;
 - 2,000 deterministic same-key edits followed by native sorting match normal React; targeted tests
-  require one changed-row binding read, preserve every keyed DOM node, compose queued map/sort and
-  map/sort/reverse pipelines, dispatch moved-row events with the newest item and index, preserve
-  controlled-input focus and selection, and cover changed-key and custom-method fallback, Strict
-  Mode hydration, and unmount-before-flush cleanup;
+  require one source-to-final descriptor scan for consecutive maps and one changed-row binding read,
+  preserve every keyed DOM node, compose queued map/sort and map/sort/reverse pipelines, dispatch
+  moved-row events with the newest item and index, preserve controlled-input focus and selection,
+  and cover changed-key, custom-method, and Array-subclass fallback, Strict Mode hydration, and
+  unmount-before-flush cleanup;
 - 1,000 deterministic exact-position insertions, single and contiguous-range removals, single-row
   replacements, and exact-window replacements match normal React; compiler tests cover guarded
   runtime positions plus literal and compiler-safe runtime delete counts, while targeted removal
