@@ -118,6 +118,14 @@ function text(content: string, contentType: string, init: ResponseInit = {}): Re
   return new Response(content, { ...init, headers });
 }
 
+function omitHeadBody(response: Response): Response {
+  return new Response(null, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
+}
+
 function normalizeAction(value: string | null | undefined): string | undefined {
   return value?.trim().toLowerCase().replace(/_/g, "-") || undefined;
 }
@@ -657,7 +665,8 @@ export function createFarmDocsAPIHandler(
 
     const method = request.method.toUpperCase();
     if (method === "GET" || method === "HEAD") {
-      return handlers.GET(request);
+      const response = await handlers.GET(request);
+      return method === "HEAD" ? omitHeadBody(response) : response;
     }
     if (method === "POST") {
       return handlers.POST(request);
