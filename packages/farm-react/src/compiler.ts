@@ -2009,7 +2009,7 @@ function keyedArrayReorderPipeline(
   let reachedReorder = false;
   for (const step of steps) {
     if (step.kind === "map") {
-      if (reachedReorder || structuralSteps > 0) return undefined;
+      if (structuralSteps > 0) return undefined;
       mapSteps += 1;
     } else if (step.kind === "filter" || step.kind === "slice") {
       if (reachedReorder) return undefined;
@@ -2109,61 +2109,67 @@ function rewriteKeyedArrayReorderPipelineHints(
       const previous = t.cloneNode(updater.params[0]);
       const statements: t.Statement[] = [];
       let value: t.Expression = t.cloneNode(previous);
-      const leadingMapCount = mapPipeline ? steps.findIndex((step) => step.kind !== "map") : 0;
-      let stepIndex = 0;
-      if (leadingMapCount > 1) {
-        const pipelineValue = path.scope.generateUidIdentifier("farmMapValue");
-        const applyMap = path.scope.generateUidIdentifier("farmApplyMap");
-        const pipelineStatements: t.Statement[] = [];
-        let current: t.Expression = t.cloneNode(pipelineValue);
-        for (; stepIndex < leadingMapCount; stepIndex += 1) {
-          const step = steps[stepIndex];
-          if (step.kind !== "map") break;
-          const method = path.scope.generateUidIdentifier(`farmMap${stepIndex + 1}`);
-          const result = path.scope.generateUidIdentifier(`farmMappedItems${stepIndex + 1}`);
-          pipelineStatements.push(
-            t.variableDeclaration("const", [
-              t.variableDeclarator(
-                t.cloneNode(method),
-                t.memberExpression(t.cloneNode(current), t.identifier("map")),
-              ),
-            ]),
-            t.variableDeclaration("const", [
-              t.variableDeclarator(
-                t.cloneNode(result),
-                t.callExpression(t.cloneNode(applyMap), [
-                  t.cloneNode(current),
-                  t.cloneNode(method),
-                  t.cloneNode(step.callback, true),
+      let hasMappedLineage = false;
+      for (let stepIndex = 0; stepIndex < steps.length; stepIndex += 1) {
+        const step = steps[stepIndex];
+        if (step.kind === "map") {
+          let mapEnd = stepIndex + 1;
+          while (steps[mapEnd]?.kind === "map") mapEnd += 1;
+          if (mapEnd - stepIndex > 1) {
+            const pipelineValue = path.scope.generateUidIdentifier("farmMapValue");
+            const applyMap = path.scope.generateUidIdentifier("farmApplyMap");
+            const pipelineStatements: t.Statement[] = [];
+            let current: t.Expression = t.cloneNode(pipelineValue);
+            for (let mapIndex = stepIndex; mapIndex < mapEnd; mapIndex += 1) {
+              const mapStep = steps[mapIndex];
+              if (mapStep.kind !== "map") break;
+              const method = path.scope.generateUidIdentifier(`farmMap${mapIndex + 1}`);
+              const result = path.scope.generateUidIdentifier(`farmMappedItems${mapIndex + 1}`);
+              pipelineStatements.push(
+                t.variableDeclaration("const", [
+                  t.variableDeclarator(
+                    t.cloneNode(method),
+                    t.memberExpression(t.cloneNode(current), t.identifier("map")),
+                  ),
                 ]),
-              ),
-            ]),
-          );
-          current = t.cloneNode(result);
-        }
-        const result = path.scope.generateUidIdentifier("farmPipelineValue");
-        statements.push(
-          t.variableDeclaration("const", [
-            t.variableDeclarator(
-              t.cloneNode(result),
-              t.callExpression(t.cloneNode(mapHelperIdentifier), [
-                t.cloneNode(previous),
-                t.arrowFunctionExpression(
-                  [t.cloneNode(pipelineValue), t.cloneNode(applyMap)],
-                  t.blockStatement([
-                    ...pipelineStatements,
-                    t.returnStatement(t.cloneNode(current)),
+                t.variableDeclaration("const", [
+                  t.variableDeclarator(
+                    t.cloneNode(result),
+                    t.callExpression(t.cloneNode(applyMap), [
+                      t.cloneNode(current),
+                      t.cloneNode(method),
+                      t.cloneNode(mapStep.callback, true),
+                    ]),
+                  ),
+                ]),
+              );
+              current = t.cloneNode(result);
+            }
+            const result = path.scope.generateUidIdentifier("farmPipelineValue");
+            statements.push(
+              t.variableDeclaration("const", [
+                t.variableDeclarator(
+                  t.cloneNode(result),
+                  t.callExpression(t.cloneNode(mapHelperIdentifier), [
+                    t.cloneNode(value),
+                    t.arrowFunctionExpression(
+                      [t.cloneNode(pipelineValue), t.cloneNode(applyMap)],
+                      t.blockStatement([
+                        ...pipelineStatements,
+                        t.returnStatement(t.cloneNode(current)),
+                      ]),
+                    ),
                   ]),
                 ),
               ]),
-            ),
-          ]),
-        );
-        value = t.cloneNode(result);
-        mapCount += leadingMapCount;
-      }
-      for (; stepIndex < steps.length; stepIndex += 1) {
-        const step = steps[stepIndex];
+            );
+            value = t.cloneNode(result);
+            mapCount += mapEnd - stepIndex;
+            hasMappedLineage = true;
+            stepIndex = mapEnd - 1;
+            continue;
+          }
+        }
         const methodName =
           step.kind === "map"
             ? "map"
@@ -2194,12 +2200,12 @@ function rewriteKeyedArrayReorderPipelineHints(
               : step.kind === "slice"
                 ? sliceHelperIdentifier
                 : step.kind === "reverse"
-                  ? mapPipeline
+                  ? hasMappedLineage
                     ? mapReorderHelperIdentifier
                     : structuralPipeline
                       ? structuralReorderHelperIdentifier
                       : reorderHelperIdentifier
-                  : mapPipeline
+                  : hasMappedLineage
                     ? mapReorderHelperIdentifier
                     : structuralPipeline
                       ? structuralSortHelperIdentifier
@@ -2233,16 +2239,18 @@ function rewriteKeyedArrayReorderPipelineHints(
           ]),
         );
         value = t.cloneNode(result);
-        if (step.kind === "map") mapCount += 1;
-        else if (step.kind === "filter") filterCount += 1;
+        if (step.kind === "map") {
+          mapCount += 1;
+          hasMappedLineage = true;
+        } else if (step.kind === "filter") filterCount += 1;
         else if (step.kind === "slice") sliceCount += 1;
         else if (step.kind === "reverse") {
           reorderCount += 1;
-          if (mapPipeline) mapReorderCount += 1;
+          if (hasMappedLineage) mapReorderCount += 1;
           if (structuralPipeline) structuralReorderCount += 1;
         } else {
           sortCount += 1;
-          if (mapPipeline) mapSortCount += 1;
+          if (hasMappedLineage) mapSortCount += 1;
           if (structuralPipeline) structuralSortCount += 1;
         }
       }

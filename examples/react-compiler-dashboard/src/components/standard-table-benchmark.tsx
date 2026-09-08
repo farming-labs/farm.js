@@ -1071,6 +1071,46 @@ export function StandardTableBenchmark() {
           Queue reverse + review + restore (snapshot control)
         </button>
         <button
+          data-action="table-reorder-then-map-pipeline"
+          type="button"
+          onClick={() => {
+            setRows((current) =>
+              current
+                .toReversed()
+                .map((row) =>
+                  row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
+                )
+                .map((row) =>
+                  row.id % 10_000 === 5_001 ? { ...row, amount: row.amount + 1 } : row,
+                ),
+            );
+            setOperation("reverse rows, then review and reprice one row");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Reverse + review one row
+        </button>
+        <button
+          data-action="table-reorder-then-map-pipeline-snapshot"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              return current
+                .toReversed()
+                .map((row) =>
+                  row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
+                )
+                .map((row) =>
+                  row.id % 10_000 === 5_001 ? { ...row, amount: row.amount + 1 } : row,
+                );
+            });
+            setOperation("reverse rows, then review and reprice one row (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Reverse + review one row (snapshot control)
+        </button>
+        <button
           data-action="table-sort"
           type="button"
           onClick={() => {

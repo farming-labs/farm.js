@@ -2,6 +2,40 @@
 
 Latest run: 2026-09-08
 
+## Native reorder followed by same-key maps — 2026-09-08
+
+A concise setter may now call native `toReversed()` or `toSorted()` before one or more safe
+same-key `map()` calls. The compiler keeps that reorder proof through the final mapped array. An
+exact reverse therefore uses the direct `n - 1` DOM-move path and patches only changed bindings;
+an ambiguous sort performs one validated source-item lookup and one LIS pass. Every native method,
+callback, result, and error still occurs in JavaScript source order.
+
+The new 10,000-row production-browser workload reverses the rows and then changes one row through
+two native maps. Its block-bodied compiled control performs the identical application work through
+complete keyed reconciliation. The correctness oracle checks all values and positions plus every
+row's DOM identity and connection after each sample.
+
+| Mode   | Reorder + maps | Compiled control | vs React | vs control |
+| ------ | -------------: | ---------------: | -------: | ---------: |
+| Static | 25.10 ms | 38.20 ms | 10.77x | 1.52x |
+| Hybrid | 22.90 ms | 34.10 ms | 11.80x | 1.49x |
+
+Both modes passed the unchanged 4x React and 1.2x compiled-control floors. The full correctness
+oracle, general performance gate, every existing optimization gate, and zero compiled owner
+executions also passed. Deterministic coverage compares 2,000 reverse-or-sort-then-map updates with
+normal React and covers maps on both sides of a reorder, custom methods, changed-key fallback,
+Strict Mode hydration, unmount-before-flush cleanup, and React 18.3.1 and 19.2.8.
+
+On Node.js 22.13.1, the isolated keyed map/reorder premium is 13,341 B gzip, 58 B below the unchanged
+13,399 B limit and 46 B smaller than the preceding release. The complete dashboard chunks are
+27,123 B gzip in both compiler modes and 6,643 B with the compiler disabled, including the new
+benchmark controls.
+
+Numbers are local medians from 10 table samples per compiler mode with 20 bracketing React samples,
+Chrome 152.0.7977.82, Node.js 23.11.0, and Apple M1 macOS arm64. Timing varies by machine; the
+deterministic parity, fallback, DOM-move, compatibility, and runtime-size checks are the primary
+safety controls.
+
 ## Queued reverse and mapped parity — 2026-09-08
 
 Exact keyed-row order now survives across separate queued setters. The benchmark first queues a
@@ -92,8 +126,8 @@ compiled-control floors, the complete correctness oracle, and every existing reg
 Correctness checks verify the complete final order and values, preserve all 10,000 row nodes and
 their connectivity, and cover changed keys, custom methods, Array subclasses, delegated events,
 controlled-input focus and selection, Strict Mode hydration, unmount cleanup, and 2,000 randomized
-mapped reversals. A preceding sort, a map after a queued reorder, ambiguous ownership, or failed
-validation remains on the general path or falls back to React before any DOM mutation.
+mapped reversals. A separately queued standalone map after a reorder, ambiguous ownership, or
+failed validation remains on the general path or falls back to React before any DOM mutation.
 
 The isolated optional runtime changed from 13,390 B to 13,378 B gzip, remaining below the 13,399 B
 ceiling. The complete dashboard compiler chunk changed from 26,919 B to 26,903 B gzip, while the

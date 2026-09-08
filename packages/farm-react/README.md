@@ -427,7 +427,7 @@ reorder fall back. Reports count each compiled step in the existing filter, slic
 counter, and modules without those operations omit their optional runtimes. Farm does not polyfill
 `Array.prototype.toReversed`.
 
-A compiler-safe same-key map may also precede the native reorder suffix:
+A compiler-safe same-key map may also appear before or after native reorder steps:
 
 ```tsx
 setItems((current) =>
@@ -439,7 +439,7 @@ setItems((current) =>
 ```
 
 Farm executes every native map and reorder call normally. For consecutive accepted maps, it checks
-each native call but compares only the committed input and final mapped result, avoiding a full
+each native call but compares only the input and final result of that map segment, avoiding a full
 lineage scan for every intermediate array. It verifies the committed token, dense-array shape, a
 one-to-one source-item match, and every final replacement key before touching the DOM, then runs one
 LIS and patches each changed row once. Unchanged rows need no second key or binding read. Queued
@@ -451,6 +451,22 @@ the same chain, computed or custom methods, sparse or subclassed arrays, collect
 bindings, nested or React-owned rows, and failed checks use complete keyed reconciliation. Reports
 use the existing map, sort, and reorder hint counters, and unrelated modules do not retain this
 optional runtime.
+
+The maps may also finish the concise pipeline:
+
+```tsx
+setItems((current) =>
+  current
+    .toReversed()
+    .map((item) => (item.id === editedId ? { ...item, label: nextLabel } : item))
+    .map((item) => (item.id === editedId ? { ...item, rank: nextRank } : item)),
+);
+```
+
+Farm retains the preceding reorder instead of treating the mapped result as an unhinted snapshot.
+An exact reverse uses the minimum-move reverse path without a general source-item lookup or LIS. A
+sort remains an ambiguous permutation, so Farm performs one validated source lookup and LIS pass.
+Safe maps on both sides of a reorder flatten their replacements back to the same committed rows.
 
 A reverse before the safe map pipeline may be queued in a separate setter:
 
