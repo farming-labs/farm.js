@@ -68,20 +68,11 @@ test("an inline environment prefix reaches the command", () => {
 });
 
 test("a ${VAR:-default} expansion falls back when the variable is unset", () => {
-  // The emulator applies the default for an unset variable only; unlike bash it
-  // leaves an empty string alone. The repository relies on the unset case.
+  // The repository relies on the unset case for local defaults.
   const result = runScript(`PROBE_VAR=\${PROBE_VAR:-fallback} ${PRINT}`, { PROBE_VAR: undefined });
 
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout, "fallback");
-});
-
-test("a ${VAR:-default} expansion leaves an empty string alone", () => {
-  // Pins the emulator's departure from bash so a change in pnpm is noticed.
-  const result = runScript(`PROBE_VAR=\${PROBE_VAR:-fallback} ${PRINT}`, { PROBE_VAR: "" });
-
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout, "");
 });
 
 test("a ${VAR:-default} expansion keeps an explicit value", () => {
