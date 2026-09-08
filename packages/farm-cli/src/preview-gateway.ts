@@ -278,7 +278,11 @@ export async function forwardGatewayRequest(
     const normalized = key.toLowerCase();
     // Set-Cookie is collected separately: Headers.forEach folds repeated
     // headers into one comma-joined value, which corrupts multiple cookies.
-    if (!HOP_BY_HOP_HEADERS.has(normalized) && normalized !== "set-cookie") {
+    if (
+      !HOP_BY_HOP_HEADERS.has(normalized) &&
+      normalized !== "content-encoding" &&
+      normalized !== "set-cookie"
+    ) {
       responseHeaders[key] = value;
     }
   });

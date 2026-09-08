@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
+import { gzipSync } from "node:zlib";
 
 const require = createRequire(import.meta.url);
 const {
@@ -232,6 +233,38 @@ test("forwards local redirects without following them", async () => {
 
     assert.equal(response.status, 302);
     assert.equal(response.headers.location, "/destination");
+  } finally {
+    await server.close();
+  }
+});
+
+test("removes content encoding after fetch decodes a local response", async () => {
+  const body = gzipSync("compressed response");
+  const server = await createTestServer((_req, res) => {
+    res.writeHead(200, {
+      "content-encoding": "gzip",
+      "content-length": body.byteLength,
+    });
+    res.end(body);
+  });
+
+  try {
+    const response = await forwardGatewayRequest(
+      {
+        localUrl: `http://localhost:${server.port}`,
+        host: "localhost",
+        port: server.port,
+        source: "port",
+      },
+      {
+        id: "req_gzip",
+        method: "GET",
+        path: "/compressed",
+      },
+    );
+
+    assert.equal(response.headers["content-encoding"], undefined);
+    assert.equal(Buffer.from(response.body, "base64").toString(), "compressed response");
   } finally {
     await server.close();
   }
