@@ -36,6 +36,7 @@ describe("msw Farm plugin", () => {
   it("adds a dev-only virtual handler module and serves the worker under basePath", async () => {
     const plugin = msw({ handlers: "src/mocks/handlers.ts" });
     const existing = { name: "existing" };
+    const handlersFile = path.resolve("/app", "src/mocks/handlers.ts").replace(/\\/g, "/");
     const configured = await plugin.configure?.(
       {
         root: "/app",
@@ -57,7 +58,7 @@ describe("msw Farm plugin", () => {
     const vitePlugin = vitePlugins[0];
     expect(vitePlugin.resolveId("virtual:farm-msw-handlers")).toBe("\0virtual:farm-msw-handlers");
     expect(vitePlugin.load("\0virtual:farm-msw-handlers")).toContain(
-      'import * as handlerModule from "/app/src/mocks/handlers.ts"',
+      `import * as handlerModule from ${JSON.stringify(handlersFile)}`,
     );
 
     let middleware: Function | undefined;
