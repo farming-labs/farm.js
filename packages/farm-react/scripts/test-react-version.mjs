@@ -95,6 +95,7 @@ const testSource = String.raw`
   let reverseCompatibilityRows = () => undefined;
   let mapReverseParityCompatibilityRows = () => undefined;
   let queuedMapReverseParityCompatibilityRows = () => undefined;
+  let reorderThenMapCompatibilityRows = () => undefined;
   let insertCompatibilityRows = () => undefined;
   let removeCompatibilityRow = () => undefined;
   let replaceCompatibilityRows = () => undefined;
@@ -139,6 +140,15 @@ const testSource = String.raw`
           return createCompilerKeyedArrayMapReorder(mapped, mapped.toReversed);
         });
       };
+      reorderThenMapCompatibilityRows = () =>
+        state[0].set((previous) => {
+          const reversed = createCompilerKeyedArrayReorder(previous, previous.toReversed);
+          return createCompilerKeyedArrayMapPipeline(
+            reversed,
+            reversed.map,
+            (item) => item.id === "c" ? { ...item, label: "Gamma after reverse" } : item,
+          );
+        });
       removeCompatibilityRow = () =>
         state[0].set((previous) =>
           createCompilerKeyedArrayPositionUpdate(
@@ -279,6 +289,13 @@ const testSource = String.raw`
     "Beta queued parity",
   );
   assert.equal(reorderContainer.querySelector("li:last-child"), reorderAlpha);
+  assert.equal(reorderExecutions, 1);
+  reorderThenMapCompatibilityRows();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(reorderContainer.querySelector("li:first-child"), reorderAlpha);
+  assert.equal(reorderContainer.querySelector("[data-key='c']").textContent, "Gamma after reverse");
+  assert.equal(reorderContainer.querySelector("li:last-child"), reorderGamma);
   assert.equal(reorderExecutions, 1);
   const reorderBeta = reorderContainer.querySelector("[data-key='b']");
   sortCompatibilityRows();

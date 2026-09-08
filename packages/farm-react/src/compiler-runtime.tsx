@@ -87,15 +87,6 @@ interface CompilerKeyedArrayReorderHint {
   readonly structuralUpdate?: CompilerKeyedArrayFilterHint;
 }
 
-interface CompilerKeyedArrayMapPipelineHint {
-  /** Exact order relative to the committed rows; permutation means the order is ambiguous. */
-  readonly order?: CompilerKeyedArrayReorderKind;
-  readonly sourceToken: object;
-  readonly sourceLength: number;
-  readonly resultLength: number;
-  readonly mappedItemSources: ReadonlyMap<unknown, unknown>;
-}
-
 function reversedCompilerKeyedArrayOrder(
   order: CompilerKeyedArrayReorderKind | undefined,
 ): CompilerKeyedArrayReorderKind | undefined {
@@ -155,10 +146,6 @@ const COMPILER_KEYED_ARRAY_WINDOW_REPLACEMENTS = /* @__PURE__ */ new WeakMap<
 const COMPILER_KEYED_ARRAY_REORDERS = /* @__PURE__ */ new WeakMap<
   object,
   CompilerKeyedArrayReorderHint
->();
-const COMPILER_KEYED_ARRAY_MAP_PIPELINES = /* @__PURE__ */ new WeakMap<
-  object,
-  CompilerKeyedArrayMapPipelineHint
 >();
 const COMPILER_KEYED_COLLECTION_DRAFTS = /* @__PURE__ */ new WeakMap<
   object,
@@ -667,19 +654,11 @@ function recordCompilerKeyedArrayMapPipeline(previous: unknown, value: unknown):
     }
 
     const committedSource = COMPILER_KEYED_COMMITTED_COLLECTIONS.has(previousTarget);
-    const previousMapPipeline = committedSource
+    const previousReorder = committedSource
       ? undefined
-      : COMPILER_KEYED_ARRAY_MAP_PIPELINES.get(previousTarget);
-    const previousReorder =
-      committedSource || previousMapPipeline
-        ? undefined
-        : COMPILER_KEYED_ARRAY_REORDERS.get(previousTarget);
-    const composablePreviousReorder =
-      previousReorder &&
-      (previousReorder.mapped ||
-        previousReorder.kind !== CompilerKeyedArrayReorderKind.Permutation);
+      : COMPILER_KEYED_ARRAY_REORDERS.get(previousTarget);
     const previousSource =
-      previousMapPipeline || (composablePreviousReorder ? previousReorder : undefined);
+      previousReorder && !previousReorder.structuralUpdate ? previousReorder : undefined;
     if (!committedSource && (!previousSource || previousSource.resultLength !== previous.length)) {
       return value;
     }
@@ -707,17 +686,16 @@ function recordCompilerKeyedArrayMapPipeline(previous: unknown, value: unknown):
       const mappedItem = mappedDescriptor.value;
       if (!Object.is(mappedItem, sourceItem)) mappedItemSources.set(mappedItem, sourceItem);
     }
-    COMPILER_KEYED_ARRAY_MAP_PIPELINES.set(valueTarget, {
-      order: previousMapPipeline
-        ? previousMapPipeline.order
-        : committedSource
-          ? undefined
-          : previousReorder?.kind,
+    const hint: CompilerKeyedArrayReorderHint = {
+      kind: committedSource ? undefined : previousReorder?.kind,
       sourceToken,
       sourceLength: previousSource?.sourceLength ?? previous.length,
       resultLength: value.length,
+      mapped: true,
       mappedItemSources,
-    });
+    };
+    // A safe map can precede or follow a native reorder, including as the final pipeline step.
+    COMPILER_KEYED_ARRAY_REORDERS.set(valueTarget, hint);
   } catch {
     // Metadata must never change the result of a successful native update.
   }
@@ -725,7 +703,7 @@ function recordCompilerKeyedArrayMapPipeline(previous: unknown, value: unknown):
 }
 
 /**
- * @internal Executes proven native maps before the reorder suffix of a keyed pipeline.
+ * @internal Executes proven native maps within a keyed reorder pipeline.
  * The three-argument form remains accepted for older generated output.
  */
 export function createCompilerKeyedArrayMapPipeline(
@@ -789,21 +767,14 @@ export function createCompilerKeyedArrayMapReorder(
       }
     }
 
-    const mapPipeline = COMPILER_KEYED_ARRAY_MAP_PIPELINES.get(previousTarget);
-    const previousReorder = mapPipeline
-      ? undefined
-      : COMPILER_KEYED_ARRAY_REORDERS.get(previousTarget);
-    const source = mapPipeline || (previousReorder?.mapped ? previousReorder : undefined);
+    const previousReorder = COMPILER_KEYED_ARRAY_REORDERS.get(previousTarget);
+    const source = previousReorder?.mapped ? previousReorder : undefined;
     if (!source || source.resultLength !== previous.length) return value;
     COMPILER_KEYED_ARRAY_REORDERS.set(valueTarget, {
       kind:
         method !== NATIVE_ARRAY_TO_REVERSED
           ? CompilerKeyedArrayReorderKind.Permutation
-          : mapPipeline
-            ? reversedCompilerKeyedArrayOrder(mapPipeline.order)
-            : previousReorder
-              ? reversedCompilerKeyedArrayOrder(previousReorder.kind)
-              : CompilerKeyedArrayReorderKind.Permutation,
+          : reversedCompilerKeyedArrayOrder(source.kind),
       sourceToken: source.sourceToken,
       sourceLength: source.sourceLength,
       resultLength: value.length,

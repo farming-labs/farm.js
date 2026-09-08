@@ -1233,13 +1233,13 @@ setItems((current) =>
 ```
 
 For a concise functional setter, Farm can prepare one or more consecutive safe same-key `map()`
-calls and the following native `toSorted()` or `toReversed()` calls as one update pipeline.
+calls before or after native `toSorted()` or `toReversed()` calls as one update pipeline.
 JavaScript still performs every map and reorder normally. For two or more accepted maps, the
 compiler runtime checks each native call as it completes but records replacement lineage only once,
-by comparing the committed input with the final mapped result. The intermediate arrays need no
-separate full scan, and the final replacements still point directly to their committed source rows.
-The reorder suffix then needs one final keyed reconciliation rather than a growing chain of
-intermediate snapshots.
+by comparing the input and final result of each consecutive map segment. The intermediate arrays
+need no separate full scan, and the final replacements still point directly to their committed
+source rows. The complete pipeline then needs one final keyed reconciliation rather than a growing
+chain of intermediate snapshots.
 
 Before changing the DOM, the runtime verifies ordinary dense arrays, exact native methods, the
 committed collection token, equal lengths, a unique one-to-one source-item match, and the key of
@@ -1249,6 +1249,23 @@ Unchanged rows need no second key or binding read. Existing row elements, delega
 controlled inputs, focus, and text selection stay attached to their keys. Multiple supported
 map-and-reorder setters queued before one compiler flush compose against the same committed
 collection and expose only the final state.
+
+A safe map may also be the final pipeline step:
+
+```tsx
+setItems((current) =>
+  current
+    .toReversed()
+    .map((item) => (item.id === editedId ? { ...item, label: nextLabel } : item))
+    .map((item) => (item.id === editedId ? { ...item, rank: nextRank } : item)),
+);
+```
+
+Here the maps retain the preceding reorder lineage instead of turning the final value into an
+unhinted snapshot. An exact reverse uses the direct minimum-move reverse path and patches only
+changed rows. An earlier sort retains its general permutation proof, so Farm creates one
+source-item lookup, runs LIS once, and still skips key and binding reads for unchanged rows. Map
+segments on both sides of a reorder flatten replacements back to the same committed source rows.
 
 Exact reverse proof can also cross a setter boundary in the same batch:
 
@@ -2149,6 +2166,10 @@ The package and example test suites verify more than generated code:
   moved-row events with the newest item and index, preserve controlled-input focus and selection,
   and cover changed-key, custom-method, and Array-subclass fallback, Strict Mode hydration, and
   unmount-before-flush cleanup;
+- 2,000 deterministic native reversals or sorts followed by consecutive same-key edits match normal
+  React; targeted tests require exact reversal to use `n - 1` direct DOM moves without a generic
+  source-item map, require ambiguous sorting to use one validated keyed reconciliation, and cover
+  changed keys, custom methods, Strict Mode hydration, and unmount-before-flush cleanup;
 - 1,000 deterministic exact-position insertions, single and contiguous-range removals, single-row
   replacements, and exact-window replacements match normal React; compiler tests cover guarded
   runtime positions plus literal and compiler-safe runtime delete counts, while targeted removal

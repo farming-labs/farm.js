@@ -1385,6 +1385,12 @@ async function measureTrial(browser, trial, compilerMode, port) {
           () => tableButton("table-queued-map-reverse-parity-snapshot").click(),
           false,
         );
+        const tableReorderThenMapPipeline = await measureMultiMapReverseTable(() =>
+          tableButton("table-reorder-then-map-pipeline").click(),
+        );
+        const tableReorderThenMapPipelineSnapshot = await measureMultiMapReverseTable(() =>
+          tableButton("table-reorder-then-map-pipeline-snapshot").click(),
+        );
 
         const tableSort = await measureTable(
           async () => create10000(),
@@ -1866,6 +1872,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
             multiMapReverseParitySnapshot: tableMultiMapReverseParitySnapshot,
             queuedMapReverseParity: tableQueuedMapReverseParity,
             queuedMapReverseParitySnapshot: tableQueuedMapReverseParitySnapshot,
+            reorderThenMapPipeline: tableReorderThenMapPipeline,
+            reorderThenMapPipelineSnapshot: tableReorderThenMapPipelineSnapshot,
             mapLookup: tableMapLookup,
             membership: tableMembership,
             prepend: tablePrepend,
@@ -2004,6 +2012,10 @@ async function measureTrial(browser, trial, compilerMode, port) {
         multiMapReverseParitySnapshot: timingSummary(result.table.multiMapReverseParitySnapshot),
         queuedMapReverseParity: timingSummary(result.table.queuedMapReverseParity),
         queuedMapReverseParitySnapshot: timingSummary(result.table.queuedMapReverseParitySnapshot),
+        reorderThenMapPipeline: timingSummary(result.table.reorderThenMapPipeline),
+        reorderThenMapPipelineSnapshot: timingSummary(
+          result.table.reorderThenMapPipelineSnapshot,
+        ),
         mapLookup: timingSummary(result.table.mapLookup),
         membership: timingSummary(result.table.membership),
         prepend: timingSummary(result.table.prepend),
@@ -2188,6 +2200,8 @@ const tableMetrics = [
   "multiMapReverseParitySnapshot",
   "queuedMapReverseParity",
   "queuedMapReverseParitySnapshot",
+  "reorderThenMapPipeline",
+  "reorderThenMapPipelineSnapshot",
   "snapshotMembership",
   "snapshotMapLookup",
   "slicePrefix",
@@ -2938,6 +2952,28 @@ const keyedQueuedMapReverseParityRegressions = keyedQueuedMapReverseParityResult
     !Number.isFinite(snapshotSpeedup) ||
     snapshotSpeedup < keyedQueuedMapReverseParityMinimumSnapshotSpeedup,
 );
+// A safe map suffix must retain the preceding native reorder. The exact reverse path should move
+// the minimum rows, patch only changed bindings, and avoid the generic source-item lookup and LIS.
+const keyedReorderThenMapMinimumSpeedup = 4;
+const keyedReorderThenMapMinimumSnapshotSpeedup = 1.2;
+const keyedReorderThenMapResults = ["static", "hybrid"].map((mode) => {
+  const pipelineMedianMs = comparisons.table.reorderThenMapPipeline[mode].medianMs;
+  const snapshotMedianMs = comparisons.table.reorderThenMapPipelineSnapshot[mode].medianMs;
+  return {
+    mode,
+    pipelineMedianMs,
+    snapshotMedianMs,
+    snapshotSpeedup: snapshotMedianMs / pipelineMedianMs,
+    speedup: comparisons.table.reorderThenMapPipeline[`${mode}VsBaseline`].speedup,
+  };
+});
+const keyedReorderThenMapRegressions = keyedReorderThenMapResults.filter(
+  ({ snapshotSpeedup, speedup }) =>
+    !Number.isFinite(speedup) ||
+    speedup < keyedReorderThenMapMinimumSpeedup ||
+    !Number.isFinite(snapshotSpeedup) ||
+    snapshotSpeedup < keyedReorderThenMapMinimumSnapshotSpeedup,
+);
 // A direct native toSorted() exposes a permutation while preserving every keyed row object. The
 // hinted path validates that permutation by item identity, uses LIS to move only the required DOM
 // nodes, and avoids key, descriptor, and binding reads. Compare it with React and the equivalent
@@ -3131,6 +3167,7 @@ const passed =
   keyedMultiMapReverseRegressions.length === 0 &&
   keyedMappedReverseParityRegressions.length === 0 &&
   keyedQueuedMapReverseParityRegressions.length === 0 &&
+  keyedReorderThenMapRegressions.length === 0 &&
   keyedSortRegressions.length === 0 &&
   keyedFilterRegressions.length === 0 &&
   keyedIdentityRegressions.length === 0 &&
@@ -3331,6 +3368,13 @@ const report = {
     regressions: keyedQueuedMapReverseParityRegressions,
     results: keyedQueuedMapReverseParityResults,
     status: keyedQueuedMapReverseParityRegressions.length === 0 ? "PASS" : "FAIL",
+  },
+  keyedReorderThenMapHintGate: {
+    minimumSnapshotSpeedup: keyedReorderThenMapMinimumSnapshotSpeedup,
+    minimumSpeedup: keyedReorderThenMapMinimumSpeedup,
+    regressions: keyedReorderThenMapRegressions,
+    results: keyedReorderThenMapResults,
+    status: keyedReorderThenMapRegressions.length === 0 ? "PASS" : "FAIL",
   },
   keyedSortHintGate: {
     minimumSnapshotSpeedup: keyedSortMinimumSnapshotSpeedup,

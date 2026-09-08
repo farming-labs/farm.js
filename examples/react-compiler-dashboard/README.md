@@ -243,6 +243,15 @@ reversed order, every original DOM identity and connection, and the changed row 
 path validates mirrored row lineage and uses the minimum `n - 1` moves without a source-item map or
 LIS pass.
 
+Reorder-then-map has its own 10,000-row comparison. The concise setter calls `toReversed()` first
+and then changes one row through two safe native maps. Its block-bodied control performs the same
+native work through complete keyed reconciliation. Both compiler modes must remain at least 4x
+faster than React and 1.2x faster than the compiled control. The assertion checks the complete
+reversed order, every existing DOM identity and connection, and the changed row values. Package
+tests also cover sort-before-map permutation reconciliation, maps on both sides of a reorder,
+changed-key and custom-method fallback, React 18/19, Strict Mode hydration, cleanup, and 2,000
+differential updates.
+
 Mapped reverse parity has an independent 10,000-row comparison. Two safe native maps update one
 row, then two native reversals restore committed order. Farm must patch the changed row without
 moving any DOM row or constructing the generic source-item map/LIS sequence. Both compiler modes
@@ -350,6 +359,9 @@ The default JSON report is `/tmp/farm-react-dashboard-benchmark.json`; change it
 - The multi-map reverse control changes the same row through two native maps and then reverses all
   rows. Its block-bodied equivalent performs the same maps and connected DOM moves, while the
   hinted path validates mirrored lineage directly and skips the temporary source map and LIS pass.
+- The reorder-then-map control reverses all rows before changing one row through two native maps.
+  Its block-bodied equivalent loses the reorder proof; the hinted path retains exact reverse order,
+  patches one row, and skips the generic source map and LIS pass.
 - The multi-map reverse-parity control changes the same row through two native maps and then
   reverses twice. Its block-bodied equivalent keeps complete reconciliation; the hinted path
   validates exact committed order, patches the row once, and performs no generic item-map, LIS, or
