@@ -218,10 +218,11 @@ async function isLocalPreviewTargetReachable(url: string, timeoutMs: number) {
   const signal = AbortSignal.timeout(timeoutMs);
 
   try {
-    await fetch(url, {
+    const response = await fetch(url, {
       method: "GET",
       signal,
     });
+    await response.body?.cancel();
     return true;
   } catch {
     return false;
