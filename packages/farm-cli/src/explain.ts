@@ -619,7 +619,15 @@ function normalizePathname(value: string, basePath: string): string {
 }
 
 function splitPath(value: string) {
-  return value.split("/").filter(Boolean).map(decodeURIComponent);
+  return value.split("/").filter(Boolean).map(decodeExplainPathSegment);
+}
+
+function decodeExplainPathSegment(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 function toProjectPath(root: string, filePath: string) {
