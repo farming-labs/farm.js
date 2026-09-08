@@ -194,6 +194,10 @@ export async function POST(request: Request) {
 
 PPR works best when the stable page shell is outside Suspense and request-specific or slow data lives inside Suspense.
 
+When a production render actually suspends, Farm currently buffers that response for late status
+errors and bypasses the shared PPR shell cache. This preserves fresh request-specific content
+instead of caching a completed response as though it were a reusable partial shell.
+
 ```tsx
 import { Suspense } from "react";
 
