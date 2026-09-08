@@ -523,7 +523,12 @@ export async function createFarmStorage(config: FarmStorageUserConfig = {}): Pro
     driver: await resolveDriver(rootConfig),
   });
 
-  await mountNamespaces(storage, config.mounts);
+  try {
+    await mountNamespaces(storage, config.mounts);
+  } catch (error) {
+    await storage.dispose().catch(() => {});
+    throw error;
+  }
   return storage;
 }
 

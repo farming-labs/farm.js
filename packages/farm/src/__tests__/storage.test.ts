@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { IncomingMessage, ServerResponse } from "node:http";
 import { Socket } from "node:net";
+import memoryDriver from "unstorage/drivers/memory";
 import { middleware } from "../middleware/chain";
 import { createContext } from "../middleware/context";
 import {
@@ -104,6 +105,32 @@ describe("Storage", () => {
     expect(await storage.getItem("greeting")).toEqual({ hello: "world" });
 
     await storage.dispose();
+  });
+
+  it("disposes initialized drivers when a later mount fails", async () => {
+    const rootDriver = memoryDriver();
+    const mountedDriver = memoryDriver();
+    const disposeRoot = vi.fn();
+    const disposeMount = vi.fn();
+    rootDriver.dispose = disposeRoot;
+    mountedDriver.dispose = disposeMount;
+
+    await expect(
+      createFarmStorage({
+        driver: rootDriver,
+        mounts: {
+          ready: { driver: mountedDriver },
+          failed: {
+            driver: async () => {
+              throw new Error("mount failed");
+            },
+          },
+        },
+      }),
+    ).rejects.toThrow("mount failed");
+
+    expect(disposeRoot).toHaveBeenCalledOnce();
+    expect(disposeMount).toHaveBeenCalledOnce();
   });
 
   it("re-creates the driver after dispose instead of reviving the disposed one", async () => {
