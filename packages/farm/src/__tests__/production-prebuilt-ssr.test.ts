@@ -371,6 +371,73 @@ async function expectNitroFallback(root: string): Promise<void> {
 }
 
 describe("production prebuilt SSR output", () => {
+  it("serves the configured OpenAPI reference in production", async () => {
+    const root = await createProductionFixture();
+    const apiDir = path.join(root, "src", "app", "api", "health");
+
+    try {
+      await fs.mkdir(apiDir, { recursive: true });
+      await fs.writeFile(
+        path.join(apiDir, "route.ts"),
+        `export function GET() { return Response.json({ ok: true }); }`,
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          telemetry: false,
+          openapi: {
+            enabled: true,
+            route: "/docs/reference",
+            title: "Production API",
+          },
+          generateBuildId: () => "production-openapi-test",
+        },
+        "production",
+      );
+
+      await build(config, { root, preset: "node-server" });
+
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
+          expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+          const html = await response.text();
+          expect(html).toContain("<title>Production API</title>");
+          expect(html).toContain('id="api-reference"');
+          const encodedSpec = html.match(/data-url="data:application\/json;base64,([^"]+)"/)?.[1];
+          expect(encodedSpec).toBeTruthy();
+          const spec = JSON.parse(Buffer.from(encodedSpec!, "base64").toString("utf8"));
+          expect(spec.paths["/health"].get.operationId).toBe("get_health");
+        },
+        "/docs/reference?source=production-test",
+      );
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          await expect(response.text()).resolves.toBe("");
+        },
+        "/docs/reference",
+        { method: "HEAD" },
+      );
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(405);
+          expect(response.headers.get("allow")).toBe("GET, HEAD");
+        },
+        "/docs/reference",
+        { method: "POST" },
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("bundles automatic production-site discovery on the server only", async () => {
     const root = await createProductionFixture();
 

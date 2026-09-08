@@ -1433,7 +1433,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           }
 
           // Handle OpenAPI docs route
-          if (openAPIManager && req.url === options.openapi?.route) {
+          if (openAPIManager && requestPathname === options.openapi?.route) {
             const docsHandler = openAPIManager.getDocsRouteHandler();
             return docsHandler(req, res);
           }

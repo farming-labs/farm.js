@@ -3626,6 +3626,19 @@ async function buildSSRInMemory(
     : {};
 
   const appDirs = getFarmAppDirectories(config);
+  let openAPIReference: { route: string; html: string } | null = null;
+  if (config.openapi.enabled && config.openapi.route) {
+    const { OpenAPIManager, renderOpenAPIReferenceHTML } = await import("../openapi/manager");
+    const openAPIManager = new OpenAPIManager(appDirs, config.openapi);
+    const spec = await openAPIManager.generateSpec();
+    if (!spec) {
+      throw new Error("Failed to generate the OpenAPI specification for the production build.");
+    }
+    openAPIReference = {
+      route: config.openapi.route,
+      html: renderOpenAPIReferenceHTML(spec, config.openapi),
+    };
+  }
   const middlewareRoutes = await discoverMiddlewareRoutes(appDirs);
   const instrumentationPath = resolveFarmInstrumentationFile(root, config.srcDir || "src");
 
@@ -3695,6 +3708,7 @@ async function buildSSRInMemory(
     redirectRoutes,
     configuredRewrites,
     configuredHeaderRoutes,
+    openAPIReference,
     notFoundPath,
     instrumentationPath,
     config,
@@ -4005,6 +4019,7 @@ function generateVirtualEntryCode(
   redirectRoutes: ProgrammaticRedirectRoute[],
   configuredRewriteRoutes: RewriteConfig[],
   configuredHeaderRoutes: UniversalConfiguredHeaderRoute[],
+  openAPIReference: { route: string; html: string } | null,
   notFoundPath: string | null,
   instrumentationPath: string | null,
   config: ResolvedFarmConfig,
@@ -4756,6 +4771,7 @@ const farmDocsAPIHandler = ${
 const apiRoutes = [${apiRegistrations.join(",")}
 ];
 const farmLocalAPIBasePath = ${JSON.stringify(resolveFarmAPIServerBasePath(config.api))};
+const farmOpenAPIReference = ${JSON.stringify(openAPIReference)};
 
 function isFarmLocalAPIPathname(pathname) {
   return farmLocalAPIBasePath !== "/" &&
@@ -5691,6 +5707,12 @@ function matchRouteSlots(pathname, interceptFrom) {
 
 function hasLocalRequestRoute(request, routePathname) {
   const pathname = new URL(request.url).pathname;
+  if (
+    farmOpenAPIReference &&
+    normalizeRuntimePath(pathname) === normalizeRuntimePath(farmOpenAPIReference.route)
+  ) {
+    return true;
+  }
   if (matchLocalAPIRequest(request) || matchLocalIntegrationRequest(request)) {
     return true;
   }
@@ -5725,6 +5747,15 @@ function getFarmPluginRequestOptions(request) {
   const pathname = url.pathname;
   const routePathname = getFarmRoutePathname(pathname);
   const route = { pathname };
+  if (
+    farmOpenAPIReference &&
+    normalizeRuntimePath(pathname) === normalizeRuntimePath(farmOpenAPIReference.route)
+  ) {
+    return {
+      kind: "docs",
+      route: { ...route, pattern: normalizeRuntimePath(farmOpenAPIReference.route) },
+    };
+  }
   const isDocsAPIRequest = ${config.docs?.enabled ? "isFarmDocsAPIRequest(pathname)" : "false"};
   const integrationMatch = ${
     hasServerRuntimeIntegrations
@@ -6246,6 +6277,30 @@ async function handleFarmRequestInContext(
   }
   `
       : ""
+  }
+
+  if (
+    farmOpenAPIReference &&
+    normalizeRuntimePath(pathname) === normalizeRuntimePath(farmOpenAPIReference.route)
+  ) {
+    const method = request.method.toUpperCase();
+    const response = method === "GET" || method === "HEAD"
+      ? new Response(method === "HEAD" ? null : farmOpenAPIReference.html, {
+          status: 200,
+          headers: {
+            "Content-Type": "text/html; charset=utf-8",
+            "Cache-Control": "public, max-age=0, must-revalidate",
+            "X-Content-Type-Options": "nosniff",
+          },
+        })
+      : new Response("Method Not Allowed", {
+          status: 405,
+          headers: {
+            "Allow": "GET, HEAD",
+            "Content-Type": "text/plain; charset=utf-8",
+          },
+        });
+    return applyProductionMiddlewareHeaders(response, middlewareHeaders);
   }
 
   ${
