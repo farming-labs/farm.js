@@ -10,6 +10,7 @@ import {
   type PreviewGatewaySession,
 } from "./preview-gateway";
 import { runNativePreviewTunnel } from "./preview-native";
+import { createHttpLocalUrl } from "./local-url";
 
 export interface PreviewFarmOptions {
   root?: string;
@@ -418,7 +419,7 @@ function normalizeLocalUrl(value: string) {
 }
 
 function createLocalUrl(host: string, port: number) {
-  return `http://${host}:${port}`;
+  return createHttpLocalUrl(host, port);
 }
 
 function normalizePort(value: unknown): number | undefined {

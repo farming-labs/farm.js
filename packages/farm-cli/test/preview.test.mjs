@@ -58,6 +58,13 @@ test("resolves a running local preview target", async () => {
   }
 });
 
+test("formats a bare IPv6 preview host as a valid local URL", async () => {
+  const target = await resolvePreviewTarget({ host: "::1", port: 4321, noProbe: true });
+
+  assert.equal(target.localUrl, "http://[::1]:4321");
+  assert.equal(new URL(target.localUrl).hostname, "[::1]");
+});
+
 test("creates a tunnel plan from the preview command template", () => {
   const previousCommand = process.env.FARM_PREVIEW_TUNNEL_COMMAND;
   const previousDomain = process.env.FARM_PREVIEW_DOMAIN;

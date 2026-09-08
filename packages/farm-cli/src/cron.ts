@@ -7,6 +7,7 @@ import {
 } from "@farm.js/core";
 import { Cron } from "croner";
 import path from "node:path";
+import { createHttpLocalUrl } from "./local-url";
 
 export interface FarmCronCLIOptions {
   root?: string;
@@ -213,7 +214,8 @@ async function invokeFarmCronJob(
 }
 
 function resolveCronTarget(job: FarmCronJob, options: RunFarmCronOptions): string {
-  const baseURL = options.url || `http://${options.host || "localhost"}:${options.port || 3000}`;
+  const baseURL =
+    options.url || createHttpLocalUrl(options.host || "localhost", options.port || 3000);
   const normalizedBase = baseURL.endsWith("/") ? baseURL : `${baseURL}/`;
   return new URL(job.path.replace(/^\/+/, ""), normalizedBase).toString();
 }
