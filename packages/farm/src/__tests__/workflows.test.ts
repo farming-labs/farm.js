@@ -385,6 +385,34 @@ describe("Farm workflows", () => {
     expect((malformedResponse as Response).status).toBe(400);
   });
 
+  it("removes generated wrappers when workflows are removed or disabled", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-workflow-cleanup-"));
+    const jobsDir = path.join(root, "src", "jobs");
+    const firstWorkflow = path.join(jobsDir, "first.mjs");
+    const remainingWorkflow = path.join(jobsDir, "remaining.mjs");
+    const generatedDir = path.join(root, ".farm", ".nitro", "farm-workflows");
+    await fs.mkdir(jobsDir, { recursive: true });
+    const workflowSource = "export default { async run() { return { ok: true }; } };";
+    await Promise.all([
+      fs.writeFile(firstWorkflow, workflowSource),
+      fs.writeFile(remainingWorkflow, workflowSource),
+    ]);
+
+    await prepareFarmWorkflowsForNitro({ root, workflows: {} });
+    await expect(fs.stat(path.join(generatedDir, "first.mjs"))).resolves.toBeDefined();
+    await expect(fs.stat(path.join(generatedDir, "remaining.mjs"))).resolves.toBeDefined();
+
+    await fs.unlink(firstWorkflow);
+    await prepareFarmWorkflowsForNitro({ root, workflows: {} });
+    await expect(fs.stat(path.join(generatedDir, "first.mjs"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    await expect(fs.stat(path.join(generatedDir, "remaining.mjs"))).resolves.toBeDefined();
+
+    await prepareFarmWorkflowsForNitro({ root, workflows: false });
+    await expect(fs.stat(generatedDir)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("emits only internal imports the production runtime actually exports", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-workflow-imports-"));
     await fs.mkdir(path.join(root, "src", "jobs"), { recursive: true });

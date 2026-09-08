@@ -236,4 +236,6 @@ parses `application/json` and `application/*+json` bodies as JSON, wraps other n
 should use `cron` config plus an ordinary API route so local, deployment, security, and testing
 behavior share one model. Existing workflow-module applications may configure `workflows.dir` or
 `workflows.dirs` with project-relative or absolute directories; absolute directories remain rooted
-outside the project instead of being remounted below it.
+outside the project instead of being remounted below it. Production preparation replaces the
+generated workflow wrappers on each run, so removed modules or disabling `workflows` cannot leave
+an executable stale task behind.

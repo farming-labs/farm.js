@@ -302,12 +302,18 @@ export async function prepareFarmWorkflowsForNitro(config: {
   const workflowConfig = isResolvedWorkflowConfig(config.workflows)
     ? config.workflows
     : resolveWorkflowsConfig(config.workflows);
+  const root = config.root || process.cwd();
+  const distDir = config.distDir || ".farm";
+  const fs = await import("fs/promises");
+  const path = await import("path");
+  const generatedDir = path.join(root, distDir, ".nitro", "farm-workflows");
   const workflows = await discoverFarmWorkflows({
-    root: config.root,
+    root,
     workflows: workflowConfig,
   });
 
   if (workflows.length === 0) {
+    await fs.rm(generatedDir, { recursive: true, force: true });
     return {
       workflows,
       tasks: {},
@@ -315,11 +321,7 @@ export async function prepareFarmWorkflowsForNitro(config: {
     };
   }
 
-  const root = config.root || process.cwd();
-  const distDir = config.distDir || ".farm";
-  const fs = await import("fs/promises");
-  const path = await import("path");
-  const generatedDir = path.join(root, distDir, ".nitro", "farm-workflows");
+  await fs.rm(generatedDir, { recursive: true, force: true });
   await fs.mkdir(generatedDir, { recursive: true });
 
   const tasks: PreparedFarmWorkflows["tasks"] = {};
