@@ -84,6 +84,41 @@ describe("config route plugins", () => {
     });
   });
 
+  it("keeps wildcard captures root-relative and aligned with production", async () => {
+    const plugin = createRedirectsPlugin([{ source: "/old/:path*", destination: "/:path*" }]);
+    const response = createResponse();
+
+    await runBeforeRequest(plugin, createRequest("/old//evil.example"), response);
+
+    expect(response.writeHead).toHaveBeenCalledWith(307, {
+      Location: "/evil.example",
+    });
+  });
+
+  it("encodes redirect and rewrite captures like the production runtime", async () => {
+    const redirect = createRedirectsPlugin([
+      { source: "/legacy/:path*", destination: "/current/:path*" },
+    ]);
+    const redirectResponse = createResponse();
+
+    await runBeforeRequest(
+      redirect,
+      createRequest("/legacy/guides/a%20b//c%2Fd"),
+      redirectResponse,
+    );
+
+    expect(redirectResponse.writeHead).toHaveBeenCalledWith(307, {
+      Location: "/current/guides/a%20b/c%2Fd",
+    });
+
+    const rewrite = createRewritesPlugin([
+      { source: "/legacy/:path*", destination: "/current/$1" },
+    ]);
+    const rewriteRequest = createRequest("/legacy/guides/a%20b//c%2Fd");
+    await runBeforeRequest(rewrite, rewriteRequest, createResponse());
+    expect(rewriteRequest.url).toBe("/current/guides/a%20b/c%2Fd");
+  });
+
   it("treats regular-expression characters as literals", async () => {
     const plugin = createRedirectsPlugin([{ source: "/promo.html", destination: "/offer" }]);
     const req = createRequest("/promoXhtml");
