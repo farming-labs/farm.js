@@ -49,6 +49,19 @@ test("explains a dynamic page and its inherited route behavior", async () => {
   }
 });
 
+test("keeps malformed percent-encoded route parameters raw", async () => {
+  const root = await createExplainProject();
+
+  try {
+    const explanation = await explainFarmRoute("/products/%ZZ", { root });
+
+    assert.equal(explanation.pattern, "/products/[id]");
+    assert.deepEqual(explanation.params, { id: "%ZZ" });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("prints route explanations as JSON through the CLI", async () => {
   const root = await createExplainProject();
 

@@ -224,6 +224,9 @@ farm explain /products/42 --json
 - static or generated metadata and the nearest Open Graph and Twitter images;
 - the deployment target, preset, runtime compatibility, and actionable warnings.
 
+Request paths are not required to contain valid percent escapes. `farm explain` keeps a malformed
+segment raw, matching the runtime router, instead of aborting the diagnostic with a URI error.
+
 Use the text output while debugging and `--json` for tooling. The command is read-only and fails when no page route matches the supplied URL.
 
 ## Build
