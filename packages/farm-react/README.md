@@ -452,14 +452,24 @@ bindings, nested or React-owned rows, and failed checks use complete keyed recon
 use the existing map, sort, and reorder hint counters, and unrelated modules do not retain this
 optional runtime.
 
+A reverse before the safe map pipeline may be queued in a separate setter:
+
+```tsx
+setItems((current) => current.toReversed());
+setItems((current) =>
+  current.map((item) => (item.id === editedId ? { ...item, label: nextLabel } : item)).toReversed(),
+);
+```
+
 A direct `toReversed()` suffix is more specific than an arbitrary permutation. When all preceding
 maps retain committed row order, Farm validates the mirrored source-to-result relation and every
 changed binding before touching the DOM, then performs the minimum-move reverse without building a
 second item lookup map or running LIS. Additional exact reversals toggle that proof between reverse
 and identity. Therefore two reversals after safe maps patch changed rows in committed order without
 moving DOM nodes or creating the generic source map; three use the exact reverse path. Exact reverse
-metadata also composes across queued setters. A preceding sort or any ambiguous order keeps the
-general permutation path.
+metadata also composes across queued setters: a queued reverse followed by safe maps and another
+reverse retains exact identity, so only changed row bindings are patched. A preceding sort or any
+ambiguous order keeps the general permutation path.
 
 A direct native immutable sort can use the same optional reorder runtime:
 

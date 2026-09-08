@@ -247,8 +247,11 @@ Mapped reverse parity has an independent 10,000-row comparison. Two safe native 
 row, then two native reversals restore committed order. Farm must patch the changed row without
 moving any DOM row or constructing the generic source-item map/LIS sequence. Both compiler modes
 must remain at least 8x faster than React and 1.5x faster than the equivalent block-bodied compiled
-control. The assertion checks all final values, positions, identities, and connections. Package
-tests compare one to four reversals across 2,000 deterministic updates and cover queued parity,
+control. A second operation splits the same proof across queued setters: one setter reverses the
+rows, then another applies two safe maps and reverses again. It has the same independent 8x React
+and 1.5x compiled-control floors. Both assertions check all final values, positions, identities,
+and connections. Package tests compare one to four reversals across 2,000 deterministic updates,
+run another 2,000 separately queued reverse/map/reverse updates against normal React, and cover
 changed-key and subclass fallback, Strict Mode hydration, and cleanup.
 
 Native keyed-array sorting has its own 10,000-row comparison. Concise `toSorted()` is measured

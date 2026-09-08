@@ -1377,6 +1377,14 @@ async function measureTrial(browser, trial, compilerMode, port) {
           () => tableButton("table-multi-map-reverse-parity-snapshot").click(),
           false,
         );
+        const tableQueuedMapReverseParity = await measureMultiMapReverseTable(
+          () => tableButton("table-queued-map-reverse-parity").click(),
+          false,
+        );
+        const tableQueuedMapReverseParitySnapshot = await measureMultiMapReverseTable(
+          () => tableButton("table-queued-map-reverse-parity-snapshot").click(),
+          false,
+        );
 
         const tableSort = await measureTable(
           async () => create10000(),
@@ -1856,6 +1864,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
             multiMapReversePipelineSnapshot: tableMultiMapReversePipelineSnapshot,
             multiMapReverseParity: tableMultiMapReverseParity,
             multiMapReverseParitySnapshot: tableMultiMapReverseParitySnapshot,
+            queuedMapReverseParity: tableQueuedMapReverseParity,
+            queuedMapReverseParitySnapshot: tableQueuedMapReverseParitySnapshot,
             mapLookup: tableMapLookup,
             membership: tableMembership,
             prepend: tablePrepend,
@@ -1992,6 +2002,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
         ),
         multiMapReverseParity: timingSummary(result.table.multiMapReverseParity),
         multiMapReverseParitySnapshot: timingSummary(result.table.multiMapReverseParitySnapshot),
+        queuedMapReverseParity: timingSummary(result.table.queuedMapReverseParity),
+        queuedMapReverseParitySnapshot: timingSummary(result.table.queuedMapReverseParitySnapshot),
         mapLookup: timingSummary(result.table.mapLookup),
         membership: timingSummary(result.table.membership),
         prepend: timingSummary(result.table.prepend),
@@ -2174,6 +2186,8 @@ const tableMetrics = [
   "multiMapReversePipelineSnapshot",
   "multiMapReverseParity",
   "multiMapReverseParitySnapshot",
+  "queuedMapReverseParity",
+  "queuedMapReverseParitySnapshot",
   "snapshotMembership",
   "snapshotMapLookup",
   "slicePrefix",
@@ -2901,6 +2915,29 @@ const keyedMappedReverseParityRegressions = keyedMappedReverseParityResults.filt
     !Number.isFinite(snapshotSpeedup) ||
     snapshotSpeedup < keyedMappedReverseParityMinimumSnapshotSpeedup,
 );
+// Separate queued setters can reverse the committed rows, update through safe maps, and reverse
+// again. The final order is still exact identity, so it should retain the same bounded row patch
+// without generic source-map, LIS, or DOM-movement work.
+const keyedQueuedMapReverseParityMinimumSpeedup = 8;
+const keyedQueuedMapReverseParityMinimumSnapshotSpeedup = 1.5;
+const keyedQueuedMapReverseParityResults = ["static", "hybrid"].map((mode) => {
+  const pipelineMedianMs = comparisons.table.queuedMapReverseParity[mode].medianMs;
+  const snapshotMedianMs = comparisons.table.queuedMapReverseParitySnapshot[mode].medianMs;
+  return {
+    mode,
+    pipelineMedianMs,
+    snapshotMedianMs,
+    snapshotSpeedup: snapshotMedianMs / pipelineMedianMs,
+    speedup: comparisons.table.queuedMapReverseParity[`${mode}VsBaseline`].speedup,
+  };
+});
+const keyedQueuedMapReverseParityRegressions = keyedQueuedMapReverseParityResults.filter(
+  ({ snapshotSpeedup, speedup }) =>
+    !Number.isFinite(speedup) ||
+    speedup < keyedQueuedMapReverseParityMinimumSpeedup ||
+    !Number.isFinite(snapshotSpeedup) ||
+    snapshotSpeedup < keyedQueuedMapReverseParityMinimumSnapshotSpeedup,
+);
 // A direct native toSorted() exposes a permutation while preserving every keyed row object. The
 // hinted path validates that permutation by item identity, uses LIS to move only the required DOM
 // nodes, and avoids key, descriptor, and binding reads. Compare it with React and the equivalent
@@ -3093,6 +3130,7 @@ const passed =
   keyedMultiMapReorderRegressions.length === 0 &&
   keyedMultiMapReverseRegressions.length === 0 &&
   keyedMappedReverseParityRegressions.length === 0 &&
+  keyedQueuedMapReverseParityRegressions.length === 0 &&
   keyedSortRegressions.length === 0 &&
   keyedFilterRegressions.length === 0 &&
   keyedIdentityRegressions.length === 0 &&
@@ -3286,6 +3324,13 @@ const report = {
     regressions: keyedMappedReverseParityRegressions,
     results: keyedMappedReverseParityResults,
     status: keyedMappedReverseParityRegressions.length === 0 ? "PASS" : "FAIL",
+  },
+  keyedQueuedMapReverseParityHintGate: {
+    minimumSnapshotSpeedup: keyedQueuedMapReverseParityMinimumSnapshotSpeedup,
+    minimumSpeedup: keyedQueuedMapReverseParityMinimumSpeedup,
+    regressions: keyedQueuedMapReverseParityRegressions,
+    results: keyedQueuedMapReverseParityResults,
+    status: keyedQueuedMapReverseParityRegressions.length === 0 ? "PASS" : "FAIL",
   },
   keyedSortHintGate: {
     minimumSnapshotSpeedup: keyedSortMinimumSnapshotSpeedup,
