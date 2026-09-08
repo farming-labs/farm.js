@@ -234,4 +234,6 @@ The older `defineCron()` workflow-module API remains available for compatibility
 parses `application/json` and `application/*+json` bodies as JSON, wraps other non-empty bodies as
 `{ text }`, and rejects malformed JSON consistently in development and production. New applications
 should use `cron` config plus an ordinary API route so local, deployment, security, and testing
-behavior share one model.
+behavior share one model. Existing workflow-module applications may configure `workflows.dir` or
+`workflows.dirs` with project-relative or absolute directories; absolute directories remain rooted
+outside the project instead of being remounted below it.

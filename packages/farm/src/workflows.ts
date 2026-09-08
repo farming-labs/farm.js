@@ -8,6 +8,13 @@ import {
 import { searchParamsToObject } from "./search-params";
 import { decodeRouteSegment } from "./utils/decode";
 import { toPosixPath } from "./utils";
+import {
+  isAbsolute as isAbsolutePath,
+  normalize as normalizePath,
+  relative as relativeFilePath,
+  resolve as resolvePath,
+  sep as pathSeparator,
+} from "node:path";
 
 export type FarmWorkflowSchedule = string | string[];
 
@@ -173,7 +180,9 @@ export async function discoverFarmWorkflows(
     const definition = resolveWorkflowDefinition(module);
     if (!definition) continue;
 
-    const id = normalizeWorkflowId(definition.id || workflowIdFromFile(root, filePath));
+    const id = normalizeWorkflowId(
+      definition.id || workflowIdFromFile(root, workflowConfig.dirs, filePath),
+    );
     const previousPath = seenIds.get(id);
     if (previousPath) {
       throw new Error(
@@ -412,7 +421,13 @@ function normalizeWorkflowDirs(options: FarmWorkflowsUserConfig): string[] {
     options.dirs ||
     (Array.isArray(options.dir) ? options.dir : options.dir ? [options.dir] : undefined);
   const dirs = rawDirs && rawDirs.length > 0 ? rawDirs : DEFAULT_FARM_WORKFLOW_DIRS;
-  return [...new Set(dirs.map((dir) => trimSlashes(dir)).filter(Boolean))];
+  return [...new Set(dirs.map(normalizeWorkflowDir).filter(Boolean))];
+}
+
+function normalizeWorkflowDir(value: string): string {
+  const dir = value.trim();
+  if (!dir) return "";
+  return isAbsolutePath(dir) ? normalizePath(dir) : trimSlashes(dir);
 }
 
 function normalizeWorkflowRoute(route: string): string {
@@ -452,7 +467,6 @@ function resolveWorkflowDefinition(
 }
 
 async function findWorkflowFiles(root: string, dirs: string[]): Promise<string[]> {
-  const fs = await import("fs/promises");
   const path = await import("path");
   const files: string[] = [];
 
@@ -528,15 +542,16 @@ async function loadWorkflowModule(filePath: string, root: string): Promise<Recor
   }
 }
 
-function workflowIdFromFile(root: string, filePath: string): string {
-  const normalizedRoot = root.replace(/\\/g, "/");
-  const normalizedFile = filePath.replace(/\\/g, "/");
-  const relative = normalizedFile.startsWith(`${normalizedRoot}/`)
-    ? normalizedFile.slice(normalizedRoot.length + 1)
-    : normalizedFile;
-  return normalizeWorkflowId(
-    relative.replace(/^src\/(?:jobs|workflows|cron)\//, "").replace(/\.(tsx?|jsx?|mjs|cjs)$/, ""),
-  );
+function workflowIdFromFile(root: string, dirs: string[], filePath: string): string {
+  for (const dir of dirs) {
+    const scanRoot = isAbsolutePath(dir) ? dir : resolvePath(root, dir);
+    const candidate = relativeFilePath(scanRoot, filePath);
+    if (candidate && candidate !== ".." && !candidate.startsWith(`..${pathSeparator}`)) {
+      return normalizeWorkflowId(candidate);
+    }
+  }
+
+  return normalizeWorkflowId(relativeFilePath(root, filePath));
 }
 
 function createScheduledTasks(
