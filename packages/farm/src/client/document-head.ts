@@ -1,4 +1,4 @@
-const FARM_NAVIGATION_HEAD_SELECTOR = [
+export const FARM_NAVIGATION_HEAD_SELECTOR = [
   "meta[name]",
   "meta[property]",
   "meta[http-equiv]",
