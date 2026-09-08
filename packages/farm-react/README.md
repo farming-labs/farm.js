@@ -449,6 +449,12 @@ bindings, nested or React-owned rows, and failed checks use complete keyed recon
 use the existing map, sort, and reorder hint counters, and unrelated modules do not retain this
 optional runtime.
 
+A direct `toReversed()` suffix is more specific than an arbitrary permutation. When all preceding
+maps retain committed row order, Farm validates the mirrored source-to-result relation and every
+changed binding before touching the DOM, then performs the minimum-move reverse without building a
+second item lookup map or running LIS. A preceding sort or a map whose source is an uncommitted
+reorder keeps the general permutation path.
+
 A direct native immutable sort can use the same optional reorder runtime:
 
 ```tsx

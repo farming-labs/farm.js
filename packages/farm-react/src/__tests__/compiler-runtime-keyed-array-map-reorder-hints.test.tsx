@@ -97,6 +97,16 @@ function multiMappedSort(items: Item[], id: string, rank: number, label: string)
   );
 }
 
+function multiMappedReverse(items: Item[], id: string, rank: number, label: string): Item[] {
+  return hintedReverse(
+    hintedMaps(
+      items,
+      (item) => (item.id === id ? { ...item, label } : item),
+      (item) => (item.id === id ? { ...item, rank } : item),
+    ),
+  );
+}
+
 function rowDescriptor(item: Item): CompilerKeyedRowElement {
   return {
     kind: "element",
@@ -122,9 +132,11 @@ function createHarness(initialItems: Item[]) {
   let editAndSort: (id: string, rank: number, label?: string) => void = () => undefined;
   let editTwoAndSort: (labelId: string, rankId: string) => void = () => undefined;
   let editTwiceAndSort: (id: string, rank: number, label: string) => void = () => undefined;
+  let editTwiceAndReverse: (id: string, rank: number, label: string) => void = () => undefined;
   let editSortReverse: (id: string, rank: number) => void = () => undefined;
   let queueEdits: (edits: readonly { id: string; rank: number; label: string }[]) => void = () =>
     undefined;
+  let queueSortThenMapReverse: () => void = () => undefined;
   let invalidateKey: () => void = () => undefined;
   let customMap: () => void = () => undefined;
   let customSecondMap: () => void = () => undefined;
@@ -148,6 +160,8 @@ function createHarness(initialItems: Item[]) {
         );
       editTwiceAndSort = (id, rank, label) =>
         state[0].set((previous) => multiMappedSort(previous as Item[], id, rank, label));
+      editTwiceAndReverse = (id, rank, label) =>
+        state[0].set((previous) => multiMappedReverse(previous as Item[], id, rank, label));
       editSortReverse = (id, rank) =>
         state[0].set((previous) => hintedReverse(mappedSort(previous as Item[], id, rank)));
       queueEdits = (edits) => {
@@ -157,9 +171,25 @@ function createHarness(initialItems: Item[]) {
           );
         }
       };
-      invalidateKey = () =>
+      queueSortThenMapReverse = () => {
         state[0].set((previous) =>
           hintedSort(
+            hintedMap(previous as Item[], (item) =>
+              item.id === "a" ? { ...item, label: "Alpha sorted" } : item,
+            ),
+          ),
+        );
+        state[0].set((previous) =>
+          hintedReverse(
+            hintedMap(previous as Item[], (item) =>
+              item.id === "c" ? { ...item, label: "Gamma reversed" } : item,
+            ),
+          ),
+        );
+      };
+      invalidateKey = () =>
+        state[0].set((previous) =>
+          hintedReverse(
             hintedMap(previous as Item[], (item) =>
               item.id === "b" ? { ...item, id: "replacement", label: "Replacement" } : item,
             ),
@@ -268,10 +298,13 @@ function createHarness(initialItems: Item[]) {
     editTwoAndSort: (labelId: string, rankId: string) => editTwoAndSort(labelId, rankId),
     editTwiceAndSort: (id: string, rank: number, label: string) =>
       editTwiceAndSort(id, rank, label),
+    editTwiceAndReverse: (id: string, rank: number, label: string) =>
+      editTwiceAndReverse(id, rank, label),
     editSortReverse: (id: string, rank: number) => editSortReverse(id, rank),
     invalidateKey: () => invalidateKey(),
     queueEdits: (edits: readonly { id: string; rank: number; label: string }[]) =>
       queueEdits(edits),
+    queueSortThenMapReverse: () => queueSortThenMapReverse(),
   };
 }
 
@@ -363,6 +396,42 @@ describe("compiled keyed-array map and reorder hints", () => {
     expect(harness.counters.keys).toBe(1);
     expect(harness.counters.descriptors).toBe(0);
     expect(harness.counters.bindings).toBe(1);
+  });
+
+  it("patches mapped rows and takes the exact reverse path", async () => {
+    const harness = createHarness([
+      { id: "a", label: "Alpha", rank: 1 },
+      { id: "b", label: "Beta", rank: 2 },
+      { id: "c", label: "Gamma", rank: 3 },
+    ]);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Table />));
+    const rows = new Map(
+      [...container.querySelectorAll("li")].map((row) => [row.dataset.key, row]),
+    );
+    const insertBefore = vi.spyOn(container.querySelector("ul")!, "insertBefore");
+    harness.counters.bindings = 0;
+    harness.counters.descriptors = 0;
+    harness.counters.keys = 0;
+
+    await act(async () => {
+      harness.editTwiceAndReverse("a", 4, "Alpha reversed");
+      await flushCompilerUpdates();
+    });
+
+    expect(labels(container)).toEqual(["Gamma:3", "Beta:2", "Alpha reversed:4"]);
+    for (const [key, row] of rows) {
+      expect(container.querySelector(`[data-key="${key}"]`)).toBe(row);
+    }
+    expect(harness.counters.executions).toBe(1);
+    expect(harness.counters.renders).toBe(1);
+    expect(harness.counters.keys).toBe(1);
+    expect(harness.counters.descriptors).toBe(0);
+    expect(harness.counters.bindings).toBe(1);
+    expect(insertBefore).toHaveBeenCalledTimes(2);
   });
 
   it("records consecutive map lineage with one source-to-result scan", async () => {
@@ -463,6 +532,39 @@ describe("compiled keyed-array map and reorder hints", () => {
     expect(harness.counters.executions).toBe(1);
   });
 
+  it("keeps a map after a queued reorder on the general permutation path", async () => {
+    const harness = createHarness([
+      { id: "a", label: "Alpha", rank: 3 },
+      { id: "b", label: "Beta", rank: 1 },
+      { id: "c", label: "Gamma", rank: 2 },
+    ]);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Table />));
+    const rows = new Map(
+      [...container.querySelectorAll("li")].map((row) => [row.dataset.key, row]),
+    );
+    harness.counters.bindings = 0;
+    harness.counters.descriptors = 0;
+    harness.counters.keys = 0;
+
+    await act(async () => {
+      harness.queueSortThenMapReverse();
+      await flushCompilerUpdates();
+    });
+
+    expect(labels(container)).toEqual(["Alpha sorted:3", "Gamma reversed:2", "Beta:1"]);
+    for (const [key, row] of rows) {
+      expect(container.querySelector(`[data-key="${key}"]`)).toBe(row);
+    }
+    expect(harness.counters.executions).toBe(1);
+    expect(harness.counters.keys).toBe(2);
+    expect(harness.counters.descriptors).toBe(0);
+    expect(harness.counters.bindings).toBe(2);
+  });
+
   it("falls back before DOM writes for custom map methods and changed keys", async () => {
     const harness = createHarness([
       { id: "a", label: "Alpha", rank: 2 },
@@ -485,7 +587,7 @@ describe("compiled keyed-array map and reorder hints", () => {
       harness.invalidateKey();
       await flushCompilerUpdates();
     });
-    expect(labels(container)).toEqual(["Replacement:1", "Custom:2"]);
+    expect(labels(container)).toEqual(["Custom:2", "Replacement:1"]);
   });
 
   it("discards earlier map lineage when a later map method is custom", async () => {
@@ -525,7 +627,7 @@ describe("compiled keyed-array map and reorder hints", () => {
     harness.counters.bindings = 0;
 
     await act(async () => {
-      harness.editTwiceAndSort("a", 3, "Alpha subclass");
+      harness.editTwiceAndReverse("a", 3, "Alpha subclass");
       await flushCompilerUpdates();
     });
 
@@ -592,7 +694,13 @@ describe("compiled keyed-array map and reorder hints", () => {
       render(_props: Record<string, never>, state, blocks) {
         const items = () => state[0].get() as Item[];
         update = () =>
-          state[0].set((previous) => mappedSort(previous as Item[], "b", 5, "Beta newest"));
+          state[0].set((previous) =>
+            hintedReverse(
+              hintedMap(previous as Item[], (item) =>
+                item.id === "a" ? { ...item, label: "Alpha newest" } : item,
+              ),
+            ),
+          );
         return (
           <section>
             <blocks.KeyedRows
@@ -640,7 +748,7 @@ describe("compiled keyed-array map and reorder hints", () => {
     const root = createRoot(container);
     roots.push(root);
     await act(async () => root.render(<Form />));
-    const input = container.querySelector('[data-key="b"]') as HTMLInputElement;
+    const input = container.querySelector('[data-key="a"]') as HTMLInputElement;
     input.focus();
     input.setSelectionRange(1, 3);
 
@@ -649,8 +757,8 @@ describe("compiled keyed-array map and reorder hints", () => {
       await flushCompilerUpdates();
     });
 
-    expect(container.querySelector('[data-key="b"]')).toBe(input);
-    expect(input.value).toBe("Beta newest");
+    expect(container.querySelector('[data-key="a"]')).toBe(input);
+    expect(input.value).toBe("Alpha newest");
     expect(document.activeElement).toBe(input);
     expect([input.selectionStart, input.selectionEnd]).toEqual([1, 3]);
   });
@@ -669,7 +777,13 @@ describe("compiled keyed-array map and reorder hints", () => {
       render(_props: Record<string, never>, state, blocks) {
         const items = () => state[0].get() as Item[];
         update = () =>
-          state[0].set((previous) => mappedSort(previous as Item[], "b", 0, "Beta newest"));
+          state[0].set((previous) =>
+            hintedReverse(
+              hintedMap(previous as Item[], (item) =>
+                item.id === "b" ? { ...item, rank: 0, label: "Beta newest" } : item,
+              ),
+            ),
+          );
         return (
           <section>
             <blocks.KeyedRows
@@ -814,6 +928,63 @@ describe("compiled keyed-array map and reorder hints", () => {
     120_000,
   );
 
+  stressIt(
+    "matches React through 2,000 deterministic mapped reversals",
+    async () => {
+      const initialItems = Array.from(
+        { length: 31 },
+        (_, index): Item => ({ id: `row-${index}`, label: `Row ${index}`, rank: index }),
+      );
+      const harness = createHarness(initialItems);
+      let updateReact: (id: string, rank: number, label: string) => void = () => undefined;
+      function Normal() {
+        const [items, setItems] = useState(initialItems);
+        updateReact = (id, rank, label) =>
+          setItems((previous) =>
+            previous
+              .map((item) => (item.id === id ? { ...item, label } : item))
+              .map((item) => (item.id === id ? { ...item, rank } : item))
+              .toReversed(),
+          );
+        return (
+          <ol>
+            {items.map((item) => (
+              <li data-key={item.id} key={item.id}>
+                {item.label}:{item.rank}
+              </li>
+            ))}
+          </ol>
+        );
+      }
+      const compiledContainer = document.createElement("div");
+      const reactContainer = document.createElement("div");
+      document.body.append(compiledContainer, reactContainer);
+      const compiledRoot = createRoot(compiledContainer);
+      const reactRoot = createRoot(reactContainer);
+      roots.push(compiledRoot, reactRoot);
+      await act(async () => {
+        compiledRoot.render(<harness.Table />);
+        reactRoot.render(<Normal />);
+      });
+
+      let seed = 0x1b873593;
+      for (let update = 0; update < 2_000; update += 1) {
+        seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0;
+        const id = `row-${seed % initialItems.length}`;
+        const rank = (seed ^ (seed >>> 16)) % 4_003;
+        const label = `Reversed ${update}`;
+        await act(async () => {
+          harness.editTwiceAndReverse(id, rank, label);
+          updateReact(id, rank, label);
+          await flushCompilerUpdates();
+        });
+        expect(labels(compiledContainer)).toEqual(labels(reactContainer));
+      }
+      expect(harness.counters.executions).toBe(1);
+    },
+    120_000,
+  );
+
   it("hydrates in StrictMode and drops a queued update after unmount", async () => {
     const initialItems: Item[] = [
       { id: "a", label: "Alpha", rank: 1 },
@@ -837,10 +1008,10 @@ describe("compiled keyed-array map and reorder hints", () => {
     });
     roots.push(root);
     await act(async () => {
-      hydration.editTwiceAndSort("a", 5, "Alpha hydrated");
+      hydration.editTwiceAndReverse("a", 5, "Alpha hydrated");
       await flushCompilerUpdates();
     });
-    expect(labels(container)).toEqual(["Beta:2", "Gamma:3", "Alpha hydrated:5"]);
+    expect(labels(container)).toEqual(["Gamma:3", "Beta:2", "Alpha hydrated:5"]);
     expect(recoverable).toEqual([]);
 
     const unmounted = createHarness(initialItems);
@@ -849,7 +1020,7 @@ describe("compiled keyed-array map and reorder hints", () => {
     const unmountRoot = createRoot(unmountContainer);
     await act(async () => unmountRoot.render(<unmounted.Table />));
     act(() => {
-      unmounted.editAndSort("b", 8, "Never committed");
+      unmounted.editTwiceAndReverse("b", 8, "Never committed");
       unmountRoot.unmount();
     });
     await flushCompilerUpdates();

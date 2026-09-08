@@ -20,7 +20,7 @@ export default defineConfig({
     ],
     setupFiles: ["src/__tests__/stress.setup.ts"],
     testNamePattern:
-      /2,000 deterministic mapped reorder updates|3,000 deterministic recursive updates|4,096 rows/,
+      /2,000 deterministic mapped reorder updates|2,000 deterministic mapped reversals|3,000 deterministic recursive updates|4,096 rows/,
     testTimeout: 30_000,
   },
 });

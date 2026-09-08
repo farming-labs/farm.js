@@ -261,6 +261,36 @@ describe("React AOT keyed-array sort hints", () => {
     });
   });
 
+  it("groups multiple safe maps before a direct native reverse", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Table({ editedId, nextRank, nextLabel }) {
+        const [rows, setRows] = useState([
+          { id: "a", label: "Alpha", rank: 1 },
+          { id: "b", label: "Beta", rank: 2 },
+        ]);
+        return <section>
+          <button onClick={() => setRows((current) => current
+            .map((row) => row.id === editedId ? { ...row, label: nextLabel } : row)
+            .map((row) => row.id === editedId ? { ...row, rank: nextRank } : row)
+            .toReversed()
+          )}>Edit and reverse</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}: {row.rank}</li>)}</ul>
+        </section>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Table"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.optimizations.keyedMapUpdateHints).toBe(2);
+    expect(result.optimizations.keyedArraySortHints).toBe(0);
+    expect(result.optimizations.keyedArrayReorderHints).toBe(1);
+    expect(result.code.match(/createCompilerKeyedArrayMapPipeline\(/g)).toHaveLength(1);
+    expect(result.code.match(/_farmApplyMap\d*\(/g)).toHaveLength(2);
+    expect(result.code.match(/createCompilerKeyedArrayMapReorder\(/g)).toHaveLength(1);
+    expect(result.code).toContain("keyedRowsMapReorderHintedRuntimeFeature");
+  });
+
   it("does not lower map and reorder pipelines for host-backed keyed rows", async () => {
     const result = await compile(`
       import { useState } from "react";

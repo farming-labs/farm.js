@@ -233,6 +233,14 @@ edits, map/sort/reverse composition, changed-key and custom-method fallback, del
 controlled-input focus and selection, 2,000 differential updates, Strict Mode hydration, and
 unmount-before-flush cleanup.
 
+Direct mapped reversal has a separate 10,000-row comparison. Two concise native maps change one
+row's label and amount before `toReversed()`; the block-bodied control performs the same native
+calls and DOM-visible work through complete reconciliation. Both compiler modes must remain at
+least 4x faster than React and 1.2x faster than the compiled control. The assertion checks the full
+reversed order, every original DOM identity and connection, and the changed row values. The hinted
+path validates mirrored row lineage and uses the minimum `n - 1` moves without a source-item map or
+LIS pass.
+
 Native keyed-array sorting has its own 10,000-row comparison. Concise `toSorted()` is measured
 against bracketed React and an equivalent block-bodied compiled control. Both compiler modes must
 remain at least 4x faster than React and 1.25x faster than the compiled control. The report must
@@ -326,6 +334,9 @@ The default JSON report is `/tmp/farm-react-dashboard-benchmark.json`; change it
   then sorts the same keyed rows. Its block-bodied equivalent keeps complete reconciliation, while
   the hinted path checks each native call, scans only the committed and final arrays for lineage,
   and patches the final row once.
+- The multi-map reverse control changes the same row through two native maps and then reverses all
+  rows. Its block-bodied equivalent performs the same maps and connected DOM moves, while the
+  hinted path validates mirrored lineage directly and skips the temporary source map and LIS pass.
 - The sort control compares concise native `toSorted()` with an equivalent block-bodied compiled
   update. Both paths run the same native sort and move the same keyed DOM rows; the hint isolates
   the saved key, descriptor, and binding work while retaining only the required LIS moves.

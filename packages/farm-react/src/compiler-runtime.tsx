@@ -82,6 +82,8 @@ interface CompilerKeyedArrayReorderHint {
 }
 
 interface CompilerKeyedArrayMapPipelineHint {
+  /** True while every map preserves the committed row order. */
+  readonly ordered: boolean;
   readonly sourceToken: object;
   readonly sourceLength: number;
   readonly resultLength: number;
@@ -688,6 +690,7 @@ function recordCompilerKeyedArrayMapPipeline(previous: unknown, value: unknown):
       if (!Object.is(mappedItem, sourceItem)) mappedItemSources.set(mappedItem, sourceItem);
     }
     COMPILER_KEYED_ARRAY_MAP_PIPELINES.set(valueTarget, {
+      ordered: previousMapPipeline?.ordered ?? committedSource,
       sourceToken,
       sourceLength: previousSource?.sourceLength ?? previous.length,
       resultLength: value.length,
@@ -771,7 +774,7 @@ export function createCompilerKeyedArrayMapReorder(
     const source = mapPipeline || (previousReorder?.mapped ? previousReorder : undefined);
     if (!source || source.resultLength !== previous.length) return value;
     COMPILER_KEYED_ARRAY_REORDERS.set(valueTarget, {
-      kind: "permutation",
+      kind: method === NATIVE_ARRAY_TO_REVERSED && mapPipeline?.ordered ? "reverse" : "permutation",
       sourceToken: source.sourceToken,
       sourceLength: source.sourceLength,
       resultLength: value.length,
@@ -4599,8 +4602,7 @@ function reorderCompilerKeyedRows(
   sequence: readonly number[],
   anchor: ChildNode | null,
 ): void {
-  const activeElement = root.ownerDocument.activeElement;
-  const restoreFocus = Boolean(activeElement && root.contains(activeElement));
+  const activeElement = compilerFocusedElement(root);
   const stablePositions = longestIncreasingSubsequencePositions(sequence);
   for (let index = instances.length - 1; index >= 0; index -= 1) {
     const instance = instances[index];
@@ -4621,14 +4623,37 @@ function reorderCompilerKeyedRows(
       anchor = instance.element;
     }
   }
+  restoreCompilerFocus(activeElement);
+}
+
+function compilerFocusedElement(root: Element): Element | null {
+  const activeElement = root.ownerDocument.activeElement;
+  return activeElement && root.contains(activeElement) ? activeElement : null;
+}
+
+function restoreCompilerFocus(activeElement: Element | null): void {
   if (
-    restoreFocus &&
     activeElement?.isConnected &&
     activeElement.ownerDocument.activeElement !== activeElement &&
     "focus" in activeElement
   ) {
     (activeElement as HTMLElement).focus({ preventScroll: true });
   }
+}
+
+function reverseCompilerKeyedRows(root: Element, instances: CompilerKeyedRowInstance[]): void {
+  const activeElement = compilerFocusedElement(root);
+  let anchor = instances[0]?.element || null;
+  for (let sourceIndex = 1; sourceIndex < instances.length; sourceIndex += 1) {
+    const element = instances[sourceIndex].element;
+    root.insertBefore(element, anchor);
+    anchor = element;
+  }
+  instances.reverse();
+  for (let index = 0; index < instances.length; index += 1) {
+    instances[index].index = index;
+  }
+  restoreCompilerFocus(activeElement);
 }
 
 type RowConditionalRefresh = (item: unknown, index: number, afterCommit?: () => void) => void;
@@ -4926,40 +4951,56 @@ function reconcileCompilerKeyedArrayMapReorder(
 
   const previousInstances = [...instances.values()];
   const prepared = (() => {
+    const reverse = update.kind === "reverse";
+    const changed: Array<{
+      bindingUpdates: CompilerPreparedKeyedRowBindingUpdate[];
+      instance: CompilerKeyedRowInstance;
+      item: unknown;
+    }> = [];
     try {
-      const instancesByItem = new Map<unknown, CompilerKeyedRowInstance>();
-      for (let sourceIndex = 0; sourceIndex < previousInstances.length; sourceIndex += 1) {
-        const instance = previousInstances[sourceIndex];
-        if (instance.index !== sourceIndex || instancesByItem.has(instance.item)) return undefined;
-        instancesByItem.set(instance.item, instance);
-      }
-
-      const nextInstances: CompilerKeyedRowInstance[] = [];
-      const sequence: number[] = [];
-      const changed: Array<{
-        bindingUpdates: CompilerPreparedKeyedRowBindingUpdate[];
-        instance: CompilerKeyedRowInstance;
-        item: unknown;
-        index: number;
-      }> = [];
-      for (let targetIndex = 0; targetIndex < finalValue.length; targetIndex += 1) {
-        const item = finalValue[targetIndex];
-        const sourceItem = update.mappedItemSources.has(item)
-          ? update.mappedItemSources.get(item)
-          : item;
-        const instance = instancesByItem.get(sourceItem);
-        if (!instance) return undefined;
-        instancesByItem.delete(sourceItem);
-        nextInstances.push(instance);
-        sequence.push(instance.index);
-        if (!Object.is(instance.item, item)) {
-          if (keyedRowIdentity(props.rowKey(item, targetIndex)) !== instance.key) return undefined;
-          const bindingUpdates = prepareKeyedRowBindingUpdates(props, instance, item, targetIndex);
-          if (!bindingUpdates) return undefined;
-          changed.push({ bindingUpdates, instance, item, index: targetIndex });
+      const instancesByItem = reverse ? undefined : new Map<unknown, CompilerKeyedRowInstance>();
+      if (instancesByItem) {
+        for (let sourceIndex = 0; sourceIndex < previousInstances.length; sourceIndex += 1) {
+          const instance = previousInstances[sourceIndex];
+          if (instance.index !== sourceIndex || instancesByItem.has(instance.item))
+            return undefined;
+          instancesByItem.set(instance.item, instance);
         }
       }
-      if (instancesByItem.size > 0) return undefined;
+
+      const nextInstances: CompilerKeyedRowInstance[] = reverse ? previousInstances : [];
+      const sequence: number[] | undefined = reverse ? undefined : [];
+      for (let targetIndex = 0; targetIndex < finalValue.length; targetIndex += 1) {
+        const item = finalValue[targetIndex];
+        let instance: CompilerKeyedRowInstance | undefined;
+        if (reverse) {
+          const sourceIndex = finalValue.length - targetIndex - 1;
+          instance = previousInstances[sourceIndex];
+          if (!instance || instance.index !== sourceIndex) return undefined;
+          if (Object.is(instance.item, item)) continue;
+          if (
+            !update.mappedItemSources.has(item) ||
+            !Object.is(instance.item, update.mappedItemSources.get(item))
+          ) {
+            return undefined;
+          }
+        } else {
+          const sourceItem = update.mappedItemSources.has(item)
+            ? update.mappedItemSources.get(item)
+            : item;
+          instance = instancesByItem!.get(sourceItem);
+          if (!instance) return undefined;
+          instancesByItem!.delete(sourceItem);
+          nextInstances.push(instance);
+          sequence!.push(instance.index);
+          if (Object.is(instance.item, item)) continue;
+        }
+        if (keyedRowIdentity(props.rowKey(item, targetIndex)) !== instance.key) return undefined;
+        const bindingUpdates = prepareKeyedRowBindingUpdates(props, instance, item, targetIndex);
+        if (!bindingUpdates) return undefined;
+        changed.push({ bindingUpdates, instance, item });
+      }
+      if (instancesByItem?.size) return undefined;
       return { changed, nextInstances, sequence };
     } catch {
       return undefined;
@@ -4967,11 +5008,14 @@ function reconcileCompilerKeyedArrayMapReorder(
   })();
   if (!prepared) return undefined;
 
-  reorderCompilerKeyedRows(root, prepared.nextInstances, prepared.sequence, null);
-  for (const { bindingUpdates, instance, item, index } of prepared.changed) {
+  if (prepared.sequence) {
+    reorderCompilerKeyedRows(root, prepared.nextInstances, prepared.sequence, null);
+  } else {
+    reverseCompilerKeyedRows(root, prepared.nextInstances);
+  }
+  for (const { bindingUpdates, instance, item } of prepared.changed) {
     applyPreparedKeyedRowBindingUpdates(props, instance, bindingUpdates);
     instance.item = item;
-    instance.index = index;
   }
   for (let index = 0; index < prepared.nextInstances.length; index += 1) {
     prepared.nextInstances[index].index = index;
@@ -5948,25 +5992,9 @@ function reconcileCompilerKeyedArrayReorder(
       }
       if (instancesByItem.size > 0) return undefined;
 
-      const activeElement = root.ownerDocument.activeElement;
-      const restoreFocus = Boolean(activeElement && root.contains(activeElement));
-      const stablePositions = longestIncreasingSubsequencePositions(sequence);
-      let anchor: ChildNode | null = null;
-      for (let index = nextInstances.length - 1; index >= 0; index -= 1) {
-        const instance = nextInstances[index];
-        if (!stablePositions.has(index) && instance.element.nextSibling !== anchor) {
-          root.insertBefore(instance.element, anchor);
-        }
-        anchor = instance.element;
-        instance.index = index;
-      }
-      if (
-        restoreFocus &&
-        activeElement?.isConnected &&
-        activeElement.ownerDocument.activeElement !== activeElement &&
-        "focus" in activeElement
-      ) {
-        (activeElement as HTMLElement).focus({ preventScroll: true });
+      reorderCompilerKeyedRows(root, nextInstances, sequence, null);
+      for (let index = 0; index < nextInstances.length; index += 1) {
+        nextInstances[index].index = index;
       }
       return new Map(nextInstances.map((instance) => [instance.key, instance]));
     } catch {
@@ -5986,30 +6014,10 @@ function reconcileCompilerKeyedArrayReorder(
     return undefined;
   }
 
-  const activeElement = root.ownerDocument.activeElement;
-  const restoreFocus = Boolean(activeElement && root.contains(activeElement));
   // A reverse has a one-row LIS. Keep the first committed row in place and
   // move every following row before the previous anchor, which performs the
   // minimum n - 1 connected DOM moves without rescanning keys or descriptors.
-  let anchor = previousInstances[0]?.element || null;
-  for (let sourceIndex = 1; sourceIndex < previousInstances.length; sourceIndex += 1) {
-    const element = previousInstances[sourceIndex].element;
-    root.insertBefore(element, anchor);
-    anchor = element;
-  }
-
-  previousInstances.reverse();
-  for (let index = 0; index < previousInstances.length; index += 1) {
-    previousInstances[index].index = index;
-  }
-  if (
-    restoreFocus &&
-    activeElement?.isConnected &&
-    activeElement.ownerDocument.activeElement !== activeElement &&
-    "focus" in activeElement
-  ) {
-    (activeElement as HTMLElement).focus({ preventScroll: true });
-  }
+  reverseCompilerKeyedRows(root, previousInstances);
   return new Map(previousInstances.map((instance) => [instance.key, instance]));
 }
 

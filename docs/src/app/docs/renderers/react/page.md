@@ -1248,6 +1248,12 @@ controlled inputs, focus, and text selection stay attached to their keys. Multip
 map-and-reorder setters queued before one compiler flush compose against the same committed
 collection and expose only the final state.
 
+When the maps are followed directly by `toReversed()`, their same-order lineage proves the exact
+final permutation. Farm validates each mirrored source item and every changed replacement before
+the first DOM write, then uses the minimum-move reverse operation directly. It does not allocate a
+second source-item lookup map or run LIS for that case. A sort before the reverse, a map after a
+queued reorder, or any other order ambiguity keeps the general permutation path.
+
 The proof requires every map callback to be inline, synchronous, compiler-safe, and to return the
 original item on one conditional branch and an object-spread replacement on the other. It requires
 compiler-owned host rows whose render and key do not observe the index. Referenced or block-bodied
