@@ -358,6 +358,7 @@ async function fetchImageSource(
 
     if (![301, 302, 303, 307, 308].includes(response.status)) {
       if (!response.ok) {
+        await cancelResponseBody(response);
         throw new FarmImageRequestError(
           "UNSUPPORTED_IMAGE",
           response.status === 404 ? 404 : 502,
@@ -368,6 +369,7 @@ async function fetchImageSource(
     }
 
     if (redirectCount >= config.maximumRedirects) {
+      await cancelResponseBody(response);
       throw new FarmImageRequestError(
         "TOO_MANY_REDIRECTS",
         400,
@@ -376,8 +378,10 @@ async function fetchImageSource(
     }
     const location = response.headers.get("location");
     if (!location) {
+      await cancelResponseBody(response);
       throw new FarmImageRequestError("UNSUPPORTED_IMAGE", 502, "Invalid image redirect");
     }
+    await cancelResponseBody(response);
     currentUrl = new URL(location, currentUrl);
     await validateImageSourceUrl(currentUrl, requestOrigin, config, validateRemoteUrl);
   }
@@ -386,6 +390,7 @@ async function fetchImageSource(
 async function readResponseWithLimit(response: Response, limit: number): Promise<Uint8Array> {
   const contentLength = response.headers.get("content-length");
   if (contentLength && Number(contentLength) > limit) {
+    await cancelResponseBody(response);
     throw new FarmImageRequestError("BODY_TOO_LARGE", 413, "Source image is too large");
   }
 
@@ -412,6 +417,14 @@ async function readResponseWithLimit(response: Response, limit: number): Promise
     offset += chunk.byteLength;
   }
   return result;
+}
+
+async function cancelResponseBody(response: Response): Promise<void> {
+  try {
+    await response.body?.cancel();
+  } catch {
+    // Cleanup must not replace the request error or redirect result.
+  }
 }
 
 function detectImageContentType(bytes: Uint8Array): string {
