@@ -1402,6 +1402,40 @@ importers:
         specifier: 3.3.9
         version: 3.3.9(typescript@5.9.3)
 
+  examples/webmcp-demo:
+    dependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../../packages/farm
+      '@farm.js/webmcp':
+        specifier: workspace:*
+        version: link:../../packages/farm-webmcp
+      react:
+        specifier: 19.2.8
+        version: 19.2.8
+      react-dom:
+        specifier: 19.2.8
+        version: 19.2.8(react@19.2.8)
+      zod:
+        specifier: 4.1.12
+        version: 4.1.12
+    devDependencies:
+      '@farm.js/cli':
+        specifier: workspace:*
+        version: link:../../packages/farm-cli
+      '@types/react':
+        specifier: ^18.2.45
+        version: 18.3.26
+      '@types/react-dom':
+        specifier: ^18.2.18
+        version: 18.3.7(@types/react@18.3.26)
+      typescript:
+        specifier: ^5.5.3
+        version: 5.9.3
+      vite:
+        specifier: ^5.0.10
+        version: 5.4.20(@types/node@20.19.21)
+
   examples/workos-integration:
     dependencies:
       '@farm.js/core':
@@ -2241,6 +2275,22 @@ importers:
       vue:
         specifier: 3.5.41
         version: 3.5.41(typescript@5.9.3)
+
+  packages/farm-webmcp:
+    dependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
+    devDependencies:
+      '@types/node':
+        specifier: ^20.10.5
+        version: 20.19.21
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.7
+        version: 3.2.7(@types/node@20.19.21)(jsdom@25.0.1)(supports-color@10.2.2)
 
   packages/farm-workos:
     dependencies:
