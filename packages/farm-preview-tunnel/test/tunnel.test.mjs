@@ -150,6 +150,44 @@ test("rejects malformed and unauthenticated agent messages without crashing", as
   }
 });
 
+test("closes the agent socket when the relay rejects registration", async () => {
+  const relay = new WebSocketServer({ port: 0 });
+  await once(relay, "listening");
+  const address = relay.address();
+  assert.ok(address && typeof address === "object");
+  let resolveAgentClosed;
+  const agentClosed = new Promise((resolve) => {
+    resolveAgentClosed = resolve;
+  });
+  relay.on("connection", (socket) => {
+    socket.once("message", () => {
+      socket.send(JSON.stringify({ type: "error", message: "registration rejected" }));
+    });
+    socket.once("close", resolveAgentClosed);
+  });
+
+  try {
+    await assert.rejects(
+      startTypeScriptPreviewAgent({
+        relayUrl: `ws://127.0.0.1:${address.port}`,
+        name: "rejected-agent",
+        targetUrl: "http://127.0.0.1:3000",
+      }),
+      /registration rejected/,
+    );
+    await Promise.race([
+      agentClosed,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("rejected agent socket remained open")), 500),
+      ),
+    ]);
+    assert.equal(relay.clients.size, 0);
+  } finally {
+    for (const socket of relay.clients) socket.terminate();
+    await new Promise((resolve) => relay.close(resolve));
+  }
+});
+
 test("advertises explicit public HTTP and WebSocket endpoints", async () => {
   const relay = createPersistentPreviewRelay({
     publicBaseUrl: "https://preview.example.com/",
