@@ -32,7 +32,7 @@ export class APITypeGenerator {
    * Scan all API route files and extract route information
    */
   scanAPIRoutes(): APIRouteInfo[] {
-    const routes = new Map<string, APIRouteInfo>();
+    const methodSources = new Map<string, Map<string, APIRouteInfo>>();
 
     for (const appDir of this.appDirs) {
       const apiDir = join(appDir, "api");
@@ -41,11 +41,36 @@ export class APITypeGenerator {
       const discovered: APIRouteInfo[] = [];
       this.scanDirectory(apiDir, appDir, discovered);
       for (const route of discovered) {
-        routes.set(route.path, route);
+        const routeMethods = methodSources.get(route.path) ?? new Map<string, APIRouteInfo>();
+        for (const method of route.methods) {
+          routeMethods.set(method, route);
+        }
+        methodSources.set(route.path, routeMethods);
       }
     }
 
-    return Array.from(routes.values()).sort((left, right) => left.path.localeCompare(right.path));
+    const routes: APIRouteInfo[] = [];
+    for (const [routePath, methods] of methodSources) {
+      const routesByFile = new Map<string, APIRouteInfo>();
+      for (const [method, route] of methods) {
+        const existing = routesByFile.get(route.filePath);
+        if (existing) {
+          existing.methods.push(method);
+        } else {
+          routesByFile.set(route.filePath, {
+            ...route,
+            path: routePath,
+            methods: [method],
+          });
+        }
+      }
+      routes.push(...routesByFile.values());
+    }
+
+    return routes.sort(
+      (left, right) =>
+        left.path.localeCompare(right.path) || left.filePath.localeCompare(right.filePath),
+    );
   }
 
   private scanDirectory(dir: string, appDir: string, routes: APIRouteInfo[], basePath = "") {
@@ -156,17 +181,20 @@ export class APITypeGenerator {
     const usedRouteNames = new Map<string, number>();
 
     for (const [path, routeList] of routeGroups) {
-      const route = routeList[0];
-      const importPath = this.getRouteImportPath(route, options.outFile);
-      const routeName = this.uniqueRouteName(route.path, usedRouteNames);
+      const routeName = this.uniqueRouteName(path, usedRouteNames);
       const cleanPath = path === "/api" ? "" : path.replace(/^\/api\//, "");
       const parts = cleanPath ? cleanPath.split("/") : [];
 
-      // Collect all methods for this route
-      const allMethods = routeList.flatMap((r) => r.methods);
+      // Keep the final source for each method, matching runtime layer precedence.
+      const methodSources = new Map<string, APIRouteInfo>();
+      for (const route of routeList) {
+        for (const method of route.methods) methodSources.set(method, route);
+      }
+      const allMethods = [...methodSources.keys()];
 
       // Generate imports
       for (const method of allMethods) {
+        const importPath = this.getRouteImportPath(methodSources.get(method)!, options.outFile);
         const importName = `${method}_${routeName}`;
         imports.push(
           `import type { ${method} as ${importName} } from ${JSON.stringify(importPath)};`,
@@ -317,7 +345,7 @@ ${typeExports}
    */
   generateAPIIndex(outputPath: string): void {
     const routes = this.scanAPIRoutes();
-    const content = this.generateAPIRouter(routes);
+    const content = this.generateAPIRouter(routes, { outFile: outputPath });
 
     mkdirSync(dirname(outputPath), { recursive: true });
     writeFileIfChanged(outputPath, content);

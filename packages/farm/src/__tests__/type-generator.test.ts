@@ -202,4 +202,52 @@ describe("APITypeGenerator", () => {
     expect(routes.find((route) => route.path === "/api/listed")?.methods).toEqual(["GET", "POST"]);
     expect(routes.some((route) => route.path === "/api/renamed")).toBe(false);
   });
+
+  it("keeps non-overridden layer methods and imports each winning source", () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "farm-api-types-layers-"));
+    const layerAppDir = path.join(root, "layer", "src", "app");
+    const projectAppDir = path.join(root, "project", "src", "app");
+    const layerRoute = path.join(layerAppDir, "api", "users", "route.ts");
+    const projectRoute = path.join(projectAppDir, "api", "users", "route.ts");
+    mkdirSync(path.dirname(layerRoute), { recursive: true });
+    mkdirSync(path.dirname(projectRoute), { recursive: true });
+    writeFileSync(
+      layerRoute,
+      "export const GET = async () => new Response('layer');\nexport const PATCH = GET;\n",
+    );
+    writeFileSync(
+      projectRoute,
+      "export const GET = async () => new Response('project');\nexport const POST = GET;\n",
+    );
+    const outputPath = path.join(projectAppDir, "..", "lib", "api.generated.ts");
+
+    const generator = new APITypeGenerator([layerAppDir, projectAppDir]);
+    const routes = generator.scanAPIRoutes();
+    const content = generator.generateAPIRouter(routes, { outFile: outputPath });
+    const layerImport = path
+      .relative(path.dirname(outputPath), layerRoute)
+      .replace(/\\/g, "/")
+      .replace(/\.ts$/, "");
+    const projectImport = path
+      .relative(path.dirname(outputPath), projectRoute)
+      .replace(/\\/g, "/")
+      .replace(/\.ts$/, "");
+
+    expect(routes).toEqual([
+      expect.objectContaining({ filePath: layerRoute, methods: ["PATCH"] }),
+      expect.objectContaining({ filePath: projectRoute, methods: ["GET", "POST"] }),
+    ]);
+    expect(content).toContain(
+      `import type { PATCH as PATCH_users } from ${JSON.stringify(layerImport)};`,
+    );
+    expect(content).toContain(
+      `import type { GET as GET_users } from ${JSON.stringify(projectImport)};`,
+    );
+    expect(content).toContain(
+      `import type { POST as POST_users } from ${JSON.stringify(projectImport)};`,
+    );
+    expect(content).toContain("get: typeof GET_users;");
+    expect(content).toContain("post: typeof POST_users;");
+    expect(content).toContain("patch: typeof PATCH_users;");
+  });
 });
