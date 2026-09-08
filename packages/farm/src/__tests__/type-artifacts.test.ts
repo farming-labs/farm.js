@@ -216,10 +216,14 @@ describe("generateFarmTypeArtifacts", () => {
     expect(routeTypes).toContain("`/products/${string}`");
     expect(routeTypes).toContain('"/reports"');
     expect(result.apiRoutes.map((route) => [route.path, route.methods])).toEqual([
+      ["/api/catalog", ["GET"]],
       ["/api/catalog", ["POST"]],
       ["/api/inventory", ["GET"]],
     ]);
     expect(apiTypes).toContain('from "../../layers/commerce/src/app/api/inventory/route"');
+    expect(apiTypes).toContain(
+      'import type { GET as GET_catalog } from "../../layers/commerce/src/app/api/catalog/route"',
+    );
     expect(apiTypes).toContain('from "../app/api/catalog/route"');
     expect(envTypes).toContain('FarmConfig0 from "../layers/commerce/farm.config"');
     expect(envTypes).toContain('FarmConfig1 from "../farm.config"');
