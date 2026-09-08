@@ -7,6 +7,7 @@ import {
 } from "@farm.js/core";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { createHttpLocalUrl } from "./local-url";
 import pc from "picocolors";
 
 export type FarmDoctorCheckStatus = "pass" | "warn" | "fail" | "info";
@@ -620,7 +621,7 @@ function findConfigFile(root: string, configPath?: string): string | undefined {
 }
 
 function resolveLiveTarget(options: FarmDoctorOptions): string {
-  const raw = options.url || `http://${options.host || "localhost"}:${options.port || 3000}`;
+  const raw = options.url || createHttpLocalUrl(options.host || "localhost", options.port || 3000);
   return raw.replace(/\/+$/, "");
 }
 

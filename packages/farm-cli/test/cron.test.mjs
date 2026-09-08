@@ -69,6 +69,27 @@ test("runs a configured route with cron metadata and bearer auth", async () => {
   }
 });
 
+test("formats a bare IPv6 cron host as a valid request URL", async () => {
+  const root = await createTempProject();
+  let requestedUrl;
+
+  try {
+    await runFarmCronJob("dailyCleanup", {
+      root,
+      host: "::1",
+      port: 4319,
+      fetch: async (input) => {
+        requestedUrl = String(input);
+        return Response.json({ ok: true });
+      },
+    });
+
+    assert.equal(requestedUrl, "http://[::1]:4319/api/maintenance/cleanup");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("starts UTC development schedules and stops them cleanly", async () => {
   const root = await createTempProject();
 
