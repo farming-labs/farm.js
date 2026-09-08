@@ -2,7 +2,7 @@ import { localizeFarmHref, resolveFarmLocalePath } from "../i18n/routing";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
 
 type ConfigRoutePatternToken =
-  | { kind: "param"; name: string; captureIndex: number }
+  | { kind: "param"; name: string; captureIndex: number; catchAll: boolean }
   | { kind: "wildcard"; captureIndex: number };
 
 export interface CompiledConfigRoutePattern {
@@ -40,7 +40,12 @@ export function compileConfigRoutePattern(source: string): CompiledConfigRoutePa
     const rest = source.slice(index);
     const parameter = rest.match(/^:([A-Za-z0-9_]+)(\*)?/);
     if (parameter) {
-      tokens.push({ kind: "param", name: parameter[1], captureIndex });
+      tokens.push({
+        kind: "param",
+        name: parameter[1],
+        captureIndex,
+        catchAll: parameter[2] === "*",
+      });
       pattern += parameter[2] ? "(.*)" : "([^/]+)";
       captureIndex += 1;
       index += parameter[0].length;
@@ -69,9 +74,14 @@ export function interpolateConfigRouteDestination(
 ): string {
   const namedCaptures = new Map<string, string>();
   const wildcardCaptures: string[] = [];
+  const captures = new Map<number, string>();
 
   for (const token of tokens) {
-    const value = match[token.captureIndex] || "";
+    const value = normalizeConfigRouteCapture(
+      match[token.captureIndex] || "",
+      token.kind === "wildcard" || token.catchAll,
+    );
+    captures.set(token.captureIndex, value);
     if (token.kind === "param") {
       namedCaptures.set(token.name, value);
     } else {
@@ -93,7 +103,7 @@ export function interpolateConfigRouteDestination(
 
     const capture = rest.match(/^\$(\d+)/);
     if (capture) {
-      result += match[Number(capture[1])] || "";
+      result += captures.get(Number(capture[1])) ?? "";
       index += capture[0].length;
       continue;
     }
@@ -110,4 +120,26 @@ export function interpolateConfigRouteDestination(
   }
 
   return result;
+}
+
+function normalizeConfigRouteCapture(value: string, catchAll: boolean): string {
+  const segments = catchAll ? value.split("/").filter(Boolean) : [value];
+  return segments
+    .map((segment) => encodeConfigRouteSegment(decodeConfigRouteSegment(segment)))
+    .join("/");
+}
+
+function decodeConfigRouteSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}
+
+function encodeConfigRouteSegment(segment: string): string {
+  return encodeURIComponent(segment).replace(
+    /[!'()*]/g,
+    (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
 }
