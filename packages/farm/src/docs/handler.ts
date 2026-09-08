@@ -680,10 +680,11 @@ function createFarmDocsPublicResponse(
   request: Request,
 ): Response | null {
   const url = new URL(request.url);
-  const loadedPages = getLoadedDocsPages(contentDir, docs);
+  let loadedPages: LoadedFarmDocsPage[] | undefined;
+  const getPages = () => (loadedPages ??= getLoadedDocsPages(contentDir, docs));
   const sitemapManifest = () =>
     buildDocsSitemapManifest({
-      pages: loadedPages.map(toDocsSitemapPage),
+      pages: getPages().map(toDocsSitemapPage),
       entry: docs.entry,
       siteTitle: getDocsTitle(docs),
       baseUrl: url.origin,
@@ -696,7 +697,7 @@ function createFarmDocsPublicResponse(
   const llmsFormat = resolveDocsLlmsTxtFormat(url);
   if (llmsFormat) {
     const generated = renderDocsLlmsTxt(
-      loadedPages.map(toDocsLlmsPage),
+      getPages().map(toDocsLlmsPage),
       getDocsLlmsOptions(docs, request),
     );
     return new Response(llmsFormat === "llms-full" ? generated.llmsFullTxt : generated.llmsTxt, {
