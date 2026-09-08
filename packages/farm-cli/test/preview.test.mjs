@@ -270,6 +270,32 @@ test("removes content encoding after fetch decodes a local response", async () =
   }
 });
 
+test("cancels a forwarded local request at its deadline", async () => {
+  const server = await createTestServer(() => undefined);
+
+  try {
+    await assert.rejects(
+      forwardGatewayRequest(
+        {
+          localUrl: `http://localhost:${server.port}`,
+          host: "localhost",
+          port: server.port,
+          source: "port",
+        },
+        {
+          id: "req_timeout",
+          method: "GET",
+          path: "/slow",
+        },
+        { signal: AbortSignal.timeout(20) },
+      ),
+      (error) => error?.name === "TimeoutError",
+    );
+  } finally {
+    await server.close();
+  }
+});
+
 test("closes the gateway session when the local target stops", async () => {
   const app = await createTestServer();
   const gateway = await createPreviewGatewayTestServer();
