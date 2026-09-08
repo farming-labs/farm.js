@@ -6320,7 +6320,7 @@ async function handleFarmRequestInContext(
       const pprBypassReason = pprConfig.enabled
         ? getPPRShellBypassReason(request, middlewareData, middlewareContext)
         : undefined;
-      const pprCanCache = pprConfig.enabled && !pprBypassReason;
+      let pprCanCache = pprConfig.enabled && !pprBypassReason;
       const pprCacheKey = pprCanCache
         ? getPPRShellCacheKey(url, farmLocaleResolution?.locale)
         : null;
@@ -6646,6 +6646,21 @@ async function handleFarmRequestInContext(
         )`
             : "await renderPageElement()"
         };
+
+        // A completed document is not a reusable PPR shell: it already contains
+        // the request's resolved Suspense content. Until the production runtime
+        // can persist and resume the partial shell itself, buffer streamed PPR
+        // responses for late status errors but do not cache their dynamic HTML.
+        const shouldCachePPRShell = Boolean(pprCacheKey && !renderedPage.stream);
+        if (!shouldCachePPRShell && pprCacheKey) {
+          pprCanCache = false;
+          emitFarmEvent({
+            type: "ppr.shell.bypass",
+            route: pathname,
+            reason: "suspense-stream",
+          });
+          emitFarmEvent({ type: "cache.bypass", route: pathname, reason: "suspense-stream" });
+        }
         
         // Collect static and generated metadata from layouts and page.
         // Later entries override earlier entries, matching the development renderer.
@@ -6862,7 +6877,12 @@ async function handleFarmRequestInContext(
           getFarmTheme(request)
         );
 
-        if (pageStatus === 200 && pprCacheKey && request.method.toUpperCase() !== "HEAD") {
+        if (
+          pageStatus === 200 &&
+          shouldCachePPRShell &&
+          pprCacheKey &&
+          request.method.toUpperCase() !== "HEAD"
+        ) {
           await pprShellCache.setAsync(
             pprCacheKey,
             { html: fullHtml },

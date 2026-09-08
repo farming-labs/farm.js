@@ -2367,8 +2367,10 @@ export async function QUERY(request: Request) {
       try {
         if (useReact18) await linkReact18(root);
         const suspenseDir = path.join(root, "src", "app", "suspense");
+        const pprSuspenseDir = path.join(root, "src", "app", "ppr-suspense");
         const failureDir = path.join(root, "src", "app", "failure");
         await fs.mkdir(suspenseDir, { recursive: true });
+        await fs.mkdir(pprSuspenseDir, { recursive: true });
         await fs.mkdir(failureDir, { recursive: true });
         await fs.writeFile(
           path.join(root, "src", "app", "layout.tsx"),
@@ -2405,6 +2407,38 @@ export default function SuspensePage() {
     <main data-page-render-count={renderCount}>
       <Suspense fallback={<p>suspense-fallback</p>}>
         <SuspenseContent />
+      </Suspense>
+    </main>
+  );
+}
+`.trim(),
+        );
+        await fs.writeFile(
+          path.join(pprSuspenseDir, "content.tsx"),
+          `
+export default function PPRSuspenseContent() {
+  return <p data-ppr-suspense="ready">ppr-suspense-ready</p>;
+}
+`.trim(),
+        );
+        await fs.writeFile(
+          path.join(pprSuspenseDir, "page.tsx"),
+          `
+import React, { lazy, Suspense } from "react";
+
+export const ppr = true;
+
+const PPRSuspenseContent = lazy(() =>
+  new Promise((resolve) => {
+    setTimeout(() => resolve(import("./content")), 100);
+  }),
+);
+
+export default function PPRSuspensePage() {
+  return (
+    <main>
+      <Suspense fallback={<p>ppr-suspense-fallback</p>}>
+        <PPRSuspenseContent />
       </Suspense>
     </main>
   );
@@ -2578,6 +2612,15 @@ export default defineRoutes(() => [
             expect(html).not.toContain("renderToString which does not support Suspense");
           },
           "/suspense",
+        );
+        await runProductionRequest(
+          serverDir,
+          async (response) => {
+            expect(response.status).toBe(200);
+            expect(response.headers.get("x-farm-ppr")).toBe("bypass");
+            await expect(response.text()).resolves.toContain("ppr-suspense-ready");
+          },
+          "/ppr-suspense",
         );
         await runProductionRequest(
           serverDir,
