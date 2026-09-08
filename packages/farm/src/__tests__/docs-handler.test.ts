@@ -732,6 +732,18 @@ describe("createFarmDocsHandler", () => {
     await expect(handler(new Request("http://farm.test/docs"))).resolves.toBeNull();
   });
 
+  it("does not scan docs content for unrelated requests", async () => {
+    const { root, docs } = await createDocsFixture();
+    const contentFile = path.join(root, "not-a-docs-directory");
+    await fs.writeFile(contentFile, "unrelated");
+    const handler = createFarmDocsHandler(
+      { ...docs, contentDir: contentFile },
+      { root, srcDir: "src" },
+    );
+
+    await expect(handler(new Request("http://farm.test/dashboard"))).resolves.toBeNull();
+  });
+
   it("softens a trailing .js in the sidebar brand title", async () => {
     const { root, docs } = await createDocsFixture();
     const handler = createFarmDocsHandler(
