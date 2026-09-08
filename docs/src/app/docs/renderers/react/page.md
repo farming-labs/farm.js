@@ -1255,8 +1255,8 @@ final permutation. Farm validates each mirrored source item and every changed re
 the first DOM write, then uses the minimum-move reverse operation directly. It does not allocate a
 second source-item lookup map or run LIS for that case. Further exact reversals toggle the proof:
 two reversals patch changed rows in committed order with zero DOM moves, while three use the exact
-reverse path. The same parity survives safe maps and queued exact reversals. A sort or any other
-order ambiguity keeps the general permutation path.
+reverse path. The same parity applies to safe mapped pipelines and to queued reverse-only setters.
+A sort or any other order ambiguity keeps the general permutation path.
 
 The proof requires every map callback to be inline, synchronous, compiler-safe, and to return the
 original item on one conditional branch and an object-spread replacement on the other. It requires

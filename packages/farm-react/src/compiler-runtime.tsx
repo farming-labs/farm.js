@@ -71,11 +71,14 @@ interface CompilerKeyedArrayWindowReplaceHint {
   readonly previous?: CompilerKeyedArrayWindowReplaceHint;
 }
 
-type CompilerKeyedArrayExactOrder = "identity" | "reverse";
-type CompilerKeyedArrayReorderKind = CompilerKeyedArrayExactOrder | "permutation";
+const enum CompilerKeyedArrayReorderKind {
+  Reverse,
+  Permutation,
+}
 
 interface CompilerKeyedArrayReorderHint {
-  readonly kind: CompilerKeyedArrayReorderKind;
+  /** An omitted kind is an exact identity order. */
+  readonly kind?: CompilerKeyedArrayReorderKind;
   readonly sourceToken: object;
   readonly sourceLength: number;
   readonly resultLength: number;
@@ -85,8 +88,8 @@ interface CompilerKeyedArrayReorderHint {
 }
 
 interface CompilerKeyedArrayMapPipelineHint {
-  /** Exact order relative to the committed rows, when the complete lineage proves it. */
-  readonly order?: CompilerKeyedArrayExactOrder;
+  /** True while every map preserves the committed row order. */
+  readonly ordered: boolean;
   readonly sourceToken: object;
   readonly sourceLength: number;
   readonly resultLength: number;
@@ -95,12 +98,10 @@ interface CompilerKeyedArrayMapPipelineHint {
 
 function reversedCompilerKeyedArrayOrder(
   order: CompilerKeyedArrayReorderKind | undefined,
-): CompilerKeyedArrayReorderKind {
-  return order === undefined || order === "identity"
-    ? "reverse"
-    : order === "reverse"
-      ? "identity"
-      : "permutation";
+): CompilerKeyedArrayReorderKind | undefined {
+  return order === CompilerKeyedArrayReorderKind.Reverse
+    ? undefined
+    : (order ?? CompilerKeyedArrayReorderKind.Reverse);
 }
 
 type CompilerKeyedCollectionKind = "set" | "map";
@@ -674,12 +675,7 @@ function recordCompilerKeyedArrayMapPipeline(previous: unknown, value: unknown):
         ? undefined
         : COMPILER_KEYED_ARRAY_REORDERS.get(previousTarget);
     const previousSource =
-      previousMapPipeline ||
-      (previousReorder?.mapped ||
-      previousReorder?.kind === "identity" ||
-      previousReorder?.kind === "reverse"
-        ? previousReorder
-        : undefined);
+      previousMapPipeline || (previousReorder?.mapped ? previousReorder : undefined);
     if (!committedSource && (!previousSource || previousSource.resultLength !== previous.length)) {
       return value;
     }
@@ -708,13 +704,7 @@ function recordCompilerKeyedArrayMapPipeline(previous: unknown, value: unknown):
       if (!Object.is(mappedItem, sourceItem)) mappedItemSources.set(mappedItem, sourceItem);
     }
     COMPILER_KEYED_ARRAY_MAP_PIPELINES.set(valueTarget, {
-      order:
-        previousMapPipeline?.order ||
-        (committedSource
-          ? "identity"
-          : previousReorder?.kind === "identity" || previousReorder?.kind === "reverse"
-            ? previousReorder.kind
-            : undefined),
+      ordered: previousMapPipeline?.ordered ?? committedSource,
       sourceToken,
       sourceLength: previousSource?.sourceLength ?? previous.length,
       resultLength: value.length,
@@ -799,11 +789,13 @@ export function createCompilerKeyedArrayMapReorder(
     if (!source || source.resultLength !== previous.length) return value;
     COMPILER_KEYED_ARRAY_REORDERS.set(valueTarget, {
       kind:
-        method === NATIVE_ARRAY_TO_REVERSED
-          ? reversedCompilerKeyedArrayOrder(
-              mapPipeline ? (mapPipeline.order ?? "permutation") : previousReorder?.kind,
-            )
-          : "permutation",
+        method !== NATIVE_ARRAY_TO_REVERSED
+          ? CompilerKeyedArrayReorderKind.Permutation
+          : mapPipeline?.ordered
+            ? CompilerKeyedArrayReorderKind.Reverse
+            : previousReorder
+              ? reversedCompilerKeyedArrayOrder(previousReorder.kind)
+              : CompilerKeyedArrayReorderKind.Permutation,
       sourceToken: source.sourceToken,
       sourceLength: source.sourceLength,
       resultLength: value.length,
@@ -1381,7 +1373,7 @@ export function createCompilerKeyedArraySort(
     const sourceToken = previousUpdate?.sourceToken || compilerKeyedCollectionToken(previousTarget);
     if (!sourceToken) return value;
     COMPILER_KEYED_ARRAY_REORDERS.set(valueTarget, {
-      kind: "permutation",
+      kind: CompilerKeyedArrayReorderKind.Permutation,
       sourceToken,
       sourceLength: previous.length,
       resultLength: value.length,
@@ -1395,7 +1387,7 @@ export function createCompilerKeyedArraySort(
 function recordCompilerKeyedArrayStructuralReorder(
   previous: unknown,
   value: unknown,
-  kind: CompilerKeyedArrayReorderHint["kind"],
+  kind: CompilerKeyedArrayReorderKind,
 ): unknown {
   try {
     const previousTarget = compilerObject(previous);
@@ -1421,12 +1413,7 @@ function recordCompilerKeyedArrayStructuralReorder(
     const sourceToken = previousUpdate?.sourceToken || structuralSource?.sourceToken;
     if (!sourceToken) return value;
     COMPILER_KEYED_ARRAY_REORDERS.set(valueTarget, {
-      kind:
-        previousUpdate && kind === "reverse"
-          ? reversedCompilerKeyedArrayOrder(previousUpdate.kind)
-          : previousUpdate
-            ? "permutation"
-            : kind,
+      kind: previousUpdate ? CompilerKeyedArrayReorderKind.Permutation : kind,
       sourceToken,
       sourceLength: previousUpdate?.sourceLength || structuralSource.sourceLength,
       resultLength: value.length,
@@ -1462,7 +1449,11 @@ export function createCompilerKeyedArrayStructuralReorder(
   } catch {
     return value;
   }
-  return recordCompilerKeyedArrayStructuralReorder(previous, value, "reverse");
+  return recordCompilerKeyedArrayStructuralReorder(
+    previous,
+    value,
+    CompilerKeyedArrayReorderKind.Reverse,
+  );
 }
 
 /** @internal Executes a native sort after a compiler-proven filter or slice pipeline. */
@@ -1495,7 +1486,11 @@ export function createCompilerKeyedArrayStructuralSort(
   } catch {
     return value;
   }
-  return recordCompilerKeyedArrayStructuralReorder(previous, value, "permutation");
+  return recordCompilerKeyedArrayStructuralReorder(
+    previous,
+    value,
+    CompilerKeyedArrayReorderKind.Permutation,
+  );
 }
 
 /** @internal Preserves a proven native collection mutation while recording its executed key. */
@@ -2419,6 +2414,12 @@ interface CompilerKeyedRowInstance extends CompilerHostInstance {
   item: unknown;
   index: number;
   conditionalValues: ReadonlyMap<number, readonly unknown[]>;
+}
+
+function keyedRowInstancesByKey(
+  instances: readonly CompilerKeyedRowInstance[],
+): Map<string, CompilerKeyedRowInstance> {
+  return new Map(instances.map((instance) => [instance.key, instance]));
 }
 
 interface CompilerKeyedIdentityTargetSnapshot {
@@ -3538,7 +3539,7 @@ class CompilerNestedKeyedRanges implements CompilerHostTreeScope {
       }
       anchor = instance.element;
     }
-    this.instances[rangeIndex] = new Map(nextInstances.map((instance) => [instance.key, instance]));
+    this.instances[rangeIndex] = keyedRowInstancesByKey(nextInstances);
     return true;
   }
 
@@ -3934,7 +3935,7 @@ class CompilerNestedMixedRanges implements CompilerHostTreeScope {
       }
       anchor = row.element;
     }
-    instance.value = new Map(nextInstances.map((row) => [row.key, row]));
+    instance.value = keyedRowInstancesByKey(nextInstances);
     return true;
   }
 
@@ -4984,8 +4985,7 @@ function reconcileCompilerKeyedArrayMapReorder(
   }
 
   const previousInstances = [...instances.values()];
-  const exactOrder = update.kind === "permutation" ? undefined : update.kind;
-  const reverse = exactOrder === "reverse";
+  const reverse = update.kind === CompilerKeyedArrayReorderKind.Reverse;
   const prepared = (() => {
     const changed: Array<{
       bindingUpdates: CompilerPreparedKeyedRowBindingUpdate[];
@@ -4993,7 +4993,10 @@ function reconcileCompilerKeyedArrayMapReorder(
       item: unknown;
     }> = [];
     try {
-      const instancesByItem = exactOrder ? undefined : new Map<unknown, CompilerKeyedRowInstance>();
+      const instancesByItem =
+        update.kind === CompilerKeyedArrayReorderKind.Permutation
+          ? new Map<unknown, CompilerKeyedRowInstance>()
+          : undefined;
       if (instancesByItem) {
         for (let sourceIndex = 0; sourceIndex < previousInstances.length; sourceIndex += 1) {
           const instance = previousInstances[sourceIndex];
@@ -5003,12 +5006,12 @@ function reconcileCompilerKeyedArrayMapReorder(
         }
       }
 
-      const nextInstances: CompilerKeyedRowInstance[] = exactOrder ? previousInstances : [];
-      const sequence: number[] | undefined = exactOrder ? undefined : [];
+      const nextInstances: CompilerKeyedRowInstance[] = instancesByItem ? [] : previousInstances;
+      const sequence: number[] | undefined = instancesByItem ? [] : undefined;
       for (let targetIndex = 0; targetIndex < finalValue.length; targetIndex += 1) {
         const item = finalValue[targetIndex];
         let instance: CompilerKeyedRowInstance | undefined;
-        if (exactOrder) {
+        if (!instancesByItem) {
           const sourceIndex = reverse ? finalValue.length - targetIndex - 1 : targetIndex;
           instance = previousInstances[sourceIndex];
           if (!instance || instance.index !== sourceIndex) return undefined;
@@ -5055,9 +5058,7 @@ function reconcileCompilerKeyedArrayMapReorder(
   for (let index = 0; index < prepared.nextInstances.length; index += 1) {
     prepared.nextInstances[index].index = index;
   }
-  return exactOrder === "identity"
-    ? instances
-    : new Map(prepared.nextInstances.map((instance) => [instance.key, instance]));
+  return reverse || prepared.sequence ? keyedRowInstancesByKey(prepared.nextInstances) : instances;
 }
 
 function reconcileCompilerKeyedArrayAppend(
@@ -5265,7 +5266,7 @@ function reconcileCompilerKeyedArrayPosition(
     for (let index = update.position; index < previousInstances.length; index += 1) {
       previousInstances[index].index = index;
     }
-    return new Map(previousInstances.map((instance) => [instance.key, instance]));
+    return keyedRowInstancesByKey(previousInstances);
   }
 
   let item: unknown;
@@ -5298,7 +5299,7 @@ function reconcileCompilerKeyedArrayPosition(
     for (let index = update.position + 1; index < previousInstances.length; index += 1) {
       previousInstances[index].index = index;
     }
-    return new Map(previousInstances.map((instance) => [instance.key, instance]));
+    return keyedRowInstancesByKey(previousInstances);
   }
 
   if (!previous || previous.index !== update.position) return undefined;
@@ -5330,7 +5331,7 @@ function reconcileCompilerKeyedArrayPosition(
   previous.scope?.cleanup();
   previous.element.replaceWith(replacement.element);
   previousInstances[update.position] = replacement;
-  return new Map(previousInstances.map((instance) => [instance.key, instance]));
+  return keyedRowInstancesByKey(previousInstances);
 }
 
 function reconcileCompilerKeyedArrayBatchInsert(
@@ -5406,7 +5407,7 @@ function reconcileCompilerKeyedArrayBatchInsert(
   for (let index = update.position + insertCount; index < previousInstances.length; index += 1) {
     previousInstances[index].index = index;
   }
-  return new Map(previousInstances.map((instance) => [instance.key, instance]));
+  return keyedRowInstancesByKey(previousInstances);
 }
 
 type CompilerKeyedArrayDisjointWindow = [
@@ -5669,7 +5670,7 @@ function reconcileCompilerKeyedArrayWindowReplace(
       for (let index = 0; index < nextInstances.length; index += 1) {
         nextInstances[index].index = index;
       }
-      return new Map(nextInstances.map((instance) => [instance.key, instance]));
+      return keyedRowInstancesByKey(nextInstances);
     }
 
     const touchedIndices = new Set<number>();
@@ -5752,9 +5753,7 @@ function reconcileCompilerKeyedArrayWindowReplace(
         instance.item = item;
       }
     }
-    return replacesRows
-      ? new Map(previousInstances.map((instance) => [instance.key, instance]))
-      : instances;
+    return replacesRows ? keyedRowInstancesByKey(previousInstances) : instances;
   }
 
   const update = updates[0];
@@ -5831,7 +5830,7 @@ function reconcileCompilerKeyedArrayWindowReplace(
   for (let index = update.position; index < previousInstances.length; index += 1) {
     previousInstances[index].index = index;
   }
-  return new Map(previousInstances.map((instance) => [instance.key, instance]));
+  return keyedRowInstancesByKey(previousInstances);
 }
 
 function reconcileCompilerKeyedArrayPositionWithBatch(
@@ -5968,7 +5967,7 @@ function reconcileCompilerKeyedArrayStructuralReorder(
   for (let index = 0; index < prepared.nextInstances.length; index += 1) {
     prepared.nextInstances[index].index = index;
   }
-  return new Map(prepared.nextInstances.map((instance) => [instance.key, instance]));
+  return keyedRowInstancesByKey(prepared.nextInstances);
 }
 
 function reconcileCompilerKeyedArrayReorder(
@@ -6008,7 +6007,7 @@ function reconcileCompilerKeyedArrayReorder(
   }
 
   const previousInstances = [...instances.values()];
-  if (update.kind === "permutation") {
+  if (update.kind === CompilerKeyedArrayReorderKind.Permutation) {
     const instancesByItem = new Map<unknown, CompilerKeyedRowInstance>();
     try {
       for (let sourceIndex = 0; sourceIndex < previousInstances.length; sourceIndex += 1) {
@@ -6033,7 +6032,7 @@ function reconcileCompilerKeyedArrayReorder(
       for (let index = 0; index < nextInstances.length; index += 1) {
         nextInstances[index].index = index;
       }
-      return new Map(nextInstances.map((instance) => [instance.key, instance]));
+      return keyedRowInstancesByKey(nextInstances);
     } catch {
       return undefined;
     }
@@ -6042,7 +6041,9 @@ function reconcileCompilerKeyedArrayReorder(
   try {
     for (let targetIndex = 0; targetIndex < previousInstances.length; targetIndex += 1) {
       const sourceIndex =
-        update.kind === "reverse" ? previousInstances.length - targetIndex - 1 : targetIndex;
+        update.kind === CompilerKeyedArrayReorderKind.Reverse
+          ? previousInstances.length - targetIndex - 1
+          : targetIndex;
       const instance = previousInstances[sourceIndex];
       if (instance.index !== sourceIndex || !Object.is(instance.item, finalValue[targetIndex])) {
         return undefined;
@@ -6052,13 +6053,13 @@ function reconcileCompilerKeyedArrayReorder(
     return undefined;
   }
 
-  if (update.kind === "identity") return instances;
+  if (update.kind === undefined) return instances;
 
   // A reverse has a one-row LIS. Keep the first committed row in place and
   // move every following row before the previous anchor, which performs the
   // minimum n - 1 connected DOM moves without rescanning keys or descriptors.
   reverseCompilerKeyedRows(root, previousInstances);
-  return new Map(previousInstances.map((instance) => [instance.key, instance]));
+  return keyedRowInstancesByKey(previousInstances);
 }
 
 interface CompilerPreparedKeyedArrayReorder {
@@ -6096,26 +6097,15 @@ function prepareCompilerKeyedArrayReorder(
   };
 }
 
-function callPreparedCompilerKeyedArrayReorder(
-  reconcile: typeof reconcileCompilerKeyedArrayReorder,
-  args: Parameters<typeof reconcileCompilerKeyedArrayReorder>,
-  prepared: CompilerPreparedKeyedArrayReorder,
-): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined {
-  return reconcile(args[0], args[1], args[2], args[3], args[4], args[5], prepared);
-}
-
 function reconcileCompilerKeyedArrayReorderWithMap(
   ...args: Parameters<typeof reconcileCompilerKeyedArrayReorder>
 ): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined {
   const prepared = prepareCompilerKeyedArrayReorder(args);
   if (!prepared) return undefined;
-  return callPreparedCompilerKeyedArrayReorder(
-    prepared.update?.mapped
-      ? reconcileCompilerKeyedArrayMapReorder
-      : reconcileCompilerKeyedArrayReorder,
-    args,
-    prepared,
-  );
+  const reconcile = prepared.update?.mapped
+    ? reconcileCompilerKeyedArrayMapReorder
+    : reconcileCompilerKeyedArrayReorder;
+  return reconcile(args[0], args[1], args[2], args[3], args[4], args[5], prepared);
 }
 
 function reconcileCompilerKeyedArrayReorderWithMapAndStructural(
@@ -6123,15 +6113,12 @@ function reconcileCompilerKeyedArrayReorderWithMapAndStructural(
 ): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined {
   const prepared = prepareCompilerKeyedArrayReorder(args);
   if (!prepared) return undefined;
-  return callPreparedCompilerKeyedArrayReorder(
-    prepared.update?.mapped
-      ? reconcileCompilerKeyedArrayMapReorder
-      : prepared.update?.structuralUpdate
-        ? reconcileCompilerKeyedArrayStructuralReorder
-        : reconcileCompilerKeyedArrayReorder,
-    args,
-    prepared,
-  );
+  const reconcile = prepared.update?.mapped
+    ? reconcileCompilerKeyedArrayMapReorder
+    : prepared.update?.structuralUpdate
+      ? reconcileCompilerKeyedArrayStructuralReorder
+      : reconcileCompilerKeyedArrayReorder;
+  return reconcile(args[0], args[1], args[2], args[3], args[4], args[5], prepared);
 }
 
 function reconcileCompilerKeyedArrayPrepend(
@@ -6202,7 +6189,7 @@ function reconcileCompilerKeyedArrayPrepend(
   for (let index = 0; index < previousInstances.length; index += 1) {
     previousInstances[index].index = prefixLength + index;
   }
-  return new Map([...prepended, ...previousInstances].map((instance) => [instance.key, instance]));
+  return keyedRowInstancesByKey([...prepended, ...previousInstances]);
 }
 
 function reconcileCompilerKeyedArrayFilter(
@@ -6269,7 +6256,7 @@ function reconcileCompilerKeyedArrayFilter(
   for (let index = 0; index < survivors.length; index += 1) {
     survivors[index].index = index;
   }
-  return new Map(survivors.map((instance) => [instance.key, instance]));
+  return keyedRowInstancesByKey(survivors);
 }
 
 function createKeyedRowConditionalRuntime(): KeyedRowConditionalRuntime {
@@ -7241,7 +7228,7 @@ function createKeyedRowsBlockComponent(
       } else {
         reorderCompilerKeyedRows(this.root, nextInstances, sequence, null);
       }
-      this.instances = new Map(nextInstances.map((instance) => [instance.key, instance]));
+      this.instances = keyedRowInstancesByKey(nextInstances);
       this.rebuildElementIndex(this.instances);
       this.pruneEventHandlers(rows.keys);
       this.pruneConditionalListeners(rows.keys);

@@ -18,12 +18,12 @@ and connections after every sample.
 
 | Mode   | Exact identity | Compiled control | vs React | vs control |
 | ------ | -------------: | ---------------: | -------: | ---------: |
-| Static | 3.40 ms | 11.30 ms | 20.50x | 3.32x |
-| Hybrid | 3.60 ms | 11.20 ms | 19.36x | 3.11x |
+| Static | 3.40 ms | 11.60 ms | 16.12x | 3.41x |
+| Hybrid | 3.70 ms | 11.10 ms | 14.81x | 3.00x |
 
 Existing double-reverse workloads improved too. Queued reversal medians changed from 6.50 to
-3.70 ms in static mode and 6.30 to 4.30 ms in hybrid mode. Reversals chained inside one setter
-changed from 6.40 to 3.70 ms static and 6.20 to 4.20 ms hybrid. All existing benchmark gates passed;
+3.80 ms in static mode and 6.30 to 4.10 ms in hybrid mode. Reversals chained inside one setter
+changed from 6.40 to 3.70 ms static and 6.20 to 4.00 ms hybrid. All existing benchmark gates passed;
 compiled owner executions remained zero in both compiler modes.
 
 Deterministic tests require zero generic source-item map inserts and zero DOM moves for even parity,
@@ -31,9 +31,10 @@ and exactly `n - 1` moves for odd parity. Coverage includes parity across queued
 and subclass fallback, Strict Mode hydration, unmount-before-flush cleanup, React 18.3.1 and 19.2.8,
 and 2,000 mapped updates with one to four reversals compared with normal React.
 
-The isolated keyed map/reorder premium is 13,349 B gzip, down from 13,378 B in the preceding run;
-the runtime-size gate passed. The complete dashboard chunks are 27,095 B gzip in both compiler
-modes and 6,540 B with the compiler disabled, including the additional benchmark controls.
+On the CI-equivalent Node.js 22.13.1 runtime, the isolated keyed map/reorder premium is 13,398 B
+gzip and remains inside its fixed 13,399 B limit. The complete dashboard chunks are 27,009 B gzip
+in static mode, 27,008 B in hybrid mode, and 6,540 B with the compiler disabled, including the
+additional benchmark controls.
 
 Numbers are local medians from 10 table samples per compiler mode with 20 bracketing React samples,
 Chrome 152.0.7977.82, Node.js 23.11.0, and Apple M1 macOS arm64. Timing varies by machine; the
