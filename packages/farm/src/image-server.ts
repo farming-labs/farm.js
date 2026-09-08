@@ -151,7 +151,11 @@ export function createFarmImageHandler(
       return createOptimizedImageResponse(request, optimized, config);
     } catch (error) {
       if (!(error instanceof FarmImageRequestError) && !isAbortError(error)) {
-        options.onError?.(error, request);
+        try {
+          options.onError?.(error, request);
+        } catch {
+          // Error reporting must not replace the optimizer's sanitized response.
+        }
       }
       return createFarmImageErrorResponse(error);
     }
