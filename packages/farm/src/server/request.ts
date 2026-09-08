@@ -21,17 +21,38 @@ const requestStore = getRequestStore();
 
 _setCurrentRequestResolver(() => requestStore.getStore());
 
-export function createWebRequestFromFarmRequest(req: FarmRequest): Request {
-  const forwardedHost = firstForwardedHeaderValue(req.headers["x-forwarded-host"]);
+export interface FarmRequestURLOptions {
+  origin?: string | URL;
+  trustProxy?: boolean;
+}
+
+export function resolveFarmRequestURL(req: FarmRequest, options: FarmRequestURLOptions = {}): URL {
+  if (options.origin) {
+    return new URL(req.url || "/", options.origin);
+  }
+
+  const forwardedHost = options.trustProxy
+    ? firstForwardedHeaderValue(req.headers["x-forwarded-host"])
+    : undefined;
   const fallbackHost = firstForwardedHeaderValue(req.headers.host) || "localhost";
-  const forwardedProto = firstForwardedHeaderValue(req.headers["x-forwarded-proto"]);
+  const forwardedProto = options.trustProxy
+    ? firstForwardedHeaderValue(req.headers["x-forwarded-proto"])
+    : undefined;
   const normalizedProto = forwardedProto?.toLowerCase();
   const proto =
-    normalizedProto === "https" || normalizedProto === "http" ? normalizedProto : "http";
-  const fullUrl = new URL(
-    req.url || "/",
-    resolveRequestOrigin(proto, forwardedHost, fallbackHost),
-  ).toString();
+    normalizedProto === "https" || normalizedProto === "http"
+      ? normalizedProto
+      : isEncryptedFarmRequest(req)
+        ? "https"
+        : "http";
+  return new URL(req.url || "/", resolveRequestOrigin(proto, forwardedHost, fallbackHost));
+}
+
+export function createWebRequestFromFarmRequest(
+  req: FarmRequest,
+  options: FarmRequestURLOptions = {},
+): Request {
+  const fullUrl = resolveFarmRequestURL(req, options).toString();
 
   const headers = new Headers();
   for (const [key, value] of Object.entries(req.headers)) {
@@ -61,6 +82,10 @@ export function createWebRequestFromFarmRequest(req: FarmRequest): Request {
   }
 
   return new Request(fullUrl, init);
+}
+
+function isEncryptedFarmRequest(req: FarmRequest): boolean {
+  return Boolean((req.socket as { encrypted?: boolean } | undefined)?.encrypted);
 }
 
 function firstForwardedHeaderValue(value: string | string[] | undefined): string | undefined {

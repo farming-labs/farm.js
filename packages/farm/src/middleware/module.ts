@@ -21,7 +21,7 @@ function toWebRequest(ctx: MiddlewareContext): Request {
   if (isWebRequest(ctx.request)) {
     return ctx.request;
   }
-  return createWebRequestFromFarmRequest(ctx.request);
+  return createWebRequestFromFarmRequest(ctx.request, { origin: ctx.url.origin });
 }
 
 function createRequestMiddlewareContext(

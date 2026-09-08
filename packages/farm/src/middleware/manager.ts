@@ -26,6 +26,7 @@ import { stripFarmLocaleFromPathname } from "../i18n/routing";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
 import { createCliColors } from "../cli-colors";
 import { appendMiddlewareRoutePath } from "./path";
+import type { FarmServerConfig, ResolvedFarmServerConfig } from "../server-http";
 
 export interface DiscoveredMiddleware {
   path: string;
@@ -49,16 +50,19 @@ export class MiddlewareManager {
   private viteServer?: ViteDevServer;
   private appDirs: string[];
   private i18n?: ResolvedFarmI18nConfig;
+  private server?: FarmServerConfig | ResolvedFarmServerConfig;
 
   constructor(
     appDir: string | readonly string[],
     viteServer?: ViteDevServer,
     config?: FarmMiddlewareConfig,
     i18n?: ResolvedFarmI18nConfig,
+    server?: FarmServerConfig | ResolvedFarmServerConfig,
   ) {
     this.appDirs = Array.isArray(appDir) ? [...appDir] : [appDir as string];
     this.viteServer = viteServer;
     this.i18n = i18n;
+    this.server = server;
     this.configure(config);
   }
 
@@ -208,7 +212,7 @@ export class MiddlewareManager {
     const startTime = Date.now();
 
     let parentData: MiddlewareContext["parent"] | undefined;
-    let ctx = createContext(req, res, this.viteServer);
+    let ctx = createContext(req, res, this.viteServer, undefined, this.server);
 
     if (this.globalConfig) {
       const globalMatch = this.matchesConfig(routePathname, this.globalConfig, ctx);
@@ -264,7 +268,7 @@ export class MiddlewareManager {
 
       // Create new context with parent data
       if (parentData) {
-        ctx = createContext(req, res, this.viteServer, parentData);
+        ctx = createContext(req, res, this.viteServer, parentData, this.server);
         if (routeMatch.params) {
           ctx.params = { ...ctx.params, ...routeMatch.params };
         }
