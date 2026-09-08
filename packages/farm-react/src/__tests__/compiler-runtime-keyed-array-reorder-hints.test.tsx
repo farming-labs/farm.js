@@ -65,6 +65,7 @@ function createReorderHarness(initialItems: Item[], readsCollection = false) {
   };
   let reverse: () => void = () => undefined;
   let queueTwo: () => void = () => undefined;
+  let queueThree: () => void = () => undefined;
   let plainThenReverse: () => void = () => undefined;
   let customReverse: () => void = () => undefined;
   const Table = createCompiledComponent({
@@ -75,6 +76,11 @@ function createReorderHarness(initialItems: Item[], readsCollection = false) {
       const items = () => state[0].get() as Item[];
       reverse = () => state[0].set((previous) => hintedReverse(previous as Item[]));
       queueTwo = () => {
+        state[0].set((previous) => hintedReverse(previous as Item[]));
+        state[0].set((previous) => hintedReverse(previous as Item[]));
+      };
+      queueThree = () => {
+        state[0].set((previous) => hintedReverse(previous as Item[]));
         state[0].set((previous) => hintedReverse(previous as Item[]));
         state[0].set((previous) => hintedReverse(previous as Item[]));
       };
@@ -143,6 +149,7 @@ function createReorderHarness(initialItems: Item[], readsCollection = false) {
     counters,
     customReverse: () => customReverse(),
     plainThenReverse: () => plainThenReverse(),
+    queueThree: () => queueThree(),
     queueTwo: () => queueTwo(),
     reverse: () => reverse(),
   };
@@ -190,7 +197,7 @@ describe("compiled keyed-array reorder hints", () => {
     },
   );
 
-  it("composes queued reverses as one validated final permutation", async () => {
+  it("tracks queued reverse parity as exact identity and reverse orders", async () => {
     const initialItems: Item[] = [
       { id: "a", label: "Alpha" },
       { id: "b", label: "Beta" },
@@ -205,6 +212,7 @@ describe("compiled keyed-array reorder hints", () => {
     const rows = [...container.querySelectorAll("li")];
     const list = container.querySelector("ul")!;
     const insertBefore = vi.spyOn(list, "insertBefore");
+    const mapSet = vi.spyOn(Map.prototype, "set");
     harness.counters.keys = 0;
     harness.counters.descriptors = 0;
     harness.counters.bindings = 0;
@@ -222,6 +230,18 @@ describe("compiled keyed-array reorder hints", () => {
     expect(harness.counters.keys).toBe(0);
     expect(harness.counters.descriptors).toBe(0);
     expect(harness.counters.bindings).toBe(0);
+    expect(mapSet.mock.calls.filter(([key]) => initialItems.includes(key as Item))).toHaveLength(0);
+
+    insertBefore.mockClear();
+    mapSet.mockClear();
+    await act(async () => {
+      harness.queueThree();
+      await flushCompilerUpdates();
+    });
+
+    expect(itemLabels(container)).toEqual(["Gamma", "Beta", "Alpha"]);
+    expect(insertBefore).toHaveBeenCalledTimes(2);
+    expect(mapSet.mock.calls.filter(([key]) => initialItems.includes(key as Item))).toHaveLength(0);
   });
 
   it("falls back safely for custom methods, unhinted chains, and collection-reading bindings", async () => {

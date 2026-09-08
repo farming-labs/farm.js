@@ -2,6 +2,45 @@
 
 Latest run: 2026-09-08
 
+## Exact reverse parity — 2026-09-08
+
+Compiler-proven reverse chains now retain exact order relative to the last committed keyed rows.
+Each native call still executes in source order. An even number of reversals records exact identity,
+so the runtime validates the final array and patches mapped replacements without constructing the
+generic source-item map, running LIS, or moving a DOM node. An odd number records exact reverse and
+keeps the minimum `n - 1` move path. Sort-derived or otherwise ambiguous order remains on general
+permutation reconciliation.
+
+The new 10,000-row workload changes one row through two native maps and then calls `toReversed()`
+twice. Its block-bodied compiled control performs the same application work through complete keyed
+reconciliation. The correctness oracle checks all 10,000 values, positions, element identities,
+and connections after every sample.
+
+| Mode   | Exact identity | Compiled control | vs React | vs control |
+| ------ | -------------: | ---------------: | -------: | ---------: |
+| Static | 3.40 ms | 11.60 ms | 16.12x | 3.41x |
+| Hybrid | 3.70 ms | 11.10 ms | 14.81x | 3.00x |
+
+Existing double-reverse workloads improved too. Queued reversal medians changed from 6.50 to
+3.80 ms in static mode and 6.30 to 4.10 ms in hybrid mode. Reversals chained inside one setter
+changed from 6.40 to 3.70 ms static and 6.20 to 4.00 ms hybrid. All existing benchmark gates passed;
+compiled owner executions remained zero in both compiler modes.
+
+Deterministic tests require zero generic source-item map inserts and zero DOM moves for even parity,
+and exactly `n - 1` moves for odd parity. Coverage includes parity across queued setters, changed-key
+and subclass fallback, Strict Mode hydration, unmount-before-flush cleanup, React 18.3.1 and 19.2.8,
+and 2,000 mapped updates with one to four reversals compared with normal React.
+
+On the CI-equivalent Node.js 22.13.1 runtime, the isolated keyed map/reorder premium is 13,398 B
+gzip and remains inside its fixed 13,399 B limit. The complete dashboard chunks are 27,009 B gzip
+in static mode, 27,008 B in hybrid mode, and 6,540 B with the compiler disabled, including the
+additional benchmark controls.
+
+Numbers are local medians from 10 table samples per compiler mode with 20 bracketing React samples,
+Chrome 152.0.7977.82, Node.js 23.11.0, and Apple M1 macOS arm64. Timing varies by machine; the
+deterministic correctness, move-count, fallback, compatibility, and size checks are the primary
+safety controls.
+
 ## Direct mapped reverse specialization — 2026-09-08
 
 A compiler-proven chain of safe `map()` calls followed directly by native `toReversed()` now uses

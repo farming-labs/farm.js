@@ -392,8 +392,11 @@ verifies equal lengths and every reversed item identity before moving the existi
 with the minimum `n - 1` connected DOM moves. It does not reread row keys, descriptors, or bindings
 and does not run the generic LIS calculation. Consecutive concise native `toReversed()` and
 `toSorted()` setters queued before one flush compose into one final validated permutation. The
-runtime skips intermediate DOM states and uses LIS once for that final order; two reversals that
-cancel perform no DOM moves. A single concise updater may also chain two or more native reorder
+runtime skips intermediate DOM states. When the proven chain contains only reversals, Farm tracks
+their parity relative to the committed rows: an even count validates exact identity and performs
+no DOM moves, source-item map construction, or LIS; an odd count validates exact reverse and uses
+the same minimum `n - 1` moves as one reverse. A chain containing a sort keeps the general final
+permutation and uses LIS once. A single concise updater may also chain two or more native reorder
 operations:
 
 ```tsx
@@ -452,8 +455,11 @@ optional runtime.
 A direct `toReversed()` suffix is more specific than an arbitrary permutation. When all preceding
 maps retain committed row order, Farm validates the mirrored source-to-result relation and every
 changed binding before touching the DOM, then performs the minimum-move reverse without building a
-second item lookup map or running LIS. A preceding sort or a map whose source is an uncommitted
-reorder keeps the general permutation path.
+second item lookup map or running LIS. Additional exact reversals toggle that proof between reverse
+and identity. Therefore two reversals after safe maps patch changed rows in committed order without
+moving DOM nodes or creating the generic source map; three use the exact reverse path. Exact reverse
+metadata also composes across queued setters. A preceding sort or any ambiguous order keeps the
+general permutation path.
 
 A direct native immutable sort can use the same optional reorder runtime:
 

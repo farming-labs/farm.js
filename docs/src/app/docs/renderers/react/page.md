@@ -1170,10 +1170,12 @@ setItems((current) => current.toReversed());
 
 Each setter still executes in order with normal JavaScript semantics. Farm carries the original
 committed token through consecutive native `toSorted()` and `toReversed()` results, validates the
-final array as the exact same set of unique item identities, and reconciles that final permutation
-once. Intermediate orders never reach the DOM. The final generic path uses LIS, so two queued
-reversals that cancel preserve every row without a DOM move. A single direct reverse keeps the
-smaller specialized `n - 1` move path described above.
+final array as the exact same set of unique item identities, and reconciles that final order once.
+Intermediate orders never reach the DOM. For a chain made only of reversals, Farm tracks whether
+the final order is exactly the committed order or its reverse. An even count validates identity and
+does not build the generic item map, run LIS, or move a DOM node. An odd count validates reverse and
+uses the specialized minimum `n - 1` move path. Any sort makes the final order a general
+permutation, so that path still uses LIS.
 
 The same proof also works when two or more native reorder operations are chained inside one concise
 functional setter:
@@ -1184,9 +1186,9 @@ setItems((current) => current.toSorted((left, right) => left.rank - right.rank).
 
 Farm prepares this pipeline at build time and evaluates each property lookup, inline comparator,
 and native call in its original JavaScript order. The intermediate arrays do not reach the DOM.
-The runtime validates only the final identity permutation against the committed collection and
-then applies one LIS-based reconciliation. A cancelling
-`current.toReversed().toReversed()` pipeline therefore performs no DOM moves.
+The runtime validates only the final order against the committed collection. A cancelling
+`current.toReversed().toReversed()` pipeline uses the exact-identity path described above; mixed
+sort/reverse pipelines apply one LIS-based reconciliation.
 
 A compiler-safe `filter()` or bounded `slice()` prefix may run before one or more native reorder
 steps in the same concise setter:
@@ -1251,8 +1253,10 @@ collection and expose only the final state.
 When the maps are followed directly by `toReversed()`, their same-order lineage proves the exact
 final permutation. Farm validates each mirrored source item and every changed replacement before
 the first DOM write, then uses the minimum-move reverse operation directly. It does not allocate a
-second source-item lookup map or run LIS for that case. A sort before the reverse, a map after a
-queued reorder, or any other order ambiguity keeps the general permutation path.
+second source-item lookup map or run LIS for that case. Further exact reversals toggle the proof:
+two reversals patch changed rows in committed order with zero DOM moves, while three use the exact
+reverse path. The same parity applies to safe mapped pipelines and to queued reverse-only setters.
+A sort or any other order ambiguity keeps the general permutation path.
 
 The proof requires every map callback to be inline, synchronous, compiler-safe, and to return the
 original item on one conditional branch and an object-spread replacement on the other. It requires

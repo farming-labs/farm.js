@@ -985,6 +985,48 @@ export function StandardTableBenchmark() {
           Review + reprice + reverse rows (snapshot control)
         </button>
         <button
+          data-action="table-multi-map-reverse-parity"
+          type="button"
+          onClick={() => {
+            setRows((current) =>
+              current
+                .map((row) =>
+                  row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
+                )
+                .map((row) =>
+                  row.id % 10_000 === 5_001 ? { ...row, amount: row.amount + 1 } : row,
+                )
+                .toReversed()
+                .toReversed(),
+            );
+            setOperation("review, reprice, and preserve row order through reverse parity");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Review + reprice + reverse twice
+        </button>
+        <button
+          data-action="table-multi-map-reverse-parity-snapshot"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              return current
+                .map((row) =>
+                  row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
+                )
+                .map((row) =>
+                  row.id % 10_000 === 5_001 ? { ...row, amount: row.amount + 1 } : row,
+                )
+                .toReversed()
+                .toReversed();
+            });
+            setOperation("review, reprice, and reverse twice (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Review + reprice + reverse twice (snapshot control)
+        </button>
+        <button
           data-action="table-sort"
           type="button"
           onClick={() => {
