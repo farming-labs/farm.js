@@ -79,6 +79,10 @@ farm preview --dry-run
 
 When no target is passed, Farm tries to detect a running app from the current project config and common development ports. Pass `--port` or `--url` when the app is running somewhere specific.
 
+The pathname in `--url` is a mount point. For example, `--url
+http://localhost:4319/console` forwards the public preview root to `/console/` and a public
+`/settings` request to `/console/settings` without allowing the public path to escape that mount.
+
 ## Options
 
 | Option                  | Purpose                                                                             |

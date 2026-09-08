@@ -56,6 +56,31 @@ test("forwards requests over one persistent websocket and closes with the agent"
   }
 });
 
+test("mounts public preview paths beneath the target URL pathname", async () => {
+  const target = createServer((request, response) => response.end(request.url));
+  await listen(target);
+  const targetAddress = target.address();
+  const relay = createPersistentPreviewRelay();
+  const relayAddress = await relay.listen();
+  const agent = await startTypeScriptPreviewAgent({
+    relayUrl: relayAddress.websocketUrl,
+    name: "base-path",
+    targetUrl: `http://127.0.0.1:${targetAddress.port}/console`,
+  });
+
+  try {
+    const nested = await fetch(`${agent.publicUrl}/dashboard?view=compact`);
+    assert.equal(await nested.text(), "/console/dashboard?view=compact");
+
+    const root = await fetch(agent.publicUrl);
+    assert.equal(await root.text(), "/console/");
+  } finally {
+    await agent.close();
+    await relay.close();
+    await close(target);
+  }
+});
+
 test("preserves repeated cookies and removes encoding after decoding a response", async () => {
   const target = createServer((_request, response) => {
     response.statusCode = 200;

@@ -259,12 +259,17 @@ function resolveTargetUrl(targetUrl: string, requestPath: string) {
     throw new UnsafePreviewPathError();
   }
 
-  const base = new URL(ensureTrailingSlash(targetUrl));
+  const base = new URL(targetUrl);
   if (base.protocol !== "http:" && base.protocol !== "https:") {
     throw new UnsafePreviewPathError();
   }
-  const resolved = new URL(requestPath, base);
-  if (resolved.origin !== base.origin) throw new UnsafePreviewPathError();
+  base.pathname = ensureTrailingSlash(base.pathname);
+  base.search = "";
+  base.hash = "";
+  const resolved = new URL(requestPath.slice(1), base);
+  if (resolved.origin !== base.origin || !resolved.pathname.startsWith(base.pathname)) {
+    throw new UnsafePreviewPathError();
+  }
   return resolved;
 }
 
