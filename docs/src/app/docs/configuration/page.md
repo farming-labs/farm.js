@@ -614,7 +614,8 @@ Rewrites use after-files semantics in development and production: an existing Fa
 integration, docs, image, or metadata route wins, and the rewrite is considered only as a fallback.
 Configured response headers are applied after route handlers in both modes, so they win when the
 same header is returned by a handler. `Link` is additive: handler and configured link values are
-merged instead of replacing one another.
+merged instead of replacing one another. `Set-Cookie` is also additive, and each handler or
+configured cookie remains a separate response header.
 
 ```ts
 export default defineConfig({
