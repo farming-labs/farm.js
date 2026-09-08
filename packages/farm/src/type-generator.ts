@@ -4,7 +4,7 @@ import { initSync, parse } from "es-module-lexer";
 import { writeFileIfChanged } from "./write-file-if-changed";
 import { isFarmAPIRouteFileName } from "./api/route-files";
 
-initSync();
+let moduleLexerInitialized = false;
 
 const API_CLIENT_METHOD_SEGMENTS = new Set([
   "get",
@@ -98,6 +98,10 @@ export class APITypeGenerator {
   }
 
   private extractExportedMethods(content: string): string[] {
+    if (!moduleLexerInitialized) {
+      initSync();
+      moduleLexerInitialized = true;
+    }
     const httpMethods = ["GET", "HEAD", "QUERY", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"];
     const [, exports] = parse(content);
     const valueExports = new Set(
