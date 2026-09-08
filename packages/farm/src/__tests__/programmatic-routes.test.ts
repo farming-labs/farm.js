@@ -63,6 +63,12 @@ describe("programmatic routes", () => {
     expect(() => parseProgrammaticRoutePath("/docs/[...slug]/edit")).toThrow(
       'Catch-all segment "[...slug]" must be the final segment',
     );
+    expect(() => parseProgrammaticRoutePath("/products?draft=1")).toThrow(
+      "must be a pathname without a query string or hash",
+    );
+    expect(() => parseProgrammaticRoutePath("/products#details")).toThrow(
+      "must be a pathname without a query string or hash",
+    );
   });
 
   it("owns typed named actions and resolves a default action", async () => {
