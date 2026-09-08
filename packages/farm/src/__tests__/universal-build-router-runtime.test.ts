@@ -7,10 +7,74 @@ import {
   isFarmDeploymentMismatchResponse,
 } from "../deployment";
 import {
+  generateConfiguredResponseHeadersRuntimeSource,
   generateRuntimePathMatcherSource,
   generateUniversalRouterStateRuntime,
   generateUniversalRouterStateProperties,
 } from "../nitro/universal-build";
+
+describe("generateConfiguredResponseHeadersRuntimeSource", () => {
+  it("preserves handler and configured Set-Cookie fields separately", () => {
+    const source = generateConfiguredResponseHeadersRuntimeSource();
+    const applyConfiguredResponseHeaders = new Function(
+      "configuredHeaderRoutes",
+      "matchRuntimePathPattern",
+      "appendFarmLinkHeader",
+      `${source}; return applyConfiguredResponseHeaders;`,
+    )(
+      [
+        {
+          source: "/account",
+          headers: [
+            { key: "Set-Cookie", value: "theme=dark; Path=/" },
+            { key: "set-cookie", value: "locale=en; Path=/" },
+          ],
+        },
+      ],
+      (source: string, pathname: string) => source === pathname,
+      (headers: Headers, value: string) => headers.append("Link", value),
+    ) as (response: Response, pathname: string) => Response;
+    const handlerHeaders = new Headers();
+    handlerHeaders.append("Set-Cookie", "session=abc; Path=/; HttpOnly");
+
+    const response = applyConfiguredResponseHeaders(
+      new Response("ok", { headers: handlerHeaders }),
+      "/account",
+    );
+
+    expect(response.headers.getSetCookie()).toEqual([
+      "session=abc; Path=/; HttpOnly",
+      "theme=dark; Path=/",
+      "locale=en; Path=/",
+    ]);
+  });
+
+  it("does not duplicate an existing configured cookie", () => {
+    const source = generateConfiguredResponseHeadersRuntimeSource();
+    const applyConfiguredResponseHeaders = new Function(
+      "configuredHeaderRoutes",
+      "matchRuntimePathPattern",
+      "appendFarmLinkHeader",
+      `${source}; return applyConfiguredResponseHeaders;`,
+    )(
+      [
+        {
+          source: "/account",
+          headers: [{ key: "Set-Cookie", value: "theme=dark; Path=/" }],
+        },
+      ],
+      () => true,
+      (headers: Headers, value: string) => headers.append("Link", value),
+    ) as (response: Response, pathname: string) => Response;
+
+    const response = applyConfiguredResponseHeaders(
+      new Response("ok", { headers: { "Set-Cookie": "theme=dark; Path=/" } }),
+      "/account",
+    );
+
+    expect(response.headers.getSetCookie()).toEqual(["theme=dark; Path=/"]);
+  });
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();

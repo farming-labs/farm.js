@@ -3948,6 +3948,49 @@ export function toVirtualEntryImportSpecifier(modulePath: string): string {
   return JSON.stringify(modulePath.replace(/\\/g, "/"));
 }
 
+export function generateConfiguredResponseHeadersRuntimeSource(): string {
+  return `
+function getConfiguredSetCookieHeaders(headers) {
+  const getSetCookie = headers.getSetCookie;
+  if (typeof getSetCookie === "function") return getSetCookie.call(headers);
+  const value = headers.get("set-cookie");
+  return value ? [value] : [];
+}
+
+function applyConfiguredResponseHeaders(response, pathname) {
+  let headers;
+  for (const headerRoute of configuredHeaderRoutes) {
+    if (!matchRuntimePathPattern(headerRoute.source, pathname)) continue;
+    for (const header of headerRoute.headers) {
+      const currentHeaders = headers || response.headers;
+      const normalizedKey = header.key.toLowerCase();
+      if (normalizedKey === "set-cookie") {
+        if (getConfiguredSetCookieHeaders(currentHeaders).includes(header.value)) continue;
+        if (!headers) headers = new Headers(response.headers);
+        headers.append("Set-Cookie", header.value);
+      } else {
+        const currentValue = currentHeaders.get(header.key);
+        if (currentValue === header.value) continue;
+        if (!headers) headers = new Headers(response.headers);
+        if (normalizedKey === "link") {
+          appendFarmLinkHeader(headers, header.value);
+        } else {
+          headers.set(header.key, header.value);
+        }
+      }
+    }
+  }
+
+  if (!headers) return response;
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+`.trim();
+}
+
 function generateVirtualEntryCode(
   apiRoutes: Array<{ path: string; filePath: string; methods: string[] }>,
   pageRoutes: UniversalPageRoute[],
@@ -5508,29 +5551,7 @@ function createRewrittenRequest(request, destination) {
   return new Request(destinationUrl, request);
 }
 
-function applyConfiguredResponseHeaders(response, pathname) {
-  let headers;
-  for (const headerRoute of configuredHeaderRoutes) {
-    if (!matchRuntimePathPattern(headerRoute.source, pathname)) continue;
-    for (const header of headerRoute.headers) {
-      const currentValue = (headers || response.headers).get(header.key);
-      if (currentValue === header.value) continue;
-      if (!headers) headers = new Headers(response.headers);
-      if (header.key.toLowerCase() === "link") {
-        appendFarmLinkHeader(headers, header.value);
-      } else {
-        headers.set(header.key, header.value);
-      }
-    }
-  }
-
-  if (!headers) return response;
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
-  });
-}
+${generateConfiguredResponseHeadersRuntimeSource()}
 
 // App middleware files bundled at build time (sorted by depth, root first)
 const fileMiddlewareModules = [${middlewareRegistrations.join(",")}
