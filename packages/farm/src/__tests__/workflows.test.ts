@@ -69,6 +69,24 @@ describe("Farm workflows", () => {
     ]);
   });
 
+  it("discovers workflows from an absolute directory outside the project", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-workflow-project-"));
+    const workflowDir = await fs.mkdtemp(path.join(os.tmpdir(), "farm-workflow-shared-"));
+    const workflowPath = path.join(workflowDir, "shared-sync.mjs");
+    await fs.writeFile(workflowPath, "export default { async run() { return { ok: true }; } };");
+
+    const config = resolveWorkflowsConfig({ dir: workflowDir });
+    const workflows = await discoverFarmWorkflows({ root, workflows: config });
+
+    expect(config.dirs).toEqual([path.normalize(workflowDir)]);
+    expect(workflows).toEqual([
+      expect.objectContaining({
+        id: "shared-sync",
+        filePath: workflowPath,
+      }),
+    ]);
+  });
+
   it("runs workflow modules through the HTTP handler", async () => {
     const workflow = {
       id: "sync-users",
