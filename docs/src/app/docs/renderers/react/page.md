@@ -1250,13 +1250,24 @@ controlled inputs, focus, and text selection stay attached to their keys. Multip
 map-and-reorder setters queued before one compiler flush compose against the same committed
 collection and expose only the final state.
 
+Exact reverse proof can also cross a setter boundary in the same batch:
+
+```tsx
+setItems((current) => current.toReversed());
+setItems((current) =>
+  current.map((item) => (item.id === editedId ? { ...item, label: nextLabel } : item)).toReversed(),
+);
+```
+
 When the maps are followed directly by `toReversed()`, their same-order lineage proves the exact
 final permutation. Farm validates each mirrored source item and every changed replacement before
 the first DOM write, then uses the minimum-move reverse operation directly. It does not allocate a
 second source-item lookup map or run LIS for that case. Further exact reversals toggle the proof:
 two reversals patch changed rows in committed order with zero DOM moves, while three use the exact
-reverse path. The same parity applies to safe mapped pipelines and to queued reverse-only setters.
-A sort or any other order ambiguity keeps the general permutation path.
+reverse path. The runtime now retains that exact identity-or-reverse proof across separate queued
+setters too. For example, a queued reverse followed by a safe map and another reverse patches the
+changed row in committed order without moving DOM rows or constructing the generic source map. A
+sort or any other order ambiguity keeps the general permutation path.
 
 The proof requires every map callback to be inline, synchronous, compiler-safe, and to return the
 original item on one conditional branch and an object-spread replacement on the other. It requires

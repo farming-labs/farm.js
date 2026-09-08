@@ -88,8 +88,8 @@ interface CompilerKeyedArrayReorderHint {
 }
 
 interface CompilerKeyedArrayMapPipelineHint {
-  /** True while every map preserves the committed row order. */
-  readonly ordered: boolean;
+  /** Exact order relative to the committed rows; permutation means the order is ambiguous. */
+  readonly order?: CompilerKeyedArrayReorderKind;
   readonly sourceToken: object;
   readonly sourceLength: number;
   readonly resultLength: number;
@@ -674,8 +674,12 @@ function recordCompilerKeyedArrayMapPipeline(previous: unknown, value: unknown):
       committedSource || previousMapPipeline
         ? undefined
         : COMPILER_KEYED_ARRAY_REORDERS.get(previousTarget);
+    const composablePreviousReorder =
+      previousReorder &&
+      (previousReorder.mapped ||
+        previousReorder.kind !== CompilerKeyedArrayReorderKind.Permutation);
     const previousSource =
-      previousMapPipeline || (previousReorder?.mapped ? previousReorder : undefined);
+      previousMapPipeline || (composablePreviousReorder ? previousReorder : undefined);
     if (!committedSource && (!previousSource || previousSource.resultLength !== previous.length)) {
       return value;
     }
@@ -704,7 +708,11 @@ function recordCompilerKeyedArrayMapPipeline(previous: unknown, value: unknown):
       if (!Object.is(mappedItem, sourceItem)) mappedItemSources.set(mappedItem, sourceItem);
     }
     COMPILER_KEYED_ARRAY_MAP_PIPELINES.set(valueTarget, {
-      ordered: previousMapPipeline?.ordered ?? committedSource,
+      order: previousMapPipeline
+        ? previousMapPipeline.order
+        : committedSource
+          ? undefined
+          : previousReorder?.kind,
       sourceToken,
       sourceLength: previousSource?.sourceLength ?? previous.length,
       resultLength: value.length,
@@ -791,8 +799,8 @@ export function createCompilerKeyedArrayMapReorder(
       kind:
         method !== NATIVE_ARRAY_TO_REVERSED
           ? CompilerKeyedArrayReorderKind.Permutation
-          : mapPipeline?.ordered
-            ? CompilerKeyedArrayReorderKind.Reverse
+          : mapPipeline
+            ? reversedCompilerKeyedArrayOrder(mapPipeline.order)
             : previousReorder
               ? reversedCompilerKeyedArrayOrder(previousReorder.kind)
               : CompilerKeyedArrayReorderKind.Permutation,

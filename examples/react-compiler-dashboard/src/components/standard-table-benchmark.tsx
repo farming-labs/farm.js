@@ -1027,6 +1027,50 @@ export function StandardTableBenchmark() {
           Review + reprice + reverse twice (snapshot control)
         </button>
         <button
+          data-action="table-queued-map-reverse-parity"
+          type="button"
+          onClick={() => {
+            setRows((current) => current.toReversed());
+            setRows((current) =>
+              current
+                .map((row) =>
+                  row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
+                )
+                .map((row) =>
+                  row.id % 10_000 === 5_001 ? { ...row, amount: row.amount + 1 } : row,
+                )
+                .toReversed(),
+            );
+            setOperation("queue reverse, review, reprice, and restore row order");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queue reverse + review + restore
+        </button>
+        <button
+          data-action="table-queued-map-reverse-parity-snapshot"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              return current.toReversed();
+            });
+            setRows((current) => {
+              return current
+                .map((row) =>
+                  row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
+                )
+                .map((row) =>
+                  row.id % 10_000 === 5_001 ? { ...row, amount: row.amount + 1 } : row,
+                )
+                .toReversed();
+            });
+            setOperation("queue reverse, review, reprice, and restore row order (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queue reverse + review + restore (snapshot control)
+        </button>
+        <button
           data-action="table-sort"
           type="button"
           onClick={() => {

@@ -2,6 +2,33 @@
 
 Latest run: 2026-09-08
 
+## Queued reverse and mapped parity — 2026-09-08
+
+Exact keyed-row order now survives across separate queued setters. The benchmark first queues a
+native `toReversed()`, then queues two safe same-key maps followed by another `toReversed()`. The
+two reversals cancel, so the runtime validates the committed lineage and patches the changed row
+without constructing the generic source-item map, running LIS, or moving a DOM row. Native calls
+and updater order remain unchanged.
+
+The block-bodied control performs the same JavaScript and produces the same DOM-visible result
+through complete keyed reconciliation. Both paths run against the same 10,000 rows. The correctness
+oracle checks every value, position, element identity, and connection after each sample.
+
+| Mode   | Exact identity | Compiled control | vs React | vs control |
+| ------ | -------------: | ---------------: | -------: | ---------: |
+| Static | 3.80 ms | 12.10 ms | 15.05x | 3.18x |
+| Hybrid | 3.60 ms | 11.80 ms | 15.89x | 3.28x |
+
+The new gate passed in a smoke run and two complete bracketing runs without changing its 8x React
+or 1.5x compiled-control floors. The general React-relative performance gate, optimization
+persistence gate, correctness oracle, and zero compiled owner executions passed in both complete
+runs. Separate deterministic coverage compares 2,000 queued updates with normal React and requires
+zero generic source-item map inserts, zero DOM moves, stable row identity, one changed key and
+binding read, React 18.3.1 and 19.2.8 compatibility, and safe ambiguous-order fallback.
+
+On Node.js 22.13.1, the isolated keyed map/reorder premium is 13,387 B gzip, below the unchanged
+13,399 B limit and 11 B smaller than the preceding release.
+
 ## Exact reverse parity — 2026-09-08
 
 Compiler-proven reverse chains now retain exact order relative to the last committed keyed rows.
