@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -170,6 +172,29 @@ describe("APITypeGenerator", () => {
 
     expect(routes).toHaveLength(1);
     expect(routes[0]?.methods).toEqual(["GET", "POST"]);
+  });
+
+  it("ignores commented, string, and type-only HTTP exports", () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "farm-api-types-comments-"));
+    const appDir = path.join(root, "src", "app");
+    const routeDir = path.join(appDir, "api", "comments");
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      path.join(routeDir, "route.ts"),
+      [
+        "// export const GET = () => new Response('commented');",
+        "/* export async function DELETE() { return new Response('commented'); } */",
+        'const example = "export const PATCH = () => null";',
+        "type OPTIONS = () => Response;",
+        "export type { OPTIONS };",
+        "export const POST = () => new Response(example);",
+      ].join("\n"),
+    );
+
+    const routes = new APITypeGenerator(appDir).scanAPIRoutes();
+
+    expect(routes).toHaveLength(1);
+    expect(routes[0]?.methods).toEqual(["POST"]);
   });
 
   it("detects the HTTP names exposed by export lists", () => {

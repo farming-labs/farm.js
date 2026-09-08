@@ -2,6 +2,7 @@ import { readFileSync, existsSync, readdirSync, mkdirSync } from "fs";
 import { join, relative, dirname } from "path";
 import { writeFileIfChanged } from "./write-file-if-changed";
 import { isFarmAPIRouteFileName } from "./api/route-files";
+import { buildSync, type Loader } from "esbuild";
 
 const API_CLIENT_METHOD_SEGMENTS = new Set([
   "get",
@@ -73,7 +74,7 @@ export class APITypeGenerator {
   ): APIRouteInfo | null {
     try {
       const content = readFileSync(filePath, "utf-8");
-      const methods = this.extractExportedMethods(content);
+      const methods = this.extractExportedMethods(content, filePath);
 
       if (methods.length === 0) {
         return null;
@@ -94,35 +95,30 @@ export class APITypeGenerator {
     }
   }
 
-  private extractExportedMethods(content: string): string[] {
-    const methods: string[] = [];
+  private extractExportedMethods(content: string, filePath: string): string[] {
+    const result = buildSync({
+      bundle: false,
+      format: "esm",
+      logLevel: "silent",
+      metafile: true,
+      platform: "neutral",
+      stdin: {
+        contents: content,
+        loader: this.getEsbuildLoader(filePath),
+        sourcefile: filePath,
+      },
+      write: false,
+    });
     const httpMethods = ["GET", "HEAD", "QUERY", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"];
-    const namedExports = new Set<string>();
+    const valueExports = new Set(
+      Object.values(result.metafile.outputs).flatMap((output) => output.exports),
+    );
+    return httpMethods.filter((method) => valueExports.has(method));
+  }
 
-    for (const match of content.matchAll(/export\s*\{([\s\S]*?)\}/g)) {
-      for (const specifier of match[1].split(",")) {
-        const normalized = specifier.trim().replace(/^type\s+/, "");
-        if (!normalized) continue;
-
-        const alias = normalized.match(/^([A-Za-z_$][\w$]*)\s+as\s+([A-Za-z_$][\w$]*)$/);
-        const exportedName = alias?.[2] ?? normalized.match(/^([A-Za-z_$][\w$]*)$/)?.[1];
-        if (exportedName) namedExports.add(exportedName);
-      }
-    }
-
-    for (const method of httpMethods) {
-      // Look for a direct declaration or the name exposed by an export list.
-      const patterns = [
-        new RegExp(`export\\s+(?:const|let|var)\\s+${method}\\s*(?::|=)`, "g"),
-        new RegExp(`export\\s+(?:async\\s+)?function\\s+${method}\\s*\\(`, "g"),
-      ];
-
-      if (namedExports.has(method) || patterns.some((pattern) => pattern.test(content))) {
-        methods.push(method);
-      }
-    }
-
-    return methods;
+  private getEsbuildLoader(filePath: string): Loader {
+    const extension = filePath.slice(filePath.lastIndexOf(".") + 1).toLowerCase();
+    return extension === "tsx" || extension === "jsx" || extension === "js" ? extension : "ts";
   }
 
   /**
