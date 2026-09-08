@@ -96,7 +96,11 @@ export function parseProgrammaticRoutePath(
 
   return {
     filePath,
-    segments: normalized.split("/").filter(Boolean).map(parseRouteSegment),
+    segments: normalized
+      .split("/")
+      .filter(Boolean)
+      .filter((segment) => !(segment.startsWith("(") && segment.endsWith(")")))
+      .map(parseRouteSegment),
     type,
   };
 }

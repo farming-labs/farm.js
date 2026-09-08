@@ -65,6 +65,21 @@ describe("programmatic routes", () => {
     );
   });
 
+  it("keeps programmatic route groups out of URL segments", () => {
+    expect(parseProgrammaticRoutePath("/(marketing)/pricing")).toEqual({
+      filePath: "(marketing)/pricing/page.tsx",
+      segments: [
+        {
+          segment: "pricing",
+          isDynamic: false,
+          isOptional: false,
+          isCatchAll: false,
+        },
+      ],
+      type: "page",
+    });
+  });
+
   it("owns typed named actions and resolves a default action", async () => {
     const update = createServerFn({
       input: z.object({ id: z.string(), name: z.string() }),
