@@ -2843,6 +2843,8 @@ function resetReactRoot() {
 
 // Hydrate client components
 async function hydrate() {
+  await farmClientRuntime.start();
+
   if (await hydrateFarmDocsAdapterRuntime()) {
     return;
   }

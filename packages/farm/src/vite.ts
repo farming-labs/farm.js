@@ -4822,6 +4822,8 @@ async function renderPage(pageData) {
 spaRouter.setNavigationHandler(renderPage);
 
 async function hydrate() {
+  await farmClientRuntime.start();
+
   if (isFarmDocsSearchPage()) {
     await mountFarmDocsSearch();
   }
