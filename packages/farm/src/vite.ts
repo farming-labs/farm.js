@@ -858,9 +858,8 @@ export function farmPlugin(
             await openAPIManager.invalidateCache();
           }
         } catch (e) {
-          if (process.env.FARM_VERBOSE) {
-            logger.warn("Type artifact generation failed: " + (e as Error).message);
-          }
+          const message = e instanceof Error ? e.message : String(e);
+          logger.warn(`Route type generation failed (farm.d.ts may be stale): ${message}`);
           if (pm) {
             await emitPluginError("type-artifact-generation", e, { reason });
           }
