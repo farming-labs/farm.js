@@ -933,7 +933,7 @@ export const acme = defineIntegration({
 });
 ```
 
-Common phases are `registered`, `validate`, `setup`, `ready`, `dispose`, `request:start`, `request:end`, and `request:error`.
+Common phases are `registered`, `validate`, `setup`, `ready`, `dispose`, `request:start`, `request:end`, and `request:error`. Logging is observational: a synchronous throw or rejected promise from the callback is isolated and does not prevent integration startup, request handling, response delivery, or shutdown.
 
 ## Client and server usage
 

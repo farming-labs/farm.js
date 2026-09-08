@@ -1658,6 +1658,18 @@ function createIntegrationLifecycleLogger(
   };
 }
 
+async function emitIntegrationLog(
+  integration: FarmIntegration,
+  event: FarmIntegrationLogEvent,
+): Promise<void> {
+  try {
+    await integration.log?.(event);
+  } catch {
+    // Integration logging is optional observability. A failed sink must not
+    // block lifecycle startup, request handlers, responses, or cleanup.
+  }
+}
+
 const INTEGRATION_DATA_HEADER = "x-farm-integration-data";
 const INTEGRATION_DATA_HEADER_MAX_LENGTH = 16 * 1024;
 const BLOCKED_INTEGRATION_DATA_KEYS = new Set(["__proto__", "constructor", "prototype"]);
@@ -1811,7 +1823,7 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
       }
 
       for (const route of routes) {
-        await integration.log({
+        await emitIntegrationLog(integration, {
           category: integration.category,
           slot: integration.category,
           type: integration.type,
@@ -1826,7 +1838,7 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
       }
 
       for (const entry of middleware) {
-        await integration.log({
+        await emitIntegrationLog(integration, {
           category: integration.category,
           slot: integration.category,
           type: integration.type,
@@ -1917,7 +1929,7 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
           pluginContext: context,
         });
         const startedAt = Date.now();
-        await integration.log?.({
+        await emitIntegrationLog(integration, {
           category: integration.category,
           slot: integration.category,
           type: integration.type,
@@ -1936,7 +1948,7 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
           const response = await entry.handler(request, handlerContext);
           if (response) {
             await sendWebResponse(res, response);
-            await integration.log?.({
+            await emitIntegrationLog(integration, {
               category: integration.category,
               slot: integration.category,
               type: integration.type,
@@ -1955,7 +1967,7 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
             return;
           }
 
-          await integration.log?.({
+          await emitIntegrationLog(integration, {
             category: integration.category,
             slot: integration.category,
             type: integration.type,
@@ -1971,7 +1983,7 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
             context: handlerContext.req.snapshot(),
           });
         } catch (error) {
-          await integration.log?.({
+          await emitIntegrationLog(integration, {
             category: integration.category,
             slot: integration.category,
             type: integration.type,
@@ -2016,7 +2028,7 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
           pluginContext: context,
         });
         const startedAt = Date.now();
-        await integration.log?.({
+        await emitIntegrationLog(integration, {
           category: integration.category,
           slot: integration.category,
           type: integration.type,
@@ -2035,7 +2047,7 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
           const validation = await validateIntegrationRouteInput(route, request, url);
           if (!validation.success) {
             await sendWebResponse(res, validation.response);
-            await integration.log?.({
+            await emitIntegrationLog(integration, {
               category: integration.category,
               slot: integration.category,
               type: integration.type,
@@ -2059,7 +2071,7 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
             const middlewareResponse = await middlewareEntry.handler(request, handlerContext);
             if (middlewareResponse) {
               await sendWebResponse(res, middlewareResponse);
-              await integration.log?.({
+              await emitIntegrationLog(integration, {
                 category: integration.category,
                 slot: integration.category,
                 type: integration.type,
@@ -2092,7 +2104,7 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
               beforeResponse,
             );
             await sendWebResponse(res, response);
-            await integration.log?.({
+            await emitIntegrationLog(integration, {
               category: integration.category,
               slot: integration.category,
               type: integration.type,
@@ -2119,7 +2131,7 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
             handlerResponse,
           );
           await sendWebResponse(res, response);
-          await integration.log?.({
+          await emitIntegrationLog(integration, {
             category: integration.category,
             slot: integration.category,
             type: integration.type,
@@ -2137,7 +2149,7 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
           });
           return;
         } catch (error) {
-          await integration.log?.({
+          await emitIntegrationLog(integration, {
             category: integration.category,
             slot: integration.category,
             type: integration.type,
@@ -2758,7 +2770,7 @@ export async function dispatchIntegrationRequest(
     });
     const startedAt = Date.now();
 
-    await integration.log?.({
+    await emitIntegrationLog(integration, {
       category: integration.category,
       slot: integration.category,
       type: integration.type,
@@ -2776,7 +2788,7 @@ export async function dispatchIntegrationRequest(
     try {
       const response = await entry.handler(request, handlerContext);
       if (response) {
-        await integration.log?.({
+        await emitIntegrationLog(integration, {
           category: integration.category,
           slot: integration.category,
           type: integration.type,
@@ -2795,7 +2807,7 @@ export async function dispatchIntegrationRequest(
         return response;
       }
 
-      await integration.log?.({
+      await emitIntegrationLog(integration, {
         category: integration.category,
         slot: integration.category,
         type: integration.type,
@@ -2811,7 +2823,7 @@ export async function dispatchIntegrationRequest(
         context: handlerContext.req.snapshot(),
       });
     } catch (error) {
-      await integration.log?.({
+      await emitIntegrationLog(integration, {
         category: integration.category,
         slot: integration.category,
         type: integration.type,
@@ -2856,7 +2868,7 @@ export async function dispatchIntegrationRequest(
     });
     const startedAt = Date.now();
 
-    await integration.log?.({
+    await emitIntegrationLog(integration, {
       category: integration.category,
       slot: integration.category,
       type: integration.type,
@@ -2874,7 +2886,7 @@ export async function dispatchIntegrationRequest(
     try {
       const validation = await validateIntegrationRouteInput(route, request, url);
       if (!validation.success) {
-        await integration.log?.({
+        await emitIntegrationLog(integration, {
           category: integration.category,
           slot: integration.category,
           type: integration.type,
@@ -2897,7 +2909,7 @@ export async function dispatchIntegrationRequest(
       for (const middlewareEntry of route.middleware || []) {
         const middlewareResponse = await middlewareEntry.handler(request, handlerContext);
         if (middlewareResponse) {
-          await integration.log?.({
+          await emitIntegrationLog(integration, {
             category: integration.category,
             slot: integration.category,
             type: integration.type,
@@ -2925,7 +2937,7 @@ export async function dispatchIntegrationRequest(
           handlerContext,
           beforeResponse,
         );
-        await integration.log?.({
+        await emitIntegrationLog(integration, {
           category: integration.category,
           slot: integration.category,
           type: integration.type,
@@ -2951,7 +2963,7 @@ export async function dispatchIntegrationRequest(
         handlerContext,
         handlerResponse,
       );
-      await integration.log?.({
+      await emitIntegrationLog(integration, {
         category: integration.category,
         slot: integration.category,
         type: integration.type,
@@ -2969,7 +2981,7 @@ export async function dispatchIntegrationRequest(
       });
       return response;
     } catch (error) {
-      await integration.log?.({
+      await emitIntegrationLog(integration, {
         category: integration.category,
         slot: integration.category,
         type: integration.type,

@@ -486,6 +486,52 @@ describe("integrations runtime", () => {
     expect(endLog?.context.get("seed")).toBe("shared-value");
   });
 
+  it("isolates integration log failures from lifecycle and request handling", async () => {
+    const handler = vi.fn(() => Response.json({ ok: true }));
+    const log = vi.fn(() => {
+      throw new Error("log sink unavailable");
+    });
+    const manager = createManager();
+    manager.addPlugins(
+      resolveIntegrationPlugins({
+        isolatedLogs: defineIntegration({
+          category: "custom",
+          type: "isolated-logs",
+          instance: {},
+          log,
+          routes: [
+            {
+              path: "/api/isolated-logs",
+              methods: ["GET"],
+              handler,
+            },
+          ],
+        }),
+      }),
+    );
+
+    await expect(manager.runHookParallel("init")).resolves.toBe(false);
+
+    const req = createRequest("/api/isolated-logs");
+    const res = createResponse();
+    await expect(manager.runHookParallel("beforeRequest", req as any, res as any)).resolves.toBe(
+      true,
+    );
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body.toString())).toEqual({ ok: true });
+
+    const runtime = getRegisteredIntegrationRuntime("isolatedLogs");
+    expect(runtime).toBeDefined();
+    const response = await dispatchIntegrationRequest(
+      runtime!,
+      new Request("http://localhost/api/isolated-logs"),
+    );
+    expect(response?.status).toBe(200);
+    await expect(response?.json()).resolves.toEqual({ ok: true });
+    expect(handler).toHaveBeenCalledTimes(2);
+    expect(log).toHaveBeenCalled();
+  });
+
   it("runs integration middleware before routes and can short-circuit the request", async () => {
     const manager = createManager();
     manager.addPlugins(
