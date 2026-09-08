@@ -205,6 +205,38 @@ test("forwards a gateway request to the local target", async () => {
   }
 });
 
+test("forwards local redirects without following them", async () => {
+  const server = await createTestServer((req, res) => {
+    if (req.url === "/redirect") {
+      res.writeHead(302, { location: "/destination" });
+      res.end();
+      return;
+    }
+    res.end("destination");
+  });
+
+  try {
+    const response = await forwardGatewayRequest(
+      {
+        localUrl: `http://localhost:${server.port}`,
+        host: "localhost",
+        port: server.port,
+        source: "port",
+      },
+      {
+        id: "req_redirect",
+        method: "GET",
+        path: "/redirect",
+      },
+    );
+
+    assert.equal(response.status, 302);
+    assert.equal(response.headers.location, "/destination");
+  } finally {
+    await server.close();
+  }
+});
+
 test("closes the gateway session when the local target stops", async () => {
   const app = await createTestServer();
   const gateway = await createPreviewGatewayTestServer();
