@@ -126,14 +126,21 @@ export async function runPreviewGateway(
 
   const handleRequest = async (request: PreviewGatewayRequest) => {
     const startedAt = Date.now();
+    let response: PreviewGatewayResponse;
 
     try {
-      const response = await forwardGatewayRequest(plan.target, request, {
+      response = await forwardGatewayRequest(plan.target, request, {
         signal: AbortSignal.any([
           controller.signal,
           AbortSignal.timeout(options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS),
         ]),
       });
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      response = createGatewayErrorResponse(error);
+    }
+
+    try {
       await sendGatewayResponse(plan, session, request.id, response, controller.signal);
       handledRequests += 1;
       logger.info(
@@ -142,9 +149,8 @@ export async function runPreviewGateway(
     } catch (error) {
       if (controller.signal.aborted) return;
       logger.warn(
-        `Local preview target ${plan.target.localUrl} is no longer reachable. Closing preview session.`,
+        `Could not return preview response for ${request.method.toUpperCase()} ${formatRequestPath(request.path)}: ${error instanceof Error ? error.message : String(error)}`,
       );
-      controller.abort(error);
     }
   };
 
@@ -397,6 +403,16 @@ function formatRequestPath(path: string) {
   }
 
   return `${path.slice(0, 93)}...`;
+}
+
+function createGatewayErrorResponse(error: unknown): PreviewGatewayResponse {
+  const message = error instanceof Error ? error.message : String(error);
+  return {
+    status: 502,
+    headers: { "content-type": "text/plain; charset=utf-8" },
+    body: Buffer.from(message).toString("base64"),
+    encoding: "base64",
+  };
 }
 
 function normalizeGatewayUrl(value: string) {

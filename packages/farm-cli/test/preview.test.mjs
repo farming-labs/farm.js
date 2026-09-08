@@ -337,6 +337,48 @@ test("closes the gateway session when the local target stops", async () => {
   }
 });
 
+test("keeps the gateway session alive after one local request fails", async () => {
+  const app = await createTestServer((req, res) => {
+    if (req.url === "/fail") {
+      req.socket.destroy();
+      return;
+    }
+    res.end("ok");
+  });
+  const gateway = await createQueuedPreviewGatewayTestServer([
+    { id: "req_fail", method: "GET", path: "/fail" },
+    { id: "req_ok", method: "GET", path: "/ok" },
+  ]);
+  const plan = createPreviewGatewayPlan(
+    {
+      localUrl: `http://localhost:${app.port}`,
+      host: "localhost",
+      port: app.port,
+      source: "port",
+    },
+    { gatewayUrl: gateway.url, name: "request-isolation" },
+  );
+
+  try {
+    await runPreviewGateway(plan, {
+      maxRequests: 2,
+      pollTimeoutMs: 10,
+      localProbeIntervalMs: 1_000,
+    });
+
+    assert.deepEqual(
+      gateway.responses.map(({ requestId, response }) => [requestId, response.status]),
+      [
+        ["req_fail", 502],
+        ["req_ok", 200],
+      ],
+    );
+  } finally {
+    await app.close();
+    await gateway.close();
+  }
+});
+
 test("falls back to gateway polling while the hosted native relay is unavailable", async () => {
   const app = await createTestServer();
   const gateway = await createPreviewGatewayTestServer();
@@ -517,6 +559,57 @@ async function createPreviewGatewayTestServer() {
       new Promise((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()));
       }),
+  };
+}
+
+async function createQueuedPreviewGatewayTestServer(requests) {
+  const queued = [...requests];
+  const responses = [];
+  const server = await createTestServer(async (req, res) => {
+    const url = new URL(req.url || "/", "http://localhost");
+
+    if (req.method === "POST" && url.pathname === "/api/sessions") {
+      await readRequestBody(req);
+      res.setHeader("content-type", "application/json");
+      res.end(
+        JSON.stringify({
+          id: "sess_queue",
+          name: "request-isolation",
+          token: "token_queue",
+          publicUrl: "https://request-isolation.preview.farming-labs.dev",
+        }),
+      );
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/sessions/sess_queue/requests") {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ requests: queued.length ? [queued.shift()] : [] }));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname.startsWith("/api/sessions/sess_queue/responses/")) {
+      responses.push({
+        requestId: url.pathname.split("/").pop(),
+        response: JSON.parse(await readRequestBody(req)),
+      });
+      res.end("ok");
+      return;
+    }
+
+    if (req.method === "DELETE" && url.pathname === "/api/sessions/sess_queue") {
+      res.end("ok");
+      return;
+    }
+
+    res.statusCode = 404;
+    res.end("not found");
+  });
+
+  return {
+    url: `http://localhost:${server.port}`,
+    responses,
+    close: server.close,
   };
 }
 
