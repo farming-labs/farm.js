@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "farm dev",
     "build": "farm build",
+    "auth:migrate": "node --experimental-strip-types src/lib/migrate-auth.ts",
     "check": "pnpm type-check && pnpm build",
     "deploy": "farm deploy",
     "type-check": "tsc --noEmit"

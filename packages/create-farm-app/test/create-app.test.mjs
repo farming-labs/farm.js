@@ -698,6 +698,8 @@ test("generates renderer-native Better Auth starters", async () => {
         await readFile(path.join(generatedDir, "package.json"), "utf8"),
       );
       const config = await readFile(path.join(generatedDir, "farm.config.ts"), "utf8");
+      const auth = await readFile(path.join(generatedDir, "src/lib/auth.ts"), "utf8");
+      const migration = await readFile(path.join(generatedDir, "src/lib/migrate-auth.ts"), "utf8");
       const home = await readFile(path.join(generatedDir, "src/app", renderer.page), "utf8");
       const form = await readFile(path.join(generatedDir, "src/components", renderer.form), "utf8");
       const authClient = await readFile(path.join(generatedDir, "src/lib/auth-client.ts"), "utf8");
@@ -708,12 +710,20 @@ test("generates renderer-native Better Auth starters", async () => {
         templatePackage.dependencies["@farm.js/better-auth"],
       );
       assert.equal(packageJson.dependencies["better-auth"], "1.6.25");
+      assert.equal(
+        packageJson.scripts["auth:migrate"],
+        "node --experimental-strip-types src/lib/migrate-auth.ts",
+      );
       assert.equal(packageJson.dependencies.react, undefined);
       assert.equal(packageJson.dependencies["react-dom"], undefined);
       assert.equal(packageJson.devDependencies["@types/react"], undefined);
       assert.equal(packageJson.devDependencies["@types/react-dom"], undefined);
       assert.match(config, new RegExp(`renderer: ${renderer.name}\\(\\)`));
       assert.match(config, /auth: betterAuth\(\{ instance: auth \}\)/);
+      assert.match(config, /command: "pnpm auth:migrate"/);
+      assert.doesNotMatch(auth, /runMigrations/);
+      assert.match(migration, /await migrations\.runMigrations\(\)/);
+      assert.match(migration, /await authDatabase\.end\(\)/);
       assert.match(home, new RegExp(`FARMJS / ${renderer.label} \\+ Better Auth`));
       assert.match(home, /Get started/);
       assert.match(form, renderer.nativePattern);
