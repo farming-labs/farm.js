@@ -4,7 +4,11 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { readFarmI18nCatalogs } from "../i18n/catalog";
 import { resolveFarmI18nConfig } from "../i18n/config";
-import { getFarmLocaleVaryHeaders, resolveFarmLocaleRequest } from "../i18n/resolver";
+import {
+  createFarmLocaleCookie,
+  getFarmLocaleVaryHeaders,
+  resolveFarmLocaleRequest,
+} from "../i18n/resolver";
 import { FarmI18nRuntime } from "../i18n/runtime";
 import {
   _runWithFarmI18nRequest,
@@ -52,6 +56,35 @@ describe("Farm i18n configuration", () => {
 
     expect(() => resolveFarmI18nConfig({ locales: ["en", "en"], defaultLocale: "en" })).toThrow(
       "must not contain duplicate locales",
+    );
+  });
+
+  it("rejects cookie settings that cannot be serialized safely", () => {
+    const base = { locales: ["en"], defaultLocale: "en" } as const;
+
+    expect(() => resolveFarmI18nConfig({ ...base, cookie: { path: "/; HttpOnly" } })).toThrow(
+      "without attributes",
+    );
+    expect(() => resolveFarmI18nConfig({ ...base, cookie: { path: "/docs\\admin" } })).toThrow(
+      "backslashes",
+    );
+    expect(() => resolveFarmI18nConfig({ ...base, cookie: { path: "/docs/%2Fadmin" } })).toThrow(
+      "percent-encoded path separators",
+    );
+    expect(() =>
+      resolveFarmI18nConfig({ ...base, cookie: { sameSite: "invalid" as "lax" } }),
+    ).toThrow('must be "lax", "strict", or "none"');
+  });
+
+  it("serializes a validated custom locale cookie", () => {
+    const config = resolveFarmI18nConfig({
+      locales: ["en"],
+      defaultLocale: "en",
+      cookie: { path: "/docs", sameSite: "strict", secure: true },
+    });
+
+    expect(createFarmLocaleCookie("en", config)).toBe(
+      "farm_locale=en; Max-Age=31536000; Path=/docs; SameSite=Strict; Secure",
     );
   });
 });
