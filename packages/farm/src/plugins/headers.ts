@@ -2,6 +2,7 @@ import type { FarmPlugin, FarmPluginContext } from "../plugin";
 import type { HeaderConfig } from "../config";
 import type { FarmRequest, FarmResponse } from "../types";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
+import { resolveFarmRequestURL } from "../server/request";
 import { compileConfigRoutePattern, resolveConfigRoutePathname } from "./route-pattern";
 
 const FARM_CONFIG_HEADERS_FINALIZER = Symbol.for("farm.configHeadersFinalizer");
@@ -109,7 +110,7 @@ export function createHeadersPlugin(
       if (overrideBeforeRequest) {
         await overrideBeforeRequest(req, res, context);
       }
-      const url = new URL(req.url || "/", `http://${req.headers.host}`);
+      const url = resolveFarmRequestURL(req);
       const pathname = resolveConfigRoutePathname(url.pathname, i18n).pathname;
       const matchedHeaders = compiledHeaders
         .filter(({ pattern }) => pattern.regex.test(pathname))

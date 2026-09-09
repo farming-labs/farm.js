@@ -86,3 +86,23 @@ describe.each([
     expect(seen).toEqual([{ path: "/dashboard/reports", params: { section: "reports" } }]);
   });
 });
+
+describe("dev middleware request URL parsing", () => {
+  it("matches safely when Host is malformed", async () => {
+    const seen: string[] = [];
+    const manager = new MiddlewareManager("/tmp", undefined, [
+      {
+        matcher: "/dashboard/:path*",
+        async handler(ctx, next) {
+          seen.push(ctx.pathname);
+          await next();
+        },
+      },
+    ]);
+    const request = createRequest("/dashboard/reports");
+    request.headers.host = "%";
+
+    await expect(manager.execute(request, new ServerResponse(request))).resolves.toBe(false);
+    expect(seen).toEqual(["/dashboard/reports"]);
+  });
+});
