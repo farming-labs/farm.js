@@ -475,9 +475,14 @@ describe("React AOT keyed-array sort hints", () => {
         'current["map"]((row) => row.id === editedId ? { ...row, rank: 0 } : row).toSorted((a, b) => a.rank - b.rank)',
     },
     {
-      name: "a structural step after map",
+      name: "a mapped structural update without a final reorder",
       pipeline:
-        "current.map((row) => row.id === editedId ? { ...row, rank: 0 } : row).filter((row) => row.rank > 0).toSorted((a, b) => a.rank - b.rank)",
+        "current.map((row) => row.id === editedId ? { ...row, rank: 0 } : row).filter((row) => row.rank > 0)",
+    },
+    {
+      name: "a map after a structural step",
+      pipeline:
+        "current.filter((row) => row.rank > 0).map((row) => row.id === editedId ? { ...row, rank: 0 } : row).toSorted((a, b) => a.rank - b.rank)",
     },
     {
       name: "a map after a structural reorder",
@@ -500,6 +505,70 @@ describe("React AOT keyed-array sort hints", () => {
     expect(result.optimizations.keyedArraySortHints).toBe(0);
     expect(result.code).not.toContain("createCompilerKeyedArrayMapPipeline");
     expect(result.code).not.toContain("keyedRowsMapReorderHintedRuntimeFeature");
+  });
+
+  it("carries mapped row lineage through a following filter and sort", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Table({ editedId, nextRank }) {
+        const [rows, setRows] = useState([
+          { id: "a", rank: 1, visible: true },
+          { id: "b", rank: 2, visible: false },
+        ]);
+        return <section>
+          <button onClick={() => setRows((current) => current
+            .map((row) => row.id === editedId ? { ...row, rank: nextRank } : row)
+            .filter((row) => row.visible)
+            .toSorted((left, right) => left.rank - right.rank)
+          )}>Update</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.rank}</li>)}</ul>
+        </section>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Table"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.optimizations.keyedMapUpdateHints).toBe(1);
+    expect(result.optimizations.keyedArrayFilterHints).toBe(1);
+    expect(result.optimizations.keyedArraySortHints).toBe(1);
+    expect(result.code).toContain("createCompilerKeyedArrayMapPipeline");
+    expect(result.code).toContain("createCompilerKeyedArrayFilter");
+    expect(result.code).toContain("createCompilerKeyedArrayStructuralSort");
+    expect(result.code).toContain("keyedRowsEveryHintedRuntimeFeature");
+    expect(result.code).not.toContain("createCompilerKeyedArrayMapReorder");
+  });
+
+  it("carries consecutive maps through slice and reverse steps", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Table({ editedId, nextLabel, offset }) {
+        const [rows, setRows] = useState([
+          { id: "a", label: "Alpha", rank: 1 },
+          { id: "b", label: "Beta", rank: 2 },
+          { id: "c", label: "Gamma", rank: 3 },
+        ]);
+        return <section>
+          <button onClick={() => setRows((current) => current
+            .map((row) => row.id === editedId ? { ...row, label: nextLabel } : row)
+            .map((row) => row.id === editedId ? { ...row, rank: row.rank + 1 } : row)
+            .slice(offset)
+            .toReversed()
+            .toReversed()
+          )}>Update</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}: {row.rank}</li>)}</ul>
+        </section>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Table"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.optimizations.keyedMapUpdateHints).toBe(2);
+    expect(result.optimizations.keyedArraySliceHints).toBe(1);
+    expect(result.optimizations.keyedArrayReorderHints).toBe(2);
+    expect(result.code.match(/createCompilerKeyedArrayMapPipeline\(/g)).toHaveLength(1);
+    expect(result.code).toContain("createCompilerKeyedArraySlice");
+    expect(result.code.match(/createCompilerKeyedArrayStructuralReorder\(/g)).toHaveLength(2);
+    expect(result.code).not.toContain("createCompilerKeyedArrayMapReorder");
   });
 
   it.each([

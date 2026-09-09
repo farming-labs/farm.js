@@ -1250,6 +1250,25 @@ controlled inputs, focus, and text selection stay attached to their keys. Multip
 map-and-reorder setters queued before one compiler flush compose against the same committed
 collection and expose only the final state.
 
+Safe maps can also lead into an index-independent filter or slice before the native reorder:
+
+```tsx
+setItems((current) =>
+  current
+    .map((item) => (item.id === editedId ? { ...item, label: nextLabel } : item))
+    .filter((item) => item.visible)
+    .toSorted((left, right) => left.rank - right.rank),
+);
+```
+
+The filter or slice still evaluates the mapped values in normal JavaScript order. Farm carries both
+proofs to the final commit: which committed rows survived and which surviving items replaced their
+source items. It validates every survivor and key before the first DOM write, removes rejected
+rows, performs only the final LIS moves, and patches bindings only for changed survivors. A changed
+item that the structural step removes needs no row patch. This combined path is limited to one
+concise functional setter with maps before the structural steps; maps after a filter/slice and
+structural work split across setter calls keep complete reconciliation.
+
 A safe map may also be the final pipeline step:
 
 ```tsx
@@ -1342,8 +1361,8 @@ sort or any other order ambiguity keeps the general permutation path.
 The proof requires every map callback to be inline, synchronous, compiler-safe, and to return the
 original item on one conditional branch and an object-spread replacement on the other. It requires
 compiler-owned host rows whose render and key do not observe the index. Referenced or block-bodied
-callbacks, unconditional replacements, changed or duplicate keys, `thisArg`, structural methods in
-the same chain, computed or custom methods, sparse or subclassed arrays, collection-reading
+callbacks, unconditional replacements, changed or duplicate keys, `thisArg`, maps after structural
+steps, computed or custom methods, sparse or subclassed arrays, collection-reading
 bindings, React-owned rows, nested host blocks, row conditionals, unrelated dirty dependencies, or
 failed runtime validation use complete keyed reconciliation before any fast-path DOM write.
 
@@ -2219,6 +2238,10 @@ The package and example test suites verify more than generated code:
   moved-row events with the newest item and index, preserve controlled-input focus and selection,
   and cover changed-key, custom-method, and Array-subclass fallback, Strict Mode hydration, and
   unmount-before-flush cleanup;
+- 2,000 deterministic mapped structural removals match normal React; targeted tests combine safe
+  maps with filter/slice/sort/reverse pipelines, preserve surviving DOM identity and controlled
+  input focus/selection, patch only changed survivors, and cover changed-key and custom-method
+  fallback, Strict Mode hydration, and unmount-before-flush cleanup;
 - 2,000 deterministic native reversals or sorts followed by consecutive same-key edits match normal
   React; targeted tests require exact reversal to use `n - 1` direct DOM moves without a generic
   source-item map, require ambiguous sorting to use one validated keyed reconciliation, and cover
