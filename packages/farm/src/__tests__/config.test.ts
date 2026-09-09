@@ -728,7 +728,7 @@ describe("resolveConfig", () => {
       "/blog/**": { swr: 3600 },
       "/admin/**": { prerender: false },
       "/reports/**": {},
-      "/old": { redirect: "/new" },
+      "/old": { redirect: { to: "/new", status: 308 } },
       "/api/**": {
         cors: true,
         headers: {
@@ -766,6 +766,30 @@ describe("resolveConfig", () => {
         "production",
       ),
     ).rejects.toThrow('Route rules "docs/**" and "/docs/**" both normalize to "/docs/**"');
+  });
+
+  it("preserves route-rule redirect semantics in Nitro", async () => {
+    const config = await resolveConfig(
+      {
+        routeRules: {
+          "/temporary": { redirect: "/next" },
+          "/see-other": { redirect: { to: "/result", statusCode: 303 } },
+          "/permanent": { redirect: { to: "/current", permanent: true } },
+          "/replace-query": { redirect: "/search?view=compact" },
+        },
+      },
+      "production",
+    );
+
+    expect(routeRulesToNitroRouteRules(config.routeRules)).toMatchObject({
+      "/temporary": { redirect: { to: "/next", status: 307 } },
+      "/see-other": { redirect: { to: "/result", status: 303 } },
+      "/permanent": { redirect: { to: "/current", status: 308 } },
+      "/replace-query": {},
+    });
+    expect(routeRulesToNitroRouteRules(config.routeRules)["/replace-query"]).not.toHaveProperty(
+      "redirect",
+    );
   });
 
   it("rejects non-redirect status codes in configured redirects", async () => {

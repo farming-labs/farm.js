@@ -117,10 +117,19 @@ export function routeRulesToNitroRouteRules(routeRules: FarmRouteRules): Record<
       nitroRule.prerender = false;
     }
 
-    if (rule.redirect && typeof rule.redirect !== "string") {
-      nitroRule.redirect = rule.redirect.to;
-      if (rule.redirect.statusCode) {
-        nitroRule.statusCode = rule.redirect.statusCode;
+    if (rule.redirect) {
+      const redirect = typeof rule.redirect === "string" ? { to: rule.redirect } : rule.redirect;
+      if (hasExplicitQuery(redirect.to)) {
+        // Nitro merges the incoming query into redirect targets, including when
+        // the target already declares one. Farm's redirect contract replaces
+        // the incoming query in that case, so let the bundled Farm handler own
+        // these redirects instead of changing their meaning in production.
+        delete nitroRule.redirect;
+      } else {
+        nitroRule.redirect = {
+          to: redirect.to,
+          status: redirect.statusCode ?? (redirect.permanent === true ? 308 : 307),
+        };
       }
     }
 
@@ -171,4 +180,11 @@ function normalizeRuleSource(source: string): string {
     throw new TypeError("Route rule source must be a non-empty pathname pattern.");
   }
   return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+}
+
+function hasExplicitQuery(destination: string): boolean {
+  const queryIndex = destination.indexOf("?");
+  if (queryIndex === -1) return false;
+  const hashIndex = destination.indexOf("#");
+  return hashIndex === -1 || queryIndex < hashIndex;
 }
