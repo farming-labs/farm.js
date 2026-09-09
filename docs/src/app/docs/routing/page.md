@@ -183,6 +183,8 @@ the `edit` segment and make the route unreachable.
 
 Each dynamic segment in one route must have a unique parameter name. Farm rejects paths such as
 `teams/[id]/members/[id]/page.tsx` instead of silently replacing the outer `id` value.
+The prototype-sensitive names `__proto__`, `constructor`, and `prototype` are reserved because
+JavaScript cannot represent them safely in the plain `params` object.
 For navigation state, `router.isActive(pattern, pathname, { exact: false })` also matches
 descendants after dynamic segments, such as `/users/42/settings` for `/users/[id]`.
 

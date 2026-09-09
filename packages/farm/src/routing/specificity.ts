@@ -21,6 +21,13 @@ export class DuplicateRouteParameterError extends AmbiguousRouteError {
   }
 }
 
+export class ReservedRouteParameterError extends AmbiguousRouteError {
+  constructor(message: string) {
+    super(message);
+    this.name = "ReservedRouteParameterError";
+  }
+}
+
 const SEGMENT_RANK: Record<RouteSegmentSpecificity, number> = {
   static: 4,
   dynamic: 3,
@@ -54,6 +61,7 @@ const ROUTER_PARAMETER_NAME = "[A-Za-z0-9_$-]+";
 const PAGE_PARAMETER_PATTERN = /^(?:\[\[\.\.\.(.+)\]\]|\[\.\.\.(.+)\]|\[(.+)\])$/;
 const ROUTER_PARAMETER_PATTERN =
   /^(?:\[\[\.\.\.([A-Za-z0-9_$-]+)\]\]|\[\.\.\.([A-Za-z0-9_$-]+)\]|\[([A-Za-z0-9_$-]+)\]|:([A-Za-z0-9_$-]+)|\*([A-Za-z0-9_$-]+)\??)$/;
+const RESERVED_PARAMETER_NAMES = new Set(["__proto__", "constructor", "prototype"]);
 
 export function assertUniqueRouteParameters(
   pattern: string,
@@ -66,6 +74,11 @@ export function assertUniqueRouteParameters(
     const match = parameterPattern.exec(segment);
     const name = match?.slice(1).find(Boolean);
     if (!name) continue;
+    if (RESERVED_PARAMETER_NAMES.has(name)) {
+      throw new ReservedRouteParameterError(
+        `Route parameter "${name}" in route "${pattern}" is reserved. Use a different parameter name.`,
+      );
+    }
     if (names.has(name)) {
       throw new DuplicateRouteParameterError(
         `Duplicate route parameter "${name}" in route "${pattern}". Each dynamic segment must use a unique name.`,

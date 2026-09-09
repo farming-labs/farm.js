@@ -57,6 +57,15 @@ describe("createFarmRouter", () => {
     );
   });
 
+  it("rejects prototype-sensitive names in router patterns", () => {
+    expect(() => createFarmRouter(["/users/:constructor"])).toThrow(
+      'Route parameter "constructor"',
+    );
+    expect(() => matchFarmRoute("/docs/*__proto__", "/docs/core/routing")).toThrow(
+      'Route parameter "__proto__"',
+    );
+  });
+
   it("rejects routes that differ only by parameter names", () => {
     expect(() => createFarmRouter(["/users/[id]", "/users/[slug]"])).toThrow(
       'Ambiguous route patterns "/users/[id]" and "/users/[slug]" match the same URLs.',
