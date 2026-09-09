@@ -386,8 +386,11 @@ Farm also applies a measured graph-cost guard. Up to four statically bounded iso
 the isolated plan. A page or layout with a larger client graph stays on route-wide hydration and
 prints the owner, detected count, and limit. Lists whose boundary count depends on runtime data also
 stay route-wide because Farm cannot prove their root cost before streaming. In the maintained
-25-sample Chrome benchmark, eight independent roots were the first stress shape to exceed the
+40-sample Chrome browser benchmark, eight independent roots were the first stress shape to exceed the
 route-wide hydration budget. See the [raw samples and full cost table](https://github.com/farming-labs/farm.js/blob/main/benchmarks/isolated-hydration/results/latest.md).
+The same report includes compiler-enabled route-wide and isolated controls. It verifies that every
+measured leaf actually compiled, then checks initial hydration and repeated state updates
+independently.
 
 SPA navigation preserves isolated roots that live in a shared layout, including their state and DOM
 identity. Farm unmounts roots in the outgoing route subtree before replacing it, then hydrates only
