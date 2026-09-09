@@ -43,8 +43,6 @@ export interface HintsOverlayOptions {
 }
 
 export interface HintsOptions {
-  /** Set false to leave the plugin configured without starting it. */
-  enabled?: boolean;
   /** Run WCAG checks with axe-core. Defaults to true. */
   accessibility?: boolean | AccessibilityHintsOptions;
   /** Track Core Web Vitals, Farm timings, and layout-risk hints. Defaults to true. */
@@ -82,7 +80,6 @@ export interface ResolvedThirdPartyHintsOptions {
 }
 
 export interface ResolvedHintsOptions {
-  enabled: boolean;
   accessibility: false | ResolvedAccessibilityHintsOptions;
   performance: false | ResolvedPerformanceHintsOptions;
   html: boolean;
@@ -106,7 +103,6 @@ const PERFORMANCE_DEFAULTS: ResolvedPerformanceHintsOptions = {
 /** Validate and expand the concise public options into browser-safe configuration. */
 export function resolveHintsOptions(options: HintsOptions = {}): ResolvedHintsOptions {
   assertObject(options, "hints options");
-  assertBoolean(options.enabled, "enabled");
   assertBooleanOrObject(options.accessibility, "accessibility");
   assertBooleanOrObject(options.performance, "performance");
   assertBoolean(options.html, "html");
@@ -132,7 +128,6 @@ export function resolveHintsOptions(options: HintsOptions = {}): ResolvedHintsOp
   assertPositiveNumber(maxIssues, "maxIssues");
 
   return {
-    enabled: options.enabled ?? true,
     accessibility: resolveAccessibility(options.accessibility),
     performance: resolvePerformance(options.performance),
     html: options.html ?? true,

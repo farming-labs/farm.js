@@ -17,7 +17,6 @@ describe("hints Farm plugin", () => {
     expect(plugin.name).toBe("farm:hints");
     expect(plugin.enforce).toBe("post");
     expect(plugin.client?.public).toMatchObject({
-      enabled: true,
       html: true,
       report: "overlay",
       accessibility: { level: "AA" },
@@ -35,12 +34,6 @@ describe("hints Farm plugin", () => {
     );
 
     expect((configured as any).plugins).toEqual([other]);
-  });
-
-  it("also removes itself when explicitly disabled", async () => {
-    const plugin = hints({ enabled: false });
-    const configured = await plugin.configure?.({ plugins: [plugin] } as never, context(true));
-    expect((configured as any).plugins).toEqual([]);
   });
 
   it("records lifecycle timings without delaying hydration or navigation", () => {

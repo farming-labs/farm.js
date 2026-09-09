@@ -35,7 +35,7 @@ export function hints(options: HintsOptions = {}) {
     name: "farm:hints",
     enforce: "post",
     configure(config, context) {
-      if (!resolved.enabled || context.isProd) return withoutPlugin(config, plugin);
+      if (context.isProd) return withoutPlugin(config, plugin);
     },
     client: {
       public: resolved,

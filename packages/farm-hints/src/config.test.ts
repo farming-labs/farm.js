@@ -4,7 +4,6 @@ import { resolveHintsOptions } from "./config.js";
 describe("resolveHintsOptions", () => {
   it("enables the useful development checks with no configuration", () => {
     expect(resolveHintsOptions()).toEqual({
-      enabled: true,
       accessibility: { level: "AA", impact: "moderate", exclude: [], rules: {} },
       performance: { lcp: 2_500, cls: 0.1, inp: 200, hydration: 500, navigation: 1_000 },
       html: true,
