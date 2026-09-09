@@ -51,6 +51,14 @@ describe("image config", () => {
 
   it("rejects unsafe or unusable config", () => {
     expect(() => resolveFarmImageConfig({ path: "images" })).toThrow("absolute pathname");
+    expect(() => resolveFarmImageConfig({ path: "//images.example.com/optimize" })).toThrow(
+      "absolute pathname",
+    );
+    expect(() => resolveFarmImageConfig({ path: "/images/../private" })).toThrow("path segments");
+    expect(() => resolveFarmImageConfig({ path: "/images/%2Fprivate" })).toThrow(
+      "percent-encoded path separators",
+    );
+    expect(() => resolveFarmImageConfig({ path: "/images\\private" })).toThrow("backslashes");
     expect(() => resolveFarmImageConfig({ qualities: [0, 101] })).toThrow("no greater than 100");
     expect(() => resolveFarmImageConfig({ deviceSizes: [] })).toThrow("must contain at least one");
     expect(() =>

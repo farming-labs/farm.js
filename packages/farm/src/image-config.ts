@@ -151,10 +151,41 @@ export function getPublicFarmImageConfig(
 }
 
 function normalizeImagePath(value: string): string {
+  const hasUnstableCharacters = (candidate: string) =>
+    candidate.includes("\\") ||
+    Array.from(candidate).some((character) => {
+      const code = character.charCodeAt(0);
+      return code <= 31 || (code >= 127 && code <= 159);
+    });
+
+  if (hasUnstableCharacters(value)) {
+    throw new TypeError("images.path cannot contain backslashes or control characters");
+  }
+
   const path = value.trim().replace(/\/+$/, "") || "/";
-  if (!path.startsWith("/") || path.includes("?") || path.includes("#")) {
+  if (!path.startsWith("/") || path.startsWith("//") || path.includes("?") || path.includes("#")) {
     throw new TypeError("images.path must be an absolute pathname without a query or hash");
   }
+
+  for (const segment of path.split("/")) {
+    let decoded = segment;
+    try {
+      decoded = decodeURIComponent(segment);
+    } catch {
+      // Malformed escapes remain literal and cannot conceal a path separator
+      // or dot segment.
+    }
+    if (hasUnstableCharacters(decoded)) {
+      throw new TypeError("images.path cannot contain backslashes or control characters");
+    }
+    if (decoded.includes("/")) {
+      throw new TypeError("images.path cannot contain percent-encoded path separators");
+    }
+    if (decoded === "." || decoded === "..") {
+      throw new TypeError('images.path cannot contain "." or ".." path segments');
+    }
+  }
+
   return path;
 }
 
