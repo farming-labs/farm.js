@@ -43,6 +43,10 @@ Each entry has one job:
 | `description` | no       | Human-readable purpose shown by CLI output and the build manifest.   |
 | `enabled`     | no       | Set to `false` to keep an entry in config without scheduling it.     |
 
+`path` must be a root-relative application pathname. Farm rejects hosts, query strings, hashes,
+dot segments, backslashes, control characters, and encoded path separators so local invocations
+and deployment schedulers call the same route.
+
 Use an array when the same route should run at more than one time:
 
 ```ts

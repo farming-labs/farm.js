@@ -104,6 +104,23 @@ describe("Farm cron", () => {
         },
       }),
     ).toThrow('path must start with "/"');
+
+    for (const path of [
+      "/api/../admin",
+      "/api/%2e%2e/admin",
+      "/api/%2Fadmin",
+      "/api\\admin",
+      "/api/%0Aadmin",
+    ]) {
+      expect(() =>
+        resolveCronConfig({
+          unsafePath: {
+            schedule: "0 2 * * *",
+            path,
+          },
+        }),
+      ).toThrow();
+    }
   });
 
   it("generates Nitro tasks, grouped schedules, and a portable manifest", async () => {
