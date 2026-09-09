@@ -754,6 +754,20 @@ describe("resolveConfig", () => {
     }
   });
 
+  it("rejects route-rule keys that normalize to the same pathname", async () => {
+    await expect(
+      resolveConfig(
+        {
+          routeRules: {
+            "docs/**": { headers: { "x-first": "1" } },
+            "/docs/**": { cors: true },
+          },
+        },
+        "production",
+      ),
+    ).rejects.toThrow('Route rules "docs/**" and "/docs/**" both normalize to "/docs/**"');
+  });
+
   it("rejects non-redirect status codes in configured redirects", async () => {
     await expect(
       resolveConfig(

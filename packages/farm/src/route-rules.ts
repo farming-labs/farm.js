@@ -39,10 +39,18 @@ export function normalizeRouteRules(routeRules: FarmRouteRules | undefined): Far
   if (!routeRules) return {};
 
   const normalized: FarmRouteRules = {};
+  const normalizedSources = new Map<string, string>();
   for (const [source, rule] of Object.entries(routeRules)) {
     if (!rule) continue;
     const normalizedSource = normalizeRuleSource(source);
     validateConfigRouteSource(normalizedSource, `Route rule "${source}" source`);
+    const existingSource = normalizedSources.get(normalizedSource);
+    if (existingSource !== undefined) {
+      throw new Error(
+        `Route rules "${existingSource}" and "${source}" both normalize to "${normalizedSource}".`,
+      );
+    }
+    normalizedSources.set(normalizedSource, source);
     if (
       typeof rule.redirect === "object" &&
       rule.redirect.statusCode !== undefined &&
