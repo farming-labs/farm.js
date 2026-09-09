@@ -368,6 +368,10 @@ export default defineConfig({
 | `cookie`         | `farm_locale`, one year | Name, lifetime, path, SameSite, and Secure behavior.                    |
 | `direction`      | Inferred                | Per-locale `ltr` or `rtl` overrides.                                    |
 
+The locale cookie `path` must be a root-relative pathname; cookie attributes, URL queries and
+hashes, dot segments, backslashes, and encoded path separators are rejected. `sameSite` accepts
+`"lax"`, `"strict"`, or `"none"`.
+
 For a custom catalog layout, include `{locale}` in the path:
 
 ```ts

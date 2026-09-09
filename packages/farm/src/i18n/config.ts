@@ -59,6 +59,10 @@ export function resolveFarmI18nConfig(
   }
 
   const detection = resolveDetection(input);
+  const sameSite = input.cookie?.sameSite ?? "lax";
+  if (sameSite !== "lax" && sameSite !== "strict" && sameSite !== "none") {
+    throw new Error('i18n.cookie.sameSite must be "lax", "strict", or "none".');
+  }
   const direction: Record<string, FarmI18nDirection> = {};
   for (const [rawLocale, value] of Object.entries(input.direction || {})) {
     const locale = canonicalizeLocale(rawLocale);
@@ -87,8 +91,8 @@ export function resolveFarmI18nConfig(
         DEFAULT_FARM_I18N_COOKIE_MAX_AGE,
         "i18n.cookie.maxAge",
       ),
-      path: input.cookie?.path || "/",
-      sameSite: input.cookie?.sameSite || "lax",
+      path: normalizeCookiePath(input.cookie?.path),
+      sameSite,
       secure: input.cookie?.secure ?? options.mode === "production",
     },
     direction,
@@ -145,4 +149,56 @@ function normalizePositiveInteger(
     throw new Error(`${name} must be a positive integer.`);
   }
   return value;
+}
+
+function normalizeCookiePath(value: string | undefined): string {
+  if (value === undefined) return "/";
+  if (typeof value !== "string") {
+    throw new Error("i18n.cookie.path must be a root-relative pathname.");
+  }
+
+  const hasUnstableCharacters = (candidate: string) =>
+    candidate.includes("\\") ||
+    Array.from(candidate).some((character) => {
+      const code = character.charCodeAt(0);
+      return code <= 31 || (code >= 127 && code <= 159);
+    });
+
+  if (hasUnstableCharacters(value)) {
+    throw new Error("i18n.cookie.path cannot contain backslashes or control characters.");
+  }
+
+  const pathname = value.trim();
+  if (
+    !pathname ||
+    !pathname.startsWith("/") ||
+    pathname.startsWith("//") ||
+    pathname.includes(";") ||
+    pathname.includes("?") ||
+    pathname.includes("#")
+  ) {
+    throw new Error(
+      "i18n.cookie.path must be a root-relative pathname without attributes, a query, or a hash.",
+    );
+  }
+
+  for (const segment of pathname.split("/")) {
+    let decoded = segment;
+    try {
+      decoded = decodeURIComponent(segment);
+    } catch {
+      // Malformed escapes remain literal and cannot conceal a separator or dot segment.
+    }
+    if (hasUnstableCharacters(decoded)) {
+      throw new Error("i18n.cookie.path cannot contain backslashes or control characters.");
+    }
+    if (decoded.includes("/")) {
+      throw new Error("i18n.cookie.path cannot contain percent-encoded path separators.");
+    }
+    if (decoded === "." || decoded === "..") {
+      throw new Error('i18n.cookie.path cannot contain "." or ".." path segments.');
+    }
+  }
+
+  return pathname;
 }
