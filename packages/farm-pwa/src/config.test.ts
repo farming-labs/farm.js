@@ -4,7 +4,6 @@ import { parsePwaDuration, resolvePwaOptions } from "./config";
 describe("resolvePwaOptions", () => {
   it("uses the automatic cache preset by default", () => {
     const expected = {
-      enabled: true,
       offline: "/offline",
       update: "prompt",
       serviceWorker: false,
@@ -89,8 +88,8 @@ describe("resolvePwaOptions", () => {
 
   it("rejects invalid top-level options instead of changing behavior silently", () => {
     expect(() => resolvePwaOptions(null as never)).toThrow("options must be an object");
-    expect(() => resolvePwaOptions({ enabled: "false" as never })).toThrow(
-      "enabled must be boolean",
+    expect(() => resolvePwaOptions({ enabled: false } as never)).toThrow(
+      "remove pwa() from plugins",
     );
     expect(() => resolvePwaOptions({ update: "manual" as never })).toThrow(
       'update must be "prompt" or "auto"',

@@ -162,15 +162,15 @@ confirmation flow in the application.
 
 ```ts
 webmcp({
-  enabled: true,
   unsupported: "warn",
   debug: true,
 });
 ```
 
+Adding `webmcp()` to `plugins` enables the browser adapter. Remove it from the array to disable it.
+
 | Option        | Default                             | Purpose                                                        |
 | ------------- | ----------------------------------- | -------------------------------------------------------------- |
-| `enabled`     | `true`                              | Start or disable the browser adapter.                          |
 | `unsupported` | `"warn"` in dev, `"ignore"` in prod | Warn, ignore, or report an unavailable browser API.            |
 | `debug`       | `true` in dev, `false` in prod      | Expose `window.__FARM_WEBMCP__` and log tool execution errors. |
 

@@ -4,8 +4,6 @@ export type { FarmWebMCPRuntime } from "./types.js";
 export type { WebMCPUnsupportedBehavior } from "./client.js";
 
 export interface WebMCPPluginOptions {
-  /** Set false to keep the plugin configured without starting its browser runtime. */
-  enabled?: boolean;
   /** Behavior when `document.modelContext` is unavailable. Defaults to warn in development. */
   unsupported?: "ignore" | "warn" | "error";
   /** Expose `window.__FARM_WEBMCP__` for inspection. Defaults to true in development. */
@@ -20,12 +18,10 @@ export function webmcp(options: WebMCPPluginOptions = {}) {
     name: "farm:webmcp",
     client: {
       public: {
-        enabled: options.enabled ?? true,
         unsupported: options.unsupported ?? null,
         debug: options.debug ?? null,
       },
       async setup({ public: config, isDev }) {
-        if (!config.enabled) return undefined;
         const runtime = await import("@farm.js/webmcp/client");
         return runtime.startWebMCPRuntime({
           unsupported: config.unsupported ?? (isDev ? "warn" : "ignore"),
@@ -45,8 +41,10 @@ export function webmcp(options: WebMCPPluginOptions = {}) {
 }
 
 function assertOptions(options: WebMCPPluginOptions): void {
-  if (options.enabled !== undefined && typeof options.enabled !== "boolean") {
-    throw new TypeError("webmcp enabled must be boolean");
+  if ("enabled" in options) {
+    throw new TypeError(
+      "webmcp no longer accepts enabled; remove webmcp() from plugins to disable it",
+    );
   }
   if (options.debug !== undefined && typeof options.debug !== "boolean") {
     throw new TypeError("webmcp debug must be boolean");

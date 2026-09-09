@@ -85,20 +85,19 @@ export function msw(options: MswPluginOptions) {
 
   const browserClient:
     | FarmPluginClientConfig<MswBrowserState | undefined, typeof publicConfig>
-    | undefined =
-    resolved.enabled && resolved.browser
-      ? {
-          public: publicConfig,
-          async setup({ public: config, isDev }) {
-            if (!isDev) return undefined;
-            const runtime = await import("@farm.js/msw/client");
-            return runtime.startMswBrowserRuntime(config);
-          },
-          close({ state }) {
-            state?.stop();
-          },
-        }
-      : undefined;
+    | undefined = resolved.browser
+    ? {
+        public: publicConfig,
+        async setup({ public: config, isDev }) {
+          if (!isDev) return undefined;
+          const runtime = await import("@farm.js/msw/client");
+          return runtime.startMswBrowserRuntime(config);
+        },
+        close({ state }) {
+          state?.stop();
+        },
+      }
+    : undefined;
 
   let plugin: FarmPlugin<
     MswPluginState,
@@ -116,7 +115,7 @@ export function msw(options: MswPluginOptions) {
     enforce: "pre",
 
     configure(config, context) {
-      if (!resolved.enabled || context.isProd) {
+      if (context.isProd) {
         return withoutPlugin(config, plugin);
       }
 
@@ -151,7 +150,7 @@ export function msw(options: MswPluginOptions) {
 
     dev: {
       async server(viteServer, { state }) {
-        if (!resolved.enabled || !resolved.server) return;
+        if (!resolved.server) return;
 
         const server = viteServer as unknown as FarmViteDevServer;
         const handlers = await loadHandlers(server, handlersFile);

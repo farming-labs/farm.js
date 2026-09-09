@@ -37,7 +37,7 @@ export function analyzer(options: AnalyzerOptions = {}) {
 
     build: {
       async after(result) {
-        if (!resolved.enabled || !result.success) return;
+        if (!result.success) return;
 
         const outputDir = path.resolve(
           result.root,

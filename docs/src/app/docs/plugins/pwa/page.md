@@ -191,9 +191,11 @@ worker and reloads once the new worker controls the page.
 
 ## Options
 
+Adding `pwa()` to `plugins` enables service worker generation and registration. Remove it from the
+array when the app should not ship a service worker.
+
 | Option          | Default    | Description                                                         |
 | --------------- | ---------- | ------------------------------------------------------------------- |
-| `enabled`       | `true`     | Generate or copy and then register the worker.                      |
 | `offline`       | `false`    | Static fallback route for the generated worker.                     |
 | `update`        | `"prompt"` | Prompt or automatically activate and reload for a waiting worker.   |
 | `cache`         | `"auto"`   | Generated-worker caching, a custom object, or build assets only.    |

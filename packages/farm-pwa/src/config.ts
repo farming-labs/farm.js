@@ -26,8 +26,6 @@ export interface PwaServiceWorkerOptions {
 }
 
 export interface PwaPluginOptions {
-  /** Set false to keep the plugin registered without emitting or registering a worker. */
-  enabled?: boolean;
   /** Static route to serve after an offline navigation misses the cache. */
   offline?: string | false;
   /** How a waiting service worker becomes active. */
@@ -45,7 +43,6 @@ export interface ResolvedPwaImageCacheOptions {
 }
 
 export interface ResolvedPwaOptions {
-  enabled: boolean;
   offline: string | false;
   update: "prompt" | "auto";
   serviceWorker: Required<PwaServiceWorkerOptions> | false;
@@ -62,8 +59,8 @@ export function resolvePwaOptions(options: PwaPluginOptions = {}): ResolvedPwaOp
   if (!options || typeof options !== "object" || Array.isArray(options)) {
     throw new TypeError("PWA options must be an object");
   }
-  if (options.enabled !== undefined && typeof options.enabled !== "boolean") {
-    throw new TypeError("PWA enabled must be boolean");
+  if ("enabled" in options) {
+    throw new TypeError("PWA no longer accepts enabled; remove pwa() from plugins to disable it");
   }
   if (
     options.offline !== undefined &&
@@ -98,7 +95,6 @@ export function resolvePwaOptions(options: PwaPluginOptions = {}): ResolvedPwaOp
   const customCache = typeof cache === "object" ? cache : undefined;
 
   return {
-    enabled: options.enabled !== false,
     offline: serviceWorker ? false : normalizeRoute(options.offline ?? false, "offline"),
     update: options.update ?? "prompt",
     serviceWorker,

@@ -8,7 +8,6 @@ describe("resolveMswOptions", () => {
       browser: true,
       server: true,
       onUnhandledRequest: "bypass",
-      enabled: true,
     });
   });
 
@@ -18,13 +17,11 @@ describe("resolveMswOptions", () => {
         handlers: "src/mocks/handlers.ts",
         browser: false,
         server: false,
-        enabled: false,
         onUnhandledRequest: "error",
       }),
     ).toMatchObject({
       browser: false,
       server: false,
-      enabled: false,
       onUnhandledRequest: "error",
     });
   });
@@ -33,7 +30,7 @@ describe("resolveMswOptions", () => {
     [{ handlers: "" }, "handlers"],
     [{ handlers: "mocks.ts", browser: "yes" }, "browser"],
     [{ handlers: "mocks.ts", server: 1 }, "server"],
-    [{ handlers: "mocks.ts", enabled: "no" }, "enabled"],
+    [{ handlers: "mocks.ts", enabled: false }, "remove msw() from plugins"],
     [{ handlers: "mocks.ts", onUnhandledRequest: "ignore" }, "onUnhandledRequest"],
   ])("rejects invalid options %#", (options, message) => {
     expect(() => resolveMswOptions(options as never)).toThrow(message);

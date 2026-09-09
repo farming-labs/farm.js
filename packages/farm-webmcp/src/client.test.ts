@@ -337,7 +337,6 @@ describe("webmcp Farm plugin", () => {
     const plugin = webmcp();
     expect(plugin.name).toBe("farm:webmcp");
     expect(plugin.client?.public).toEqual({
-      enabled: true,
       unsupported: null,
       debug: null,
     });
@@ -345,6 +344,7 @@ describe("webmcp Farm plugin", () => {
   });
 
   it("validates plugin options", () => {
+    expect(() => webmcp({ enabled: false } as never)).toThrow("remove webmcp() from plugins");
     expect(() => webmcp({ unsupported: "silent" as "ignore" })).toThrow(
       'unsupported must be "ignore", "warn", or "error"',
     );
