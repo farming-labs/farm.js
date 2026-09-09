@@ -533,7 +533,7 @@ if (checkOnly) {
     {
       name: "keyed filter compiler premium",
       current: results.fixtures.keyedFilter.compilerPremium.gzip,
-      maximum: (reference.fixtures.keyedFilter?.compilerPremium.gzip ?? 12_000) + 256,
+      maximum: (reference.fixtures.keyedFilter?.compilerPremium.gzip ?? 12_000) + 260,
     },
     {
       name: "keyed prepend compiler premium",

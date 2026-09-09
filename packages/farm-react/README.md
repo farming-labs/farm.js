@@ -468,6 +468,13 @@ An exact reverse uses the minimum-move reverse path without a general source-ite
 sort remains an ambiguous permutation, so Farm performs one validated source lookup and LIS pass.
 Safe maps on both sides of a reorder flatten their replacements back to the same committed rows.
 
+Safe maps may also run before index-independent `filter` or `slice` steps and a native reorder in
+one concise functional setter. The structural helpers retain both the committed survivor indices
+and the mapped-item sources, so the final commit removes rejected rows, performs only its final LIS
+moves, and patches bindings only for changed survivors. Every native callback and method still runs
+in JavaScript order. Maps after a structural step, structural work split across setters, unsafe
+callbacks, and failed runtime validation keep complete keyed reconciliation.
+
 The reorder and safe maps may also be adjacent setter calls in the same synchronous block:
 
 ```tsx

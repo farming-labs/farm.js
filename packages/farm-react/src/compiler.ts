@@ -2019,7 +2019,6 @@ function keyedArrayReorderPipeline(
       reorderSteps += 1;
     }
   }
-  if (mapSteps > 0 && structuralSteps > 0) return undefined;
   if (reorderSteps < 1) return undefined;
   if (mapSteps > 0 && reorderSteps >= 1) return steps;
   if (structuralSteps < 1 && reorderSteps < 2) return undefined;
@@ -2200,15 +2199,15 @@ function rewriteKeyedArrayReorderPipelineHints(
               : step.kind === "slice"
                 ? sliceHelperIdentifier
                 : step.kind === "reverse"
-                  ? hasMappedLineage
-                    ? mapReorderHelperIdentifier
-                    : structuralPipeline
-                      ? structuralReorderHelperIdentifier
+                  ? structuralPipeline
+                    ? structuralReorderHelperIdentifier
+                    : hasMappedLineage
+                      ? mapReorderHelperIdentifier
                       : reorderHelperIdentifier
-                  : hasMappedLineage
-                    ? mapReorderHelperIdentifier
-                    : structuralPipeline
-                      ? structuralSortHelperIdentifier
+                  : structuralPipeline
+                    ? structuralSortHelperIdentifier
+                    : hasMappedLineage
+                      ? mapReorderHelperIdentifier
                       : sortHelperIdentifier;
         const args =
           step.kind === "map"
@@ -2246,11 +2245,11 @@ function rewriteKeyedArrayReorderPipelineHints(
         else if (step.kind === "slice") sliceCount += 1;
         else if (step.kind === "reverse") {
           reorderCount += 1;
-          if (hasMappedLineage) mapReorderCount += 1;
+          if (hasMappedLineage && !structuralPipeline) mapReorderCount += 1;
           if (structuralPipeline) structuralReorderCount += 1;
         } else {
           sortCount += 1;
-          if (hasMappedLineage) mapSortCount += 1;
+          if (hasMappedLineage && !structuralPipeline) mapSortCount += 1;
           if (structuralPipeline) structuralSortCount += 1;
         }
       }

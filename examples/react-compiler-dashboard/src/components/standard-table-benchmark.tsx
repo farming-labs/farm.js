@@ -871,6 +871,48 @@ export function StandardTableBenchmark() {
           Filter + reorder pipeline (snapshot control)
         </button>
         <button
+          data-action="table-map-structural-reorder-pipeline"
+          type="button"
+          onClick={() => {
+            setRows((current) =>
+              current
+                .map((row) =>
+                  row.id % 10_000 === 5_001
+                    ? { ...row, amount: row.amount + 1, label: `${row.label} reviewed` }
+                    : row,
+                )
+                .filter((row) => row.id % 10_000 !== 7_001)
+                .toReversed()
+                .toReversed(),
+            );
+            setOperation("review one row, filter another, and preserve order");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Review + filter + reorder
+        </button>
+        <button
+          data-action="table-map-structural-reorder-pipeline-snapshot"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              return current
+                .map((row) =>
+                  row.id % 10_000 === 5_001
+                    ? { ...row, amount: row.amount + 1, label: `${row.label} reviewed` }
+                    : row,
+                )
+                .filter((row) => row.id % 10_000 !== 7_001)
+                .toReversed()
+                .toReversed();
+            });
+            setOperation("review, filter, and reorder rows (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Review + filter + reorder (snapshot control)
+        </button>
+        <button
           data-action="table-map-reorder-pipeline"
           type="button"
           onClick={() => {

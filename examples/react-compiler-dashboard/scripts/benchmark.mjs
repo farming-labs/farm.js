@@ -127,7 +127,7 @@ async function inspectBuild(compilerMode) {
       "The compiler build did not emit a keyed Map-lookup target.",
     );
     assert(
-      compilerReport.summary.keyedMapUpdateHints >= 6,
+      compilerReport.summary.keyedMapUpdateHints >= 21,
       "The compiler build did not emit every single-map, consecutive-map, and map-reorder hint.",
     );
     assert(
@@ -135,8 +135,8 @@ async function inspectBuild(compilerMode) {
       "The compiler build did not emit a keyed-array append hint.",
     );
     assert(
-      compilerReport.summary.keyedArrayFilterHints >= 2,
-      "The compiler build did not emit both keyed-array filter hints.",
+      compilerReport.summary.keyedArrayFilterHints >= 3,
+      "The compiler build did not emit every keyed-array filter hint.",
     );
     assert(
       compilerReport.summary.keyedArrayPrependHints > 0,
@@ -147,7 +147,7 @@ async function inspectBuild(compilerMode) {
       "The compiler build did not emit the keyed-array exact-position hints.",
     );
     assert(
-      compilerReport.summary.keyedArrayReorderHints >= 7,
+      compilerReport.summary.keyedArrayReorderHints >= 19,
       "The compiler build did not emit every keyed-array reorder pipeline step.",
     );
     assert(
@@ -1198,6 +1198,81 @@ async function measureTrial(browser, trial, compilerMode, port) {
             ),
         );
 
+        const prepareMapStructuralReorderPipeline = async () => {
+          await create10000();
+          const rows = [...table.querySelectorAll("tbody tr")];
+          const target = rows.find(
+            (row) => Number(row.getAttribute("data-row-id")) % 10_000 === 5_001,
+          );
+          const removed = rows.find(
+            (row) => Number(row.getAttribute("data-row-id")) % 10_000 === 7_001,
+          );
+          const amount = Number(target?.querySelector("td:nth-child(4)")?.textContent?.slice(1));
+          if (!target || !removed || !Number.isFinite(amount)) {
+            throw new Error("Mapped structural-reorder source rows are invalid.");
+          }
+          return {
+            amount: amount + 1,
+            expectedRows: rows.filter((row) => row !== removed),
+            removed,
+            rows,
+            target,
+          };
+        };
+
+        const measureMapStructuralReorderPipeline = async (action, prepared) => {
+          const { amount, expectedRows, removed, rows, target } = prepared;
+          await runTableAction(action, () => {
+            const nextRows = table.querySelectorAll("tbody tr");
+            return (
+              nextRows.length === 9_999 &&
+              target.querySelector("td:nth-child(2)")?.textContent?.endsWith(" reviewed") ===
+                true &&
+              target.querySelector("td:nth-child(4)")?.textContent === `$${amount}` &&
+              !removed.isConnected
+            );
+          });
+          return () => {
+            const nextRows = table.querySelectorAll("tbody tr");
+            if (
+              !rowsMatch(nextRows, expectedRows) ||
+              rows.some((row) => row !== removed && !row.isConnected)
+            ) {
+              throw new Error(
+                "Mapped structural-reorder rows do not match the expected filtered order.",
+              );
+            }
+          };
+        };
+
+        const measureMapStructuralReorderTable = async (action) => {
+          for (let sample = 0; sample < warmupSamples; sample += 1) {
+            const verify = await measureMapStructuralReorderPipeline(
+              action,
+              await prepareMapStructuralReorderPipeline(),
+            );
+            verify();
+          }
+          const timings = [];
+          for (let sample = 0; sample < tableSamples; sample += 1) {
+            const prepared = await prepareMapStructuralReorderPipeline();
+            const startedAt = performance.now();
+            const verify = await measureMapStructuralReorderPipeline(action, prepared);
+            timings.push(performance.now() - startedAt);
+            verify();
+          }
+          return timings;
+        };
+
+        const tableMapStructuralReorderPipeline = await measureMapStructuralReorderTable(() =>
+          tableButton("table-map-structural-reorder-pipeline").click(),
+        );
+
+        const tableMapStructuralReorderPipelineSnapshot =
+          await measureMapStructuralReorderTable(() =>
+            tableButton("table-map-structural-reorder-pipeline-snapshot").click(),
+          );
+
         const prepareMapReorderPipeline = async (expectedAmount) => {
           await create10000();
           const rows = [...table.querySelectorAll("tbody tr")];
@@ -1880,6 +1955,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
             executionsAdded: Number(tableExecutions.textContent) - initialTableExecutions,
             filterReorderPipeline: tableFilterReorderPipeline,
             filterReorderPipelineSnapshot: tableFilterReorderPipelineSnapshot,
+            mapStructuralReorderPipeline: tableMapStructuralReorderPipeline,
+            mapStructuralReorderPipelineSnapshot: tableMapStructuralReorderPipelineSnapshot,
             mapReorderPipeline: tableMapReorderPipeline,
             mapReorderPipelineSnapshot: tableMapReorderPipelineSnapshot,
             multiMapUpdate: tableMultiMapUpdate,
@@ -2022,6 +2099,10 @@ async function measureTrial(browser, trial, compilerMode, port) {
         executionsAdded: result.table.executionsAdded,
         filterReorderPipeline: timingSummary(result.table.filterReorderPipeline),
         filterReorderPipelineSnapshot: timingSummary(result.table.filterReorderPipelineSnapshot),
+        mapStructuralReorderPipeline: timingSummary(result.table.mapStructuralReorderPipeline),
+        mapStructuralReorderPipelineSnapshot: timingSummary(
+          result.table.mapStructuralReorderPipelineSnapshot,
+        ),
         mapReorderPipeline: timingSummary(result.table.mapReorderPipeline),
         mapReorderPipelineSnapshot: timingSummary(result.table.mapReorderPipelineSnapshot),
         multiMapUpdate: timingSummary(result.table.multiMapUpdate),
@@ -2233,6 +2314,8 @@ const tableMetrics = [
   "denseMapLookup",
   "filterReorderPipeline",
   "filterReorderPipelineSnapshot",
+  "mapStructuralReorderPipeline",
+  "mapStructuralReorderPipelineSnapshot",
   "mapReorderPipeline",
   "mapReorderPipelineSnapshot",
   "multiMapUpdate",
@@ -2889,6 +2972,30 @@ const keyedStructuralReorderRegressions = keyedStructuralReorderResults.filter(
     !Number.isFinite(snapshotSpeedup) ||
     snapshotSpeedup < keyedStructuralReorderMinimumSnapshotSpeedup,
 );
+// A safe map before filter and reorder changes row data, membership, and order in one setter. The
+// mapped structural path must patch the changed survivor, remove the rejected row, and validate the
+// final order once instead of dropping to complete keyed reconciliation.
+const keyedMappedStructuralReorderMinimumSpeedup = 2;
+const keyedMappedStructuralReorderMinimumSnapshotSpeedup = 1.25;
+const keyedMappedStructuralReorderResults = ["static", "hybrid"].map((mode) => {
+  const pipelineMedianMs = comparisons.table.mapStructuralReorderPipeline[mode].medianMs;
+  const snapshotMedianMs =
+    comparisons.table.mapStructuralReorderPipelineSnapshot[mode].medianMs;
+  return {
+    mode,
+    pipelineMedianMs,
+    snapshotMedianMs,
+    snapshotSpeedup: snapshotMedianMs / pipelineMedianMs,
+    speedup: comparisons.table.mapStructuralReorderPipeline[`${mode}VsBaseline`].speedup,
+  };
+});
+const keyedMappedStructuralReorderRegressions = keyedMappedStructuralReorderResults.filter(
+  ({ snapshotSpeedup, speedup }) =>
+    !Number.isFinite(speedup) ||
+    speedup < keyedMappedStructuralReorderMinimumSpeedup ||
+    !Number.isFinite(snapshotSpeedup) ||
+    snapshotSpeedup < keyedMappedStructuralReorderMinimumSnapshotSpeedup,
+);
 // Editing one same-key row and immediately sorting it should reuse all keyed DOM rows, patch only
 // the changed bindings, and run one LIS against the final order. Compare the concise hinted setter
 // with React and the equivalent block-bodied compiled control at 10,000 rows.
@@ -3279,6 +3386,7 @@ const passed =
   keyedQueuedReorderRegressions.length === 0 &&
   keyedReorderPipelineRegressions.length === 0 &&
   keyedStructuralReorderRegressions.length === 0 &&
+  keyedMappedStructuralReorderRegressions.length === 0 &&
   keyedMapReorderRegressions.length === 0 &&
   keyedMultiMapReorderRegressions.length === 0 &&
   keyedMultiMapReverseRegressions.length === 0 &&
@@ -3453,6 +3561,13 @@ const report = {
     regressions: keyedStructuralReorderRegressions,
     results: keyedStructuralReorderResults,
     status: keyedStructuralReorderRegressions.length === 0 ? "PASS" : "FAIL",
+  },
+  keyedMappedStructuralReorderHintGate: {
+    minimumSnapshotSpeedup: keyedMappedStructuralReorderMinimumSnapshotSpeedup,
+    minimumSpeedup: keyedMappedStructuralReorderMinimumSpeedup,
+    regressions: keyedMappedStructuralReorderRegressions,
+    results: keyedMappedStructuralReorderResults,
+    status: keyedMappedStructuralReorderRegressions.length === 0 ? "PASS" : "FAIL",
   },
   keyedMapReorderHintGate: {
     minimumSnapshotSpeedup: keyedMapReorderMinimumSnapshotSpeedup,

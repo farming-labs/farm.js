@@ -26,6 +26,7 @@ interface CompilerKeyedArrayFilterHint {
   readonly removedIndices?: readonly number[];
   readonly retainedEnd?: number;
   readonly retainedStart?: number;
+  readonly mappedItemSources?: CompilerMappedItemSources;
   readonly previous?: CompilerKeyedArrayFilterHint;
 }
 
@@ -1011,17 +1012,29 @@ export function createCompilerKeyedArrayFilter(
     ) {
       return value;
     }
-    const sourceToken = compilerKeyedCollectionToken(previousTarget);
+    const committedSource = COMPILER_KEYED_COMMITTED_COLLECTIONS.has(previousTarget);
+    const previousMappedUpdate = committedSource
+      ? undefined
+      : COMPILER_KEYED_ARRAY_REORDERS.get(previousTarget);
+    const mappedUpdate =
+      previousMappedUpdate?.mapped &&
+      !previousMappedUpdate.structuralUpdate &&
+      previousMappedUpdate.resultLength === sourceLength
+        ? previousMappedUpdate
+        : undefined;
+    const sourceToken = mappedUpdate?.sourceToken || compilerKeyedCollectionToken(previousTarget);
     if (!sourceToken) return value;
-    const previousUpdate = !COMPILER_KEYED_COMMITTED_COLLECTIONS.has(previousTarget)
+    const previousUpdate = !committedSource
       ? COMPILER_KEYED_ARRAY_FILTERS.get(previousTarget)
       : undefined;
+    const mappedItemSources = previousUpdate?.mappedItemSources || mappedUpdate?.mappedItemSources;
     COMPILER_KEYED_ARRAY_FILTERS.set(valueTarget, {
       kind: "filter",
       sourceToken: previousUpdate?.sourceToken || sourceToken,
       sourceLength,
       resultLength: value.length,
       removedIndices,
+      ...(mappedItemSources ? { mappedItemSources } : {}),
       ...(previousUpdate ? { previous: previousUpdate } : {}),
     });
   } catch {
@@ -1071,11 +1084,22 @@ export function createCompilerKeyedArraySlice(
     const retainedEnd = args.length === 2 ? normalize(args[1]) : sourceLength;
     const resultLength = Math.max(retainedEnd - retainedStart, 0);
     if (value.length !== resultLength || resultLength >= sourceLength) return value;
-    const sourceToken = compilerKeyedCollectionToken(previousTarget);
+    const committedSource = COMPILER_KEYED_COMMITTED_COLLECTIONS.has(previousTarget);
+    const previousMappedUpdate = committedSource
+      ? undefined
+      : COMPILER_KEYED_ARRAY_REORDERS.get(previousTarget);
+    const mappedUpdate =
+      previousMappedUpdate?.mapped &&
+      !previousMappedUpdate.structuralUpdate &&
+      previousMappedUpdate.resultLength === sourceLength
+        ? previousMappedUpdate
+        : undefined;
+    const sourceToken = mappedUpdate?.sourceToken || compilerKeyedCollectionToken(previousTarget);
     if (!sourceToken) return value;
-    const previousUpdate = !COMPILER_KEYED_COMMITTED_COLLECTIONS.has(previousTarget)
+    const previousUpdate = !committedSource
       ? COMPILER_KEYED_ARRAY_FILTERS.get(previousTarget)
       : undefined;
+    const mappedItemSources = previousUpdate?.mappedItemSources || mappedUpdate?.mappedItemSources;
     COMPILER_KEYED_ARRAY_FILTERS.set(valueTarget, {
       kind: "slice",
       sourceToken: previousUpdate?.sourceToken || sourceToken,
@@ -1083,6 +1107,7 @@ export function createCompilerKeyedArraySlice(
       resultLength,
       retainedEnd: Math.max(retainedEnd, retainedStart),
       retainedStart,
+      ...(mappedItemSources ? { mappedItemSources } : {}),
       ...(previousUpdate ? { previous: previousUpdate } : {}),
     });
   } catch {
@@ -1485,11 +1510,17 @@ function recordCompilerKeyedArrayStructuralReorder(
     const sourceToken = previousUpdate?.sourceToken || structuralSource?.sourceToken;
     if (!sourceToken) return value;
     COMPILER_KEYED_ARRAY_REORDERS.set(valueTarget, {
-      kind: previousUpdate ? CompilerKeyedArrayReorderKind.Permutation : kind,
+      kind:
+        kind === CompilerKeyedArrayReorderKind.Reverse
+          ? reversedCompilerKeyedArrayOrder(previousUpdate?.kind)
+          : CompilerKeyedArrayReorderKind.Permutation,
       sourceToken,
       sourceLength: previousUpdate?.sourceLength || structuralSource.sourceLength,
       resultLength: value.length,
       structuralUpdate,
+      ...(structuralUpdate.mappedItemSources
+        ? { mappedItemSources: structuralUpdate.mappedItemSources }
+        : {}),
     });
   } catch {
     // Metadata must never change the result of a successful native update.
@@ -5966,6 +5997,7 @@ function reconcileCompilerKeyedArrayStructuralReorder(
   if (!survivorResult) return undefined;
 
   const previousInstances = [...instances.values()];
+  const mappedItemSources = update.mappedItemSources;
   const prepared = (() => {
     try {
       const survivors: CompilerKeyedRowInstance[] = [];
@@ -5979,18 +6011,55 @@ function reconcileCompilerKeyedArrayStructuralReorder(
         survivors.push(instance);
       }
 
+      const prepareChangedInstance = (
+        instance: CompilerKeyedRowInstance,
+        item: unknown,
+        targetIndex: number,
+      ) => {
+        if (Object.is(instance.item, item)) return undefined;
+        const bindingUpdates = prepareKeyedRowBindingUpdates(props, instance, item, targetIndex);
+        if (!bindingUpdates) throw new TypeError();
+        return { bindingUpdates, instance, item };
+      };
       let preservesSurvivorOrder = true;
+      const directChanges: Array<{
+        bindingUpdates: CompilerPreparedKeyedRowBindingUpdate[];
+        instance: CompilerKeyedRowInstance;
+        item: unknown;
+      }> = [];
+      if (update.kind !== CompilerKeyedArrayReorderKind.Permutation) {
+        const positionalInstances =
+          update.kind === CompilerKeyedArrayReorderKind.Reverse
+            ? [...survivors].reverse()
+            : survivors;
+        const sequence =
+          update.kind === CompilerKeyedArrayReorderKind.Reverse
+            ? positionalInstances.map((instance) => instance.index)
+            : undefined;
+        for (let targetIndex = 0; targetIndex < finalValue.length; targetIndex += 1) {
+          const item = finalValue[targetIndex];
+          const instance = positionalInstances[targetIndex];
+          if (keyedRowIdentity(props.rowKey(item, targetIndex)) !== instance.key) return undefined;
+          const changed = prepareChangedInstance(instance, item, targetIndex);
+          if (changed) directChanges.push(changed);
+        }
+        return { changed: directChanges, nextInstances: positionalInstances, sequence };
+      }
+
       for (let targetIndex = 0; targetIndex < finalValue.length; targetIndex += 1) {
         const item = finalValue[targetIndex];
         const instance = survivors[targetIndex];
-        if (!Object.is(instance.item, item)) {
+        const sourceItem = mappedItemSources?.has(item) ? mappedItemSources.get(item) : item;
+        if (!Object.is(instance.item, sourceItem)) {
           preservesSurvivorOrder = false;
           break;
         }
         if (keyedRowIdentity(props.rowKey(item, targetIndex)) !== instance.key) return undefined;
+        const changed = prepareChangedInstance(instance, item, targetIndex);
+        if (changed) directChanges.push(changed);
       }
       if (preservesSurvivorOrder) {
-        return { nextInstances: survivors, sequence: undefined };
+        return { changed: directChanges, nextInstances: survivors, sequence: undefined };
       }
 
       const survivorInstances = new Map<unknown, CompilerKeyedRowInstance>();
@@ -6001,22 +6070,26 @@ function reconcileCompilerKeyedArrayStructuralReorder(
 
       const nextInstances: CompilerKeyedRowInstance[] = [];
       const sequence: number[] = [];
+      const changed: typeof directChanges = [];
       for (let targetIndex = 0; targetIndex < finalValue.length; targetIndex += 1) {
         const item = finalValue[targetIndex];
-        const instance = survivorInstances.get(item);
+        const sourceItem = mappedItemSources?.has(item) ? mappedItemSources.get(item) : item;
+        const instance = survivorInstances.get(sourceItem);
         if (
           !instance ||
-          !Object.is(instance.item, item) ||
+          !Object.is(instance.item, sourceItem) ||
           keyedRowIdentity(props.rowKey(item, targetIndex)) !== instance.key
         ) {
           return undefined;
         }
-        survivorInstances.delete(item);
+        survivorInstances.delete(sourceItem);
         nextInstances.push(instance);
         sequence.push(instance.index);
+        const changedInstance = prepareChangedInstance(instance, item, targetIndex);
+        if (changedInstance) changed.push(changedInstance);
       }
       if (survivorInstances.size > 0) return undefined;
-      return { nextInstances, sequence };
+      return { changed, nextInstances, sequence };
     } catch {
       return undefined;
     }
@@ -6035,6 +6108,10 @@ function reconcileCompilerKeyedArrayStructuralReorder(
   }
   if (prepared.sequence) {
     reorderCompilerKeyedRows(root, prepared.nextInstances, prepared.sequence, null);
+  }
+  for (const { bindingUpdates, instance, item } of prepared.changed) {
+    applyPreparedKeyedRowBindingUpdates(props, instance, bindingUpdates);
+    instance.item = item;
   }
   for (let index = 0; index < prepared.nextInstances.length; index += 1) {
     prepared.nextInstances[index].index = index;
