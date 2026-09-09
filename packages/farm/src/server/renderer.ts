@@ -10,7 +10,7 @@ import type {
   SSGPage,
 } from "../types";
 import type { MatchedRouteSlot, RouteManager } from "../routing/route-manager";
-import { logger, toRootRelativeUrlPath, toViteModuleId } from "../utils";
+import { logger, toViteModuleId } from "../utils";
 import { collectDevStylesheetUrls } from "./dev-styles";
 import {
   composeFarmFullDocument,
@@ -1393,7 +1393,7 @@ export class ServerRenderer {
       );
       const clientLayouts = layouts.map((layout, index) => ({
         pattern: layout.pattern,
-        modulePath: toRootRelativeUrlPath(layout.modulePath, this.config.root) ?? layout.modulePath,
+        modulePath: toViteModuleId(layout.modulePath, this.config.root),
         shouldHydrate: layoutHydrationMetadata[index]?.shouldHydrate === true,
         islandStrategy: layoutHydrationMetadata[index]?.islandStrategy ?? null,
         ...(layoutHydrationMetadata[index]?.hasIsolatedClientBoundaries === true
@@ -1432,9 +1432,7 @@ export class ServerRenderer {
       (req as any).__FARM_ISLAND_STRATEGY__ = hydrationIslandStrategy;
       (req as any).__FARM_HAS_HYDRATABLE_ROUTE_SLOTS__ = hasHydratableRouteSlots;
       (req as any).__FARM_LOADING_MODULE_PATH__ = loadingBoundaryEntry?.modulePath
-        ? loadingBoundaryEntry.modulePath.substring(
-            loadingBoundaryEntry.modulePath.indexOf("/src/app/"),
-          )
+        ? toViteModuleId(loadingBoundaryEntry.modulePath, this.config.root)
         : null;
       (req as any).__FARM_ROUTE_SLOTS__ = renderedRouteSlots.map((slot) => ({
         name: slot.name,
@@ -2208,7 +2206,7 @@ export class ServerRenderer {
           ...slot,
           modulePath:
             typeof slot.modulePath === "string"
-              ? (toRootRelativeUrlPath(slot.modulePath, this.config.root) ?? slot.modulePath)
+              ? toViteModuleId(slot.modulePath, this.config.root)
               : slot.modulePath,
         }),
       );
@@ -2218,7 +2216,7 @@ export class ServerRenderer {
       });
       const pagePath = (req as any).__FARM_PAGE_PATH__;
       const relativePath = pagePath
-        ? (toRootRelativeUrlPath(pagePath, this.config.root) ?? pagePath)
+        ? toViteModuleId(pagePath, this.config.root)
         : "/src/app/page.tsx";
       const deploymentId = this.getDeploymentId();
       const bootstrapScript = `<script>
@@ -2390,7 +2388,7 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
       const pagePath = (req as any).__FARM_PAGE_PATH__;
       const isClientComponent = (req as any).__FARM_IS_CLIENT_COMPONENT__ === true;
       const relativePath = pagePath
-        ? (toRootRelativeUrlPath(pagePath, this.config.root) ?? pagePath)
+        ? toViteModuleId(pagePath, this.config.root)
         : "/src/app/page.tsx";
 
       // Generate manifest for client-side SPA navigation (TanStack Start pattern)
@@ -2459,7 +2457,7 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
           ...slot,
           modulePath:
             typeof slot.modulePath === "string"
-              ? (toRootRelativeUrlPath(slot.modulePath, this.config.root) ?? slot.modulePath)
+              ? toViteModuleId(slot.modulePath, this.config.root)
               : slot.modulePath,
         }),
       );

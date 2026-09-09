@@ -1201,10 +1201,7 @@ export function farmPlugin(
           ? (hydrationStrategies[0] ?? "load")
           : "load";
         const params = matchedRoute.params || {};
-        const toUrlPath = (absolutePath: string) =>
-          absolutePath.startsWith(farmConfig.root)
-            ? absolutePath.slice(farmConfig.root.length)
-            : absolutePath;
+        const toUrlPath = (absolutePath: string) => toViteModuleId(absolutePath, farmConfig.root);
         const clientLayouts = Object.fromEntries(
           layoutEntries.map((layout) => [
             layout.pattern,
@@ -2157,12 +2154,8 @@ window.__FARM_MANIFEST__ = ${inlineValue({
 
                 // Convert absolute paths to URL paths (relative to project root)
                 const projectRoot = server.config.root;
-                const toUrlPath = (absolutePath: string) => {
-                  if (absolutePath.startsWith(projectRoot)) {
-                    return absolutePath.slice(projectRoot.length);
-                  }
-                  return absolutePath;
-                };
+                const toUrlPath = (absolutePath: string) =>
+                  toViteModuleId(absolutePath, projectRoot);
 
                 const renderPlan = createFarmRouteRenderPlan({
                   pageShouldHydrate: shouldHydrate,
@@ -3522,11 +3515,7 @@ export const OPTIONS = __farmRoute.methods.OPTIONS;
 }
 
 function toProgrammaticRouteImportSpecifier(filePath: string, root?: string): string {
-  if (root && filePath.startsWith(root)) {
-    return filePath.slice(root.length) || "/";
-  }
-
-  return filePath;
+  return root ? toViteModuleId(filePath, root) : filePath;
 }
 
 type RouteModuleLike = {

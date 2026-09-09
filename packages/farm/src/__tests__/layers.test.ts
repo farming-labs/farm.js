@@ -15,6 +15,8 @@ import {
 import { MiddlewareManager } from "../middleware/manager";
 import { discoverMiddlewareRoutes, hasFarmRuntimeConfigModule } from "../nitro/universal-build";
 import { RouteManager } from "../routing/route-manager";
+import { createProgrammaticRouteModuleId } from "../routes-shared";
+import { toViteModuleId } from "../utils";
 import { farmPlugin } from "../vite";
 
 const temporaryRoots: string[] = [];
@@ -363,6 +365,20 @@ describe("Farm layers", () => {
       "#layers/commerce": path.join(layerRoot, "src"),
     });
     expect(viteConfig.server.fs.allow).toEqual([root, layerRoot]);
+  });
+
+  it("imports an external programmatic route through Vite's filesystem namespace", async () => {
+    const root = createProject();
+    const externalRoot = realpathSync(mkdtempSync(path.join(tmpdir(), "farm-external-layer-")));
+    temporaryRoots.push(externalRoot);
+    const routeFile = writeSource(externalRoot, "src/routes.ts");
+    const plugin = farmPlugin({ root });
+    const moduleId = createProgrammaticRouteModuleId(routeFile, "page", "/reports");
+
+    const source = await (plugin.load as (id: string) => Promise<string>)(moduleId);
+
+    expect(source).toContain(`from ${JSON.stringify(toViteModuleId(routeFile, root))}`);
+    expect(source).not.toContain(`from ${JSON.stringify(routeFile)}`);
   });
 });
 

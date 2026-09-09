@@ -535,6 +535,44 @@ describe("file route loading.tsx and error.tsx", () => {
     );
   });
 
+  it("uses Vite filesystem module IDs for routes supplied by an external layer", async () => {
+    const response = createMockResponse();
+    const renderer = createRenderer(
+      {
+        [routeModulePath]: {
+          default: function DashboardPage() {
+            return React.createElement("main", null, "Layer dashboard");
+          },
+        },
+        [layoutModulePath]: {
+          default: function RootLayout({ children }: { children: React.ReactNode }) {
+            return React.createElement("section", null, children);
+          },
+        },
+        [loadingModulePath]: {
+          default: function DashboardLoading() {
+            return React.createElement("p", null, "Loading layer dashboard");
+          },
+        },
+      },
+      {
+        root: "/workspace/app",
+        clientMetadata: { isClientComponent: true, shouldHydrate: true },
+        layoutMetadata: { shouldHydrate: true },
+      },
+    );
+
+    await renderer.renderPage(createMockRequest("/dashboard"), response);
+
+    expect(response.body).toContain(
+      'window.__FARM_PAGE_MODULE__ = "/@fs/test/src/app/dashboard/page.tsx"',
+    );
+    expect(response.body).toContain('"modulePath":"/@fs/test/src/app/layout.tsx"');
+    expect(response.body).toContain(
+      'window.__FARM_LOADING_MODULE__ = "/@fs/test/src/app/dashboard/loading.tsx"',
+    );
+  });
+
   it("renders navigation fragments with stable page and nested layout boundaries", async () => {
     const renderer = createRenderer({});
     const html = await renderer.renderNavigationFragment({
@@ -748,6 +786,7 @@ function createRenderer(
     onGenerateClientManifest?: () => void;
     integrations?: FarmConfig["integrations"];
     basePath?: string;
+    root?: string;
   } = {},
 ) {
   const metadataImageEntry = {
@@ -922,7 +961,7 @@ function createRenderer(
 
   return new ServerRenderer(
     {
-      ...createConfig(),
+      ...createConfig(options.root),
       integrations: options.integrations ?? {},
       basePath: options.basePath ?? "/",
     },
@@ -930,9 +969,9 @@ function createRenderer(
   );
 }
 
-function createConfig(): Required<FarmConfig> {
+function createConfig(root = "/test"): Required<FarmConfig> {
   return {
-    root: "/test",
+    root,
     srcDir: "src",
     outDir: "dist",
     basePath: "/",
