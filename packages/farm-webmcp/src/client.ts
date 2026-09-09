@@ -237,8 +237,13 @@ export async function startWebMCPRuntime(
   });
   activeRuntime = runtime;
   exposeDebugRuntime(runtime, options.debug === true);
-  await runtime.sync();
-  return runtime;
+  try {
+    await runtime.sync();
+    return runtime;
+  } catch (error) {
+    runtime.close();
+    throw error;
+  }
 }
 
 function createUnsupportedRuntime(): FarmWebMCPRuntime {

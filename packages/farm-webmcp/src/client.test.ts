@@ -247,6 +247,30 @@ describe("webmcp client runtime", () => {
     expect(window.__FARM_WEBMCP__).toBeUndefined();
   });
 
+  it("cleans up the runtime when initial native registration fails", async () => {
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    const registrationSignals: AbortSignal[] = [];
+    const registerTool = vi.fn(
+      async (_tool: NativeTool, options: { signal?: AbortSignal } = {}) => {
+        if (options.signal) registrationSignals.push(options.signal);
+        throw new Error("Native registration failed");
+      },
+    );
+    vi.stubGlobal("document", { modelContext: { registerTool } });
+    register(searchTool());
+
+    await expect(startWebMCPRuntime({ debug: true })).rejects.toThrow("Native registration failed");
+
+    expect(registrationSignals).toHaveLength(1);
+    expect(registrationSignals[0]?.aborted).toBe(true);
+    expect(window.__FARM_WEBMCP__).toBeUndefined();
+    expect(errorLog).toHaveBeenCalledOnce();
+
+    register(searchTool());
+    await Promise.resolve();
+    expect(registerTool).toHaveBeenCalledOnce();
+  });
+
   it("supports ignore, warning, and error behavior in browsers without WebMCP", async () => {
     vi.stubGlobal("document", {});
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
