@@ -371,6 +371,37 @@ async function expectNitroFallback(root: string): Promise<void> {
 }
 
 describe("production prebuilt SSR output", () => {
+  it("matches application routes beneath the configured basePath", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          basePath: "/workspace",
+          images: { provider: "none" },
+          telemetry: false,
+          generateBuildId: () => "production-base-path-test",
+        },
+        "production",
+      );
+
+      await build(config, { root, preset: "node-server" });
+
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          await expect(response.text()).resolves.toContain("prebuilt SSR output");
+        },
+        "/workspace",
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("serves the configured OpenAPI reference in production", async () => {
     const root = await createProductionFixture();
     const apiDir = path.join(root, "src", "app", "api", "health");
