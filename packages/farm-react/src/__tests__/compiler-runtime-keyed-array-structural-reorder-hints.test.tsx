@@ -98,6 +98,13 @@ function createHarness(initialItems: Item[]) {
     nextLabel: string,
     removed: ReadonlySet<string>,
   ) => void = () => undefined;
+  let filterMapSliceMapSortReverse: (
+    editedId: string,
+    nextLabel: string,
+    nextRank: number,
+    removed: ReadonlySet<string>,
+    limit: number,
+  ) => void = () => undefined;
   let invalidIdentity: () => void = () => undefined;
   let invalidMappedIdentity: () => void = () => undefined;
   let customMapStructural: () => void = () => undefined;
@@ -162,6 +169,25 @@ function createHarness(initialItems: Item[]) {
             ),
           ),
         );
+      filterMapSliceMapSortReverse = (editedId, nextLabel, nextRank, removed, limit) =>
+        state[0].set((previous) =>
+          hintedReverse(
+            hintedSort(
+              hintedMap(
+                hintedSlice(
+                  hintedMap(
+                    hintedFilter(previous as Item[], (item) => !removed.has(item.id)),
+                    (item) => (item.id === editedId ? { ...item, rank: nextRank } : item),
+                  ),
+                  0,
+                  limit,
+                ),
+                (item) => (item.id === editedId ? { ...item, label: nextLabel } : item),
+              ),
+              (left, right) => left.rank - right.rank,
+            ),
+          ),
+        );
       invalidIdentity = () =>
         state[0].set((previous) => {
           const next = hintedReverse(hintedFilter(previous as Item[], (item) => item.id !== "b"));
@@ -171,30 +197,26 @@ function createHarness(initialItems: Item[]) {
       invalidMappedIdentity = () =>
         state[0].set((previous) =>
           hintedReverse(
-            hintedFilter(
-              hintedMap(previous as Item[], (item) =>
+            hintedMap(
+              hintedFilter(previous as Item[], (item) => item.id !== "c"),
+              (item) =>
                 item.id === "b" ? { ...item, id: "replacement", label: "Replacement" } : item,
-              ),
-              (item) => item.id !== "c",
             ),
           ),
         );
       customMapStructural = () =>
         state[0].set((previous) => {
-          const source = previous as Item[];
+          const filtered = hintedFilter(previous as Item[], (item) => item.id !== "c");
           const customMap = function (
             this: Item[],
             callback: (item: Item, index: number, items: Item[]) => Item,
           ) {
             return Array.prototype.map.call(this, callback);
           };
-          const mapped = createCompilerKeyedArrayMapPipeline(source, customMap, (item: Item) =>
+          const mapped = createCompilerKeyedArrayMapPipeline(filtered, customMap, (item: Item) =>
             item.id === "a" ? { ...item, label: "Custom map" } : item,
           ) as Item[];
-          return hintedSort(
-            hintedFilter(mapped, (item) => item.id !== "c"),
-            (left, right) => left.rank - right.rank,
-          );
+          return hintedSort(mapped, (left, right) => left.rank - right.rank);
         });
       customSortAfterFilter = (removed) =>
         state[0].set((previous) => {
@@ -259,6 +281,13 @@ function createHarness(initialItems: Item[]) {
     counters,
     customSortAfterFilter: (removed: ReadonlySet<string>) => customSortAfterFilter(removed),
     customMapStructural: () => customMapStructural(),
+    filterMapSliceMapSortReverse: (
+      editedId: string,
+      nextLabel: string,
+      nextRank: number,
+      removed: ReadonlySet<string>,
+      limit: number,
+    ) => filterMapSliceMapSortReverse(editedId, nextLabel, nextRank, removed, limit),
     filterSliceReverse: (removed: ReadonlySet<string>, limit: number) =>
       filterSliceReverse(removed, limit),
     filterSortReverse: (removed: ReadonlySet<string>) => filterSortReverse(removed),
@@ -402,6 +431,42 @@ describe("compiled keyed-array structural reorder hints", () => {
     expect(insertBefore).not.toHaveBeenCalled();
   });
 
+  it("preserves mapped row lineage between structural steps", async () => {
+    const items: Item[] = [
+      { id: "a", label: "Alpha", rank: 4, visible: true },
+      { id: "b", label: "Beta", rank: 1, visible: false },
+      { id: "c", label: "Gamma", rank: 3, visible: true },
+      { id: "d", label: "Delta", rank: 2, visible: true },
+    ];
+    const harness = createHarness(items);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Table />));
+    const alpha = container.querySelector('[data-key="a"]');
+    const gamma = container.querySelector('[data-key="c"]');
+    harness.counters.bindings = 0;
+    harness.counters.descriptors = 0;
+    harness.counters.keys = 0;
+
+    await act(async () => {
+      harness.filterMapSliceMapSortReverse("c", "Gamma updated", 0, new Set(["b"]), 2);
+      await flushCompilerUpdates();
+    });
+
+    expect(labels(container)).toEqual(["Alpha", "Gamma updated"]);
+    expect(container.querySelector('[data-key="a"]')).toBe(alpha);
+    expect(container.querySelector('[data-key="c"]')).toBe(gamma);
+    expect(container.querySelector('[data-key="b"]')).toBeNull();
+    expect(container.querySelector('[data-key="d"]')).toBeNull();
+    expect(harness.counters.executions).toBe(1);
+    expect(harness.counters.renders).toBe(1);
+    expect(harness.counters.keys).toBe(2);
+    expect(harness.counters.descriptors).toBe(0);
+    expect(harness.counters.bindings).toBe(1);
+  });
+
   it("falls back safely for custom methods and identity mismatches", async () => {
     const items: Item[] = [
       { id: "a", label: "Alpha", rank: 2, visible: true },
@@ -482,11 +547,13 @@ describe("compiled keyed-array structural reorder hints", () => {
         update = () =>
           state[0].set((previous) =>
             hintedReverse(
-              hintedFilter(
-                hintedMap(previous as Item[], (item) =>
-                  item.id === "b" ? { ...item, label: "Beta newest" } : item,
+              hintedSlice(
+                hintedMap(
+                  hintedFilter(previous as Item[], (item) => item.id !== "a"),
+                  (item) => (item.id === "b" ? { ...item, label: "Beta newest" } : item),
                 ),
-                (item) => item.id !== "a",
+                0,
+                1,
               ),
             ),
           );
@@ -689,6 +756,85 @@ describe("compiled keyed-array structural reorder hints", () => {
     expect(harness.counters.executions).toBe(1);
   }, 20_000);
 
+  it("matches React across 2,000 randomized interleaved map and structural removals", async () => {
+    const initialItems = Array.from(
+      { length: 2_001 },
+      (_, index): Item => ({
+        id: `row-${index}`,
+        label: `Row ${index}`,
+        rank: (index * 1_229) % 2_003,
+        visible: true,
+      }),
+    );
+    const harness = createHarness(initialItems);
+    let updateReact: (
+      editedId: string,
+      nextLabel: string,
+      nextRank: number,
+      removed: ReadonlySet<string>,
+      limit: number,
+    ) => void = () => undefined;
+    function Normal() {
+      const [items, setItems] = useState(initialItems);
+      updateReact = (editedId, nextLabel, nextRank, removed, limit) =>
+        setItems((previous) =>
+          previous
+            .filter((item) => !removed.has(item.id))
+            .map((item) => (item.id === editedId ? { ...item, rank: nextRank } : item))
+            .slice(0, limit)
+            .map((item) => (item.id === editedId ? { ...item, label: nextLabel } : item))
+            .toSorted((left, right) => left.rank - right.rank)
+            .toReversed(),
+        );
+      return (
+        <ol>
+          {items.map((item) => (
+            <li data-key={item.id} key={item.id}>
+              {item.label}
+            </li>
+          ))}
+        </ol>
+      );
+    }
+    const compiledContainer = document.createElement("div");
+    const reactContainer = document.createElement("div");
+    document.body.append(compiledContainer, reactContainer);
+    const compiledRoot = createRoot(compiledContainer);
+    const reactRoot = createRoot(reactContainer);
+    roots.push(compiledRoot, reactRoot);
+    await act(async () => {
+      compiledRoot.render(<harness.Table />);
+      reactRoot.render(<Normal />);
+    });
+
+    let seed = 0x6c8e9cf5;
+    let active = initialItems.map((item) => item.id);
+    for (let batch = 0; batch < 100; batch += 1) {
+      const removed = new Set<string>();
+      for (let update = 0; update < 15; update += 1) {
+        seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0;
+        const available = active.filter((id) => !removed.has(id));
+        removed.add(available[seed % available.length]);
+      }
+      const survivors = active.filter((id) => !removed.has(id));
+      const limit = survivors.length - 5;
+      seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0;
+      const editedId = survivors[seed % limit];
+      const nextLabel = `Interleaved ${batch}`;
+      const nextRank = seed % 2_003;
+      await act(async () => {
+        harness.filterMapSliceMapSortReverse(editedId, nextLabel, nextRank, removed, limit);
+        updateReact(editedId, nextLabel, nextRank, removed, limit);
+        await flushCompilerUpdates();
+      });
+      expect(labels(compiledContainer)).toEqual(labels(reactContainer));
+      active = [...reactContainer.querySelectorAll<HTMLElement>("li")].map(
+        (row) => row.dataset.key!,
+      );
+    }
+    expect(harness.counters.executions).toBe(1);
+  }, 20_000);
+
   it("hydrates in StrictMode and drops a queued pipeline after unmount", async () => {
     const items: Item[] = [
       { id: "a", label: "Alpha", rank: 3, visible: true },
@@ -712,10 +858,10 @@ describe("compiled keyed-array structural reorder hints", () => {
     });
     roots.push(root);
     await act(async () => {
-      hydration.mapFilterSortReverse("c", "Gamma hydrated", 2, new Set(["b"]));
+      hydration.filterMapSliceMapSortReverse("b", "Beta hydrated", 2, new Set(), 2);
       await flushCompilerUpdates();
     });
-    expect(labels(container)).toEqual(["Alpha", "Gamma hydrated"]);
+    expect(labels(container)).toEqual(["Alpha", "Beta hydrated"]);
     expect(recoverable).toEqual([]);
 
     const unmounted = createHarness(items);
@@ -724,7 +870,7 @@ describe("compiled keyed-array structural reorder hints", () => {
     const unmountRoot = createRoot(unmountContainer);
     await act(async () => unmountRoot.render(<unmounted.Table />));
     act(() => {
-      unmounted.mapFilterSortReverse("c", "Gamma queued", 2, new Set(["a"]));
+      unmounted.filterMapSliceMapSortReverse("c", "Gamma queued", 2, new Set(["a"]), 2);
       unmountRoot.unmount();
     });
     await flushCompilerUpdates();

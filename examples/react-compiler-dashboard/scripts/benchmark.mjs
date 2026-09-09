@@ -2972,9 +2972,9 @@ const keyedStructuralReorderRegressions = keyedStructuralReorderResults.filter(
     !Number.isFinite(snapshotSpeedup) ||
     snapshotSpeedup < keyedStructuralReorderMinimumSnapshotSpeedup,
 );
-// A safe map before filter and reorder changes row data, membership, and order in one setter. The
-// mapped structural path must patch the changed survivor, remove the rejected row, and validate the
-// final order once instead of dropping to complete keyed reconciliation.
+// A safe map between filter and reorder changes row data, membership, and order in one setter. The
+// interleaved structural path must patch the changed survivor, remove the rejected row, and
+// validate the final order once instead of dropping to complete keyed reconciliation.
 const keyedMappedStructuralReorderMinimumSpeedup = 2;
 const keyedMappedStructuralReorderMinimumSnapshotSpeedup = 1.25;
 const keyedMappedStructuralReorderResults = ["static", "hybrid"].map((mode) => {

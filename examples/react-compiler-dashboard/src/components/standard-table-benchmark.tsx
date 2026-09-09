@@ -876,12 +876,12 @@ export function StandardTableBenchmark() {
           onClick={() => {
             setRows((current) =>
               current
+                .filter((row) => row.id % 10_000 !== 7_001)
                 .map((row) =>
                   row.id % 10_000 === 5_001
                     ? { ...row, amount: row.amount + 1, label: `${row.label} reviewed` }
                     : row,
                 )
-                .filter((row) => row.id % 10_000 !== 7_001)
                 .toReversed()
                 .toReversed(),
             );
@@ -897,12 +897,12 @@ export function StandardTableBenchmark() {
           onClick={() => {
             setRows((current) => {
               return current
+                .filter((row) => row.id % 10_000 !== 7_001)
                 .map((row) =>
                   row.id % 10_000 === 5_001
                     ? { ...row, amount: row.amount + 1, label: `${row.label} reviewed` }
                     : row,
                 )
-                .filter((row) => row.id % 10_000 !== 7_001)
                 .toReversed()
                 .toReversed();
             });

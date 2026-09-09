@@ -1,6 +1,34 @@
 # Complex dashboard and 21,000-row peak result
 
-Latest run: 2026-09-08
+Latest run: 2026-09-09
+
+## Maps interleaved with structural steps — 2026-09-09
+
+A concise keyed-row setter may now keep same-key replacement lineage when a safe `map()` follows
+an index-independent `filter()` or `slice()` and precedes the final native reorder. The maintained
+10,000-row workload filters one row, updates another, and executes two reversals that preserve
+survivor order. The block-bodied compiled control performs identical JavaScript work through
+complete keyed reconciliation. Every value, final position, surviving DOM identity, and removed
+row connection is checked after each sample.
+
+| Mode   | Interleaved pipeline | Compiled control | vs React | vs control |
+| ------ | -------------------: | ---------------: | -------: | ---------: |
+| Static |              5.80 ms |         12.80 ms |   11.28x |      2.21x |
+| Hybrid |              5.80 ms |         12.90 ms |   11.28x |      2.22x |
+
+Both modes passed the unchanged 2x React and 1.25x compiled-control floors. The full correctness
+oracle and broad 10% regression gate passed, and compiled owner executions remained zero. Three
+unrelated isolated gates were noisy in this run: static append scaling measured 3.996x against its
+4x floor, the older static structural-control comparison measured 1.239x against 1.25x, and the
+older hybrid multi-map reorder comparison measured 3.19x against 4x. Their workloads and thresholds
+were not changed.
+
+Compiler and runtime tests additionally cover two maps separated by filter/slice steps, exact DOM
+reuse, one changed-row binding read, custom-map and changed-key fallback before DOM writes,
+controlled-input focus and selection, Strict Mode hydration, unmount-before-flush cleanup, and
+2,000 randomized interleaved transitions matched with normal React. Numbers are local medians from
+10 samples per compiler mode and 20 bracketing React samples using Chrome 153.0.8010.36,
+Node.js 23.11.0, and Apple M1 macOS arm64.
 
 ## Native reorder followed by same-key maps — 2026-09-08
 

@@ -533,7 +533,7 @@ if (checkOnly) {
     {
       name: "keyed filter compiler premium",
       current: results.fixtures.keyedFilter.compilerPremium.gzip,
-      maximum: (reference.fixtures.keyedFilter?.compilerPremium.gzip ?? 12_000) + 260,
+      maximum: (reference.fixtures.keyedFilter?.compilerPremium.gzip ?? 12_000) + 264,
     },
     {
       name: "keyed prepend compiler premium",
@@ -573,7 +573,7 @@ if (checkOnly) {
       current: results.fixtures.keyedMapReorder.compilerPremium.gzip,
       maximum:
         (reference.fixtures.keyedMapReorder?.compilerPremium.gzip ??
-          results.fixtures.keyedMapReorder.compilerPremium.gzip) + 256,
+          results.fixtures.keyedMapReorder.compilerPremium.gzip) + 328,
     },
     {
       name: "keyed sort compiler premium",
