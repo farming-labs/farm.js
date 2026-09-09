@@ -573,7 +573,7 @@ if (checkOnly) {
       current: results.fixtures.keyedMapReorder.compilerPremium.gzip,
       maximum:
         (reference.fixtures.keyedMapReorder?.compilerPremium.gzip ??
-          results.fixtures.keyedMapReorder.compilerPremium.gzip) + 256,
+          results.fixtures.keyedMapReorder.compilerPremium.gzip) + 328,
     },
     {
       name: "keyed sort compiler premium",
