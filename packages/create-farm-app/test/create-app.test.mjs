@@ -247,8 +247,8 @@ test("generates a buildable starter application", async () => {
     assert.match(generatedResourceLinks, /function ResourceSeparator\(\)/);
     assert.match(generatedResourceLinks, /className="resource-separator"/);
     assert.match(generatedResourceLinks, /aria-hidden="true"/);
-    assert.match(generatedResourceLinks, /href="https:\/\/farm\.js\.dev"/);
-    assert.doesNotMatch(generatedResourceLinks, /https:\/\/farmjs\.dev/);
+    assert.match(generatedResourceLinks, /href="https:\/\/farmjs\.dev"/);
+    assert.doesNotMatch(generatedResourceLinks, /https:\/\/farm\.js\.dev/);
     assert.doesNotMatch(generatedResourceLinks, /Docs ↗|GitHub ↗/);
 
     const generatedStyles = await readFile(
@@ -839,16 +839,16 @@ for (const template of [
       assert.match(generatedResourceLinks, /function ResourceSeparator\(\)/);
       assert.match(generatedResourceLinks, /className="resource-separator"/);
       assert.match(generatedResourceLinks, /aria-hidden="true"/);
-      assert.match(generatedResourceLinks, /href="https:\/\/farm\.js\.dev"/);
-      assert.doesNotMatch(generatedResourceLinks, /https:\/\/farmjs\.dev/);
+      assert.match(generatedResourceLinks, /href="https:\/\/farmjs\.dev"/);
+      assert.doesNotMatch(generatedResourceLinks, /https:\/\/farm\.js\.dev/);
       assert.doesNotMatch(generatedResourceLinks, /Docs ↗|GitHub ↗/);
 
       const generatedSiteHeader = await readFile(
         path.join(generatedDir, "src/components/site-header.tsx"),
         "utf8",
       );
-      assert.match(generatedSiteHeader, /href="https:\/\/farm\.js\.dev"/);
-      assert.doesNotMatch(generatedSiteHeader, /https:\/\/farmjs\.dev/);
+      assert.match(generatedSiteHeader, /href="https:\/\/farmjs\.dev"/);
+      assert.doesNotMatch(generatedSiteHeader, /https:\/\/farm\.js\.dev/);
 
       const generatedStyles = await readFile(
         path.join(generatedDir, "src/app/globals.css"),
@@ -1057,7 +1057,8 @@ test("generates every official integration starter", async () => {
       assert.match(styles, /\[data-theme="dark"\] \{/);
       assert.doesNotMatch(styles, /^\.dark \{/m);
       assert.match(readme, new RegExp(`^# FARMJS ${escapeRegExp(template.label)} Starter`, "m"));
-      assert.match(readme, /https:\/\/farm\.js\.dev\/docs\/integrations/);
+      assert.match(readme, /https:\/\/farmjs\.dev\/docs\/integrations/);
+      assert.doesNotMatch(readme, /https:\/\/farm\.js\.dev/);
       await readFile(
         path.join(generatedDir, "src/app/integrations", template.route, "page.tsx"),
         "utf8",

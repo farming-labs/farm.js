@@ -676,7 +676,7 @@ ${environmentSetup}pnpm dev
 Open [${integration.route}](http://localhost:3000${integration.route}) for the integration UI.
 
 ${wiring}
-See the [${integration.label} integration guide](https://farm.js.dev${integration.docsPath}) for provider setup and production guidance.
+See the [${integration.label} integration guide](https://farmjs.dev${integration.docsPath}) for provider setup and production guidance.
 `;
 
   await fs.writeFile(path.join(projectPath, "README.md"), source, "utf8");
