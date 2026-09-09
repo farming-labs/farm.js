@@ -37,6 +37,7 @@ import {
 import path from "path";
 import type { ViteDevServer } from "vite";
 import {
+  enforceFarmIsolatedHydrationRouteBudget,
   getClientModuleHydrationPlan,
   getClientModuleMetadata,
   resolveFarmIsolatedClientHydrationMode,
@@ -631,6 +632,24 @@ export class RouteManager {
       entry,
       metadata: getClientModuleHydrationPlan(entry.modulePath, normalizedProjectRoot, isolatedMode),
     }));
+
+    enforceFarmIsolatedHydrationRouteBudget(
+      layoutEntries.map(({ entry, metadata }) => ({
+        pattern: entry.pattern,
+        depth: entry.route.segments.length,
+        metadata,
+      })),
+      routeEntries.map(({ entry, metadata }) => ({
+        pattern: entry.pattern,
+        depth: entry.route.segments.length,
+        metadata,
+      })),
+      (layoutPattern, routePattern) =>
+        layoutPattern === "/" ||
+        routePattern === layoutPattern ||
+        routePattern.startsWith(`${layoutPattern.replace(/\/$/, "")}/`),
+    );
+
     for (const { entry, metadata } of [...layoutEntries, ...routeEntries]) {
       if (!metadata.costGuardExceeded) continue;
       logger.warn(
@@ -643,26 +662,6 @@ export class RouteManager {
         logger.info(
           `[Farm.js] isolated hydration analysis: ${entry.modulePath} can keep ${metadata.isolatedBoundaries.length} client ${metadata.isolatedBoundaries.length === 1 ? "boundary" : "boundaries"} while excluding its server owner from the browser graph.`,
         );
-      }
-    }
-
-    // A route-wide layout owns its complete descendant tree, so a client leaf
-    // below it cannot also create an isolated root. A route-wide page does not
-    // conflict with isolated layout leaves because its root starts at the page
-    // boundary, outside those sibling markers.
-    for (const routeEntry of routeEntries) {
-      if (!routeEntry.metadata.hasIsolatedClientBoundaries) continue;
-      const conflictsWithLayoutRoot = layoutEntries.some(
-        ({ entry, metadata }) =>
-          metadata.shouldHydrate &&
-          (entry.pattern === "/" ||
-            routeEntry.entry.pattern === entry.pattern ||
-            routeEntry.entry.pattern.startsWith(`${entry.pattern.replace(/\/$/, "")}/`)),
-      );
-      if (conflictsWithLayoutRoot) {
-        routeEntry.metadata.shouldHydrate = routeEntry.metadata.legacyShouldHydrate;
-        routeEntry.metadata.islandStrategy = routeEntry.metadata.legacyIslandStrategy;
-        routeEntry.metadata.hasIsolatedClientBoundaries = false;
       }
     }
 

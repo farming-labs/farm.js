@@ -972,12 +972,13 @@ export default function SecondPage() {
     }
   }, 120_000);
 
-  it("keeps the measured isolated-root overflow route-wide in development and production", async () => {
+  it("enforces the measured isolated-root budget across layouts and pages", async () => {
     const root = await createProductionFixture();
     const developmentRoot = await createProductionFixture();
 
     try {
       await fs.mkdir(path.join(root, "src", "components"), { recursive: true });
+      await fs.mkdir(path.join(root, "src", "app", "safe"), { recursive: true });
       await fs.writeFile(
         path.join(root, "src", "components", "counter.tsx"),
         `
@@ -992,21 +993,37 @@ export default function Counter({ name }) {
 `.trim(),
       );
       await fs.writeFile(
+        path.join(root, "src", "app", "layout.tsx"),
+        `
+import Counter from "../components/counter";
+
+export default function Layout({ children }) {
+  return <><header><Counter name="layout-1" /><Counter name="layout-2" /></header>{children}</>;
+}
+`.trim(),
+      );
+      await fs.writeFile(
         path.join(root, "src", "app", "page.tsx"),
         `
 import Counter from "../components/counter";
 
 export default function Page() {
   return <main>${Array.from(
-    { length: 5 },
-    (_, index) => `<Counter name="counter-${index + 1}" />`,
+    { length: 3 },
+    (_, index) => `<Counter name="overflow-${index + 1}" />`,
   ).join("")}</main>;
 }
 `.trim(),
       );
       await fs.writeFile(
-        path.join(root, "src", "app", "layout.tsx"),
-        `export default function RootLayout({ children }) { return <>{children}</>; }`,
+        path.join(root, "src", "app", "safe", "page.tsx"),
+        `
+import Counter from "../../components/counter";
+
+export default function Page() {
+  return <main><Counter name="safe-1" /><Counter name="safe-2" /></main>;
+}
+`.trim(),
       );
       await fs.writeFile(
         path.join(developmentRoot, "index.mjs"),
@@ -1028,11 +1045,23 @@ await server.listen(Number(process.env.PORT));
         force: true,
       });
 
-      const verifyRouteWideRuntime = async (response: Response) => {
+      const verifyRuntime = async (
+        response: Response,
+        expected: {
+          isolatedRoots: number;
+          pageHydrates: boolean;
+          counter: string;
+          totalCounters: number;
+        },
+      ) => {
         expect(response.status).toBe(200);
         const html = await response.text();
-        expect(html).not.toContain("<farm-client-boundary");
-        expect(html).toMatch(/id="__farm_page__"[^>]*data-farm-client="true"/);
+        expect(html.match(/<farm-client-boundary/g) ?? []).toHaveLength(expected.isolatedRoots);
+        expect(html).toMatch(
+          new RegExp(
+            `id="__farm_page__"[^>]*data-farm-client="${expected.pageHydrates ? "true" : "false"}`,
+          ),
+        );
 
         const executablePath = await resolveInstalledChromiumExecutable();
         if (!executablePath) return;
@@ -1045,18 +1074,16 @@ await server.listen(Number(process.env.PORT));
           });
           page.on("pageerror", (error) => browserErrors.push(error.message));
           await page.goto(response.url);
-          const counter = page.locator('[data-cost-counter="counter-3"]');
+          const counter = page.locator(`[data-cost-counter="${expected.counter}"]`);
           try {
             await expect
-              .poll(() =>
-                counter.evaluate((element) =>
-                  Object.keys(element).some((key) => key.startsWith("__reactProps$")),
-                ),
-              )
-              .toBe(true);
+              .poll(() => page.locator('farm-client-boundary[data-farm-hydrated="true"]').count())
+              .toBe(expected.isolatedRoots);
             await counter.click();
-            await expect.poll(() => counter.textContent()).toBe("counter-3:1");
-            await expect.poll(() => page.locator("[data-cost-counter]").count()).toBe(5);
+            await expect.poll(() => counter.textContent()).toBe(`${expected.counter}:1`);
+            await expect
+              .poll(() => page.locator("[data-cost-counter]").count())
+              .toBe(expected.totalCounters);
             expect(browserErrors).toEqual([]);
           } catch (error) {
             throw new Error(
@@ -1068,7 +1095,23 @@ await server.listen(Number(process.env.PORT));
         }
       };
 
-      await runProductionRequest(developmentRoot, verifyRouteWideRuntime);
+      const verifyServer = async (response: Response) => {
+        const origin = new URL(response.url).origin;
+        await verifyRuntime(response, {
+          isolatedRoots: 2,
+          pageHydrates: true,
+          counter: "overflow-2",
+          totalCounters: 5,
+        });
+        await verifyRuntime(await fetch(`${origin}/safe`), {
+          isolatedRoots: 4,
+          pageHydrates: false,
+          counter: "safe-2",
+          totalCounters: 4,
+        });
+      };
+
+      await runProductionRequest(developmentRoot, verifyServer);
 
       const config = await resolveConfig(
         {
@@ -1084,13 +1127,10 @@ await server.listen(Number(process.env.PORT));
 
       const clientJavaScript = await readAllClientJavaScript(root);
       expect(clientJavaScript).toContain("data-cost-counter");
-      expect(clientJavaScript).not.toContain("__farm_client_boundary_originals__");
-      expect(clientJavaScript).not.toContain("Could not hydrate isolated client boundary");
+      expect(clientJavaScript).toContain("__farm_client_boundary_originals__");
+      expect(clientJavaScript).toContain("Could not hydrate isolated client boundary");
 
-      await runProductionRequest(
-        path.join(root, ".farm", ".output", "server"),
-        verifyRouteWideRuntime,
-      );
+      await runProductionRequest(path.join(root, ".farm", ".output", "server"), verifyServer);
     } finally {
       await Promise.all(
         [root, developmentRoot].map((fixtureRoot) =>
