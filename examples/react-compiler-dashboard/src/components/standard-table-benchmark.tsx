@@ -1199,6 +1199,54 @@ export function StandardTableBenchmark() {
           Queue review + reverse rows (snapshot control)
         </button>
         <button
+          data-action="table-queued-map-reorder-chain"
+          type="button"
+          onClick={() => {
+            setRows((current) =>
+              current.map((row) =>
+                row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
+              ),
+            );
+            setRows((current) =>
+              current.map((row) =>
+                row.id % 10_000 === 5_001 ? { ...row, amount: row.amount + 1 } : row,
+              ),
+            );
+            setRows((current) => current.toReversed());
+            setRows((current) => current.toReversed());
+            setOperation("queue review, then reverse rows twice");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queue review + two reversals
+        </button>
+        <button
+          data-action="table-queued-map-reorder-chain-snapshot"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              return current.map((row) =>
+                row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
+              );
+            });
+            setRows((current) => {
+              return current.map((row) =>
+                row.id % 10_000 === 5_001 ? { ...row, amount: row.amount + 1 } : row,
+              );
+            });
+            setRows((current) => {
+              return current.toReversed();
+            });
+            setRows((current) => {
+              return current.toReversed();
+            });
+            setOperation("queue review, then reverse rows twice (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queue review + two reversals (snapshot control)
+        </button>
+        <button
           data-action="table-sort"
           type="button"
           onClick={() => {

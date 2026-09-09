@@ -1303,6 +1303,23 @@ following native reverse or sort. This produces the same final result as React's
 setters while reconciling the keyed block once. Only adjacent concise calls to the same setter are
 linked; any statement or unsupported update between them keeps the existing fallback.
 
+The mapped lineage can continue through more than one adjacent native reorder setter:
+
+```tsx
+setItems((current) =>
+  current.map((item) => (item.id === editedId ? { ...item, rank: nextRank } : item)),
+);
+setItems((current) => current.toReversed());
+setItems((current) => current.toSorted((left, right) => left.rank - right.rank));
+setItems((current) => current.toReversed());
+```
+
+Farm still executes every updater and native method in order. Each accepted reverse or sort carries
+the same committed-row proof forward, so the final value needs one validated keyed reconciliation
+rather than losing map lineage after the first reorder. A `map().toReversed()` pipeline can start
+the same adjacent chain. An intervening statement, another setter, a structural update, or an
+unsupported method ends the chain before later setters are considered.
+
 Exact reverse proof can also cross a setter boundary in the same batch:
 
 ```tsx

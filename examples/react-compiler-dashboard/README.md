@@ -262,6 +262,13 @@ connection, and both changed values. Package tests also compare 2,000 determinis
 reverse-or-sort/map sequences with normal React and cover Strict Mode hydration and
 unmount-before-flush cleanup.
 
+Queued map/reorder chains have a separate 10,000-row comparison. Two concise map setters update
+one row, followed by two adjacent concise reverse setters. The block-bodied control performs the
+same four native updates through complete reconciliation. Both compiler modes must remain at least
+4x faster than React and 1.2x faster than the compiled control. The assertion verifies the complete
+final committed order, every original DOM identity and connection, and both changed values. Package tests
+also cover mixed reverse/sort chains, chain boundaries, and 2,000 randomized differential updates.
+
 Mapped reverse parity has an independent 10,000-row comparison. Two safe native maps update one
 row, then two native reversals restore committed order. Farm must patch the changed row without
 moving any DOM row or constructing the generic source-item map/LIS sequence. Both compiler modes
@@ -378,6 +385,10 @@ The default JSON report is `/tmp/farm-react-dashboard-benchmark.json`; change it
 - The queued map-then-reorder control performs two maps and a reverse in three adjacent setter
   calls. Its block-bodied equivalent keeps complete reconciliation; the hinted path records safe
   replacements from the committed rows and carries them into the final exact reverse.
+- The queued map/reorder-chain control performs two maps and two reversals in four adjacent
+  setter calls. Its block-bodied equivalent drops to complete reconciliation; the hinted path
+  carries one committed replacement proof through both reversals, patches the changed row, and
+  moves no DOM row when the reversals cancel.
 - The multi-map reverse-parity control changes the same row through two native maps and then
   reverses twice. Its block-bodied equivalent keeps complete reconciliation; the hinted path
   validates exact committed order, patches the row once, and performs no generic item-map, LIS, or

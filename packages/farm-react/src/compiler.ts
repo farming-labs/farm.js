@@ -2435,6 +2435,7 @@ function rewriteQueuedKeyedArrayMapReorderHints(
 
   traverse(file, {
     BlockStatement(path) {
+      let mappedReorderState: number | undefined;
       let pendingMaps: Array<{
         count: number;
         stateIndex: number;
@@ -2444,6 +2445,7 @@ function rewriteQueuedKeyedArrayMapReorderHints(
       for (const statementPath of statements) {
         const statement = statementPath.node;
         if (!t.isExpressionStatement(statement) || !t.isCallExpression(statement.expression)) {
+          mappedReorderState = undefined;
           pendingMaps = [];
           continue;
         }
@@ -2453,6 +2455,7 @@ function rewriteQueuedKeyedArrayMapReorderHints(
           statementPath.scope.hasBinding(setterCall.callee.name) ||
           setterCall.arguments.length !== 1
         ) {
+          mappedReorderState = undefined;
           pendingMaps = [];
           continue;
         }
@@ -2466,6 +2469,7 @@ function rewriteQueuedKeyedArrayMapReorderHints(
           updater.params.length !== 1 ||
           !t.isIdentifier(updater.params[0])
         ) {
+          mappedReorderState = undefined;
           pendingMaps = [];
           continue;
         }
@@ -2499,10 +2503,12 @@ function rewriteQueuedKeyedArrayMapReorderHints(
               pendingMaps[0]?.stateIndex === state.index
                 ? [...pendingMaps, candidate]
                 : [candidate];
+            if (mappedReorderState !== state.index) mappedReorderState = undefined;
             continue;
           }
         }
 
+        let containsMappedReorder = false;
         const reorderCalls: Array<{
           call: t.CallExpression;
           kind: "reverse" | "sort";
@@ -2515,31 +2521,51 @@ function rewriteQueuedKeyedArrayMapReorderHints(
             node.callee.name === structuralSortIdentifier.name
           ) {
             structural = true;
+          } else if (node.callee.name === mapReorderIdentifier.name) {
+            containsMappedReorder = true;
           } else if (node.callee.name === reorderIdentifier.name) {
             reorderCalls.push({ call: node, kind: "reverse" });
           } else if (node.callee.name === sortIdentifier.name) {
             reorderCalls.push({ call: node, kind: "sort" });
           }
         });
-        if (
-          structural ||
-          reorderCalls.length === 0 ||
-          pendingMaps.length === 0 ||
-          pendingMaps[0].stateIndex !== state.index
-        ) {
+        if (structural) {
+          mappedReorderState = undefined;
           pendingMaps = [];
           continue;
         }
 
-        for (const candidate of pendingMaps) {
-          candidate.updater.body.callee = t.cloneNode(queuedMapPipelineIdentifier);
-          mapCount += candidate.count;
+        const hasPendingMaps = pendingMaps.length > 0 && pendingMaps[0].stateIndex === state.index;
+        if (containsMappedReorder && reorderCalls.length === 0) {
+          // A mapped reorder can start the next adjacent segment only when no unlinked map setter
+          // sits before it. The later reorder-to-map pass handles proven maps after an existing
+          // mapped reorder; an earlier unproven map must not be skipped when establishing lineage.
+          mappedReorderState = pendingMaps.length === 0 ? state.index : undefined;
+          pendingMaps = [];
+          continue;
+        }
+        if (
+          containsMappedReorder ||
+          reorderCalls.length === 0 ||
+          (!hasPendingMaps && mappedReorderState !== state.index)
+        ) {
+          mappedReorderState = undefined;
+          pendingMaps = [];
+          continue;
+        }
+
+        if (hasPendingMaps) {
+          for (const candidate of pendingMaps) {
+            candidate.updater.body.callee = t.cloneNode(queuedMapPipelineIdentifier);
+            mapCount += candidate.count;
+          }
         }
         for (const { call, kind } of reorderCalls) {
           call.callee = t.cloneNode(mapReorderIdentifier);
           if (kind === "reverse") mapReorderCount += 1;
           else mapSortCount += 1;
         }
+        mappedReorderState = state.index;
         pendingMaps = [];
       }
     },
@@ -8277,7 +8303,9 @@ function compileCandidate(
   );
   let appliedQueuedReorderMapHints = 0;
   const queuedMapCount = queuedMapReorderHintedRoot.mapCount + queuedReorderMapHintedRoot.mapCount;
-  if (queuedMapCount > 0) {
+  const queuedMapReorderCount =
+    queuedMapReorderHintedRoot.mapReorderCount + queuedMapReorderHintedRoot.mapSortCount;
+  if (queuedMapCount > 0 || queuedMapReorderCount > 0) {
     const hintedBlockAnalysis = analyzeComposableBlocks(
       queuedReorderMapHintedRoot.root,
       reactiveByValue,
@@ -8298,7 +8326,7 @@ function compileCandidate(
       expandedReactiveRoot = queuedReorderMapHintedRoot.root;
       blockAnalysis = hintedBlockAnalysis;
       analysis = hintedAnalysis;
-      appliedQueuedReorderMapHints = queuedMapCount;
+      appliedQueuedReorderMapHints = queuedMapCount + queuedMapReorderCount;
       compilerUsage.keyedArrayMapUpdateHints += queuedMapCount;
       compilerUsage.keyedArrayQueuedMapUpdateHints += queuedMapCount;
       compilerUsage.keyedArrayMapReorderHints += queuedMapReorderHintedRoot.mapReorderCount;
