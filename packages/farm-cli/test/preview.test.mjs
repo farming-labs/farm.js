@@ -65,6 +65,29 @@ test("formats a bare IPv6 preview host as a valid local URL", async () => {
   assert.equal(new URL(target.localUrl).hostname, "[::1]");
 });
 
+test("rejects invalid explicit preview targets", async () => {
+  await assert.rejects(resolvePreviewTarget({ url: "ftp://127.0.0.1:21" }), /http or https/);
+  await assert.rejects(resolvePreviewTarget({ url: "file:///tmp/farm" }), /http or https/);
+  await assert.rejects(
+    resolvePreviewTarget({ url: "http://user:secret@127.0.0.1:3000" }),
+    /cannot include credentials/,
+  );
+  await assert.rejects(
+    resolvePreviewTarget({ url: "http://127.0.0.1:3000/app?token=secret" }),
+    /query string or fragment/,
+  );
+  await assert.rejects(resolvePreviewTarget({ port: "3000oops" }), /integer between 1 and 65535/);
+  await assert.rejects(resolvePreviewTarget({ port: 0 }), /integer between 1 and 65535/);
+});
+
+test("normalizes a valid explicit preview URL", async () => {
+  const target = await resolvePreviewTarget({ url: "  http://127.0.0.1:3000/app/  " });
+
+  assert.equal(target.localUrl, "http://127.0.0.1:3000/app");
+  assert.equal(target.host, "127.0.0.1");
+  assert.equal(target.port, 3000);
+});
+
 test("creates a tunnel plan from the preview command template", () => {
   const previousCommand = process.env.FARM_PREVIEW_TUNNEL_COMMAND;
   const previousDomain = process.env.FARM_PREVIEW_DOMAIN;

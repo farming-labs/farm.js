@@ -114,13 +114,30 @@ export async function resolvePreviewTarget(
   options: PreviewFarmOptions = {},
 ): Promise<PreviewTarget> {
   if (options.url) {
-    const parsed = new URL(options.url);
+    let parsed: URL;
+    try {
+      parsed = new URL(options.url);
+    } catch {
+      throw new Error(`Preview URL ${JSON.stringify(options.url)} is not a valid URL.`);
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error("Preview URL must use http or https.");
+    }
+    if (!parsed.hostname) {
+      throw new Error("Preview URL must include a hostname.");
+    }
+    if (parsed.username || parsed.password) {
+      throw new Error("Preview URL cannot include credentials.");
+    }
+    if (parsed.search || parsed.hash) {
+      throw new Error("Preview URL cannot include a query string or fragment.");
+    }
     const port = Number(parsed.port || (parsed.protocol === "https:" ? 443 : 80));
-    if (!Number.isFinite(port)) {
+    if (!Number.isInteger(port) || port <= 0 || port > 65535) {
       throw new Error(`Could not resolve a port from ${options.url}.`);
     }
     return {
-      localUrl: normalizeLocalUrl(options.url),
+      localUrl: normalizeLocalUrl(parsed.toString()),
       host: parsed.hostname,
       port,
       source: "url",
@@ -129,7 +146,11 @@ export async function resolvePreviewTarget(
 
   const root = options.root || process.cwd();
   const host = options.host || process.env.FARM_PREVIEW_HOST || "localhost";
-  const explicitPort = normalizePort(options.port || process.env.FARM_PREVIEW_PORT);
+  const configuredPort = options.port ?? process.env.FARM_PREVIEW_PORT;
+  const explicitPort = normalizePort(configuredPort);
+  if (configuredPort !== undefined && configuredPort !== "" && explicitPort === undefined) {
+    throw new Error("Preview port must be an integer between 1 and 65535.");
+  }
   const configPort = explicitPort ? undefined : await readConfigPort(root, options.configPath);
   const candidates = uniqueNumbers([
     explicitPort,
