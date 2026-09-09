@@ -486,6 +486,11 @@ sort-permutation path at commit. An intervening statement, another setter, a str
 filter/slice reorder, an unsupported map, or a changed key keeps the ordinary complete fallback.
 Standalone map-only components do not retain the map-and-reorder runtime.
 
+The mirror order is supported as well: two or more adjacent concise same-key map setters may be
+followed by a concise native reverse or sort setter. Farm records their replacement lineage from
+the committed collection and carries it into the final reorder. Only adjacent calls to the same
+setter are linked; intervening work and unsupported updates retain complete reconciliation.
+
 A reverse before the safe map pipeline may be queued in a separate setter:
 
 ```tsx

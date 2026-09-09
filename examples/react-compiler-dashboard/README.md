@@ -375,6 +375,9 @@ The default JSON report is `/tmp/farm-react-dashboard-benchmark.json`; change it
 - The queued reorder-then-map control performs the same reverse and two maps in three adjacent
   setter calls. Its block-bodied equivalent keeps complete reconciliation; the hinted path carries
   one committed reorder token through both queued maps and patches only the changed row.
+- The queued map-then-reorder control performs two maps and a reverse in three adjacent setter
+  calls. Its block-bodied equivalent keeps complete reconciliation; the hinted path records safe
+  replacements from the committed rows and carries them into the final exact reverse.
 - The multi-map reverse-parity control changes the same row through two native maps and then
   reverses twice. Its block-bodied equivalent keeps complete reconciliation; the hinted path
   validates exact committed order, patches the row once, and performs no generic item-map, LIS, or

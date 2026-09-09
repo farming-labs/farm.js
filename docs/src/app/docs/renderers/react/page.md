@@ -1286,6 +1286,23 @@ structural filter/slice reorder, an unsupported map, or host-backed/nested row s
 specialized chain and preserves the existing complete fallback. Map-only components do not retain
 the optional map-and-reorder runtime.
 
+The maps may come first as separate queued setters too:
+
+```tsx
+setItems((current) =>
+  current.map((item) => (item.id === editedId ? { ...item, label: nextLabel } : item)),
+);
+setItems((current) =>
+  current.map((item) => (item.id === editedId ? { ...item, rank: nextRank } : item)),
+);
+setItems((current) => current.toReversed());
+```
+
+Farm records safe replacement lineage from the committed collection, then carries it into the
+following native reverse or sort. This produces the same final result as React's queued functional
+setters while reconciling the keyed block once. Only adjacent concise calls to the same setter are
+linked; any statement or unsupported update between them keeps the existing fallback.
+
 Exact reverse proof can also cross a setter boundary in the same batch:
 
 ```tsx

@@ -2403,6 +2403,155 @@ function rewriteQueuedKeyedArrayReorderMapHints(
   };
 }
 
+function rewriteQueuedKeyedArrayMapReorderHints(
+  root: t.JSXElement,
+  statesBySetter: ReadonlyMap<string, StateBinding>,
+  mapUpdateIdentifier: t.Identifier,
+  queuedMapPipelineIdentifier: t.Identifier,
+  mapReorderIdentifier: t.Identifier,
+  reorderIdentifier: t.Identifier,
+  sortIdentifier: t.Identifier,
+  structuralReorderIdentifier: t.Identifier,
+  structuralSortIdentifier: t.Identifier,
+  allowed: boolean,
+): {
+  root: t.JSXElement;
+  mapCount: number;
+  mapReorderCount: number;
+  mapSortCount: number;
+} {
+  if (!allowed) {
+    return {
+      root: t.cloneNode(root, true),
+      mapCount: 0,
+      mapReorderCount: 0,
+      mapSortCount: 0,
+    };
+  }
+  const file = expressionFile(t.cloneNode(root, true));
+  let mapCount = 0;
+  let mapReorderCount = 0;
+  let mapSortCount = 0;
+
+  traverse(file, {
+    BlockStatement(path) {
+      let pendingMaps: Array<{
+        count: number;
+        stateIndex: number;
+        updater: t.ArrowFunctionExpression & { body: t.CallExpression };
+      }> = [];
+      const statements = path.get("body") as NodePath<t.Statement>[];
+      for (const statementPath of statements) {
+        const statement = statementPath.node;
+        if (!t.isExpressionStatement(statement) || !t.isCallExpression(statement.expression)) {
+          pendingMaps = [];
+          continue;
+        }
+        const setterCall = statement.expression;
+        if (
+          !t.isIdentifier(setterCall.callee) ||
+          statementPath.scope.hasBinding(setterCall.callee.name) ||
+          setterCall.arguments.length !== 1
+        ) {
+          pendingMaps = [];
+          continue;
+        }
+        const state = statesBySetter.get(setterCall.callee.name);
+        const updater = setterCall.arguments[0];
+        if (
+          !state ||
+          !t.isArrowFunctionExpression(updater) ||
+          updater.async ||
+          updater.generator ||
+          updater.params.length !== 1 ||
+          !t.isIdentifier(updater.params[0])
+        ) {
+          pendingMaps = [];
+          continue;
+        }
+
+        if (
+          t.isCallExpression(updater.body) &&
+          t.isIdentifier(updater.body.callee, { name: mapUpdateIdentifier.name }) &&
+          updater.body.arguments.length === 2
+        ) {
+          const pipeline = updater.body.arguments[1];
+          let pipelineMapCount = 0;
+          if (
+            t.isArrowFunctionExpression(pipeline) &&
+            pipeline.params.length === 2 &&
+            t.isIdentifier(pipeline.params[1])
+          ) {
+            const applyMapName = pipeline.params[1].name;
+            t.traverseFast(pipeline.body, (node) => {
+              if (t.isCallExpression(node) && t.isIdentifier(node.callee, { name: applyMapName })) {
+                pipelineMapCount += 1;
+              }
+            });
+          }
+          if (pipelineMapCount > 0) {
+            const candidate = {
+              count: pipelineMapCount,
+              stateIndex: state.index,
+              updater: updater as t.ArrowFunctionExpression & { body: t.CallExpression },
+            };
+            pendingMaps =
+              pendingMaps[0]?.stateIndex === state.index
+                ? [...pendingMaps, candidate]
+                : [candidate];
+            continue;
+          }
+        }
+
+        const reorderCalls: Array<{
+          call: t.CallExpression;
+          kind: "reverse" | "sort";
+        }> = [];
+        let structural = false;
+        t.traverseFast(updater.body, (node) => {
+          if (!t.isCallExpression(node) || !t.isIdentifier(node.callee)) return;
+          if (
+            node.callee.name === structuralReorderIdentifier.name ||
+            node.callee.name === structuralSortIdentifier.name
+          ) {
+            structural = true;
+          } else if (node.callee.name === reorderIdentifier.name) {
+            reorderCalls.push({ call: node, kind: "reverse" });
+          } else if (node.callee.name === sortIdentifier.name) {
+            reorderCalls.push({ call: node, kind: "sort" });
+          }
+        });
+        if (
+          structural ||
+          reorderCalls.length === 0 ||
+          pendingMaps.length === 0 ||
+          pendingMaps[0].stateIndex !== state.index
+        ) {
+          pendingMaps = [];
+          continue;
+        }
+
+        for (const candidate of pendingMaps) {
+          candidate.updater.body.callee = t.cloneNode(queuedMapPipelineIdentifier);
+          mapCount += candidate.count;
+        }
+        for (const { call, kind } of reorderCalls) {
+          call.callee = t.cloneNode(mapReorderIdentifier);
+          if (kind === "reverse") mapReorderCount += 1;
+          else mapSortCount += 1;
+        }
+        pendingMaps = [];
+      }
+    },
+  });
+  return {
+    root: (file.program.body[0] as t.ExpressionStatement).expression as t.JSXElement,
+    mapCount,
+    mapReorderCount,
+    mapSortCount,
+  };
+}
+
 function rewriteKeyedArraySortHints(
   root: t.JSXElement,
   hintedStateIndices: ReadonlySet<number>,
@@ -8102,7 +8251,7 @@ function compileCandidate(
       optimizationCounts.keyedArrayFilterHints += filterHintedRoot.count;
     }
   }
-  const queuedReorderMapHintedRoot = rewriteQueuedKeyedArrayReorderMapHints(
+  const queuedMapReorderHintedRoot = rewriteQueuedKeyedArrayMapReorderHints(
     expandedReactiveRoot,
     statesBySetter,
     keyedMapUpdateIdentifier,
@@ -8114,8 +8263,21 @@ function compileCandidate(
     keyedArrayStructuralSortIdentifier,
     allowKeyedArrayMapPipelines,
   );
+  const queuedReorderMapHintedRoot = rewriteQueuedKeyedArrayReorderMapHints(
+    queuedMapReorderHintedRoot.root,
+    statesBySetter,
+    keyedMapUpdateIdentifier,
+    keyedArrayQueuedMapPipelineIdentifier,
+    keyedArrayMapReorderIdentifier,
+    keyedArrayReorderIdentifier,
+    keyedArraySortIdentifier,
+    keyedArrayStructuralReorderIdentifier,
+    keyedArrayStructuralSortIdentifier,
+    allowKeyedArrayMapPipelines,
+  );
   let appliedQueuedReorderMapHints = 0;
-  if (queuedReorderMapHintedRoot.mapCount > 0) {
+  const queuedMapCount = queuedMapReorderHintedRoot.mapCount + queuedReorderMapHintedRoot.mapCount;
+  if (queuedMapCount > 0) {
     const hintedBlockAnalysis = analyzeComposableBlocks(
       queuedReorderMapHintedRoot.root,
       reactiveByValue,
@@ -8136,9 +8298,11 @@ function compileCandidate(
       expandedReactiveRoot = queuedReorderMapHintedRoot.root;
       blockAnalysis = hintedBlockAnalysis;
       analysis = hintedAnalysis;
-      appliedQueuedReorderMapHints = queuedReorderMapHintedRoot.mapCount;
-      compilerUsage.keyedArrayMapUpdateHints += queuedReorderMapHintedRoot.mapCount;
-      compilerUsage.keyedArrayQueuedMapUpdateHints += queuedReorderMapHintedRoot.mapCount;
+      appliedQueuedReorderMapHints = queuedMapCount;
+      compilerUsage.keyedArrayMapUpdateHints += queuedMapCount;
+      compilerUsage.keyedArrayQueuedMapUpdateHints += queuedMapCount;
+      compilerUsage.keyedArrayMapReorderHints += queuedMapReorderHintedRoot.mapReorderCount;
+      compilerUsage.keyedArrayMapSortHints += queuedMapReorderHintedRoot.mapSortCount;
     }
   }
   const keyedCollectionTargetKinds = new Map<number, KeyedCollectionTargetKind>();
@@ -8614,6 +8778,8 @@ export async function compileReactModule(
 
         const hasEagerKeyedArrayMapUpdateHints =
           compilerUsage.keyedArrayMapUpdateHints > compilerUsage.keyedArrayQueuedMapUpdateHints;
+        const hasKeyedArrayMapReorderHints =
+          compilerUsage.keyedArrayMapReorderHints + compilerUsage.keyedArrayMapSortHints > 0;
         if (compiled.length > 0) {
           programPath.unshiftContainer(
             "body",
@@ -8637,6 +8803,10 @@ export async function compileReactModule(
                         keyedArrayMapPipelineIdentifier,
                         t.identifier("createCompilerKeyedArrayMapPipeline"),
                       ),
+                    ]
+                  : []),
+                ...(hasKeyedArrayMapReorderHints
+                  ? [
                       t.importSpecifier(
                         keyedArrayMapReorderIdentifier,
                         t.identifier("createCompilerKeyedArrayMapReorder"),
