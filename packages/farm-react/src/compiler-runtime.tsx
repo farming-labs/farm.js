@@ -83,9 +83,14 @@ interface CompilerKeyedArrayReorderHint {
   readonly sourceLength: number;
   readonly resultLength: number;
   readonly mapped?: boolean;
-  readonly mappedItemSources?: ReadonlyMap<unknown, unknown>;
-  readonly mappedSourceItems?: readonly unknown[];
+  readonly mappedItemSources?: CompilerMappedItemSources;
   readonly structuralUpdate?: CompilerKeyedArrayFilterHint;
+}
+
+interface CompilerMappedItemSources {
+  readonly queuedSourceItems?: readonly unknown[];
+  get(item: unknown): unknown;
+  has(item: unknown): boolean;
 }
 
 function reversedCompilerKeyedArrayOrder(
@@ -752,6 +757,29 @@ function recordCompilerKeyedArrayQueuedMapPipeline(previous: unknown, value: unk
     ) {
       return value;
     }
+    const sourceItems = previousReorder.mappedItemSources?.queuedSourceItems || previous;
+    let mappedItemSources: Map<unknown, unknown> | undefined;
+    const readMappedItemSources = (): Map<unknown, unknown> => {
+      if (mappedItemSources) return mappedItemSources;
+      const sources = new Map<unknown, unknown>();
+      for (let index = 0; index < value.length; index += 1) {
+        const sourceDescriptor = Object.getOwnPropertyDescriptor(sourceItems, index);
+        const mappedDescriptor = Object.getOwnPropertyDescriptor(value, index);
+        if (
+          !sourceDescriptor ||
+          !("value" in sourceDescriptor) ||
+          !mappedDescriptor ||
+          !("value" in mappedDescriptor)
+        ) {
+          throw new TypeError();
+        }
+        if (!Object.is(sourceDescriptor.value, mappedDescriptor.value)) {
+          sources.set(mappedDescriptor.value, sourceDescriptor.value);
+        }
+      }
+      mappedItemSources = sources;
+      return sources;
+    };
     COMPILER_KEYED_ARRAY_REORDERS.set(valueTarget, {
       kind: previousReorder.kind,
       sourceToken: previousReorder.sourceToken,
@@ -761,7 +789,11 @@ function recordCompilerKeyedArrayQueuedMapPipeline(previous: unknown, value: unk
       // Array.map preserves positions. Retain the first post-reorder collection and validate its
       // data properties against the final collection once, immediately before the DOM commit.
       // This avoids rescanning every intermediate Array produced by separately queued setters.
-      mappedSourceItems: previousReorder.mappedSourceItems || previous,
+      mappedItemSources: {
+        queuedSourceItems: sourceItems,
+        get: (item) => readMappedItemSources().get(item),
+        has: (item) => readMappedItemSources().has(item),
+      },
     });
   } catch {
     // Metadata must never change the result of a successful native update.
@@ -5010,7 +5042,7 @@ function reconcileCompilerKeyedArrayMapReorder(
     compilerKeyedArrayReorder(finalValue, collectionToken, instances.size);
   if (
     !update?.mapped ||
-    (!update.mappedItemSources && !update.mappedSourceItems) ||
+    !update.mappedItemSources ||
     update.structuralUpdate ||
     !Array.isArray(finalValue)
   ) {
@@ -5042,44 +5074,23 @@ function reconcileCompilerKeyedArrayMapReorder(
       const nextInstances: CompilerKeyedRowInstance[] = instancesByItem ? [] : previousInstances;
       const sequence: number[] | undefined = instancesByItem ? [] : undefined;
       for (let targetIndex = 0; targetIndex < finalValue.length; targetIndex += 1) {
-        let item: unknown;
-        let queuedSourceItem: unknown;
-        if (update.mappedSourceItems) {
-          const mappedDescriptor = Object.getOwnPropertyDescriptor(finalValue, targetIndex);
-          if (!mappedDescriptor || !("value" in mappedDescriptor)) return undefined;
-          const sourceDescriptor = Object.getOwnPropertyDescriptor(
-            update.mappedSourceItems,
-            targetIndex,
-          );
-          if (!sourceDescriptor || !("value" in sourceDescriptor)) return undefined;
-          item = mappedDescriptor.value;
-          queuedSourceItem = sourceDescriptor.value;
-        } else {
-          // Preserve the existing eager map/reorder path. Its compiler-owned native map pipeline
-          // already validated the collection while recording the source-item lookup.
-          item = finalValue[targetIndex];
-        }
+        const item = finalValue[targetIndex];
         let instance: CompilerKeyedRowInstance | undefined;
         if (!instancesByItem) {
           const sourceIndex = reverse ? finalValue.length - targetIndex - 1 : targetIndex;
           instance = previousInstances[sourceIndex];
           if (!instance || instance.index !== sourceIndex) return undefined;
           if (Object.is(instance.item, item)) continue;
-          const sourceItem = update.mappedSourceItems
-            ? queuedSourceItem
-            : update.mappedItemSources!.get(item);
           if (
-            (!update.mappedSourceItems && !update.mappedItemSources!.has(item)) ||
-            !Object.is(instance.item, sourceItem)
+            !update.mappedItemSources.has(item) ||
+            !Object.is(instance.item, update.mappedItemSources.get(item))
           ) {
             return undefined;
           }
         } else {
-          const sourceItem = update.mappedSourceItems
-            ? queuedSourceItem
-            : update.mappedItemSources!.has(item)
-              ? update.mappedItemSources!.get(item)
-              : item;
+          const sourceItem = update.mappedItemSources.has(item)
+            ? update.mappedItemSources.get(item)
+            : item;
           instance = instancesByItem!.get(sourceItem);
           if (!instance) return undefined;
           instancesByItem!.delete(sourceItem);
