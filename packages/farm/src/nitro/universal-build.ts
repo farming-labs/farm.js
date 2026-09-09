@@ -4432,6 +4432,7 @@ function generateVirtualEntryCode(
   searchParamsToObject,
   setFarmBasePath,
   setFarmTrailingSlashPreference,
+  stripFarmBasePath,
   stripFarmLocaleFromPathname,
   withFarmRouteContext,
 } from "@farm.js/core/internal/production-runtime";`;
@@ -4945,8 +4946,8 @@ function getFarmI18nSnapshot() {
 
 function getFarmRoutePathname(pathname) {
   return farmI18nRuntime
-    ? stripFarmLocaleFromPathname(pathname, farmI18nConfig)
-    : pathname;
+    ? stripFarmLocaleFromPathname(stripFarmBasePath(pathname), farmI18nConfig)
+    : stripFarmBasePath(pathname);
 }
 
 function serializeFarmInlineValue(value) {
