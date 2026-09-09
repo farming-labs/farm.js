@@ -2,6 +2,7 @@ import path from "path";
 import { describe, it, expect } from "vitest";
 import {
   parseRoutePath,
+  parseSearchParams,
   matchRoute,
   matchRoutePrefix,
   segmentsToPattern,
@@ -77,6 +78,17 @@ describe("toRootRelativeUrlPath", () => {
 
   it("returns an empty path for the root itself", () => {
     expect(toRootRelativeUrlPath("/workspace/app", "/workspace/app")).toBe("");
+  });
+});
+
+describe("parseSearchParams", () => {
+  it("drops prototype-poisoning keys without changing the returned prototype", () => {
+    const result = parseSearchParams(
+      new URLSearchParams("__proto__=a&__proto__=b&constructor=c&prototype=d&tag=x&tag=y"),
+    );
+
+    expect(Object.getPrototypeOf(result)).toBe(Object.prototype);
+    expect(result).toEqual({ tag: ["x", "y"] });
   });
 });
 
