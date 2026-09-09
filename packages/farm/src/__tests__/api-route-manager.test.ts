@@ -92,6 +92,19 @@ describe("APIRouteManager", () => {
     await expect(manager.discoverRoutes()).rejects.toThrow('Duplicate route parameter "id"');
   });
 
+  it("fails discovery for prototype-sensitive API parameter names", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-api-route-"));
+    tempDirs.push(root);
+    const routeDir = path.join(root, "api", "users", "[__proto__]");
+    fs.mkdirSync(routeDir, { recursive: true });
+    fs.writeFileSync(path.join(routeDir, "route.ts"), "export const GET = () => new Response();\n");
+    const manager = new APIRouteManager(root, {
+      ssrLoadModule: async () => ({ GET: async () => new Response() }),
+    } as any);
+
+    await expect(manager.discoverRoutes()).rejects.toThrow('Route parameter "__proto__"');
+  });
+
   it("ignores empty programmatic routes and preserves API-literal syntax", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-api-route-"));
     tempDirs.push(root);

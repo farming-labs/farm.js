@@ -148,6 +148,18 @@ describe("parseRoutePath", () => {
     }
   });
 
+  it("rejects prototype-sensitive parameter names in file routes", () => {
+    expect(() => parseRoutePath("users/[__proto__]/page.tsx")).toThrow(
+      'Route parameter "__proto__"',
+    );
+    expect(() => parseRoutePath("docs/[...constructor]/page.tsx")).toThrow(
+      'Route parameter "constructor"',
+    );
+    expect(() => parseRoutePath("docs/[[...prototype]]/page.tsx")).toThrow(
+      'Route parameter "prototype"',
+    );
+  });
+
   it("should parse root page", () => {
     const result = parseRoutePath("page.tsx");
     expect(result.segments).toEqual([]);
