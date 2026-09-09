@@ -16,6 +16,7 @@ import { MiddlewareManager } from "../middleware/manager";
 import { discoverMiddlewareRoutes, hasFarmRuntimeConfigModule } from "../nitro/universal-build";
 import { RouteManager } from "../routing/route-manager";
 import { createProgrammaticRouteModuleId } from "../routes-shared";
+import { toViteModuleId } from "../utils";
 import { farmPlugin } from "../vite";
 
 const temporaryRoots: string[] = [];
@@ -376,7 +377,7 @@ describe("Farm layers", () => {
 
     const source = await (plugin.load as (id: string) => Promise<string>)(moduleId);
 
-    expect(source).toContain(`from ${JSON.stringify(`/@fs${routeFile}`)}`);
+    expect(source).toContain(`from ${JSON.stringify(toViteModuleId(routeFile, root))}`);
     expect(source).not.toContain(`from ${JSON.stringify(routeFile)}`);
   });
 });
