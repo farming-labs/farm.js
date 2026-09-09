@@ -491,6 +491,13 @@ followed by a concise native reverse or sort setter. Farm records their replacem
 the committed collection and carries it into the final reorder. Only adjacent calls to the same
 setter are linked; intervening work and unsupported updates retain complete reconciliation.
 
+Mapped lineage also continues through multiple adjacent native reorder setters. For example,
+`map -> reverse -> sort -> reverse` keeps the same committed-row proof until the final value, then
+performs one validated keyed reconciliation. A concise `map().toReversed()` pipeline may start the
+same chain. Every updater and native method still executes in order; another setter, intervening
+work, a structural update, or an unsupported method ends the chain and preserves the complete
+fallback.
+
 A reverse before the safe map pipeline may be queued in a separate setter:
 
 ```tsx

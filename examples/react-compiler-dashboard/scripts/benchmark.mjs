@@ -1403,6 +1403,14 @@ async function measureTrial(browser, trial, compilerMode, port) {
         const tableQueuedMapThenReorderPipelineSnapshot = await measureMultiMapReverseTable(() =>
           tableButton("table-queued-map-then-reorder-pipeline-snapshot").click(),
         );
+        const tableQueuedMapReorderChain = await measureMultiMapReverseTable(
+          () => tableButton("table-queued-map-reorder-chain").click(),
+          false,
+        );
+        const tableQueuedMapReorderChainSnapshot = await measureMultiMapReverseTable(
+          () => tableButton("table-queued-map-reorder-chain-snapshot").click(),
+          false,
+        );
 
         const tableSort = await measureTable(
           async () => create10000(),
@@ -1890,6 +1898,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
             queuedReorderThenMapPipelineSnapshot: tableQueuedReorderThenMapPipelineSnapshot,
             queuedMapThenReorderPipeline: tableQueuedMapThenReorderPipeline,
             queuedMapThenReorderPipelineSnapshot: tableQueuedMapThenReorderPipelineSnapshot,
+            queuedMapReorderChain: tableQueuedMapReorderChain,
+            queuedMapReorderChainSnapshot: tableQueuedMapReorderChainSnapshot,
             mapLookup: tableMapLookup,
             membership: tableMembership,
             prepend: tablePrepend,
@@ -2040,6 +2050,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
         queuedMapThenReorderPipelineSnapshot: timingSummary(
           result.table.queuedMapThenReorderPipelineSnapshot,
         ),
+        queuedMapReorderChain: timingSummary(result.table.queuedMapReorderChain),
+        queuedMapReorderChainSnapshot: timingSummary(result.table.queuedMapReorderChainSnapshot),
         mapLookup: timingSummary(result.table.mapLookup),
         membership: timingSummary(result.table.membership),
         prepend: timingSummary(result.table.prepend),
@@ -2239,6 +2251,8 @@ const tableMetrics = [
   "queuedReorderThenMapPipelineSnapshot",
   "queuedMapThenReorderPipeline",
   "queuedMapThenReorderPipelineSnapshot",
+  "queuedMapReorderChain",
+  "queuedMapReorderChainSnapshot",
   "snapshotMembership",
   "snapshotMapLookup",
   "slicePrefix",
@@ -3055,6 +3069,28 @@ const keyedQueuedMapThenReorderRegressions = keyedQueuedMapThenReorderResults.fi
     !Number.isFinite(snapshotSpeedup) ||
     snapshotSpeedup < keyedQueuedMapThenReorderMinimumSnapshotSpeedup,
 );
+// Mapped lineage should survive every adjacent native reorder setter, not only the first one.
+// Compare maps plus two concise reversals with React and block-bodied complete reconciliation.
+const keyedQueuedMapReorderChainMinimumSpeedup = 4;
+const keyedQueuedMapReorderChainMinimumSnapshotSpeedup = 1.2;
+const keyedQueuedMapReorderChainResults = ["static", "hybrid"].map((mode) => {
+  const pipelineMedianMs = comparisons.table.queuedMapReorderChain[mode].medianMs;
+  const snapshotMedianMs = comparisons.table.queuedMapReorderChainSnapshot[mode].medianMs;
+  return {
+    mode,
+    pipelineMedianMs,
+    snapshotMedianMs,
+    snapshotSpeedup: snapshotMedianMs / pipelineMedianMs,
+    speedup: comparisons.table.queuedMapReorderChain[`${mode}VsBaseline`].speedup,
+  };
+});
+const keyedQueuedMapReorderChainRegressions = keyedQueuedMapReorderChainResults.filter(
+  ({ snapshotSpeedup, speedup }) =>
+    !Number.isFinite(speedup) ||
+    speedup < keyedQueuedMapReorderChainMinimumSpeedup ||
+    !Number.isFinite(snapshotSpeedup) ||
+    snapshotSpeedup < keyedQueuedMapReorderChainMinimumSnapshotSpeedup,
+);
 // A direct native toSorted() exposes a permutation while preserving every keyed row object. The
 // hinted path validates that permutation by item identity, uses LIS to move only the required DOM
 // nodes, and avoids key, descriptor, and binding reads. Compare it with React and the equivalent
@@ -3251,6 +3287,7 @@ const passed =
   keyedReorderThenMapRegressions.length === 0 &&
   keyedQueuedReorderThenMapRegressions.length === 0 &&
   keyedQueuedMapThenReorderRegressions.length === 0 &&
+  keyedQueuedMapReorderChainRegressions.length === 0 &&
   keyedSortRegressions.length === 0 &&
   keyedFilterRegressions.length === 0 &&
   keyedIdentityRegressions.length === 0 &&
@@ -3472,6 +3509,13 @@ const report = {
     regressions: keyedQueuedMapThenReorderRegressions,
     results: keyedQueuedMapThenReorderResults,
     status: keyedQueuedMapThenReorderRegressions.length === 0 ? "PASS" : "FAIL",
+  },
+  keyedQueuedMapReorderChainHintGate: {
+    minimumSnapshotSpeedup: keyedQueuedMapReorderChainMinimumSnapshotSpeedup,
+    minimumSpeedup: keyedQueuedMapReorderChainMinimumSpeedup,
+    regressions: keyedQueuedMapReorderChainRegressions,
+    results: keyedQueuedMapReorderChainResults,
+    status: keyedQueuedMapReorderChainRegressions.length === 0 ? "PASS" : "FAIL",
   },
   keyedSortHintGate: {
     minimumSnapshotSpeedup: keyedSortMinimumSnapshotSpeedup,

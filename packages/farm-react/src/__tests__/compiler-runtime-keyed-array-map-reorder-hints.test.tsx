@@ -201,6 +201,12 @@ function createHarness(initialItems: Item[]) {
     rank: number,
     label: string,
   ) => void = () => undefined;
+  let queueMapsThenReorders: (
+    kinds: readonly ("reverse" | "sort")[],
+    id: string,
+    rank: number,
+    label: string,
+  ) => void = () => undefined;
   let reverseThenMap: (id: string, rank: number, label: string) => void = () => undefined;
   let sortThenMap: (id: string, rank: number, label: string) => void = () => undefined;
   let queueSortThenMapReverse: () => void = () => undefined;
@@ -289,6 +295,23 @@ function createHarness(initialItems: Item[]) {
         state[0].set((previous) =>
           kind === "reverse" ? hintedReverse(previous as Item[]) : hintedSort(previous as Item[]),
         );
+      };
+      queueMapsThenReorders = (kinds, id, rank, label) => {
+        state[0].set((previous) =>
+          queuedHintedMap(previous as Item[], (item) =>
+            item.id === id ? { ...item, label } : item,
+          ),
+        );
+        state[0].set((previous) =>
+          queuedHintedMap(previous as Item[], (item) =>
+            item.id === id ? { ...item, rank } : item,
+          ),
+        );
+        for (const kind of kinds) {
+          state[0].set((previous) =>
+            kind === "reverse" ? hintedReverse(previous as Item[]) : hintedSort(previous as Item[]),
+          );
+        }
       };
       reverseThenMap = (id, rank, label) =>
         state[0].set((previous) =>
@@ -528,6 +551,12 @@ function createHarness(initialItems: Item[]) {
       queueReorderThenMaps(kind, id, rank, label),
     queueMapsThenReorder: (kind: "reverse" | "sort", id: string, rank: number, label: string) =>
       queueMapsThenReorder(kind, id, rank, label),
+    queueMapsThenReorders: (
+      kinds: readonly ("reverse" | "sort")[],
+      id: string,
+      rank: number,
+      label: string,
+    ) => queueMapsThenReorders(kinds, id, rank, label),
     queueSortThenMapReverse: () => queueSortThenMapReverse(),
     reverseThenMap: (id: string, rank: number, label: string) => reverseThenMap(id, rank, label),
     sortThenMap: (id: string, rank: number, label: string) => sortThenMap(id, rank, label),
@@ -981,6 +1010,48 @@ describe("compiled keyed-array map and reorder hints", () => {
     expect([...container.querySelectorAll("li")]).toEqual(rows.toReversed());
     expect(insertBefore).toHaveBeenCalledTimes(2);
     expect(mapSet.mock.calls.filter(([key]) => initialItems.includes(key as Item))).toHaveLength(0);
+    expect(descriptorRead).toHaveBeenCalledTimes(initialItems.length * 2);
+    expect(harness.counters.keys).toBe(1);
+    expect(harness.counters.descriptors).toBe(0);
+    expect(harness.counters.bindings).toBe(1);
+    expect(harness.counters.executions).toBe(1);
+  });
+
+  it("retains queued map lineage through adjacent reverse and sort setters", async () => {
+    const initialItems: Item[] = [
+      { id: "a", label: "Alpha", rank: 1 },
+      { id: "b", label: "Beta", rank: 2 },
+      { id: "c", label: "Gamma", rank: 3 },
+    ];
+    const harness = createHarness(initialItems);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Table />));
+    const rows = new Map(
+      [...container.querySelectorAll("li")].map((row) => [row.dataset.key, row]),
+    );
+    const mapSet = vi.spyOn(Map.prototype, "set");
+    const descriptorRead = vi.spyOn(Object, "getOwnPropertyDescriptor");
+    harness.counters.bindings = 0;
+    harness.counters.descriptors = 0;
+    harness.counters.keys = 0;
+
+    await act(async () => {
+      harness.queueMapsThenReorders(["reverse", "sort", "reverse"], "b", 5, "Beta chain");
+      await flushCompilerUpdates();
+    });
+
+    expect(labels(container)).toEqual(["Beta chain:5", "Gamma:3", "Alpha:1"]);
+    expect([...container.querySelectorAll("li")]).toEqual([
+      rows.get("b"),
+      rows.get("c"),
+      rows.get("a"),
+    ]);
+    expect(mapSet.mock.calls.filter(([key]) => initialItems.includes(key as Item))).toHaveLength(
+      initialItems.length,
+    );
     expect(descriptorRead).toHaveBeenCalledTimes(initialItems.length * 2);
     expect(harness.counters.keys).toBe(1);
     expect(harness.counters.descriptors).toBe(0);
@@ -1862,6 +1933,80 @@ describe("compiled keyed-array map and reorder hints", () => {
         await act(async () => {
           harness.queueMapsThenReorder(kind, id, rank, label);
           updateReact(kind, id, rank, label);
+          await flushCompilerUpdates();
+        });
+        expect(labels(compiledContainer)).toEqual(labels(reactContainer));
+      }
+      expect(harness.counters.executions).toBe(1);
+    },
+    120_000,
+  );
+
+  stressIt(
+    "matches React through 2,000 queued map and consecutive reorder updates",
+    async () => {
+      const initialItems = Array.from(
+        { length: 31 },
+        (_, index): Item => ({ id: `row-${index}`, label: `Row ${index}`, rank: index }),
+      );
+      const harness = createHarness(initialItems);
+      let updateReact: (
+        kinds: readonly ("reverse" | "sort")[],
+        id: string,
+        rank: number,
+        label: string,
+      ) => void = () => undefined;
+      function Normal() {
+        const [items, setItems] = useState(initialItems);
+        updateReact = (kinds, id, rank, label) => {
+          setItems((previous) =>
+            previous.map((item) => (item.id === id ? { ...item, label } : item)),
+          );
+          setItems((previous) =>
+            previous.map((item) => (item.id === id ? { ...item, rank } : item)),
+          );
+          for (const kind of kinds) {
+            setItems((previous) =>
+              kind === "reverse"
+                ? previous.toReversed()
+                : previous.toSorted((left, right) => left.rank - right.rank),
+            );
+          }
+        };
+        return (
+          <ol>
+            {items.map((item) => (
+              <li data-key={item.id} key={item.id}>
+                {item.label}:{item.rank}
+              </li>
+            ))}
+          </ol>
+        );
+      }
+      const compiledContainer = document.createElement("div");
+      const reactContainer = document.createElement("div");
+      document.body.append(compiledContainer, reactContainer);
+      const compiledRoot = createRoot(compiledContainer);
+      const reactRoot = createRoot(reactContainer);
+      roots.push(compiledRoot, reactRoot);
+      await act(async () => {
+        compiledRoot.render(<harness.Table />);
+        reactRoot.render(<Normal />);
+      });
+
+      let seed = 0x6d2b79f5;
+      for (let update = 0; update < 2_000; update += 1) {
+        seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0;
+        const reorderCount = 2 + ((seed >>> 3) % 3);
+        const kinds = Array.from({ length: reorderCount }, (_, index) =>
+          seed & (1 << (index + 8)) ? ("reverse" as const) : ("sort" as const),
+        );
+        const id = `row-${seed % initialItems.length}`;
+        const rank = (seed ^ (seed >>> 16)) % 4_003;
+        const label = `Queued reorder chain ${update}`;
+        await act(async () => {
+          harness.queueMapsThenReorders(kinds, id, rank, label);
+          updateReact(kinds, id, rank, label);
           await flushCompilerUpdates();
         });
         expect(labels(compiledContainer)).toEqual(labels(reactContainer));
