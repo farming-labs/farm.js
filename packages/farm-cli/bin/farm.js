@@ -35,6 +35,17 @@ function collectOption(value, previous) {
   return [...(previous || []), value];
 }
 
+function parsePortOption(value) {
+  if (!/^\d+$/.test(value)) {
+    throw new Error("--port must be an integer between 1 and 65535.");
+  }
+  const port = Number(value);
+  if (!Number.isSafeInteger(port) || port < 1 || port > 65535) {
+    throw new Error("--port must be an integer between 1 and 65535.");
+  }
+  return port;
+}
+
 function telemetryCommandPath(command) {
   const segments = [];
   let current = command;
@@ -81,7 +92,7 @@ program
         {
           root: options.root,
         },
-        options.port === undefined ? undefined : parseInt(options.port, 10),
+        options.port === undefined ? undefined : parsePortOption(options.port),
       );
       if (options.cron) {
         const { startFarmCronScheduler } = require("../dist/index.js");
