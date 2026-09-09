@@ -10,6 +10,31 @@ export interface CompiledConfigRoutePattern {
   tokens: ConfigRoutePatternToken[];
 }
 
+export function validateConfigRouteSource(source: string, field = "Config route source"): string {
+  if (typeof source !== "string" || source.length === 0) {
+    throw new TypeError(`${field} must be a non-empty pathname pattern.`);
+  }
+  if (source.trim() !== source) {
+    throw new Error(`${field} cannot contain leading or trailing whitespace.`);
+  }
+  if (!source.startsWith("/")) {
+    throw new Error(`${field} must start with "/".`);
+  }
+  if (source.includes("?") || source.includes("#")) {
+    throw new Error(`${field} must be a pathname without a query string or hash.`);
+  }
+  if (
+    source.includes("\\") ||
+    Array.from(source).some((character) => {
+      const code = character.charCodeAt(0);
+      return code <= 31 || (code >= 127 && code <= 159);
+    })
+  ) {
+    throw new Error(`${field} cannot contain backslashes or control characters.`);
+  }
+  return source;
+}
+
 export function resolveConfigRoutePathname(
   pathname: string,
   i18n?: ResolvedFarmI18nConfig,
@@ -32,6 +57,7 @@ function escapeRegexCharacter(character: string): string {
 }
 
 export function compileConfigRoutePattern(source: string): CompiledConfigRoutePattern {
+  validateConfigRouteSource(source);
   const tokens: ConfigRoutePatternToken[] = [];
   let pattern = "";
   let captureIndex = 1;
