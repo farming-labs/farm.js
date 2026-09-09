@@ -402,6 +402,51 @@ describe("production prebuilt SSR output", () => {
     }
   }, 120_000);
 
+  it("preserves route-rule redirect status and explicit destination queries", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          telemetry: false,
+          routeRules: {
+            "/legacy": { redirect: { to: "/current?view=compact", statusCode: 303 } },
+            "/moved": { redirect: { to: "/current", permanent: true } },
+          },
+          generateBuildId: () => "production-route-rule-redirect-test",
+        },
+        "production",
+      );
+
+      await build(config, { root, preset: "node-server" });
+      const serverDir = path.join(root, ".farm", ".output", "server");
+
+      await runProductionRequest(
+        serverDir,
+        async (response) => {
+          expect(response.status).toBe(303);
+          expect(response.headers.get("location")).toBe("/current?view=compact");
+        },
+        "/legacy?view=full&campaign=launch",
+        { redirect: "manual" },
+      );
+      await runProductionRequest(
+        serverDir,
+        async (response) => {
+          expect(response.status).toBe(308);
+          expect(response.headers.get("location")).toBe("/current?campaign=launch");
+        },
+        "/moved?campaign=launch",
+        { redirect: "manual" },
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("serves the configured OpenAPI reference in production", async () => {
     const root = await createProductionFixture();
     const apiDir = path.join(root, "src", "app", "api", "health");
