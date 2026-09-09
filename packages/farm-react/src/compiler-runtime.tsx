@@ -664,11 +664,9 @@ function recordCompilerKeyedArrayMapPipeline(previous: unknown, value: unknown):
     const previousReorder = committedSource
       ? undefined
       : COMPILER_KEYED_ARRAY_REORDERS.get(previousTarget);
-    const structuralUpdate = previousReorder?.structuralUpdate
-      ? previousReorder.structuralUpdate
-      : !previousReorder
-        ? COMPILER_KEYED_ARRAY_FILTERS.get(previousTarget)
-        : undefined;
+    const structuralUpdate =
+      previousReorder?.structuralUpdate ||
+      (!previousReorder ? COMPILER_KEYED_ARRAY_FILTERS.get(previousTarget) : undefined);
     const structuralSource = structuralUpdate
       ? compilerKeyedArrayFilterSource(structuralUpdate, previous.length)
       : undefined;
@@ -1527,6 +1525,8 @@ function recordCompilerKeyedArrayStructuralReorder(
     }
     const sourceToken = previousUpdate?.sourceToken || structuralSource?.sourceToken;
     if (!sourceToken) return value;
+    const mappedItemSources =
+      previousUpdate?.mappedItemSources || structuralUpdate.mappedItemSources;
     COMPILER_KEYED_ARRAY_REORDERS.set(valueTarget, {
       kind:
         kind === CompilerKeyedArrayReorderKind.Reverse
@@ -1536,12 +1536,7 @@ function recordCompilerKeyedArrayStructuralReorder(
       sourceLength: previousUpdate?.sourceLength || structuralSource.sourceLength,
       resultLength: value.length,
       structuralUpdate,
-      ...(previousUpdate?.mappedItemSources || structuralUpdate.mappedItemSources
-        ? {
-            mappedItemSources:
-              previousUpdate?.mappedItemSources || structuralUpdate.mappedItemSources,
-          }
-        : {}),
+      ...(mappedItemSources ? { mappedItemSources } : {}),
     });
   } catch {
     // Metadata must never change the result of a successful native update.
