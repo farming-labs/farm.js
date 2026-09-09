@@ -54,6 +54,21 @@ describe("Farm Vite publicDir", () => {
   });
 });
 
+describe("Farm Vite link delegation", () => {
+  it("preserves download links and application click cancellation", async () => {
+    const plugin = farmPlugin({});
+    const source = await (plugin.load as (id: string) => Promise<string>)("/@farm/client");
+    const start = source.indexOf("// ====== EVENT DELEGATION FOR LINKS ======");
+    const end = source.indexOf("if (import.meta.hot)", start);
+    const delegation = source.slice(start, end);
+
+    expect(delegation).toContain("if (target.hasAttribute('download')) return;");
+    expect(delegation).toContain("if (event.defaultPrevented) return;");
+    expect(delegation).toContain("hasAbsoluteNavigationHref(href)");
+    expect(delegation).not.toContain("}, true)");
+  });
+});
+
 describe("Farm Vite type artifacts", () => {
   it("warns when startup generation leaves farm.d.ts stale", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-vite-type-warning-"));

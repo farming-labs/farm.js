@@ -5011,8 +5011,8 @@ function isModifierEvent(e) {
   return !!(e.metaKey || e.altKey || e.ctrlKey || e.shiftKey);
 }
 
-function isExternalUrl(href) {
-  return href.startsWith('http://') || href.startsWith('https://') || href.startsWith('//');
+function hasAbsoluteNavigationHref(href) {
+  return /^[a-zA-Z][a-zA-Z\\d+.-]*:/.test(href) || href.startsWith('//');
 }
 
 document.addEventListener('click', function(event) {
@@ -5028,9 +5028,10 @@ document.addEventListener('click', function(event) {
   
   const href = target.getAttribute('href');
   if (!href) return;
+  if (target.hasAttribute('download')) return;
   
-  // Don't intercept external links
-  if (isExternalUrl(href)) return;
+  // Leave absolute URLs and non-HTTP schemes to the browser.
+  if (hasAbsoluteNavigationHref(href)) return;
   
   // Don't intercept hash-only links
   if (href.startsWith('#')) return;
@@ -5058,7 +5059,7 @@ document.addEventListener('click', function(event) {
     : viewTransitionValue === 'true';
   
   spaRouter.navigate(href, { replace, scroll, viewTransition });
-}, true);  // Use capture phase to handle before React
+});
 
 if (import.meta.hot) {
   import.meta.hot.on('vite:beforeUpdate', () => {
