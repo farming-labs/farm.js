@@ -32,7 +32,11 @@ import {
   getRegisteredIntegrationAPIManifest,
   isFarmIntegrationProviderComponentReference,
 } from "../integrations";
-import { _runWithCurrentRequest, createWebRequestFromFarmRequest } from "./request";
+import {
+  _runWithCurrentRequest,
+  createWebRequestFromFarmRequest,
+  resolveFarmRequestURL,
+} from "./request";
 import { createFarmCacheKey, getFarmDataCache, normalizeRevalidatePath } from "../cache";
 import { resolveFarmNotFoundComponentPath } from "../not-found";
 import { getFarmAppDirectories } from "../layers";
@@ -1069,7 +1073,7 @@ export class ServerRenderer {
     };
 
     try {
-      const url = new URL(req.url || "/", `http://${req.headers.host}`);
+      const url = resolveFarmRequestURL(req, { trustProxy: this.config.server?.trustProxy });
       pathname = url.pathname;
       emitFarmEvent({ type: "render.start", route: pathname, pathname });
       searchParamsObject = searchParamsToObject(url.searchParams);
@@ -2027,7 +2031,9 @@ export class ServerRenderer {
     }
 
     const etag = `"${image.staticInfo.hash}"`;
-    const requestUrl = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+    const requestUrl = resolveFarmRequestURL(req, {
+      trustProxy: this.config.server?.trustProxy,
+    });
     const isVersioned = requestUrl.searchParams.get("v") === image.staticInfo.hash;
 
     res.setHeader("Content-Type", image.staticInfo.contentType);
@@ -2683,7 +2689,9 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
   private async render404(req: FarmRequest, res: FarmResponse): Promise<void> {
     res.statusCode = 404;
 
-    const pathname = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`).pathname;
+    const pathname = resolveFarmRequestURL(req, {
+      trustProxy: this.config.server?.trustProxy,
+    }).pathname;
 
     try {
       // Look for custom not-found page
@@ -2762,7 +2770,9 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
 
     res.statusCode = statusCode;
     const isDev = process.env.NODE_ENV === "development";
-    const requestUrl = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+    const requestUrl = resolveFarmRequestURL(req, {
+      trustProxy: this.config.server?.trustProxy,
+    });
     const diagnostics = isDev
       ? createDefaultErrorDiagnostics(error, this.config.root || process.cwd())
       : undefined;

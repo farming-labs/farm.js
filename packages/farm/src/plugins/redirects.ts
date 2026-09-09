@@ -4,6 +4,7 @@ import type { FarmRequest, FarmResponse } from "../types";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
 import { isFarmRedirectStatus } from "../navigation-errors";
 import { appendFarmRedirectQuery } from "../redirect-query";
+import { resolveFarmRequestURL } from "../server/request";
 import {
   compileConfigRoutePattern,
   interpolateConfigRouteDestination,
@@ -50,7 +51,7 @@ export function createRedirectsPlugin(
       if (overrideBeforeRequest) {
         await overrideBeforeRequest(req, res, context);
       }
-      const url = new URL(req.url || "/", `http://${req.headers.host}`);
+      const url = resolveFarmRequestURL(req);
       const routePath = resolveConfigRoutePathname(url.pathname, i18n);
       const pathname = routePath.pathname;
 

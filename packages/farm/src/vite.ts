@@ -1,5 +1,5 @@
 import type { ConfigEnv, Plugin, UserConfig, ViteDevServer, HmrContext, Connect } from "vite";
-import type { FarmConfig } from "./types";
+import type { FarmConfig, FarmRequest } from "./types";
 import { FarmApp } from "./app";
 import { logger, toPosixPath, toViteModuleId } from "./utils";
 import { defaultGlobalCSS } from "./default-styles";
@@ -101,6 +101,7 @@ import {
 } from "./navigation/render-plan";
 import { resolveFarmPageDataFailure } from "./navigation/page-data-error";
 import { FARM_CONFIG_REWRITES_PLUGIN_NAME } from "./plugins/rewrites";
+import { resolveFarmRequestURL } from "./server/request";
 
 interface FarmVitePluginOptions extends FarmConfig {
   openapi?: FarmUserConfig["openapi"];
@@ -1324,11 +1325,13 @@ window.__FARM_MANIFEST__ = ${inlineValue({
         withFarmRequestTracing(async (req, res, next) => {
           const requestUrl = req.url || "/";
           const requestMethod = req.method || "GET";
-          const fullUrl = `http://${req.headers.host || "localhost:3000"}${requestUrl}`;
-          const parsedRequestUrl = new URL(fullUrl);
-          const requestPathname = parsedRequestUrl.pathname;
           const currentConfig = farmApp?.getConfig() ?? options;
           const currentServerConfig = resolveFarmServerConfig(currentConfig.server);
+          const parsedRequestUrl = resolveFarmRequestURL(req as FarmRequest, {
+            trustProxy: currentServerConfig.trustProxy,
+          });
+          const fullUrl = parsedRequestUrl.toString();
+          const requestPathname = parsedRequestUrl.pathname;
 
           if (imageHandler && requestPathname === farmConfig.images.path) {
             const imageResponse = await imageHandler(
@@ -1947,7 +1950,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
 
           // Handle SPA page-data requests for client-side navigation
           if (req.url?.startsWith("/__farm/page-data")) {
-            const urlObj = new URL(req.url, `http://${req.headers.host || "localhost:3000"}`);
+            const urlObj = parsedRequestUrl;
             const targetPath = urlObj.searchParams.get("path") || "/";
 
             try {

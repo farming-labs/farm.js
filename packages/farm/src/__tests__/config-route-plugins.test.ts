@@ -48,6 +48,39 @@ describe("config route plugins", () => {
     ).toThrow('Redirect "/old" statusCode must be one of 301, 302, 303, 307, or 308');
   });
 
+  it("falls back safely when a request carries a malformed Host header", async () => {
+    const redirectRequest = createRequest("/old");
+    redirectRequest.headers.host = "%";
+    const redirectResponse = createResponse();
+    await runBeforeRequest(
+      createRedirectsPlugin([{ source: "/old", destination: "/new" }]),
+      redirectRequest,
+      redirectResponse,
+    );
+    expect(redirectResponse.writeHead).toHaveBeenCalledWith(307, { Location: "/new" });
+
+    const rewriteRequest = createRequest("/legacy");
+    rewriteRequest.headers.host = "%";
+    await runBeforeRequest(
+      createRewritesPlugin([{ source: "/legacy", destination: "/current" }]),
+      rewriteRequest,
+      createResponse(),
+    );
+    expect(rewriteRequest.url).toBe("/current");
+
+    const headersRequest = createRequest("/docs");
+    headersRequest.headers.host = "%";
+    const headersResponse = createResponse();
+    await runBeforeRequest(
+      createHeadersPlugin([
+        { source: "/docs", headers: [{ key: "x-farm-safe-host", value: "1" }] },
+      ]),
+      headersRequest,
+      headersResponse,
+    );
+    expect(headersResponse.setHeader).toHaveBeenCalledWith("x-farm-safe-host", "1");
+  });
+
   it("keeps named and plain redirect captures in source order", async () => {
     const plugin = createRedirectsPlugin([
       {

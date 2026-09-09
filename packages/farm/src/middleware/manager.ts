@@ -27,6 +27,7 @@ import type { ResolvedFarmI18nConfig } from "../i18n/types";
 import { createCliColors } from "../cli-colors";
 import { appendMiddlewareRoutePath } from "./path";
 import type { FarmServerConfig, ResolvedFarmServerConfig } from "../server-http";
+import { resolveFarmRequestURL } from "../server/request";
 
 export interface DiscoveredMiddleware {
   path: string;
@@ -203,7 +204,7 @@ export class MiddlewareManager {
    * Execute middleware for a request
    */
   async execute(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
-    const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+    const url = resolveFarmRequestURL(req, { trustProxy: this.server?.trustProxy });
     const pathname = url.pathname;
     const routePathname = this.i18n?.enabled
       ? stripFarmLocaleFromPathname(pathname, this.i18n)
