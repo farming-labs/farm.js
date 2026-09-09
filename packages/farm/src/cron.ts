@@ -288,11 +288,46 @@ function normalizeCronPath(name: string, value: unknown): string {
     throw new TypeError(`Farm cron ${JSON.stringify(name)} path must start with "/".`);
   }
 
+  const hasUnstableCharacters = (candidate: string) =>
+    candidate.includes("\\") ||
+    Array.from(candidate).some((character) => {
+      const code = character.charCodeAt(0);
+      return code <= 31 || (code >= 127 && code <= 159);
+    });
+  if (hasUnstableCharacters(value)) {
+    throw new TypeError(
+      `Farm cron ${JSON.stringify(name)} path cannot contain backslashes or control characters.`,
+    );
+  }
+
   const path = value.trim();
   if (path.startsWith("//") || path.includes("?") || path.includes("#")) {
     throw new TypeError(
       `Farm cron ${JSON.stringify(name)} path must be an application pathname without a host, query, or hash.`,
     );
+  }
+  for (const segment of path.split("/")) {
+    let decoded = segment;
+    try {
+      decoded = decodeURIComponent(segment);
+    } catch {
+      // Malformed escapes remain literal and cannot conceal a separator or dot segment.
+    }
+    if (hasUnstableCharacters(decoded)) {
+      throw new TypeError(
+        `Farm cron ${JSON.stringify(name)} path cannot contain backslashes or control characters.`,
+      );
+    }
+    if (decoded.includes("/")) {
+      throw new TypeError(
+        `Farm cron ${JSON.stringify(name)} path cannot contain percent-encoded path separators.`,
+      );
+    }
+    if (decoded === "." || decoded === "..") {
+      throw new TypeError(
+        `Farm cron ${JSON.stringify(name)} path cannot contain "." or ".." path segments.`,
+      );
+    }
   }
   return path.length > 1 ? path.replace(/\/+$/, "") : path;
 }
