@@ -11,6 +11,9 @@ export default defineConfig({
   integrations: {
     auth: betterAuth({ instance: auth }),
   },
+  migrations: {
+    commands: [{ name: "Better Auth schema", command: "pnpm auth:migrate" }],
+  },
   deploy: {
     target: "vercel",
   },

@@ -16,6 +16,14 @@ export default defineConfig({
   experimental: {
     serverComponents: true,
   },
+  migrations: {
+    commands: [
+      {
+        name: "Better Auth schema",
+        command: "pnpm auth:migrate",
+      },
+    ],
+  },
   vite: {
     server: {
       port: 3000,

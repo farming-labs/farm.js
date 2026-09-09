@@ -68,7 +68,7 @@ const templateDetails: Record<string, TemplateDetails> = {
     description: "Better Auth with Postgres, secure sessions, and protected routes",
     instructions: [
       "Before starting, copy .env.example to .env.local and set DATABASE_URL and BETTER_AUTH_SECRET.",
-      "Better Auth migrations run automatically when the auth instance starts.",
+      "Run pnpm auth:migrate before starting the app or serving production traffic.",
     ],
   },
   ai: integrationTemplate({
