@@ -2278,6 +2278,131 @@ function rewriteKeyedArrayReorderPipelineHints(
   };
 }
 
+function rewriteQueuedKeyedArrayReorderMapHints(
+  root: t.JSXElement,
+  statesBySetter: ReadonlyMap<string, StateBinding>,
+  mapUpdateIdentifier: t.Identifier,
+  queuedMapPipelineIdentifier: t.Identifier,
+  mapReorderIdentifier: t.Identifier,
+  reorderIdentifier: t.Identifier,
+  sortIdentifier: t.Identifier,
+  structuralReorderIdentifier: t.Identifier,
+  structuralSortIdentifier: t.Identifier,
+  allowed: boolean,
+): { root: t.JSXElement; mapCount: number } {
+  if (!allowed) return { root: t.cloneNode(root, true), mapCount: 0 };
+  const file = expressionFile(t.cloneNode(root, true));
+  let mapCount = 0;
+
+  const containsHelperCall = (
+    updater: t.ArrowFunctionExpression,
+    helperNames: ReadonlySet<string>,
+  ): boolean => {
+    let found = false;
+    t.traverseFast(updater.body, (node) => {
+      if (
+        !found &&
+        t.isCallExpression(node) &&
+        t.isIdentifier(node.callee) &&
+        helperNames.has(node.callee.name)
+      ) {
+        found = true;
+      }
+    });
+    return found;
+  };
+  const reorderHelperNames = new Set([
+    mapReorderIdentifier.name,
+    reorderIdentifier.name,
+    sortIdentifier.name,
+  ]);
+  const structuralHelperNames = new Set([
+    structuralReorderIdentifier.name,
+    structuralSortIdentifier.name,
+  ]);
+
+  traverse(file, {
+    BlockStatement(path) {
+      let queuedReorderState: number | undefined;
+      const statements = path.get("body") as NodePath<t.Statement>[];
+      for (const statementPath of statements) {
+        const statement = statementPath.node;
+        if (!t.isExpressionStatement(statement) || !t.isCallExpression(statement.expression)) {
+          queuedReorderState = undefined;
+          continue;
+        }
+        const setterCall = statement.expression;
+        if (
+          !t.isIdentifier(setterCall.callee) ||
+          statementPath.scope.hasBinding(setterCall.callee.name) ||
+          setterCall.arguments.length !== 1
+        ) {
+          queuedReorderState = undefined;
+          continue;
+        }
+        const state = statesBySetter.get(setterCall.callee.name);
+        const updater = setterCall.arguments[0];
+        if (
+          !state ||
+          !t.isArrowFunctionExpression(updater) ||
+          updater.async ||
+          updater.generator ||
+          updater.params.length !== 1 ||
+          !t.isIdentifier(updater.params[0])
+        ) {
+          queuedReorderState = undefined;
+          continue;
+        }
+
+        if (
+          containsHelperCall(updater, reorderHelperNames) &&
+          !containsHelperCall(updater, structuralHelperNames)
+        ) {
+          queuedReorderState = state.index;
+          continue;
+        }
+
+        if (
+          queuedReorderState !== state.index ||
+          !t.isCallExpression(updater.body) ||
+          !t.isIdentifier(updater.body.callee, { name: mapUpdateIdentifier.name }) ||
+          updater.body.arguments.length !== 2
+        ) {
+          queuedReorderState = undefined;
+          continue;
+        }
+        const pipeline = updater.body.arguments[1];
+        if (
+          !t.isArrowFunctionExpression(pipeline) ||
+          pipeline.params.length !== 2 ||
+          !t.isIdentifier(pipeline.params[1])
+        ) {
+          queuedReorderState = undefined;
+          continue;
+        }
+        let pipelineMapCount = 0;
+        const applyMapName = pipeline.params[1].name;
+        t.traverseFast(pipeline.body, (node) => {
+          if (t.isCallExpression(node) && t.isIdentifier(node.callee, { name: applyMapName })) {
+            pipelineMapCount += 1;
+          }
+        });
+        if (pipelineMapCount === 0) {
+          queuedReorderState = undefined;
+          continue;
+        }
+
+        updater.body.callee = t.cloneNode(queuedMapPipelineIdentifier);
+        mapCount += pipelineMapCount;
+      }
+    },
+  });
+  return {
+    root: (file.program.body[0] as t.ExpressionStatement).expression as t.JSXElement,
+    mapCount,
+  };
+}
+
 function rewriteKeyedArraySortHints(
   root: t.JSXElement,
   hintedStateIndices: ReadonlySet<number>,
@@ -7247,6 +7372,7 @@ function compileCandidate(
   keyedArrayAppendIdentifier: t.Identifier,
   keyedArrayFilterIdentifier: t.Identifier,
   keyedArrayMapPipelineIdentifier: t.Identifier,
+  keyedArrayQueuedMapPipelineIdentifier: t.Identifier,
   keyedArrayMapReorderIdentifier: t.Identifier,
   keyedArrayPrependIdentifier: t.Identifier,
   keyedArrayPositionIdentifier: t.Identifier,
@@ -7282,6 +7408,7 @@ function compileCandidate(
     keyedArrayMapReorderHints: number;
     keyedArrayMapSortHints: number;
     keyedArrayMapUpdateHints: number;
+    keyedArrayQueuedMapUpdateHints: number;
     keyedArrayStructuralReorderHints: number;
     keyedArrayStructuralSortHints: number;
     keyedArrayWindowReplaceHints: number;
@@ -7750,6 +7877,11 @@ function compileCandidate(
       compilerUsage.keyedArrayWindowReplaceHints += positionHintedRoot.windowReplaceCount;
     }
   }
+  const allowKeyedArrayMapPipelines = (blockAnalysis.plans || []).every(
+    (plan) =>
+      plan.kind !== "keyed-rows" ||
+      (plan.conditionals.length === 0 && !plan.descriptorBlocks?.size),
+  );
   const reorderPipelineHintedRoot = rewriteKeyedArrayReorderPipelineHints(
     expandedReactiveRoot,
     shiftedIndexIndependentStateIndices,
@@ -7763,11 +7895,7 @@ function compileCandidate(
     keyedArraySortIdentifier,
     keyedArrayStructuralSortIdentifier,
     safeGlobals,
-    (blockAnalysis.plans || []).every(
-      (plan) =>
-        plan.kind !== "keyed-rows" ||
-        (plan.conditionals.length === 0 && !plan.descriptorBlocks?.size),
-    ),
+    allowKeyedArrayMapPipelines,
   );
   let appliedPipelineFilterHints = 0;
   let appliedPipelineMapHints = 0;
@@ -7974,6 +8102,45 @@ function compileCandidate(
       optimizationCounts.keyedArrayFilterHints += filterHintedRoot.count;
     }
   }
+  const queuedReorderMapHintedRoot = rewriteQueuedKeyedArrayReorderMapHints(
+    expandedReactiveRoot,
+    statesBySetter,
+    keyedMapUpdateIdentifier,
+    keyedArrayQueuedMapPipelineIdentifier,
+    keyedArrayMapReorderIdentifier,
+    keyedArrayReorderIdentifier,
+    keyedArraySortIdentifier,
+    keyedArrayStructuralReorderIdentifier,
+    keyedArrayStructuralSortIdentifier,
+    allowKeyedArrayMapPipelines,
+  );
+  let appliedQueuedReorderMapHints = 0;
+  if (queuedReorderMapHintedRoot.mapCount > 0) {
+    const hintedBlockAnalysis = analyzeComposableBlocks(
+      queuedReorderMapHintedRoot.root,
+      reactiveByValue,
+      safeGlobals,
+      listNames,
+      allowedComponentNames,
+    );
+    const hintedAnalysis = analyzeHostTree(
+      queuedReorderMapHintedRoot.root,
+      reactiveByValue,
+      safeGlobals,
+      hintedBlockAnalysis.conditionalExpressions || new Set<t.Expression>(),
+      hintedBlockAnalysis.keyedExpressions || new Set<t.Expression>(),
+      hintedBlockAnalysis.ownedElements || new Set<t.JSXElement>(),
+      hintedBlockAnalysis.componentElements || new Set<t.JSXElement>(),
+    );
+    if (!hintedBlockAnalysis.reason && !hintedAnalysis.reason) {
+      expandedReactiveRoot = queuedReorderMapHintedRoot.root;
+      blockAnalysis = hintedBlockAnalysis;
+      analysis = hintedAnalysis;
+      appliedQueuedReorderMapHints = queuedReorderMapHintedRoot.mapCount;
+      compilerUsage.keyedArrayMapUpdateHints += queuedReorderMapHintedRoot.mapCount;
+      compilerUsage.keyedArrayQueuedMapUpdateHints += queuedReorderMapHintedRoot.mapCount;
+    }
+  }
   const keyedCollectionTargetKinds = new Map<number, KeyedCollectionTargetKind>();
   const conflictingKeyedCollectionTargets = new Set<number>();
   for (const plan of blockAnalysis.plans || []) {
@@ -8074,7 +8241,7 @@ function compileCandidate(
     appliedKeyedArrayBatchInsertHints > 0,
     appliedKeyedArrayWindowReplaceHints > 0,
     appliedKeyedArrayReorderHints > 0 || appliedKeyedArraySortHints > 0,
-    appliedPipelineMapHints > 0,
+    appliedPipelineMapHints > 0 || appliedQueuedReorderMapHints > 0,
     appliedKeyedArrayRollingWindowHints > 0,
   );
   markShortCircuitBindings(analysis.bindings || []);
@@ -8289,6 +8456,7 @@ export async function compileReactModule(
     keyedArrayMapReorderHints: 0,
     keyedArrayMapSortHints: 0,
     keyedArrayMapUpdateHints: 0,
+    keyedArrayQueuedMapUpdateHints: 0,
     keyedArrayStructuralReorderHints: 0,
     keyedArrayStructuralSortHints: 0,
     keyedArrayWindowReplaceHints: 0,
@@ -8341,6 +8509,9 @@ export async function compileReactModule(
         );
         const keyedArrayMapPipelineIdentifier = programPath.scope.generateUidIdentifier(
           "createCompilerKeyedArrayMapPipeline",
+        );
+        const keyedArrayQueuedMapPipelineIdentifier = programPath.scope.generateUidIdentifier(
+          "createCompilerKeyedArrayQueuedMapPipeline",
         );
         const keyedArrayMapReorderIdentifier = programPath.scope.generateUidIdentifier(
           "createCompilerKeyedArrayMapReorder",
@@ -8406,6 +8577,7 @@ export async function compileReactModule(
             keyedArrayAppendIdentifier,
             keyedArrayFilterIdentifier,
             keyedArrayMapPipelineIdentifier,
+            keyedArrayQueuedMapPipelineIdentifier,
             keyedArrayMapReorderIdentifier,
             keyedArrayPrependIdentifier,
             keyedArrayPositionIdentifier,
@@ -8440,6 +8612,8 @@ export async function compileReactModule(
           }
         }
 
+        const hasEagerKeyedArrayMapUpdateHints =
+          compilerUsage.keyedArrayMapUpdateHints > compilerUsage.keyedArrayQueuedMapUpdateHints;
         if (compiled.length > 0) {
           programPath.unshiftContainer(
             "body",
@@ -8457,7 +8631,7 @@ export async function compileReactModule(
                       ),
                     ]
                   : []),
-                ...(compilerUsage.keyedArrayMapUpdateHints > 0
+                ...(hasEagerKeyedArrayMapUpdateHints
                   ? [
                       t.importSpecifier(
                         keyedArrayMapPipelineIdentifier,
@@ -8466,6 +8640,14 @@ export async function compileReactModule(
                       t.importSpecifier(
                         keyedArrayMapReorderIdentifier,
                         t.identifier("createCompilerKeyedArrayMapReorder"),
+                      ),
+                    ]
+                  : []),
+                ...(compilerUsage.keyedArrayQueuedMapUpdateHints > 0
+                  ? [
+                      t.importSpecifier(
+                        keyedArrayQueuedMapPipelineIdentifier,
+                        t.identifier("createCompilerKeyedArrayQueuedMapPipeline"),
                       ),
                     ]
                   : []),

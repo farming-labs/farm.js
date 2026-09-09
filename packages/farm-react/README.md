@@ -468,6 +468,24 @@ An exact reverse uses the minimum-move reverse path without a general source-ite
 sort remains an ambiguous permutation, so Farm performs one validated source lookup and LIS pass.
 Safe maps on both sides of a reorder flatten their replacements back to the same committed rows.
 
+The reorder and safe maps may also be adjacent setter calls in the same synchronous block:
+
+```tsx
+setItems((current) => current.toReversed());
+setItems((current) =>
+  current.map((item) => (item.id === editedId ? { ...item, label: nextLabel } : item)),
+);
+setItems((current) =>
+  current.map((item) => (item.id === editedId ? { ...item, rank: nextRank } : item)),
+);
+```
+
+The compiler links only consecutive calls to the same setter. It keeps the reorder token through
+each accepted native map, then validates row keys before applying the same exact-reverse or
+sort-permutation path at commit. An intervening statement, another setter, a structural
+filter/slice reorder, an unsupported map, or a changed key keeps the ordinary complete fallback.
+Standalone map-only components do not retain the map-and-reorder runtime.
+
 A reverse before the safe map pipeline may be queued in a separate setter:
 
 ```tsx

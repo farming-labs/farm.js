@@ -83,8 +83,14 @@ interface CompilerKeyedArrayReorderHint {
   readonly sourceLength: number;
   readonly resultLength: number;
   readonly mapped?: boolean;
-  readonly mappedItemSources?: ReadonlyMap<unknown, unknown>;
+  readonly mappedItemSources?: CompilerMappedItemSources;
   readonly structuralUpdate?: CompilerKeyedArrayFilterHint;
+}
+
+interface CompilerMappedItemSources {
+  readonly queuedSourceItems?: readonly unknown[];
+  get(item: unknown): unknown;
+  has(item: unknown): boolean;
 }
 
 function reversedCompilerKeyedArrayOrder(
@@ -724,6 +730,86 @@ export function createCompilerKeyedArrayMapPipeline(
     previous,
     methodOrPipeline as (...values: readonly unknown[]) => unknown,
     recordCompilerKeyedArrayMapPipeline,
+  );
+}
+
+function recordCompilerKeyedArrayQueuedMapPipeline(previous: unknown, value: unknown): unknown {
+  try {
+    const previousTarget = compilerObject(previous);
+    const valueTarget = compilerObject(value);
+    if (
+      !previousTarget ||
+      !valueTarget ||
+      !Array.isArray(previous) ||
+      !Array.isArray(value) ||
+      Object.getPrototypeOf(previous) !== NATIVE_ARRAY_PROTOTYPE ||
+      Object.getPrototypeOf(value) !== NATIVE_ARRAY_PROTOTYPE ||
+      value.length !== previous.length
+    ) {
+      return value;
+    }
+
+    const previousReorder = COMPILER_KEYED_ARRAY_REORDERS.get(previousTarget);
+    if (
+      !previousReorder ||
+      previousReorder.structuralUpdate ||
+      previousReorder.resultLength !== previous.length
+    ) {
+      return value;
+    }
+    const sourceItems = previousReorder.mappedItemSources?.queuedSourceItems || previous;
+    let mappedItemSources: Map<unknown, unknown> | undefined;
+    const readMappedItemSources = (): Map<unknown, unknown> => {
+      if (mappedItemSources) return mappedItemSources;
+      const sources = new Map<unknown, unknown>();
+      for (let index = 0; index < value.length; index += 1) {
+        const sourceDescriptor = Object.getOwnPropertyDescriptor(sourceItems, index);
+        const mappedDescriptor = Object.getOwnPropertyDescriptor(value, index);
+        if (
+          !sourceDescriptor ||
+          !("value" in sourceDescriptor) ||
+          !mappedDescriptor ||
+          !("value" in mappedDescriptor)
+        ) {
+          throw new TypeError();
+        }
+        if (!Object.is(sourceDescriptor.value, mappedDescriptor.value)) {
+          sources.set(mappedDescriptor.value, sourceDescriptor.value);
+        }
+      }
+      mappedItemSources = sources;
+      return sources;
+    };
+    COMPILER_KEYED_ARRAY_REORDERS.set(valueTarget, {
+      kind: previousReorder.kind,
+      sourceToken: previousReorder.sourceToken,
+      sourceLength: previousReorder.sourceLength,
+      resultLength: value.length,
+      mapped: true,
+      // Array.map preserves positions. Retain the first post-reorder collection and validate its
+      // data properties against the final collection once, immediately before the DOM commit.
+      // This avoids rescanning every intermediate Array produced by separately queued setters.
+      mappedItemSources: {
+        queuedSourceItems: sourceItems,
+        get: (item) => readMappedItemSources().get(item),
+        has: (item) => readMappedItemSources().has(item),
+      },
+    });
+  } catch {
+    // Metadata must never change the result of a successful native update.
+  }
+  return value;
+}
+
+/** @internal Executes a queued native map after a compiler-proven keyed-array reorder. */
+export function createCompilerKeyedArrayQueuedMapPipeline(
+  previous: unknown,
+  pipeline: (...values: readonly unknown[]) => unknown,
+): unknown {
+  return executeCompilerKeyedMapPipeline(
+    previous,
+    pipeline,
+    recordCompilerKeyedArrayQueuedMapPipeline,
   );
 }
 

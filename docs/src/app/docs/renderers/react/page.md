@@ -1267,6 +1267,25 @@ changed rows. An earlier sort retains its general permutation proof, so Farm cre
 source-item lookup, runs LIS once, and still skips key and binding reads for unchanged rows. Map
 segments on both sides of a reorder flatten replacements back to the same committed source rows.
 
+The same proof can cross adjacent setter calls in one synchronous block:
+
+```tsx
+setItems((current) => current.toReversed());
+setItems((current) =>
+  current.map((item) => (item.id === editedId ? { ...item, label: nextLabel } : item)),
+);
+setItems((current) =>
+  current.map((item) => (item.id === editedId ? { ...item, rank: nextRank } : item)),
+);
+```
+
+Farm links only consecutive concise calls to the same setter. Each accepted standalone map keeps
+the earlier reorder token, so an exact reverse still takes the direct minimum-move path and a sort
+still performs one validated lookup and LIS. An intervening statement, a different setter, a
+structural filter/slice reorder, an unsupported map, or host-backed/nested row structure ends this
+specialized chain and preserves the existing complete fallback. Map-only components do not retain
+the optional map-and-reorder runtime.
+
 Exact reverse proof can also cross a setter boundary in the same batch:
 
 ```tsx
@@ -2170,6 +2189,10 @@ The package and example test suites verify more than generated code:
   React; targeted tests require exact reversal to use `n - 1` direct DOM moves without a generic
   source-item map, require ambiguous sorting to use one validated keyed reconciliation, and cover
   changed keys, custom methods, Strict Mode hydration, and unmount-before-flush cleanup;
+- another 2,000 deterministic reverse-or-sort operations followed by two adjacent standalone map
+  setters match normal React; compiler tests cover same-state adjacency and conservative boundaries,
+  while targeted tests preserve DOM identity, exact reverse moves, one changed-row binding read,
+  Strict Mode hydration, and unmount-before-flush cleanup;
 - 1,000 deterministic exact-position insertions, single and contiguous-range removals, single-row
   replacements, and exact-window replacements match normal React; compiler tests cover guarded
   runtime positions plus literal and compiler-safe runtime delete counts, while targeted removal
