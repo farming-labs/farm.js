@@ -49,7 +49,8 @@ pnpm --filter farm-react-compiler-dashboard-example benchmark
 
 The runner builds four production trials in this order: baseline React, static compiler, default
 hybrid compiler, and a second baseline React trial. Two baseline trials bracket machine drift. Each
-trial uses the same browser, viewport, DOM, data, and user actions. It warms every scenario, reports
+trial launches a clean process of the same browser version and uses the same viewport, DOM, data,
+and user actions. It warms every scenario, reports
 median and p95 event-to-DOM timings, checks the compiler report and bundle markers, verifies final
 DOM state and component execution counts, and fails on browser errors.
 
@@ -252,6 +253,15 @@ tests also cover sort-before-map permutation reconciliation, maps on both sides 
 changed-key and custom-method fallback, React 18/19, Strict Mode hydration, cleanup, and 2,000
 differential updates.
 
+Queued reorder-then-map has a separate 10,000-row comparison. One concise setter reverses the
+rows, and two immediately adjacent setters change one row's label and amount through native maps.
+The block-bodied control performs the same three queued updates through complete reconciliation.
+Both compiler modes must remain at least 4x faster than React and 1.2x faster than the compiled
+control. The assertion verifies complete reversed order, every original DOM identity and
+connection, and both changed values. Package tests also compare 2,000 deterministic queued
+reverse-or-sort/map sequences with normal React and cover Strict Mode hydration and
+unmount-before-flush cleanup.
+
 Mapped reverse parity has an independent 10,000-row comparison. Two safe native maps update one
 row, then two native reversals restore committed order. Farm must patch the changed row without
 moving any DOM row or constructing the generic source-item map/LIS sequence. Both compiler modes
@@ -362,6 +372,9 @@ The default JSON report is `/tmp/farm-react-dashboard-benchmark.json`; change it
 - The reorder-then-map control reverses all rows before changing one row through two native maps.
   Its block-bodied equivalent loses the reorder proof; the hinted path retains exact reverse order,
   patches one row, and skips the generic source map and LIS pass.
+- The queued reorder-then-map control performs the same reverse and two maps in three adjacent
+  setter calls. Its block-bodied equivalent keeps complete reconciliation; the hinted path carries
+  one committed reorder token through both queued maps and patches only the changed row.
 - The multi-map reverse-parity control changes the same row through two native maps and then
   reverses twice. Its block-bodied equivalent keeps complete reconciliation; the hinted path
   validates exact committed order, patches the row once, and performs no generic item-map, LIS, or

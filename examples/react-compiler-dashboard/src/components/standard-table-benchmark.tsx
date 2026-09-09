@@ -1111,13 +1111,55 @@ export function StandardTableBenchmark() {
           Reverse + review one row (snapshot control)
         </button>
         <button
+          data-action="table-queued-reorder-then-map-pipeline"
+          type="button"
+          onClick={() => {
+            setRows((current) => current.toReversed());
+            setRows((current) =>
+              current.map((row) =>
+                row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
+              ),
+            );
+            setRows((current) =>
+              current.map((row) =>
+                row.id % 10_000 === 5_001 ? { ...row, amount: row.amount + 1 } : row,
+              ),
+            );
+            setOperation("queue reverse, then review and reprice one row");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queue reverse + review one row
+        </button>
+        <button
+          data-action="table-queued-reorder-then-map-pipeline-snapshot"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              return current.toReversed();
+            });
+            setRows((current) => {
+              return current.map((row) =>
+                row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
+              );
+            });
+            setRows((current) => {
+              return current.map((row) =>
+                row.id % 10_000 === 5_001 ? { ...row, amount: row.amount + 1 } : row,
+              );
+            });
+            setOperation("queue reverse, then review and reprice one row (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queue reverse + review one row (snapshot control)
+        </button>
+        <button
           data-action="table-sort"
           type="button"
           onClick={() => {
             setRows((current) =>
-              current.toSorted(
-                (left, right) => left.amount - right.amount || left.id - right.id,
-              ),
+              current.toSorted((left, right) => left.amount - right.amount || left.id - right.id),
             );
             setOperation("sort rows");
             setRevision((value) => value + 1);

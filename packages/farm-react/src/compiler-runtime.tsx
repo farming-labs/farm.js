@@ -84,6 +84,7 @@ interface CompilerKeyedArrayReorderHint {
   readonly resultLength: number;
   readonly mapped?: boolean;
   readonly mappedItemSources?: ReadonlyMap<unknown, unknown>;
+  readonly mappedSourceItems?: readonly unknown[];
   readonly structuralUpdate?: CompilerKeyedArrayFilterHint;
 }
 
@@ -724,6 +725,59 @@ export function createCompilerKeyedArrayMapPipeline(
     previous,
     methodOrPipeline as (...values: readonly unknown[]) => unknown,
     recordCompilerKeyedArrayMapPipeline,
+  );
+}
+
+function recordCompilerKeyedArrayQueuedMapPipeline(previous: unknown, value: unknown): unknown {
+  try {
+    const previousTarget = compilerObject(previous);
+    const valueTarget = compilerObject(value);
+    if (
+      !previousTarget ||
+      !valueTarget ||
+      !Array.isArray(previous) ||
+      !Array.isArray(value) ||
+      Object.getPrototypeOf(previous) !== NATIVE_ARRAY_PROTOTYPE ||
+      Object.getPrototypeOf(value) !== NATIVE_ARRAY_PROTOTYPE ||
+      value.length !== previous.length
+    ) {
+      return value;
+    }
+
+    const previousReorder = COMPILER_KEYED_ARRAY_REORDERS.get(previousTarget);
+    if (
+      !previousReorder ||
+      previousReorder.structuralUpdate ||
+      previousReorder.resultLength !== previous.length
+    ) {
+      return value;
+    }
+    COMPILER_KEYED_ARRAY_REORDERS.set(valueTarget, {
+      kind: previousReorder.kind,
+      sourceToken: previousReorder.sourceToken,
+      sourceLength: previousReorder.sourceLength,
+      resultLength: value.length,
+      mapped: true,
+      // Array.map preserves positions. Retain the first post-reorder collection and validate its
+      // data properties against the final collection once, immediately before the DOM commit.
+      // This avoids rescanning every intermediate Array produced by separately queued setters.
+      mappedSourceItems: previousReorder.mappedSourceItems || previous,
+    });
+  } catch {
+    // Metadata must never change the result of a successful native update.
+  }
+  return value;
+}
+
+/** @internal Executes a queued native map after a compiler-proven keyed-array reorder. */
+export function createCompilerKeyedArrayQueuedMapPipeline(
+  previous: unknown,
+  pipeline: (...values: readonly unknown[]) => unknown,
+): unknown {
+  return executeCompilerKeyedMapPipeline(
+    previous,
+    pipeline,
+    recordCompilerKeyedArrayQueuedMapPipeline,
   );
 }
 
@@ -4956,7 +5010,7 @@ function reconcileCompilerKeyedArrayMapReorder(
     compilerKeyedArrayReorder(finalValue, collectionToken, instances.size);
   if (
     !update?.mapped ||
-    !update.mappedItemSources ||
+    (!update.mappedItemSources && !update.mappedSourceItems) ||
     update.structuralUpdate ||
     !Array.isArray(finalValue)
   ) {
@@ -4988,23 +5042,44 @@ function reconcileCompilerKeyedArrayMapReorder(
       const nextInstances: CompilerKeyedRowInstance[] = instancesByItem ? [] : previousInstances;
       const sequence: number[] | undefined = instancesByItem ? [] : undefined;
       for (let targetIndex = 0; targetIndex < finalValue.length; targetIndex += 1) {
-        const item = finalValue[targetIndex];
+        let item: unknown;
+        let queuedSourceItem: unknown;
+        if (update.mappedSourceItems) {
+          const mappedDescriptor = Object.getOwnPropertyDescriptor(finalValue, targetIndex);
+          if (!mappedDescriptor || !("value" in mappedDescriptor)) return undefined;
+          const sourceDescriptor = Object.getOwnPropertyDescriptor(
+            update.mappedSourceItems,
+            targetIndex,
+          );
+          if (!sourceDescriptor || !("value" in sourceDescriptor)) return undefined;
+          item = mappedDescriptor.value;
+          queuedSourceItem = sourceDescriptor.value;
+        } else {
+          // Preserve the existing eager map/reorder path. Its compiler-owned native map pipeline
+          // already validated the collection while recording the source-item lookup.
+          item = finalValue[targetIndex];
+        }
         let instance: CompilerKeyedRowInstance | undefined;
         if (!instancesByItem) {
           const sourceIndex = reverse ? finalValue.length - targetIndex - 1 : targetIndex;
           instance = previousInstances[sourceIndex];
           if (!instance || instance.index !== sourceIndex) return undefined;
           if (Object.is(instance.item, item)) continue;
+          const sourceItem = update.mappedSourceItems
+            ? queuedSourceItem
+            : update.mappedItemSources!.get(item);
           if (
-            !update.mappedItemSources.has(item) ||
-            !Object.is(instance.item, update.mappedItemSources.get(item))
+            (!update.mappedSourceItems && !update.mappedItemSources!.has(item)) ||
+            !Object.is(instance.item, sourceItem)
           ) {
             return undefined;
           }
         } else {
-          const sourceItem = update.mappedItemSources.has(item)
-            ? update.mappedItemSources.get(item)
-            : item;
+          const sourceItem = update.mappedSourceItems
+            ? queuedSourceItem
+            : update.mappedItemSources!.has(item)
+              ? update.mappedItemSources!.get(item)
+              : item;
           instance = instancesByItem!.get(sourceItem);
           if (!instance) return undefined;
           instancesByItem!.delete(sourceItem);
