@@ -480,11 +480,6 @@ describe("React AOT keyed-array sort hints", () => {
         "current.map((row) => row.id === editedId ? { ...row, rank: 0 } : row).filter((row) => row.rank > 0)",
     },
     {
-      name: "a map after a structural step",
-      pipeline:
-        "current.filter((row) => row.rank > 0).map((row) => row.id === editedId ? { ...row, rank: 0 } : row).toSorted((a, b) => a.rank - b.rank)",
-    },
-    {
       name: "a map after a structural reorder",
       pipeline:
         "current.filter((row) => row.rank > 0).toReversed().map((row) => row.id === editedId ? { ...row, rank: 0 } : row)",
@@ -535,6 +530,41 @@ describe("React AOT keyed-array sort hints", () => {
     expect(result.code).toContain("createCompilerKeyedArrayFilter");
     expect(result.code).toContain("createCompilerKeyedArrayStructuralSort");
     expect(result.code).toContain("keyedRowsEveryHintedRuntimeFeature");
+    expect(result.code).not.toContain("createCompilerKeyedArrayMapReorder");
+  });
+
+  it("carries mapped row lineage between filter, slice, and sort steps", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Table({ editedId, nextLabel, nextRank, limit }) {
+        const [rows, setRows] = useState([
+          { id: "a", label: "Alpha", rank: 1, visible: true },
+          { id: "b", label: "Beta", rank: 2, visible: false },
+          { id: "c", label: "Gamma", rank: 3, visible: true },
+        ]);
+        return <section>
+          <button onClick={() => setRows((current) => current
+            .filter((row) => row.visible)
+            .map((row) => row.id === editedId ? { ...row, rank: nextRank } : row)
+            .slice(0, limit)
+            .map((row) => row.id === editedId ? { ...row, label: nextLabel } : row)
+            .toSorted((left, right) => left.rank - right.rank)
+          )}>Update</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}: {row.rank}</li>)}</ul>
+        </section>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Table"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.optimizations.keyedMapUpdateHints).toBe(2);
+    expect(result.optimizations.keyedArrayFilterHints).toBe(1);
+    expect(result.optimizations.keyedArraySliceHints).toBe(1);
+    expect(result.optimizations.keyedArraySortHints).toBe(1);
+    expect(result.code).toContain("createCompilerKeyedArrayFilter");
+    expect(result.code).toContain("createCompilerKeyedArrayMapPipeline");
+    expect(result.code).toContain("createCompilerKeyedArraySlice");
+    expect(result.code).toContain("createCompilerKeyedArrayStructuralSort");
     expect(result.code).not.toContain("createCompilerKeyedArrayMapReorder");
   });
 

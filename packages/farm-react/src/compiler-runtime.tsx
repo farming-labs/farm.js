@@ -664,14 +664,30 @@ function recordCompilerKeyedArrayMapPipeline(previous: unknown, value: unknown):
     const previousReorder = committedSource
       ? undefined
       : COMPILER_KEYED_ARRAY_REORDERS.get(previousTarget);
+    const structuralUpdate = previousReorder?.structuralUpdate
+      ? previousReorder.structuralUpdate
+      : !previousReorder
+        ? COMPILER_KEYED_ARRAY_FILTERS.get(previousTarget)
+        : undefined;
+    const structuralSource = structuralUpdate
+      ? compilerKeyedArrayFilterSource(structuralUpdate, previous.length)
+      : undefined;
     const previousSource =
       previousReorder && !previousReorder.structuralUpdate ? previousReorder : undefined;
-    if (!committedSource && (!previousSource || previousSource.resultLength !== previous.length)) {
+    if (
+      !committedSource &&
+      (!previousSource || previousSource.resultLength !== previous.length) &&
+      !structuralSource
+    ) {
       return value;
     }
-    const sourceToken = previousSource?.sourceToken || compilerKeyedCollectionToken(previousTarget);
+    const sourceToken =
+      previousSource?.sourceToken ||
+      structuralSource?.sourceToken ||
+      compilerKeyedCollectionToken(previousTarget);
     if (!sourceToken) return value;
-    const previousMappedItemSources = previousSource?.mappedItemSources;
+    const previousMappedItemSources =
+      previousReorder?.mappedItemSources || structuralUpdate?.mappedItemSources;
     const mappedItemSources = new Map<unknown, unknown>();
     for (let index = 0; index < value.length; index += 1) {
       const previousDescriptor = Object.getOwnPropertyDescriptor(previous, index);
@@ -696,12 +712,14 @@ function recordCompilerKeyedArrayMapPipeline(previous: unknown, value: unknown):
     const hint: CompilerKeyedArrayReorderHint = {
       kind: committedSource ? undefined : previousReorder?.kind,
       sourceToken,
-      sourceLength: previousSource?.sourceLength ?? previous.length,
+      sourceLength:
+        previousSource?.sourceLength ?? structuralSource?.sourceLength ?? previous.length,
       resultLength: value.length,
       mapped: true,
       mappedItemSources,
+      ...(structuralUpdate ? { structuralUpdate } : {}),
     };
-    // A safe map can precede or follow a native reorder, including as the final pipeline step.
+    // A safe map may retain a native reorder or an index-independent structural prefix.
     COMPILER_KEYED_ARRAY_REORDERS.set(valueTarget, hint);
   } catch {
     // Metadata must never change the result of a successful native update.
@@ -1018,16 +1036,16 @@ export function createCompilerKeyedArrayFilter(
       : COMPILER_KEYED_ARRAY_REORDERS.get(previousTarget);
     const mappedUpdate =
       previousMappedUpdate?.mapped &&
-      !previousMappedUpdate.structuralUpdate &&
+      previousMappedUpdate.kind === undefined &&
       previousMappedUpdate.resultLength === sourceLength
         ? previousMappedUpdate
         : undefined;
     const sourceToken = mappedUpdate?.sourceToken || compilerKeyedCollectionToken(previousTarget);
     if (!sourceToken) return value;
     const previousUpdate = !committedSource
-      ? COMPILER_KEYED_ARRAY_FILTERS.get(previousTarget)
+      ? COMPILER_KEYED_ARRAY_FILTERS.get(previousTarget) || mappedUpdate?.structuralUpdate
       : undefined;
-    const mappedItemSources = previousUpdate?.mappedItemSources || mappedUpdate?.mappedItemSources;
+    const mappedItemSources = mappedUpdate?.mappedItemSources || previousUpdate?.mappedItemSources;
     COMPILER_KEYED_ARRAY_FILTERS.set(valueTarget, {
       kind: "filter",
       sourceToken: previousUpdate?.sourceToken || sourceToken,
@@ -1090,16 +1108,16 @@ export function createCompilerKeyedArraySlice(
       : COMPILER_KEYED_ARRAY_REORDERS.get(previousTarget);
     const mappedUpdate =
       previousMappedUpdate?.mapped &&
-      !previousMappedUpdate.structuralUpdate &&
+      previousMappedUpdate.kind === undefined &&
       previousMappedUpdate.resultLength === sourceLength
         ? previousMappedUpdate
         : undefined;
     const sourceToken = mappedUpdate?.sourceToken || compilerKeyedCollectionToken(previousTarget);
     if (!sourceToken) return value;
     const previousUpdate = !committedSource
-      ? COMPILER_KEYED_ARRAY_FILTERS.get(previousTarget)
+      ? COMPILER_KEYED_ARRAY_FILTERS.get(previousTarget) || mappedUpdate?.structuralUpdate
       : undefined;
-    const mappedItemSources = previousUpdate?.mappedItemSources || mappedUpdate?.mappedItemSources;
+    const mappedItemSources = mappedUpdate?.mappedItemSources || previousUpdate?.mappedItemSources;
     COMPILER_KEYED_ARRAY_FILTERS.set(valueTarget, {
       kind: "slice",
       sourceToken: previousUpdate?.sourceToken || sourceToken,
@@ -1518,8 +1536,11 @@ function recordCompilerKeyedArrayStructuralReorder(
       sourceLength: previousUpdate?.sourceLength || structuralSource.sourceLength,
       resultLength: value.length,
       structuralUpdate,
-      ...(structuralUpdate.mappedItemSources
-        ? { mappedItemSources: structuralUpdate.mappedItemSources }
+      ...(previousUpdate?.mappedItemSources || structuralUpdate.mappedItemSources
+        ? {
+            mappedItemSources:
+              previousUpdate?.mappedItemSources || structuralUpdate.mappedItemSources,
+          }
         : {}),
     });
   } catch {

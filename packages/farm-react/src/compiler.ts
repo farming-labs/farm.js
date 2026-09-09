@@ -2009,7 +2009,7 @@ function keyedArrayReorderPipeline(
   let reachedReorder = false;
   for (const step of steps) {
     if (step.kind === "map") {
-      if (structuralSteps > 0) return undefined;
+      if (reachedReorder && structuralSteps > 0) return undefined;
       mapSteps += 1;
     } else if (step.kind === "filter" || step.kind === "slice") {
       if (reachedReorder) return undefined;
