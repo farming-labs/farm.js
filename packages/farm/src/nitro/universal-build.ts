@@ -2475,7 +2475,7 @@ document.addEventListener("click", function(e) {
   });
   const isolatedHydrationEnabled = isolatedBoundaryModules.size > 0;
   const isolatedHydrationImport = isolatedHydrationEnabled
-    ? `import { createFarmIsolatedHydrationRuntime } from "@farm.js/core/internal/isolated-boundary";`
+    ? `import { createFarmIsolatedHydrationRuntime, wrapFarmIsolatedClientGraph } from "@farm.js/core/internal/isolated-boundary";`
     : "";
   const isolatedHydrationRuntime = isolatedHydrationEnabled
     ? `const farmIsolatedBoundaryLoaders = {
@@ -2506,6 +2506,11 @@ async function hydrateFarmIsolatedClientBoundaries(scope = document, signal) {
   await farmIsolatedHydrationRuntime.hydrate(scope, signal);
 }`
     : "";
+  const routeClientGraphRuntime = isolatedHydrationEnabled
+    ? `function wrapFarmRouteClientGraph(element) {
+  return wrapFarmIsolatedClientGraph(React, element);
+}`
+    : `function wrapFarmRouteClientGraph(element) { return element; }`;
   clientRouteSlots.forEach((slot, index) => {
     const importPath = toImportPath(slot.modulePath);
     imports.push(`import RouteSlot${index} from "${importPath}";`);
@@ -2551,6 +2556,7 @@ ${routeEntries.join(",\n")}
 ];
 
 ${isolatedHydrationRuntime}
+${routeClientGraphRuntime}
 
 const clientRouteSlots = [
 ${routeSlotEntries.join(",\n")}
@@ -2674,11 +2680,15 @@ async function createMatchedHydrationElement(matched, pathname, searchParams, se
   }
 
   if (!pageElement) return null;
-  if (!hydrateLayouts) return wrapWithIntegrationProviders(pageElement);
+  if (!hydrateLayouts) {
+    return wrapFarmRouteClientGraph(wrapWithIntegrationProviders(pageElement));
+  }
   if (matched.route.pageShouldHydrate) {
     pageElement = createLayoutPageBoundary(matched.route, pageElement);
   }
-  return wrapWithIntegrationProviders(wrapWithLayouts(pageElement, pathname, params));
+  return wrapFarmRouteClientGraph(
+    wrapWithIntegrationProviders(wrapWithLayouts(pageElement, pathname, params)),
+  );
 }
 
 function matchesRoutePrefix(pathname, pattern) {
@@ -2737,7 +2747,9 @@ function renderClientRouteSlot(slot, registration, mode) {
   const key = routeSlotKey(slot);
   const existingRoot = routeSlotRoots.get(key);
   const props = slot.props && typeof slot.props === "object" ? slot.props : {};
-  const element = wrapWithIntegrationProviders(React.createElement(registration.Component, props));
+  const element = wrapFarmRouteClientGraph(
+    wrapWithIntegrationProviders(React.createElement(registration.Component, props)),
+  );
 
   if (mode === "hydrate") {
     if (existingRoot) return true;
@@ -3718,6 +3730,7 @@ async function buildSSRInMemory(
     hasConfiguredRuntimePlugins,
     preset,
     i18nCatalogs,
+    isolatedClientBoundaryModules,
   );
 
   // Find a temporary file path for the virtual entry
@@ -4029,6 +4042,7 @@ function generateVirtualEntryCode(
   hasConfiguredRuntimePlugins: boolean,
   preset: string,
   i18nCatalogs: FarmI18nCatalogs,
+  isolatedClientBoundaryModules: ReadonlySet<string>,
 ): string {
   const hasPluginRuntime = hasRuntimeIntegrationConfig || hasConfiguredRuntimePlugins;
   const adapterOwnsDocsRuntime = Boolean(
@@ -4037,9 +4051,20 @@ function generateVirtualEntryCode(
     config.docs.adapter?.server &&
     config.docs.adapter.react,
   );
+  const hasIsolatedClientGraphRuntime =
+    isReactRenderer(config.renderer) && isolatedClientBoundaryModules.size > 0;
   const rendererServerImports = isReactRenderer(config.renderer)
-    ? `import * as React from "react";\nimport * as ReactDOMServer from "react-dom/server";`
+    ? `import * as React from "react";\nimport * as ReactDOMServer from "react-dom/server";${
+        hasIsolatedClientGraphRuntime
+          ? '\nimport { wrapFarmIsolatedClientGraph } from "@farm.js/core/internal/isolated-boundary";'
+          : ""
+      }`
     : `import React, * as ReactDOMServer from ${JSON.stringify(config.renderer.server)};`;
+  const routeClientGraphServerRuntime = hasIsolatedClientGraphRuntime
+    ? `function wrapFarmRouteClientGraph(element) {
+  return wrapFarmIsolatedClientGraph(React, element);
+}`
+    : `function wrapFarmRouteClientGraph(element) { return element; }`;
   const hasGeneratedMetadataImages = metadataImageRoutes.some(
     (image) => image.sourceType === "module",
   );
@@ -4071,6 +4096,51 @@ function generateVirtualEntryCode(
       return providers.length > 0 ? [[name, { providers }]] : [];
     }),
   );
+  const unsupportedIntegrationProvider = renderedIntegrationProviders.find(
+    (provider) => provider.supportsIsolatedHydration !== true,
+  );
+  const isolatedHydrationMode = resolveFarmIsolatedClientHydrationMode(
+    config.experimental?.isolatedClientHydration,
+    {
+      serverComponents: config.experimental?.serverComponents === true,
+      hasUnsupportedIntegrationProvider: Boolean(unsupportedIntegrationProvider),
+    },
+  );
+  const layoutAppliesToRoute = (layoutPattern: string, routePattern: string) =>
+    layoutPattern === "/" ||
+    routePattern === layoutPattern ||
+    routePattern.startsWith(`${layoutPattern}/`);
+  const layoutHydrationPlans = layoutRoutes.map((layout) => ({
+    ...layout,
+    hydration: getClientModuleHydrationPlan(layout.modulePath, config.root, isolatedHydrationMode),
+  }));
+  const pageHydrationPlans = new Map(
+    pageRoutes
+      .filter((route) => !isFarmMarkdownPageFile(route.modulePath))
+      .map((route) => [
+        route.modulePath,
+        getClientModuleHydrationPlan(route.modulePath, config.root, isolatedHydrationMode),
+      ]),
+  );
+
+  // Match the production client plan: a route-wide layout owns its full
+  // descendant tree, so an overlapping isolated page graph must fall back to
+  // the route-wide metadata used before isolated hydration was enabled.
+  for (const route of pageRoutes) {
+    const hydration = pageHydrationPlans.get(route.modulePath);
+    if (
+      hydration?.hasIsolatedClientBoundaries &&
+      layoutHydrationPlans.some(
+        (layout) =>
+          layout.hydration.shouldHydrate && layoutAppliesToRoute(layout.pattern, route.pattern),
+      )
+    ) {
+      hydration.shouldHydrate = hydration.legacyShouldHydrate;
+      hydration.islandStrategy = hydration.legacyIslandStrategy;
+      hydration.hasIsolatedClientBoundaries = false;
+      hydration.isolatedBoundaries = [];
+    }
+  }
   const providerServerImports = [
     providerServerModules.hasClerkProvider
       ? `import { ClerkProvider as FarmClerkProvider } from "@clerk/react";`
@@ -4133,7 +4203,7 @@ function generateVirtualEntryCode(
     pageImports.push(
       `import * as ${varName} from ${toVirtualEntryImportSpecifier(route.modulePath)};`,
     );
-    const clientMetadata = getClientModuleMetadata(route.modulePath, config.root);
+    const clientMetadata = pageHydrationPlans.get(route.modulePath)!;
     pageRegistrations.push(`
   {
     pattern: ${JSON.stringify(route.pattern)},
@@ -4155,9 +4225,9 @@ function generateVirtualEntryCode(
   const layoutImports: string[] = [];
   const layoutRegistrations: string[] = [];
 
-  layoutRoutes.forEach((layout, index) => {
+  layoutHydrationPlans.forEach((layout, index) => {
     const varName = `layoutRoute${index}`;
-    const clientMetadata = getClientModuleMetadata(layout.modulePath, config.root);
+    const clientMetadata = layout.hydration;
     layoutImports.push(
       `import * as ${varName} from ${toVirtualEntryImportSpecifier(layout.modulePath)};`,
     );
@@ -4535,6 +4605,8 @@ ${imageNodeRuntimeImport}
 import { farmFontPreloadHeader } from "virtual:farm-font-runtime";
 import { isFarmRouteActive } from "@farm.js/core/router";
 ${rendererServerImports}
+
+${routeClientGraphServerRuntime}
 
 const farmPreloadConfig = ${JSON.stringify(config.performance.preload)};
 const farmProductionSiteTelemetry = ${
@@ -5921,7 +5993,7 @@ ${
     React.createElement(
       "div",
       { id: "root" },
-      wrapWithFarmIntegrationProviders(wrappedElement),
+      wrapFarmRouteClientGraph(wrapWithFarmIntegrationProviders(wrappedElement)),
     ),
   );
   let rootMarkup = renderedRoot.html;
@@ -6639,6 +6711,10 @@ async function handleFarmRequestInContext(
               pageElement = React.createElement(PageComponent, pageProps);
             }
 
+            if (route.shouldHydrate && !shouldHydrateLayout) {
+              pageElement = wrapFarmRouteClientGraph(pageElement);
+            }
+
             pageElement = React.createElement(
               "div",
               {
@@ -6671,7 +6747,9 @@ async function handleFarmRequestInContext(
                       "data-farm-route-slot": slot.name,
                       "data-farm-slot-owner": slot.ownerPattern,
                     },
-                    React.createElement(slot.module.default, slot.props),
+                    wrapFarmRouteClientGraph(
+                      React.createElement(slot.module.default, slot.props),
+                    ),
                   );
                 }
                 wrappedElement = React.createElement(LayoutComponent, {
@@ -6690,6 +6768,10 @@ async function handleFarmRequestInContext(
                 );
               }
             }
+
+          if (shouldHydrateLayout) {
+            wrappedElement = wrapFarmRouteClientGraph(wrappedElement);
+          }
 
           wrappedElement = wrapWithFarmIntegrationProviders(wrappedElement);
           return renderFarmElement(ReactDOMServer, wrappedElement);

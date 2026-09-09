@@ -2921,10 +2921,15 @@ if (import.meta.hot) {
       const props = window.__FARM_PROPS__ || {};
       const nextElement = React.createElement(newModule.default, props);
       const wrapProviders = window.__FARM_WRAP_PROVIDERS__;
+      const wrapClientGraph = window.__FARM_WRAP_CLIENT_GRAPH__;
       Promise.resolve(
         typeof wrapProviders === 'function' ? wrapProviders(nextElement) : nextElement
       ).then((wrappedElement) => {
-        window.__FARM_REACT_ROOT__.render(wrappedElement);
+        window.__FARM_REACT_ROOT__.render(
+          typeof wrapClientGraph === 'function'
+            ? wrapClientGraph(wrappedElement)
+            : wrappedElement
+        );
       });
     }
   });
@@ -3623,7 +3628,7 @@ function generateClientCode(
     ? `import React from 'react'\nimport { hydrateRoot, createRoot } from 'react-dom/client'`
     : `import React, { hydrateRoot, createRoot } from ${JSON.stringify(renderer.client)}`;
   const isolatedHydrationImport = isolatedHydrationEnabled
-    ? `import { createFarmIsolatedHydrationRuntime } from '@farm.js/core/internal/isolated-boundary'`
+    ? `import { createFarmIsolatedHydrationRuntime, wrapFarmIsolatedClientGraph } from '@farm.js/core/internal/isolated-boundary'`
     : "";
   const docsAdapterImportBlock = docsAdapterReact
     ? `import * as FarmDocsAdapterReact from ${JSON.stringify(docsAdapterReact)};
@@ -3711,6 +3716,7 @@ function matchesDocumentNavigation(pathname) {
 ${providerClientCode.runtime}
 
 window.__FARM_WRAP_PROVIDERS__ = wrapWithIntegrationProviders;
+${isolatedHydrationEnabled ? "window.__FARM_WRAP_CLIENT_GRAPH__ = (element) => wrapFarmIsolatedClientGraph(React, element);" : ""}
 
 // Get manifest from window (inlined by server in HTML)
 // Fallback to empty manifest if not available yet
@@ -4104,9 +4110,8 @@ async function renderRouteSlot(slot, mode = 'render') {
     normalizeServerProps(slot.props || {}),
     window.__FARM_DEFERRED_DATA__ || {},
   );
-  const element = wrapWithIntegrationProviders(
-    React.createElement(SlotComponent, props),
-  );
+  let element = wrapWithIntegrationProviders(React.createElement(SlotComponent, props));
+  ${isolatedHydrationEnabled ? "element = wrapFarmIsolatedClientGraph(React, element);" : ""}
   const key = getRouteSlotKey(slot);
   const existingRoot = routeSlotRoots.get(key);
 
@@ -4505,6 +4510,8 @@ async function tryHydrateImportedPage(
     );
   }
   if (signal?.aborted || !container?.isConnected) return false;
+
+  ${isolatedHydrationEnabled ? "wrappedElement = wrapFarmIsolatedClientGraph(React, wrappedElement);" : ""}
 
   if (useHydrate) {
     try {

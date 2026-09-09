@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createFarmIsolatedClientBoundary,
   createFarmIsolatedHydrationRuntime,
+  wrapFarmIsolatedClientGraph,
 } from "../client/isolated-boundary";
 import { scheduleFarmIslandHydration } from "../client/island-runtime";
 
@@ -60,6 +61,25 @@ describe("isolated client boundary", () => {
     );
     expect(html).toContain('{"initial":2}');
     expect(html).toContain("<button>2</button>");
+  });
+
+  it("keeps a compiled leaf inside its route-owned React root", () => {
+    function Counter() {
+      return <button data-route-counter>route</button>;
+    }
+    const Boundary = createFarmIsolatedClientBoundary(
+      React,
+      Counter,
+      "/src/counter.tsx",
+      "default",
+      "load",
+    );
+
+    const html = renderToString(wrapFarmIsolatedClientGraph(React, <Boundary />));
+
+    expect(html).toContain('<button data-route-counter="true">route</button>');
+    expect(html).not.toContain("<farm-client-boundary");
+    expect(html).not.toContain("data-farm-client-props");
   });
 
   it("keeps serialized props non-executable and round-trips supported values", async () => {

@@ -3,6 +3,7 @@ import {
   renderToPipeableStream as reactRenderToPipeableStream,
   renderToString as reactRenderToString,
 } from "react-dom/server";
+import { wrapFarmIsolatedClientGraph } from "../../client/isolated-boundary";
 
 export class ErrorBoundary extends React.Component<
   {
@@ -42,6 +43,8 @@ export const Fragment = React.Fragment;
 export const Suspense = React.Suspense;
 export const createElement = React.createElement;
 export const isValidElement = React.isValidElement;
+export const wrapClientGraph = (element: React.ReactNode) =>
+  wrapFarmIsolatedClientGraph(React, element);
 export const renderToString = reactRenderToString;
 export const renderToPipeableStream = reactRenderToPipeableStream;
 
