@@ -1,6 +1,7 @@
 import type { RouteSegment, ParsedRoute } from "./types";
 import path from "path";
 import { assertTerminalCatchAll, assertUniqueRouteParameters } from "./routing/specificity";
+import { searchParamsToObject } from "./search-params";
 import { decodeRouteSegment } from "./utils/decode";
 
 export function parseRoutePath(filePath: string): ParsedRoute {
@@ -219,22 +220,7 @@ export async function globFiles(pattern: string, cwd: string): Promise<string[]>
 export function parseSearchParams(
   searchParams: URLSearchParams,
 ): Record<string, string | string[]> {
-  const result: Record<string, string | string[]> = {};
-
-  for (const [key, value] of searchParams.entries()) {
-    if (key in result) {
-      const existing = result[key];
-      if (Array.isArray(existing)) {
-        existing.push(value);
-      } else {
-        result[key] = [existing, value];
-      }
-    } else {
-      result[key] = value;
-    }
-  }
-
-  return result;
+  return searchParamsToObject(searchParams) as Record<string, string | string[]>;
 }
 
 export const logger = {
