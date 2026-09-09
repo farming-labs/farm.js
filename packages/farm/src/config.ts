@@ -73,6 +73,7 @@ import {
   type ResolvedFarmAuthConfig,
 } from "./auth-config";
 import { resolveFarmPerformanceConfig, type ResolvedFarmPerformanceConfig } from "./preload";
+import { validateConfigRouteSource } from "./plugins/route-pattern";
 import {
   getFarmSecurityHeader,
   resolveFarmSecurityConfig,
@@ -855,6 +856,7 @@ export async function resolveDocsConfig(
 
 function validateRedirectConfigs(redirects: RedirectConfig[], field: string): RedirectConfig[] {
   for (const [index, redirect] of redirects.entries()) {
+    validateConfigRouteSource(redirect.source, `${field}[${index}].source`);
     if (redirect.statusCode !== undefined && !isFarmRedirectStatus(redirect.statusCode)) {
       throw new RangeError(
         `${field}[${index}].statusCode must be one of 301, 302, 303, 307, or 308.`,
@@ -862,6 +864,13 @@ function validateRedirectConfigs(redirects: RedirectConfig[], field: string): Re
     }
   }
   return redirects;
+}
+
+function validateConfigRouteSources<T extends { source: string }>(routes: T[], field: string): T[] {
+  for (const [index, route] of routes.entries()) {
+    validateConfigRouteSource(route.source, `${field}[${index}].source`);
+  }
+  return routes;
 }
 
 export async function resolveConfig(
@@ -906,11 +915,13 @@ export async function resolveConfig(
     typeof userConfig.rewrites === "function"
       ? await userConfig.rewrites()
       : userConfig.rewrites || [];
+  validateConfigRouteSources(rewrites, "rewrites");
 
   const headers =
     typeof userConfig.headers === "function"
       ? await userConfig.headers()
       : userConfig.headers || [];
+  validateConfigRouteSources(headers, "headers");
   const routeRules = normalizeRouteRules(userConfig.routeRules);
   const routeRuleRedirects = routeRulesToRedirects(routeRules);
   const routeRuleHeaders = routeRulesToHeaders(routeRules);

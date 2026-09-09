@@ -2,6 +2,7 @@ import type { HeaderConfig, RedirectConfig } from "./config";
 import { isFarmRedirectStatus, type FarmRedirectStatus } from "./navigation-errors";
 import type { FarmRouteRuntimeConfig } from "./route-runtime";
 import { normalizeFarmRouteRuntimeConfig } from "./route-runtime";
+import { validateConfigRouteSource } from "./plugins/route-pattern";
 
 export type FarmRouteRuleRenderMode = "static" | "dynamic";
 
@@ -39,8 +40,9 @@ export function normalizeRouteRules(routeRules: FarmRouteRules | undefined): Far
 
   const normalized: FarmRouteRules = {};
   for (const [source, rule] of Object.entries(routeRules)) {
-    if (!source || !rule) continue;
+    if (!rule) continue;
     const normalizedSource = normalizeRuleSource(source);
+    validateConfigRouteSource(normalizedSource, `Route rule "${source}" source`);
     if (
       typeof rule.redirect === "object" &&
       rule.redirect.statusCode !== undefined &&
@@ -157,6 +159,8 @@ function normalizeList(value: string | readonly string[] | undefined): string | 
 
 function normalizeRuleSource(source: string): string {
   const trimmed = source.trim();
-  if (!trimmed) return "/";
+  if (!trimmed) {
+    throw new TypeError("Route rule source must be a non-empty pathname pattern.");
+  }
   return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
 }

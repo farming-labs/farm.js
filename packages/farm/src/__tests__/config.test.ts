@@ -740,6 +740,20 @@ describe("resolveConfig", () => {
     });
   });
 
+  it("rejects config route sources that cannot match a URL pathname", async () => {
+    for (const config of [
+      { redirects: [{ source: "/old?campaign=launch", destination: "/new" }] },
+      { rewrites: [{ source: "/legacy#details", destination: "/current" }] },
+      {
+        headers: [{ source: "docs/:path*", headers: [{ key: "x-docs", value: "enabled" }] }],
+      },
+      { routeRules: { "/api/**?private=1": { cors: true } } },
+      { routeRules: { "": { cors: true } } },
+    ]) {
+      await expect(resolveConfig(config, "production")).rejects.toThrow();
+    }
+  });
+
   it("rejects non-redirect status codes in configured redirects", async () => {
     await expect(
       resolveConfig(

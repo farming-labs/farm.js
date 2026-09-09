@@ -614,7 +614,9 @@ syntax. `:name` captures one path segment, while `:name*` and plain `*` capture 
 characters. Redirect and rewrite destinations can reuse named captures or use numbered captures
 such as `$1`. Captured path segments are decoded and safely re-encoded before interpolation;
 empty segments in catch-all captures are removed consistently in development and production. All
-other source characters are matched literally.
+other source characters are matched literally. Sources must be pathname patterns beginning with
+`/`; query strings and hashes belong in redirect or rewrite destinations and are rejected in
+sources because matching operates on the request pathname.
 For redirects and rewrites, the incoming query string is preserved when the destination has no
 query. A query written in the destination replaces the incoming query string.
 Rewrites use after-files semantics in development and production: an existing Farm page, API,
