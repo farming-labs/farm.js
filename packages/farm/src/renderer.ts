@@ -109,6 +109,8 @@ export interface FarmServerRendererRuntime {
   readonly Suspense: unknown;
   createElement(type: unknown, props?: unknown, ...children: unknown[]): unknown;
   isValidElement(value: unknown): boolean;
+  /** Wraps a route-owned client tree so compiled leaf boundaries stay inside that React root. */
+  wrapClientGraph?(element: unknown): unknown;
   renderToString(element: unknown): string | Promise<string>;
   /**
    * Optional variant for renderers whose components emit document-head markup

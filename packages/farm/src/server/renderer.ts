@@ -570,6 +570,18 @@ export class ServerRenderer {
     );
   }
 
+  private wrapClientGraph(element: unknown): unknown {
+    const getIsolatedClientBoundaryModules = this.routeManager.getIsolatedClientBoundaryModules;
+    if (
+      !this.rendererRuntime.wrapClientGraph ||
+      typeof getIsolatedClientBoundaryModules !== "function" ||
+      getIsolatedClientBoundaryModules.call(this.routeManager, this.config.root).size === 0
+    ) {
+      return element;
+    }
+    return this.rendererRuntime.wrapClientGraph(element);
+  }
+
   private async renderElementToCompleteHTML(element: unknown): Promise<string> {
     const capabilities = getFarmRendererCapabilities(this.config.renderer);
     const renderToPipeableStream = capabilities.streaming.node
@@ -648,6 +660,9 @@ export class ServerRenderer {
         element,
       );
     }
+    if (input.pageShouldHydrate && !input.layoutShouldHydrate) {
+      element = this.wrapClientGraph(element);
+    }
     element = this.createPageBoundary(element, {
       pageShouldHydrate: input.pageShouldHydrate,
       layoutShouldHydrate: input.layoutShouldHydrate,
@@ -665,7 +680,8 @@ export class ServerRenderer {
       const slotProps: Record<string, unknown> = {};
       for (const slot of input.slots || []) {
         if (slot.ownerPattern !== layout.pattern || !slot.module.default) continue;
-        const slotElement = this.rendererRuntime.createElement(slot.module.default, slot.props);
+        let slotElement = this.rendererRuntime.createElement(slot.module.default, slot.props);
+        slotElement = this.wrapClientGraph(slotElement);
         slotProps[slot.name] = this.rendererRuntime.createElement(
           "div",
           {
@@ -682,6 +698,10 @@ export class ServerRenderer {
         ...slotProps,
       });
       element = this.createLayoutBoundary(layout.pattern, element);
+    }
+
+    if (input.layoutShouldHydrate) {
+      element = this.wrapClientGraph(element);
     }
 
     return this.renderElementToCompleteHTML(await this.wrapWithIntegrationProviders(element));
@@ -1505,6 +1525,13 @@ export class ServerRenderer {
               );
             }
 
+            // A route-wide page owns every compiled client component beneath
+            // its React root. Keep shared leaf modules as ordinary components
+            // here even when an isolated layout also imports the same module.
+            if ((isClientComponent || shouldHydrate) && !shouldHydrateLayout) {
+              pageElement = this.wrapClientGraph(pageElement);
+            }
+
             // Every route gets a stable HTML boundary. Server-only pages keep
             // native markup with no React root; interactive pages hydrate this
             // exact boundary.
@@ -1527,6 +1554,7 @@ export class ServerRenderer {
                   slot.module.default,
                   slot.props,
                 );
+                slotElement = this.wrapClientGraph(slotElement);
                 slotElement = this.rendererRuntime.createElement(
                   "div",
                   {
@@ -1544,6 +1572,10 @@ export class ServerRenderer {
                 ...slotProps,
               });
               wrappedElement = this.createLayoutBoundary(layoutEntry.pattern, wrappedElement);
+            }
+
+            if (shouldHydrateLayout) {
+              wrappedElement = this.wrapClientGraph(wrappedElement);
             }
 
             if (ErrorFallbackComponent && this.rendererRuntime.ErrorBoundary) {

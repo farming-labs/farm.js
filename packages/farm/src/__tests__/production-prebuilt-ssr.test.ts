@@ -1005,6 +1005,10 @@ export default function Page() {
 `.trim(),
       );
       await fs.writeFile(
+        path.join(root, "src", "app", "layout.tsx"),
+        `export default function RootLayout({ children }) { return <>{children}</>; }`,
+      );
+      await fs.writeFile(
         path.join(developmentRoot, "index.mjs"),
         `
 import { createServer } from "@farm.js/core/server";
@@ -1418,7 +1422,12 @@ await server.listen(Number(process.env.PORT));
         },
         "production",
       );
-    const verifyIndependentInitialScheduling = async (url: string) => {
+    const verifyIndependentInitialScheduling = async (
+      url: string,
+      options: { expectedIsolatedRoots?: number; stableCounterIsInteractive?: boolean } = {},
+    ) => {
+      const expectedIsolatedRoots = options.expectedIsolatedRoots ?? 3;
+      const stableCounterIsInteractive = options.stableCounterIsInteractive ?? true;
       const executablePath = await resolveInstalledChromiumExecutable();
       if (!executablePath) return;
       const browser = await chromium.launch({ headless: true, executablePath });
@@ -1429,23 +1438,31 @@ await server.listen(Number(process.env.PORT));
           if (message.type() === "error") browserErrors.push(message.text());
         });
         page.on("pageerror", (error) => browserErrors.push(error.message));
-        await page.goto(new URL("/fallback", url).href);
+        try {
+          await page.goto(new URL("/fallback", url).href);
 
-        await expect
-          .poll(() => page.locator('farm-client-boundary[data-farm-hydrated="true"]').count())
-          .toBe(3);
-        expect(
-          await page.locator("#__farm_page__").getAttribute("data-farm-island-hydrated"),
-        ).toBeNull();
-        await page.locator("[data-stable-counter]").click();
-        await expect
-          .poll(() => page.locator("[data-stable-counter]").textContent())
-          .toBe("stable:1");
-        await page.locator("[data-fallback-counter]").click();
-        await expect
-          .poll(() => page.locator("[data-fallback-counter]").textContent())
-          .toBe("fallback:1");
-        expect(browserErrors).toEqual([]);
+          await expect
+            .poll(() => page.locator('farm-client-boundary[data-farm-hydrated="true"]').count())
+            .toBe(expectedIsolatedRoots);
+          expect(
+            await page.locator("#__farm_page__").getAttribute("data-farm-island-hydrated"),
+          ).toBeNull();
+          if (stableCounterIsInteractive) {
+            await page.locator("[data-stable-counter]").click();
+            await expect
+              .poll(() => page.locator("[data-stable-counter]").textContent())
+              .toBe("stable:1");
+          }
+          await page.locator("[data-fallback-counter]").click();
+          await expect
+            .poll(() => page.locator("[data-fallback-counter]").textContent())
+            .toBe("fallback:1");
+          expect(browserErrors).toEqual([]);
+        } catch (error) {
+          throw new Error(
+            `${String(error)}\nBrowser errors:\n${browserErrors.join("\n")}\nDOM:\n${await page.locator("body").innerHTML()}`,
+          );
+        }
       } finally {
         await browser.close();
       }
@@ -1645,7 +1662,10 @@ export default function PageOwner() { return <section data-page-owner><LiveCount
         } finally {
           await browser.close();
         }
-        await verifyIndependentInitialScheduling(response.url);
+        await verifyIndependentInitialScheduling(response.url, {
+          expectedIsolatedRoots: 2,
+          stableCounterIsInteractive: false,
+        });
       });
 
       const streamingConfig = await resolveParityConfig(
