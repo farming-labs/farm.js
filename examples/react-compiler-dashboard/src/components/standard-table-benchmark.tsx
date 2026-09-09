@@ -881,15 +881,13 @@ export function StandardTableBenchmark() {
                   row.id % 10_000 === 5_001
                     ? { ...row, amount: row.amount + 1, label: `${row.label} reviewed` }
                     : row,
-                )
-                .toReversed()
-                .toReversed(),
+                ),
             );
-            setOperation("review one row, filter another, and preserve order");
+            setOperation("filter one row and review another");
             setRevision((value) => value + 1);
           }}
         >
-          Review + filter + reorder
+          Filter + terminal map
         </button>
         <button
           data-action="table-map-structural-reorder-pipeline-snapshot"
@@ -902,15 +900,13 @@ export function StandardTableBenchmark() {
                   row.id % 10_000 === 5_001
                     ? { ...row, amount: row.amount + 1, label: `${row.label} reviewed` }
                     : row,
-                )
-                .toReversed()
-                .toReversed();
+                );
             });
-            setOperation("review, filter, and reorder rows (snapshot control)");
+            setOperation("filter and review rows (snapshot control)");
             setRevision((value) => value + 1);
           }}
         >
-          Review + filter + reorder (snapshot control)
+          Filter + terminal map (snapshot control)
         </button>
         <button
           data-action="table-map-reorder-pipeline"

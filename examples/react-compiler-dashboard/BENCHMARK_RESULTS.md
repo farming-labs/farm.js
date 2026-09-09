@@ -2,6 +2,42 @@
 
 Latest run: 2026-09-09
 
+## Terminal structural maps — 2026-09-09
+
+A concise keyed-row setter may now finish an index-independent `filter()` or `slice()` pipeline
+with a safe same-key `map()`. Farm keeps the survivor and replacement lineage through the final
+map, validates the complete result before touching the DOM, removes rejected rows, and patches only
+changed surviving bindings. No synthetic reverse or sort is needed, and a failed key, ownership, or
+native-method proof still falls back before any compiler-owned DOM write.
+
+The maintained 10,000-row workload filters one row and updates another. Its block-bodied compiled
+control performs the same native JavaScript work through complete keyed reconciliation. Every
+value, surviving position, DOM identity, and removed-row connection is checked after each sample.
+
+| Mode   | Terminal map | Compiled control | vs React | vs control |
+| ------ | -----------: | ---------------: | -------: | ---------: |
+| Static |      5.00 ms |         10.50 ms |   10.59x |      2.10x |
+| Hybrid |      5.90 ms |         10.50 ms |    8.97x |      1.78x |
+
+Both modes passed the unchanged 2x React and 1.25x compiled-control floors in two complete bracketed
+runs. The correctness oracle, broad 10% regression gate, optimization-persistence gate, and zero
+compiled owner executions also passed twice. One unrelated isolated timing gate was noisy in each
+run, but the failing workload changed between runs: queued-window refresh and 20,000-row swap in the
+first, then the older static multi-map reorder in the confirmation run. Each passed in the other
+unchanged run; their code and thresholds were not changed.
+
+Compiler and runtime tests cover terminal filter/map and slice/map pipelines, maps interleaved
+between structural steps, exact survivor identity, one changed-row binding read, custom-map and
+changed-key atomic fallback, controlled-input focus and selection, Strict Mode hydration,
+unmount-before-flush cleanup, and 2,000 randomized terminal structural-map row transitions matched
+with normal React. React 18.3.1 and 19.2.8 compatibility passes. The isolated optional runtime gzip
+sizes are unchanged.
+
+Numbers are conservative medians from the confirmation run: 10 samples per compiler mode and 20
+bracketing React samples using Chrome 153.0.8010.36, Node.js 23.11.0, and Apple M1 macOS arm64.
+Timing varies by machine; deterministic parity, fallback, DOM-identity, compatibility, and runtime-
+size checks are the primary safety controls.
+
 ## Maps interleaved with structural steps — 2026-09-09
 
 A concise keyed-row setter may now keep same-key replacement lineage when a safe `map()` follows

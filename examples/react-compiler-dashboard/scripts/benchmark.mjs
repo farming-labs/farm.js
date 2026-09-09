@@ -147,8 +147,8 @@ async function inspectBuild(compilerMode) {
       "The compiler build did not emit the keyed-array exact-position hints.",
     );
     assert(
-      compilerReport.summary.keyedArrayReorderHints >= 19,
-      "The compiler build did not emit every keyed-array reorder pipeline step.",
+      compilerReport.summary.keyedArrayReorderHints >= 17,
+      "The compiler build did not emit every native keyed-array reorder pipeline step.",
     );
     assert(
       compilerReport.summary.keyedArraySortHints > 0,
@@ -1209,7 +1209,7 @@ async function measureTrial(browser, trial, compilerMode, port) {
           );
           const amount = Number(target?.querySelector("td:nth-child(4)")?.textContent?.slice(1));
           if (!target || !removed || !Number.isFinite(amount)) {
-            throw new Error("Mapped structural-reorder source rows are invalid.");
+            throw new Error("Terminal structural-map source rows are invalid.");
           }
           return {
             amount: amount + 1,
@@ -1239,7 +1239,7 @@ async function measureTrial(browser, trial, compilerMode, port) {
               rows.some((row) => row !== removed && !row.isConnected)
             ) {
               throw new Error(
-                "Mapped structural-reorder rows do not match the expected filtered order.",
+                "Terminal structural-map rows do not match the expected filtered order.",
               );
             }
           };
@@ -2972,9 +2972,9 @@ const keyedStructuralReorderRegressions = keyedStructuralReorderResults.filter(
     !Number.isFinite(snapshotSpeedup) ||
     snapshotSpeedup < keyedStructuralReorderMinimumSnapshotSpeedup,
 );
-// A safe map between filter and reorder changes row data, membership, and order in one setter. The
-// interleaved structural path must patch the changed survivor, remove the rejected row, and
-// validate the final order once instead of dropping to complete keyed reconciliation.
+// A safe map after a filter changes row data and membership in one setter. The terminal structural
+// path must patch the changed survivor and remove the rejected row instead of dropping to complete
+// keyed reconciliation merely because no reorder follows.
 const keyedMappedStructuralReorderMinimumSpeedup = 2;
 const keyedMappedStructuralReorderMinimumSnapshotSpeedup = 1.25;
 const keyedMappedStructuralReorderResults = ["static", "hybrid"].map((mode) => {

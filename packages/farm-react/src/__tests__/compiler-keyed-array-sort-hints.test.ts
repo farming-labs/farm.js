@@ -568,6 +568,43 @@ describe("React AOT keyed-array sort hints", () => {
     expect(result.code).not.toContain("createCompilerKeyedArrayMapReorder");
   });
 
+  it("keeps structural lineage when a safe map ends the pipeline", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Table({ editedId, nextLabel, limit }) {
+        const [rows, setRows] = useState([
+          { id: "a", label: "Alpha", visible: true },
+          { id: "b", label: "Beta", visible: false },
+          { id: "c", label: "Gamma", visible: true },
+        ]);
+        return <section>
+          <button onClick={() => setRows((current) => current
+            .filter((row) => row.visible)
+            .map((row) => row.id === editedId ? { ...row, label: nextLabel } : row)
+          )}>Filter and update</button>
+          <button onClick={() => setRows((current) => current
+            .slice(0, limit)
+            .map((row) => row.id === editedId ? { ...row, label: nextLabel } : row)
+          )}>Slice and update</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </section>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Table"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.optimizations.keyedMapUpdateHints).toBe(2);
+    expect(result.optimizations.keyedArrayFilterHints).toBe(1);
+    expect(result.optimizations.keyedArraySliceHints).toBe(1);
+    expect(result.optimizations.keyedArrayReorderHints).toBe(0);
+    expect(result.code.match(/createCompilerKeyedArrayMapPipeline\(/g)).toHaveLength(2);
+    expect(result.code).toContain("createCompilerKeyedArrayFilter");
+    expect(result.code).toContain("createCompilerKeyedArraySlice");
+    expect(result.code).toContain("keyedRowsEveryHintedRuntimeFeature");
+    expect(result.code).not.toContain("createCompilerKeyedArrayStructuralReorder");
+    expect(result.code).not.toContain("createCompilerKeyedArrayMapReorder");
+  });
+
   it("carries consecutive maps through slice and reverse steps", async () => {
     const result = await compile(`
       import { useState } from "react";
