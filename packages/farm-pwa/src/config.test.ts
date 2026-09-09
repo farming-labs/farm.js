@@ -86,6 +86,28 @@ describe("resolvePwaOptions", () => {
       "positive integer",
     );
   });
+
+  it("rejects invalid top-level options instead of changing behavior silently", () => {
+    expect(() => resolvePwaOptions(null as never)).toThrow("options must be an object");
+    expect(() => resolvePwaOptions({ enabled: "false" as never })).toThrow(
+      "enabled must be boolean",
+    );
+    expect(() => resolvePwaOptions({ update: "manual" as never })).toThrow(
+      'update must be "prompt" or "auto"',
+    );
+    expect(() => resolvePwaOptions({ cache: null as never })).toThrow("PWA cache must be");
+    expect(() => resolvePwaOptions({ cache: "unknown" as never })).toThrow("PWA cache must be");
+    expect(() => resolvePwaOptions({ cache: { staticRoutes: "all" as never } })).toThrow(
+      "staticRoutes must be boolean or an array",
+    );
+    expect(() => resolvePwaOptions({ cache: { images: null as never } })).toThrow(
+      'image cache strategy must be "swr"',
+    );
+    expect(() => resolvePwaOptions({ offline: 42 as never })).toThrow("offline must be a route");
+    expect(() => resolvePwaOptions({ serviceWorker: null as never })).toThrow(
+      "serviceWorker must be an options object",
+    );
+  });
 });
 
 describe("parsePwaDuration", () => {

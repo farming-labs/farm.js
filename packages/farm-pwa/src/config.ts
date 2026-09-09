@@ -59,6 +59,23 @@ const DEFAULT_IMAGE_LIMIT = 100;
 const DEFAULT_IMAGE_TTL = "30d";
 
 export function resolvePwaOptions(options: PwaPluginOptions = {}): ResolvedPwaOptions {
+  if (!options || typeof options !== "object" || Array.isArray(options)) {
+    throw new TypeError("PWA options must be an object");
+  }
+  if (options.enabled !== undefined && typeof options.enabled !== "boolean") {
+    throw new TypeError("PWA enabled must be boolean");
+  }
+  if (
+    options.offline !== undefined &&
+    options.offline !== false &&
+    typeof options.offline !== "string"
+  ) {
+    throw new TypeError('PWA offline must be a route starting with "/" or false');
+  }
+  if (options.update !== undefined && options.update !== "prompt" && options.update !== "auto") {
+    throw new TypeError('PWA update must be "prompt" or "auto"');
+  }
+
   const serviceWorker = resolveServiceWorker(options.serviceWorker);
   if (serviceWorker && (options.offline !== undefined || options.cache !== undefined)) {
     throw new TypeError(
@@ -66,7 +83,17 @@ export function resolvePwaOptions(options: PwaPluginOptions = {}): ResolvedPwaOp
     );
   }
 
-  const cache = options.cache ?? "auto";
+  const configuredCache = options.cache;
+  if (
+    configuredCache !== undefined &&
+    configuredCache !== false &&
+    configuredCache !== "auto" &&
+    configuredCache !== "recommended" &&
+    (!configuredCache || typeof configuredCache !== "object" || Array.isArray(configuredCache))
+  ) {
+    throw new TypeError('PWA cache must be "auto", "recommended", an options object, or false');
+  }
+  const cache = configuredCache ?? "auto";
   const usesAutomaticCache = cache === "auto" || cache === "recommended";
   const customCache = typeof cache === "object" ? cache : undefined;
 
@@ -82,14 +109,16 @@ export function resolvePwaOptions(options: PwaPluginOptions = {}): ResolvedPwaOp
           ? true
           : cache === false
             ? false
-            : normalizeStaticRoutes(customCache?.staticRoutes ?? false),
+            : normalizeStaticRoutes(
+                customCache?.staticRoutes === undefined ? false : customCache.staticRoutes,
+              ),
       images: serviceWorker
         ? false
         : usesAutomaticCache
           ? resolveImageCache("swr")
           : cache === false
             ? false
-            : resolveImageCache(customCache?.images ?? false),
+            : resolveImageCache(customCache?.images === undefined ? false : customCache.images),
     },
   };
 }
@@ -97,7 +126,13 @@ export function resolvePwaOptions(options: PwaPluginOptions = {}): ResolvedPwaOp
 function resolveServiceWorker(
   value: PwaServiceWorkerOptions | undefined,
 ): Required<PwaServiceWorkerOptions> | false {
-  if (!value) return false;
+  if (value === undefined) return false;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("PWA serviceWorker must be an options object");
+  }
+  if (typeof value.source !== "string") {
+    throw new TypeError("PWA serviceWorker source must be a non-empty path");
+  }
   const source = value.source.trim();
   if (!source) throw new TypeError("PWA serviceWorker source must be a non-empty path");
   if (value.type !== undefined && value.type !== "classic" && value.type !== "module") {
@@ -136,7 +171,11 @@ export function parsePwaDuration(value: PwaDuration): number {
 
 function resolveImageCache(value: PwaImageCache): ResolvedPwaImageCacheOptions | false {
   if (value === false) return false;
-  if (value !== true && value !== "swr" && value.strategy !== "swr") {
+  if (
+    value !== true &&
+    value !== "swr" &&
+    (!value || typeof value !== "object" || Array.isArray(value) || value.strategy !== "swr")
+  ) {
     throw new TypeError('PWA image cache strategy must be "swr"');
   }
 
@@ -154,7 +193,10 @@ function resolveImageCache(value: PwaImageCache): ResolvedPwaImageCacheOptions |
 }
 
 function normalizeStaticRoutes(value: boolean | string[]): boolean | string[] {
-  if (!Array.isArray(value)) return value;
+  if (typeof value === "boolean") return value;
+  if (!Array.isArray(value)) {
+    throw new TypeError("PWA cache staticRoutes must be boolean or an array of routes");
+  }
   return [...new Set(value.map((route) => normalizeRoute(route, "static route")))];
 }
 
