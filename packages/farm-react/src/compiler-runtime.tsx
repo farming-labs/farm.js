@@ -749,15 +749,22 @@ function recordCompilerKeyedArrayQueuedMapPipeline(previous: unknown, value: unk
       return value;
     }
 
-    const previousReorder = COMPILER_KEYED_ARRAY_REORDERS.get(previousTarget);
+    const committedSource = COMPILER_KEYED_COMMITTED_COLLECTIONS.has(previousTarget);
+    const previousReorder = committedSource
+      ? undefined
+      : COMPILER_KEYED_ARRAY_REORDERS.get(previousTarget);
     if (
-      !previousReorder ||
-      previousReorder.structuralUpdate ||
-      previousReorder.resultLength !== previous.length
+      !committedSource &&
+      (!previousReorder ||
+        previousReorder.structuralUpdate ||
+        previousReorder.resultLength !== previous.length)
     ) {
       return value;
     }
-    const sourceItems = previousReorder.mappedItemSources?.queuedSourceItems || previous;
+    const sourceToken =
+      previousReorder?.sourceToken || compilerKeyedCollectionToken(previousTarget);
+    if (!sourceToken) return value;
+    const sourceItems = previousReorder?.mappedItemSources?.queuedSourceItems || previous;
     let mappedItemSources: Map<unknown, unknown> | undefined;
     const readMappedItemSources = (): Map<unknown, unknown> => {
       if (mappedItemSources) return mappedItemSources;
@@ -781,12 +788,12 @@ function recordCompilerKeyedArrayQueuedMapPipeline(previous: unknown, value: unk
       return sources;
     };
     COMPILER_KEYED_ARRAY_REORDERS.set(valueTarget, {
-      kind: previousReorder.kind,
-      sourceToken: previousReorder.sourceToken,
-      sourceLength: previousReorder.sourceLength,
+      kind: previousReorder?.kind,
+      sourceToken,
+      sourceLength: previousReorder?.sourceLength ?? previous.length,
       resultLength: value.length,
       mapped: true,
-      // Array.map preserves positions. Retain the first post-reorder collection and validate its
+      // Array.map preserves positions. Retain the first queued source collection and validate its
       // data properties against the final collection once, immediately before the DOM commit.
       // This avoids rescanning every intermediate Array produced by separately queued setters.
       mappedItemSources: {
@@ -801,7 +808,7 @@ function recordCompilerKeyedArrayQueuedMapPipeline(previous: unknown, value: unk
   return value;
 }
 
-/** @internal Executes a queued native map after a compiler-proven keyed-array reorder. */
+/** @internal Executes a queued native map next to a compiler-proven keyed-array reorder. */
 export function createCompilerKeyedArrayQueuedMapPipeline(
   previous: unknown,
   pipeline: (...values: readonly unknown[]) => unknown,
