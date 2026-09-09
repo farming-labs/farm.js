@@ -9,8 +9,6 @@ export interface MswPluginOptions {
   server?: boolean;
   /** How MSW handles requests that have no matching handler. Defaults to bypass. */
   onUnhandledRequest?: MswUnhandledRequestBehavior;
-  /** Set false to leave the plugin configured without starting either runtime. */
-  enabled?: boolean;
 }
 
 export interface ResolvedMswOptions {
@@ -18,7 +16,6 @@ export interface ResolvedMswOptions {
   browser: boolean;
   server: boolean;
   onUnhandledRequest: MswUnhandledRequestBehavior;
-  enabled: boolean;
 }
 
 export function resolveMswOptions(options: MswPluginOptions): ResolvedMswOptions {
@@ -28,9 +25,11 @@ export function resolveMswOptions(options: MswPluginOptions): ResolvedMswOptions
   if (typeof options.handlers !== "string" || !options.handlers.trim()) {
     throw new TypeError("msw handlers must be a non-empty module path");
   }
+  if ("enabled" in options) {
+    throw new TypeError("msw no longer accepts enabled; remove msw() from plugins to disable it");
+  }
   assertBoolean(options.browser, "browser");
   assertBoolean(options.server, "server");
-  assertBoolean(options.enabled, "enabled");
 
   if (
     options.onUnhandledRequest !== undefined &&
@@ -46,7 +45,6 @@ export function resolveMswOptions(options: MswPluginOptions): ResolvedMswOptions
     browser: options.browser ?? true,
     server: options.server ?? true,
     onUnhandledRequest: options.onUnhandledRequest ?? "bypass",
-    enabled: options.enabled ?? true,
   };
 }
 

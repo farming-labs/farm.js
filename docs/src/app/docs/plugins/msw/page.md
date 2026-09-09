@@ -87,9 +87,11 @@ msw({
   browser: true,
   server: true,
   onUnhandledRequest: "bypass",
-  enabled: true,
 });
 ```
+
+Adding `msw()` to `plugins` enables mocking in development. Remove it from the array to disable
+both runtimes.
 
 | Option               | Default    | Purpose                                                             |
 | -------------------- | ---------- | ------------------------------------------------------------------- |
@@ -97,7 +99,6 @@ msw({
 | `browser`            | `true`     | Start the browser service worker.                                   |
 | `server`             | `true`     | Start the Node interceptor used by development SSR and server code. |
 | `onUnhandledRequest` | `"bypass"` | Bypass, warn about, or reject requests without a matching handler.  |
-| `enabled`            | `true`     | Disable both runtimes without removing the config block.            |
 
 Use `onUnhandledRequest: "error"` when the mock environment should be completely deterministic.
 The default is `"bypass"` because a Farm development server also makes ordinary framework and

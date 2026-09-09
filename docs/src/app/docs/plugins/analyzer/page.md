@@ -114,9 +114,11 @@ analyzer({
 
 ## Options
 
+Adding `analyzer()` to `plugins` enables analysis. Remove it from the array when analysis is not
+needed.
+
 | Option    | Type                          | Default              | Purpose                                      |
 | --------- | ----------------------------- | -------------------- | -------------------------------------------- |
-| `enabled` | `boolean`                     | `true`               | Temporarily disable analysis.                |
 | `output`  | `string \| false`             | `.farm/analyze.html` | HTML report path, or no HTML report.         |
 | `json`    | `boolean \| string`           | `false`              | Write companion JSON or use a custom path.   |
 | `open`    | `boolean`                     | `false`              | Open the HTML report after the build.        |

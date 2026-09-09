@@ -47,7 +47,6 @@ export function pwa(options: PwaPluginOptions = {}) {
   let configuredBasePath = "/";
   let configuredOutputDir = ".farm/.output";
   const publicConfig = {
-    enabled: resolved.enabled,
     workerUrl: "/sw.js",
     scope: "/",
     update: resolved.update,
@@ -68,8 +67,6 @@ export function pwa(options: PwaPluginOptions = {}) {
 
     build: {
       configure(nitroConfig) {
-        if (!resolved.enabled) return nitroConfig;
-
         let generated = false;
         const hooks = nitroConfig.hooks ?? {};
         const previousPrerenderDone = hooks["prerender:done"];
@@ -114,7 +111,7 @@ export function pwa(options: PwaPluginOptions = {}) {
       public: publicConfig,
 
       async setup({ public: config, isProd }) {
-        if (!config.enabled || !isProd || !("serviceWorker" in navigator)) return undefined;
+        if (!isProd || !("serviceWorker" in navigator)) return undefined;
 
         const registration = await navigator.serviceWorker.register(
           config.workerUrl,

@@ -4,7 +4,6 @@ import { parseAnalyzerSize, resolveAnalyzerOptions } from "./config";
 describe("resolveAnalyzerOptions", () => {
   it("creates a useful report with no configuration", () => {
     expect(resolveAnalyzerOptions()).toEqual({
-      enabled: true,
       output: ".farm/analyze.html",
       json: false,
       open: false,
@@ -42,6 +41,9 @@ describe("resolveAnalyzerOptions", () => {
   });
 
   it("rejects contradictory or unclear options", () => {
+    expect(() => resolveAnalyzerOptions({ enabled: false } as never)).toThrow(
+      "remove analyzer() from plugins",
+    );
     expect(() => resolveAnalyzerOptions({ output: false, open: true })).toThrow(
       "needs an HTML output",
     );
