@@ -58,5 +58,5 @@ For batching, multiple bindings, safe keyed-list fallback, and the full compiler
 see the maintained
 [React Compiler example](https://github.com/farming-labs/farm.js/tree/main/examples/react-compiler).
 
-Read the [React compiler guide](https://farm.js.dev/docs/renderers/react#experimental-aot-compiler)
+Read the [React compiler guide](https://farmjs.dev/docs/renderers/react#experimental-aot-compiler)
 for the supported component contract and rollout guidance.

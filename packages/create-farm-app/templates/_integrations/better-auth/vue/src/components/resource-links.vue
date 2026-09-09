@@ -11,7 +11,7 @@ defineProps<{
     </span>
     <span class="resource-link-item">
       <span v-if="primary" class="resource-separator" aria-hidden="true">/</span>
-      <a href="https://farm.js.dev">
+      <a href="https://farmjs.dev">
         <svg
           class="resource-icon"
           viewBox="0 0 24 24"
