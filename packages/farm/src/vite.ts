@@ -102,6 +102,7 @@ import {
 import { resolveFarmPageDataFailure } from "./navigation/page-data-error";
 import { FARM_CONFIG_REWRITES_PLUGIN_NAME } from "./plugins/rewrites";
 import { resolveFarmRequestURL } from "./server/request";
+import { reportOpenAPIDevGenerationResult } from "./openapi/dev-status";
 
 interface FarmVitePluginOptions extends FarmConfig {
   openapi?: FarmUserConfig["openapi"];
@@ -1094,8 +1095,8 @@ export function farmPlugin(
       if (options.openapi?.enabled) {
         const { OpenAPIManager } = await loadFarmOpenAPIDevRuntime();
         openAPIManager = new OpenAPIManager(appDirs, options.openapi);
-        await openAPIManager.generateSpec();
-        logger.success("✅ OpenAPI documentation enabled");
+        const spec = await openAPIManager.generateSpec();
+        reportOpenAPIDevGenerationResult(spec);
       }
 
       refreshRouteDiscovery = async (reason: string) => {
