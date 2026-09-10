@@ -2056,6 +2056,7 @@ function generateClientHydrationEntry(
   docsAdapterReact: string | undefined,
   i18nConfig: ResolvedFarmConfig["i18n"] = {
     enabled: false,
+    basePath: "/",
     locales: ["en"],
     defaultLocale: "en",
     messages: "",

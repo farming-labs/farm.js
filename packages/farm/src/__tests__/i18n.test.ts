@@ -35,6 +35,7 @@ describe("Farm i18n configuration", () => {
 
     expect(config).toMatchObject({
       enabled: true,
+      basePath: "/",
       locales: ["en-US", "am"],
       defaultLocale: "en-US",
       fallbackLocale: "en-US",
@@ -118,6 +119,27 @@ describe("Farm locale routing", () => {
     expect(localizeFarmPathname("/", "en", always)).toBe("/en");
     expect(localizeFarmPathname("/am/account", "en", always)).toBe("/en/account");
   });
+
+  it("preserves the application base path around locale prefixes", () => {
+    const based = resolveFarmI18nConfig(
+      {
+        locales: ["en", "fr"],
+        defaultLocale: "en",
+      },
+      { basePath: "/app" },
+    );
+
+    expect(resolveFarmLocalePath("/app/fr/account", based)).toEqual({
+      locale: "fr",
+      pathname: "/account",
+      explicit: true,
+    });
+    expect(localizeFarmPathname("/account", "en", based)).toBe("/app/account");
+    expect(localizeFarmPathname("/app/fr/account", "en", based)).toBe("/app/account");
+    expect(localizeFarmHref("/app/account?tab=profile#name", "fr", based)).toBe(
+      "/app/fr/account?tab=profile#name",
+    );
+  });
 });
 
 describe("Farm locale request signals", () => {
@@ -161,6 +183,37 @@ describe("Farm locale request signals", () => {
       locale: "fr",
       source: "cookie",
       redirect: "/fr/dashboard",
+    });
+  });
+
+  it("keeps locale redirects beneath the application base path", () => {
+    const based = resolveFarmI18nConfig(
+      {
+        locales: ["en", "fr"],
+        defaultLocale: "en",
+      },
+      { basePath: "/app" },
+    );
+
+    expect(
+      resolveFarmLocaleRequest(
+        new Request("https://farm.test/app/products", {
+          headers: { "accept-language": "fr" },
+        }),
+        based,
+      ),
+    ).toMatchObject({
+      locale: "fr",
+      pathname: "/products",
+      redirect: "/app/fr/products",
+    });
+    expect(
+      resolveFarmLocaleRequest(new Request("https://farm.test/app/fr/products"), based),
+    ).toMatchObject({
+      locale: "fr",
+      source: "url",
+      pathname: "/products",
+      redirect: undefined,
     });
   });
 

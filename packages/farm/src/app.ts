@@ -182,6 +182,7 @@ export class FarmApp {
         : resolveFarmI18nConfig(config.i18n, {
             root,
             mode: process.env.NODE_ENV === "production" ? "production" : "development",
+            basePath,
           }),
       deploymentId: config.deploymentId || "development",
       notFound: config.notFound || {},

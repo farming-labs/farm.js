@@ -1,4 +1,5 @@
 import { localizeFarmPathname, resolveFarmLocalePath } from "./routing";
+import { stripFarmBasePath } from "../base-path";
 import type { FarmI18nLocaleSource, ResolvedFarmI18nConfig } from "./types";
 
 export interface FarmLocaleResolution {
@@ -57,7 +58,7 @@ export function resolveFarmLocaleRequest(
   const detected = detectLocale(request, config);
   const shouldRedirect =
     options.redirect !== false &&
-    !isInternalOrApiPath(url.pathname) &&
+    !isInternalOrApiPath(stripFarmBasePath(url.pathname, config.basePath)) &&
     config.routing !== "none" &&
     (config.routing === "prefix-always" || detected.locale !== config.defaultLocale);
 

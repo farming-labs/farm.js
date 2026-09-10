@@ -1,9 +1,11 @@
+import { applyFarmBasePath, stripFarmBasePath } from "../base-path";
 import type { FarmI18nDirection, FarmI18nRouting, ResolvedFarmI18nConfig } from "./types";
 
 export interface FarmLocalePathConfig {
   locales: readonly string[];
   defaultLocale: string;
   routing: FarmI18nRouting;
+  basePath?: string;
 }
 
 export interface FarmLocalePathMatch {
@@ -33,7 +35,7 @@ export function resolveFarmLocalePath(
   pathname: string,
   config: FarmLocalePathConfig,
 ): FarmLocalePathMatch {
-  const normalized = normalizePathname(pathname);
+  const normalized = normalizePathname(stripFarmBasePath(pathname, config.basePath));
   if (config.routing === "none") {
     return { pathname: normalized, explicit: false };
   }
@@ -68,11 +70,15 @@ export function localizeFarmPathname(
   config: FarmLocalePathConfig,
 ): string {
   const internalPathname = resolveFarmLocalePath(pathname, config).pathname;
-  if (config.routing === "none") return internalPathname;
-  if (config.routing === "prefix-except-default" && locale === config.defaultLocale) {
-    return internalPathname;
+  let localizedPathname = internalPathname;
+  if (config.routing === "none") {
+    return applyFarmBasePath(localizedPathname, config.basePath);
   }
-  return internalPathname === "/" ? `/${locale}` : `/${locale}${internalPathname}`;
+  if (config.routing === "prefix-except-default" && locale === config.defaultLocale) {
+    return applyFarmBasePath(localizedPathname, config.basePath);
+  }
+  localizedPathname = internalPathname === "/" ? `/${locale}` : `/${locale}${internalPathname}`;
+  return applyFarmBasePath(localizedPathname, config.basePath);
 }
 
 export function localizeFarmHref(
