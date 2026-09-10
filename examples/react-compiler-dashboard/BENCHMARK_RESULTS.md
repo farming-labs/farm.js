@@ -2,6 +2,37 @@
 
 Latest run: 2026-09-10
 
+## Queued removal followed by append — 2026-09-10
+
+Adjacent keyed-row setters may now keep one committed-row proof when an index-independent
+`filter()` or bounded `slice()` is followed by one or more immutable appends. Before this change,
+the append result lost the structural survivor lineage and the final commit used complete keyed
+reconciliation. The new path validates the complete chain before its first DOM write, removes only
+rejected rows, preserves every surviving node, and creates only the appended suffix.
+
+| Mode   | Remove + append | Compiled fallback | vs React | vs fallback |
+| ------ | --------------: | ----------------: | -------: | ----------: |
+| Static |        21.00 ms |          32.00 ms |    3.49x |       1.52x |
+| Hybrid |        20.80 ms |          48.00 ms |    3.52x |       2.31x |
+
+Both modes passed the 2x React and 1.25x compiled-control floors. The surrounding React median was
+73.20 ms. Every sample checked all 9,999 survivor positions and identities, the rejected row's
+disconnection, one fresh final row, the final 10,000-row count, browser errors, and zero compiled
+owner executions. The broad 10% no-regression gate and optimization-persistence gate also passed.
+
+Compiler and runtime tests cover filter and slice sources, multiple later appends, duplicate-key
+fallback before mutation, an intervening unhinted update, collection-reading bindings, multiple
+keyed boundaries, controlled-input focus and selection, Strict Mode hydration,
+unmount-before-flush cleanup, and 2,000 randomized row removals/appends matched with normal React.
+The dedicated optional runtime is 17,262 bytes gzip in its isolated fixture; every pre-existing
+fixture remains byte-for-byte equal to the merged parent when rebuilt in the same environment.
+
+Numbers are medians from a reduced complete-dashboard run with 2 warmups and 5 measured samples per
+compiler mode, bracketed by 10 React samples, using Chrome 151.0.7922.34 and Node.js 23.11.0 on
+Apple M1 macOS arm64. Correctness and the new performance gate passed. Several unchanged,
+near-threshold feature gates were noisy at this reduced sample count, so this run is not described
+as a full default all-gates pass.
+
 ## Queued structural maps through reorder setters — 2026-09-10
 
 Adjacent keyed-row setters may now keep one committed-row proof across compiler-safe `filter()`,

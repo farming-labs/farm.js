@@ -75,6 +75,15 @@ modes must remain at least 4x faster than React at 10,000 and up to 20,000 rows,
 faster than the compiled control. The report must contain a nonzero `keyedArrayAppendHints` count;
 deterministic package tests separately require work to equal only the appended suffix.
 
+Queued structural appends have an independent 10,000-row comparison. One concise setter removes a
+row with `filter()` and the immediately adjacent setter appends one fresh row, while the
+block-bodied pair remains the compiled fallback control. Both compiler modes must remain at least
+2x faster than React and 1.25x faster than the compiled control. Every sample verifies the exact
+9,999 survivor identities and order, the disconnected rejected row, and the fresh final row.
+Package tests also cover bounded slices, multiple later appends, 2,000 randomized transitions,
+controlled-input focus and selection, multi-boundary sharing, hydration, unmount cleanup, and
+pre-mutation fallback.
+
 Keyed array prepends have the same independent comparison. A concise functional prepend is
 measured against bracketed React and an equivalent block-bodied compiled snapshot control. Both
 compiler modes must remain at least 3x faster than React at 10,000 and 20,000 existing rows, and at
@@ -350,6 +359,10 @@ The default JSON report is `/tmp/farm-react-dashboard-benchmark.json`; change it
   complete entry scan.
 - The append snapshot control creates the same 1,000 array items and DOM rows but intentionally uses
   an unsupported block-bodied updater, isolating the saved full key-and-binding scan.
+- The queued structural-append control removes one keyed row and appends one fresh row across
+  adjacent setters. Its block-bodied pair performs the same native array and DOM-visible work
+  through complete reconciliation; the hinted path reuses survivor positions and reads only the
+  appended suffix.
 - The prepend snapshot control does the same work at the beginning of the array. It isolates the
   saved suffix scan while the hinted path still creates and inserts every required new DOM row.
 - The slice snapshot control retains the same 9,000-row suffix through an unsupported block-bodied

@@ -52,8 +52,10 @@ const testSource = String.raw`
     createCompilerKeyedArrayReorder,
     createCompilerKeyedArraySort,
     createCompilerKeyedArraySlice,
+    createCompilerKeyedArrayStructuralAppend,
     createCompilerKeyedArrayWindowReplace,
     createCompilerKeyedMapUpdate,
+    keyedRowsStructuralAppendHintedRuntimeFeature,
   } = await import(
     "@farm.js/react/compiler-runtime"
   );
@@ -2244,6 +2246,85 @@ const testSource = String.raw`
   assert.equal(derivedCollectionContainer.querySelector("[data-key='b']"), originalBeta);
   assert.equal(derivedCollectionExecutions, initialDerivedCollectionExecutions);
   flushSync(() => derivedCollectionRoot.unmount());
+
+  let structuralAppendRows = () => undefined;
+  let structuralAppendExecutions = 0;
+  const StructuralAppendRows = createCompiledComponentWithFeatures({
+    displayName: "CompatibilityStructuralAppendRows",
+    initialize: () => [[
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+      { id: "c", label: "Gamma" },
+    ]],
+    render(_props, state, blocks) {
+      structuralAppendExecutions += 1;
+      const items = () => state[0].get();
+      structuralAppendRows = () => {
+        state[0].set((previous) =>
+          createCompilerKeyedArrayFilter(
+            previous,
+            previous.filter,
+            (item) => item.id !== "b",
+          ),
+        );
+        state[0].set((previous) =>
+          createCompilerKeyedArrayStructuralAppend(previous, [
+            ...previous,
+            { id: "d", label: "Delta" },
+          ]),
+        );
+      };
+      return React.createElement(
+        "section",
+        null,
+        React.createElement(blocks.KeyedRows, {
+          collectionDependency: 0,
+          dependencies: [0],
+          filterIndexIndependent: true,
+          id: 0,
+          items,
+          structureDependencies: [0],
+          render: () =>
+            React.createElement(
+              "ol",
+              null,
+              items().map((item) =>
+                React.createElement("li", { key: item.id, "data-key": item.id }, item.label),
+              ),
+            ),
+          rowKey: (item) => item.id,
+          create: (item) => ({
+            kind: "element",
+            tag: "li",
+            attributes: [{ name: "data-key", value: item.id }],
+            styles: [],
+            children: [item.label],
+          }),
+          bindings: [{ kind: "text", path: [], dependencies: [], read: (item) => [item.label] }],
+        }),
+      );
+    },
+    bindings: [{ kind: "block", id: 0, dependencies: [0] }],
+  }, [keyedRowsStructuralAppendHintedRuntimeFeature]);
+  const structuralAppendContainer = document.createElement("div");
+  document.body.append(structuralAppendContainer);
+  const structuralAppendRoot = createRoot(structuralAppendContainer);
+  flushSync(() => structuralAppendRoot.render(React.createElement(StructuralAppendRows)));
+  const structuralAlpha = structuralAppendContainer.querySelector("[data-key='a']");
+  const structuralGamma = structuralAppendContainer.querySelector("[data-key='c']");
+  const structuralBeta = structuralAppendContainer.querySelector("[data-key='b']");
+  structuralAppendRows();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(
+    [...structuralAppendContainer.querySelectorAll("li")].map((row) => row.textContent),
+    ["Alpha", "Gamma", "Delta"],
+  );
+  assert.equal(structuralAppendContainer.querySelector("[data-key='a']"), structuralAlpha);
+  assert.equal(structuralAppendContainer.querySelector("[data-key='c']"), structuralGamma);
+  assert.equal(structuralBeta.isConnected, false);
+  assert.equal(structuralAppendExecutions, 1);
+  flushSync(() => structuralAppendRoot.unmount());
 
   let islandExecutions = 0;
   let islandChildExecutions = 0;
