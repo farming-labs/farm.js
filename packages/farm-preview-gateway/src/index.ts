@@ -34,6 +34,7 @@ export interface PreviewGatewayRequest {
   body?: string | null;
   encoding?: "base64";
   createdAt: number;
+  cancelled?: true;
 }
 
 export interface PreviewGatewayResponse {
@@ -164,20 +165,36 @@ export function createNodePreviewGatewayHandler(options: PreviewGatewayOptions =
   const handler = createPreviewGatewayHandler(options);
 
   return async function nodePreviewGatewayHandler(req: IncomingMessage, res: ServerResponse) {
-    const response = await handler(nodeRequestToWebRequest(req));
-    res.statusCode = response.status;
-    // Headers.forEach folds repeated headers into one comma-joined value, which
-    // corrupts multiple Set-Cookie. Emit those separately as an array so each
-    // cookie becomes its own header line.
-    const setCookies = response.headers.getSetCookie?.() ?? [];
-    response.headers.forEach((value, key) => {
-      if (key.toLowerCase() === "set-cookie") return;
-      res.setHeader(key, value);
-    });
-    if (setCookies.length > 0) {
-      res.setHeader("set-cookie", setCookies);
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    const abortOnClose = () => {
+      if (!res.writableEnded) abort();
+    };
+    req.once("aborted", abort);
+    res.once("close", abortOnClose);
+    try {
+      const response = await handler(nodeRequestToWebRequest(req, controller.signal));
+      if (controller.signal.aborted || res.destroyed) {
+        await response.body?.cancel();
+        return;
+      }
+      res.statusCode = response.status;
+      // Headers.forEach folds repeated headers into one comma-joined value, which
+      // corrupts multiple Set-Cookie. Emit those separately as an array so each
+      // cookie becomes its own header line.
+      const setCookies = response.headers.getSetCookie?.() ?? [];
+      response.headers.forEach((value, key) => {
+        if (key.toLowerCase() === "set-cookie") return;
+        res.setHeader(key, value);
+      });
+      if (setCookies.length > 0) {
+        res.setHeader("set-cookie", setCookies);
+      }
+      res.end(Buffer.from(await response.arrayBuffer()));
+    } finally {
+      req.off("aborted", abort);
+      res.off("close", abortOnClose);
     }
-    res.end(Buffer.from(await response.arrayBuffer()));
   };
 }
 
@@ -615,7 +632,27 @@ async function proxyPublicRequest(
   await store.enqueueRequest(session.id, previewRequest, config.sessionTtlMs);
   await store.touchSession(session, config.sessionTtlMs);
 
-  const response = await waitForPreviewResponse(store, config, session, previewRequest.id);
+  const response = await waitForPreviewResponse(
+    store,
+    config,
+    session,
+    previewRequest.id,
+    request.signal,
+  );
+  if (response === "cancelled") {
+    await store.enqueueRequest(
+      session.id,
+      {
+        ...previewRequest,
+        body: undefined,
+        encoding: undefined,
+        cancelled: true,
+        createdAt: Date.now(),
+      },
+      config.sessionTtlMs,
+    );
+    return new Response(null, { status: 499 });
+  }
   if (response === "stale") {
     return text(`No active Farm preview is running for "${route.name}".`, 404);
   }
@@ -654,11 +691,13 @@ async function waitForPreviewResponse(
   config: PreviewGatewayRuntimeConfig,
   session: PreviewGatewaySession,
   requestId: string,
+  signal: AbortSignal,
 ) {
   const deadline = Date.now() + config.requestTimeoutMs;
   let nextLivenessCheckAt = 0;
 
   while (Date.now() < deadline) {
+    if (signal.aborted) return "cancelled";
     if (Date.now() >= nextLivenessCheckAt) {
       const latestSession = await store.getSessionById(session.id);
       if (!latestSession || !isPreviewClientOnline(latestSession, config)) {
@@ -673,7 +712,12 @@ async function waitForPreviewResponse(
       await store.deleteResponse(session.id, requestId);
       return response;
     }
-    await delay(config.pollIntervalMs);
+    try {
+      await delay(config.pollIntervalMs, undefined, { signal });
+    } catch {
+      if (signal.aborted) return "cancelled";
+      throw new Error("Preview response polling was interrupted.");
+    }
   }
 
   return undefined;
@@ -807,7 +851,7 @@ function matchSessionRoute(pathname: string) {
   };
 }
 
-function nodeRequestToWebRequest(req: IncomingMessage) {
+function nodeRequestToWebRequest(req: IncomingMessage, signal?: AbortSignal) {
   const host = headerValue(req.headers, "host") || "localhost";
   // This adapter is the public trust boundary. A visitor-controlled forwarded
   // protocol must not influence the authority serialized to the local app.
@@ -818,6 +862,7 @@ function nodeRequestToWebRequest(req: IncomingMessage) {
   const init: RequestInit & { duplex?: "half" } = {
     method,
     headers,
+    signal,
   };
 
   if (method !== "GET" && method !== "HEAD") {

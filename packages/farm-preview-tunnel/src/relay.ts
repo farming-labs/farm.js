@@ -6,6 +6,7 @@ import {
   isAgentToRelayMessage,
   normalizePreviewName,
   type ReadyMessage,
+  type TunnelCancelMessage,
   type TunnelRequestMessage,
   type TunnelResponseMessage,
 } from "./protocol.js";
@@ -52,8 +53,14 @@ export interface PersistentPreviewRelayCoordinator {
   findSession(name: string): Promise<PersistentPreviewRelayCoordinatorSession | undefined>;
   touchSession(session: PersistentPreviewRelayCoordinatorSession, ttlMs: number): Promise<boolean>;
   releaseSession(session: PersistentPreviewRelayCoordinatorSession): Promise<void>;
-  publishRequest(sessionId: string, request: TunnelRequestMessage): Promise<void>;
-  takeRequest(sessionId: string, timeoutMs: number): Promise<TunnelRequestMessage | undefined>;
+  publishRequest(
+    sessionId: string,
+    request: TunnelRequestMessage | TunnelCancelMessage,
+  ): Promise<void>;
+  takeRequest(
+    sessionId: string,
+    timeoutMs: number,
+  ): Promise<TunnelRequestMessage | TunnelCancelMessage | undefined>;
   publishResponse(sessionId: string, response: TunnelResponseMessage): Promise<void>;
   takeResponse(
     sessionId: string,
@@ -79,6 +86,7 @@ interface PendingRequest {
   response: ServerResponse;
   sessionId: string;
   timeout: NodeJS.Timeout;
+  cleanup: () => void;
 }
 
 export function createPersistentPreviewRelay(options: PersistentPreviewRelayOptions = {}) {
@@ -286,8 +294,9 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
     },
     async close() {
       for (const session of agents.values()) session.socket.close(1001, "Relay shutting down");
-      for (const { response, timeout } of pending.values()) {
+      for (const { response, timeout, cleanup } of pending.values()) {
         clearTimeout(timeout);
+        cleanup();
         if (!response.headersSent)
           sendText(response, 503, "Persistent preview relay is shutting down.");
       }
@@ -318,13 +327,53 @@ async function forwardPublicRequest(options: ForwardPublicRequestOptions) {
   const id = randomUUID();
   const uploadController = new AbortController();
   const deadline = Date.now() + options.requestTimeoutMs;
+  let delivered = false;
+  let resolveDisconnected: (() => void) | undefined;
+  const disconnected = new Promise<"disconnected">((resolve) => {
+    resolveDisconnected = () => resolve("disconnected");
+  });
+  const sendCancel = () => {
+    if (!delivered) return;
+    const message: TunnelCancelMessage = { type: "cancel", id };
+    const localSession = options.localSession;
+    if (localSession && localSession.socket.readyState === localSession.socket.OPEN) {
+      localSession.socket.send(JSON.stringify(message));
+    } else if (options.coordinator && options.coordinatedSession) {
+      void options.coordinator
+        .publishRequest(options.coordinatedSession.id, message)
+        .catch(() => undefined);
+    }
+  };
+  const cleanup = () => {
+    options.request.off("aborted", onDisconnect);
+    options.response.off("close", onResponseClose);
+  };
+  const onDisconnect = () => {
+    uploadController.abort();
+    clearTimeout(timeout);
+    const entry = options.pending.get(id);
+    if (entry) {
+      options.pending.delete(id);
+      clearTimeout(entry.timeout);
+    }
+    sendCancel();
+    cleanup();
+    resolveDisconnected?.();
+  };
+  const onResponseClose = () => {
+    if (!options.response.writableEnded) onDisconnect();
+  };
   const timeout = setTimeout(() => {
     uploadController.abort();
     options.pending.delete(id);
+    sendCancel();
+    cleanup();
     if (!options.response.headersSent) {
       sendText(options.response, 504, "The persistent preview agent did not respond in time.");
     }
   }, options.requestTimeoutMs);
+  options.request.once("aborted", onDisconnect);
+  options.response.once("close", onResponseClose);
 
   let body: Buffer;
   try {
@@ -332,10 +381,14 @@ async function forwardPublicRequest(options: ForwardPublicRequestOptions) {
   } catch (error) {
     if (uploadController.signal.aborted) return;
     clearTimeout(timeout);
+    cleanup();
     throw error;
   }
 
-  if (uploadController.signal.aborted || options.response.writableEnded) return;
+  if (uploadController.signal.aborted || options.response.writableEnded) {
+    cleanup();
+    return;
+  }
   const message: TunnelRequestMessage = {
     type: "request",
     id,
@@ -347,10 +400,12 @@ async function forwardPublicRequest(options: ForwardPublicRequestOptions) {
 
   const localSession = options.localSession;
   if (localSession) {
+    delivered = true;
     options.pending.set(id, {
       response: options.response,
       sessionId: localSession.id,
       timeout,
+      cleanup,
     });
     try {
       localSession.socket.send(JSON.stringify(message), (error) => {
@@ -359,6 +414,7 @@ async function forwardPublicRequest(options: ForwardPublicRequestOptions) {
     } catch (error) {
       options.pending.delete(id);
       clearTimeout(timeout);
+      cleanup();
       throw error;
     }
     return;
@@ -366,17 +422,20 @@ async function forwardPublicRequest(options: ForwardPublicRequestOptions) {
 
   if (!options.coordinator || !options.coordinatedSession) {
     clearTimeout(timeout);
+    cleanup();
     throw new Error("Persistent preview relay coordination is unavailable.");
   }
 
   await options.coordinator.publishRequest(options.coordinatedSession.id, message);
+  delivered = true;
   const remainingMs = Math.max(1, deadline - Date.now());
-  const coordinatedResponse = await options.coordinator.takeResponse(
-    options.coordinatedSession.id,
-    id,
-    remainingMs,
-  );
+  const coordinatedResponse = await Promise.race([
+    options.coordinator.takeResponse(options.coordinatedSession.id, id, remainingMs),
+    disconnected,
+  ]);
   clearTimeout(timeout);
+  cleanup();
+  if (coordinatedResponse === "disconnected") return;
   if (options.response.writableEnded) return;
   if (!coordinatedResponse) {
     sendText(options.response, 504, "The persistent preview agent did not respond in time.");
@@ -483,6 +542,7 @@ function completePendingRequest(
   if (!entry || entry.sessionId !== sessionId) return false;
   pending.delete(message.id);
   clearTimeout(entry.timeout);
+  entry.cleanup();
 
   writeTunnelResponse(entry.response, message);
   return true;
@@ -526,6 +586,7 @@ function failPendingRequestsForSession(sessionId: string, pending: Map<string, P
     if (entry.sessionId !== sessionId) continue;
     pending.delete(id);
     clearTimeout(entry.timeout);
+    entry.cleanup();
     sendText(entry.response, 502, "The persistent preview agent disconnected.");
   }
 }
@@ -535,6 +596,7 @@ function failPendingRequest(id: string, sessionId: string, pending: Map<string, 
   if (!entry || entry.sessionId !== sessionId) return;
   pending.delete(id);
   clearTimeout(entry.timeout);
+  entry.cleanup();
   sendText(entry.response, 502, "The persistent preview agent disconnected.");
 }
 

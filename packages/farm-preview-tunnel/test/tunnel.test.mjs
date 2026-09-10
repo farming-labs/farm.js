@@ -312,6 +312,51 @@ test("routes wildcard preview hosts and advertises the matching public URL", asy
   }
 });
 
+test("aborts the local request when the public visitor disconnects", async () => {
+  let markLocalStarted;
+  const localStarted = new Promise((resolve) => {
+    markLocalStarted = resolve;
+  });
+  let markLocalClosed;
+  const localClosed = new Promise((resolve) => {
+    markLocalClosed = resolve;
+  });
+  const target = createServer((_request, response) => {
+    markLocalStarted();
+    response.once("close", markLocalClosed);
+  });
+  await listen(target);
+  const targetAddress = target.address();
+  const relay = createPersistentPreviewRelay({ requestTimeoutMs: 2_000 });
+  const relayAddress = await relay.listen();
+  const agent = await startTypeScriptPreviewAgent({
+    relayUrl: relayAddress.websocketUrl,
+    name: "visitor-disconnect",
+    targetUrl: `http://127.0.0.1:${targetAddress.port}`,
+    requestTimeoutMs: 2_000,
+  });
+
+  const publicRequest = createRequest(agent.publicUrl);
+  publicRequest.on("error", () => undefined);
+  publicRequest.end();
+
+  try {
+    await localStarted;
+    publicRequest.destroy();
+    await Promise.race([
+      localClosed,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("local request remained active")), 500),
+      ),
+    ]);
+  } finally {
+    publicRequest.destroy();
+    await agent.close();
+    await relay.close();
+    await close(target);
+  }
+});
+
 test("falls through to an existing HTTP gateway when no native session matches", async () => {
   const fallbackRequests = [];
   const relay = createPersistentPreviewRelay({

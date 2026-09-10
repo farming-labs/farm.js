@@ -438,6 +438,58 @@ test("keeps the gateway session alive after one local request fails", async () =
   }
 });
 
+test("aborts local gateway work after a public cancellation", async () => {
+  let markSlowClosed;
+  const slowClosed = new Promise((resolve) => {
+    markSlowClosed = resolve;
+  });
+  const app = await createTestServer((req, res) => {
+    if (req.url === "/slow") {
+      res.once("close", markSlowClosed);
+      return;
+    }
+    res.end("ok");
+  });
+  const gateway = await createQueuedPreviewGatewayTestServer(
+    [
+      { id: "req_cancel", method: "GET", path: "/slow" },
+      { id: "req_cancel", method: "GET", path: "/slow", cancelled: true },
+      { id: "req_ok", method: "GET", path: "/ok" },
+    ],
+    { pollDelayMs: 20 },
+  );
+  const plan = createPreviewGatewayPlan(
+    {
+      localUrl: `http://localhost:${app.port}`,
+      host: "localhost",
+      port: app.port,
+      source: "port",
+    },
+    { gatewayUrl: gateway.url, name: "request-cancellation" },
+  );
+
+  try {
+    await runPreviewGateway(plan, {
+      maxRequests: 1,
+      pollTimeoutMs: 10,
+      localProbeIntervalMs: 1_000,
+    });
+    await Promise.race([
+      slowClosed,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("cancelled local request remained active")), 500),
+      ),
+    ]);
+    assert.deepEqual(
+      gateway.responses.map(({ requestId, response }) => [requestId, response.status]),
+      [["req_ok", 200]],
+    );
+  } finally {
+    await app.close();
+    await gateway.close();
+  }
+});
+
 test("cancels streaming local health probe responses", async () => {
   const app = await createStreamingTestServer();
   const gateway = await createPreviewGatewayTestServer();
@@ -684,7 +736,7 @@ async function createPreviewGatewayTestServer() {
   };
 }
 
-async function createQueuedPreviewGatewayTestServer(requests) {
+async function createQueuedPreviewGatewayTestServer(requests, options = {}) {
   const queued = [...requests];
   const responses = [];
   const server = await createTestServer(async (req, res) => {
@@ -705,6 +757,8 @@ async function createQueuedPreviewGatewayTestServer(requests) {
     }
 
     if (req.method === "GET" && url.pathname === "/api/sessions/sess_queue/requests") {
+      if (options.pollDelayMs)
+        await new Promise((resolve) => setTimeout(resolve, options.pollDelayMs));
       res.setHeader("content-type", "application/json");
       res.end(JSON.stringify({ requests: queued.length ? [queued.shift()] : [] }));
       return;

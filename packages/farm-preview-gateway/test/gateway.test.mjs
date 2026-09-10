@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createServer } from "node:http";
+import { createServer, request as createRequest } from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
 import { createNodePreviewGatewayHandler, MemoryPreviewGatewayStore } from "../dist/index.js";
@@ -206,6 +206,37 @@ test("expires stale preview clients before queueing public requests", async () =
     assert.equal(response.status, 404);
     assert.match(await response.text(), /No active Farm preview/);
     assert.ok(elapsedMs < 1000, `expected stale request to fail quickly, got ${elapsedMs}ms`);
+  } finally {
+    await gateway.close();
+  }
+});
+
+test("queues cancellation when a public visitor disconnects", async () => {
+  const store = new MemoryPreviewGatewayStore();
+  const gateway = await createGatewayServer(store);
+
+  try {
+    const session = await fetch(`${gateway.url}/api/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "cancel-check", localUrl: "http://localhost:4321" }),
+    }).then((response) => response.json());
+
+    const publicRequest = createRequest(`${gateway.url}/__preview/cancel-check/slow`);
+    publicRequest.on("error", () => undefined);
+    publicRequest.end();
+
+    const firstPoll = await fetch(
+      `${gateway.url}/api/sessions/${session.id}/requests?token=${session.token}&wait=1000`,
+    ).then((response) => response.json());
+    assert.equal(firstPoll.requests[0].cancelled, undefined);
+    publicRequest.destroy();
+
+    const secondPoll = await fetch(
+      `${gateway.url}/api/sessions/${session.id}/requests?token=${session.token}&wait=1000`,
+    ).then((response) => response.json());
+    assert.equal(secondPoll.requests[0].id, firstPoll.requests[0].id);
+    assert.equal(secondPoll.requests[0].cancelled, true);
   } finally {
     await gateway.close();
   }

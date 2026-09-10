@@ -82,6 +82,9 @@ export async function startTypeScriptPreviewAgent(
           if (inFlight.get(message.id) === controller) inFlight.delete(message.id);
         },
       );
+    } else if (message.type === "cancel") {
+      inFlight.get(message.id)?.abort();
+      inFlight.delete(message.id);
     }
   });
   socket.once("close", () => {
@@ -240,6 +243,7 @@ async function forwardRequest(
       body: responseBody.toString("base64"),
     };
   } catch (error) {
+    if (controller.signal.aborted && !timedOut) return;
     const unsafePath = error instanceof UnsafePreviewPathError;
     response = {
       type: "response",

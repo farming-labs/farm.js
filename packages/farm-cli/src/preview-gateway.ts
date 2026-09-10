@@ -27,6 +27,7 @@ export interface PreviewGatewayRequest {
   headers?: Record<string, string>;
   body?: string | null;
   encoding?: "base64";
+  cancelled?: true;
 }
 
 export interface PreviewGatewayResponse {
@@ -104,6 +105,7 @@ export async function runPreviewGateway(
   const controller = new AbortController();
   let handledRequests = 0;
   const inFlightRequests = new Set<Promise<void>>();
+  const requestControllers = new Map<string, AbortController>();
   const maxConcurrentRequests = Math.max(
     1,
     options.maxConcurrentRequests ?? DEFAULT_MAX_CONCURRENT_REQUESTS,
@@ -127,7 +129,10 @@ export async function runPreviewGateway(
     }
   };
 
-  const handleRequest = async (request: PreviewGatewayRequest) => {
+  const handleRequest = async (
+    request: PreviewGatewayRequest,
+    requestController: AbortController,
+  ) => {
     const startedAt = Date.now();
     let response: PreviewGatewayResponse;
 
@@ -135,12 +140,13 @@ export async function runPreviewGateway(
       response = await forwardGatewayRequest(plan.target, request, {
         signal: AbortSignal.any([
           controller.signal,
+          requestController.signal,
           AbortSignal.timeout(options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS),
         ]),
         maxResponseBodyBytes: options.maxResponseBodyBytes ?? DEFAULT_MAX_RESPONSE_BODY_BYTES,
       });
     } catch (error) {
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted || requestController.signal.aborted) return;
       response = createGatewayErrorResponse(error);
     }
 
@@ -169,12 +175,24 @@ export async function runPreviewGateway(
       });
 
       for (const request of requests) {
+        if (request.cancelled) {
+          requestControllers.get(request.id)?.abort();
+          continue;
+        }
         await waitForAvailableRequestSlot();
         if (controller.signal.aborted) break;
 
-        const promise = handleRequest(request);
+        const requestController = new AbortController();
+        requestControllers.get(request.id)?.abort();
+        requestControllers.set(request.id, requestController);
+        const promise = handleRequest(request, requestController);
         inFlightRequests.add(promise);
-        promise.finally(() => inFlightRequests.delete(promise));
+        promise.finally(() => {
+          inFlightRequests.delete(promise);
+          if (requestControllers.get(request.id) === requestController) {
+            requestControllers.delete(request.id);
+          }
+        });
       }
 
       if (options.maxRequests && handledRequests >= options.maxRequests) {
@@ -185,6 +203,8 @@ export async function runPreviewGateway(
     process.removeListener("SIGINT", cleanup);
     process.removeListener("SIGTERM", cleanup);
     controller.abort();
+    for (const requestController of requestControllers.values()) requestController.abort();
+    requestControllers.clear();
     await Promise.allSettled(inFlightRequests);
     await localTargetWatch.catch(() => undefined);
     await closeGatewaySession(plan, session).catch(() => undefined);

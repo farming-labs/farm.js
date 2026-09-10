@@ -3,6 +3,7 @@ import {
   isRelayToAgentMessage,
   type PersistentPreviewRelayCoordinator,
   type PersistentPreviewRelayCoordinatorSession,
+  type TunnelCancelMessage,
   type TunnelRequestMessage,
   type TunnelResponseMessage,
 } from "@farm.js/preview-tunnel";
@@ -64,7 +65,10 @@ export class RedisPreviewRelayCoordinator implements PersistentPreviewRelayCoord
     await this.redis.eval(RELEASE_SESSION_SCRIPT, 1, this.nameKey(session.name), session.id);
   }
 
-  async publishRequest(sessionId: string, request: TunnelRequestMessage) {
+  async publishRequest(
+    sessionId: string,
+    request: TunnelRequestMessage | TunnelCancelMessage,
+  ) {
     await this.push(this.requestKey(sessionId), request);
   }
 
@@ -72,7 +76,10 @@ export class RedisPreviewRelayCoordinator implements PersistentPreviewRelayCoord
     const value = await this.take(this.requestKey(sessionId), timeoutMs);
     if (!value) return undefined;
     const message: unknown = JSON.parse(value);
-    return isRelayToAgentMessage(message) && message.type === "request" ? message : undefined;
+    return isRelayToAgentMessage(message) &&
+      (message.type === "request" || message.type === "cancel")
+      ? message
+      : undefined;
   }
 
   async publishResponse(sessionId: string, response: TunnelResponseMessage) {

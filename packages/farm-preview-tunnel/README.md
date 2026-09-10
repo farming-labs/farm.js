@@ -38,6 +38,8 @@ The agent closes automatically when the local target becomes unreachable. The re
 
 Local response bodies are limited to 5 MiB by default because the current protocol buffers and base64-encodes them. Configure `maxResponseBodyBytes` on the relay to change the limit; the relay advertises that limit to compatible agents and also enforces it when accepting responses. The TypeScript agent can set a smaller `maxResponseBodyBytes`, but cannot exceed the relay's limit.
 
+The relay sends a per-request cancellation message when a public visitor disconnects or the relay deadline expires. Compatible agents abort the matching localhost request, so abandoned streaming and slow responses do not continue running in the app.
+
 ## Rust agent
 
 The independent `@farm.js/tunnel` N-API package implements the same protocol and is the native agent used by `farm preview`. The TypeScript agent remains the portable protocol reference and fallback.
