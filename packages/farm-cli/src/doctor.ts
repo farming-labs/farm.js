@@ -363,16 +363,10 @@ function applySafeProjectFixes(
     const rendererExtension = config.renderer.componentExtensions?.[0] || ".tsx";
     const layoutPath = path.join(config.root, config.srcDir, "app", `layout${rendererExtension}`);
     if (!existsSync(layoutPath)) {
+      const source = createRootLayoutSource(config.renderer.name);
+      if (!source) return fixes;
       mkdirSync(path.dirname(layoutPath), { recursive: true });
-      writeFileSync(
-        layoutPath,
-        config.renderer.name === "vue"
-          ? `<script setup lang="ts">\ndefineOptions({ inheritAttrs: false });\n</script>\n\n<template>\n  <slot />\n</template>\n`
-          : config.renderer.name === "solid"
-            ? `import type { ParentProps } from "solid-js";\n\nexport default function RootLayout(props: ParentProps) {\n  return <>{props.children}</>;\n}\n`
-            : `import type { ReactNode } from "react";\n\nexport default function RootLayout({ children }: { children: ReactNode }) {\n  return (\n    <html lang="en">\n      <body>{children}</body>\n    </html>\n  );\n}\n`,
-        { encoding: "utf8", flag: "wx" },
-      );
+      writeFileSync(layoutPath, source, { encoding: "utf8", flag: "wx" });
       fixes.push({
         code: "ROOT_LAYOUT_CREATED",
         title: "Created the missing root layout",
@@ -381,6 +375,23 @@ function applySafeProjectFixes(
     }
   }
   return fixes;
+}
+
+function createRootLayoutSource(renderer: string): string | undefined {
+  if (renderer === "vue") {
+    return `<script setup lang="ts">\ndefineOptions({ inheritAttrs: false });\n</script>\n\n<template>\n  <slot />\n</template>\n`;
+  }
+  if (renderer === "solid") {
+    return `import type { ParentProps } from "solid-js";\n\nexport default function RootLayout(props: ParentProps) {\n  return <>{props.children}</>;\n}\n`;
+  }
+  if (renderer === "preact") {
+    return `import type { ComponentChildren } from "preact";\n\nexport default function RootLayout({ children }: { children?: ComponentChildren }) {\n  return <>{children}</>;\n}\n`;
+  }
+  if (renderer === "svelte") {
+    return `<script lang="ts">\n  import type { Snippet } from "svelte";\n\n  let { children }: { children?: Snippet } = $props();\n</script>\n\n{@render children?.()}\n`;
+  }
+  if (renderer !== "react") return undefined;
+  return `import type { ReactNode } from "react";\n\nexport default function RootLayout({ children }: { children: ReactNode }) {\n  return (\n    <html lang="en">\n      <body>{children}</body>\n    </html>\n  );\n}\n`;
 }
 
 function collectNodeCheck(checks: FarmDoctorCheck[]): void {

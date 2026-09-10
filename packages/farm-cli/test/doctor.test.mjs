@@ -272,6 +272,59 @@ test("recognizes routes using the configured renderer extension", async () => {
   }
 });
 
+for (const fixture of [
+  {
+    renderer: "preact",
+    extension: ".tsx",
+    expected: /ComponentChildren.*from "preact"/,
+    rejected: /from "react"/,
+  },
+  {
+    renderer: "svelte",
+    extension: ".svelte",
+    expected: /Snippet.*from "svelte"/,
+    rejected: /from "react"/,
+  },
+]) {
+  test(`creates a ${fixture.renderer} root layout with renderer-native source`, async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), `farm-cli-doctor-${fixture.renderer}-`));
+    const layoutPath = path.join(root, `src/app/layout${fixture.extension}`);
+
+    try {
+      await mkdir(path.join(root, "src/app"), { recursive: true });
+      await writeFile(
+        path.join(root, "package.json"),
+        JSON.stringify({
+          name: `${fixture.renderer}-doctor`,
+          dependencies: { "@farm.js/core": "workspace:*" },
+        }),
+      );
+      await writeFile(
+        path.join(root, "farm.config.mjs"),
+        `export default {
+  renderer: {
+    name: ${JSON.stringify(fixture.renderer)},
+    vite: "@farm.js/${fixture.renderer}/vite",
+    server: "@farm.js/${fixture.renderer}/server",
+    client: "@farm.js/${fixture.renderer}/client",
+    componentExtensions: [${JSON.stringify(fixture.extension)}],
+  },
+};
+`,
+      );
+
+      const report = await runFarmDoctor({ root, offline: true, fix: true });
+      const source = await readFile(layoutPath, "utf8");
+
+      assert.ok(report.fixes?.some((fix) => fix.filePath.endsWith(`layout${fixture.extension}`)));
+      assert.match(source, fixture.expected);
+      assert.doesNotMatch(source, fixture.rejected);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+}
+
 test("applies safe fixes inside a configured project root", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "farm-cli-doctor-root-"));
   const projectRoot = path.join(root, "application");
