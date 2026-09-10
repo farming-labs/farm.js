@@ -874,6 +874,7 @@ export function StandardTableBenchmark() {
           data-action="table-map-structural-reorder-pipeline"
           type="button"
           onClick={() => {
+            setRows((current) => current.filter((row) => row.id % 10_000 !== 7_001));
             setRows((current) =>
               current.map((row) =>
                 row.id % 10_000 === 5_001
@@ -881,17 +882,19 @@ export function StandardTableBenchmark() {
                   : row,
               ),
             );
-            setRows((current) => current.filter((row) => row.id % 10_000 !== 7_001));
-            setOperation("review one row, then filter another in a queued setter");
+            setOperation("filter one row, then review another in a queued setter");
             setRevision((value) => value + 1);
           }}
         >
-          Queued map + filter
+          Queued filter + map
         </button>
         <button
           data-action="table-map-structural-reorder-pipeline-snapshot"
           type="button"
           onClick={() => {
+            setRows((current) => {
+              return current.filter((row) => row.id % 10_000 !== 7_001);
+            });
             setRows((current) => {
               return current.map((row) =>
                 row.id % 10_000 === 5_001
@@ -899,14 +902,11 @@ export function StandardTableBenchmark() {
                   : row,
               );
             });
-            setRows((current) => {
-              return current.filter((row) => row.id % 10_000 !== 7_001);
-            });
-            setOperation("review and filter rows in queued setters (snapshot control)");
+            setOperation("filter and review rows in queued setters (snapshot control)");
             setRevision((value) => value + 1);
           }}
         >
-          Queued map + filter (snapshot control)
+          Queued filter + map (snapshot control)
         </button>
         <button
           data-action="table-map-reorder-pipeline"

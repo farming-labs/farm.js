@@ -1306,21 +1306,33 @@ validates every survivor and key before the first DOM write, removes rejected ro
 moves only when a reorder needs them, and patches bindings only for changed survivors. A changed
 item that a later structural step removes needs no row patch.
 
-Leading maps may also be split from following filter or slice work across adjacent setter calls:
+Structural and map work may also be split across adjacent setter calls in either order:
 
 ```tsx
+// Map, then structural work.
 setItems((current) =>
   current.map((item) => (item.id === editedId ? { ...item, label: nextLabel } : item)),
 );
 setItems((current) => current.filter((item) => item.visible));
 setItems((current) => current.slice(0, limit));
+
+// Structural work, then maps.
+setItems((current) => current.filter((item) => item.visible));
+setItems((current) => current.slice(0, limit));
+setItems((current) =>
+  current.map((item) => (item.id === editedId ? { ...item, label: nextLabel } : item)),
+);
+setItems((current) =>
+  current.map((item) => (item.id === editedId ? { ...item, rank: nextRank } : item)),
+);
 ```
 
-Farm links only consecutive calls to the same setter. It retains the first committed map source and
-validates each structural result before the queued commit touches the DOM. Multiple leading map
-setters and multiple following filter/slice setters may share the proof. A map after structural
-work, an intervening statement, another setter, an unsupported callback, a changed key, or any
-failed runtime proof keeps complete reconciliation.
+Farm links only consecutive calls to the same setter. A leading map retains its first committed
+source through later structural work; a terminal map consumes the saved survivor lineage from the
+preceding filter or slice. Multiple safe steps in either segment may share the proof, and mixed
+map/structural/map sequences compose. Every result and key is validated before the queued commit
+touches the DOM. An intervening statement, another setter, an unsupported callback, a changed key,
+or any failed runtime proof keeps complete reconciliation.
 
 A safe map may also be the final pipeline step:
 
@@ -2294,10 +2306,10 @@ The package and example test suites verify more than generated code:
 - 2,000 deterministic mapped structural removals, another 2,000 randomized updates with maps
   interleaved between filter/slice steps and a final reorder, 2,000 randomized terminal
   structural-map transitions, 2,000 randomized map-before-terminal-filter/slice transitions, and
-  2,000 randomized adjacent queued map/filter/slice transitions match normal React; targeted tests
-  preserve surviving DOM identity and controlled-input focus/selection, patch only changed
-  survivors, and cover adjacency boundaries, changed-key and custom-method fallback, Strict Mode
-  hydration, and unmount-before-flush cleanup;
+  separate 2,000-transition adjacent-setter runs with map/structural work in both orders match normal
+  React; targeted tests preserve surviving DOM identity and controlled-input focus/selection, patch
+  only changed survivors, and cover multiple terminal maps, adjacency boundaries, changed-key and
+  custom-method fallback, Strict Mode hydration, and unmount-before-flush cleanup;
 - 2,000 deterministic native reversals or sorts followed by consecutive same-key edits match normal
   React; targeted tests require exact reversal to use `n - 1` direct DOM moves without a generic
   source-item map, require ambiguous sorting to use one validated keyed reconciliation, and cover
