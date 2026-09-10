@@ -149,6 +149,22 @@ describe("content collection loading", () => {
     expect(() => encodeContentValue(sparse)).toThrow("sparse arrays");
   });
 
+  it("reports circular transformed values without overflowing the stack", async () => {
+    const root = await fixtureRoot();
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+
+    await expect(
+      loadContentCollections(root, {
+        posts: collection({
+          source: files("content/posts/hello.md"),
+          schema: postSchema,
+          transform: () => circular,
+        }),
+      }),
+    ).rejects.toThrow("[farm:content] Content data cannot contain circular references");
+  });
+
   it("writes a normal generated server module only when content changes", async () => {
     const root = await fixtureRoot();
     const output = path.join(root, ".farm", "content", "server.mjs");

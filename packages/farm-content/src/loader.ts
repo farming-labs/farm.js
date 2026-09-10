@@ -347,18 +347,26 @@ function isArrayIndex(key: string, length: number): boolean {
   return Number.isInteger(index) && index >= 0 && index < length && String(index) === key;
 }
 
-function freezeContentValue<T>(value: T): T {
+function freezeContentValue<T>(value: T, ancestors = new Set<object>()): T {
   if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
-  if (Array.isArray(value)) {
-    for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(value))) {
-      if ("value" in descriptor) freezeContentValue(descriptor.value);
-    }
-  } else if (!(value instanceof Date)) {
-    for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(value))) {
-      if ("value" in descriptor) freezeContentValue(descriptor.value);
-    }
+  if (ancestors.has(value)) {
+    throw new TypeError("[farm:content] Content data cannot contain circular references");
   }
-  return Object.freeze(value);
+  ancestors.add(value);
+  try {
+    if (Array.isArray(value)) {
+      for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(value))) {
+        if ("value" in descriptor) freezeContentValue(descriptor.value, ancestors);
+      }
+    } else if (!(value instanceof Date)) {
+      for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(value))) {
+        if ("value" in descriptor) freezeContentValue(descriptor.value, ancestors);
+      }
+    }
+    return Object.freeze(value);
+  } finally {
+    ancestors.delete(value);
+  }
 }
 
 async function writeFileIfChanged(filePath: string, source: string): Promise<void> {
