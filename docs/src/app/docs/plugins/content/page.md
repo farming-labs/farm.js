@@ -162,6 +162,64 @@ export default async function PostPage({ params }: PageProps<"/posts/[...slug]">
 }
 ```
 
+## Use a hosted CMS
+
+`content()` is the file-backed path. For Sanity, Contentful, Storyblok, or another hosted CMS,
+install the provider's SDK directly and choose where the content should enter the application:
+
+- **Build-time snapshot:** export or sync the CMS into a generated Markdown or JSON directory before
+  `farm build`, then point `files()` at that directory. The plugin validates and bundles the snapshot;
+  publishing new content triggers a new deployment.
+- **Live content:** keep the provider SDK in a server-only module and fetch through a
+  [Server Query](/docs/server-queries). Farm can validate the response, cache published content, and
+  share the typed result with server or client consumers.
+
+For example, a Sanity-backed query can stay small:
+
+**src/lib/cms.ts**
+
+```ts
+import { createServerQuery } from "@farm.js/core/server-query";
+import { createClient } from "@sanity/client";
+import { z } from "zod";
+
+const Post = z.object({
+  id: z.string(),
+  title: z.string(),
+  slug: z.string(),
+});
+
+const sanity = createClient({
+  projectId: process.env.SANITY_PROJECT_ID!,
+  dataset: process.env.SANITY_DATASET!,
+  apiVersion: "2026-09-09",
+  useCdn: true,
+});
+
+export const cmsPosts = createServerQuery({
+  output: z.array(Post),
+  key: () => ["cms", "posts"],
+  staleTime: "5m",
+  handler: () =>
+    sanity.fetch(`*[_type == "post"]{
+      "id": _id,
+      title,
+      "slug": slug.current
+    }`),
+});
+```
+
+A Server Component can call `await cmsPosts()`. Point a verified CMS webhook at a Farm API route
+and call `await invalidate(["cms", "posts"])` when published content changes; see
+[Cache and PPR](/docs/cache-ppr). For draft previews, use a server-only read token, bypass the
+provider CDN, authorize the request, and avoid a shared persistent cache. Never expose a CMS token
+to a Client Component.
+
+The same shape works with another provider: replace the client and query language, while keeping
+the server-only boundary, output schema, cache key, and invalidation path. See the
+[Sanity JavaScript client guide](https://www.sanity.io/docs/apis-and-sdks/js-client-getting-started)
+for provider-specific setup.
+
 ## Type generation
 
 Farm adds content inference to the same `src/farm.d.ts` used for routes and environment values. It
