@@ -73,7 +73,7 @@ the newest prerelease published under the `beta` tag. Exactly one release channe
 
 Farm reads the app's dependencies and upgrades every published `@farm.js/*` package together. It
 detects npm, pnpm, Yarn, or Bun from `packageManager` and lockfiles, preserves whether each package
-is a regular, development, optional, or peer dependency, and skips local `workspace:`, `file:`,
+is a regular, development, optional, or peer dependency (including packages repeated across sections), and skips local `workspace:`, `file:`,
 `link:`, `portal:`, and `catalog:` references. Use `--dry-run` to inspect the commands without
 changing the project.
 
