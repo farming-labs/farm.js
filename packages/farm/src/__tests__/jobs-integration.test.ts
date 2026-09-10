@@ -26,6 +26,37 @@ describe("jobs integration", () => {
     vi.unstubAllGlobals();
   });
 
+  it("rejects malformed and non-object JSON before dispatching a job", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const integration = jobs({
+      runtime: trigger({ apiKey: "tr_dev_test" }),
+      tasks: defineTasks({
+        sendEmail: task({
+          async run(input: { recipient: string }) {
+            return input;
+          },
+        }),
+      }),
+    });
+    const routes = integration.routes as Array<{
+      path: string;
+      handler(request: Request): Promise<Response>;
+    }>;
+    const triggerRoute = routes.find((route) => route.path.endsWith("/trigger"));
+
+    for (const body of ["{", "null", "[]", '"recipient"']) {
+      const response = await triggerRoute!.handler(
+        new Request("https://farmjs.dev/api/jobs/send-email/trigger", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body,
+        }),
+      );
+      expect(response.status).toBe(400);
+    }
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("infers task input/output types and exposes task metadata", async () => {
     const tasks = defineTasks({
       sendWelcomeEmail: task({
