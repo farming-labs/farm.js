@@ -66,6 +66,8 @@ The preview lifecycle is tied to the local app. When `farm dev` stops or the con
 
 The public URL is invalidated as soon as the session closes, so later requests return `404`. You do not need to run a separate command to stop or clean up the tunnel.
 
+Cancellation also applies to individual requests. If a visitor closes the connection while a slow or streaming local response is still running, the gateway tells the preview agent to abort that localhost request.
+
 ## Commands
 
 ```bash
