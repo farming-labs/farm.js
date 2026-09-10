@@ -205,8 +205,38 @@ function normalizeRoute(value: string | false, label: string): string | false {
   if (!route.startsWith("/")) {
     throw new TypeError(`PWA ${label} must start with "/"`);
   }
+  if (route.startsWith("//")) {
+    throw new TypeError(`PWA ${label} must be an application pathname, not a URL`);
+  }
   if (route.includes("?") || route.includes("#")) {
     throw new TypeError(`PWA ${label} cannot contain a query string or fragment`);
   }
+  if (hasUnstablePathCharacters(route)) {
+    throw new TypeError(`PWA ${label} cannot contain backslashes or control characters`);
+  }
+  for (const segment of route.split("/")) {
+    let decoded = segment;
+    try {
+      decoded = decodeURIComponent(segment);
+    } catch {
+      // Malformed escapes remain literal URL pathname segments.
+    }
+    if (hasUnstablePathCharacters(decoded) || decoded.includes("/")) {
+      throw new TypeError(`PWA ${label} cannot contain encoded path separators`);
+    }
+    if (decoded === "." || decoded === "..") {
+      throw new TypeError(`PWA ${label} cannot contain "." or ".." path segments`);
+    }
+  }
   return route === "/" ? route : route.replace(/\/+$/, "");
+}
+
+function hasUnstablePathCharacters(value: string): boolean {
+  return (
+    value.includes("\\") ||
+    Array.from(value).some((character) => {
+      const code = character.charCodeAt(0);
+      return code <= 31 || (code >= 127 && code <= 159);
+    })
+  );
 }
