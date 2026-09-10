@@ -101,6 +101,17 @@ describe("Partytown document bootstrap", () => {
     expect(twice).toBe(once);
   });
 
+  it("does not mistake document text or another attribute value for the marker", () => {
+    const html =
+      '<!doctype html><html><head><title>data-farm-partytown</title><script title="x data-farm-partytown y"></script></head><body></body></html>';
+
+    const result = injectPartytownBootstrap(html, "/~partytown/farm-partytown.js");
+
+    expect(result).toContain(
+      '<script src="/~partytown/farm-partytown.js" data-farm-partytown></script></head>',
+    );
+  });
+
   it("leaves fragments unchanged and validates base paths", () => {
     expect(injectPartytownBootstrap("<main>Farm</main>", "/bootstrap.js")).toBe(
       "<main>Farm</main>",
