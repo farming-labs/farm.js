@@ -295,7 +295,11 @@ export function extractStaticImports(source: string): string[] {
 }
 
 function extractCssImports(source: string): string[] {
-  return [...source.matchAll(/@import\s+(?:url\(\s*)?["']([^"']+)["']/g)].map((match) => match[1]);
+  return [
+    ...source.matchAll(
+      /@import\s+(?:url\(\s*(?:"([^"]+)"|'([^']+)'|([^"')\s]+))\s*\)|"([^"]+)"|'([^']+)')/gi,
+    ),
+  ].map((match) => match.slice(1).find((value) => value !== undefined) as string);
 }
 
 function resolveAssetReference(

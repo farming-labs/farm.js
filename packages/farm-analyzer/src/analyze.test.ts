@@ -18,7 +18,12 @@ describe("analyzeBuild", () => {
     expect(report.summary.pages).toBe(2);
     expect(report.pages.map((page) => page.route).sort()).toEqual(["/", "/about"]);
     const home = report.pages.find((page) => page.route === "/");
-    expect(home?.assets).toEqual(["assets/entry.js", "assets/shared.js", "assets/styles.css"]);
+    expect(home?.assets).toEqual([
+      "assets/entry.js",
+      "assets/shared.js",
+      "assets/styles.css",
+      "assets/theme.css",
+    ]);
     expect(home?.assets).not.toContain("assets/lazy.js");
     expect(report.clientAssets.find((asset) => asset.path === "assets/entry.js")?.usedByPages).toBe(
       2,
@@ -91,7 +96,11 @@ async function createBuildFixture(): Promise<string> {
     ),
     writeFile(path.join(publicDirectory, "assets/shared.js"), "export const x = 1;"),
     writeFile(path.join(publicDirectory, "assets/lazy.js"), "export const lazy = true;"),
-    writeFile(path.join(publicDirectory, "assets/styles.css"), "body{color:#123}"),
+    writeFile(
+      path.join(publicDirectory, "assets/styles.css"),
+      "@import url(./theme.css);body{color:#123}",
+    ),
+    writeFile(path.join(publicDirectory, "assets/theme.css"), ":root{color-scheme:dark}"),
     writeFile(path.join(publicDirectory, "logo.svg"), "<svg></svg>"),
     writeFile(path.join(serverDirectory, "index.mjs"), "export default {}"),
     writeFile(path.join(serverDirectory, "index.mjs.map"), "{}"),
