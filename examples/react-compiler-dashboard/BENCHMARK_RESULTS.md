@@ -2,6 +2,36 @@
 
 Latest run: 2026-09-09
 
+## Queued maps before structural setters — 2026-09-09
+
+Adjacent keyed-row setters may now keep one safe lineage across the queued update boundary. The
+maintained workload first updates one row with `map()`, then removes another row with `filter()`.
+Farm preserves the mapped sources until the structural setter finishes, validates the complete
+result before the first DOM write, removes the rejected row, and patches only the changed survivor.
+The block-bodied control performs the same two native operations through complete keyed
+reconciliation.
+
+| Mode   | Queued map + filter | Compiled control | vs React | vs control |
+| ------ | ------------------: | ---------------: | -------: | ---------: |
+| Static |             3.30 ms |         10.50 ms |   16.23x |      3.18x |
+| Hybrid |             3.50 ms |         10.60 ms |   15.30x |      3.03x |
+
+Both modes passed the unchanged 2x React and 1.25x compiled-control floors. The complete bracketed
+run passed its correctness oracle, broad 10% regression gate, optimization-persistence gate, every
+existing feature-specific performance gate, and zero compiled owner executions.
+
+Compiler and runtime tests cover multiple queued maps before filter and slice setters, exact
+survivor DOM identity, one changed-row binding read, controlled-input focus and selection, atomic
+fallback when adjacency or runtime proof fails, Strict Mode hydration, unmount-before-flush
+cleanup, and 2,000 randomized queued transitions matched with normal React. React 18.3.1 and 19.2.8
+compatibility passes, and all isolated optional-runtime gzip fixtures remain within their unchanged
+budgets.
+
+Numbers are medians from one complete bracketed run: 10 samples per compiler mode and 20 surrounding
+React samples using Chrome 153.0.8010.36, Node.js 23.11.0, and Apple M1 macOS arm64. Timing varies by
+machine; deterministic parity, fallback, DOM-identity, compatibility, and runtime-size checks remain
+the primary safety controls.
+
 ## Maps before terminal structural steps — 2026-09-09
 
 A concise keyed-row setter may now run a safe same-key `map()` before a terminal native `filter()`
