@@ -15,6 +15,7 @@ Use an [integration](/docs/integrations) for a product or service such as authen
 | Plugin                               | Purpose                                                                                          |
 | ------------------------------------ | ------------------------------------------------------------------------------------------------ |
 | [Analyzer](/docs/plugins/analyzer)   | Explain page, client, and server build size and enforce readable CI limits.                      |
+| [Content](/docs/plugins/content)     | Validate local Markdown, MDX, JSON, and YAML as typed server collections.                        |
 | [Hints](/docs/plugins/hints)         | Find accessibility, performance, HTML, and third-party problems in the live development page.    |
 | [MSW](/docs/plugins/msw)             | Share request handlers across development SSR and the browser without shipping production mocks. |
 | [Partytown](/docs/plugins/partytown) | Move explicitly opted-in third-party scripts from the main thread into a web worker.             |

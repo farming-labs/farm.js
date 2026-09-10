@@ -366,6 +366,40 @@ importers:
         specifier: ^5.0.10
         version: 5.4.20(@types/node@20.19.21)
 
+  examples/content-demo:
+    dependencies:
+      '@farm.js/content':
+        specifier: workspace:*
+        version: link:../../packages/farm-content
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../../packages/farm
+      react:
+        specifier: 19.2.8
+        version: 19.2.8
+      react-dom:
+        specifier: 19.2.8
+        version: 19.2.8(react@19.2.8)
+      zod:
+        specifier: ^4.1.12
+        version: 4.3.6
+    devDependencies:
+      '@farm.js/cli':
+        specifier: workspace:*
+        version: link:../../packages/farm-cli
+      '@types/react':
+        specifier: ^19.0.0
+        version: 19.2.13
+      '@types/react-dom':
+        specifier: ^19.0.0
+        version: 19.2.3(@types/react@19.2.13)
+      typescript:
+        specifier: ^5.5.3
+        version: 5.9.3
+      vite:
+        specifier: ^5.0.10
+        version: 5.4.20(@types/node@20.19.21)
+
   examples/deployment-presets:
     dependencies:
       '@farm.js/core':
@@ -1925,6 +1959,31 @@ importers:
       typescript:
         specifier: ^5.3.3
         version: 5.9.3
+
+  packages/farm-content:
+    dependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
+      fast-glob:
+        specifier: ^3.3.2
+        version: 3.3.3
+      gray-matter:
+        specifier: ^4.0.3
+        version: 4.0.3
+      yaml:
+        specifier: ^2.8.0
+        version: 2.9.0
+    devDependencies:
+      '@types/node':
+        specifier: ^20.10.5
+        version: 20.19.21
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.7
+        version: 3.2.7(@types/node@20.19.21)(jsdom@25.0.1)(supports-color@10.2.2)
 
   packages/farm-email:
     dependencies:

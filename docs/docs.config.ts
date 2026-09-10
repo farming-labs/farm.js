@@ -329,6 +329,7 @@ const sidebar = [
         icon: "plug",
         children: [
           { label: "Analyzer", slug: "plugins/analyzer", icon: "gauge" },
+          { label: "Content", slug: "plugins/content", icon: "file" },
           { label: "Hints", slug: "plugins/hints", icon: "activity" },
           { label: "MSW", slug: "plugins/msw", icon: "activity" },
           { label: "Partytown", slug: "plugins/partytown", icon: "zap" },

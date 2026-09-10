@@ -1,0 +1,25 @@
+{
+  "name": "farm-content-demo",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "farm dev",
+    "build": "farm build --preset node-server",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@farm.js/content": "workspace:*",
+    "@farm.js/core": "workspace:*",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@farm.js/cli": "workspace:*",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.5.3",
+    "vite": "^5.0.10"
+  }
+}
