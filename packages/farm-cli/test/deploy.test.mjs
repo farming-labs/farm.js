@@ -34,6 +34,25 @@ test("resolves a deployment plan without building or invoking a platform CLI", a
   }
 });
 
+test("rejects a custom Vercel output that --prebuilt cannot upload", async () => {
+  let root;
+
+  try {
+    root = await mkdtemp(path.join(tmpdir(), "farm-cli-vercel-custom-output-"));
+    await writeFile(
+      path.join(root, "farm.config.mjs"),
+      "export default { deploy: { target: 'vercel', outputDir: 'custom-output' } };\n",
+    );
+
+    await assert.rejects(
+      () => createFarmDeployPlan({ root }),
+      /Vercel prebuilt deploys require output at .*\.vercel.*output/,
+    );
+  } finally {
+    if (root) await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("reads a Cloudflare Agents Worker deployment handoff", async () => {
   let root;
 
