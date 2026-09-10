@@ -331,6 +331,7 @@ const sidebar = [
           { label: "Analyzer", slug: "plugins/analyzer", icon: "gauge" },
           { label: "Hints", slug: "plugins/hints", icon: "activity" },
           { label: "MSW", slug: "plugins/msw", icon: "activity" },
+          { label: "Partytown", slug: "plugins/partytown", icon: "zap" },
           { label: "PWA", slug: "plugins/pwa", icon: "monitor" },
           { label: "Sentry", slug: "plugins/sentry", icon: "brand-sentry" },
           { label: "WebMCP", slug: "plugins/webmcp", icon: "sparkles" },

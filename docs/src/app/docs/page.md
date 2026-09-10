@@ -85,6 +85,7 @@ Plugin system and lifecycle hooks.
 
 - [Plugin Ecosystem](/docs/plugins): Extend server and browser behavior across config, requests, routing, rendering, hydration, navigation, builds, and HMR.
 - [Hints Plugin](/docs/plugins/hints): Find accessibility, Web Vitals, HTML, and third-party script problems on the route you are developing.
+- [Partytown Plugin](/docs/plugins/partytown): Move explicitly opted-in analytics and tag-manager scripts into a web worker with typed callers.
 - [PWA Plugin](/docs/plugins/pwa): Generate a route-aware service worker with offline navigation, update prompts, and concise SWR image caching.
 - [Sentry Plugin](/docs/plugins/sentry): Report server errors with route context and trace Farm requests with `@sentry/node`.
 - [WebMCP Plugin](/docs/plugins/webmcp): Expose a small, explicit, typed browser tool surface to agents using the experimental WebMCP API.

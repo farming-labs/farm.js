@@ -1,0 +1,56 @@
+{
+  "name": "@farm.js/partytown",
+  "version": "0.1.0-beta.0",
+  "description": "Run opted-in third-party scripts in a web worker in Farm.js applications",
+  "keywords": [
+    "analytics",
+    "farm.js",
+    "partytown",
+    "performance",
+    "web-worker"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/farming-labs/farm.js",
+    "directory": "packages/farm-partytown"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "import": "./dist/client.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc",
+    "dev": "tsc --watch",
+    "type-check": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@farm.js/core": "workspace:*",
+    "@qwik.dev/partytown": "^0.14.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "typescript": "^5.3.3",
+    "vitest": "^3.2.7"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}
