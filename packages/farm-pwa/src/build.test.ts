@@ -58,7 +58,7 @@ describe("writePwaBuildArtifacts", () => {
     });
 
     const worker = await readFile(result.workerPath, "utf8");
-    expect(worker).toContain('const IMAGE_CACHE = "farm-pwa-images-v1"');
+    expect(worker).toMatch(/const IMAGE_CACHE = "farm-pwa-images-[0-9a-f]{16}-v1"/);
     expect(worker).toContain('"strategy":"swr","limit":100');
     expect(worker).toContain('const OFFLINE_FILE = "/offline/index.html"');
     expect(worker).toContain('event.data?.type === "FARM_PWA_SKIP_WAITING"');
@@ -135,8 +135,33 @@ describe("writePwaBuildArtifacts", () => {
 });
 
 describe("generateServiceWorker", () => {
+  it("isolates cache names and cleanup to the service worker base path", () => {
+    const createWorker = (basePath: string) =>
+      generateServiceWorker({
+        basePath,
+        cacheId: "same-build",
+        precacheUrls: [],
+        staticRoutes: {},
+        offlineRoute: false,
+        update: "prompt",
+        images: false,
+      });
+
+    const shopWorker = createWorker("/shop");
+    const adminWorker = createWorker("/admin");
+    const shopPrefix = shopWorker.match(/const PRECACHE_PREFIX = "([^"]+)"/)?.[1];
+    const adminPrefix = adminWorker.match(/const PRECACHE_PREFIX = "([^"]+)"/)?.[1];
+
+    expect(shopPrefix).toBeDefined();
+    expect(adminPrefix).toBeDefined();
+    expect(shopPrefix).not.toBe(adminPrefix);
+    expect(shopWorker).toContain("name.startsWith(PRECACHE_PREFIX)");
+    expect(adminWorker).toContain("name.startsWith(PRECACHE_PREFIX)");
+  });
+
   it("only intercepts GET navigation, precached paths, and opted-in images", () => {
     const worker = generateServiceWorker({
+      basePath: "/",
       cacheId: "test",
       precacheUrls: ["/assets/app.js"],
       staticRoutes: {},

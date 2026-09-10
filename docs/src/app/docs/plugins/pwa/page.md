@@ -216,6 +216,9 @@ During `farm build`, generated-worker mode:
 4. Maps clean static route URLs to emitted HTML files.
 5. Fails if the configured offline page is missing.
 
+Generated cache names are isolated by `basePath`, so multiple Farm applications on one origin do
+not delete or reuse a sibling application's precache or image cache.
+
 Custom-worker mode copies the configured source to the same deployment-aware `sw.js` location and
 leaves its contents untouched.
 
