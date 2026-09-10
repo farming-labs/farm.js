@@ -134,6 +134,25 @@ test("reports missing cron routes and ephemeral serverless storage", async () =>
   }
 });
 
+test("finds cron routes mounted under a custom API base path", async () => {
+  const root = await createTempProject({
+    apiBasePath: "/v2/api",
+    cronPath: "/v2/api/maintenance/cleanup",
+  });
+
+  try {
+    const report = await runFarmDoctor({
+      root,
+      offline: true,
+      env: { CRON_SECRET: "configured" },
+    });
+
+    assert.ok(!report.checks.some((check) => check.code === "CRON_ROUTE_MISSING"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("prints a machine-readable report through the CLI", async () => {
   const root = await createTempProject();
 
@@ -269,6 +288,7 @@ async function createTempProject(options = {}) {
     [
       "export default {",
       `  deploy: { target: '${target}' },`,
+      ...(options.apiBasePath ? [`  api: { basePath: '${options.apiBasePath}' },`] : []),
       `  storage: ${storage},`,
       "  cron: {",
       `    cleanup: { schedule: '0 2 * * *', path: '${cronPath}' },`,

@@ -572,13 +572,25 @@ function collectCronChecks(
 }
 
 function hasCronRoute(config: ResolvedFarmConfig, job: FarmCronJob): boolean {
-  const relative = job.path.replace(/^\/+/, "").replace(/^api\//, "");
+  const relative = resolveCronSourceRelativePath(config, job.path);
+  if (relative === undefined) return false;
   return getFarmSourceRoots(config).some((source) => {
     const directory = path.join(source.root, source.srcDir, "app", "api", relative);
     return ROUTE_EXTENSIONS.some((extension) =>
       existsSync(path.join(directory, `route.${extension}`)),
     );
   });
+}
+
+function resolveCronSourceRelativePath(
+  config: ResolvedFarmConfig,
+  cronPath: string,
+): string | undefined {
+  const serverBasePath = config.api.baseURL.startsWith("/") ? config.api.basePath : "/api";
+  if (serverBasePath === "/") return cronPath.replace(/^\/+/, "");
+  if (cronPath === serverBasePath) return "";
+  if (!cronPath.startsWith(`${serverBasePath}/`)) return undefined;
+  return cronPath.slice(serverBasePath.length + 1);
 }
 
 function containsFile(directory: string, pattern: RegExp): boolean {
