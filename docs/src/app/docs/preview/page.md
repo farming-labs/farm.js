@@ -223,6 +223,8 @@ The local CLI owns:
 - Request and response logging.
 - Closing the preview when the local app exits.
 
+Preview transports currently buffer bodies while carrying them through the relay. Public request and local response bodies are limited to 5 MiB by default; an oversized request receives `413`, while an oversized local response receives `502`. Self-hosted gateway and relay operators can configure those limits.
+
 ## Self-Hosting a Gateway
 
 Most app developers should use the hosted gateway. Self-host only when you are operating a private preview domain or maintaining Farming Labs infrastructure.

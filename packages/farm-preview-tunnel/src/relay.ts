@@ -34,6 +34,7 @@ export interface PersistentPreviewRelayOptions {
   coordinatorSessionTtlMs?: number;
   requestTimeoutMs?: number;
   maxBodyBytes?: number;
+  maxResponseBodyBytes?: number;
 }
 
 export type PersistentPreviewRelayFallbackHandler = (
@@ -83,7 +84,11 @@ interface PendingRequest {
 export function createPersistentPreviewRelay(options: PersistentPreviewRelayOptions = {}) {
   const agents = new Map<string, AgentSession>();
   const pending = new Map<string, PendingRequest>();
-  const websocketServer = new WebSocketServer({ noServer: true });
+  const maxResponseBodyBytes = options.maxResponseBodyBytes ?? 5 * 1024 * 1024;
+  const websocketServer = new WebSocketServer({
+    noServer: true,
+    maxPayload: Math.ceil(maxResponseBodyBytes / 3) * 4 + 256 * 1024,
+  });
   const host = options.host || "127.0.0.1";
   const publicDomain = normalizeDomain(options.publicDomain);
   const healthPath = options.healthPath || "/api/health";
@@ -131,6 +136,7 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
         pending,
         requestTimeoutMs,
         maxBodyBytes,
+        maxResponseBodyBytes,
       });
     } catch (error) {
       const status = error instanceof BodyLimitError ? 413 : 500;
@@ -214,6 +220,7 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
               type: "ready",
               sessionId: session.id,
               publicUrl: createPublicUrl(baseUrl, publicDomain, name),
+              maxResponseBodyBytes,
             };
             socket.send(JSON.stringify(ready));
             if (options.coordinator) {
@@ -233,6 +240,10 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
         if (message.type === "response") {
           if (!session) {
             rejectSocketMessage(socket, "Register the preview agent before sending responses.");
+            return;
+          }
+          if (getEncodedBodySize(message.body) > maxResponseBodyBytes) {
+            rejectOversizedResponse(message.id, session.id, pending, maxResponseBodyBytes);
             return;
           }
           if (!completePendingRequest(message, session.id, pending)) {
@@ -296,6 +307,7 @@ interface ForwardPublicRequestOptions {
   pending: Map<string, PendingRequest>;
   requestTimeoutMs: number;
   maxBodyBytes: number;
+  maxResponseBodyBytes: number;
 }
 
 async function forwardPublicRequest(options: ForwardPublicRequestOptions) {
@@ -364,6 +376,14 @@ async function forwardPublicRequest(options: ForwardPublicRequestOptions) {
   if (options.response.writableEnded) return;
   if (!coordinatedResponse) {
     sendText(options.response, 504, "The persistent preview agent did not respond in time.");
+    return;
+  }
+  if (getEncodedBodySize(coordinatedResponse.body) > options.maxResponseBodyBytes) {
+    sendText(
+      options.response,
+      502,
+      `The local preview response exceeded the ${options.maxResponseBodyBytes} byte limit.`,
+    );
     return;
   }
   writeTunnelResponse(options.response, coordinatedResponse);
@@ -462,6 +482,27 @@ function completePendingRequest(
 
   writeTunnelResponse(entry.response, message);
   return true;
+}
+
+function rejectOversizedResponse(
+  requestId: string,
+  sessionId: string,
+  pending: Map<string, PendingRequest>,
+  maxResponseBodyBytes: number,
+) {
+  const entry = pending.get(requestId);
+  if (!entry || entry.sessionId !== sessionId) return;
+  pending.delete(requestId);
+  clearTimeout(entry.timeout);
+  sendText(
+    entry.response,
+    502,
+    `The local preview response exceeded the ${maxResponseBodyBytes} byte limit.`,
+  );
+}
+
+function getEncodedBodySize(body: string | undefined) {
+  return body ? Buffer.byteLength(body, "base64") : 0;
 }
 
 function writeTunnelResponse(response: ServerResponse, message: TunnelResponseMessage) {

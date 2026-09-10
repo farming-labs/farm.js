@@ -59,6 +59,44 @@ test("proxies a public preview request through the gateway queue", async () => {
   }
 });
 
+test("rejects oversized agent responses and completes the public request safely", async () => {
+  const store = new MemoryPreviewGatewayStore();
+  const gateway = await createGatewayServer(store, { maxResponseBodyBytes: 8 });
+
+  try {
+    const session = await fetch(`${gateway.url}/api/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "response-limit", localUrl: "http://localhost:4321" }),
+    }).then((response) => response.json());
+
+    const publicRequest = fetch(`${gateway.url}/__preview/response-limit/large`);
+    const poll = await fetch(
+      `${gateway.url}/api/sessions/${session.id}/requests?token=${session.token}&wait=1000`,
+    ).then((response) => response.json());
+    const upload = await fetch(
+      `${gateway.url}/api/sessions/${session.id}/responses/${poll.requests[0].id}?token=${session.token}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          status: 200,
+          headers: { "content-type": "text/plain" },
+          body: Buffer.from("123456789").toString("base64"),
+          encoding: "base64",
+        }),
+      },
+    );
+
+    assert.equal(upload.status, 413);
+    const response = await publicRequest;
+    assert.equal(response.status, 502);
+    assert.match(await response.text(), /exceeded the 8 byte limit/);
+  } finally {
+    await gateway.close();
+  }
+});
+
 test("does not resurrect a deleted session when a stale touch lands late", async () => {
   const store = new MemoryPreviewGatewayStore();
   const session = {

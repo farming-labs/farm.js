@@ -11,6 +11,7 @@ export interface PreviewGatewayOptions {
   pollTimeoutMs?: number;
   pollIntervalMs?: number;
   maxBodyBytes?: number;
+  maxResponseBodyBytes?: number;
 }
 
 export interface PreviewGatewaySession {
@@ -72,6 +73,7 @@ interface PreviewGatewayRuntimeConfig {
   pollTimeoutMs: number;
   pollIntervalMs: number;
   maxBodyBytes: number;
+  maxResponseBodyBytes: number;
 }
 
 const DEFAULT_DOMAIN = "preview.farming-labs.dev";
@@ -81,6 +83,7 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 25000;
 const DEFAULT_POLL_TIMEOUT_MS = 15000;
 const DEFAULT_POLL_INTERVAL_MS = 100;
 const DEFAULT_MAX_BODY_BYTES = 1024 * 1024 * 5;
+const DEFAULT_MAX_RESPONSE_BODY_BYTES = 1024 * 1024 * 5;
 const DEFAULT_POLL_REQUEST_LIMIT = 50;
 const HOP_BY_HOP_HEADERS = new Set([
   "connection",
@@ -107,6 +110,7 @@ export function createPreviewGatewayHandler(options: PreviewGatewayOptions = {})
     pollTimeoutMs: options.pollTimeoutMs ?? DEFAULT_POLL_TIMEOUT_MS,
     pollIntervalMs: options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
     maxBodyBytes: options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES,
+    maxResponseBodyBytes: options.maxResponseBodyBytes ?? DEFAULT_MAX_RESPONSE_BODY_BYTES,
   };
 
   return async function handlePreviewGatewayRequest(request: Request): Promise<Response> {
@@ -488,7 +492,20 @@ async function handleSessionRoute(
   }
 
   if (request.method === "POST" && route.action === "responses" && route.requestId) {
-    const response = (await request.json()) as PreviewGatewayResponse;
+    let response: PreviewGatewayResponse;
+    try {
+      response = await parsePreviewResponse(request, config.maxResponseBodyBytes);
+    } catch (error) {
+      if (error instanceof GatewayHttpError && error.status === 413) {
+        await store.saveResponse(
+          session.id,
+          route.requestId,
+          createOversizedPreviewResponse(config.maxResponseBodyBytes),
+          config.sessionTtlMs,
+        );
+      }
+      throw error;
+    }
     await store.saveResponse(session.id, route.requestId, response, config.sessionTtlMs);
     await markSessionOnline(store, config, session);
     return json({ ok: true });
@@ -505,6 +522,48 @@ async function handleSessionRoute(
   }
 
   return text("Preview gateway route not found.", 404);
+}
+
+async function parsePreviewResponse(request: Request, maxBodyBytes: number) {
+  const maxEncodedBytes = Math.ceil(maxBodyBytes / 3) * 4 + 64 * 1024;
+  const contentLength = Number(request.headers.get("content-length") || 0);
+  if (Number.isFinite(contentLength) && contentLength > maxEncodedBytes) {
+    await request.body?.cancel();
+    throw new GatewayHttpError(413, "Preview response body is too large.");
+  }
+
+  const bytes = await readBodyWithLimit(
+    request,
+    maxEncodedBytes,
+    "Preview response body is too large.",
+  );
+  let response: PreviewGatewayResponse;
+  try {
+    response = JSON.parse(bytes.toString("utf8")) as PreviewGatewayResponse;
+  } catch {
+    throw new GatewayHttpError(400, "Preview response body must be valid JSON.");
+  }
+
+  if (getPreviewResponseBodySize(response) > maxBodyBytes) {
+    throw new GatewayHttpError(413, "Preview response body is too large.");
+  }
+  return response;
+}
+
+function getPreviewResponseBodySize(response: PreviewGatewayResponse) {
+  if (!response.body) return 0;
+  return Buffer.byteLength(response.body, response.encoding === "base64" ? "base64" : "utf8");
+}
+
+function createOversizedPreviewResponse(maxBodyBytes: number): PreviewGatewayResponse {
+  return {
+    status: 502,
+    headers: { "content-type": "text/plain; charset=utf-8" },
+    body: Buffer.from(
+      `The local preview response exceeded the ${maxBodyBytes} byte limit.`,
+    ).toString("base64"),
+    encoding: "base64",
+  };
 }
 
 async function pollSessionRequests(
@@ -662,10 +721,11 @@ async function serializePreviewRequest(
       throw new GatewayHttpError(413, "Preview request body is too large.");
     }
 
-    const buffer = Buffer.from(await request.arrayBuffer());
-    if (buffer.byteLength > maxBodyBytes) {
-      throw new GatewayHttpError(413, "Preview request body is too large.");
-    }
+    const buffer = await readBodyWithLimit(
+      request,
+      maxBodyBytes,
+      "Preview request body is too large.",
+    );
     body = buffer.toString("base64");
   }
 
@@ -678,6 +738,29 @@ async function serializePreviewRequest(
     encoding: body ? "base64" : undefined,
     createdAt: Date.now(),
   };
+}
+
+async function readBodyWithLimit(request: Request, maxBytes: number, message: string) {
+  if (!request.body) return Buffer.alloc(0);
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) {
+        await reader.cancel();
+        throw new GatewayHttpError(413, message);
+      }
+      chunks.push(value);
+    }
+  } catch (error) {
+    await reader.cancel().catch(() => undefined);
+    throw error;
+  }
+  return Buffer.concat(chunks, size);
 }
 
 async function requireSession(store: PreviewGatewayStore, sessionId: string, token: string | null) {

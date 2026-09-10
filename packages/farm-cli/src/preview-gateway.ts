@@ -44,10 +44,12 @@ export interface RunPreviewGatewayOptions {
   maxRequests?: number;
   maxConcurrentRequests?: number;
   requestTimeoutMs?: number;
+  maxResponseBodyBytes?: number;
 }
 
 export interface ForwardGatewayRequestOptions {
   signal?: AbortSignal;
+  maxResponseBodyBytes?: number;
 }
 
 const DEFAULT_GATEWAY_URL = "https://preview.farming-labs.dev";
@@ -57,6 +59,7 @@ const DEFAULT_LOCAL_PROBE_INTERVAL_MS = 2000;
 const DEFAULT_LOCAL_PROBE_TIMEOUT_MS = 1000;
 const DEFAULT_MAX_CONCURRENT_REQUESTS = 25;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+const DEFAULT_MAX_RESPONSE_BODY_BYTES = 5 * 1024 * 1024;
 const HOP_BY_HOP_HEADERS = new Set([
   "connection",
   "content-length",
@@ -134,6 +137,7 @@ export async function runPreviewGateway(
           controller.signal,
           AbortSignal.timeout(options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS),
         ]),
+        maxResponseBodyBytes: options.maxResponseBodyBytes ?? DEFAULT_MAX_RESPONSE_BODY_BYTES,
       });
     } catch (error) {
       if (controller.signal.aborted) return;
@@ -311,12 +315,49 @@ export async function forwardGatewayRequest(
     responseHeaders["set-cookie"] = setCookies;
   }
 
+  const responseBody = await readResponseBody(
+    response,
+    options.maxResponseBodyBytes ?? DEFAULT_MAX_RESPONSE_BODY_BYTES,
+  );
   return {
     status: response.status,
     headers: responseHeaders,
-    body: Buffer.from(await response.arrayBuffer()).toString("base64"),
+    body: responseBody.toString("base64"),
     encoding: "base64",
   };
+}
+
+async function readResponseBody(response: Response, maxBytes: number) {
+  const contentLength = Number(response.headers.get("content-length") || 0);
+  if (
+    !response.headers.has("content-encoding") &&
+    Number.isFinite(contentLength) &&
+    contentLength > maxBytes
+  ) {
+    await response.body?.cancel();
+    throw new Error(`The local preview response exceeded the ${maxBytes} byte limit.`);
+  }
+  if (!response.body) return Buffer.alloc(0);
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) {
+        await reader.cancel();
+        throw new Error(`The local preview response exceeded the ${maxBytes} byte limit.`);
+      }
+      chunks.push(value);
+    }
+  } catch (error) {
+    await reader.cancel().catch(() => undefined);
+    throw error;
+  }
+  return Buffer.concat(chunks, size);
 }
 
 async function pollGatewayRequests(
