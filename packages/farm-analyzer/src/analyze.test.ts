@@ -55,6 +55,18 @@ describe("extractStaticImports", () => {
       ),
     ).toEqual(["./side-effect.js", "./shared.js", "./other.js"]);
   });
+
+  it("ignores import-shaped text in comments and strings", () => {
+    expect(
+      extractStaticImports(`
+        // import "./comment.js";
+        /* export { value } from "./block-comment.js"; */
+        const example = 'import value from "./string.js"';
+        import "./real.js";
+        export { value } from "./shared.js";
+      `),
+    ).toEqual(["./real.js", "./shared.js"]);
+  });
 });
 
 async function createBuildFixture(): Promise<string> {

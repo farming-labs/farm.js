@@ -37,7 +37,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@farm.js/core": "workspace:*"
+    "@farm.js/core": "workspace:*",
+    "es-module-lexer": "2.0.0"
   },
   "devDependencies": {
     "@types/node": "^20.10.5",
