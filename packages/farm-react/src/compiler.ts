@@ -378,6 +378,7 @@ type CompilerRuntimeFeatureName =
   | "keyed-rows-window-every-hinted"
   | "keyed-rows-filter-hinted"
   | "keyed-rows-structural-append-hinted"
+  | "keyed-rows-structural-append-map-hinted"
   | "keyed-rows-prepend-hinted"
   | "keyed-rows-filter-prepend-hinted"
   | "keyed-rows-conditional"
@@ -392,6 +393,7 @@ type CompilerRuntimeFeatureName =
   | "keyed-rows-conditional-window-every-hinted"
   | "keyed-rows-conditional-filter-hinted"
   | "keyed-rows-conditional-structural-append-hinted"
+  | "keyed-rows-conditional-structural-append-map-hinted"
   | "keyed-rows-conditional-prepend-hinted"
   | "keyed-rows-conditional-filter-prepend-hinted"
   | "keyed-rows-host"
@@ -406,6 +408,7 @@ type CompilerRuntimeFeatureName =
   | "keyed-rows-host-window-every-hinted"
   | "keyed-rows-host-filter-hinted"
   | "keyed-rows-host-structural-append-hinted"
+  | "keyed-rows-host-structural-append-map-hinted"
   | "keyed-rows-host-prepend-hinted"
   | "keyed-rows-host-filter-prepend-hinted"
   | "keyed-rows-complete"
@@ -420,6 +423,7 @@ type CompilerRuntimeFeatureName =
   | "keyed-rows-complete-window-every-hinted"
   | "keyed-rows-complete-filter-hinted"
   | "keyed-rows-complete-structural-append-hinted"
+  | "keyed-rows-complete-structural-append-map-hinted"
   | "keyed-rows-complete-prepend-hinted"
   | "keyed-rows-complete-filter-prepend-hinted"
   | "keyed-ranges"
@@ -444,6 +448,7 @@ const COMPILER_RUNTIME_FEATURE_EXPORTS: Record<CompilerRuntimeFeatureName, strin
   "keyed-rows-window-every-hinted": "keyedRowsWindowEveryHintedRuntimeFeature",
   "keyed-rows-filter-hinted": "keyedRowsFilterHintedRuntimeFeature",
   "keyed-rows-structural-append-hinted": "keyedRowsStructuralAppendHintedRuntimeFeature",
+  "keyed-rows-structural-append-map-hinted": "keyedRowsStructuralAppendMapHintedRuntimeFeature",
   "keyed-rows-prepend-hinted": "keyedRowsPrependHintedRuntimeFeature",
   "keyed-rows-filter-prepend-hinted": "keyedRowsFilterPrependHintedRuntimeFeature",
   "keyed-rows-conditional": "keyedRowsConditionalRuntimeFeature",
@@ -462,6 +467,8 @@ const COMPILER_RUNTIME_FEATURE_EXPORTS: Record<CompilerRuntimeFeatureName, strin
   "keyed-rows-conditional-filter-hinted": "keyedRowsConditionalFilterHintedRuntimeFeature",
   "keyed-rows-conditional-structural-append-hinted":
     "keyedRowsConditionalStructuralAppendHintedRuntimeFeature",
+  "keyed-rows-conditional-structural-append-map-hinted":
+    "keyedRowsConditionalStructuralAppendMapHintedRuntimeFeature",
   "keyed-rows-conditional-prepend-hinted": "keyedRowsConditionalPrependHintedRuntimeFeature",
   "keyed-rows-conditional-filter-prepend-hinted":
     "keyedRowsConditionalFilterPrependHintedRuntimeFeature",
@@ -477,6 +484,8 @@ const COMPILER_RUNTIME_FEATURE_EXPORTS: Record<CompilerRuntimeFeatureName, strin
   "keyed-rows-host-window-every-hinted": "keyedRowsHostWindowEveryHintedRuntimeFeature",
   "keyed-rows-host-filter-hinted": "keyedRowsHostFilterHintedRuntimeFeature",
   "keyed-rows-host-structural-append-hinted": "keyedRowsHostStructuralAppendHintedRuntimeFeature",
+  "keyed-rows-host-structural-append-map-hinted":
+    "keyedRowsHostStructuralAppendMapHintedRuntimeFeature",
   "keyed-rows-host-prepend-hinted": "keyedRowsHostPrependHintedRuntimeFeature",
   "keyed-rows-host-filter-prepend-hinted": "keyedRowsHostFilterPrependHintedRuntimeFeature",
   "keyed-rows-complete": "keyedRowsCompleteRuntimeFeature",
@@ -493,6 +502,8 @@ const COMPILER_RUNTIME_FEATURE_EXPORTS: Record<CompilerRuntimeFeatureName, strin
   "keyed-rows-complete-filter-hinted": "keyedRowsCompleteFilterHintedRuntimeFeature",
   "keyed-rows-complete-structural-append-hinted":
     "keyedRowsCompleteStructuralAppendHintedRuntimeFeature",
+  "keyed-rows-complete-structural-append-map-hinted":
+    "keyedRowsCompleteStructuralAppendMapHintedRuntimeFeature",
   "keyed-rows-complete-prepend-hinted": "keyedRowsCompletePrependHintedRuntimeFeature",
   "keyed-rows-complete-filter-prepend-hinted": "keyedRowsCompleteFilterPrependHintedRuntimeFeature",
   "keyed-ranges": "keyedRangesRuntimeFeature",
@@ -505,6 +516,7 @@ function runtimeFeaturesForPlans(
   keyedMapUpdateHints: boolean,
   keyedArrayFilterHints: boolean,
   keyedArrayStructuralAppendHints: boolean,
+  keyedArrayStructuralAppendMapHints: boolean,
   keyedArrayPrependHints: boolean,
   keyedArrayPositionHints: boolean,
   keyedArrayBatchInsertHints: boolean,
@@ -537,36 +549,38 @@ function runtimeFeaturesForPlans(
             : "keyed-rows";
     const arrayRangeHints =
       keyedArrayRollingWindowHints || keyedArrayFilterHints || keyedArrayPrependHints;
-    const hintSuffix = keyedArrayStructuralAppendHints
-      ? "-structural-append-hinted"
-      : keyedArrayWindowReplaceHints
-        ? arrayRangeHints || keyedArrayReorderHints
-          ? "-window-every-hinted"
-          : "-window-position-hinted"
-        : keyedArrayBatchInsertHints
+    const hintSuffix = keyedArrayStructuralAppendMapHints
+      ? "-structural-append-map-hinted"
+      : keyedArrayStructuralAppendHints
+        ? "-structural-append-hinted"
+        : keyedArrayWindowReplaceHints
           ? arrayRangeHints || keyedArrayReorderHints
-            ? "-batch-every-hinted"
-            : "-batch-position-hinted"
-          : (keyedArrayPositionHints && (arrayRangeHints || keyedArrayReorderHints)) ||
-              (keyedArrayReorderHints && arrayRangeHints)
-            ? "-every-hinted"
-            : keyedArrayRollingWindowHints
-              ? "-all-hinted"
-              : keyedArrayPositionHints
-                ? "-position-hinted"
-                : keyedArrayMapReorderHints && keyedRowsFeature === "keyed-rows"
-                  ? "-map-reorder-hinted"
-                  : keyedArrayReorderHints
-                    ? "-reorder-hinted"
-                    : keyedArrayFilterHints && keyedArrayPrependHints
-                      ? "-filter-prepend-hinted"
-                      : keyedArrayFilterHints
-                        ? "-filter-hinted"
-                        : keyedArrayPrependHints
-                          ? "-prepend-hinted"
-                          : keyedMapUpdateHints
-                            ? "-hinted"
-                            : "";
+            ? "-window-every-hinted"
+            : "-window-position-hinted"
+          : keyedArrayBatchInsertHints
+            ? arrayRangeHints || keyedArrayReorderHints
+              ? "-batch-every-hinted"
+              : "-batch-position-hinted"
+            : (keyedArrayPositionHints && (arrayRangeHints || keyedArrayReorderHints)) ||
+                (keyedArrayReorderHints && arrayRangeHints)
+              ? "-every-hinted"
+              : keyedArrayRollingWindowHints
+                ? "-all-hinted"
+                : keyedArrayPositionHints
+                  ? "-position-hinted"
+                  : keyedArrayMapReorderHints && keyedRowsFeature === "keyed-rows"
+                    ? "-map-reorder-hinted"
+                    : keyedArrayReorderHints
+                      ? "-reorder-hinted"
+                      : keyedArrayFilterHints && keyedArrayPrependHints
+                        ? "-filter-prepend-hinted"
+                        : keyedArrayFilterHints
+                          ? "-filter-hinted"
+                          : keyedArrayPrependHints
+                            ? "-prepend-hinted"
+                            : keyedMapUpdateHints
+                              ? "-hinted"
+                              : "";
     features.add(`${keyedRowsFeature}${hintSuffix}` as CompilerRuntimeFeatureName);
   }
   return [...features].sort();
@@ -2611,30 +2625,41 @@ function rewriteQueuedKeyedArrayStructuralMapHints(
   statesBySetter: ReadonlyMap<string, StateBinding>,
   mapUpdateIdentifier: t.Identifier,
   mapPipelineIdentifier: t.Identifier,
+  appendIdentifier: t.Identifier,
+  structuralAppendMapPipelineIdentifier: t.Identifier,
   filterIdentifier: t.Identifier,
   sliceIdentifier: t.Identifier,
   allowed: boolean,
-): { root: t.JSXElement; mapCount: number; stateIndices: ReadonlySet<number> } {
+): {
+  root: t.JSXElement;
+  mapCount: number;
+  structuralAppendMapCount: number;
+  stateIndices: ReadonlySet<number>;
+} {
   if (!allowed) {
-    return { root: t.cloneNode(root, true), mapCount: 0, stateIndices: new Set() };
+    return {
+      root: t.cloneNode(root, true),
+      mapCount: 0,
+      structuralAppendMapCount: 0,
+      stateIndices: new Set(),
+    };
   }
   const file = expressionFile(t.cloneNode(root, true));
   let mapCount = 0;
+  let structuralAppendMapCount = 0;
   const stateIndices = new Set<number>();
 
-  const returnsStructuralValue = (updater: t.ArrowFunctionExpression): boolean => {
-    if (!t.isBlockStatement(updater.body)) return false;
+  const structuralUpdateKind = (
+    updater: t.ArrowFunctionExpression,
+  ): "filter" | "slice" | undefined => {
+    if (!t.isBlockStatement(updater.body)) return undefined;
     const statement = updater.body.body.at(-1);
-    if (!t.isReturnStatement(statement) || !statement.argument) return false;
-    let found = false;
+    if (!t.isReturnStatement(statement) || !statement.argument) return undefined;
+    let found: "filter" | "slice" | undefined;
     t.traverseFast(statement.argument, (node) => {
-      if (
-        !found &&
-        t.isCallExpression(node) &&
-        t.isIdentifier(node.callee) &&
-        (node.callee.name === filterIdentifier.name || node.callee.name === sliceIdentifier.name)
-      ) {
-        found = true;
+      if (!found && t.isCallExpression(node) && t.isIdentifier(node.callee)) {
+        if (node.callee.name === filterIdentifier.name) found = "filter";
+        if (node.callee.name === sliceIdentifier.name) found = "slice";
       }
     });
     return found;
@@ -2643,11 +2668,17 @@ function rewriteQueuedKeyedArrayStructuralMapHints(
   traverse(file, {
     BlockStatement(path) {
       let structuralState: number | undefined;
+      let structuralAppendState: number | undefined;
+      let structuralMapState: number | undefined;
+      let structuralKind: "filter" | "slice" | undefined;
       const statements = path.get("body") as NodePath<t.Statement>[];
       for (const statementPath of statements) {
         const statement = statementPath.node;
         if (!t.isExpressionStatement(statement) || !t.isCallExpression(statement.expression)) {
           structuralState = undefined;
+          structuralAppendState = undefined;
+          structuralMapState = undefined;
+          structuralKind = undefined;
           continue;
         }
         const setterCall = statement.expression;
@@ -2657,6 +2688,9 @@ function rewriteQueuedKeyedArrayStructuralMapHints(
           setterCall.arguments.length !== 1
         ) {
           structuralState = undefined;
+          structuralAppendState = undefined;
+          structuralMapState = undefined;
+          structuralKind = undefined;
           continue;
         }
         const state = statesBySetter.get(setterCall.callee.name);
@@ -2670,22 +2704,66 @@ function rewriteQueuedKeyedArrayStructuralMapHints(
           !t.isIdentifier(updater.params[0])
         ) {
           structuralState = undefined;
+          structuralAppendState = undefined;
+          structuralMapState = undefined;
+          structuralKind = undefined;
           continue;
         }
 
-        if (returnsStructuralValue(updater)) {
+        const nextStructuralKind = structuralUpdateKind(updater);
+        if (nextStructuralKind) {
           structuralState = state.index;
+          structuralAppendState = undefined;
+          structuralMapState = undefined;
+          structuralKind = nextStructuralKind;
+          continue;
+        }
+
+        let containsAppend = false;
+        t.traverseFast(updater.body, (node) => {
+          if (
+            !containsAppend &&
+            t.isCallExpression(node) &&
+            t.isIdentifier(node.callee, { name: appendIdentifier.name })
+          ) {
+            containsAppend = true;
+          }
+        });
+        if (containsAppend) {
+          if (
+            structuralState === state.index &&
+            structuralKind === "slice" &&
+            structuralMapState !== state.index
+          ) {
+            structuralAppendState = state.index;
+          } else {
+            structuralState = undefined;
+            structuralAppendState = undefined;
+            structuralMapState = undefined;
+            structuralKind = undefined;
+          }
           continue;
         }
 
         const pipelineMapCount = countKeyedArrayMapPipeline(updater, mapUpdateIdentifier);
         if (structuralState !== state.index || pipelineMapCount === 0) {
           structuralState = undefined;
+          structuralAppendState = undefined;
+          structuralMapState = undefined;
+          structuralKind = undefined;
           continue;
         }
         (updater as t.ArrowFunctionExpression & { body: t.CallExpression }).body.callee =
-          t.cloneNode(mapPipelineIdentifier);
+          t.cloneNode(
+            structuralAppendState === state.index
+              ? structuralAppendMapPipelineIdentifier
+              : mapPipelineIdentifier,
+          );
         mapCount += pipelineMapCount;
+        if (structuralAppendState === state.index) {
+          structuralAppendMapCount += pipelineMapCount;
+        }
+        structuralMapState = state.index;
         stateIndices.add(state.index);
       }
     },
@@ -2693,6 +2771,7 @@ function rewriteQueuedKeyedArrayStructuralMapHints(
   return {
     root: (file.program.body[0] as t.ExpressionStatement).expression as t.JSXElement,
     mapCount,
+    structuralAppendMapCount,
     stateIndices,
   };
 }
@@ -8026,6 +8105,7 @@ function compileCandidate(
   keyedArrayAppendIdentifier: t.Identifier,
   keyedArrayFilterIdentifier: t.Identifier,
   keyedArrayMapPipelineIdentifier: t.Identifier,
+  keyedArrayStructuralAppendMapPipelineIdentifier: t.Identifier,
   keyedArrayQueuedMapPipelineIdentifier: t.Identifier,
   keyedArrayMapReorderIdentifier: t.Identifier,
   keyedArrayMappedStructuralIdentifier: t.Identifier,
@@ -8065,6 +8145,7 @@ function compileCandidate(
     keyedArrayMapUpdateHints: number;
     keyedArrayMappedStructuralHints: number;
     keyedArrayQueuedMapUpdateHints: number;
+    keyedArrayStructuralAppendMapHints: number;
     keyedArrayStructuralReorderHints: number;
     keyedArrayStructuralSortHints: number;
     keyedArrayWindowReplaceHints: number;
@@ -8817,11 +8898,14 @@ function compileCandidate(
     statesBySetter,
     keyedMapUpdateIdentifier,
     keyedArrayMapPipelineIdentifier,
+    keyedArrayAppendIdentifier,
+    keyedArrayStructuralAppendMapPipelineIdentifier,
     keyedArrayFilterIdentifier,
     keyedArraySliceIdentifier,
     allowKeyedArrayMapPipelines,
   );
   let appliedQueuedStructuralMapHints = 0;
+  let appliedQueuedStructuralAppendMapHints = 0;
   if (queuedStructuralMapHintedRoot.mapCount > 0) {
     const hintedBlockAnalysis = analyzeComposableBlocks(
       queuedStructuralMapHintedRoot.root,
@@ -8844,12 +8928,16 @@ function compileCandidate(
       blockAnalysis = hintedBlockAnalysis;
       analysis = hintedAnalysis;
       appliedQueuedStructuralMapHints = queuedStructuralMapHintedRoot.mapCount;
+      appliedQueuedStructuralAppendMapHints =
+        queuedStructuralMapHintedRoot.structuralAppendMapCount;
       appliedKeyedArrayReorderHints += queuedStructuralMapHintedRoot.mapCount;
       appliedReorderHintedStateIndices = new Set([
         ...appliedReorderHintedStateIndices,
         ...queuedStructuralMapHintedRoot.stateIndices,
       ]);
       compilerUsage.keyedArrayMapUpdateHints += queuedStructuralMapHintedRoot.mapCount;
+      compilerUsage.keyedArrayStructuralAppendMapHints +=
+        queuedStructuralMapHintedRoot.structuralAppendMapCount;
     }
   }
   const queuedMapReorderHintedRoot = rewriteQueuedKeyedArrayMapReorderHints(
@@ -9056,6 +9144,7 @@ function compileCandidate(
     hasKeyedArrayRemovalHints,
     appliedKeyedArrayAppendHints > 0 &&
       (appliedKeyedArrayFilterHints > 0 || appliedKeyedArraySliceHints > 0),
+    appliedQueuedStructuralAppendMapHints > 0,
     appliedKeyedArrayPrependHints > 0,
     appliedKeyedArrayPositionHints > 0,
     appliedKeyedArrayBatchInsertHints > 0,
@@ -9281,6 +9370,7 @@ export async function compileReactModule(
     keyedArrayMapUpdateHints: 0,
     keyedArrayMappedStructuralHints: 0,
     keyedArrayQueuedMapUpdateHints: 0,
+    keyedArrayStructuralAppendMapHints: 0,
     keyedArrayStructuralReorderHints: 0,
     keyedArrayStructuralSortHints: 0,
     keyedArrayWindowReplaceHints: 0,
@@ -9334,6 +9424,10 @@ export async function compileReactModule(
         const keyedArrayMapPipelineIdentifier = programPath.scope.generateUidIdentifier(
           "createCompilerKeyedArrayMapPipeline",
         );
+        const keyedArrayStructuralAppendMapPipelineIdentifier =
+          programPath.scope.generateUidIdentifier(
+            "createCompilerKeyedArrayStructuralAppendMapPipeline",
+          );
         const keyedArrayQueuedMapPipelineIdentifier = programPath.scope.generateUidIdentifier(
           "createCompilerKeyedArrayQueuedMapPipeline",
         );
@@ -9404,6 +9498,7 @@ export async function compileReactModule(
             keyedArrayAppendIdentifier,
             keyedArrayFilterIdentifier,
             keyedArrayMapPipelineIdentifier,
+            keyedArrayStructuralAppendMapPipelineIdentifier,
             keyedArrayQueuedMapPipelineIdentifier,
             keyedArrayMapReorderIdentifier,
             keyedArrayMappedStructuralIdentifier,
@@ -9441,7 +9536,9 @@ export async function compileReactModule(
         }
 
         const hasEagerKeyedArrayMapUpdateHints =
-          compilerUsage.keyedArrayMapUpdateHints > compilerUsage.keyedArrayQueuedMapUpdateHints;
+          compilerUsage.keyedArrayMapUpdateHints >
+          compilerUsage.keyedArrayQueuedMapUpdateHints +
+            compilerUsage.keyedArrayStructuralAppendMapHints;
         const hasKeyedArrayMapReorderHints =
           compilerUsage.keyedArrayMapReorderHints + compilerUsage.keyedArrayMapSortHints > 0;
         const hasKeyedArrayStructuralAppendHints =
@@ -9470,6 +9567,14 @@ export async function compileReactModule(
                       t.importSpecifier(
                         keyedArrayMapPipelineIdentifier,
                         t.identifier("createCompilerKeyedArrayMapPipeline"),
+                      ),
+                    ]
+                  : []),
+                ...(compilerUsage.keyedArrayStructuralAppendMapHints > 0
+                  ? [
+                      t.importSpecifier(
+                        keyedArrayStructuralAppendMapPipelineIdentifier,
+                        t.identifier("createCompilerKeyedArrayStructuralAppendMapPipeline"),
                       ),
                     ]
                   : []),

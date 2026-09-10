@@ -53,9 +53,10 @@ const testSource = String.raw`
     createCompilerKeyedArraySort,
     createCompilerKeyedArraySlice,
     createCompilerKeyedArrayStructuralAppend,
+    createCompilerKeyedArrayStructuralAppendMapPipeline,
     createCompilerKeyedArrayWindowReplace,
     createCompilerKeyedMapUpdate,
-    keyedRowsStructuralAppendHintedRuntimeFeature,
+    keyedRowsStructuralAppendMapHintedRuntimeFeature,
   } = await import(
     "@farm.js/react/compiler-runtime"
   );
@@ -2261,10 +2262,10 @@ const testSource = String.raw`
       const items = () => state[0].get();
       structuralAppendRows = () => {
         state[0].set((previous) =>
-          createCompilerKeyedArrayFilter(
+          createCompilerKeyedArraySlice(
             previous,
-            previous.filter,
-            (item) => item.id !== "b",
+            previous.slice,
+            1,
           ),
         );
         state[0].set((previous) =>
@@ -2272,6 +2273,15 @@ const testSource = String.raw`
             ...previous,
             { id: "d", label: "Delta" },
           ]),
+        );
+        state[0].set((previous) =>
+          createCompilerKeyedArrayStructuralAppendMapPipeline(
+            previous,
+            (current, applyMap) =>
+              applyMap(current, current.map, (item) =>
+                item.id === "c" ? { ...item, label: "Gamma edited" } : item,
+              ),
+          ),
         );
       };
       return React.createElement(
@@ -2305,24 +2315,24 @@ const testSource = String.raw`
       );
     },
     bindings: [{ kind: "block", id: 0, dependencies: [0] }],
-  }, [keyedRowsStructuralAppendHintedRuntimeFeature]);
+  }, [keyedRowsStructuralAppendMapHintedRuntimeFeature]);
   const structuralAppendContainer = document.createElement("div");
   document.body.append(structuralAppendContainer);
   const structuralAppendRoot = createRoot(structuralAppendContainer);
   flushSync(() => structuralAppendRoot.render(React.createElement(StructuralAppendRows)));
-  const structuralAlpha = structuralAppendContainer.querySelector("[data-key='a']");
-  const structuralGamma = structuralAppendContainer.querySelector("[data-key='c']");
   const structuralBeta = structuralAppendContainer.querySelector("[data-key='b']");
+  const structuralGamma = structuralAppendContainer.querySelector("[data-key='c']");
+  const structuralAlpha = structuralAppendContainer.querySelector("[data-key='a']");
   structuralAppendRows();
   await Promise.resolve();
   await Promise.resolve();
   assert.deepEqual(
     [...structuralAppendContainer.querySelectorAll("li")].map((row) => row.textContent),
-    ["Alpha", "Gamma", "Delta"],
+    ["Beta", "Gamma edited", "Delta"],
   );
-  assert.equal(structuralAppendContainer.querySelector("[data-key='a']"), structuralAlpha);
+  assert.equal(structuralAppendContainer.querySelector("[data-key='b']"), structuralBeta);
   assert.equal(structuralAppendContainer.querySelector("[data-key='c']"), structuralGamma);
-  assert.equal(structuralBeta.isConnected, false);
+  assert.equal(structuralAlpha.isConnected, false);
   assert.equal(structuralAppendExecutions, 1);
   flushSync(() => structuralAppendRoot.unmount());
 
