@@ -139,6 +139,10 @@ export default defineConfig({
 
 This interface stays at application-policy level. It does not expose a Better Auth instance or require Better Auth imports in application code.
 
+`basePath` accepts a stable application pathname, with or without its leading slash. URLs, query
+strings, fragments, dot segments, backslashes, control characters, and encoded path separators are
+rejected.
+
 If `basePath` is customized, create matching client helpers once:
 
 ```ts
