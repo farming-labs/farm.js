@@ -1,6 +1,6 @@
 import type { FarmPlugin, FarmPluginContext } from "../plugin";
 import type { FarmRequest, FarmResponse } from "../types";
-import { Readable } from "node:stream";
+import { pipeline, Readable } from "node:stream";
 import { constants, createBrotliCompress, createGzip } from "node:zlib";
 
 type SupportedEncoding = "br" | "gzip";
@@ -78,7 +78,11 @@ function compressResponse(response: Response, encoding: SupportedEncoding): Resp
   const compressor =
     encoding === "br" ? createBrotliCompress() : createGzip({ flush: constants.Z_SYNC_FLUSH });
   const input = Readable.fromWeb(response.body as any);
-  const output = input.pipe(compressor);
+  const output = pipeline(input, compressor, () => {
+    // pipeline forwards source failures to the compressed body and destroys
+    // the source when the response consumer cancels it. The web stream owns
+    // observing the resulting destination error.
+  });
   const headers = new Headers(response.headers);
 
   headers.set("content-encoding", encoding);

@@ -1,5 +1,5 @@
 import { brotliDecompressSync, gunzipSync } from "node:zlib";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { PluginManager } from "../plugin";
 import { createCompressionPlugin } from "../plugins/compression";
 
@@ -132,5 +132,43 @@ describe("compression plugin", () => {
     expect(await eventStream.text()).toBe("data: ready\n\n");
     expect(parameterizedEventStream.headers.get("content-encoding")).toBeNull();
     expect(await parameterizedEventStream.text()).toBe("data: still-ready\n\n");
+  });
+
+  it("propagates source stream failures to the compressed response", async () => {
+    const manager = createManager();
+    const source = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("partial response"));
+        queueMicrotask(() => controller.error(new Error("source stream failed")));
+      },
+    });
+    const response = await manager.runRuntimeRequest(
+      new Request("https://farm.test/", { headers: { "accept-encoding": "gzip" } }),
+      () => new Response(source, { headers: { "content-type": "text/plain" } }),
+    );
+
+    await expect(response.arrayBuffer()).rejects.toThrow("source stream failed");
+  });
+
+  it("cancels the source when the compressed response consumer disconnects", async () => {
+    const manager = createManager();
+    const cancel = vi.fn();
+    const chunk = new TextEncoder().encode("streamed response".repeat(256));
+    const source = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(chunk);
+      },
+      cancel,
+    });
+    const response = await manager.runRuntimeRequest(
+      new Request("https://farm.test/", { headers: { "accept-encoding": "gzip" } }),
+      () => new Response(source, { headers: { "content-type": "text/plain" } }),
+    );
+
+    const reader = response.body!.getReader();
+    await reader.read();
+    await reader.cancel("client disconnected");
+
+    await vi.waitFor(() => expect(cancel).toHaveBeenCalledOnce());
   });
 });
