@@ -53,6 +53,28 @@ describe("document hint scanners", () => {
     expect(issues).toEqual([]);
   });
 
+  it("reports image dimensions that cannot reserve a stable aspect ratio", async () => {
+    document.body.innerHTML = `
+      <img id="empty" src="/empty.png" width="" height="100">
+      <img id="zero" src="/zero.png" width="100" height="0">
+      <img id="decimal" src="/decimal.png" width="100.5" height="80">
+      <img id="unit" src="/unit.png" width="100px" height="80">
+      <img id="valid" src="/valid.png" width="100" height="80">
+    `;
+
+    const issues = await collectDocumentHints(
+      document,
+      window,
+      resolveHintsOptions({
+        accessibility: false,
+        html: false,
+        thirdParty: false,
+      }),
+    );
+
+    expect(issues.map((issue) => issue.selector)).toEqual(["#empty", "#zero", "#decimal", "#unit"]);
+  });
+
   it("does not repeat a nested-control finding already reported by axe", async () => {
     document.body.innerHTML = `<button class="outer-control"><a href="/details">Details</a></button>`;
 

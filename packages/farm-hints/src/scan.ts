@@ -83,7 +83,12 @@ async function scanAccessibility(
 function scanPerformance(document: Document): HintIssue[] {
   return Array.from(document.images).flatMap((image, index): HintIssue[] => {
     if (image.closest("farm-hints")) return [];
-    if (image.hasAttribute("width") && image.hasAttribute("height")) return [];
+    if (
+      hasPositiveIntegerAttribute(image, "width") &&
+      hasPositiveIntegerAttribute(image, "height")
+    ) {
+      return [];
+    }
     const selector = createSelector(image);
     return [
       {
@@ -98,6 +103,11 @@ function scanPerformance(document: Document): HintIssue[] {
       },
     ];
   });
+}
+
+function hasPositiveIntegerAttribute(element: Element, name: string): boolean {
+  const value = element.getAttribute(name)?.trim();
+  return value !== undefined && /^[1-9]\d*$/.test(value);
 }
 
 function scanHtml(document: Document): HintIssue[] {
