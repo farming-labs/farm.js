@@ -87,4 +87,23 @@ describe("generated metadata images", () => {
     expect(response.headers.get("content-type")).toBe("image/custom");
     expect(await response.text()).toBe("custom");
   });
+
+  it("cancels a custom image response body that HEAD discards", async () => {
+    let cancelled = false;
+    const custom = new Response(
+      new ReadableStream({
+        pull() {},
+        cancel() {
+          cancelled = true;
+        },
+      }),
+      { headers: { "Content-Type": "image/custom" } },
+    );
+
+    const response = await createFarmMetadataImageResponse(custom, {}, { method: "HEAD" });
+
+    expect(response.body).toBeNull();
+    expect(response.headers.get("content-type")).toBe("image/custom");
+    expect(cancelled).toBe(true);
+  });
 });

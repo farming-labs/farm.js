@@ -96,6 +96,26 @@ Host: https://farm.test
     expect(response.headers.get("allow")).toBe("GET, HEAD");
   });
 
+  it("cancels a custom response body that HEAD discards", async () => {
+    let cancelled = false;
+    const custom = new Response(
+      new ReadableStream({
+        pull() {},
+        cancel() {
+          cancelled = true;
+        },
+      }),
+      { headers: { "x-custom": "yes" } },
+    );
+
+    const response = createFarmMetadataRouteResponse("robots", custom, {}, { method: "HEAD" });
+    await Promise.resolve();
+
+    expect(response.body).toBeNull();
+    expect(response.headers.get("x-custom")).toBe("yes");
+    expect(cancelled).toBe(true);
+  });
+
   it("reports invalid convention values with focused errors", () => {
     expect(() => createFarmMetadataRouteResponse("sitemap", {})).toThrow(
       "sitemap.ts must return an array",
