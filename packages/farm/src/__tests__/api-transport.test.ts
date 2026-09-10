@@ -86,4 +86,24 @@ describe("API transports", () => {
 
     expect(released).toBe(true);
   });
+
+  it("cancels and unlocks the response body when NDJSON decoding fails", async () => {
+    let cancelReason: unknown;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"progress":}\n'));
+      },
+      cancel(reason) {
+        cancelReason = reason;
+      },
+    });
+    const response = new Response(body, {
+      headers: { "content-type": "application/x-ndjson" },
+    });
+    const iterator = readJSONStream(response)[Symbol.asyncIterator]();
+
+    await expect(iterator.next()).rejects.toBeInstanceOf(SyntaxError);
+    expect(cancelReason).toBeInstanceOf(SyntaxError);
+    expect(response.body?.locked).toBe(false);
+  });
 });

@@ -150,6 +150,29 @@ export function readJSONStream<TItem>(response: Response): FarmAPIStream<TItem> 
   let buffer = "";
   let completed = false;
   let claimed = false;
+  let released = false;
+
+  const releaseReader = () => {
+    if (released) return;
+    released = true;
+    reader.releaseLock();
+  };
+  const parseLine = async (line: string) => {
+    try {
+      return JSON.parse(line) as TItem;
+    } catch (error) {
+      completed = true;
+      buffer = "";
+      try {
+        await reader.cancel(error);
+      } catch {
+        // Preserve the decode error even if the underlying stream also fails cleanup.
+      } finally {
+        releaseReader();
+      }
+      throw error;
+    }
+  };
 
   const iterator: AsyncIterator<TItem> = {
     async next() {
@@ -159,17 +182,28 @@ export function readJSONStream<TItem>(response: Response): FarmAPIStream<TItem> 
           const line = buffer.slice(0, lineEnd).trim();
           buffer = buffer.slice(lineEnd + 1);
           if (!line) continue;
-          return { done: false, value: JSON.parse(line) as TItem };
+          return { done: false, value: await parseLine(line) };
         }
 
         if (completed) {
           const line = buffer.trim();
           buffer = "";
-          if (!line) return { done: true, value: undefined };
-          return { done: false, value: JSON.parse(line) as TItem };
+          if (!line) {
+            releaseReader();
+            return { done: true, value: undefined };
+          }
+          return { done: false, value: await parseLine(line) };
         }
 
-        const chunk = await reader.read();
+        let chunk: ReadableStreamReadResult<Uint8Array>;
+        try {
+          chunk = await reader.read();
+        } catch (error) {
+          completed = true;
+          buffer = "";
+          releaseReader();
+          throw error;
+        }
         completed = chunk.done;
         buffer += decoder.decode(chunk.value, { stream: !chunk.done });
       }
@@ -177,7 +211,13 @@ export function readJSONStream<TItem>(response: Response): FarmAPIStream<TItem> 
     async return() {
       completed = true;
       buffer = "";
-      await reader.cancel();
+      if (!released) {
+        try {
+          await reader.cancel();
+        } finally {
+          releaseReader();
+        }
+      }
       return { done: true, value: undefined };
     },
   };
@@ -187,7 +227,13 @@ export function readJSONStream<TItem>(response: Response): FarmAPIStream<TItem> 
     async cancel(reason) {
       completed = true;
       buffer = "";
-      await reader.cancel(reason);
+      if (!released) {
+        try {
+          await reader.cancel(reason);
+        } finally {
+          releaseReader();
+        }
+      }
     },
     [Symbol.asyncIterator]() {
       if (claimed) {
