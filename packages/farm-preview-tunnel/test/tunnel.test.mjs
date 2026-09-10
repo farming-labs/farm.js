@@ -81,6 +81,49 @@ test("mounts public preview paths beneath the target URL pathname", async () => 
   }
 });
 
+test("replaces client-supplied forwarding headers at the relay boundary", async () => {
+  const target = createServer((request, response) => {
+    response.setHeader("content-type", "application/json");
+    response.end(
+      JSON.stringify({
+        forwarded: request.headers.forwarded,
+        forwardedFor: request.headers["x-forwarded-for"],
+        forwardedHost: request.headers["x-forwarded-host"],
+        forwardedProto: request.headers["x-forwarded-proto"],
+      }),
+    );
+  });
+  await listen(target);
+  const targetAddress = target.address();
+  const relay = createPersistentPreviewRelay();
+  const relayAddress = await relay.listen();
+  const agent = await startTypeScriptPreviewAgent({
+    relayUrl: relayAddress.websocketUrl,
+    name: "forwarded-headers",
+    targetUrl: `http://127.0.0.1:${targetAddress.port}`,
+  });
+
+  try {
+    const response = await fetch(agent.publicUrl, {
+      headers: {
+        forwarded: "for=127.0.0.1;host=evil.example;proto=https",
+        "x-forwarded-for": "127.0.0.1",
+        "x-forwarded-host": "evil.example",
+        "x-forwarded-proto": "https",
+      },
+    });
+
+    assert.deepEqual(await response.json(), {
+      forwardedHost: new URL(agent.publicUrl).host,
+      forwardedProto: "http",
+    });
+  } finally {
+    await agent.close();
+    await relay.close();
+    await close(target);
+  }
+});
+
 test("preserves repeated cookies and removes encoding after decoding a response", async () => {
   const target = createServer((_request, response) => {
     response.statusCode = 200;
