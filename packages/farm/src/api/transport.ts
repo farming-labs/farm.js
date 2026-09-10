@@ -105,6 +105,11 @@ export function jsonStream<TItem>(
           controller.enqueue(encoder.encode(`${JSON.stringify(next.value)}\n`));
         } catch (error) {
           finished = true;
+          try {
+            await iterator.return?.(error);
+          } catch {
+            // Preserve the serialization/source error that failed the response stream.
+          }
           controller.error(error);
         }
       },

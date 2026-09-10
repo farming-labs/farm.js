@@ -106,4 +106,20 @@ describe("API transports", () => {
     expect(cancelReason).toBeInstanceOf(SyntaxError);
     expect(response.body?.locked).toBe(false);
   });
+
+  it("finalizes the source when a streamed value cannot be serialized", async () => {
+    let finalized = false;
+    async function* events() {
+      try {
+        yield 1n;
+      } finally {
+        finalized = true;
+      }
+    }
+
+    const response = jsonStream(events());
+    await expect(response.text()).rejects.toThrow(/BigInt/);
+
+    expect(finalized).toBe(true);
+  });
 });
