@@ -191,10 +191,6 @@ describe("React AOT queued map then reorder hints", () => {
       name: "a different state setter",
       between: "setOther((current) => current + 1);",
     },
-    {
-      name: "a structural update",
-      between: "setRows((current) => current.filter((row) => row.visible));",
-    },
   ])("ends consecutive reorder lineage at $name", async ({ between }) => {
     const result = await compile(`
       import { useState } from "react";

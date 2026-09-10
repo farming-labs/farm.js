@@ -1,6 +1,42 @@
 # Complex dashboard and 21,000-row peak result
 
-Latest run: 2026-09-09
+Latest run: 2026-09-10
+
+## Queued structural maps through reorder setters — 2026-09-10
+
+Adjacent keyed-row setters may now keep one committed-row proof across compiler-safe `filter()`,
+same-key `map()`, and native reorder work. The focused 10,000-row workload removes one row, updates
+another, and queues two reverses that restore survivor order. Before this change, the reorder setter
+discarded the shorter structural result and the final value used complete keyed reconciliation.
+The new compiler linking selects the existing structural-reorder runtime, so the final commit
+removes the rejected row and patches the changed survivor without rescanning or moving the other
+9,998 rows.
+
+| Mode   | Parent compiler | This change | Lower median | vs React | vs compiled fallback |
+| ------ | --------------: | ----------: | -----------: | -------: | -------------------: |
+| Static |        21.35 ms |     8.50 ms |        60.2% |   10.41x |                2.40x |
+| Hybrid |        21.40 ms |     8.40 ms |        60.7% |   10.54x |                2.48x |
+
+The parent-compiler medians average matching 10-sample runs immediately before and after the
+candidate (18.10/24.60 ms static and 19.30/23.50 ms hybrid). The candidate run measured 88.50 ms
+for React and 20.40/20.80 ms for equivalent block-bodied compiled fallback controls. Every sample
+checked the final values, complete survivor order, rejected-row disconnection, and every surviving
+DOM identity.
+
+Compiler tests cover filter/map/reverse, maps on both sides of structural work, a map-and-reorder
+pipeline after a structural setter, multiple later reorders, and adjacency, setter, unsupported-map,
+and host-row fallback boundaries. Runtime tests cover zero owner reruns, exact DOM identity, focused
+input behavior inherited from the structural runtime, Strict Mode hydration, unmount-before-flush
+cleanup, and 2,001-row randomized queued transitions matched with normal React.
+
+Numbers are browser medians from focused production builds using 3 warmups and 10 measured samples
+per action in Chrome 153.0.8010.36 and Node.js 23.11.0 on macOS arm64. Timing varies by machine;
+deterministic parity, fallback, DOM-identity, compatibility, runtime-size, and the complete dashboard
+gate remain the primary safety controls.
+
+A reduced complete-dashboard run passed every correctness check and the new action's static and
+hybrid performance gates. Its intentionally small sample count made several unrelated timing gates
+miss narrow thresholds, so it is not recorded as a full default all-gates pass.
 
 ## Queued structural setters before maps — 2026-09-09
 

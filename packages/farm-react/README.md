@@ -522,6 +522,23 @@ map/structural/map sequences compose. Every result and key is validated before t
 touches the DOM. An intervening statement, another setter, an unsafe callback, a changed key, or
 failed runtime validation keeps complete keyed reconciliation.
 
+The survivor proof may continue through adjacent native reorder setters:
+
+```tsx
+setItems((current) => current.filter((item) => item.visible));
+setItems((current) =>
+  current.map((item) => (item.id === editedId ? { ...item, rank: nextRank } : item)),
+);
+setItems((current) => current.toSorted((left, right) => left.rank - right.rank));
+setItems((current) => current.toReversed());
+```
+
+Farm retains the committed survivor positions and same-key replacements until the final queued
+value. The commit removes rejected rows, patches changed survivors, and applies the final order in
+one validated DOM transaction. Exact reverses use the minimum-move reverse path; an arbitrary sort
+uses one source lookup and LIS. Non-adjacent calls, another setter, unsupported syntax, or a failed
+shape/key check keep complete reconciliation.
+
 The reorder and safe maps may also be adjacent setter calls in the same synchronous block:
 
 ```tsx
@@ -536,9 +553,10 @@ setItems((current) =>
 
 The compiler links only consecutive calls to the same setter. It keeps the reorder token through
 each accepted native map, then validates row keys before applying the same exact-reverse or
-sort-permutation path at commit. An intervening statement, another setter, a structural
-filter/slice reorder, an unsupported map, or a changed key keeps the ordinary complete fallback.
-Standalone map-only components do not retain the map-and-reorder runtime.
+sort-permutation path at commit. Adjacent compiler-safe filter or slice work switches to the
+structural proof above. An intervening statement, another setter, an unsupported map, or a changed
+key keeps the ordinary complete fallback. Standalone map-only components do not retain the
+map-and-reorder runtime.
 
 The mirror order is supported as well: two or more adjacent concise same-key map setters may be
 followed by a concise native reverse or sort setter. Farm records their replacement lineage from
@@ -548,8 +566,9 @@ setter are linked; intervening work and unsupported updates retain complete reco
 Mapped lineage also continues through multiple adjacent native reorder setters. For example,
 `map -> reverse -> sort -> reverse` keeps the same committed-row proof until the final value, then
 performs one validated keyed reconciliation. A concise `map().toReversed()` pipeline may start the
-same chain. Every updater and native method still executes in order; another setter, intervening
-work, a structural update, or an unsupported method ends the chain and preserves the complete
+same chain. Adjacent compiler-safe filter or slice work changes it into a structural chain while
+retaining the committed source. Every updater and native method still executes in order; another
+setter, intervening work, or an unsupported method ends the chain and preserves the complete
 fallback.
 
 A reverse before the safe map pipeline may be queued in a separate setter:

@@ -1334,6 +1334,24 @@ map/structural/map sequences compose. Every result and key is validated before t
 touches the DOM. An intervening statement, another setter, an unsupported callback, a changed key,
 or any failed runtime proof keeps complete reconciliation.
 
+That survivor proof may continue through adjacent native reorder setters too:
+
+```tsx
+setItems((current) => current.filter((item) => item.visible));
+setItems((current) =>
+  current.map((item) => (item.id === editedId ? { ...item, rank: nextRank } : item)),
+);
+setItems((current) => current.toSorted((left, right) => left.rank - right.rank));
+setItems((current) => current.toReversed());
+```
+
+Farm keeps the retained-row positions and same-key replacements attached to the same committed
+collection. The final update removes rejected rows, patches changed survivors, and applies the
+resulting order in one validated DOM transaction. Exact reverse chains use the minimum-move reverse
+path; an arbitrary sort uses one source lookup and LIS. The native setters still run in order. If
+the calls are not adjacent, target another state value, use an unsupported callback or method, or
+fail a runtime shape/key check, Farm discards the proof and performs complete reconciliation.
+
 A safe map may also be the final pipeline step:
 
 ```tsx
@@ -1365,10 +1383,11 @@ setItems((current) =>
 
 Farm links only consecutive concise calls to the same setter. Each accepted standalone map keeps
 the earlier reorder token, so an exact reverse still takes the direct minimum-move path and a sort
-still performs one validated lookup and LIS. An intervening statement, a different setter, a
-structural filter/slice reorder, an unsupported map, or host-backed/nested row structure ends this
-specialized chain and preserves the existing complete fallback. Map-only components do not retain
-the optional map-and-reorder runtime.
+still performs one validated lookup and LIS. Adjacent compiler-safe filter or slice work switches
+the chain to the structural proof described above. An intervening statement, a different setter,
+an unsupported map, or host-backed/nested row structure ends the specialized chain and preserves
+the existing complete fallback. Map-only components do not retain the optional map-and-reorder
+runtime.
 
 The maps may come first as separate queued setters too:
 
@@ -1401,7 +1420,8 @@ setItems((current) => current.toReversed());
 Farm still executes every updater and native method in order. Each accepted reverse or sort carries
 the same committed-row proof forward, so the final value needs one validated keyed reconciliation
 rather than losing map lineage after the first reorder. A `map().toReversed()` pipeline can start
-the same adjacent chain. An intervening statement, another setter, a structural update, or an
+the same adjacent chain. Adjacent compiler-safe filter or slice work changes this into a structural
+chain while retaining the committed source. An intervening statement, another setter, or an
 unsupported method ends the chain before later setters are considered.
 
 Exact reverse proof can also cross a setter boundary in the same batch:
