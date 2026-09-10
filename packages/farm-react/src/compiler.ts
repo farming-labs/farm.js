@@ -2019,7 +2019,10 @@ function keyedArrayReorderPipeline(
       reorderSteps += 1;
     }
   }
-  if (reorderSteps < 1) return undefined;
+  if (reorderSteps < 1) {
+    const finalStep = steps[steps.length - 1];
+    return structuralSteps > 0 && finalStep?.kind === "map" ? steps : undefined;
+  }
   if (mapSteps > 0 && reorderSteps >= 1) return steps;
   if (structuralSteps < 1 && reorderSteps < 2) return undefined;
   return steps;
@@ -2049,6 +2052,7 @@ function rewriteKeyedArrayReorderPipelineHints(
   sliceCount: number;
   sortCount: number;
   structuralReorderCount: number;
+  terminalStructuralMapCount: number;
   structuralSortCount: number;
   stateIndices: ReadonlySet<number>;
 } {
@@ -2063,6 +2067,7 @@ function rewriteKeyedArrayReorderPipelineHints(
       sliceCount: 0,
       sortCount: 0,
       structuralReorderCount: 0,
+      terminalStructuralMapCount: 0,
       structuralSortCount: 0,
       stateIndices: new Set(),
     };
@@ -2077,6 +2082,7 @@ function rewriteKeyedArrayReorderPipelineHints(
   let sliceCount = 0;
   let sortCount = 0;
   let structuralReorderCount = 0;
+  let terminalStructuralMapCount = 0;
   let structuralSortCount = 0;
   traverse(file, {
     CallExpression(path) {
@@ -2104,6 +2110,9 @@ function rewriteKeyedArrayReorderPipelineHints(
       );
       const mapPipeline = steps.some((step) => step.kind === "map");
       if (mapPipeline && !allowMapPipelines) return;
+      const terminalStructuralMap =
+        structuralPipeline &&
+        steps.every((step) => step.kind !== "reverse" && step.kind !== "sort");
 
       const previous = t.cloneNode(updater.params[0]);
       const statements: t.Statement[] = [];
@@ -2254,6 +2263,7 @@ function rewriteKeyedArrayReorderPipelineHints(
         }
       }
       statements.push(t.returnStatement(t.cloneNode(value)));
+      if (terminalStructuralMap) terminalStructuralMapCount += 1;
       path.node.arguments[0] = t.arrowFunctionExpression(
         [t.cloneNode(previous)],
         t.blockStatement(statements),
@@ -2272,6 +2282,7 @@ function rewriteKeyedArrayReorderPipelineHints(
     sliceCount,
     sortCount,
     structuralReorderCount,
+    terminalStructuralMapCount,
     structuralSortCount,
     stateIndices,
   };
@@ -8106,7 +8117,9 @@ function compileCandidate(
       appliedPipelineFilterHints = reorderPipelineHintedRoot.filterCount;
       appliedPipelineMapHints = reorderPipelineHintedRoot.mapCount;
       appliedKeyedMapUpdateHints += reorderPipelineHintedRoot.mapCount;
-      appliedPipelineReorderHints = reorderPipelineHintedRoot.reorderCount;
+      appliedPipelineReorderHints =
+        reorderPipelineHintedRoot.reorderCount +
+        reorderPipelineHintedRoot.terminalStructuralMapCount;
       appliedPipelineSliceHints = reorderPipelineHintedRoot.sliceCount;
       appliedPipelineSortHints = reorderPipelineHintedRoot.sortCount;
       appliedPipelineHintedStateIndices = reorderPipelineHintedRoot.stateIndices;

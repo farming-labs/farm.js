@@ -269,15 +269,15 @@ same four native updates through complete reconciliation. Both compiler modes mu
 final committed order, every original DOM identity and connection, and both changed values. Package tests
 also cover mixed reverse/sort chains, chain boundaries, and 2,000 randomized differential updates.
 
-Mapped structural reorders have a separate 10,000-row comparison. One concise setter filters out
-one row, changes a surviving row through a following map, and applies two reversals that preserve
-survivor order. The block-bodied control performs the same native work through complete keyed
+Terminal structural maps have a separate 10,000-row comparison. One concise setter filters out one
+row and changes a surviving row through its final map, with no synthetic reorder needed to retain
+the compiler proof. The block-bodied control performs the same native work through complete keyed
 reconciliation. Both compiler modes must remain at least 2x faster than React and 1.25x faster than
 the compiled control. The assertion checks the changed values, rejected-row cleanup, full survivor
 order, and every surviving DOM identity. Package tests also cover maps interleaved with
-filter/slice/sort/reverse steps, controlled-input focus and selection, changed-key and custom-method
-fallback, Strict Mode hydration, cleanup, and 2,000 randomized interleaved removals matched with
-normal React. The benchmark lifecycle rebuilds
+filter/slice/sort/reverse steps, terminal filter/slice maps, controlled-input focus and selection,
+changed-key and custom-method fallback, Strict Mode hydration, cleanup, and separate 2,000-row
+differential runs for final-reorder and terminal pipelines. The benchmark lifecycle rebuilds
 `@farm.js/react` first and then verifies the emitted hint counts, so local source changes cannot be
 silently measured through stale package output.
 

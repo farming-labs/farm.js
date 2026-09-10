@@ -6278,10 +6278,10 @@ function reconcileCompilerKeyedArrayReorderWithMapAndStructural(
 ): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined {
   const prepared = prepareCompilerKeyedArrayReorder(args);
   if (!prepared) return undefined;
-  const reconcile = prepared.update?.mapped
-    ? reconcileCompilerKeyedArrayMapReorder
-    : prepared.update?.structuralUpdate
-      ? reconcileCompilerKeyedArrayStructuralReorder
+  const reconcile = prepared.update?.structuralUpdate
+    ? reconcileCompilerKeyedArrayStructuralReorder
+    : prepared.update?.mapped
+      ? reconcileCompilerKeyedArrayMapReorder
       : reconcileCompilerKeyedArrayReorder;
   return reconcile(args[0], args[1], args[2], args[3], args[4], args[5], prepared);
 }
