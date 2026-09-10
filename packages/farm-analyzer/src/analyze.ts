@@ -1,6 +1,7 @@
 import { constants as zlibConstants, brotliCompressSync, gzipSync } from "node:zlib";
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
+import { initSync, parse } from "es-module-lexer";
 import type { AnalyzerMetric, ResolvedAnalyzerLimits } from "./config.js";
 
 export interface AnalyzerSizes {
@@ -70,6 +71,7 @@ interface ReadAsset extends AnalyzerAsset {
 
 const ZERO_SIZES: AnalyzerSizes = { raw: 0, gzip: 0, brotli: 0 };
 const CLIENT_KINDS = new Set<AnalyzerAssetKind>(["script", "style"]);
+let moduleLexerInitialized = false;
 
 export async function analyzeBuild(options: AnalyzeBuildOptions): Promise<AnalyzerBuildReport> {
   const publicDirectory = await firstDirectory([
@@ -278,13 +280,18 @@ function collectInitialAssets(entries: Set<string>, files: Map<string, ReadAsset
 }
 
 export function extractStaticImports(source: string): string[] {
-  const imports = new Set<string>();
-  const importPattern = /\bimport\s*(?:["']([^"']+)["']|[^"'();]+?\bfrom\s*["']([^"']+)["'])/g;
-  const exportPattern = /\bexport\s*[^"';]+?\bfrom\s*["']([^"']+)["']/g;
-
-  for (const match of source.matchAll(importPattern)) imports.add(match[1] ?? match[2]);
-  for (const match of source.matchAll(exportPattern)) imports.add(match[1]);
-  return [...imports];
+  if (!moduleLexerInitialized) {
+    initSync();
+    moduleLexerInitialized = true;
+  }
+  const [imports] = parse(source);
+  return [
+    ...new Set(
+      imports
+        .filter((specifier) => specifier.d === -1 && specifier.n !== undefined)
+        .map((specifier) => specifier.n as string),
+    ),
+  ];
 }
 
 function extractCssImports(source: string): string[] {
