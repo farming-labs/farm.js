@@ -272,6 +272,11 @@ const sidebar = [
         ],
       },
       {
+        label: "CMS",
+        icon: "file",
+        children: [{ label: "Sanity", slug: "integrations/sanity", icon: "file" }],
+      },
+      {
         label: "API Keys",
         icon: "key",
         children: [{ label: "Unkey", slug: "integrations/unkey", icon: "brand-unkey" }],
