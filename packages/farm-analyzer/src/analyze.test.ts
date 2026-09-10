@@ -84,7 +84,7 @@ async function createBuildFixture(): Promise<string> {
   await Promise.all([
     writeFile(
       path.join(publicDirectory, "index.html"),
-      '<script type="module" src="/assets/entry.js"></script><link rel="stylesheet" href="/assets/styles.css">',
+      '<script data-example="a > b" type="module" src="/assets/entry.js"></script><link rel="stylesheet" href="/assets/styles.css">',
     ),
     writeFile(
       path.join(publicDirectory, "about/index.html"),
