@@ -12,14 +12,15 @@ Use an [integration](/docs/integrations) for a product or service such as authen
 
 ## Official plugins
 
-| Plugin                             | Purpose                                                                                          |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------ |
-| [Analyzer](/docs/plugins/analyzer) | Explain page, client, and server build size and enforce readable CI limits.                      |
-| [Hints](/docs/plugins/hints)       | Find accessibility, performance, HTML, and third-party problems in the live development page.    |
-| [MSW](/docs/plugins/msw)           | Share request handlers across development SSR and the browser without shipping production mocks. |
-| [PWA](/docs/plugins/pwa)           | Generate a route-aware service worker for offline navigation, caching, and safe updates.         |
-| [Sentry](/docs/plugins/sentry)     | Report server errors with Farm event and route context, trace requests, and flush on shutdown.   |
-| [WebMCP](/docs/plugins/webmcp)     | Expose explicit, typed browser tools to agents through the experimental WebMCP API.              |
+| Plugin                               | Purpose                                                                                          |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------ |
+| [Analyzer](/docs/plugins/analyzer)   | Explain page, client, and server build size and enforce readable CI limits.                      |
+| [Hints](/docs/plugins/hints)         | Find accessibility, performance, HTML, and third-party problems in the live development page.    |
+| [MSW](/docs/plugins/msw)             | Share request handlers across development SSR and the browser without shipping production mocks. |
+| [Partytown](/docs/plugins/partytown) | Move explicitly opted-in third-party scripts from the main thread into a web worker.             |
+| [PWA](/docs/plugins/pwa)             | Generate a route-aware service worker for offline navigation, caching, and safe updates.         |
+| [Sentry](/docs/plugins/sentry)       | Report server errors with Farm event and route context, trace requests, and flush on shutdown.   |
+| [WebMCP](/docs/plugins/webmcp)       | Expose explicit, typed browser tools to agents through the experimental WebMCP API.              |
 
 Each published plugin has its own setup page in this section. Use [Create a Plugin](/docs/plugins/create-plugin) when the behavior is specific to your application or package.
 

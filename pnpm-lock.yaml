@@ -731,6 +731,37 @@ importers:
         specifier: ^5.0.10
         version: 5.4.20(@types/node@20.19.21)
 
+  examples/partytown-demo:
+    dependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../../packages/farm
+      '@farm.js/partytown':
+        specifier: workspace:*
+        version: link:../../packages/farm-partytown
+      react:
+        specifier: 19.2.8
+        version: 19.2.8
+      react-dom:
+        specifier: 19.2.8
+        version: 19.2.8(react@19.2.8)
+    devDependencies:
+      '@farm.js/cli':
+        specifier: workspace:*
+        version: link:../../packages/farm-cli
+      '@types/react':
+        specifier: ^18.2.45
+        version: 18.3.26
+      '@types/react-dom':
+        specifier: ^18.2.18
+        version: 18.3.7(@types/react@18.3.26)
+      typescript:
+        specifier: ^5.5.3
+        version: 5.9.3
+      vite:
+        specifier: ^5.0.10
+        version: 5.4.20(@types/node@20.19.21)
+
   examples/polar-integration:
     dependencies:
       '@farm.js/better-auth':
@@ -2082,6 +2113,25 @@ importers:
       typescript:
         specifier: ^5.3.3
         version: 5.9.3
+
+  packages/farm-partytown:
+    dependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
+      '@qwik.dev/partytown':
+        specifier: ^0.14.4
+        version: 0.14.4
+    devDependencies:
+      '@types/node':
+        specifier: ^20.10.5
+        version: 20.19.21
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.7
+        version: 3.2.7(@types/node@20.19.21)(jsdom@25.0.1)(supports-color@10.2.2)
 
   packages/farm-polar:
     dependencies:
@@ -8031,6 +8081,12 @@ packages:
     dependencies:
       quansync: 0.2.11
     dev: true
+
+  /@qwik.dev/partytown@0.14.4:
+    resolution: {integrity: sha512-XGBgDuxgG7CsAs4PZ32GUmbD029nAeCR4VGyJRJnNp3r3uVjbZt8Dkxe8cw+f8xY6Dh8VI5cb3ygEZCqSftwtA==}
+    engines: {node: '>=18.0.0'}
+    hasBin: true
+    dev: false
 
   /@radix-ui/number@1.1.2:
     resolution: {integrity: sha512-ceTwaxc4I5IOi97DgCotl3pqiyRGvffcc0oOsE2dQYaJOFIDsDt4VWG6xEbg1QePv9QWausCEIppud/tJ1wNig==}
