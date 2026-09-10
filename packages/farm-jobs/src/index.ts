@@ -528,15 +528,10 @@ function toKebabCase(value: string) {
 }
 
 function readJsonBody(value: unknown) {
-  if (value == null) {
-    return undefined;
-  }
-
-  if (typeof value === "object") {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
     return value as Record<string, unknown>;
   }
-
-  return undefined;
+  throw new JobsRuntimeError("Jobs request body must be a JSON object.", 400);
 }
 
 function hasOwn(value: Record<string, unknown>, key: string) {
@@ -588,12 +583,21 @@ function readInlinePayload(value: Record<string, unknown>, reservedKeys: readonl
 }
 
 async function parseRequestBody(request: Request) {
+  let source: string;
   try {
-    const body = await request.json();
-    return readJsonBody(body);
+    source = await request.text();
   } catch {
-    return undefined;
+    throw new JobsRuntimeError("Jobs request body could not be read.", 400);
   }
+  if (!source.trim()) return undefined;
+
+  let body: unknown;
+  try {
+    body = JSON.parse(source);
+  } catch {
+    throw new JobsRuntimeError("Jobs request body must contain valid JSON.", 400);
+  }
+  return readJsonBody(body);
 }
 
 function normalizeQueue(queue: JobsTaskDefaults<any>["queue"]) {
