@@ -123,6 +123,53 @@ test("executes beta upgrades and skips local Farm packages", async () => {
   }
 });
 
+test("upgrades every manifest section when a Farm package is repeated", async () => {
+  const root = await createTempProject({
+    packageManager: "pnpm@8.12.1",
+    devDependencies: {
+      "@farm.js/core": "^0.1.0-beta.3",
+    },
+    peerDependencies: {
+      "@farm.js/core": "^0.1.0-beta.2",
+    },
+  });
+
+  try {
+    const plan = await createFarmUpgradePlan({ root, channel: "beta" });
+
+    assert.deepEqual(
+      plan.packages.map(({ name, current, section }) => ({ name, current, section })),
+      [
+        {
+          name: "@farm.js/core",
+          current: "^0.1.0-beta.3",
+          section: "devDependencies",
+        },
+        {
+          name: "@farm.js/core",
+          current: "^0.1.0-beta.2",
+          section: "peerDependencies",
+        },
+      ],
+    );
+    assert.deepEqual(
+      plan.commands.map(({ command, args }) => ({ command, args })),
+      [
+        {
+          command: "pnpm",
+          args: ["add", "--save-dev", "@farm.js/core@beta"],
+        },
+        {
+          command: "pnpm",
+          args: ["add", "--save-peer", "@farm.js/core@beta"],
+        },
+      ],
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("detects Bun from its lockfile when packageManager is not declared", async () => {
   const root = await createTempProject({
     dependencies: {

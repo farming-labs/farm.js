@@ -92,15 +92,13 @@ export async function createFarmUpgradePlan(options: FarmUpgradeOptions): Promis
     options.packageManager || detectFarmPackageManager(root, packageJson.packageManager);
   const packages: FarmUpgradePackage[] = [];
   const skipped: FarmSkippedUpgradePackage[] = [];
-  const seen = new Set<string>();
 
   for (const section of DEPENDENCY_SECTIONS) {
     const dependencies = packageJson[section];
     if (!dependencies || typeof dependencies !== "object") continue;
 
     for (const [name, rawSpecifier] of Object.entries(dependencies)) {
-      if (!name.startsWith("@farm.js/") || seen.has(name)) continue;
-      seen.add(name);
+      if (!name.startsWith("@farm.js/")) continue;
 
       const current = typeof rawSpecifier === "string" ? rawSpecifier : String(rawSpecifier);
       if (isLocalSpecifier(current)) {
