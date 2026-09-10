@@ -1,0 +1,197 @@
+import { describe, expect, it, vi } from "vitest";
+import {
+  createSearchClient,
+  type PagefindBrowserApi,
+  type PagefindBrowserModule,
+  type PagefindModuleLoader,
+} from "./client-runtime";
+
+function createPagefind() {
+  const fragment = {
+    url: "/docs/server-functions",
+    content: "Typed server functions and authorization",
+    excerpt: "Typed <mark>server</mark> functions",
+    plain_excerpt: "Typed server functions",
+    word_count: 5,
+    filters: { section: ["Docs"] },
+    meta: { title: "Server functions", description: "Typed RPC" },
+    sub_results: [
+      {
+        title: "Authorization",
+        url: "/docs/server-functions#authorization",
+        excerpt: "Check <mark>authorization</mark>",
+        plain_excerpt: "Check authorization",
+      },
+    ],
+  };
+  const api: PagefindBrowserApi = {
+    options: vi.fn(async () => undefined),
+    init: vi.fn(async () => undefined),
+    search: vi.fn(async () => ({
+      results: [
+        {
+          id: "first",
+          score: 0.9,
+          words: [1],
+          matchedMetaFields: ["title"],
+          data: async () => fragment,
+        },
+        {
+          id: "second",
+          score: 0.5,
+          words: [3],
+          data: async () => ({ ...fragment, url: "/docs/auth", meta: { title: "Auth" } }),
+        },
+      ],
+      unfilteredResultCount: 4,
+      filters: { section: { Docs: 2 } },
+      totalFilters: { section: { Docs: 4 } },
+      timings: { preload: 1, search: 2, total: 3 },
+    })),
+    preload: vi.fn(async () => undefined),
+    filters: vi.fn(async () => ({ section: { Docs: 4 } })),
+    destroy: vi.fn(async () => undefined),
+  };
+  const module = { ...api, createInstance: vi.fn(async () => api) } satisfies PagefindBrowserModule;
+  return { api, module };
+}
+
+describe("createSearchClient", () => {
+  it("loads the configured bundle lazily and resolves only the requested result window", async () => {
+    const { api, module } = createPagefind();
+    const loader = vi.fn(async () => module);
+    const client = createSearchClient(
+      () => ({
+        available: true,
+        bundlePath: "/app/_farm/search/",
+        excerptLength: 42,
+        highlightParam: "q",
+      }),
+      {},
+      loader,
+    );
+
+    const response = await client.search("server", { offset: 1, limit: 1 });
+
+    expect(loader).toHaveBeenCalledWith("/app/_farm/search/pagefind.js");
+    expect(module.createInstance).toHaveBeenCalledWith({
+      basePath: "/app/_farm/search/",
+      excerptLength: 42,
+      highlightParam: "q",
+    });
+    expect(api.options).not.toHaveBeenCalled();
+    expect(api.init).toHaveBeenCalledOnce();
+    expect(response.total).toBe(2);
+    expect(response.unfilteredTotal).toBe(4);
+    expect(response.results).toHaveLength(1);
+    expect(response.results[0]).toMatchObject({
+      id: "second",
+      url: "/docs/auth",
+      title: "Auth",
+      plainExcerpt: "Typed server functions",
+    });
+
+    await client.search("auth");
+    expect(loader).toHaveBeenCalledOnce();
+  });
+
+  it("passes filters and sorting while exposing preload, counts, and cleanup", async () => {
+    const { api, module } = createPagefind();
+    const client = createSearchClient(
+      () => ({
+        available: true,
+        bundlePath: "/_farm/search/",
+        excerptLength: 30,
+      }),
+      { highlightParam: false },
+      async () => module,
+    );
+    const query = { filters: { section: "Docs" }, sort: { date: "desc" as const } };
+
+    await client.preload("server", query);
+    await client.search("server", query);
+    await expect(client.filters()).resolves.toEqual({ section: { Docs: 4 } });
+    await client.destroy();
+
+    expect(api.preload).toHaveBeenCalledWith("server", query);
+    expect(api.search).toHaveBeenCalledWith("server", query);
+    expect(api.destroy).toHaveBeenCalledOnce();
+    expect(module.createInstance).toHaveBeenCalledWith({
+      basePath: "/_farm/search/",
+      excerptLength: 30,
+    });
+  });
+
+  it("configures the legacy module before initializing it", async () => {
+    const { api } = createPagefind();
+    const module = { ...api } satisfies PagefindBrowserModule;
+    const client = createSearchClient(
+      () => ({
+        available: true,
+        bundlePath: "/_farm/search/",
+        excerptLength: 30,
+      }),
+      {},
+      async () => module,
+    );
+
+    await client.search("server");
+
+    expect(api.options).toHaveBeenCalledWith({
+      basePath: "/_farm/search/",
+      excerptLength: 30,
+    });
+    expect(api.options).toHaveBeenCalledBefore(vi.mocked(api.init));
+  });
+
+  it("explains the production-only index and validates pagination", async () => {
+    const { module } = createPagefind();
+    const client = createSearchClient(
+      () => ({
+        available: false,
+        bundlePath: "/_farm/search/",
+        excerptLength: 30,
+      }),
+      {},
+      async () => module,
+    );
+
+    await expect(client.search("server")).rejects.toThrow("generated by production builds");
+
+    const explicit = createSearchClient(
+      () => ({
+        available: false,
+        bundlePath: "/_farm/search/",
+        excerptLength: 30,
+      }),
+      { bundlePath: "/built/search" },
+      async () => module,
+    );
+    await expect(explicit.search("server", { limit: 0 })).rejects.toThrow("positive integer");
+    await expect(explicit.search("server", { offset: -1 })).rejects.toThrow("non-negative");
+    await expect(
+      explicit.search("server", { sort: { date: "desc", title: "asc" } }),
+    ).rejects.toThrow("exactly one field");
+  });
+
+  it("retries after a bundle fails to load", async () => {
+    const { module } = createPagefind();
+    const loader = vi
+      .fn<PagefindModuleLoader>()
+      .mockRejectedValueOnce(new Error("network unavailable"))
+      .mockResolvedValue(module);
+    const client = createSearchClient(
+      () => ({
+        available: true,
+        bundlePath: "/_farm/search/",
+        excerptLength: 30,
+      }),
+      {},
+      loader,
+    );
+
+    await expect(client.search("server")).rejects.toThrow("network unavailable");
+    await expect(client.search("server")).resolves.toMatchObject({ total: 2 });
+    expect(loader).toHaveBeenCalledTimes(2);
+  });
+});
