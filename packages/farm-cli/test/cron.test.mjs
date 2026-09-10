@@ -110,6 +110,42 @@ test("starts UTC development schedules and stops them cleanly", async () => {
   }
 });
 
+test("stopping the development scheduler aborts an active invocation", async () => {
+  const root = await createTempProject();
+  let requestSignal;
+  let markStarted;
+  const started = new Promise((resolve) => {
+    markStarted = resolve;
+  });
+
+  try {
+    const scheduler = await startFarmCronScheduler({
+      root,
+      url: "http://localhost:4319",
+      fetch: async (_input, init) => {
+        requestSignal = init.signal;
+        markStarted();
+        await new Promise((_resolve, reject) => {
+          requestSignal.addEventListener(
+            "abort",
+            () => reject(new DOMException("The operation was aborted", "AbortError")),
+            { once: true },
+          );
+        });
+      },
+    });
+
+    const activeRun = scheduler.entries[0].timer.trigger();
+    await started;
+    scheduler.stop();
+
+    await assert.doesNotReject(activeRun);
+    assert.equal(requestSignal.aborted, true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("prevents one cron job's schedules from overlapping", async () => {
   const root = await createTempProject({ schedule: ["0 2 * * *", "0 14 * * *"] });
   let finishFirstRun;
