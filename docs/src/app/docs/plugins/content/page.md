@@ -63,6 +63,9 @@ The schema validates frontmatter for Markdown and MDX. For JSON and YAML, it val
 file value. `transform` runs after validation and can add or replace fields. Its output becomes the
 inferred type returned to the application.
 
+Asset declarations are separate from `schema`. A schema string remains a string; Farm never changes
+its output into image metadata behind the validator's back.
+
 ## Write content
 
 **content/posts/hello-farm.md**
@@ -78,6 +81,107 @@ tags:
 
 The Markdown body remains available separately from validated frontmatter.
 ```
+
+## Manage local assets
+
+Use `assets: true` when a collection only needs relative assets from Markdown or MDX body syntax:
+
+```ts
+collection({
+  source: files("content/posts/**/*.{md,mdx}"),
+  schema: z.object({ title: z.string() }),
+  assets: true,
+});
+```
+
+Farm recognizes inline and reference-style Markdown images and file links:
+
+```md
+![Architecture](./architecture.png)
+
+[Download the guide](./guide.pdf)
+
+![Release diagram][release-diagram]
+
+[release-diagram]: ./release-diagram.svg
+```
+
+Relative image destinations are checked as real images with intrinsic dimensions. Relative file
+links are managed when their destination has a file extension; extensionless links and links to
+`.md` or `.mdx` remain content navigation. Remote URLs, root-relative URLs, fragments, data URLs,
+and dynamic MDX expressions are left unchanged. Static `src` or `href` attributes inside JSX and
+HTML are not interpreted in this first API; use Markdown syntax or a normal module import there.
+
+The body keeps its original Markdown except for managed destinations, which become content-hashed
+public URLs. `entry.bodyAssets` contains the corresponding image or file metadata for a custom
+Markdown component mapping. Missing assets report the content file plus the Markdown line and
+column. Asset changes participate in development reloads.
+
+### Type frontmatter assets
+
+Declare frontmatter assets by the field names used by the application. They do not belong in the
+ordinary schema:
+
+```ts
+import { asset, collection, content, files } from "@farm.js/content";
+import { defineConfig } from "@farm.js/core";
+import { z } from "zod";
+
+export default defineConfig({
+  plugins: [
+    content({
+      collections: {
+        posts: collection({
+          source: files("content/posts/**/*.{md,mdx}"),
+          schema: z.object({
+            title: z.string(),
+            description: z.string(),
+          }),
+          assets: {
+            image: asset.image().optional(),
+            downloads: asset.files().default([]),
+          },
+        }),
+      },
+    }),
+  ],
+});
+```
+
+```md
+---
+title: Introducing Farm Content
+description: A typed local publishing workflow.
+image: ./preview.png
+downloads:
+  - ./guide.pdf
+  - ./example.zip
+---
+
+The frontmatter remains concise while its resolved values are fully typed.
+```
+
+The asset fields are removed before the Standard Schema validator runs, resolved relative to the
+content file, then merged back into `entry.data`:
+
+```ts
+post.data.title; // string
+post.data.image; // ContentImageAsset | undefined
+post.data.downloads; // readonly ContentFileAsset[]
+```
+
+`asset.image()` validates one required image. `asset.images()` validates an array of images;
+`asset.file()` and `asset.files()` provide the equivalent generic-file forms. Add `.optional()` or
+`.default(...)` when the frontmatter value may be omitted. Declarations can be nested to match a
+nested frontmatter object.
+
+Images expose `src`, `width`, `height`, `type`, `bytes`, `name`, and the original `source`. Their
+shape can be passed directly to Farm's `Image` component. Files expose the same fields except for
+image dimensions. All managed paths must be relative, resolve to ordinary files inside the Farm
+project, and use forward slashes. Keep remote or public-root URLs in the ordinary schema when the
+application intentionally owns those strings.
+
+## Entry IDs
 
 Entry IDs come from the path below the common static directory of the source globs. The extension
 and a trailing `index` are removed:
@@ -118,12 +222,13 @@ export default async function BlogPage() {
 
 Each entry contains:
 
-| Field      | Meaning                                                                   |
-| ---------- | ------------------------------------------------------------------------- |
-| `id`       | Stable path-derived identifier used with `getEntry`.                      |
-| `data`     | Validated schema output, followed by the optional transform.              |
-| `body`     | Raw Markdown or MDX body. Empty for structured JSON and YAML files.       |
-| `filePath` | Project-relative source path, useful for diagnostics and editorial tools. |
+| Field        | Meaning                                                                   |
+| ------------ | ------------------------------------------------------------------------- |
+| `id`         | Stable path-derived identifier used with `getEntry`.                      |
+| `data`       | Validated schema output, followed by the optional transform.              |
+| `body`       | Markdown or MDX body. Managed asset destinations contain emitted URLs.    |
+| `bodyAssets` | Image and file metadata discovered from managed Markdown body syntax.     |
+| `filePath`   | Project-relative source path, useful for diagnostics and editorial tools. |
 
 Read one entry when the route already has its ID:
 
@@ -268,10 +373,11 @@ chosen by the application.
 
 ## Rendering and security
 
-The plugin returns raw `body` text. It does not execute MDX or emit HTML automatically. This keeps
-the collection renderer-neutral and lets the application choose its component mapping, Markdown
-renderer, and sanitization policy. Treat author-provided HTML as untrusted unless the source is
-controlled and the chosen renderer sanitizes it.
+The plugin returns `body` text and does not execute MDX or emit HTML automatically. Without the
+`assets` option, the body is unchanged. With asset handling enabled, only recognized Markdown
+destinations are rewritten. This keeps the collection renderer-neutral and lets the application
+choose its component mapping, Markdown renderer, and sanitization policy. Treat author-provided
+HTML as untrusted unless the source is controlled and the chosen renderer sanitizes it.
 
 `@farm.js/content/server` fails the client build when imported into a browser environment. Use a
 [Server Query](/docs/server-queries) or API route when a Client Component needs content data.
@@ -279,8 +385,9 @@ controlled and the chosen renderer sanitizes it.
 ## Development and production
 
 - Development regenerates content after supported source files are added, changed, or removed, then
-  reloads the current page. Validation failures appear in Vite's error overlay with the collection,
-  source file, field path, and schema message.
+  reloads the current page. Referenced asset changes do the same. Validation failures appear in
+  Vite's error overlay with the collection, source file, field path or Markdown position, and
+  validation message.
 - Production serializes only validated values into a private `.farm/content/server.mjs` build input.
   Nitro bundles that module, so the deployed server does not read project source files per request.
 - Dates and bigints keep their runtime types. Plain objects, arrays, `undefined`, and primitives are

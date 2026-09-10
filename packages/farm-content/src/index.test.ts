@@ -113,6 +113,50 @@ describe("content plugin", () => {
     expect(invalidateModule).toHaveBeenCalledOnce();
   });
 
+  it("rebuilds and reloads when a referenced asset changes", async () => {
+    const root = await createFixture();
+    await writeFile(path.join(root, "content", "guide.pdf"), "%PDF first\n");
+    await writeFile(
+      path.join(root, "content", "hello.md"),
+      "---\ntitle: Hello\n---\n[Guide](./guide.pdf)\n",
+    );
+    const plugin = content({
+      collections: {
+        posts: collection({
+          source: files("content/*.md"),
+          schema: { parse: (value: unknown) => value as { title: string } },
+          assets: true,
+        }),
+      },
+    });
+    const configured = await plugin.configure?.({ root, plugins: [plugin] }, {
+      config: {} as never,
+      isDev: true,
+      isProd: false,
+    } as never);
+    const vitePlugin = (configured as any).vite.plugins[0];
+    let listener: ((event: string, file: string) => void) | undefined;
+    const send = vi.fn();
+    vitePlugin.configureServer({
+      watcher: {
+        on: (_event: string, callback: typeof listener) => {
+          listener = callback;
+        },
+      },
+      moduleGraph: {
+        getModulesByFile: () => new Set(),
+        invalidateModule: vi.fn(),
+      },
+      ws: { send },
+      httpServer: null,
+    });
+
+    await writeFile(path.join(root, "content", "guide.pdf"), "%PDF changed\n");
+    listener?.("change", path.join(root, "content", "guide.pdf"));
+
+    await vi.waitFor(() => expect(send).toHaveBeenCalledWith({ type: "full-reload" }));
+  });
+
   it("rejects duplicate plugin instances", async () => {
     const root = await createFixture();
     const plugin = createPlugin();

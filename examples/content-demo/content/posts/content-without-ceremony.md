@@ -6,6 +6,7 @@ tags:
   - Farm.js
   - Content
 featured: true
+image: ./content-assets.svg
 ---
 The collection lives next to the rest of the Farm configuration. Every source file is discovered, parsed, and checked before the application is shipped.
 

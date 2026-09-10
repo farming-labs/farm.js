@@ -17,7 +17,7 @@ Collections live directly in `farm.config.ts`. There is no required `content.con
 virtual module to import from application code.
 
 ```ts
-import { collection, content, files } from "@farm.js/content";
+import { asset, collection, content, files } from "@farm.js/content";
 import { defineConfig } from "@farm.js/core";
 import { z } from "zod";
 
@@ -32,6 +32,10 @@ export default defineConfig({
             publishedAt: z.coerce.date(),
             tags: z.array(z.string()).default([]),
           }),
+          assets: {
+            image: asset.image().optional(),
+            downloads: asset.files().default([]),
+          },
           transform: ({ data, words }) => ({
             ...data,
             readingMinutes: Math.max(1, Math.ceil(words / 220)),
@@ -56,6 +60,16 @@ const optionalPost = await getEntry("posts", "guides/getting-started");
 const post = await getEntryOrThrow("posts", "guides/getting-started");
 ```
 
+Asset fields are written as ordinary relative frontmatter paths but resolve to typed metadata under
+`entry.data`. Keep those fields out of the Standard Schema object: `asset.image()` performs image
+validation and produces `src`, `width`, and `height`, while `asset.file()` produces file metadata.
+Plural helpers accept arrays, and declarations support `.optional()` and `.default(...)`.
+
+The same `assets` option processes relative Markdown image and file destinations automatically.
+Use `assets: true` when no typed frontmatter fields are needed. Farm emits content-hashed URLs,
+tracks the source files for development reloads, and exposes discovered metadata through
+`entry.bodyAssets`.
+
 `src/farm.d.ts` infers the collection name and final `data` type from `farm.config.ts`, including
 values added by `transform`. Run `farm generate` after adding the plugin if the development server
 has not generated the declaration yet.
@@ -68,6 +82,7 @@ the file extension and trailing `index` removed. For example,
 
 - Source files are parsed and validated during Farm configuration, not on each request.
 - Development watches supported content files, regenerates the private module, and reloads the page.
+- Managed assets are validated inside the project, emitted through Vite, and watched for changes.
 - Production bundles the validated collection into the server output, so source files do not need
   to exist on the deployed filesystem.
 - Dates, bigints, arrays, plain objects, `undefined`, and primitive values keep their runtime types.
@@ -76,5 +91,6 @@ the file extension and trailing `index` removed. For example,
 - `@farm.js/content/server` is server-only. Use it in Server Components, static path generation,
   server queries, server functions, or API routes.
 
-The plugin returns raw Markdown or MDX in `entry.body`. Rendering stays explicit so applications can
-choose their renderer, component mapping, and HTML security policy.
+The plugin returns Markdown or MDX in `entry.body`. It stays unchanged unless assets are enabled;
+then only managed Markdown destinations are replaced with emitted URLs. Rendering stays explicit so
+applications can choose their renderer, component mapping, and HTML security policy.

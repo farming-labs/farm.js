@@ -28,6 +28,15 @@ export default async function PostPage({ params }: PageProps<"/posts/[...slug]">
         <h1>{entry.data.title}</h1>
         <p className="article-deck">{entry.data.description}</p>
       </header>
+      {entry.data.image ? (
+        <img
+          className="article-image"
+          src={entry.data.image.src}
+          alt=""
+          width={entry.data.image.width}
+          height={entry.data.image.height}
+        />
+      ) : null}
       <div className="article-body">
         {entry.body
           .trim()
