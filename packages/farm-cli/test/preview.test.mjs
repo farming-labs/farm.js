@@ -300,6 +300,35 @@ test("removes content encoding after fetch decodes a local response", async () =
   }
 });
 
+test("stops buffering gateway responses above the configured limit", async () => {
+  const server = await createTestServer((_req, res) => {
+    res.write("12345678");
+    res.end("9");
+  });
+
+  try {
+    await assert.rejects(
+      forwardGatewayRequest(
+        {
+          localUrl: `http://localhost:${server.port}`,
+          host: "localhost",
+          port: server.port,
+          source: "port",
+        },
+        {
+          id: "req_large",
+          method: "GET",
+          path: "/large",
+        },
+        { maxResponseBodyBytes: 8 },
+      ),
+      /exceeded the 8 byte limit/,
+    );
+  } finally {
+    await server.close();
+  }
+});
+
 test("cancels a forwarded local request at its deadline", async () => {
   const server = await createTestServer(() => undefined);
 

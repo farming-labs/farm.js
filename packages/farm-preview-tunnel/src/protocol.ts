@@ -7,6 +7,7 @@ export interface ReadyMessage {
   type: "ready";
   sessionId: string;
   publicUrl: string;
+  maxResponseBodyBytes?: number;
 }
 
 export interface TunnelRequestMessage {
@@ -44,7 +45,14 @@ export function isAgentToRelayMessage(value: unknown): value is AgentToRelayMess
 export function isRelayToAgentMessage(value: unknown): value is RelayToAgentMessage {
   if (!isRecord(value)) return false;
   if (value.type === "ready") {
-    return typeof value.sessionId === "string" && typeof value.publicUrl === "string";
+    return (
+      typeof value.sessionId === "string" &&
+      typeof value.publicUrl === "string" &&
+      (value.maxResponseBodyBytes === undefined ||
+        (typeof value.maxResponseBodyBytes === "number" &&
+          Number.isSafeInteger(value.maxResponseBodyBytes) &&
+          value.maxResponseBodyBytes > 0))
+    );
   }
   if (value.type === "error") {
     return (

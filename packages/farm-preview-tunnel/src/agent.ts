@@ -29,6 +29,7 @@ export interface TypeScriptPreviewAgentOptions {
   localProbeIntervalMs?: number;
   localProbeTimeoutMs?: number;
   requestTimeoutMs?: number;
+  maxResponseBodyBytes?: number;
 }
 
 export interface TypeScriptPreviewAgent {
@@ -56,6 +57,10 @@ export async function startTypeScriptPreviewAgent(
   }
 
   const inFlight = new Map<string, AbortController>();
+  const maxResponseBodyBytes = Math.min(
+    options.maxResponseBodyBytes ?? Number.POSITIVE_INFINITY,
+    ready.maxResponseBodyBytes ?? 5 * 1024 * 1024,
+  );
   const stopWatchingTarget = watchLocalTarget(socket, options);
   const abortInFlight = () => {
     for (const controller of inFlight.values()) controller.abort();
@@ -72,9 +77,11 @@ export async function startTypeScriptPreviewAgent(
       const controller = new AbortController();
       inFlight.get(message.id)?.abort();
       inFlight.set(message.id, controller);
-      void forwardRequest(socket, options, message, controller).finally(() => {
-        if (inFlight.get(message.id) === controller) inFlight.delete(message.id);
-      });
+      void forwardRequest(socket, options, message, controller, maxResponseBodyBytes).finally(
+        () => {
+          if (inFlight.get(message.id) === controller) inFlight.delete(message.id);
+        },
+      );
     }
   });
   socket.once("close", () => {
@@ -186,6 +193,7 @@ async function forwardRequest(
   options: TypeScriptPreviewAgentOptions,
   request: TunnelRequestMessage,
   controller: AbortController,
+  maxResponseBodyBytes: number,
 ) {
   let response: TunnelResponseMessage;
   let timedOut = false;
@@ -223,12 +231,13 @@ async function forwardRequest(
     }
     const setCookies = getSetCookies(result.headers);
     if (setCookies.length) responseHeaders["set-cookie"] = setCookies;
+    const responseBody = await readResponseBody(result, maxResponseBodyBytes);
     response = {
       type: "response",
       id: request.id,
       status: result.status,
       headers: responseHeaders,
-      body: Buffer.from(await result.arrayBuffer()).toString("base64"),
+      body: responseBody.toString("base64"),
     };
   } catch (error) {
     const unsafePath = error instanceof UnsafePreviewPathError;
@@ -244,6 +253,39 @@ async function forwardRequest(
   }
 
   if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(response));
+}
+
+async function readResponseBody(response: Response, maxBytes: number) {
+  const contentLength = Number(response.headers.get("content-length") || 0);
+  if (
+    !response.headers.has("content-encoding") &&
+    Number.isFinite(contentLength) &&
+    contentLength > maxBytes
+  ) {
+    await response.body?.cancel();
+    throw new PreviewResponseLimitError(maxBytes);
+  }
+  if (!response.body) return Buffer.alloc(0);
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) {
+        await reader.cancel();
+        throw new PreviewResponseLimitError(maxBytes);
+      }
+      chunks.push(value);
+    }
+  } catch (error) {
+    await reader.cancel().catch(() => undefined);
+    throw error;
+  }
+  return Buffer.concat(chunks, size);
 }
 
 function parseRelayMessage(data: WebSocket.RawData): RelayToAgentMessage | undefined {
@@ -281,6 +323,13 @@ function getSetCookies(headers: Headers) {
 
 function ensureTrailingSlash(value: string) {
   return value.endsWith("/") ? value : `${value}/`;
+}
+
+class PreviewResponseLimitError extends Error {
+  constructor(maxBytes: number) {
+    super(`The local preview response exceeded the ${maxBytes} byte limit.`);
+    this.name = "PreviewResponseLimitError";
+  }
 }
 
 function closeSocket(socket: WebSocket) {

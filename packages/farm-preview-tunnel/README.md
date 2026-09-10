@@ -36,13 +36,15 @@ When the relay can run on multiple server instances, provide a shared `Persisten
 
 The agent closes automatically when the local target becomes unreachable. The relay then removes its public route.
 
+Local response bodies are limited to 5 MiB by default because the current protocol buffers and base64-encodes them. Configure `maxResponseBodyBytes` on the relay to change the limit; the relay advertises that limit to compatible agents and also enforces it when accepting responses. The TypeScript agent can set a smaller `maxResponseBodyBytes`, but cannot exceed the relay's limit.
+
 ## Rust agent
 
 The independent `@farm.js/tunnel` N-API package implements the same protocol and is the native agent used by `farm preview`. The TypeScript agent remains the portable protocol reference and fallback.
 
 ## Prototype limitations
 
-- Request and response bodies are buffered and base64-encoded in JSON.
+- Request and response bodies are buffered and base64-encoded in JSON within their configured size limits.
 - Authentication and reconnect/resume are not implemented yet.
 - WebSocket upgrade forwarding and Vite HMR are not implemented yet.
 - The relay must run on infrastructure that supports long-lived WebSockets. Clients do not reconnect when the infrastructure's maximum connection duration is reached yet.

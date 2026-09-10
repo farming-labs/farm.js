@@ -160,6 +160,32 @@ test("preserves repeated cookies and removes encoding after decoding a response"
   }
 });
 
+test("stops buffering local responses that exceed the relay limit", async () => {
+  const target = createServer((_request, response) => {
+    response.write("12345678");
+    response.end("9");
+  });
+  await listen(target);
+  const targetAddress = target.address();
+  const relay = createPersistentPreviewRelay({ maxResponseBodyBytes: 8 });
+  const relayAddress = await relay.listen();
+  const agent = await startTypeScriptPreviewAgent({
+    relayUrl: relayAddress.websocketUrl,
+    name: "bounded-response",
+    targetUrl: `http://127.0.0.1:${targetAddress.port}`,
+  });
+
+  try {
+    const response = await fetch(agent.publicUrl);
+    assert.equal(response.status, 502);
+    assert.match(await response.text(), /exceeded the 8 byte limit/);
+  } finally {
+    await agent.close();
+    await relay.close();
+    await close(target);
+  }
+});
+
 test("rejects malformed and unauthenticated agent messages without crashing", async () => {
   const relay = createPersistentPreviewRelay();
   const address = await relay.listen();
