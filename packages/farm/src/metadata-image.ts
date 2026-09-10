@@ -1,5 +1,6 @@
 import type { ImageResponseOptions } from "@vercel/og";
 import type { ReactElement } from "react";
+import { omitFarmResponseBody } from "./response-body";
 import { matchesFarmIfNoneMatch } from "./server-http";
 
 const REACT_ELEMENT_TYPE = Symbol.for("react.element");
@@ -187,9 +188,7 @@ export async function createFarmMetadataImageResponse(
   }
 
   if (isResponse(value)) {
-    return method === "HEAD"
-      ? new Response(null, { status: value.status, headers: value.headers })
-      : value;
+    return method === "HEAD" ? omitFarmResponseBody(value) : value;
   }
 
   const cacheControl = resolveCacheControl(imageModule.revalidate);

@@ -336,11 +336,20 @@ describe("APIRouteManager", () => {
 
   it("uses GET for HEAD requests and strips the response body", async () => {
     const manager = new APIRouteManager("/tmp/farm-api-head-test");
+    let cancelled = false;
     const getHandler = async () =>
-      new Response("payload", {
-        status: 201,
-        headers: { "x-handler": "get" },
-      });
+      new Response(
+        new ReadableStream({
+          pull() {},
+          cancel() {
+            cancelled = true;
+          },
+        }),
+        {
+          status: 201,
+          headers: { "x-handler": "get" },
+        },
+      );
     manager.getRoutes().set("/api/status", {
       path: "/api/status",
       filePath: "/tmp/farm-api-head-test/status/route.ts",
@@ -355,6 +364,7 @@ describe("APIRouteManager", () => {
     expect(response.status).toBe(201);
     expect(response.headers.get("x-handler")).toBe("get");
     expect(await response.text()).toBe("");
+    expect(cancelled).toBe(true);
   });
 
   it("strips bodies returned by explicit HEAD handlers", async () => {

@@ -13,6 +13,7 @@ import {
 import { DEFAULT_FARM_API_BASE_PATH, normalizeFarmAPIBasePath } from "./config";
 import { resolveFarmAPICanonicalPathname } from "./server-path";
 import { compareRouteSpecificity, type RouteSegmentSpecificity } from "../routing/specificity";
+import { omitFarmResponseBody } from "../response-body";
 
 export type APIRouteParamValue = string | string[];
 export type APIRouteParams = Record<string, APIRouteParamValue>;
@@ -125,11 +126,7 @@ export async function invokeAPIRouteEndpoint(
     return response;
   }
 
-  return new Response(null, {
-    status: response.status,
-    statusText: response.statusText,
-    headers: response.headers,
-  });
+  return omitFarmResponseBody(response);
 }
 
 async function invokeAPIRouteEndpointInContext(
