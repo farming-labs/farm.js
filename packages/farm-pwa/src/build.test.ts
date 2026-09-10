@@ -81,7 +81,15 @@ describe("writePwaBuildArtifacts", () => {
 
     expect(result.workerUrl).toBe("/app/sw.js");
     expect(result.workerPath).toBe(path.join(publicDir, "app", "sw.js"));
+    expect(result.precacheUrls).toEqual([
+      "/app/assets/app.abc123.css",
+      "/app/assets/app.abc123.js",
+      "/app/offline/index.html",
+    ]);
     expect(result.staticRoutes).toEqual({ "/app/offline": "offline/index.html" });
+    expect(await readFile(result.workerPath, "utf8")).toContain(
+      'const OFFLINE_FILE = "/app/offline/index.html"',
+    );
   });
 
   it("copies a custom service worker verbatim under basePath", async () => {
@@ -119,6 +127,13 @@ describe("writePwaBuildArtifacts", () => {
       "/app/offline": "offline/index.html",
       "/app/pricing": "pricing/index.html",
     });
+    expect(result.precacheUrls).toEqual([
+      "/app/assets/app.abc123.css",
+      "/app/assets/app.abc123.js",
+      "/app/index.html",
+      "/app/offline/index.html",
+      "/app/pricing/index.html",
+    ]);
   });
 
   it("fails the build when the offline fallback is not an emitted static page", async () => {
