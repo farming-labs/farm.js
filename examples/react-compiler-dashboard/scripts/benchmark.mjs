@@ -2972,9 +2972,10 @@ const keyedStructuralReorderRegressions = keyedStructuralReorderResults.filter(
     !Number.isFinite(snapshotSpeedup) ||
     snapshotSpeedup < keyedStructuralReorderMinimumSnapshotSpeedup,
 );
-// A safe filter followed by a terminal map in an adjacent setter changes membership and row data in
-// one queued commit. The combined path must remove the rejected row and patch the changed survivor
-// instead of dropping to complete keyed reconciliation at the setter boundary.
+// A safe filter, terminal map, and two native reverses in adjacent setters change membership and
+// row data while restoring the survivor order in one queued commit. The combined path must remove
+// the rejected row, patch the changed survivor, and retain structural lineage through both reorder
+// boundaries instead of dropping to complete keyed reconciliation.
 const keyedMappedStructuralReorderMinimumSpeedup = 2;
 const keyedMappedStructuralReorderMinimumSnapshotSpeedup = 1.25;
 const keyedMappedStructuralReorderResults = ["static", "hybrid"].map((mode) => {

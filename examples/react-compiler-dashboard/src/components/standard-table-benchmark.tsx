@@ -882,11 +882,13 @@ export function StandardTableBenchmark() {
                   : row,
               ),
             );
-            setOperation("filter one row, then review another in a queued setter");
+            setRows((current) => current.toReversed());
+            setRows((current) => current.toReversed());
+            setOperation("filter, review, and reorder rows across queued setters");
             setRevision((value) => value + 1);
           }}
         >
-          Queued filter + map
+          Queued filter + map + reorder
         </button>
         <button
           data-action="table-map-structural-reorder-pipeline-snapshot"
@@ -902,11 +904,17 @@ export function StandardTableBenchmark() {
                   : row,
               );
             });
-            setOperation("filter and review rows in queued setters (snapshot control)");
+            setRows((current) => {
+              return current.toReversed();
+            });
+            setRows((current) => {
+              return current.toReversed();
+            });
+            setOperation("filter, review, and reorder rows (snapshot control)");
             setRevision((value) => value + 1);
           }}
         >
-          Queued filter + map (snapshot control)
+          Queued filter + map + reorder (snapshot control)
         </button>
         <button
           data-action="table-map-reorder-pipeline"

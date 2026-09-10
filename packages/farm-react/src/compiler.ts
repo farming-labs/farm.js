@@ -2684,6 +2684,191 @@ function rewriteQueuedKeyedArrayStructuralMapHints(
   };
 }
 
+function rewriteQueuedKeyedArrayStructuralReorderHints(
+  root: t.JSXElement,
+  statesBySetter: ReadonlyMap<string, StateBinding>,
+  filterIdentifier: t.Identifier,
+  sliceIdentifier: t.Identifier,
+  mapPipelineIdentifier: t.Identifier,
+  queuedMapPipelineIdentifier: t.Identifier,
+  mappedStructuralIdentifier: t.Identifier,
+  mapReorderIdentifier: t.Identifier,
+  reorderIdentifier: t.Identifier,
+  sortIdentifier: t.Identifier,
+  structuralReorderIdentifier: t.Identifier,
+  structuralSortIdentifier: t.Identifier,
+  allowed: boolean,
+): {
+  root: t.JSXElement;
+  reorderCount: number;
+  sortCount: number;
+  replacedMapReorderCount: number;
+  replacedMapSortCount: number;
+  replacedQueuedMapCount: number;
+} {
+  if (!allowed) {
+    return {
+      root: t.cloneNode(root, true),
+      reorderCount: 0,
+      sortCount: 0,
+      replacedMapReorderCount: 0,
+      replacedMapSortCount: 0,
+      replacedQueuedMapCount: 0,
+    };
+  }
+  const file = expressionFile(t.cloneNode(root, true));
+  let reorderCount = 0;
+  let sortCount = 0;
+  let replacedMapReorderCount = 0;
+  let replacedMapSortCount = 0;
+  let replacedQueuedMapCount = 0;
+
+  traverse(file, {
+    BlockStatement(path) {
+      let structuralState: number | undefined;
+      const statements = path.get("body") as NodePath<t.Statement>[];
+      for (const statementPath of statements) {
+        const statement = statementPath.node;
+        if (!t.isExpressionStatement(statement) || !t.isCallExpression(statement.expression)) {
+          structuralState = undefined;
+          continue;
+        }
+        const setterCall = statement.expression;
+        if (
+          !t.isIdentifier(setterCall.callee) ||
+          statementPath.scope.hasBinding(setterCall.callee.name) ||
+          setterCall.arguments.length !== 1
+        ) {
+          structuralState = undefined;
+          continue;
+        }
+        const state = statesBySetter.get(setterCall.callee.name);
+        const updater = setterCall.arguments[0];
+        if (
+          !state ||
+          !t.isArrowFunctionExpression(updater) ||
+          updater.async ||
+          updater.generator ||
+          updater.params.length !== 1 ||
+          !t.isIdentifier(updater.params[0])
+        ) {
+          structuralState = undefined;
+          continue;
+        }
+
+        const methodKinds = new Map<string, "reverse" | "sort">();
+        t.traverseFast(updater.body, (node) => {
+          if (
+            !t.isVariableDeclarator(node) ||
+            !t.isIdentifier(node.id) ||
+            !t.isMemberExpression(node.init) ||
+            node.init.computed ||
+            !t.isIdentifier(node.init.property)
+          ) {
+            return;
+          }
+          if (node.init.property.name === "toReversed") methodKinds.set(node.id.name, "reverse");
+          if (node.init.property.name === "toSorted") methodKinds.set(node.id.name, "sort");
+        });
+
+        let startsStructuralLineage = false;
+        let continuesStructuralLineage = false;
+        let unsupported = false;
+        const queuedMaps: t.CallExpression[] = [];
+        const reorderCalls: Array<{
+          call: t.CallExpression;
+          kind: "reverse" | "sort";
+          mapped: boolean;
+        }> = [];
+        t.traverseFast(updater.body, (node) => {
+          if (!t.isCallExpression(node) || !t.isIdentifier(node.callee)) return;
+          const helperName = node.callee.name;
+          if (
+            helperName === filterIdentifier.name ||
+            helperName === sliceIdentifier.name ||
+            helperName === mappedStructuralIdentifier.name
+          ) {
+            startsStructuralLineage = true;
+            return;
+          }
+          if (
+            helperName === structuralReorderIdentifier.name ||
+            helperName === structuralSortIdentifier.name
+          ) {
+            startsStructuralLineage = true;
+            return;
+          }
+          if (helperName === mapPipelineIdentifier.name) {
+            continuesStructuralLineage = true;
+            return;
+          }
+          if (helperName === queuedMapPipelineIdentifier.name) {
+            continuesStructuralLineage = true;
+            queuedMaps.push(node);
+            return;
+          }
+          if (helperName === reorderIdentifier.name) {
+            continuesStructuralLineage = true;
+            reorderCalls.push({ call: node, kind: "reverse", mapped: false });
+            return;
+          }
+          if (helperName === sortIdentifier.name) {
+            continuesStructuralLineage = true;
+            reorderCalls.push({ call: node, kind: "sort", mapped: false });
+            return;
+          }
+          if (helperName === mapReorderIdentifier.name) {
+            const method = node.arguments[1];
+            const kind = t.isIdentifier(method) ? methodKinds.get(method.name) : undefined;
+            if (!kind) {
+              unsupported = true;
+              return;
+            }
+            continuesStructuralLineage = true;
+            reorderCalls.push({ call: node, kind, mapped: true });
+          }
+        });
+
+        const hasStructuralLineage = startsStructuralLineage || structuralState === state.index;
+        if (unsupported || (!startsStructuralLineage && !continuesStructuralLineage)) {
+          structuralState = undefined;
+          continue;
+        }
+        if (!hasStructuralLineage) {
+          structuralState = undefined;
+          continue;
+        }
+
+        for (const call of queuedMaps) {
+          call.callee = t.cloneNode(mapPipelineIdentifier);
+          replacedQueuedMapCount += 1;
+        }
+        for (const { call, kind, mapped } of reorderCalls) {
+          call.callee = t.cloneNode(
+            kind === "reverse" ? structuralReorderIdentifier : structuralSortIdentifier,
+          );
+          if (kind === "reverse") {
+            reorderCount += 1;
+            if (mapped) replacedMapReorderCount += 1;
+          } else {
+            sortCount += 1;
+            if (mapped) replacedMapSortCount += 1;
+          }
+        }
+        structuralState = state.index;
+      }
+    },
+  });
+  return {
+    root: (file.program.body[0] as t.ExpressionStatement).expression as t.JSXElement,
+    reorderCount,
+    sortCount,
+    replacedMapReorderCount,
+    replacedMapSortCount,
+    replacedQueuedMapCount,
+  };
+}
+
 function rewriteQueuedKeyedArrayMapReorderHints(
   root: t.JSXElement,
   statesBySetter: ReadonlyMap<string, StateBinding>,
@@ -8708,6 +8893,57 @@ function compileCandidate(
       compilerUsage.keyedArrayQueuedMapUpdateHints += queuedMapCount;
       compilerUsage.keyedArrayMapReorderHints += queuedMapReorderHintedRoot.mapReorderCount;
       compilerUsage.keyedArrayMapSortHints += queuedMapReorderHintedRoot.mapSortCount;
+    }
+  }
+  const queuedStructuralReorderHintedRoot = rewriteQueuedKeyedArrayStructuralReorderHints(
+    expandedReactiveRoot,
+    statesBySetter,
+    keyedArrayFilterIdentifier,
+    keyedArraySliceIdentifier,
+    keyedArrayMapPipelineIdentifier,
+    keyedArrayQueuedMapPipelineIdentifier,
+    keyedArrayMappedStructuralIdentifier,
+    keyedArrayMapReorderIdentifier,
+    keyedArrayReorderIdentifier,
+    keyedArraySortIdentifier,
+    keyedArrayStructuralReorderIdentifier,
+    keyedArrayStructuralSortIdentifier,
+    allowKeyedArrayMapPipelines,
+  );
+  if (
+    queuedStructuralReorderHintedRoot.reorderCount > 0 ||
+    queuedStructuralReorderHintedRoot.sortCount > 0 ||
+    queuedStructuralReorderHintedRoot.replacedQueuedMapCount > 0
+  ) {
+    const hintedBlockAnalysis = analyzeComposableBlocks(
+      queuedStructuralReorderHintedRoot.root,
+      reactiveByValue,
+      safeGlobals,
+      listNames,
+      allowedComponentNames,
+    );
+    const hintedAnalysis = analyzeHostTree(
+      queuedStructuralReorderHintedRoot.root,
+      reactiveByValue,
+      safeGlobals,
+      hintedBlockAnalysis.conditionalExpressions || new Set<t.Expression>(),
+      hintedBlockAnalysis.keyedExpressions || new Set<t.Expression>(),
+      hintedBlockAnalysis.ownedElements || new Set<t.JSXElement>(),
+      hintedBlockAnalysis.componentElements || new Set<t.JSXElement>(),
+    );
+    if (!hintedBlockAnalysis.reason && !hintedAnalysis.reason) {
+      expandedReactiveRoot = queuedStructuralReorderHintedRoot.root;
+      blockAnalysis = hintedBlockAnalysis;
+      analysis = hintedAnalysis;
+      compilerUsage.keyedArrayQueuedMapUpdateHints -=
+        queuedStructuralReorderHintedRoot.replacedQueuedMapCount;
+      compilerUsage.keyedArrayMapReorderHints -=
+        queuedStructuralReorderHintedRoot.replacedMapReorderCount;
+      compilerUsage.keyedArrayMapSortHints -=
+        queuedStructuralReorderHintedRoot.replacedMapSortCount;
+      compilerUsage.keyedArrayStructuralReorderHints +=
+        queuedStructuralReorderHintedRoot.reorderCount;
+      compilerUsage.keyedArrayStructuralSortHints += queuedStructuralReorderHintedRoot.sortCount;
     }
   }
   const keyedCollectionTargetKinds = new Map<number, KeyedCollectionTargetKind>();
