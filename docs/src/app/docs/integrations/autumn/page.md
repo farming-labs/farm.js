@@ -128,6 +128,8 @@ if (checkout.data?.redirectTo) {
 }
 ```
 
+Checkout and portal return paths must be same-origin, root-relative application paths. Protocol-relative paths such as `//example.com` are rejected.
+
 ## Owner and entitlements
 
 Autumn needs a billing owner when it checks or attaches customer state. Use the owner resolver to connect Farm auth/session data with Autumn customers.
