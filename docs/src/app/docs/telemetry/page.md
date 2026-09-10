@@ -145,7 +145,8 @@ with `FARM_TELEMETRY_RETENTION_DAYS`.
 
 For local endpoint development only, `FARM_TELEMETRY_ENDPOINT` and
 `FARM_TELEMETRY_SITE_ENDPOINT` can point at an HTTPS URL or an HTTP localhost address. Released
-clients use the Farm-owned endpoints by default.
+clients use the Farm-owned endpoints by default. An invalid or insecure explicit override is skipped
+instead of being redirected to a Farm-owned endpoint.
 
 ## Maintainer deployment setup
 

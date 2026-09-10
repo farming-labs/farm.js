@@ -225,16 +225,20 @@ function isInteractive(): boolean {
 }
 
 function getEndpoint(): string {
-  const candidate = process.env.FARM_TELEMETRY_ENDPOINT || DEFAULT_TELEMETRY_ENDPOINT;
+  return process.env.FARM_TELEMETRY_ENDPOINT || DEFAULT_TELEMETRY_ENDPOINT;
+}
+
+function resolveTelemetryEndpoint(candidate: string): URL | undefined {
   try {
     const url = new URL(candidate);
-    const isLocal = ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
+    const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    const isLocal = ["localhost", "127.0.0.1", "::1"].includes(hostname);
     if (url.protocol !== "https:" && !(url.protocol === "http:" && isLocal)) {
-      return DEFAULT_TELEMETRY_ENDPOINT;
+      return undefined;
     }
-    return url.toString();
+    return url;
   } catch {
-    return DEFAULT_TELEMETRY_ENDPOINT;
+    return undefined;
   }
 }
 
@@ -434,19 +438,13 @@ async function send(payload: FarmTelemetryEvent): Promise<void> {
 }
 
 async function sendOnce(payload: FarmTelemetryEvent): Promise<"delivered" | "retry" | "rejected"> {
-  let endpoint: URL;
-  try {
-    endpoint = new URL(getEndpoint());
-  } catch {
-    debug("invalid endpoint URL");
+  const endpoint = resolveTelemetryEndpoint(getEndpoint());
+  if (!endpoint) {
+    debug("invalid or insecure telemetry endpoint; event skipped");
     return "rejected";
   }
 
   const requestTransport = endpoint.protocol === "http:" ? httpRequest : httpsRequest;
-  if (endpoint.protocol !== "http:" && endpoint.protocol !== "https:") {
-    debug(`unsupported endpoint protocol ${endpoint.protocol}`);
-    return "rejected";
-  }
 
   const body = JSON.stringify(payload);
   return new Promise((resolve) => {

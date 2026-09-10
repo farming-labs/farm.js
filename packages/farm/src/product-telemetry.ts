@@ -155,9 +155,14 @@ export function createFarmProductionSiteReporter(
 
 async function deliver(
   send: typeof fetch,
-  endpoint: string,
+  endpoint: string | undefined,
   payload: FarmProductionSiteTelemetryPayload,
 ): Promise<boolean> {
+  if (!endpoint) {
+    debug("invalid or insecure production-site telemetry endpoint; check-in skipped");
+    return false;
+  }
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   timeout.unref?.();
@@ -190,20 +195,21 @@ async function deliver(
   }
 }
 
-function resolveSiteTelemetryEndpoint(explicit?: string): string {
+function resolveSiteTelemetryEndpoint(explicit?: string): string | undefined {
   const candidate = explicit || process.env.FARM_TELEMETRY_SITE_ENDPOINT;
   if (!candidate) return DEFAULT_SITE_TELEMETRY_ENDPOINT;
 
   try {
     const url = new URL(candidate);
-    const isLocal = ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
+    const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    const isLocal = ["localhost", "127.0.0.1", "::1"].includes(hostname);
     if (url.protocol === "https:" || (url.protocol === "http:" && isLocal)) {
       return url.toString();
     }
   } catch {
-    // Fall through to the Farm-owned endpoint.
+    // Invalid explicit overrides fail closed below.
   }
-  return DEFAULT_SITE_TELEMETRY_ENDPOINT;
+  return undefined;
 }
 
 function productionTelemetryDisabled(): boolean {

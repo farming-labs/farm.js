@@ -61,6 +61,36 @@ describe("production-site origin detection", () => {
 });
 
 describe("production-site telemetry reporting", () => {
+  it("does not redirect an invalid custom endpoint to the Farm-owned service", async () => {
+    const send = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 202 }));
+    const deliveries: Promise<unknown>[] = [];
+    const reporter = createFarmProductionSiteReporter({
+      renderer: "react",
+      endpoint: "http://telemetry.example.com/sites",
+      fetch: send,
+    });
+
+    reporter.report("https://example.com", (promise) => deliveries.push(promise));
+    await Promise.all(deliveries);
+
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("accepts an HTTP IPv6 loopback endpoint for local development", async () => {
+    const send = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 202 }));
+    const deliveries: Promise<unknown>[] = [];
+    const reporter = createFarmProductionSiteReporter({
+      renderer: "react",
+      endpoint: "http://[::1]:4318/sites",
+      fetch: send,
+    });
+
+    reporter.report("https://example.com", (promise) => deliveries.push(promise));
+    await Promise.all(deliveries);
+
+    expect(send).toHaveBeenCalledWith("http://[::1]:4318/sites", expect.any(Object));
+  });
+
   it("hands delivery to waitUntil without waiting for the network", async () => {
     let finishRequest: ((response: Response) => void) | undefined;
     const response = new Promise<Response>((resolve) => {
