@@ -875,38 +875,38 @@ export function StandardTableBenchmark() {
           type="button"
           onClick={() => {
             setRows((current) =>
-              current
-                .map((row) =>
-                  row.id % 10_000 === 5_001
-                    ? { ...row, amount: row.amount + 1, label: `${row.label} reviewed` }
-                    : row,
-                )
-                .filter((row) => row.id % 10_000 !== 7_001),
+              current.map((row) =>
+                row.id % 10_000 === 5_001
+                  ? { ...row, amount: row.amount + 1, label: `${row.label} reviewed` }
+                  : row,
+              ),
             );
-            setOperation("review one row, then filter another");
+            setRows((current) => current.filter((row) => row.id % 10_000 !== 7_001));
+            setOperation("review one row, then filter another in a queued setter");
             setRevision((value) => value + 1);
           }}
         >
-          Map + terminal filter
+          Queued map + filter
         </button>
         <button
           data-action="table-map-structural-reorder-pipeline-snapshot"
           type="button"
           onClick={() => {
             setRows((current) => {
-              return current
-                .map((row) =>
-                  row.id % 10_000 === 5_001
-                    ? { ...row, amount: row.amount + 1, label: `${row.label} reviewed` }
-                    : row,
-                )
-                .filter((row) => row.id % 10_000 !== 7_001);
+              return current.map((row) =>
+                row.id % 10_000 === 5_001
+                  ? { ...row, amount: row.amount + 1, label: `${row.label} reviewed` }
+                  : row,
+              );
             });
-            setOperation("review and filter rows (snapshot control)");
+            setRows((current) => {
+              return current.filter((row) => row.id % 10_000 !== 7_001);
+            });
+            setOperation("review and filter rows in queued setters (snapshot control)");
             setRevision((value) => value + 1);
           }}
         >
-          Map + terminal filter (snapshot control)
+          Queued map + filter (snapshot control)
         </button>
         <button
           data-action="table-map-reorder-pipeline"

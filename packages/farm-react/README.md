@@ -491,9 +491,23 @@ setItems((current) =>
 The structural helpers retain both the committed survivor indices and mapped-item sources across
 each accepted step. The final commit removes rejected rows, performs LIS moves only when a reorder
 needs them, and patches bindings only for changed survivors. Every native callback and method still
-runs in JavaScript order. A map after the structural pipeline has already reordered, structural work
-split across setters, unsafe callbacks, changed keys, and failed runtime validation keep complete
-keyed reconciliation.
+runs in JavaScript order.
+
+The maps may also be followed by filter or slice work in immediately adjacent setter calls:
+
+```tsx
+setItems((current) =>
+  current.map((item) => (item.id === editedId ? { ...item, label: nextLabel } : item)),
+);
+setItems((current) => current.filter((item) => item.visible));
+setItems((current) => current.slice(0, limit));
+```
+
+Farm links only consecutive calls to the same setter, retains the first committed map source, and
+validates each structural result before the queued commit touches the DOM. Multiple leading map
+setters and multiple following filter/slice setters may share this proof. A map after structural
+work, an intervening statement, another setter, an unsafe callback, a changed key, or failed runtime
+validation keeps complete keyed reconciliation.
 
 The reorder and safe maps may also be adjacent setter calls in the same synchronous block:
 
