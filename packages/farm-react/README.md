@@ -468,9 +468,8 @@ An exact reverse uses the minimum-move reverse path without a general source-ite
 sort remains an ambiguous permutation, so Farm performs one validated source lookup and LIS pass.
 Safe maps on both sides of a reorder flatten their replacements back to the same committed rows.
 
-Safe maps may also run before or between index-independent `filter` or `slice` steps in one concise
-functional setter. A final native reorder is optional when the pipeline itself ends with a safe
-map:
+Safe maps may also run before, between, or after index-independent `filter` or `slice` steps in one
+concise functional setter. A final native reorder is optional:
 
 ```tsx
 setItems((current) =>
@@ -483,19 +482,18 @@ setItems((current) =>
 
 setItems((current) =>
   current
+    .map((item) => (item.id === editedId ? { ...item, label: nextLabel } : item))
     .filter((item) => item.visible)
-    .slice(0, limit)
-    .map((item) => (item.id === editedId ? { ...item, label: nextLabel } : item)),
+    .slice(0, limit),
 );
 ```
 
 The structural helpers retain both the committed survivor indices and mapped-item sources across
 each accepted step. The final commit removes rejected rows, performs LIS moves only when a reorder
 needs them, and patches bindings only for changed survivors. Every native callback and method still
-runs in JavaScript order. Without a reorder, the last operation must be the safe map so its newest
-lineage reaches the commit. A later structural operation, a map after the structural pipeline has
-already reordered, structural work split across setters, unsafe callbacks, and failed runtime
-validation keep complete keyed reconciliation.
+runs in JavaScript order. A map after the structural pipeline has already reordered, structural work
+split across setters, unsafe callbacks, changed keys, and failed runtime validation keep complete
+keyed reconciliation.
 
 The reorder and safe maps may also be adjacent setter calls in the same synchronous block:
 

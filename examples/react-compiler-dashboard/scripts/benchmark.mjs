@@ -1209,7 +1209,7 @@ async function measureTrial(browser, trial, compilerMode, port) {
           );
           const amount = Number(target?.querySelector("td:nth-child(4)")?.textContent?.slice(1));
           if (!target || !removed || !Number.isFinite(amount)) {
-            throw new Error("Terminal structural-map source rows are invalid.");
+            throw new Error("Mapped terminal-structural source rows are invalid.");
           }
           return {
             amount: amount + 1,
@@ -1239,7 +1239,7 @@ async function measureTrial(browser, trial, compilerMode, port) {
               rows.some((row) => row !== removed && !row.isConnected)
             ) {
               throw new Error(
-                "Terminal structural-map rows do not match the expected filtered order.",
+                "Mapped terminal-structural rows do not match the expected filtered order.",
               );
             }
           };
@@ -2972,9 +2972,9 @@ const keyedStructuralReorderRegressions = keyedStructuralReorderResults.filter(
     !Number.isFinite(snapshotSpeedup) ||
     snapshotSpeedup < keyedStructuralReorderMinimumSnapshotSpeedup,
 );
-// A safe map after a filter changes row data and membership in one setter. The terminal structural
+// A safe map before a terminal filter changes row data and membership in one setter. The combined
 // path must patch the changed survivor and remove the rejected row instead of dropping to complete
-// keyed reconciliation merely because no reorder follows.
+// keyed reconciliation merely because a structural step follows the map and no reorder follows.
 const keyedMappedStructuralReorderMinimumSpeedup = 2;
 const keyedMappedStructuralReorderMinimumSnapshotSpeedup = 1.25;
 const keyedMappedStructuralReorderResults = ["static", "hybrid"].map((mode) => {
