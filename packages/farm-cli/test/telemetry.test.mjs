@@ -99,6 +99,26 @@ test("telemetry is enabled without creating an identity by default", async () =>
   });
 });
 
+test("status preserves an invalid custom endpoint instead of hiding a fallback", async () => {
+  await withTelemetryEnvironment(async () => {
+    process.env.FARM_TELEMETRY_ENDPOINT = "http://telemetry.example.com/events";
+
+    const status = await getFarmTelemetryStatus();
+
+    assert.equal(status.endpoint, "http://telemetry.example.com/events");
+  });
+});
+
+test("status accepts an HTTP IPv6 loopback endpoint", async () => {
+  await withTelemetryEnvironment(async () => {
+    process.env.FARM_TELEMETRY_ENDPOINT = "http://[::1]:4318/events";
+
+    const status = await getFarmTelemetryStatus();
+
+    assert.equal(status.endpoint, "http://[::1]:4318/events");
+  });
+});
+
 test("telemetry remains inactive in recognized CI environments", async () => {
   await withTelemetryEnvironment(async () => {
     for (const key of ["CI", "GITHUB_ACTIONS", "BUILDKITE", "CIRCLECI"]) {
