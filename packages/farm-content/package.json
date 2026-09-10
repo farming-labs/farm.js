@@ -1,0 +1,62 @@
+{
+  "name": "@farm.js/content",
+  "version": "0.1.0-beta.0",
+  "description": "Typed local content collections for Farm.js applications",
+  "keywords": [
+    "content",
+    "content-collections",
+    "farm.js",
+    "markdown",
+    "mdx"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/farming-labs/farm.js",
+    "directory": "packages/farm-content"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js"
+    },
+    "./internal/runtime": {
+      "types": "./dist/runtime.d.ts",
+      "import": "./dist/runtime.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc",
+    "dev": "tsc --watch",
+    "type-check": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@farm.js/core": "workspace:*",
+    "fast-glob": "^3.3.2",
+    "gray-matter": "^4.0.3",
+    "yaml": "^2.8.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "typescript": "^5.3.3",
+    "vitest": "^3.2.7"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}
