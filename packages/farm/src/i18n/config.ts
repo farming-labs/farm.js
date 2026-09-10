@@ -13,14 +13,16 @@ const DEFAULT_DETECTION: readonly FarmI18nDetectionSignal[] = ["url", "cookie", 
 
 export function resolveFarmI18nConfig(
   input: FarmI18nUserConfig | false | undefined,
-  options: { root?: string; mode?: "development" | "production" } = {},
+  options: { root?: string; mode?: "development" | "production"; basePath?: string } = {},
 ): ResolvedFarmI18nConfig {
   const root = options.root || process.cwd();
+  const basePath = options.basePath || "/";
   const strictByDefault = options.mode === "production";
 
   if (!input) {
     return {
       enabled: false,
+      basePath,
       locales: ["en"],
       defaultLocale: "en",
       messages: path.join(root, "src/messages"),
@@ -77,6 +79,7 @@ export function resolveFarmI18nConfig(
 
   return {
     enabled: true,
+    basePath,
     locales,
     defaultLocale,
     messages: path.resolve(root, input.messages || "src/messages"),

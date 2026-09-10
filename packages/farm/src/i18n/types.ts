@@ -37,6 +37,8 @@ export interface ResolvedFarmI18nCookieConfig {
 
 export interface ResolvedFarmI18nConfig {
   enabled: boolean;
+  /** Normalized public pathname where the application is mounted. */
+  basePath: string;
   locales: readonly string[];
   defaultLocale: string;
   messages: string;
@@ -57,6 +59,8 @@ export interface FarmI18nClientSnapshot {
   locales: readonly string[];
   defaultLocale: string;
   routing: FarmI18nRouting;
+  /** Public application mount path. Optional for compatibility with older snapshots. */
+  basePath?: string;
   cookie: ResolvedFarmI18nCookieConfig;
   direction: FarmI18nDirection;
   messages: FarmI18nCatalog;

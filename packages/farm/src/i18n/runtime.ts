@@ -72,6 +72,7 @@ export class FarmI18nRuntime {
       locales: this.config.locales,
       defaultLocale: this.config.defaultLocale,
       routing: this.config.routing,
+      basePath: this.config.basePath,
       cookie: this.config.cookie,
       direction: getFarmLocaleDirection(resolution.locale, this.config.direction),
       messages: {

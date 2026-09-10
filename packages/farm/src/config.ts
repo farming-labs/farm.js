@@ -1006,7 +1006,7 @@ export async function resolveConfig(
     performance: resolveFarmPerformanceConfig(userConfig.performance),
     theme: resolveFarmThemeConfig(userConfig.theme, basePath),
     publicDir: userConfig.publicDir || "public",
-    i18n: resolveFarmI18nConfig(userConfig.i18n, { root, mode }),
+    i18n: resolveFarmI18nConfig(userConfig.i18n, { root, mode, basePath }),
     openapi: {
       enabled: false,
       route: "/docs/reference",
