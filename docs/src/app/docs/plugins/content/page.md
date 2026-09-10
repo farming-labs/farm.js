@@ -10,8 +10,7 @@ section: "Plugin Ecosystem"
 discovers the files, validates them while configuring the application, watches them in development,
 and bundles the validated result into production output.
 
-Collections are ordinary plugin options in `farm.config.ts`. Application code uses a normal package
-import, not a generated virtual-module name, and no separate `content.config.ts` is required.
+Collections are ordinary plugin options in `farm.config.ts`.
 
 ## Install
 
