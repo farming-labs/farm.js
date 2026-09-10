@@ -125,6 +125,8 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
         request,
         response,
         path: route.path,
+        publicBaseUrl: options.publicBaseUrl || address?.httpUrl || "",
+        publicDomain,
         localSession: activeLocalSession,
         coordinatedSession,
         coordinator: options.coordinator,
@@ -290,6 +292,8 @@ interface ForwardPublicRequestOptions {
   request: IncomingMessage;
   response: ServerResponse;
   path: string;
+  publicBaseUrl: string;
+  publicDomain?: string;
   localSession?: AgentSession;
   coordinatedSession?: PersistentPreviewRelayCoordinatorSession;
   coordinator?: PersistentPreviewRelayCoordinator;
@@ -325,7 +329,7 @@ async function forwardPublicRequest(options: ForwardPublicRequestOptions) {
     id,
     method: options.request.method || "GET",
     path: options.path,
-    headers: normalizeIncomingHeaders(options.request.headers),
+    headers: normalizeIncomingHeaders(options.request, options.publicBaseUrl, options.publicDomain),
     ...(body.length ? { body: body.toString("base64") } : {}),
   };
 
@@ -543,12 +547,32 @@ function readRequestBody(request: IncomingMessage, maxBodyBytes: number, signal:
   });
 }
 
-function normalizeIncomingHeaders(headers: IncomingMessage["headers"]) {
+function normalizeIncomingHeaders(
+  request: IncomingMessage,
+  publicBaseUrl: string,
+  publicDomain: string | undefined,
+) {
   const normalized: Record<string, string> = {};
-  for (const [name, value] of Object.entries(headers)) {
-    if (value === undefined || HOP_BY_HOP_HEADERS.has(name.toLowerCase())) continue;
+  for (const [name, value] of Object.entries(request.headers)) {
+    const lowerName = name.toLowerCase();
+    if (
+      value === undefined ||
+      HOP_BY_HOP_HEADERS.has(lowerName) ||
+      lowerName === "forwarded" ||
+      lowerName.startsWith("x-forwarded-")
+    ) {
+      continue;
+    }
     normalized[name] = Array.isArray(value) ? value.join(", ") : value;
   }
+
+  const publicUrl = new URL(publicBaseUrl);
+  normalized["x-forwarded-host"] = publicDomain
+    ? Array.isArray(request.headers.host)
+      ? request.headers.host[0] || publicUrl.host
+      : request.headers.host || publicUrl.host
+    : publicUrl.host;
+  normalized["x-forwarded-proto"] = publicUrl.protocol.replace(":", "");
   return normalized;
 }
 

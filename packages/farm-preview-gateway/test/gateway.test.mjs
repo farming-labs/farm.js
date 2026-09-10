@@ -23,7 +23,14 @@ test("proxies a public preview request through the gateway queue", async () => {
 
     assert.equal(session.publicUrl, `${gateway.url}/__preview/docs-check`);
 
-    const publicRequest = fetch(`${gateway.url}/__preview/docs-check/docs?hello=world`);
+    const publicRequest = fetch(`${gateway.url}/__preview/docs-check/docs?hello=world`, {
+      headers: {
+        forwarded: "for=127.0.0.1;host=evil.example;proto=https",
+        "x-forwarded-for": "127.0.0.1",
+        "x-forwarded-host": "evil.example",
+        "x-forwarded-proto": "https",
+      },
+    });
     const pollResponse = await fetch(
       `${gateway.url}/api/sessions/${session.id}/requests?token=${session.token}&wait=1000`,
     );
@@ -32,6 +39,10 @@ test("proxies a public preview request through the gateway queue", async () => {
     assert.equal(poll.requests.length, 1);
     assert.equal(poll.requests[0].method, "GET");
     assert.equal(poll.requests[0].path, "/docs?hello=world");
+    assert.equal(poll.requests[0].headers.forwarded, undefined);
+    assert.equal(poll.requests[0].headers["x-forwarded-for"], undefined);
+    assert.equal(poll.requests[0].headers["x-forwarded-host"], new URL(gateway.url).host);
+    assert.equal(poll.requests[0].headers["x-forwarded-proto"], "http");
 
     await fetch(
       `${gateway.url}/api/sessions/${session.id}/responses/${poll.requests[0].id}?token=${session.token}`,

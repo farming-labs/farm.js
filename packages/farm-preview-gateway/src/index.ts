@@ -647,7 +647,11 @@ async function serializePreviewRequest(
   const headers: Record<string, string> = {};
   request.headers.forEach((value, key) => {
     const normalized = key.toLowerCase();
-    if (!HOP_BY_HOP_HEADERS.has(normalized)) {
+    if (
+      !HOP_BY_HOP_HEADERS.has(normalized) &&
+      normalized !== "forwarded" &&
+      !normalized.startsWith("x-forwarded-")
+    ) {
       headers[key] = value;
     }
   });
@@ -722,9 +726,9 @@ function matchSessionRoute(pathname: string) {
 
 function nodeRequestToWebRequest(req: IncomingMessage) {
   const host = headerValue(req.headers, "host") || "localhost";
-  const protocol =
-    headerValue(req.headers, "x-forwarded-proto") ||
-    (isLocalHost(host.split(":")[0]) ? "http" : "https");
+  // This adapter is the public trust boundary. A visitor-controlled forwarded
+  // protocol must not influence the authority serialized to the local app.
+  const protocol = isLocalHost(host.split(":")[0]) ? "http" : "https";
   const url = `${protocol}://${host}${req.url || "/"}`;
   const headers = nodeHeadersToWebHeaders(req.headers);
   const method = req.method || "GET";
