@@ -2020,8 +2020,7 @@ function keyedArrayReorderPipeline(
     }
   }
   if (reorderSteps < 1) {
-    const finalStep = steps[steps.length - 1];
-    return structuralSteps > 0 && finalStep?.kind === "map" ? steps : undefined;
+    return structuralSteps > 0 && mapSteps > 0 ? steps : undefined;
   }
   if (mapSteps > 0 && reorderSteps >= 1) return steps;
   if (structuralSteps < 1 && reorderSteps < 2) return undefined;
@@ -2035,6 +2034,7 @@ function rewriteKeyedArrayReorderPipelineHints(
   filterHelperIdentifier: t.Identifier,
   mapHelperIdentifier: t.Identifier,
   mapReorderHelperIdentifier: t.Identifier,
+  mappedStructuralHelperIdentifier: t.Identifier,
   reorderHelperIdentifier: t.Identifier,
   structuralReorderHelperIdentifier: t.Identifier,
   sliceHelperIdentifier: t.Identifier,
@@ -2052,7 +2052,7 @@ function rewriteKeyedArrayReorderPipelineHints(
   sliceCount: number;
   sortCount: number;
   structuralReorderCount: number;
-  terminalStructuralMapCount: number;
+  terminalStructuralPipelineCount: number;
   structuralSortCount: number;
   stateIndices: ReadonlySet<number>;
 } {
@@ -2067,7 +2067,7 @@ function rewriteKeyedArrayReorderPipelineHints(
       sliceCount: 0,
       sortCount: 0,
       structuralReorderCount: 0,
-      terminalStructuralMapCount: 0,
+      terminalStructuralPipelineCount: 0,
       structuralSortCount: 0,
       stateIndices: new Set(),
     };
@@ -2082,7 +2082,7 @@ function rewriteKeyedArrayReorderPipelineHints(
   let sliceCount = 0;
   let sortCount = 0;
   let structuralReorderCount = 0;
-  let terminalStructuralMapCount = 0;
+  let terminalStructuralPipelineCount = 0;
   let structuralSortCount = 0;
   traverse(file, {
     CallExpression(path) {
@@ -2110,7 +2110,8 @@ function rewriteKeyedArrayReorderPipelineHints(
       );
       const mapPipeline = steps.some((step) => step.kind === "map");
       if (mapPipeline && !allowMapPipelines) return;
-      const terminalStructuralMap =
+      const terminalStructuralPipeline =
+        mapPipeline &&
         structuralPipeline &&
         steps.every((step) => step.kind !== "reverse" && step.kind !== "sort");
 
@@ -2262,8 +2263,14 @@ function rewriteKeyedArrayReorderPipelineHints(
           if (structuralPipeline) structuralSortCount += 1;
         }
       }
-      statements.push(t.returnStatement(t.cloneNode(value)));
-      if (terminalStructuralMap) terminalStructuralMapCount += 1;
+      statements.push(
+        t.returnStatement(
+          terminalStructuralPipeline
+            ? t.callExpression(t.cloneNode(mappedStructuralHelperIdentifier), [t.cloneNode(value)])
+            : t.cloneNode(value),
+        ),
+      );
+      if (terminalStructuralPipeline) terminalStructuralPipelineCount += 1;
       path.node.arguments[0] = t.arrowFunctionExpression(
         [t.cloneNode(previous)],
         t.blockStatement(statements),
@@ -2282,7 +2289,7 @@ function rewriteKeyedArrayReorderPipelineHints(
     sliceCount,
     sortCount,
     structuralReorderCount,
-    terminalStructuralMapCount,
+    terminalStructuralPipelineCount,
     structuralSortCount,
     stateIndices,
   };
@@ -7559,6 +7566,7 @@ function compileCandidate(
   keyedArrayMapPipelineIdentifier: t.Identifier,
   keyedArrayQueuedMapPipelineIdentifier: t.Identifier,
   keyedArrayMapReorderIdentifier: t.Identifier,
+  keyedArrayMappedStructuralIdentifier: t.Identifier,
   keyedArrayPrependIdentifier: t.Identifier,
   keyedArrayPositionIdentifier: t.Identifier,
   keyedArrayBatchInsertIdentifier: t.Identifier,
@@ -7593,6 +7601,7 @@ function compileCandidate(
     keyedArrayMapReorderHints: number;
     keyedArrayMapSortHints: number;
     keyedArrayMapUpdateHints: number;
+    keyedArrayMappedStructuralHints: number;
     keyedArrayQueuedMapUpdateHints: number;
     keyedArrayStructuralReorderHints: number;
     keyedArrayStructuralSortHints: number;
@@ -8074,6 +8083,7 @@ function compileCandidate(
     keyedArrayFilterIdentifier,
     keyedArrayMapPipelineIdentifier,
     keyedArrayMapReorderIdentifier,
+    keyedArrayMappedStructuralIdentifier,
     keyedArrayReorderIdentifier,
     keyedArrayStructuralReorderIdentifier,
     keyedArraySliceIdentifier,
@@ -8119,7 +8129,7 @@ function compileCandidate(
       appliedKeyedMapUpdateHints += reorderPipelineHintedRoot.mapCount;
       appliedPipelineReorderHints =
         reorderPipelineHintedRoot.reorderCount +
-        reorderPipelineHintedRoot.terminalStructuralMapCount;
+        reorderPipelineHintedRoot.terminalStructuralPipelineCount;
       appliedPipelineSliceHints = reorderPipelineHintedRoot.sliceCount;
       appliedPipelineSortHints = reorderPipelineHintedRoot.sortCount;
       appliedPipelineHintedStateIndices = reorderPipelineHintedRoot.stateIndices;
@@ -8134,6 +8144,8 @@ function compileCandidate(
       compilerUsage.keyedArrayMapUpdateHints += reorderPipelineHintedRoot.mapCount;
       compilerUsage.keyedArrayMapReorderHints += reorderPipelineHintedRoot.mapReorderCount;
       compilerUsage.keyedArrayMapSortHints += reorderPipelineHintedRoot.mapSortCount;
+      compilerUsage.keyedArrayMappedStructuralHints +=
+        reorderPipelineHintedRoot.terminalStructuralPipelineCount;
     }
   }
   const reorderHintedRoot = rewriteKeyedArrayReorderHints(
@@ -8660,6 +8672,7 @@ export async function compileReactModule(
     keyedArrayMapReorderHints: 0,
     keyedArrayMapSortHints: 0,
     keyedArrayMapUpdateHints: 0,
+    keyedArrayMappedStructuralHints: 0,
     keyedArrayQueuedMapUpdateHints: 0,
     keyedArrayStructuralReorderHints: 0,
     keyedArrayStructuralSortHints: 0,
@@ -8719,6 +8732,9 @@ export async function compileReactModule(
         );
         const keyedArrayMapReorderIdentifier = programPath.scope.generateUidIdentifier(
           "createCompilerKeyedArrayMapReorder",
+        );
+        const keyedArrayMappedStructuralIdentifier = programPath.scope.generateUidIdentifier(
+          "finalizeCompilerKeyedArrayMappedStructuralUpdate",
         );
         const keyedArrayPrependIdentifier = programPath.scope.generateUidIdentifier(
           "createCompilerKeyedArrayPrepend",
@@ -8783,6 +8799,7 @@ export async function compileReactModule(
             keyedArrayMapPipelineIdentifier,
             keyedArrayQueuedMapPipelineIdentifier,
             keyedArrayMapReorderIdentifier,
+            keyedArrayMappedStructuralIdentifier,
             keyedArrayPrependIdentifier,
             keyedArrayPositionIdentifier,
             keyedArrayBatchInsertIdentifier,
@@ -8850,6 +8867,14 @@ export async function compileReactModule(
                       t.importSpecifier(
                         keyedArrayMapReorderIdentifier,
                         t.identifier("createCompilerKeyedArrayMapReorder"),
+                      ),
+                    ]
+                  : []),
+                ...(compilerUsage.keyedArrayMappedStructuralHints > 0
+                  ? [
+                      t.importSpecifier(
+                        keyedArrayMappedStructuralIdentifier,
+                        t.identifier("finalizeCompilerKeyedArrayMappedStructuralUpdate"),
                       ),
                     ]
                   : []),

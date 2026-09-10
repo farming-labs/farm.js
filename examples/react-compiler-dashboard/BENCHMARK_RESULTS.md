@@ -2,6 +2,39 @@
 
 Latest run: 2026-09-09
 
+## Maps before terminal structural steps — 2026-09-09
+
+A concise keyed-row setter may now run a safe same-key `map()` before a terminal native `filter()`
+or `slice()` without losing its compiler proof. Farm carries mapped-item sources and structural
+survivor indices to the final array, validates the complete result before the first DOM write,
+removes rejected rows, and patches only changed surviving bindings. Unsupported callbacks, changed
+keys, ambiguous ownership, and failed native-method checks still take complete React reconciliation.
+
+The maintained 10,000-row workload changes one row and then filters out another. Its block-bodied
+compiled control performs the same native JavaScript work through complete keyed reconciliation.
+Every value, surviving position, DOM identity, and removed-row connection is checked after every
+sample.
+
+| Mode   | Map + filter | Compiled control | vs React | vs control |
+| ------ | -----------: | ---------------: | -------: | ---------: |
+| Static |      4.50 ms |         10.50 ms |   12.60x |      2.33x |
+| Hybrid |      6.70 ms |         11.20 ms |    8.46x |      1.67x |
+
+Both modes passed the unchanged 2x React and 1.25x compiled-control floors. The complete benchmark
+also passed its correctness oracle, broad 10% regression gate, optimization-persistence gate, every
+existing feature-specific performance gate, and zero compiled owner executions.
+
+Compiler and runtime tests cover map/filter, map/slice, and map/filter/slice pipelines; exact
+survivor DOM identity; one changed-row binding read; controlled-input focus and selection; atomic
+fallback for custom maps and changed keys; Strict Mode hydration; unmount-before-flush cleanup; and
+2,000 randomized mapped terminal-structural transitions matched with normal React. React 18.3.1 and
+19.2.8 compatibility passes, and all isolated optional-runtime gzip fixtures are unchanged.
+
+Numbers are medians from one complete bracketed run: 10 samples per compiler mode and 20 surrounding
+React samples using Chrome 153.0.8010.36, Node.js 23.11.0, and Apple M1 macOS arm64. Timing varies by
+machine; deterministic parity, fallback, DOM-identity, compatibility, and runtime-size checks remain
+the primary safety controls.
+
 ## Terminal structural maps — 2026-09-09
 
 A concise keyed-row setter may now finish an index-independent `filter()` or `slice()` pipeline

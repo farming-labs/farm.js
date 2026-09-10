@@ -1280,8 +1280,8 @@ controlled inputs, focus, and text selection stay attached to their keys. Multip
 map-and-reorder setters queued before one compiler flush compose against the same committed
 collection and expose only the final state.
 
-Safe maps can also appear before or between index-independent filter and slice steps. A final native
-reorder is optional when the concise pipeline ends with a safe map:
+Safe maps can also appear before, between, or after index-independent filter and slice steps. A
+final native reorder is optional:
 
 ```tsx
 setItems((current) =>
@@ -1294,9 +1294,9 @@ setItems((current) =>
 
 setItems((current) =>
   current
+    .map((item) => (item.id === editedId ? { ...item, label: nextLabel } : item))
     .filter((item) => item.visible)
-    .slice(0, limit)
-    .map((item) => (item.id === editedId ? { ...item, label: nextLabel } : item)),
+    .slice(0, limit),
 );
 ```
 
@@ -1304,10 +1304,9 @@ Each callback still evaluates in normal JavaScript order. Farm carries both proo
 pipeline: which committed rows survived and which surviving items replaced their source items. It
 validates every survivor and key before the first DOM write, removes rejected rows, performs LIS
 moves only when a reorder needs them, and patches bindings only for changed survivors. A changed
-item that a later structural step removes needs no row patch. Without a reorder, the last operation
-must be the safe map so its newest lineage reaches the commit. This combined path is limited to one
-concise functional setter. A later structural call, a map after the structural pipeline has
-reordered, structural work split across setter calls, or any failed runtime proof keeps complete
+item that a later structural step removes needs no row patch. This combined path is limited to one
+concise functional setter. A map after the structural pipeline has reordered, structural work split
+across setter calls, unsupported callbacks, changed keys, or any failed runtime proof keeps complete
 reconciliation.
 
 A safe map may also be the final pipeline step:
@@ -2280,10 +2279,11 @@ The package and example test suites verify more than generated code:
   and cover changed-key, custom-method, and Array-subclass fallback, Strict Mode hydration, and
   unmount-before-flush cleanup;
 - 2,000 deterministic mapped structural removals, another 2,000 randomized updates with maps
-  interleaved between filter/slice steps and a final reorder, and 2,000 randomized terminal
-  structural-map row transitions match normal React; targeted tests preserve surviving DOM identity
-  and controlled-input focus/selection, patch only changed survivors, and cover changed-key and
-  custom-method fallback, Strict Mode hydration, and unmount-before-flush cleanup;
+  interleaved between filter/slice steps and a final reorder, 2,000 randomized terminal
+  structural-map transitions, and 2,000 randomized map-before-terminal-filter/slice transitions
+  match normal React; targeted tests preserve surviving DOM identity and controlled-input
+  focus/selection, patch only changed survivors, and cover changed-key and custom-method fallback,
+  Strict Mode hydration, and unmount-before-flush cleanup;
 - 2,000 deterministic native reversals or sorts followed by consecutive same-key edits match normal
   React; targeted tests require exact reversal to use `n - 1` direct DOM moves without a generic
   source-item map, require ambiguous sorting to use one validated keyed reconciliation, and cover

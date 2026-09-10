@@ -876,18 +876,18 @@ export function StandardTableBenchmark() {
           onClick={() => {
             setRows((current) =>
               current
-                .filter((row) => row.id % 10_000 !== 7_001)
                 .map((row) =>
                   row.id % 10_000 === 5_001
                     ? { ...row, amount: row.amount + 1, label: `${row.label} reviewed` }
                     : row,
-                ),
+                )
+                .filter((row) => row.id % 10_000 !== 7_001),
             );
-            setOperation("filter one row and review another");
+            setOperation("review one row, then filter another");
             setRevision((value) => value + 1);
           }}
         >
-          Filter + terminal map
+          Map + terminal filter
         </button>
         <button
           data-action="table-map-structural-reorder-pipeline-snapshot"
@@ -895,18 +895,18 @@ export function StandardTableBenchmark() {
           onClick={() => {
             setRows((current) => {
               return current
-                .filter((row) => row.id % 10_000 !== 7_001)
                 .map((row) =>
                   row.id % 10_000 === 5_001
                     ? { ...row, amount: row.amount + 1, label: `${row.label} reviewed` }
                     : row,
-                );
+                )
+                .filter((row) => row.id % 10_000 !== 7_001);
             });
-            setOperation("filter and review rows (snapshot control)");
+            setOperation("review and filter rows (snapshot control)");
             setRevision((value) => value + 1);
           }}
         >
-          Filter + terminal map (snapshot control)
+          Map + terminal filter (snapshot control)
         </button>
         <button
           data-action="table-map-reorder-pipeline"

@@ -1132,6 +1132,31 @@ export function createCompilerKeyedArraySlice(
   return value;
 }
 
+/** @internal Retains mapped lineage through a compiler-proven terminal filter or slice. */
+export function finalizeCompilerKeyedArrayMappedStructuralUpdate(value: unknown): unknown {
+  try {
+    const valueTarget = compilerObject(value);
+    const structuralUpdate = valueTarget
+      ? COMPILER_KEYED_ARRAY_FILTERS.get(valueTarget)
+      : undefined;
+    const mappedItemSources = structuralUpdate?.mappedItemSources;
+    if (!valueTarget || !structuralUpdate || !mappedItemSources) return value;
+    const source = compilerKeyedArrayFilterSource(structuralUpdate, structuralUpdate.resultLength);
+    if (!source) return value;
+    COMPILER_KEYED_ARRAY_REORDERS.set(valueTarget, {
+      sourceToken: source.sourceToken,
+      sourceLength: source.sourceLength,
+      resultLength: structuralUpdate.resultLength,
+      mapped: true,
+      mappedItemSources,
+      structuralUpdate,
+    });
+  } catch {
+    // Metadata must never change the result of a successful native pipeline.
+  }
+  return value;
+}
+
 /** @internal Records a compiler-proven retained tail followed by incoming keyed rows. */
 export function createCompilerKeyedArrayRollingWindow(
   previous: unknown,
