@@ -2,6 +2,40 @@
 
 Latest run: 2026-09-10
 
+## Queued slice, append, and maps — 2026-09-10
+
+Adjacent keyed-row setters can now retain one positional proof through a bounded `slice()`, one or
+more immutable appends, and one or more immediately following same-key `map()` updates. Previously,
+the map result lost the append lineage and the final commit used complete keyed reconciliation. The
+new path validates the native arrays and every mapped survivor before its first DOM write, removes
+only sliced-away rows, patches only changed survivors, and creates the mapped suffix from its final
+value.
+
+| Mode   | Slice + append + maps | Compiled fallback | vs React | vs fallback |
+| ------ | --------------------: | ----------------: | -------: | ----------: |
+| Static |              16.40 ms |          29.80 ms |    4.24x |       1.82x |
+| Hybrid |              13.60 ms |          22.60 ms |    5.11x |       1.66x |
+
+Both modes passed the 2x React and 1.25x compiled-control floors. The bracketed React median was
+69.55 ms. Every sample verified the final 10,000-row order, complete survivor DOM identity, the
+sliced row's disconnection, the changed survivor's final label and amount, and the final mapped
+suffix. The broad 10% no-regression gate, optimization-persistence gate, and zero-owner-execution
+checks also passed.
+
+Compiler and runtime coverage includes multiple following maps, a mapped incoming suffix,
+changed-key fallback, filters retaining complete reconciliation, controlled-input focus and
+selection, custom and revoked methods, external mutation, Strict Mode, hydration, unmount before
+flush, React 18.3.1 and 19.2.8, and 2,000 randomized transitions matched with normal React. The new
+optional runtime measures 18,408 bytes gzip in its isolated fixture. The older structural-append
+fixture grew by only 23 bytes gzip for the shared instance argument, and the core-only fixture is
+unchanged.
+
+Numbers are medians from a reduced complete-dashboard run with 2 warmups and 7 measured samples per
+compiler action, bracketed by 14 React samples, using Chrome 153.0.8010.36 and Node.js 23.11.0 on
+Apple M1 macOS arm64. Correctness and the new performance gate passed. One unchanged hybrid
+structural-reorder control measured 1.14x against its 1.25x fallback threshold, so the aggregate
+reduced-sample command reported that isolated timing miss rather than a full all-gates pass.
+
 ## Queued removal followed by append — 2026-09-10
 
 Adjacent keyed-row setters may now keep one committed-row proof when an index-independent
