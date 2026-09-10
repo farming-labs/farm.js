@@ -22,6 +22,7 @@ Use the examples folder as executable docs for routing, RSC, agents, docs, markd
 | examples/svelte-renderer        | Svelte 5 routes, SSR, hydration, runes, and a typed FARMJS server call.                         |
 | examples/i18n                   | Typed ICU messages, locale routing, detection, client switching, API context, and RTL.          |
 | examples/docs-integration       | Docs runtime and /api/docs machine routes.                                                      |
+| examples/federation-demo        | Separate producer and host builds with a federated browser component.                           |
 | examples/search-demo            | Static Pagefind indexing, route selection, and a headless React search interface.               |
 | examples/stripe-integration     | Stripe checkout, portal, session, webhooks.                                                     |
 | examples/stripe-integrations/\* | Stripe with Prisma, Drizzle, SQLite, org billing.                                               |
@@ -49,6 +50,7 @@ pnpm --dir examples/basic dev
 | Renderer adapters    | Server HTML, hydration, native client state, and the typed greeting server call.                               |
 | API routes           | Typed callers, validation errors, success responses, and generated types.                                      |
 | Docs integration     | `/docs`, markdown mirrors, docs API routes, page actions, and search.                                          |
+| Browser federation   | Producer manifest, cross-origin loading, shared renderer, failure state, retry, and host callback.             |
 | Static search        | Production indexing, typed browser queries, result navigation, and excluded routes.                            |
 | Stripe               | Products, checkout redirect, portal redirect, session/status reads, and webhook handling.                      |
 | Farm Auth            | Sign-up, sign-in, session read, logout, and authenticated server requests.                                     |

@@ -67,6 +67,16 @@ describe("Farm Vite link delegation", () => {
     expect(delegation).toContain("hasAbsoluteNavigationHref(href)");
     expect(delegation).not.toContain("}, true)");
   });
+
+  it("loads queried client entries used by bootstrap plugins", async () => {
+    const plugin = farmPlugin({});
+    const id = "/@farm/client.js?mf-entry-bootstrap";
+    const resolved = await (plugin.resolveId as (id: string) => Promise<string>)(id);
+    const source = await (plugin.load as (id: string) => Promise<string>)(id);
+
+    expect(resolved).toBe(id);
+    expect(source).toContain("// ====== EVENT DELEGATION FOR LINKS ======");
+  });
 });
 
 describe("Farm Vite type artifacts", () => {

@@ -1,0 +1,25 @@
+{
+  "name": "farm-federation-remote-demo",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "farm dev --port 4101",
+    "build": "farm build --preset node-server",
+    "start": "farm start --port 4101",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@farm.js/core": "workspace:*",
+    "@farm.js/federation": "workspace:*",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@farm.js/cli": "workspace:*",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.5.3",
+    "vite": "^8.1.5"
+  }
+}
