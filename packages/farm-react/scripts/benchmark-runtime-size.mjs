@@ -57,6 +57,8 @@ const [
   keyedAppendOn,
   keyedFilterOff,
   keyedFilterOn,
+  keyedStructuralAppendOff,
+  keyedStructuralAppendOn,
   keyedPrependOff,
   keyedPrependOn,
   keyedPositionOff,
@@ -87,6 +89,8 @@ const [
   bundle("keyed-append.tsx", true),
   bundle("keyed-filter.tsx", false),
   bundle("keyed-filter.tsx", true),
+  bundle("keyed-structural-append.tsx", false),
+  bundle("keyed-structural-append.tsx", true),
   bundle("keyed-prepend.tsx", false),
   bundle("keyed-prepend.tsx", true),
   bundle("keyed-position.tsx", false),
@@ -159,6 +163,13 @@ if (
   !keyedFilterOn.code.includes("filterIndexIndependent")
 ) {
   throw new Error("Keyed filter fixture did not retain its optional filter-hint runtime.");
+}
+if (
+  !keyedStructuralAppendOn.code.includes("FarmCompiledKeyedRows") ||
+  !keyedStructuralAppendOn.code.includes("keyed-rows:structural-append-hinted") ||
+  !keyedStructuralAppendOn.code.includes("filterIndexIndependent")
+) {
+  throw new Error("Keyed structural-append fixture did not retain its isolated composed runtime.");
 }
 if (
   !keyedPrependOn.code.includes("FarmCompiledKeyedRows") ||
@@ -256,6 +267,9 @@ for (const [name, output] of [
   ) {
     throw new Error(`${name} fixture retained the optional prepend-hint runtime.`);
   }
+  if (output.code.includes("keyed-rows:structural-append-hinted")) {
+    throw new Error(`${name} fixture retained the optional structural-append runtime.`);
+  }
   if (output.code.includes("keyed-rows:all-hinted")) {
     throw new Error(`${name} fixture retained the optional rolling-window runtime.`);
   }
@@ -342,6 +356,23 @@ const results = {
         raw: keyedFilterOn.raw - keyedFilterOff.raw,
         gzip: keyedFilterOn.gzip - keyedFilterOff.gzip,
         brotli: keyedFilterOn.brotli - keyedFilterOff.brotli,
+      },
+    },
+    keyedStructuralAppend: {
+      compilerOff: {
+        raw: keyedStructuralAppendOff.raw,
+        gzip: keyedStructuralAppendOff.gzip,
+        brotli: keyedStructuralAppendOff.brotli,
+      },
+      compilerOn: {
+        raw: keyedStructuralAppendOn.raw,
+        gzip: keyedStructuralAppendOn.gzip,
+        brotli: keyedStructuralAppendOn.brotli,
+      },
+      compilerPremium: {
+        raw: keyedStructuralAppendOn.raw - keyedStructuralAppendOff.raw,
+        gzip: keyedStructuralAppendOn.gzip - keyedStructuralAppendOff.gzip,
+        brotli: keyedStructuralAppendOn.brotli - keyedStructuralAppendOff.brotli,
       },
     },
     keyedPrepend: {
@@ -534,6 +565,13 @@ if (checkOnly) {
       name: "keyed filter compiler premium",
       current: results.fixtures.keyedFilter.compilerPremium.gzip,
       maximum: (reference.fixtures.keyedFilter?.compilerPremium.gzip ?? 12_000) + 264,
+    },
+    {
+      name: "keyed structural-append compiler premium",
+      current: results.fixtures.keyedStructuralAppend.compilerPremium.gzip,
+      maximum:
+        (reference.fixtures.keyedStructuralAppend?.compilerPremium.gzip ??
+          results.fixtures.keyedStructuralAppend.compilerPremium.gzip) + 256,
     },
     {
       name: "keyed prepend compiler premium",

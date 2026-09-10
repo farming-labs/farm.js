@@ -966,6 +966,33 @@ normal React behavior; the syntax does not opt the component into a different co
 The compiler report exposes emitted sites as `keyedArrayAppendHints`, and the hinted runtime is
 retained only when a module emits at least one append or same-order map hint.
 
+Adjacent removal and append setters can share the same committed-row proof:
+
+```tsx
+setItems((current) => current.filter((item) => item.id !== expiredId));
+setItems((current) => [...current, incoming]);
+
+setItems((current) => current.slice(start, end));
+setItems((current) => [...current, ...incoming]);
+```
+
+The setters still execute in order and still create their normal native arrays. Before changing the
+DOM, Farm validates the original committed token, every filter or slice survivor, the complete final
+length, and every incoming key. It prepares all incoming keys, descriptors, bindings, and detached
+host rows first; only then does it remove rejected rows, update survivor indexes, and append the new
+suffix in one fragment. Existing survivors are neither rebound nor recreated, and additional
+adjacent append setters are collapsed into the same final suffix. This keeps the unavoidable native
+filter or slice work while removing the keyed runtime's second full scan.
+
+Only concise updater results that form one direct chain for the same state array are linked. The row
+and key must be compiler-owned and index-independent. A map or reorder between the structural step
+and append, an unhinted update to that state, another dirty row dependency, collection-reading
+binding, custom, sparse, or subclassed array, nested or React-owned row, duplicate final key, or
+reuse of any committed key in the appended suffix keeps complete React reconciliation before a DOM
+write. No API or configuration is added. Compiler reports use the existing
+`keyedArrayFilterHints`, `keyedArraySliceHints`, and `keyedArrayAppendHints` counts, and modules
+without both accepted operations omit the composed runtime.
+
 #### Keyed array prepend hints
 
 A direct keyed `useState` array can avoid rescanning every existing row when new items are inserted
@@ -2294,6 +2321,10 @@ The package and example test suites verify more than generated code:
 - 2,000 deterministic keyed-array appends match normal React; targeted tests require key,
   descriptor, and binding reads to equal only the appended suffix and cover queued updates,
   multi-boundary sharing, StrictMode hydration/unmount, and conservative fallback;
+- 2,000 randomized queued filter-or-slice then append transitions match normal React; targeted
+  tests require survivor DOM identity, suffix-only descriptor and binding reads, controlled-input
+  focus and selection, multi-boundary sharing, Strict Mode hydration, nested unmount cleanup,
+  removed-key reuse fallback, and atomic validation before mutation;
 - 2,000 deterministic keyed-array prepends match normal React; targeted tests require key,
   descriptor, and binding reads to equal only the inserted prefix, preserve every existing DOM
   row, update delegated event indexes, and cover queued updates, StrictMode hydration, unmount,

@@ -15,6 +15,7 @@ interface CompilerKeyedArrayAppendHint {
   readonly sourceToken: object;
   readonly startIndex: number;
   readonly resultLength: number;
+  readonly structuralUpdate?: CompilerKeyedArrayFilterHint;
   readonly previous?: CompilerKeyedArrayAppendHint;
 }
 
@@ -250,6 +251,60 @@ function compilerKeyedArrayAppendStart(
     length = current.resultLength;
   }
   return length === value.length ? expectedStart : undefined;
+}
+
+function compilerKeyedArrayStructuralAppendUpdate(
+  value: unknown,
+  sourceToken: object | undefined,
+  expectedStart: number,
+):
+  | {
+      readonly startIndex: number;
+      readonly structuralUpdate?: CompilerKeyedArrayFilterHint;
+      readonly structuralSurvivors?: {
+        readonly indices: readonly number[];
+        readonly keysStable: boolean;
+      };
+    }
+  | undefined {
+  const target = compilerObject(value);
+  if (!target || !sourceToken || !Array.isArray(value)) return undefined;
+  const update = COMPILER_KEYED_ARRAY_APPENDS.get(target);
+  if (!update || update.sourceToken !== sourceToken) return undefined;
+  const updates: CompilerKeyedArrayAppendHint[] = [];
+  for (
+    let current: CompilerKeyedArrayAppendHint | undefined = update;
+    current;
+    current = current.previous
+  ) {
+    if (current.sourceToken !== sourceToken) return undefined;
+    updates.push(current);
+  }
+  updates.reverse();
+  const structuralUpdate = update.structuralUpdate;
+  const first = updates[0];
+  const survivorResult = structuralUpdate
+    ? compilerKeyedArrayFilterSurvivorsFromUpdate(
+        structuralUpdate,
+        sourceToken,
+        expectedStart,
+        first.startIndex,
+      )
+    : undefined;
+  if (structuralUpdate && !survivorResult) return undefined;
+  let length = structuralUpdate ? first.startIndex : expectedStart;
+  const startIndex = length;
+  for (const current of updates) {
+    if (current.startIndex !== length || current.resultLength < length) return undefined;
+    length = current.resultLength;
+  }
+  return length === value.length
+    ? {
+        startIndex,
+        structuralUpdate,
+        ...(survivorResult ? { structuralSurvivors: survivorResult } : {}),
+      }
+    : undefined;
 }
 
 function compilerKeyedArrayFilterSurvivors(
@@ -924,6 +979,59 @@ export function createCompilerKeyedArrayAppend(previous: unknown, value: unknown
       sourceToken: previousUpdate?.sourceToken || sourceToken,
       startIndex,
       resultLength: value.length,
+      ...(previousUpdate ? { previous: previousUpdate } : {}),
+    });
+    return value;
+  } catch {
+    // Metadata must never change the behavior of an otherwise valid update.
+    return value;
+  }
+}
+
+/** @internal Records an append that may follow a compiler-proven structural update. */
+export function createCompilerKeyedArrayStructuralAppend(
+  previous: unknown,
+  value: unknown,
+): unknown {
+  try {
+    const previousTarget = compilerObject(previous);
+    const valueTarget = compilerObject(value);
+    if (
+      !previousTarget ||
+      !valueTarget ||
+      !Array.isArray(previous) ||
+      !Array.isArray(value) ||
+      Object.getPrototypeOf(previous) !== NATIVE_ARRAY_PROTOTYPE ||
+      Object.getPrototypeOf(value) !== NATIVE_ARRAY_PROTOTYPE ||
+      previous[Symbol.iterator] !== NATIVE_ARRAY_ITERATOR
+    ) {
+      return value;
+    }
+    const startIndex = previous.length;
+    if (value.length < startIndex) return value;
+    const committedSource = COMPILER_KEYED_COMMITTED_COLLECTIONS.has(previousTarget);
+    const previousUpdate = committedSource
+      ? undefined
+      : COMPILER_KEYED_ARRAY_APPENDS.get(previousTarget);
+    const directStructuralUpdate =
+      !committedSource && !previousUpdate
+        ? COMPILER_KEYED_ARRAY_FILTERS.get(previousTarget)
+        : undefined;
+    const structuralSource = directStructuralUpdate
+      ? compilerKeyedArrayFilterSource(directStructuralUpdate, previous.length)
+      : undefined;
+    const structuralUpdate =
+      previousUpdate?.structuralUpdate || (structuralSource ? directStructuralUpdate : undefined);
+    const sourceToken =
+      previousUpdate?.sourceToken ||
+      structuralSource?.sourceToken ||
+      compilerKeyedCollectionToken(previousTarget);
+    if (!sourceToken) return value;
+    COMPILER_KEYED_ARRAY_APPENDS.set(valueTarget, {
+      sourceToken,
+      startIndex,
+      resultLength: value.length,
+      ...(structuralUpdate ? { structuralUpdate } : {}),
       ...(previousUpdate ? { previous: previousUpdate } : {}),
     });
     return value;
@@ -5011,6 +5119,11 @@ const keyedWindowEveryUpdateRuntime: KeyedUpdateRuntime = {
   position: reconcileCompilerKeyedArrayPositionWithWindow,
 };
 
+const keyedWindowEveryStructuralAppendUpdateRuntime: KeyedUpdateRuntime = {
+  ...keyedWindowEveryUpdateRuntime,
+  append: reconcileCompilerKeyedArrayAppendWithStructural,
+};
+
 interface KeyedRowsRuntimeOptions {
   conditionals?: KeyedRowConditionalRuntime;
   hostBlocks?: KeyedRowHostRuntime;
@@ -5267,6 +5380,115 @@ function reconcileCompilerKeyedArrayAppend(
     root.append(fragment);
   }
   return nextInstances;
+}
+
+function reconcileCompilerKeyedArrayStructuralAppend(
+  props: CompilerKeyedRowsBlockProps,
+  dirtyState: ReadonlySet<number>,
+  collectionToken: object | undefined,
+  instances: ReadonlyMap<string, CompilerKeyedRowInstance>,
+  root: Element,
+  reactOwnedRows: boolean,
+): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined {
+  if (
+    reactOwnedRows ||
+    props.hostBlocks ||
+    (props.conditionals?.length || 0) > 0 ||
+    !props.filterIndexIndependent ||
+    props.collectionDependency === undefined
+  ) {
+    return undefined;
+  }
+  const collectionDependency = props.collectionDependency;
+  if (props.bindings.some((binding) => binding.dependencies?.includes(collectionDependency))) {
+    return undefined;
+  }
+  const dependencies = props.dependencies || props.structureDependencies;
+  const relevantDirty = (dependencies || []).filter((index) => dirtyState.has(index));
+  if (relevantDirty.length !== 1 || relevantDirty[0] !== collectionDependency) {
+    return undefined;
+  }
+
+  const finalValue = props.items();
+  const update = compilerKeyedArrayStructuralAppendUpdate(
+    finalValue,
+    collectionToken,
+    instances.size,
+  );
+  const structuralUpdate = update?.structuralUpdate;
+  const survivorResult = update?.structuralSurvivors;
+  if (
+    !update ||
+    !structuralUpdate ||
+    !survivorResult ||
+    structuralUpdate.mappedItemSources ||
+    !Array.isArray(finalValue)
+  ) {
+    return undefined;
+  }
+
+  const previousInstances = [...instances.values()];
+  const survivors: CompilerKeyedRowInstance[] = [];
+  const knownKeys = new Set(instances.keys());
+  const appended: CompilerKeyedRowInstance[] = [];
+  try {
+    for (let index = 0; index < survivorResult.indices.length; index += 1) {
+      const sourceIndex = survivorResult.indices[index];
+      const instance = previousInstances[sourceIndex];
+      const item = finalValue[index];
+      if (
+        !instance ||
+        instance.index !== sourceIndex ||
+        !Object.is(instance.item, item) ||
+        (!survivorResult.keysStable && keyedRowIdentity(props.rowKey(item, index)) !== instance.key)
+      ) {
+        return undefined;
+      }
+      survivors.push(instance);
+    }
+    for (let index = update.startIndex; index < finalValue.length; index += 1) {
+      const item = finalValue[index];
+      const key = keyedRowIdentity(props.rowKey(item, index));
+      // A new suffix row that reuses any committed key must take complete
+      // reconciliation so React can preserve that row's existing identity.
+      if (knownKeys.has(key)) return undefined;
+      knownKeys.add(key);
+      const descriptor = props.create(item, index);
+      appended.push({
+        key,
+        element: createCompilerHostElement(root.ownerDocument, descriptor),
+        values: readKeyedRowBindingValues(props, item, index),
+        item,
+        index,
+        conditionalValues: EMPTY_KEYED_ROW_CONDITIONAL_VALUES,
+      });
+    }
+  } catch {
+    return undefined;
+  }
+
+  const survivorSet = new Set(survivorResult.indices);
+  for (let index = 0; index < previousInstances.length; index += 1) {
+    if (survivorSet.has(index)) continue;
+    previousInstances[index].scope?.cleanup();
+    previousInstances[index].element.remove();
+  }
+  for (let index = 0; index < survivors.length; index += 1) survivors[index].index = index;
+  if (appended.length > 0) {
+    const fragment = root.ownerDocument.createDocumentFragment();
+    for (const instance of appended) fragment.append(instance.element);
+    root.append(fragment);
+  }
+  return keyedRowInstancesByKey([...survivors, ...appended]);
+}
+
+function reconcileCompilerKeyedArrayAppendWithStructural(
+  ...args: Parameters<typeof reconcileCompilerKeyedArrayAppend>
+): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined {
+  return (
+    reconcileCompilerKeyedArrayStructuralAppend(...args) ||
+    reconcileCompilerKeyedArrayAppend(...args)
+  );
 }
 
 function reconcileCompilerKeyedArrayRollingWindow(
@@ -8208,6 +8430,15 @@ export const keyedRowsFilterHintedRuntimeFeature: CompilerRuntimeFeature = {
   }),
 };
 
+export const keyedRowsStructuralAppendHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:structural-append-hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner, {
+      keyedUpdates: keyedWindowEveryStructuralAppendUpdateRuntime,
+    }),
+  }),
+};
+
 export const keyedRowsPrependHintedRuntimeFeature: CompilerRuntimeFeature = {
   name: "keyed-rows:prepend-hinted",
   create: (owner) => ({
@@ -8331,6 +8562,16 @@ export const keyedRowsConditionalFilterHintedRuntimeFeature: CompilerRuntimeFeat
     KeyedRows: createKeyedRowsBlockComponent(owner, {
       conditionals: createKeyedRowConditionalRuntime(),
       keyedUpdates: keyedFilterUpdateRuntime,
+    }),
+  }),
+};
+
+export const keyedRowsConditionalStructuralAppendHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:conditional:structural-append-hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner, {
+      conditionals: createKeyedRowConditionalRuntime(),
+      keyedUpdates: keyedWindowEveryStructuralAppendUpdateRuntime,
     }),
   }),
 };
@@ -8460,6 +8701,16 @@ export const keyedRowsHostFilterHintedRuntimeFeature: CompilerRuntimeFeature = {
     KeyedRows: createKeyedRowsBlockComponent(owner, {
       hostBlocks: createKeyedRowHostRuntime(),
       keyedUpdates: keyedFilterUpdateRuntime,
+    }),
+  }),
+};
+
+export const keyedRowsHostStructuralAppendHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:host:structural-append-hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner, {
+      hostBlocks: createKeyedRowHostRuntime(),
+      keyedUpdates: keyedWindowEveryStructuralAppendUpdateRuntime,
     }),
   }),
 };
@@ -8600,6 +8851,17 @@ export const keyedRowsCompleteFilterHintedRuntimeFeature: CompilerRuntimeFeature
       conditionals: createKeyedRowConditionalRuntime(),
       hostBlocks: createKeyedRowHostRuntime(),
       keyedUpdates: keyedFilterUpdateRuntime,
+    }),
+  }),
+};
+
+export const keyedRowsCompleteStructuralAppendHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:complete:structural-append-hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner, {
+      conditionals: createKeyedRowConditionalRuntime(),
+      hostBlocks: createKeyedRowHostRuntime(),
+      keyedUpdates: keyedWindowEveryStructuralAppendUpdateRuntime,
     }),
   }),
 };

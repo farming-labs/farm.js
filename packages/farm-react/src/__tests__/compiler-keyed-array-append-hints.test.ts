@@ -69,6 +69,75 @@ describe("React AOT keyed-array append hints", () => {
     expect(result.code).toContain("collectionDependency={0}");
   });
 
+  it("emits composable filter and append hints for adjacent queued setters", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Inventory({ expiredId, incoming }) {
+        const [rows, setRows] = useState([{ id: "a", label: "Alpha" }]);
+        return <main>
+          <button onClick={() => {
+            setRows((current) => current.filter((row) => row.id !== expiredId));
+            setRows((current) => [...current, incoming]);
+          }}>
+            Replace expired row
+          </button>
+          <button onClick={() => setRows((current) => current.toReversed())}>Reverse</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </main>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Inventory"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.optimizations.keyedArrayFilterHints).toBe(1);
+    expect(result.optimizations.keyedArrayAppendHints).toBe(1);
+    expect(result.optimizations.keyedArrayReorderHints).toBe(1);
+    expect(result.code).toContain("createCompilerKeyedArrayFilter");
+    expect(result.code).toContain("createCompilerKeyedArrayStructuralAppend");
+    expect(result.code).toContain("keyedRowsStructuralAppendHintedRuntimeFeature");
+    expect(result.code).not.toContain("keyedRowsFilterHintedRuntimeFeature");
+    await expect(
+      transformWithEsbuild(result.code, "/app/KeyedArrayAppendHints.tsx", {
+        loader: "tsx",
+        jsx: "automatic",
+      }),
+    ).resolves.toMatchObject({
+      code: expect.stringContaining("createCompilerKeyedArrayAppend"),
+    });
+  });
+
+  it("links a bounded slice to multiple following append setters", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Inventory({ incoming, extra }) {
+        const [rows, setRows] = useState([
+          { id: "a", label: "Alpha" },
+          { id: "b", label: "Beta" },
+          { id: "c", label: "Gamma" },
+          { id: "d", label: "Delta" },
+        ]);
+        return <main>
+          <button onClick={() => {
+            setRows((current) => current.slice(1, 3));
+            setRows((current) => [...current, incoming]);
+            setRows((current) => [...current, extra]);
+          }}>
+            Replace edges
+          </button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </main>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Inventory"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.optimizations.keyedArraySliceHints).toBe(1);
+    expect(result.optimizations.keyedArrayAppendHints).toBe(2);
+    expect(result.code).toContain("createCompilerKeyedArraySlice");
+    expect(result.code).toContain("createCompilerKeyedArrayStructuralAppend");
+    expect(result.code).toContain("keyedRowsStructuralAppendHintedRuntimeFeature");
+  });
+
   it("does not hint a collection when an existing row key reads its length", async () => {
     const result = await compile(`
       import { useState } from "react";

@@ -1198,6 +1198,42 @@ async function measureTrial(browser, trial, compilerMode, port) {
             ),
         );
 
+        const measureStructuralAppend = async (action) => {
+          const rows = [...table.querySelectorAll("tbody tr")];
+          const removed = rows.find(
+            (row) => Number(row.getAttribute("data-row-id")) % 10_000 === 7_001,
+          );
+          if (!removed) throw new Error("Queued structural-append source row is missing.");
+          const survivors = rows.filter((row) => row !== removed);
+          await runTableAction(action, () => {
+            const nextRows = [...table.querySelectorAll("tbody tr")];
+            const appended = nextRows.at(-1);
+            return (
+              nextRows.length === 10_000 &&
+              rowsMatch(nextRows.slice(0, -1), survivors) &&
+              appended?.querySelector("td:nth-child(2)")?.textContent === "queued incoming row" &&
+              !rows.includes(appended) &&
+              !removed.isConnected
+            );
+          });
+        };
+
+        const tableStructuralAppendQueued = await measureTable(
+          async () => create10000(),
+          async () =>
+            measureStructuralAppend(() =>
+              tableButton("table-structural-append-queued").click(),
+            ),
+        );
+
+        const tableStructuralAppendQueuedSnapshot = await measureTable(
+          async () => create10000(),
+          async () =>
+            measureStructuralAppend(() =>
+              tableButton("table-structural-append-queued-snapshot").click(),
+            ),
+        );
+
         const prepareMapStructuralReorderPipeline = async () => {
           await create10000();
           const rows = [...table.querySelectorAll("tbody tr")];
@@ -1955,6 +1991,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
             executionsAdded: Number(tableExecutions.textContent) - initialTableExecutions,
             filterReorderPipeline: tableFilterReorderPipeline,
             filterReorderPipelineSnapshot: tableFilterReorderPipelineSnapshot,
+            structuralAppendQueued: tableStructuralAppendQueued,
+            structuralAppendQueuedSnapshot: tableStructuralAppendQueuedSnapshot,
             mapStructuralReorderPipeline: tableMapStructuralReorderPipeline,
             mapStructuralReorderPipelineSnapshot: tableMapStructuralReorderPipelineSnapshot,
             mapReorderPipeline: tableMapReorderPipeline,
@@ -2099,6 +2137,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
         executionsAdded: result.table.executionsAdded,
         filterReorderPipeline: timingSummary(result.table.filterReorderPipeline),
         filterReorderPipelineSnapshot: timingSummary(result.table.filterReorderPipelineSnapshot),
+        structuralAppendQueued: timingSummary(result.table.structuralAppendQueued),
+        structuralAppendQueuedSnapshot: timingSummary(result.table.structuralAppendQueuedSnapshot),
         mapStructuralReorderPipeline: timingSummary(result.table.mapStructuralReorderPipeline),
         mapStructuralReorderPipelineSnapshot: timingSummary(
           result.table.mapStructuralReorderPipelineSnapshot,
@@ -2314,6 +2354,8 @@ const tableMetrics = [
   "denseMapLookup",
   "filterReorderPipeline",
   "filterReorderPipelineSnapshot",
+  "structuralAppendQueued",
+  "structuralAppendQueuedSnapshot",
   "mapStructuralReorderPipeline",
   "mapStructuralReorderPipelineSnapshot",
   "mapReorderPipeline",
@@ -2972,6 +3014,29 @@ const keyedStructuralReorderRegressions = keyedStructuralReorderResults.filter(
     !Number.isFinite(snapshotSpeedup) ||
     snapshotSpeedup < keyedStructuralReorderMinimumSnapshotSpeedup,
 );
+// A filter or bounded slice followed by an adjacent immutable append keeps the same committed
+// source. The hinted path should remove only rejected rows, create only the final suffix, and stay
+// ahead of React and the equivalent block-bodied compiled control at 10,000 rows.
+const keyedStructuralAppendMinimumSpeedup = 2;
+const keyedStructuralAppendMinimumSnapshotSpeedup = 1.25;
+const keyedStructuralAppendResults = ["static", "hybrid"].map((mode) => {
+  const pipelineMedianMs = comparisons.table.structuralAppendQueued[mode].medianMs;
+  const snapshotMedianMs = comparisons.table.structuralAppendQueuedSnapshot[mode].medianMs;
+  return {
+    mode,
+    pipelineMedianMs,
+    snapshotMedianMs,
+    snapshotSpeedup: snapshotMedianMs / pipelineMedianMs,
+    speedup: comparisons.table.structuralAppendQueued[`${mode}VsBaseline`].speedup,
+  };
+});
+const keyedStructuralAppendRegressions = keyedStructuralAppendResults.filter(
+  ({ snapshotSpeedup, speedup }) =>
+    !Number.isFinite(speedup) ||
+    speedup < keyedStructuralAppendMinimumSpeedup ||
+    !Number.isFinite(snapshotSpeedup) ||
+    snapshotSpeedup < keyedStructuralAppendMinimumSnapshotSpeedup,
+);
 // A safe filter, terminal map, and two native reverses in adjacent setters change membership and
 // row data while restoring the survivor order in one queued commit. The combined path must remove
 // the rejected row, patch the changed survivor, and retain structural lineage through both reorder
@@ -3387,6 +3452,7 @@ const passed =
   keyedQueuedReorderRegressions.length === 0 &&
   keyedReorderPipelineRegressions.length === 0 &&
   keyedStructuralReorderRegressions.length === 0 &&
+  keyedStructuralAppendRegressions.length === 0 &&
   keyedMappedStructuralReorderRegressions.length === 0 &&
   keyedMapReorderRegressions.length === 0 &&
   keyedMultiMapReorderRegressions.length === 0 &&
@@ -3562,6 +3628,13 @@ const report = {
     regressions: keyedStructuralReorderRegressions,
     results: keyedStructuralReorderResults,
     status: keyedStructuralReorderRegressions.length === 0 ? "PASS" : "FAIL",
+  },
+  keyedStructuralAppendHintGate: {
+    minimumSnapshotSpeedup: keyedStructuralAppendMinimumSnapshotSpeedup,
+    minimumSpeedup: keyedStructuralAppendMinimumSpeedup,
+    regressions: keyedStructuralAppendRegressions,
+    results: keyedStructuralAppendResults,
+    status: keyedStructuralAppendRegressions.length === 0 ? "PASS" : "FAIL",
   },
   keyedMappedStructuralReorderHintGate: {
     minimumSnapshotSpeedup: keyedMappedStructuralReorderMinimumSnapshotSpeedup,

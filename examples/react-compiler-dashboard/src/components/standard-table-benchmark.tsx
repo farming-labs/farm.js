@@ -871,6 +871,48 @@ export function StandardTableBenchmark() {
           Filter + reorder pipeline (snapshot control)
         </button>
         <button
+          data-action="table-structural-append-queued"
+          type="button"
+          onClick={() => {
+            const incoming = {
+              id: (seed + 1_000_000) * 10_000 + 1,
+              label: "queued incoming row",
+              amount: 2_048,
+              region: "AMR" as const,
+              status: "review" as const,
+            };
+            setRows((current) => current.filter((row) => row.id % 10_000 !== 7_001));
+            setRows((current) => [...current, incoming]);
+            setOperation("remove and append across queued setters");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queued remove + append
+        </button>
+        <button
+          data-action="table-structural-append-queued-snapshot"
+          type="button"
+          onClick={() => {
+            const incoming = {
+              id: (seed + 1_000_000) * 10_000 + 1,
+              label: "queued incoming row",
+              amount: 2_048,
+              region: "AMR" as const,
+              status: "review" as const,
+            };
+            setRows((current) => {
+              return current.filter((row) => row.id % 10_000 !== 7_001);
+            });
+            setRows((current) => {
+              return [...current, incoming];
+            });
+            setOperation("remove and append across queued setters (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queued remove + append (snapshot control)
+        </button>
+        <button
           data-action="table-map-structural-reorder-pipeline"
           type="button"
           onClick={() => {
