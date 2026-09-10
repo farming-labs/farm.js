@@ -59,6 +59,8 @@ A compact map of the main package exports and where to learn more.
 | `@farm.js/core/router`                                                        | `createFarmRouter`, `matchFarmRoute`, `buildFarmRoutePath`, `isFarmRouteActive`.                           |
 | `@farm.js/core/storage`                                                       | `sqliteStorage`, `postgresStorage`, `redisStorage`, `createStorageClient`, `defineStorageClient`.          |
 | `@farm.js/cache-redis`                                                        | `redisCache` distributed cache adapter.                                                                    |
+| `@farm.js/federation`                                                         | `federation` build plugin for browser Module Federation producers and hosts.                               |
+| `@farm.js/federation/client`                                                  | Typed `loadRemote` and `preloadRemote` browser helpers.                                                    |
 | `@farm.js/search`                                                             | `search` build plugin and the headless `createSearch` browser client.                                      |
 | `@farm.js/core/after`                                                         | `after` for short work that starts after the current response finishes.                                    |
 | `@farm.js/stripe`, `@farm.js/polar`, `@farm.js/autumn`                        | Dedicated billing integration packages.                                                                    |

@@ -2600,7 +2600,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
         return id;
       }
 
-      if (id === "/@farm/client" || id === "/@farm/client.js") {
+      if (isFarmClientVirtualId(id)) {
         return id;
       }
 
@@ -2630,7 +2630,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
         return generateProgrammaticRouteModule(id, server?.config.root || options.root, renderer);
       }
 
-      if (id === "/@farm/client" || id === "/@farm/client.js") {
+      if (isFarmClientVirtualId(id)) {
         const resolvedConfig = farmApp?.getConfig();
         const renderer = resolvedConfig?.renderer || resolveFarmRenderer(options.renderer);
         const integrations = resolvedConfig?.integrations || options.integrations;
@@ -3218,6 +3218,11 @@ if (import.meta.hot) {
       return modules;
     },
   };
+}
+
+function isFarmClientVirtualId(id: string): boolean {
+  const pathname = id.split("?", 1)[0];
+  return pathname === "/@farm/client" || pathname === "/@farm/client.js";
 }
 
 function generateProgrammaticRouteModule(
