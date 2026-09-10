@@ -50,6 +50,20 @@ describe("resolveAnalyzerOptions", () => {
     expect(() => resolveAnalyzerOptions({ metric: "zip" as never })).toThrow("metric");
     expect(() => resolveAnalyzerOptions({ json: " " })).toThrow("non-empty path");
   });
+
+  it("keeps HTML and JSON reports inside the project root", () => {
+    for (const output of [
+      "/tmp/report.html",
+      "../report.html",
+      "reports/../../report.html",
+      "C:\\reports\\report.html",
+      "C:report.html",
+      "\\\\server\\share\\report.html",
+    ]) {
+      expect(() => resolveAnalyzerOptions({ output })).toThrow();
+      expect(() => resolveAnalyzerOptions({ json: output })).toThrow();
+    }
+  });
 });
 
 describe("parseAnalyzerSize", () => {

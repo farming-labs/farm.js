@@ -1,3 +1,5 @@
+import path from "node:path";
+
 export type AnalyzerMetric = "raw" | "gzip" | "brotli";
 export type AnalyzerLimitAction = "error" | "warn";
 export type AnalyzerSize = number | `${number}${"b" | "kb" | "mb" | "gb"}`;
@@ -122,5 +124,15 @@ function normalizeOutput(value: string | false, label: string): string | false {
   if (value === false) return false;
   const normalized = value.trim();
   if (!normalized) throw new TypeError(`Analyzer ${label} must be a non-empty path`);
+  if (
+    path.posix.isAbsolute(normalized) ||
+    path.win32.isAbsolute(normalized) ||
+    /^[a-z]:/i.test(normalized)
+  ) {
+    throw new TypeError(`Analyzer ${label} must be relative to the project root`);
+  }
+  if (normalized.replace(/\\/g, "/").split("/").includes("..")) {
+    throw new TypeError(`Analyzer ${label} cannot contain parent path segments`);
+  }
   return normalized;
 }
