@@ -178,6 +178,16 @@ async function resolveFarmDeployContext(options: DeployFarmOptions) {
   });
   const preset = deployConfig.preset || getPresetForDeployTarget(platform) || "node-server";
   const nitroOutput = resolveDeployOutputPath(root, deployConfig.outputDir);
+  if (
+    platform === "vercel" &&
+    path.resolve(nitroOutput) !== path.resolve(root, ".vercel", "output")
+  ) {
+    throw new FarmDeployError(
+      "INVALID_BUILD_OUTPUT",
+      "vercel",
+      `Vercel prebuilt deploys require output at ${path.resolve(root, ".vercel", "output")}. Remove the custom deploy outputDir or deploy that output with your own upload workflow.`,
+    );
+  }
   const cloudflareAgent =
     platform === "cloudflare"
       ? resolveCloudflareAgentDeployPlan(root) ||
