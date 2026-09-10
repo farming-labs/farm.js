@@ -217,6 +217,42 @@ test("recognizes Vue pages and creates a Vue root layout", async () => {
   }
 });
 
+test("recognizes routes using the configured renderer extension", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "farm-cli-doctor-svelte-"));
+
+  try {
+    await mkdir(path.join(root, "src/app"), { recursive: true });
+    await writeFile(
+      path.join(root, "package.json"),
+      JSON.stringify({ name: "svelte-doctor", dependencies: { "@farm.js/core": "workspace:*" } }),
+    );
+    await writeFile(
+      path.join(root, "farm.config.mjs"),
+      `export default {
+  renderer: {
+    name: "svelte",
+    vite: "@farm.js/svelte/vite",
+    server: "@farm.js/svelte/server",
+    client: "@farm.js/svelte/client",
+    componentExtensions: [".svelte"],
+  },
+};
+`,
+    );
+    await writeFile(path.join(root, "src/app/page.svelte"), "<main>Svelte</main>\n");
+    await writeFile(path.join(root, "src/app/layout.svelte"), "<slot />\n");
+
+    const report = await runFarmDoctor({ root, offline: true });
+
+    assert.ok(report.checks.some((check) => check.code === "APP_ROUTER_READY"));
+    assert.ok(report.checks.some((check) => check.code === "ROOT_LAYOUT_READY"));
+    assert.ok(!report.checks.some((check) => check.code === "NO_PAGE_ROUTES"));
+    assert.ok(!report.checks.some((check) => check.code === "ROOT_LAYOUT_MISSING"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("applies safe fixes inside a configured project root", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "farm-cli-doctor-root-"));
   const projectRoot = path.join(root, "application");

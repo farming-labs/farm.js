@@ -455,11 +455,19 @@ function collectPackageCheck(root: string, checks: FarmDoctorCheck[]): void {
 function collectRouterChecks(config: ResolvedFarmConfig, checks: FarmDoctorCheck[]): void {
   const sources = getFarmSourceRoots(config);
   const appDirectories = sources.map((source) => path.join(source.root, source.srcDir, "app"));
-  const hasPages = appDirectories.some((directory) =>
-    containsFile(directory, /^page\.(?:ts|tsx|js|jsx|vue|md|mdx)$/),
-  );
+  const routeExtensions = [
+    ...new Set([
+      ...ROUTE_EXTENSIONS,
+      ...(config.renderer.componentExtensions ?? []).map((extension) =>
+        extension.replace(/^\./, ""),
+      ),
+    ]),
+  ];
+  const pageFilePattern = new RegExp(`^page\\.(?:${routeExtensions.map(escapeRegExp).join("|")})$`);
+  const suggestedRouteExtension = config.renderer.componentExtensions?.[0] || ".tsx";
+  const hasPages = appDirectories.some((directory) => containsFile(directory, pageFilePattern));
   const hasProgrammaticRoutes = sources.some((source) =>
-    ROUTE_EXTENSIONS.some((extension) =>
+    routeExtensions.some((extension) =>
       existsSync(path.join(source.root, source.srcDir, `farm.routes.${extension}`)),
     ),
   );
@@ -476,14 +484,13 @@ function collectRouterChecks(config: ResolvedFarmConfig, checks: FarmDoctorCheck
           code: "NO_PAGE_ROUTES",
           title: "No page routes were found",
           message: `Farm found no page modules under ${config.srcDir}/app.`,
-          action: `Add ${config.srcDir}/app/page.tsx or ${config.srcDir}/farm.routes.tsx.`,
+          action: `Add ${config.srcDir}/app/page${suggestedRouteExtension} or ${config.srcDir}/farm.routes${suggestedRouteExtension}.`,
         },
   );
 
   const hasRootLayout = appDirectories.some((directory) =>
-    ROUTE_EXTENSIONS.some((extension) => existsSync(path.join(directory, `layout.${extension}`))),
+    routeExtensions.some((extension) => existsSync(path.join(directory, `layout.${extension}`))),
   );
-  const suggestedLayoutExtension = config.renderer.componentExtensions?.[0] || ".tsx";
   checks.push(
     hasRootLayout
       ? {
@@ -497,9 +504,13 @@ function collectRouterChecks(config: ResolvedFarmConfig, checks: FarmDoctorCheck
           code: "ROOT_LAYOUT_MISSING",
           title: "Root layout is missing",
           message: "The application has no shared root layout.",
-          action: `Add ${config.srcDir}/app/layout${suggestedLayoutExtension}.`,
+          action: `Add ${config.srcDir}/app/layout${suggestedRouteExtension}.`,
         },
   );
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function collectDeploymentChecks(
