@@ -148,9 +148,47 @@ export async function resolveFarmAuthIntegration(
 
 function normalizeBasePath(value: string | undefined): string {
   const route = (value || "/api/auth").trim();
+  if (!route) return "/api/auth";
+  assertStableBasePath(route);
   const withLeadingSlash = route.startsWith("/") ? route : `/${route}`;
   const normalized = withLeadingSlash.replace(/\/+/g, "/").replace(/\/+$/, "");
   return normalized || "/api/auth";
+}
+
+function assertStableBasePath(route: string): void {
+  if (route.includes("?") || route.includes("#")) {
+    throw new Error("auth.basePath cannot contain a query string or fragment.");
+  }
+  if (route.startsWith("//") || /^[a-z][a-z\d+.-]*:\/\//i.test(route)) {
+    throw new Error('auth.basePath must be an application pathname such as "/api/auth".');
+  }
+  if (hasUnstablePathCharacters(route)) {
+    throw new Error("auth.basePath cannot contain backslashes or control characters.");
+  }
+  for (const segment of route.split("/")) {
+    let decoded = segment;
+    try {
+      decoded = decodeURIComponent(segment);
+    } catch {
+      // Malformed escapes remain literal URL pathname segments.
+    }
+    if (hasUnstablePathCharacters(decoded) || decoded.includes("/")) {
+      throw new Error("auth.basePath cannot contain encoded path separators.");
+    }
+    if (decoded === "." || decoded === "..") {
+      throw new Error('auth.basePath cannot contain "." or ".." path segments.');
+    }
+  }
+}
+
+function hasUnstablePathCharacters(value: string): boolean {
+  return (
+    value.includes("\\") ||
+    Array.from(value).some((character) => {
+      const code = character.charCodeAt(0);
+      return code <= 31 || (code >= 127 && code <= 159);
+    })
+  );
 }
 
 function validateFarmAuthConfig(config: ResolvedFarmAuthConfig): void {
