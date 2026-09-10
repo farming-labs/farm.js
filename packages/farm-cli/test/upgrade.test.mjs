@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -163,8 +163,48 @@ test("upgrades every manifest section when a Farm package is repeated", async ()
           command: "pnpm",
           args: ["add", "--save-peer", "@farm.js/core@beta"],
         },
+        {
+          command: "pnpm",
+          args: ["install"],
+        },
       ],
     );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("restores repeated sections after the package manager relocates a package", async () => {
+  const root = await createTempProject({
+    devDependencies: { "@farm.js/core": "^0.1.0-beta.3" },
+    peerDependencies: { "@farm.js/core": "^0.1.0-beta.2" },
+  });
+
+  try {
+    const commands = [];
+    await upgradeFarm({
+      root,
+      channel: "beta",
+      packageManager: "pnpm",
+      runCommand: async (command) => {
+        commands.push(command.args);
+        if (command.args[0] !== "add") return;
+        const manifestPath = path.join(root, "package.json");
+        const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+        delete manifest.devDependencies?.["@farm.js/core"];
+        delete manifest.peerDependencies?.["@farm.js/core"];
+        const section = command.args.includes("--save-peer")
+          ? "peerDependencies"
+          : "devDependencies";
+        manifest[section] = { ...manifest[section], "@farm.js/core": "^0.1.0-beta.91" };
+        await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+      },
+    });
+
+    const manifest = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
+    assert.equal(manifest.devDependencies["@farm.js/core"], "^0.1.0-beta.91");
+    assert.equal(manifest.peerDependencies["@farm.js/core"], "^0.1.0-beta.91");
+    assert.deepEqual(commands.at(-1), ["install"]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

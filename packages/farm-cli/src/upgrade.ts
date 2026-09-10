@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 export type FarmUpgradeChannel = "latest" | "beta";
@@ -151,7 +151,11 @@ export async function upgradeFarm(options: FarmUpgradeOptions): Promise<FarmUpgr
   }
 
   const runCommand = options.runCommand || runFarmUpgradeCommand;
-  for (const command of plan.commands) {
+  const repeatedPackages = getRepeatedPackages(plan.packages);
+  for (const [index, command] of plan.commands.entries()) {
+    if (repeatedPackages.length > 0 && index === plan.commands.length - 1) {
+      await restoreRepeatedDependencySections(plan.packageJsonPath, repeatedPackages);
+    }
     await runCommand(command);
   }
 
@@ -218,7 +222,7 @@ function createUpgradeCommands(
 ): FarmUpgradeCommand[] {
   const command = packageManager === "npm" ? "install" : "add";
 
-  return DEPENDENCY_SECTIONS.flatMap((section) => {
+  const commands = DEPENDENCY_SECTIONS.flatMap((section) => {
     const targets = packages
       .filter((entry) => entry.section === section)
       .map((entry) => entry.target);
@@ -232,6 +236,48 @@ function createUpgradeCommands(
       },
     ];
   });
+
+  if (getRepeatedPackages(packages).length > 0) {
+    commands.push({ command: packageManager, args: ["install"], cwd: root });
+  }
+  return commands;
+}
+
+function getRepeatedPackages(packages: FarmUpgradePackage[]): FarmUpgradePackage[][] {
+  const byName = new Map<string, FarmUpgradePackage[]>();
+  for (const entry of packages) {
+    const entries = byName.get(entry.name) ?? [];
+    entries.push(entry);
+    byName.set(entry.name, entries);
+  }
+  return [...byName.values()].filter((entries) => entries.length > 1);
+}
+
+async function restoreRepeatedDependencySections(
+  packageJsonPath: string,
+  repeatedPackages: FarmUpgradePackage[][],
+): Promise<void> {
+  const source = await readFile(packageJsonPath, "utf8");
+  const packageJson = JSON.parse(source) as ProjectPackageJson;
+
+  for (const entries of repeatedPackages) {
+    const installedSpecifier = [...entries]
+      .reverse()
+      .map((entry) => packageJson[entry.section]?.[entry.name])
+      .find((value): value is string => typeof value === "string");
+    if (!installedSpecifier) {
+      throw new Error(
+        `Package manager removed ${entries[0].name} while upgrading repeated dependency sections.`,
+      );
+    }
+    for (const entry of entries) {
+      const section = (packageJson[entry.section] ??= {});
+      section[entry.name] = installedSpecifier;
+    }
+  }
+
+  const indentation = /^([\t ]+)"/m.exec(source)?.[1] ?? "  ";
+  await writeFile(packageJsonPath, `${JSON.stringify(packageJson, null, indentation)}\n`, "utf8");
 }
 
 function getDependencySectionFlags(
