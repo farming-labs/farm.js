@@ -48,8 +48,12 @@ function hintedFilter(items: Item[], predicate: (item: Item) => boolean): Item[]
   return createCompilerKeyedArrayFilter(items, items.filter, predicate) as Item[];
 }
 
-function hintedMap(items: Item[], mapper: (item: Item) => Item): Item[] {
-  return createCompilerKeyedArrayMapPipeline(items, items.map, mapper) as Item[];
+function hintedMap(
+  items: Item[],
+  mapper: (item: Item) => Item,
+  method: unknown = items.map,
+): Item[] {
+  return createCompilerKeyedArrayMapPipeline(items, method, mapper) as Item[];
 }
 
 function queuedHintedMap(
@@ -144,8 +148,17 @@ function createHarness(initialItems: Item[]) {
     removed: ReadonlySet<string>,
     limit: number,
   ) => void = () => undefined;
+  let queuedFilterSliceMap: (
+    editedId: string,
+    nextLabel: string,
+    nextRank: number,
+    removed: ReadonlySet<string>,
+    limit: number,
+  ) => void = () => undefined;
   let invalidQueuedMappedStructuralIdentity: () => void = () => undefined;
+  let invalidQueuedStructuralMappedIdentity: () => void = () => undefined;
   let customQueuedMapThenFilter: () => void = () => undefined;
+  let customQueuedFilterThenMap: () => void = () => undefined;
   let invalidIdentity: () => void = () => undefined;
   let invalidMappedIdentity: () => void = () => undefined;
   let invalidTerminalMappedIdentity: () => void = () => undefined;
@@ -275,6 +288,22 @@ function createHarness(initialItems: Item[]) {
           hintedMappedStructural(hintedSlice(previous as Item[], 0, limit)),
         );
       };
+      queuedFilterSliceMap = (editedId, nextLabel, nextRank, removed, limit) => {
+        state[0].set((previous) =>
+          hintedFilter(previous as Item[], (item) => !removed.has(item.id)),
+        );
+        state[0].set((previous) => hintedSlice(previous as Item[], 0, limit));
+        state[0].set((previous) =>
+          hintedMap(previous as Item[], (item) =>
+            item.id === editedId ? { ...item, label: nextLabel } : item,
+          ),
+        );
+        state[0].set((previous) =>
+          hintedMap(previous as Item[], (item) =>
+            item.id === editedId ? { ...item, rank: nextRank } : item,
+          ),
+        );
+      };
       invalidQueuedMappedStructuralIdentity = () => {
         state[0].set((previous) =>
           queuedHintedMap(previous as Item[], (item) =>
@@ -283,6 +312,14 @@ function createHarness(initialItems: Item[]) {
         );
         state[0].set((previous) =>
           hintedMappedStructural(hintedFilter(previous as Item[], (item) => item.id !== "c")),
+        );
+      };
+      invalidQueuedStructuralMappedIdentity = () => {
+        state[0].set((previous) => hintedFilter(previous as Item[], (item) => item.id !== "c"));
+        state[0].set((previous) =>
+          hintedMap(previous as Item[], (item) =>
+            item.id === "b" ? { ...item, id: "replacement", label: "Replacement" } : item,
+          ),
         );
       };
       customQueuedMapThenFilter = () => {
@@ -303,6 +340,23 @@ function createHarness(initialItems: Item[]) {
         state[0].set((previous) =>
           hintedMappedStructural(hintedFilter(previous as Item[], (item) => item.id !== "c")),
         );
+      };
+      customQueuedFilterThenMap = () => {
+        state[0].set((previous) => hintedFilter(previous as Item[], (item) => item.id !== "c"));
+        state[0].set((previous) => {
+          const items = previous as Item[];
+          const customMap = function (
+            this: Item[],
+            callback: (item: Item, index: number, items: Item[]) => Item,
+          ) {
+            return Array.prototype.map.call(this, callback);
+          };
+          return hintedMap(
+            items,
+            (item) => (item.id === "a" ? { ...item, label: "Custom queued terminal map" } : item),
+            customMap,
+          );
+        });
       };
       invalidIdentity = () =>
         state[0].set((previous) => {
@@ -447,6 +501,7 @@ function createHarness(initialItems: Item[]) {
     customMapStructural: () => customMapStructural(),
     customMapTerminal: () => customMapTerminal(),
     customMapThenFilter: () => customMapThenFilter(),
+    customQueuedFilterThenMap: () => customQueuedFilterThenMap(),
     customQueuedMapThenFilter: () => customQueuedMapThenFilter(),
     filterMapSliceMap: (
       editedId: string,
@@ -470,6 +525,7 @@ function createHarness(initialItems: Item[]) {
     invalidMappedIdentity: () => invalidMappedIdentity(),
     invalidMappedStructuralIdentity: () => invalidMappedStructuralIdentity(),
     invalidQueuedMappedStructuralIdentity: () => invalidQueuedMappedStructuralIdentity(),
+    invalidQueuedStructuralMappedIdentity: () => invalidQueuedStructuralMappedIdentity(),
     invalidTerminalMappedIdentity: () => invalidTerminalMappedIdentity(),
     mapFilterSlice: (
       editedId: string,
@@ -483,6 +539,13 @@ function createHarness(initialItems: Item[]) {
       removed: ReadonlySet<string>,
       limit: number,
     ) => queuedMapFilterSlice(editedId, nextLabel, removed, limit),
+    queuedFilterSliceMap: (
+      editedId: string,
+      nextLabel: string,
+      nextRank: number,
+      removed: ReadonlySet<string>,
+      limit: number,
+    ) => queuedFilterSliceMap(editedId, nextLabel, nextRank, removed, limit),
     mapFilterDoubleReverse: (editedId: string, nextLabel: string, removed: ReadonlySet<string>) =>
       mapFilterDoubleReverse(editedId, nextLabel, removed),
     mapFilterSortReverse: (
@@ -764,6 +827,42 @@ describe("compiled keyed-array structural reorder hints", () => {
     expect(harness.counters.bindings).toBe(1);
   });
 
+  it("patches a mapped survivor across queued filter, slice, and map setters", async () => {
+    const items: Item[] = [
+      { id: "a", label: "Alpha", rank: 4, visible: true },
+      { id: "b", label: "Beta", rank: 1, visible: false },
+      { id: "c", label: "Gamma", rank: 3, visible: true },
+      { id: "d", label: "Delta", rank: 2, visible: true },
+    ];
+    const harness = createHarness(items);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Table />));
+    const alpha = container.querySelector('[data-key="a"]');
+    const gamma = container.querySelector('[data-key="c"]');
+    harness.counters.bindings = 0;
+    harness.counters.descriptors = 0;
+    harness.counters.keys = 0;
+
+    await act(async () => {
+      harness.queuedFilterSliceMap("c", "Gamma queued terminal", 7, new Set(["b"]), 2);
+      await flushCompilerUpdates();
+    });
+
+    expect(labels(container)).toEqual(["Alpha", "Gamma queued terminal"]);
+    expect(container.querySelector('[data-key="a"]')).toBe(alpha);
+    expect(container.querySelector('[data-key="c"]')).toBe(gamma);
+    expect(container.querySelector('[data-key="b"]')).toBeNull();
+    expect(container.querySelector('[data-key="d"]')).toBeNull();
+    expect(harness.counters.executions).toBe(1);
+    expect(harness.counters.renders).toBe(1);
+    expect(harness.counters.keys).toBe(2);
+    expect(harness.counters.descriptors).toBe(0);
+    expect(harness.counters.bindings).toBe(1);
+  });
+
   it("falls back safely for custom methods and identity mismatches", async () => {
     const items: Item[] = [
       { id: "a", label: "Alpha", rank: 2, visible: true },
@@ -943,6 +1042,44 @@ describe("compiled keyed-array structural reorder hints", () => {
     expect(changedKey.counters.descriptors).toBeGreaterThan(0);
   });
 
+  it("falls back atomically when queued structural work precedes an invalid map", async () => {
+    const items: Item[] = [
+      { id: "a", label: "Alpha", rank: 2, visible: true },
+      { id: "b", label: "Beta", rank: 1, visible: true },
+      { id: "c", label: "Gamma", rank: 3, visible: true },
+    ];
+    const custom = createHarness(items);
+    const customContainer = document.createElement("div");
+    document.body.append(customContainer);
+    const customRoot = createRoot(customContainer);
+    roots.push(customRoot);
+    await act(async () => customRoot.render(<custom.Table />));
+    custom.counters.bindings = 0;
+    custom.counters.descriptors = 0;
+    await act(async () => {
+      custom.customQueuedFilterThenMap();
+      await flushCompilerUpdates();
+    });
+    expect(labels(customContainer)).toEqual(["Custom queued terminal map", "Beta"]);
+    expect(custom.counters.bindings).toBeGreaterThan(0);
+
+    const changedKey = createHarness(items);
+    const changedKeyContainer = document.createElement("div");
+    document.body.append(changedKeyContainer);
+    const changedKeyRoot = createRoot(changedKeyContainer);
+    roots.push(changedKeyRoot);
+    await act(async () => changedKeyRoot.render(<changedKey.Table />));
+    changedKey.counters.bindings = 0;
+    changedKey.counters.descriptors = 0;
+    await act(async () => {
+      changedKey.invalidQueuedStructuralMappedIdentity();
+      await flushCompilerUpdates();
+    });
+    expect(labels(changedKeyContainer)).toEqual(["Alpha", "Replacement"]);
+    expect(changedKey.counters.bindings).toBeGreaterThan(0);
+    expect(changedKey.counters.descriptors).toBeGreaterThan(0);
+  });
+
   it("preserves a surviving controlled input, focus, and selection", async () => {
     const items: Item[] = [
       { id: "a", label: "Alpha", rank: 3, visible: true },
@@ -956,15 +1093,13 @@ describe("compiled keyed-array structural reorder hints", () => {
       render(_props: Record<string, never>, state, blocks) {
         const rows = () => state[0].get() as Item[];
         update = () => {
+          state[0].set((previous) => hintedFilter(previous as Item[], (item) => item.id !== "a"));
+          state[0].set((previous) => hintedSlice(previous as Item[], 0, 1));
           state[0].set((previous) =>
-            queuedHintedMap(previous as Item[], (item) =>
+            hintedMap(previous as Item[], (item) =>
               item.id === "b" ? { ...item, label: "Beta newest" } : item,
             ),
           );
-          state[0].set((previous) =>
-            hintedMappedStructural(hintedFilter(previous as Item[], (item) => item.id !== "a")),
-          );
-          state[0].set((previous) => hintedMappedStructural(hintedSlice(previous as Item[], 0, 1)));
         };
         return (
           <section>
@@ -1469,6 +1604,85 @@ describe("compiled keyed-array structural reorder hints", () => {
     expect(harness.counters.executions).toBe(1);
   }, 20_000);
 
+  it("matches React across 2,000 randomized queued structural mapped transitions", async () => {
+    const initialItems = Array.from(
+      { length: 2_001 },
+      (_, index): Item => ({
+        id: `row-${index}`,
+        label: `Row ${index}`,
+        rank: (index * 1_229) % 2_003,
+        visible: true,
+      }),
+    );
+    const harness = createHarness(initialItems);
+    let updateReact: (
+      editedId: string,
+      nextLabel: string,
+      nextRank: number,
+      removed: ReadonlySet<string>,
+      limit: number,
+    ) => void = () => undefined;
+    function Normal() {
+      const [items, setItems] = useState(initialItems);
+      updateReact = (editedId, nextLabel, nextRank, removed, limit) => {
+        setItems((previous) => previous.filter((item) => !removed.has(item.id)));
+        setItems((previous) => previous.slice(0, limit));
+        setItems((previous) =>
+          previous.map((item) => (item.id === editedId ? { ...item, label: nextLabel } : item)),
+        );
+        setItems((previous) =>
+          previous.map((item) => (item.id === editedId ? { ...item, rank: nextRank } : item)),
+        );
+      };
+      return (
+        <ol>
+          {items.map((item) => (
+            <li data-key={item.id} key={item.id}>
+              {item.label}
+            </li>
+          ))}
+        </ol>
+      );
+    }
+    const compiledContainer = document.createElement("div");
+    const reactContainer = document.createElement("div");
+    document.body.append(compiledContainer, reactContainer);
+    const compiledRoot = createRoot(compiledContainer);
+    const reactRoot = createRoot(reactContainer);
+    roots.push(compiledRoot, reactRoot);
+    await act(async () => {
+      compiledRoot.render(<harness.Table />);
+      reactRoot.render(<Normal />);
+    });
+
+    let seed = 0x243f6a88;
+    let active = initialItems.map((item) => item.id);
+    for (let batch = 0; batch < 100; batch += 1) {
+      const removed = new Set<string>();
+      for (let update = 0; update < 15; update += 1) {
+        seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0;
+        const available = active.filter((id) => !removed.has(id));
+        removed.add(available[seed % available.length]);
+      }
+      const survivors = active.filter((id) => !removed.has(id));
+      const limit = survivors.length - 5;
+      seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0;
+      const editedId = survivors[seed % limit];
+      const nextLabel = `Queued structural mapped ${batch}`;
+      const nextRank = seed % 2_003;
+      await act(async () => {
+        harness.queuedFilterSliceMap(editedId, nextLabel, nextRank, removed, limit);
+        updateReact(editedId, nextLabel, nextRank, removed, limit);
+        await flushCompilerUpdates();
+      });
+      expect(labels(compiledContainer)).toEqual(labels(reactContainer));
+      active = [...reactContainer.querySelectorAll<HTMLElement>("li")].map(
+        (row) => row.dataset.key!,
+      );
+    }
+    expect(harness.counters.executions).toBe(1);
+  }, 20_000);
+
   it("hydrates in StrictMode and drops a queued pipeline after unmount", async () => {
     const items: Item[] = [
       { id: "a", label: "Alpha", rank: 3, visible: true },
@@ -1501,6 +1715,11 @@ describe("compiled keyed-array structural reorder hints", () => {
       await flushCompilerUpdates();
     });
     expect(labels(container)).toEqual(["Alpha queued", "Beta hydrated"]);
+    await act(async () => {
+      hydration.queuedFilterSliceMap("b", "Beta queued terminal", 7, new Set(), 2);
+      await flushCompilerUpdates();
+    });
+    expect(labels(container)).toEqual(["Alpha queued", "Beta queued terminal"]);
     expect(recoverable).toEqual([]);
 
     const unmounted = createHarness(items);
@@ -1509,7 +1728,7 @@ describe("compiled keyed-array structural reorder hints", () => {
     const unmountRoot = createRoot(unmountContainer);
     await act(async () => unmountRoot.render(<unmounted.Table />));
     act(() => {
-      unmounted.queuedMapFilterSlice("c", "Gamma queued", new Set(["a"]), 2);
+      unmounted.queuedFilterSliceMap("c", "Gamma queued", 7, new Set(["a"]), 2);
       unmountRoot.unmount();
     });
     await flushCompilerUpdates();

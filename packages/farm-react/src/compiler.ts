@@ -2420,6 +2420,35 @@ function rewriteQueuedKeyedArrayReorderMapHints(
   };
 }
 
+function countKeyedArrayMapPipeline(
+  updater: t.ArrowFunctionExpression,
+  mapUpdateIdentifier: t.Identifier,
+): number {
+  if (
+    !t.isCallExpression(updater.body) ||
+    !t.isIdentifier(updater.body.callee, { name: mapUpdateIdentifier.name }) ||
+    updater.body.arguments.length !== 2
+  ) {
+    return 0;
+  }
+  const pipeline = updater.body.arguments[1];
+  if (
+    !t.isArrowFunctionExpression(pipeline) ||
+    pipeline.params.length !== 2 ||
+    !t.isIdentifier(pipeline.params[1])
+  ) {
+    return 0;
+  }
+  const applyMapName = pipeline.params[1].name;
+  let count = 0;
+  t.traverseFast(pipeline.body, (node) => {
+    if (t.isCallExpression(node) && t.isIdentifier(node.callee, { name: applyMapName })) {
+      count += 1;
+    }
+  });
+  return count;
+}
+
 function rewriteQueuedKeyedArrayMappedStructuralHints(
   root: t.JSXElement,
   statesBySetter: ReadonlyMap<string, StateBinding>,
@@ -2429,39 +2458,24 @@ function rewriteQueuedKeyedArrayMappedStructuralHints(
   filterIdentifier: t.Identifier,
   sliceIdentifier: t.Identifier,
   allowed: boolean,
-): { root: t.JSXElement; mapCount: number; structuralCount: number } {
+): {
+  root: t.JSXElement;
+  mapCount: number;
+  structuralCount: number;
+  stateIndices: ReadonlySet<number>;
+} {
   if (!allowed) {
-    return { root: t.cloneNode(root, true), mapCount: 0, structuralCount: 0 };
+    return {
+      root: t.cloneNode(root, true),
+      mapCount: 0,
+      structuralCount: 0,
+      stateIndices: new Set(),
+    };
   }
   const file = expressionFile(t.cloneNode(root, true));
   let mapCount = 0;
   let structuralCount = 0;
-
-  const mapPipelineCount = (updater: t.ArrowFunctionExpression): number => {
-    if (
-      !t.isCallExpression(updater.body) ||
-      !t.isIdentifier(updater.body.callee, { name: mapUpdateIdentifier.name }) ||
-      updater.body.arguments.length !== 2
-    ) {
-      return 0;
-    }
-    const pipeline = updater.body.arguments[1];
-    if (
-      !t.isArrowFunctionExpression(pipeline) ||
-      pipeline.params.length !== 2 ||
-      !t.isIdentifier(pipeline.params[1])
-    ) {
-      return 0;
-    }
-    const applyMapName = pipeline.params[1].name;
-    let count = 0;
-    t.traverseFast(pipeline.body, (node) => {
-      if (t.isCallExpression(node) && t.isIdentifier(node.callee, { name: applyMapName })) {
-        count += 1;
-      }
-    });
-    return count;
-  };
+  const stateIndices = new Set<number>();
 
   const terminalStructuralReturn = (
     updater: t.ArrowFunctionExpression,
@@ -2522,10 +2536,10 @@ function rewriteQueuedKeyedArrayMappedStructuralHints(
           continue;
         }
 
-        const pipelineMapCount = mapPipelineCount(updater);
+        const pipelineMapCount = countKeyedArrayMapPipeline(updater, mapUpdateIdentifier);
         if (pipelineMapCount > 0) {
-          // A map after an already structural result needs a different queued proof. Keep that
-          // direction on the complete fallback until it is supported deliberately.
+          // A later pass handles maps after an already structural result. End this pass's
+          // map-before-structural segment without rewriting that map here.
           if (mappedStructuralState !== undefined) {
             mappedStructuralState = undefined;
             pendingMaps = [];
@@ -2565,6 +2579,7 @@ function rewriteQueuedKeyedArrayMappedStructuralHints(
           t.cloneNode(structuralValue),
         ]);
         structuralCount += 1;
+        stateIndices.add(state.index);
         mappedStructuralState = state.index;
         pendingMaps = [];
       }
@@ -2574,6 +2589,98 @@ function rewriteQueuedKeyedArrayMappedStructuralHints(
     root: (file.program.body[0] as t.ExpressionStatement).expression as t.JSXElement,
     mapCount,
     structuralCount,
+    stateIndices,
+  };
+}
+
+function rewriteQueuedKeyedArrayStructuralMapHints(
+  root: t.JSXElement,
+  statesBySetter: ReadonlyMap<string, StateBinding>,
+  mapUpdateIdentifier: t.Identifier,
+  mapPipelineIdentifier: t.Identifier,
+  filterIdentifier: t.Identifier,
+  sliceIdentifier: t.Identifier,
+  allowed: boolean,
+): { root: t.JSXElement; mapCount: number; stateIndices: ReadonlySet<number> } {
+  if (!allowed) {
+    return { root: t.cloneNode(root, true), mapCount: 0, stateIndices: new Set() };
+  }
+  const file = expressionFile(t.cloneNode(root, true));
+  let mapCount = 0;
+  const stateIndices = new Set<number>();
+
+  const returnsStructuralValue = (updater: t.ArrowFunctionExpression): boolean => {
+    if (!t.isBlockStatement(updater.body)) return false;
+    const statement = updater.body.body.at(-1);
+    if (!t.isReturnStatement(statement) || !statement.argument) return false;
+    let found = false;
+    t.traverseFast(statement.argument, (node) => {
+      if (
+        !found &&
+        t.isCallExpression(node) &&
+        t.isIdentifier(node.callee) &&
+        (node.callee.name === filterIdentifier.name || node.callee.name === sliceIdentifier.name)
+      ) {
+        found = true;
+      }
+    });
+    return found;
+  };
+
+  traverse(file, {
+    BlockStatement(path) {
+      let structuralState: number | undefined;
+      const statements = path.get("body") as NodePath<t.Statement>[];
+      for (const statementPath of statements) {
+        const statement = statementPath.node;
+        if (!t.isExpressionStatement(statement) || !t.isCallExpression(statement.expression)) {
+          structuralState = undefined;
+          continue;
+        }
+        const setterCall = statement.expression;
+        if (
+          !t.isIdentifier(setterCall.callee) ||
+          statementPath.scope.hasBinding(setterCall.callee.name) ||
+          setterCall.arguments.length !== 1
+        ) {
+          structuralState = undefined;
+          continue;
+        }
+        const state = statesBySetter.get(setterCall.callee.name);
+        const updater = setterCall.arguments[0];
+        if (
+          !state ||
+          !t.isArrowFunctionExpression(updater) ||
+          updater.async ||
+          updater.generator ||
+          updater.params.length !== 1 ||
+          !t.isIdentifier(updater.params[0])
+        ) {
+          structuralState = undefined;
+          continue;
+        }
+
+        if (returnsStructuralValue(updater)) {
+          structuralState = state.index;
+          continue;
+        }
+
+        const pipelineMapCount = countKeyedArrayMapPipeline(updater, mapUpdateIdentifier);
+        if (structuralState !== state.index || pipelineMapCount === 0) {
+          structuralState = undefined;
+          continue;
+        }
+        (updater as t.ArrowFunctionExpression & { body: t.CallExpression }).body.callee =
+          t.cloneNode(mapPipelineIdentifier);
+        mapCount += pipelineMapCount;
+        stateIndices.add(state.index);
+      }
+    },
+  });
+  return {
+    root: (file.program.body[0] as t.ExpressionStatement).expression as t.JSXElement,
+    mapCount,
+    stateIndices,
   };
 }
 
@@ -8497,10 +8604,54 @@ function compileCandidate(
         queuedMappedStructuralHintedRoot.mapCount +
         queuedMappedStructuralHintedRoot.structuralCount;
       appliedKeyedArrayReorderHints += queuedMappedStructuralHintedRoot.structuralCount;
+      appliedReorderHintedStateIndices = new Set([
+        ...appliedReorderHintedStateIndices,
+        ...queuedMappedStructuralHintedRoot.stateIndices,
+      ]);
       compilerUsage.keyedArrayMapUpdateHints += queuedMappedStructuralHintedRoot.mapCount;
       compilerUsage.keyedArrayQueuedMapUpdateHints += queuedMappedStructuralHintedRoot.mapCount;
       compilerUsage.keyedArrayMappedStructuralHints +=
         queuedMappedStructuralHintedRoot.structuralCount;
+    }
+  }
+  const queuedStructuralMapHintedRoot = rewriteQueuedKeyedArrayStructuralMapHints(
+    expandedReactiveRoot,
+    statesBySetter,
+    keyedMapUpdateIdentifier,
+    keyedArrayMapPipelineIdentifier,
+    keyedArrayFilterIdentifier,
+    keyedArraySliceIdentifier,
+    allowKeyedArrayMapPipelines,
+  );
+  let appliedQueuedStructuralMapHints = 0;
+  if (queuedStructuralMapHintedRoot.mapCount > 0) {
+    const hintedBlockAnalysis = analyzeComposableBlocks(
+      queuedStructuralMapHintedRoot.root,
+      reactiveByValue,
+      safeGlobals,
+      listNames,
+      allowedComponentNames,
+    );
+    const hintedAnalysis = analyzeHostTree(
+      queuedStructuralMapHintedRoot.root,
+      reactiveByValue,
+      safeGlobals,
+      hintedBlockAnalysis.conditionalExpressions || new Set<t.Expression>(),
+      hintedBlockAnalysis.keyedExpressions || new Set<t.Expression>(),
+      hintedBlockAnalysis.ownedElements || new Set<t.JSXElement>(),
+      hintedBlockAnalysis.componentElements || new Set<t.JSXElement>(),
+    );
+    if (!hintedBlockAnalysis.reason && !hintedAnalysis.reason) {
+      expandedReactiveRoot = queuedStructuralMapHintedRoot.root;
+      blockAnalysis = hintedBlockAnalysis;
+      analysis = hintedAnalysis;
+      appliedQueuedStructuralMapHints = queuedStructuralMapHintedRoot.mapCount;
+      appliedKeyedArrayReorderHints += queuedStructuralMapHintedRoot.mapCount;
+      appliedReorderHintedStateIndices = new Set([
+        ...appliedReorderHintedStateIndices,
+        ...queuedStructuralMapHintedRoot.stateIndices,
+      ]);
+      compilerUsage.keyedArrayMapUpdateHints += queuedStructuralMapHintedRoot.mapCount;
     }
   }
   const queuedMapReorderHintedRoot = rewriteQueuedKeyedArrayMapReorderHints(
@@ -8661,7 +8812,8 @@ function compileCandidate(
     appliedKeyedArrayReorderHints > 0 || appliedKeyedArraySortHints > 0,
     appliedPipelineMapHints > 0 ||
       appliedQueuedReorderMapHints > 0 ||
-      appliedQueuedMappedStructuralHints > 0,
+      appliedQueuedMappedStructuralHints > 0 ||
+      appliedQueuedStructuralMapHints > 0,
     appliedKeyedArrayRollingWindowHints > 0,
   );
   markShortCircuitBindings(analysis.bindings || []);

@@ -8,11 +8,11 @@ import { normalizeReactCompilerOptions } from "../index";
 const infer = normalizeReactCompilerOptions(true, "/app");
 
 async function compile(source: string) {
-  return compileReactModule(source, "/app/QueuedMappedStructuralHints.tsx", infer);
+  return compileReactModule(source, "/app/QueuedStructuralMapHints.tsx", infer);
 }
 
-describe("React AOT queued mapped structural hints", () => {
-  it("retains adjacent maps through following filter and slice setters", async () => {
+describe("React AOT queued structural then map hints", () => {
+  it("retains adjacent filter and slice setters through following maps", async () => {
     const result = await compile(`
       import { useState } from "react";
       export function Table({ editedId, nextLabel, nextRank, hiddenId, limit }) {
@@ -23,15 +23,15 @@ describe("React AOT queued mapped structural hints", () => {
         ]);
         return <section>
           <button onClick={() => {
+            setRows((current) => current.filter((row) => row.id !== hiddenId));
+            setRows((current) => current.slice(0, limit));
             setRows((current) => current.map((row) =>
               row.id === editedId ? { ...row, label: nextLabel } : row
             ));
             setRows((current) => current.map((row) =>
               row.id === editedId ? { ...row, rank: nextRank } : row
             ));
-            setRows((current) => current.filter((row) => row.id !== hiddenId));
-            setRows((current) => current.slice(0, limit));
-          }}>Edit and trim</button>
+          }}>Trim and edit</button>
           <ul>{rows.map((row) => <li key={row.id}>{row.label}: {row.rank}</li>)}</ul>
         </section>;
       }
@@ -42,49 +42,69 @@ describe("React AOT queued mapped structural hints", () => {
     expect(result.optimizations.keyedMapUpdateHints).toBe(2);
     expect(result.optimizations.keyedArrayFilterHints).toBe(1);
     expect(result.optimizations.keyedArraySliceHints).toBe(1);
-    expect(result.code.match(/createCompilerKeyedArrayQueuedMapPipeline\(/g)).toHaveLength(2);
-    expect(result.code.match(/finalizeCompilerKeyedArrayMappedStructuralUpdate\(/g)).toHaveLength(
-      2,
-    );
+    expect(result.code.match(/createCompilerKeyedArrayMapPipeline\(/g)).toHaveLength(2);
     expect(result.code).not.toContain("createCompilerKeyedMapUpdate");
-    expect(result.code).not.toContain("createCompilerKeyedArrayMapPipeline");
+    expect(result.code).not.toContain("createCompilerKeyedArrayQueuedMapPipeline");
+    expect(result.code).not.toContain("finalizeCompilerKeyedArrayMappedStructuralUpdate");
     expect(result.code).toContain("keyedRowsEveryHintedRuntimeFeature");
     expect(result.code).toContain("reorderIndexIndependent={true}");
     await expect(
-      transformWithEsbuild(result.code, "/app/QueuedMappedStructuralHints.tsx", {
+      transformWithEsbuild(result.code, "/app/QueuedStructuralMapHints.tsx", {
         loader: "tsx",
         jsx: "automatic",
       }),
     ).resolves.toMatchObject({
-      code: expect.stringContaining("finalizeCompilerKeyedArrayMappedStructuralUpdate"),
+      code: expect.stringContaining("createCompilerKeyedArrayMapPipeline"),
     });
+  });
+
+  it("composes a queued map on both sides of a structural setter", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Table({ editedId, nextLabel, nextRank, hiddenId }) {
+        const [rows, setRows] = useState([
+          { id: "a", label: "Alpha", rank: 1 },
+          { id: "b", label: "Beta", rank: 2 },
+        ]);
+        return <section>
+          <button onClick={() => {
+            setRows((current) => current.map((row) =>
+              row.id === editedId ? { ...row, label: nextLabel } : row
+            ));
+            setRows((current) => current.filter((row) => row.id !== hiddenId));
+            setRows((current) => current.map((row) =>
+              row.id === editedId ? { ...row, rank: nextRank } : row
+            ));
+          }}>Edit, trim, and edit</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}: {row.rank}</li>)}</ul>
+        </section>;
+      }
+    `);
+
+    expect(result.code.match(/createCompilerKeyedArrayQueuedMapPipeline\(/g)).toHaveLength(1);
+    expect(result.code.match(/createCompilerKeyedArrayMapPipeline\(/g)).toHaveLength(1);
+    expect(result.code.match(/finalizeCompilerKeyedArrayMappedStructuralUpdate\(/g)).toHaveLength(
+      1,
+    );
+    expect(result.code).not.toContain("createCompilerKeyedMapUpdate");
   });
 
   it.each([
     {
       name: "an intervening statement",
       updates: `
+        setRows((current) => current.filter((row) => row.id !== hiddenId));
+        onFiltered();
         setRows((current) => current.map((row) =>
           row.id === editedId ? { ...row, label: nextLabel } : row
         ));
-        onMapped();
-        setRows((current) => current.filter((row) => row.id !== hiddenId));
       `,
     },
     {
       name: "another state setter",
       updates: `
-        setRows((current) => current.map((row) =>
-          row.id === editedId ? { ...row, label: nextLabel } : row
-        ));
+        setRows((current) => current.filter((row) => row.id !== hiddenId));
         setSelected(editedId);
-        setRows((current) => current.filter((row) => row.id !== hiddenId));
-      `,
-    },
-    {
-      name: "structural work before the map",
-      updates: `
-        setRows((current) => current.filter((row) => row.id !== hiddenId));
         setRows((current) => current.map((row) =>
           row.id === editedId ? { ...row, label: nextLabel } : row
         ));
@@ -93,14 +113,14 @@ describe("React AOT queued mapped structural hints", () => {
     {
       name: "an unsupported map callback",
       updates: `
-        setRows((current) => current.map((row) => ({ ...row, label: nextLabel })));
         setRows((current) => current.filter((row) => row.id !== hiddenId));
+        setRows((current) => current.map((row) => ({ ...row, label: nextLabel })));
       `,
     },
   ])("keeps complete fallback across $name", async ({ updates }) => {
     const result = await compile(`
       import { useState } from "react";
-      export function Table({ editedId, nextLabel, hiddenId, onMapped }) {
+      export function Table({ editedId, nextLabel, hiddenId, onFiltered }) {
         const [rows, setRows] = useState([
           { id: "a", label: "Alpha" },
           { id: "b", label: "Beta" },
@@ -116,7 +136,6 @@ describe("React AOT queued mapped structural hints", () => {
     `);
 
     expect(result.compiled).toEqual(["Table"]);
-    expect(result.code).not.toContain("createCompilerKeyedArrayQueuedMapPipeline");
-    expect(result.code).not.toContain("finalizeCompilerKeyedArrayMappedStructuralUpdate");
+    expect(result.code).not.toContain("createCompilerKeyedArrayMapPipeline");
   });
 });

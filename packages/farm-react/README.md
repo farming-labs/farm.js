@@ -493,21 +493,34 @@ each accepted step. The final commit removes rejected rows, performs LIS moves o
 needs them, and patches bindings only for changed survivors. Every native callback and method still
 runs in JavaScript order.
 
-The maps may also be followed by filter or slice work in immediately adjacent setter calls:
+The structural and map steps may also be split across immediately adjacent setter calls in either
+order:
 
 ```tsx
+// Map, then structural work.
 setItems((current) =>
   current.map((item) => (item.id === editedId ? { ...item, label: nextLabel } : item)),
 );
 setItems((current) => current.filter((item) => item.visible));
 setItems((current) => current.slice(0, limit));
+
+// Structural work, then maps.
+setItems((current) => current.filter((item) => item.visible));
+setItems((current) => current.slice(0, limit));
+setItems((current) =>
+  current.map((item) => (item.id === editedId ? { ...item, label: nextLabel } : item)),
+);
+setItems((current) =>
+  current.map((item) => (item.id === editedId ? { ...item, rank: nextRank } : item)),
+);
 ```
 
-Farm links only consecutive calls to the same setter, retains the first committed map source, and
-validates each structural result before the queued commit touches the DOM. Multiple leading map
-setters and multiple following filter/slice setters may share this proof. A map after structural
-work, an intervening statement, another setter, an unsafe callback, a changed key, or failed runtime
-validation keeps complete keyed reconciliation.
+Farm links only consecutive calls to the same setter. A leading map retains its first committed
+source through later structural work; a terminal map consumes the saved survivor lineage from the
+preceding filter or slice. Multiple safe steps in either segment may share the proof, and mixed
+map/structural/map sequences compose. Every result and key is validated before the queued commit
+touches the DOM. An intervening statement, another setter, an unsafe callback, a changed key, or
+failed runtime validation keeps complete keyed reconciliation.
 
 The reorder and safe maps may also be adjacent setter calls in the same synchronous block:
 

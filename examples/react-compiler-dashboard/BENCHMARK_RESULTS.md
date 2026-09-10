@@ -2,6 +2,36 @@
 
 Latest run: 2026-09-09
 
+## Queued structural setters before maps — 2026-09-09
+
+Adjacent keyed-row setters may now retain one safe lineage when native `filter()` or `slice()`
+work runs before one or more same-key `map()` setters. The maintained workload removes one row and
+then updates another. Farm carries the structural survivor proof into the terminal map, validates
+the complete result before the first DOM write, removes the rejected row, and patches only the
+changed survivor. The block-bodied control performs the same two native operations through
+complete keyed reconciliation.
+
+| Mode   | Queued filter + map | Compiled control | vs React | vs control |
+| ------ | ------------------: | ---------------: | -------: | ---------: |
+| Static |             4.70 ms |         12.90 ms |   14.97x |      2.74x |
+| Hybrid |             4.60 ms |         12.70 ms |   15.29x |      2.76x |
+
+Both modes passed the unchanged 2x React and 1.25x compiled-control floors. The complete bracketed
+run passed its correctness oracle, broad 10% regression gate, optimization-persistence gate, every
+existing feature-specific performance gate, and zero compiled owner executions.
+
+Compiler and runtime tests cover multiple filter/slice and terminal-map setters, mixed
+map/structural/map sequences, exact survivor DOM identity, one changed-row binding read,
+controlled-input focus and selection, atomic fallback when adjacency or runtime proof fails,
+Strict Mode hydration, unmount-before-flush cleanup, and 2,000 randomized queued transitions
+matched with normal React. React 18.3.1 and 19.2.8 compatibility passes, and all isolated optional
+runtime gzip fixtures remain within their unchanged budgets.
+
+Numbers are medians from one complete bracketed run: 10 samples per compiler mode and 20 surrounding
+React samples using Chrome 153.0.8010.36, Node.js 23.11.0, and Apple M1 macOS arm64. Timing varies by
+machine; deterministic parity, fallback, DOM-identity, compatibility, and runtime-size checks remain
+the primary safety controls.
+
 ## Queued maps before structural setters — 2026-09-09
 
 Adjacent keyed-row setters may now keep one safe lineage across the queued update boundary. The
