@@ -121,7 +121,7 @@ Use the opt-in development scheduler to run every configured expression in memor
 farm dev --cron
 ```
 
-The development scheduler uses UTC, prints each next run, and skips a run when its previous local invocation is still active. It stops with the dev server and does not persist state across restarts.
+The development scheduler uses UTC, prints each next run, and skips a run when any previous local invocation of the same named job is still active, including one started by another expression in its schedule array. It stops with the dev server and does not persist state across restarts.
 
 ## Schedule Syntax
 

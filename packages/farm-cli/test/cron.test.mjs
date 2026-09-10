@@ -110,6 +110,46 @@ test("starts UTC development schedules and stops them cleanly", async () => {
   }
 });
 
+test("prevents one cron job's schedules from overlapping", async () => {
+  const root = await createTempProject({ schedule: ["0 2 * * *", "0 14 * * *"] });
+  let finishFirstRun;
+  let firstRunStarted;
+  const started = new Promise((resolve) => {
+    firstRunStarted = resolve;
+  });
+  let calls = 0;
+
+  try {
+    const scheduler = await startFarmCronScheduler({
+      root,
+      url: "http://localhost:4319",
+      fetch: async () => {
+        calls += 1;
+        if (calls === 1) {
+          firstRunStarted();
+          await new Promise((resolve) => {
+            finishFirstRun = resolve;
+          });
+        }
+        return Response.json({ ok: true });
+      },
+    });
+
+    const firstRun = scheduler.entries[0].timer.trigger();
+    await started;
+    await scheduler.entries[1].timer.trigger();
+    assert.equal(calls, 1);
+
+    finishFirstRun();
+    await firstRun;
+    await scheduler.entries[1].timer.trigger();
+    assert.equal(calls, 2);
+    scheduler.stop();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("runs cron list and cron run through the CLI", async () => {
   const root = await createTempProject();
   const server = await createTestServer();
@@ -139,15 +179,16 @@ test("runs cron list and cron run through the CLI", async () => {
   }
 });
 
-async function createTempProject() {
+async function createTempProject(options = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "farm-cli-cron-"));
+  const schedule = JSON.stringify(options.schedule || "0 2 * * *");
   await writeFile(
     path.join(root, "farm.config.mjs"),
     [
       "export default {",
       "  cron: {",
       "    dailyCleanup: {",
-      "      schedule: '0 2 * * *',",
+      `      schedule: ${schedule},`,
       "      path: '/api/maintenance/cleanup',",
       "      description: 'Delete expired sessions.',",
       "    },",

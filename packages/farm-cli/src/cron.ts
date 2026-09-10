@@ -108,6 +108,7 @@ export async function startFarmCronScheduler(
 ): Promise<FarmCronScheduler> {
   const cron = await loadFarmCronConfig(options);
   const entries: FarmCronSchedulerEntry[] = [];
+  const activeJobs = new Set<string>();
 
   for (const job of cron.jobs) {
     for (const schedule of job.schedule) {
@@ -124,12 +125,22 @@ export async function startFarmCronScheduler(
           },
         },
         async () => {
-          logger.info(`Cron ${job.name} -> ${job.path}`);
-          const result = await invokeFarmCronJob(job, cron, {
-            ...options,
-            trigger: "development",
-          });
-          logger.success(`Cron ${job.name} completed in ${result.durationMs}ms.`);
+          if (activeJobs.has(job.name)) {
+            logger.warn(`Cron ${job.name} skipped an overlapping run.`);
+            return;
+          }
+
+          activeJobs.add(job.name);
+          try {
+            logger.info(`Cron ${job.name} -> ${job.path}`);
+            const result = await invokeFarmCronJob(job, cron, {
+              ...options,
+              trigger: "development",
+            });
+            logger.success(`Cron ${job.name} completed in ${result.durationMs}ms.`);
+          } finally {
+            activeJobs.delete(job.name);
+          }
         },
       );
       entries.push({ job, schedule, timer });
