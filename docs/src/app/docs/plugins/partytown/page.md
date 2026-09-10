@@ -166,6 +166,8 @@ code.
 - Production assets land in Nitro's public directory, including the separate Vercel static output.
 - Debug worker files are omitted from production unless `debug: true` is explicit.
 - The bootstrap is an external same-origin script rather than plugin-owned inline JavaScript.
+- Bootstrap injection is idempotent when an actual script carries `data-farm-partytown`; matching
+  text elsewhere in the document does not suppress it.
 
 Partytown's worker scope can coexist with a root PWA service worker because the browser selects the
 most specific matching scope.

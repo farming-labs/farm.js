@@ -63,11 +63,23 @@ export function createPartytownBootstrap(
 }
 
 export function injectPartytownBootstrap(html: string, bootstrapUrl: string): string {
-  if (html.includes("data-farm-partytown")) return html;
+  if (hasPartytownBootstrap(html)) return html;
   const closingHead = html.search(/<\/head\s*>/i);
   if (closingHead < 0) return html;
   const tag = `<script src="${escapeHtmlAttribute(bootstrapUrl)}" data-farm-partytown></script>`;
   return `${html.slice(0, closingHead)}${tag}${html.slice(closingHead)}`;
+}
+
+function hasPartytownBootstrap(html: string): boolean {
+  const scriptTags = html.matchAll(/<script\b(?:[^>"']|"[^"]*"|'[^']*')*>/gi);
+  for (const tag of scriptTags) {
+    const attributes = tag[0].slice("<script".length, -1);
+    const parsed = attributes.matchAll(/([^\s"'<>=]+)(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>]+))?/g);
+    for (const attribute of parsed) {
+      if (attribute[1]?.toLowerCase() === "data-farm-partytown") return true;
+    }
+  }
+  return false;
 }
 
 export async function readPartytownDevAsset(
