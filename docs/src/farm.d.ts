@@ -330,11 +330,12 @@ type FarmContentPluginFromConfig<TConfig> = TConfig extends {
 }
   ? Extract<TPlugin, { readonly __farmContentRegistry: Record<string, unknown> }>
   : never;
-type ContentRegistryFromConfig<TConfig> = FarmContentPluginFromConfig<TConfig> extends {
-  readonly __farmContentRegistry: infer TRegistry;
-}
-  ? TRegistry
-  : never;
+type ContentRegistryFromConfig<TConfig> =
+  FarmContentPluginFromConfig<TConfig> extends {
+    readonly __farmContentRegistry: infer TRegistry;
+  }
+    ? TRegistry
+    : never;
 type FarmContentUnionToIntersection<TValue> = (
   TValue extends unknown ? (value: TValue) => void : never
 ) extends (value: infer TIntersection) => void
