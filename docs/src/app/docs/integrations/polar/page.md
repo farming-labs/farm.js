@@ -130,6 +130,8 @@ if (portal.data?.redirectTo) {
 }
 ```
 
+Checkout and portal return paths must be same-origin, root-relative application paths. Protocol-relative paths such as `//example.com` are rejected.
+
 ## When Polar is a good fit
 
 Polar works especially well when the product is developer-facing, open-source, sponsor-backed, or selling digital access. The Farm integration keeps the same caller shape as other billing providers, so moving between Stripe, Autumn, and Polar does not force your app UI to learn a new local API style.

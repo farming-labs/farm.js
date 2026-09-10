@@ -56,11 +56,17 @@ export function resolveAppPath(path: string | undefined, label: string): string 
     return undefined;
   }
 
-  if (!path.startsWith("/")) {
-    throw new Error(`${label} must be a root-relative path.`);
+  if (!isSameOriginRootRelativePath(path)) {
+    throw new Error(`${label} must be a same-origin root-relative path.`);
   }
 
   return path;
+}
+
+function isSameOriginRootRelativePath(value: string): boolean {
+  if (!value.startsWith("/")) return false;
+  const second = value[1];
+  return second !== "/" && second !== "\\";
 }
 
 export function resolveCallbackSettings(
