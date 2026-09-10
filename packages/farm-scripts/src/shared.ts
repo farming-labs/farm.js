@@ -255,7 +255,18 @@ function normalizeDependencies(value: readonly ScriptDependency[] | undefined): 
 function normalizeScriptSource(value: unknown): string {
   const src = normalizeText(value, "src");
   const rootRelative = src.startsWith("/") && !src.startsWith("//");
-  if (rootRelative) return src;
+  if (rootRelative) {
+    const hasControlCharacter = Array.from(src).some((character) => {
+      const code = character.charCodeAt(0);
+      return code <= 31 || code === 127;
+    });
+    if (src.includes("\\") || hasControlCharacter) {
+      throw new TypeError(
+        "script root-relative src cannot contain backslashes or control characters",
+      );
+    }
+    return src;
+  }
   if (!/^https?:\/\//i.test(src)) {
     throw new TypeError("script src must be root-relative or use an absolute HTTP(S) URL");
   }

@@ -59,6 +59,12 @@ describe("resolveScriptsOptions", () => {
 
   it("rejects ambiguous or unsafe definitions", () => {
     expect(() => defineScript({ name: "x", src: "./vendor.js" })).toThrow("root-relative");
+    expect(() => defineScript({ name: "x", src: "/\\evil.example/vendor.js" })).toThrow(
+      "backslashes",
+    );
+    expect(() => defineScript({ name: "x", src: "/vendor/unsafe\nscript.js" })).toThrow(
+      "control characters",
+    );
     expect(() =>
       defineScript({ name: "x", src: "/vendor.js", global: "window.__proto__.x" }),
     ).toThrow("relative to window");

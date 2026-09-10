@@ -235,7 +235,7 @@ defineScript<VendorSDK>({
 | Option           | Default           | Purpose                                                                  |
 | ---------------- | ----------------- | ------------------------------------------------------------------------ |
 | `name`           | Required          | Unique application registry name.                                        |
-| `src`            | Required          | Root-relative or absolute HTTP(S) URL.                                   |
+| `src`            | Required          | Root-relative path without backslashes, or an absolute HTTP(S) URL.      |
 | `global`         | None              | Safe dotted browser global returned by `load()` and `use()`.             |
 | `load`           | `after-hydration` | One of the built-in loading strategies.                                  |
 | `consent`        | None              | App-owned category that must be granted first.                           |
