@@ -86,6 +86,20 @@ describe("resolvePwaOptions", () => {
     );
   });
 
+  it("rejects routes that URL parsing could reinterpret", () => {
+    for (const route of [
+      "//example.com/offline",
+      "/safe/../offline",
+      "/safe/%2e%2e/offline",
+      "/safe%2foffline",
+      "/safe\\offline",
+      "/safe\u0000offline",
+    ]) {
+      expect(() => resolvePwaOptions({ offline: route })).toThrow();
+      expect(() => resolvePwaOptions({ cache: { staticRoutes: [route] } })).toThrow();
+    }
+  });
+
   it("rejects invalid top-level options instead of changing behavior silently", () => {
     expect(() => resolvePwaOptions(null as never)).toThrow("options must be an object");
     expect(() => resolvePwaOptions({ enabled: false } as never)).toThrow(
