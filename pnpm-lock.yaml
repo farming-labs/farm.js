@@ -1111,6 +1111,37 @@ importers:
         specifier: ^5.0.10
         version: 5.4.20(@types/node@20.19.21)
 
+  examples/search-demo:
+    dependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../../packages/farm
+      '@farm.js/search':
+        specifier: workspace:*
+        version: link:../../packages/farm-search
+      react:
+        specifier: 19.2.8
+        version: 19.2.8
+      react-dom:
+        specifier: 19.2.8
+        version: 19.2.8(react@19.2.8)
+    devDependencies:
+      '@farm.js/cli':
+        specifier: workspace:*
+        version: link:../../packages/farm-cli
+      '@types/react':
+        specifier: ^19.0.0
+        version: 19.2.13
+      '@types/react-dom':
+        specifier: ^19.0.0
+        version: 19.2.3(@types/react@19.2.13)
+      typescript:
+        specifier: ^5.5.3
+        version: 5.9.3
+      vite:
+        specifier: ^5.0.10
+        version: 5.4.20(@types/node@20.19.21)
+
   examples/simple-demo:
     dependencies:
       '@farm.js/core':
@@ -2383,6 +2414,25 @@ importers:
       jsdom:
         specifier: ^25.0.0
         version: 25.0.1(supports-color@10.2.2)
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.7
+        version: 3.2.7(@types/node@20.19.21)(jsdom@25.0.1)(supports-color@10.2.2)
+
+  packages/farm-search:
+    dependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
+      pagefind:
+        specifier: ^1.5.2
+        version: 1.5.2
+    devDependencies:
+      '@types/node':
+        specifier: ^20.10.5
+        version: 20.19.21
       typescript:
         specifier: ^5.3.3
         version: 5.9.3
@@ -7824,6 +7874,62 @@ packages:
 
   /@oxlint/win32-x64@1.42.0:
     resolution: {integrity: sha512-3/KmyUOHNriL6rLpaFfm9RJxdhpXY2/Ehx9UuorJr2pUA+lrZL15FAEx/DOszYm5r10hfzj40+efAHcCilNvSQ==}
+    cpu: [x64]
+    os: [win32]
+    requiresBuild: true
+    dev: false
+    optional: true
+
+  /@pagefind/darwin-arm64@1.5.2:
+    resolution: {integrity: sha512-MXpI+7HsAdPkvJ0gk9xj9g541BCqBZOBbdwj9g6lB5LCj6kSV6nqDSjzcAJwvOsfu0fjwvC8hQU+ecfhp+MpiQ==}
+    cpu: [arm64]
+    os: [darwin]
+    requiresBuild: true
+    dev: false
+    optional: true
+
+  /@pagefind/darwin-x64@1.5.2:
+    resolution: {integrity: sha512-IojxFWMEJe0RQ7PQ3KXQsPIImNsbpPYpoZ+QUDrL8fAl/O27IX+LVLs74/UzEZy5uA2LD8Nz1AiwKr72vrkZQw==}
+    cpu: [x64]
+    os: [darwin]
+    requiresBuild: true
+    dev: false
+    optional: true
+
+  /@pagefind/freebsd-x64@1.5.2:
+    resolution: {integrity: sha512-7EVzo9+0w+2cbe671BtMj10UlNo83I+HrLVLfRxO731svHRJKUfJ/mo05gU14pe9PCfpKNQT8FS3Xc/oDN6pOA==}
+    cpu: [x64]
+    os: [freebsd]
+    requiresBuild: true
+    dev: false
+    optional: true
+
+  /@pagefind/linux-arm64@1.5.2:
+    resolution: {integrity: sha512-Ovt9+K35sqzn8H3ZMXGwls4TD/wMJuvRtShHIsmUQREmaxjrDEX7gHckRCrwYJ4XE1H1p6HkLz3wukrAnsfXQw==}
+    cpu: [arm64]
+    os: [linux]
+    requiresBuild: true
+    dev: false
+    optional: true
+
+  /@pagefind/linux-x64@1.5.2:
+    resolution: {integrity: sha512-V+tFqHKXhQKq/WqPBD67AFy7scn1/aZID00ws4fSDd+1daSi5UHR9VVlRrOUYKxn3VuFQYRD7lYXdZK1WED1YA==}
+    cpu: [x64]
+    os: [linux]
+    requiresBuild: true
+    dev: false
+    optional: true
+
+  /@pagefind/windows-arm64@1.5.2:
+    resolution: {integrity: sha512-hN9Nh90fNW61nNRCW9ZyQrAj/mD0eRvmJ8NlTUzkbuW8kIzGJUi3cxjFkEcMZ5h/8FsKWD/VcouZl4yo1F7B6g==}
+    cpu: [arm64]
+    os: [win32]
+    requiresBuild: true
+    dev: false
+    optional: true
+
+  /@pagefind/windows-x64@1.5.2:
+    resolution: {integrity: sha512-Fa2Iyw7kaDRzGMfNYNUXNW2zbL5FQVDgSOcbDHdzBrDEdpqOqg8TcZ68F22ol6NJ9IGzvUdmeyZypLW5dyhqsg==}
     cpu: [x64]
     os: [win32]
     requiresBuild: true
@@ -17086,6 +17192,19 @@ packages:
 
   /packrup@0.1.2:
     resolution: {integrity: sha512-ZcKU7zrr5GlonoS9cxxrb5HVswGnyj6jQvwFBa6p5VFw7G71VAHcUKL5wyZSU/ECtPM/9gacWxy2KFQKt1gMNA==}
+    dev: false
+
+  /pagefind@1.5.2:
+    resolution: {integrity: sha512-XTUaK0hXMCu2jszWE584JGQT7y284TmMV9l/HX3rnG5uo3rHI/uHU56XTyyyPFjeWEBxECbAi0CaFDJOONtG0Q==}
+    hasBin: true
+    optionalDependencies:
+      '@pagefind/darwin-arm64': 1.5.2
+      '@pagefind/darwin-x64': 1.5.2
+      '@pagefind/freebsd-x64': 1.5.2
+      '@pagefind/linux-arm64': 1.5.2
+      '@pagefind/linux-x64': 1.5.2
+      '@pagefind/windows-arm64': 1.5.2
+      '@pagefind/windows-x64': 1.5.2
     dev: false
 
   /pako@0.2.9:

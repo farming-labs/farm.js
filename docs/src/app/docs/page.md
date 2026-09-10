@@ -88,6 +88,7 @@ Plugin system and lifecycle hooks.
 - [Content Plugin](/docs/plugins/content): Validate local Markdown, MDX, JSON, and YAML as typed server collections without a second config file.
 - [Partytown Plugin](/docs/plugins/partytown): Move explicitly opted-in analytics and tag-manager scripts into a web worker with typed callers.
 - [PWA Plugin](/docs/plugins/pwa): Generate a route-aware service worker with offline navigation, update prompts, and concise SWR image caching.
+- [Search Plugin](/docs/plugins/search): Build a chunked index from static pages and query it through a typed, renderer-neutral browser client.
 - [Scripts Plugin](/docs/plugins/scripts): Load external browser SDKs with typed handles, deliberate timing, consent gates, dependencies, and retries.
 - [Sentry Plugin](/docs/plugins/sentry): Report server errors with route context and trace Farm requests with `@sentry/node`.
 - [WebMCP Plugin](/docs/plugins/webmcp): Expose a small, explicit, typed browser tool surface to agents using the experimental WebMCP API.

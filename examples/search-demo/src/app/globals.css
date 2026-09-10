@@ -1,0 +1,401 @@
+:root {
+  color: #171714;
+  background: #f4f3ed;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background:
+    linear-gradient(rgba(23, 23, 20, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(23, 23, 20, 0.045) 1px, transparent 1px),
+    #f4f3ed;
+  background-size: 32px 32px;
+}
+
+a {
+  color: inherit;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.site-shell {
+  width: min(1120px, calc(100% - 40px));
+  min-height: 100vh;
+  margin: 0 auto;
+  border-inline: 1px solid #cfcec6;
+  background: rgba(244, 243, 237, 0.96);
+}
+
+.site-header {
+  display: flex;
+  min-height: 68px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 0 28px;
+  border-bottom: 1px solid #cfcec6;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.brand-mark {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  color: #f8f7f1;
+  background: #171714;
+  font: 700 13px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+nav {
+  display: flex;
+  gap: 22px;
+  font: 500 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+nav a,
+.back-link {
+  text-decoration-color: #aaa99f;
+  text-underline-offset: 4px;
+}
+
+nav a:hover,
+.back-link:hover {
+  text-decoration-color: currentColor;
+}
+
+nav a:focus-visible,
+.brand:focus-visible,
+.back-link:focus-visible,
+.results a:focus-visible,
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid #d74f2a;
+  outline-offset: 3px;
+}
+
+main {
+  padding: 76px 7vw 88px;
+}
+
+.hero {
+  max-width: 800px;
+}
+
+.eyebrow,
+.result-path,
+.search-status {
+  margin: 0 0 18px;
+  color: #68675f;
+  font: 600 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+h1,
+h2,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  max-width: 820px;
+  margin-bottom: 24px;
+  font-size: clamp(42px, 7vw, 78px);
+  line-height: 0.98;
+  letter-spacing: -0.055em;
+}
+
+.lede,
+.article-lede {
+  max-width: 690px;
+  color: #55544d;
+  font-size: clamp(17px, 2.1vw, 21px);
+  line-height: 1.6;
+}
+
+.search-panel {
+  margin-top: 64px;
+  border: 1px solid #bab9b0;
+  background: #faf9f4;
+}
+
+.search-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 24px 26px 20px;
+  border-bottom: 1px solid #cfcec6;
+}
+
+.search-heading .eyebrow {
+  margin-bottom: 8px;
+}
+
+.search-heading h2 {
+  margin-bottom: 0;
+  font-size: 24px;
+  letter-spacing: -0.025em;
+}
+
+.search-status {
+  margin: 4px 0 0;
+  padding-left: 14px;
+  position: relative;
+  white-space: nowrap;
+}
+
+.search-status::before {
+  content: "";
+  position: absolute;
+  top: 4px;
+  left: 0;
+  width: 7px;
+  height: 7px;
+  background: #96958d;
+  border-radius: 50%;
+}
+
+.search-status[data-status="loading"]::before {
+  background: #d58922;
+}
+
+.search-status[data-status="ready"]::before {
+  background: #2d8a56;
+}
+
+.search-status[data-status="error"]::before {
+  background: #c43d32;
+}
+
+form {
+  padding: 24px 26px;
+  border-bottom: 1px solid #cfcec6;
+}
+
+label {
+  display: block;
+  margin-bottom: 9px;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.search-control {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  min-height: 54px;
+  border: 1px solid #8e8d85;
+  background: #fff;
+}
+
+.search-control > span {
+  padding-left: 17px;
+  color: #68675f;
+  font: 24px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.search-control input {
+  min-width: 0;
+  height: 52px;
+  padding: 0 14px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-size: 16px;
+}
+
+.search-control input:focus-visible {
+  outline: 0;
+}
+
+.search-control input::-webkit-search-cancel-button {
+  display: none;
+  appearance: none;
+}
+
+.search-control:focus-within {
+  border-color: #171714;
+  box-shadow: 0 0 0 2px #f4f3ed, 0 0 0 4px #d74f2a;
+}
+
+.search-control button {
+  align-self: stretch;
+  min-width: 72px;
+  border: 0;
+  border-left: 1px solid #cfcec6;
+  background: #f4f3ed;
+  cursor: pointer;
+  font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-transform: uppercase;
+}
+
+.search-control button:hover {
+  background: #e9e8e1;
+}
+
+.results {
+  min-height: 190px;
+}
+
+.results ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.results li + li {
+  border-top: 1px solid #dfded6;
+}
+
+.results a {
+  display: grid;
+  gap: 8px;
+  padding: 22px 26px;
+  text-decoration: none;
+  transition: background-color 120ms ease;
+}
+
+.results a:hover {
+  background: #f0efe8;
+}
+
+.results strong {
+  font-size: 18px;
+}
+
+.results a > span:last-child {
+  color: #626159;
+  line-height: 1.55;
+}
+
+.result-path {
+  margin: 0;
+  color: #b34628;
+  text-transform: none;
+}
+
+.empty-state,
+.error-state {
+  margin: 0;
+  padding: 44px 26px;
+  color: #68675f;
+}
+
+.error-state strong {
+  display: block;
+  margin-bottom: 8px;
+  color: #a93027;
+}
+
+.error-state p {
+  margin-bottom: 0;
+  line-height: 1.55;
+}
+
+.proof {
+  max-width: 720px;
+  padding-top: 72px;
+}
+
+.proof h2,
+.article h2 {
+  margin-bottom: 16px;
+  font-size: clamp(25px, 4vw, 38px);
+  letter-spacing: -0.035em;
+}
+
+.proof p:last-child,
+.article p {
+  color: #55544d;
+  line-height: 1.7;
+}
+
+.article {
+  max-width: 780px;
+  min-height: calc(100vh - 160px);
+}
+
+.article h1 {
+  font-size: clamp(46px, 7vw, 72px);
+}
+
+.article h2 {
+  margin-top: 54px;
+}
+
+.article .back-link {
+  display: inline-block;
+  margin-top: 36px;
+  font: 600 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+footer {
+  padding: 22px 28px;
+  border-top: 1px solid #cfcec6;
+  color: #68675f;
+  font: 500 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+@media (max-width: 720px) {
+  .site-shell {
+    width: 100%;
+    border-inline: 0;
+  }
+
+  .site-header {
+    align-items: flex-start;
+    flex-direction: column;
+    padding-block: 18px;
+  }
+
+  nav {
+    width: 100%;
+    gap: 14px;
+    overflow-x: auto;
+    padding-bottom: 3px;
+  }
+
+  main {
+    padding: 54px 22px 70px;
+  }
+
+  .search-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .search-status {
+    white-space: normal;
+  }
+
+  .search-panel {
+    margin-top: 46px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .results a {
+    transition: none;
+  }
+}
