@@ -111,6 +111,13 @@ least 1.25x faster than the compiled control at 10,000 rows. The report must con
 `keyedArrayPrependHints` count; deterministic package tests separately require key, descriptor, and
 binding work to equal only the new prefix while preserving every existing DOM row.
 
+Queued structural prepends have a separate 10,000-row gate. One concise setter drops the oldest row
+with a bounded `slice()` and the adjacent setter prepends one fresh row; a block-bodied pair
+performs the same native array and DOM work through complete reconciliation. Both compiler modes
+must remain at least 2x faster than bracketed React and 1.25x faster than the compiled control.
+Every sample checks all 9,999 survivor identities and order, the disconnected rejected row, and the
+fresh first row.
+
 Keyed array slices have an independent retained-window comparison. A concise
 `slice(trimCount)` uses an event-local runtime bound and is measured against bracketed React and an
 equivalent block-bodied compiled snapshot control. Both compiler modes must remain at least 3x
@@ -383,6 +390,9 @@ The default JSON report is `/tmp/farm-react-dashboard-benchmark.json`; change it
   adjacent setters. Its block-bodied pair performs the same native array and DOM-visible work
   through complete reconciliation; the hinted path reuses survivor positions and reads only the
   appended suffix.
+- The queued structural-prepend control performs the mirror operation. Its hinted path reuses the
+  exact slice interval, creates only the new prefix, and shifts delegated event indexes while its
+  block-bodied pair uses complete reconciliation.
 - The queued structural-append-map control follows that pair with a same-key native map. Its
   block-bodied control reaches the same DOM through complete reconciliation; the hinted path
   validates the final positional lineage once, patches only changed survivors, and mounts the final

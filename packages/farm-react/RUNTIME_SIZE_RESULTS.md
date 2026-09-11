@@ -27,6 +27,7 @@ is enforced on every pull request instead of serving only as a manually recorded
 | Keyed rows, LIS, scalar, Set, and Map targeting   |          60,179 B |         71,373 B |         11,194 B |
 | Keyed rows with append hints                      |          60,085 B |         71,690 B |         11,605 B |
 | Keyed rows with prepend hints                     |          60,087 B |         72,055 B |         11,968 B |
+| Keyed rows with removal + prepend hints           |          60,114 B |         73,501 B |         13,387 B |
 | Keyed rows with filter hints                      |          60,088 B |         72,258 B |         12,170 B |
 | Keyed rows with slice hints                       |          60,075 B |         72,297 B |         12,222 B |
 | Keyed rows with known-position hints              |          60,076 B |         72,344 B |         12,268 B |
@@ -36,15 +37,16 @@ is enforced on every pull request instead of serving only as a manually recorded
 | Keyed rows with sort hints                        |          60,077 B |         72,207 B |         12,130 B |
 | Keyed rows with rolling-window hints              |          60,108 B |         73,177 B |         13,069 B |
 
-The isolated compatibility runtime contributes 21,619 B gzip over the React control. The
-compiler-selected core contributes 3,766 B, an **82.6% reduction**. This comparison uses the same
+The isolated compatibility runtime contributes 24,442 B gzip over the React control. The
+compiler-selected core contributes 3,766 B, an **84.6% reduction**. This comparison uses the same
 hand-authored compiled definition and changes only the runtime entry used to create it.
 
 The keyed fixture retains `FarmCompiledKeyedRows` plus compiler-emitted `identityTarget`,
 `membershipTarget`, and `mapLookupTarget` metadata, plus Set/Map producer-delta helpers. It rejects
 the optional row-conditional and keyed-update runtimes. Separate append, prepend, and filter
-fixtures prove that recognized functional updates retain only the matching hinted runtime. Slice
-reuses the filter removal capability. Position-only, batch-position, exact-window, and
+fixtures prove that recognized functional updates retain only the matching hinted runtime. The
+removal-plus-prepend fixture retains its composed capability without changing the prepend-only or
+structural-append bundles. Slice reuses the filter removal capability. Position-only, batch-position, exact-window, and
 rolling-window modules select separate hint runtimes only when the compiler emits those update
 shapes. Reverse and sort share the optional reorder capability; the direct and isolated core
 results remain byte-for-byte unchanged. Over the ordinary keyed fixture, position pays 1,074 B

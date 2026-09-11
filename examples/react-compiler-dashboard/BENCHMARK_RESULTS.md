@@ -1,6 +1,38 @@
 # Complex dashboard and 21,000-row peak result
 
-Latest run: 2026-09-10
+Latest run: 2026-09-11
+
+## Queued removal followed by prepend — 2026-09-11
+
+An index-independent keyed-row `filter()` or bounded `slice()` can now retain its committed-row
+lineage through one or more immediately following immutable prepends. Previously, the prepend
+result lost the structural survivor proof and the final commit used complete keyed reconciliation.
+The new path validates the entire result before its first DOM write, removes only rejected rows,
+preserves every survivor, shifts delegated event indexes, and creates only the fresh prefix.
+
+| Mode   | Remove + prepend | Compiled fallback | vs React | vs fallback |
+| ------ | ---------------: | ----------------: | -------: | ----------: |
+| Static |          9.00 ms |          24.00 ms |    8.98x |       2.67x |
+| Hybrid |          7.80 ms |          23.30 ms |   10.37x |       2.99x |
+
+Both modes passed the 2x React and 1.25x compiled-control floors. The bracketed React median was
+80.85 ms. Every sample checked the final 10,000-row order, all 9,999 survivor DOM identities, the
+removed row's disconnection, the fresh first row, browser errors, and zero compiled owner
+executions. Correctness, the broad 10% no-regression gate, every established feature gate, and
+optimization persistence passed; the existing 10k/20k update persistence remained between 15.75x
+and 21.75x.
+
+Compiler and runtime coverage includes filter and slice sources, multiple queued prefixes,
+all-rows-rejected mounting, duplicate and mismatched-key fallback before mutation,
+collection-reading fallback, delegated event indexes, controlled-input focus and selection,
+Strict Mode hydration, unmount-before-flush cleanup, React 18.3.1 and 19.2.8, and 2,000 sequential
+randomized transitions matched with normal React. The dedicated structural-prepend fixture adds
+13,387 bytes gzip; the existing direct-prepend and structural-append premiums remain unchanged.
+
+Numbers are browser medians from a complete production-build run with 5 warmups, 10 measured
+samples per compiler action, 20 bracketed React samples, and 3 scale cycles, using Chrome
+153.0.8010.36 and Node.js 23.11.0 on Apple M1 macOS arm64. The aggregate command and every
+individual gate passed.
 
 ## Mapped survivors before a later append — 2026-09-10
 

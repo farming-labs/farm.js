@@ -913,6 +913,48 @@ export function StandardTableBenchmark() {
           Queued remove + append (snapshot control)
         </button>
         <button
+          data-action="table-structural-prepend-queued"
+          type="button"
+          onClick={() => {
+            const incoming = {
+              id: (seed + 1_050_000) * 10_000 + 1,
+              label: "queued prepended row",
+              amount: 2_048,
+              region: "AMR" as const,
+              status: "review" as const,
+            };
+            setRows((current) => current.slice(1));
+            setRows((current) => [incoming, ...current]);
+            setOperation("remove and prepend across queued setters");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queued remove + prepend
+        </button>
+        <button
+          data-action="table-structural-prepend-queued-snapshot"
+          type="button"
+          onClick={() => {
+            const incoming = {
+              id: (seed + 1_050_000) * 10_000 + 1,
+              label: "queued prepended row",
+              amount: 2_048,
+              region: "AMR" as const,
+              status: "review" as const,
+            };
+            setRows((current) => {
+              return current.slice(1);
+            });
+            setRows((current) => {
+              return [incoming, ...current];
+            });
+            setOperation("remove and prepend across queued setters (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queued remove + prepend (snapshot control)
+        </button>
+        <button
           data-action="table-structural-append-map-queued"
           type="button"
           onClick={() => {
