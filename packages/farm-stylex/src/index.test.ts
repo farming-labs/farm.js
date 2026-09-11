@@ -54,6 +54,22 @@ describe("stylex plugin", () => {
     expect((second as string).match(/virtual:stylex:runtime/g)).toHaveLength(1);
   });
 
+  it("does not mistake page content for injected development assets", async () => {
+    const plugin = stylex();
+    await plugin.configure?.({ plugins: [plugin] }, {
+      config: {} as never,
+      isDev: true,
+      isProd: false,
+    } as never);
+    const html =
+      '<!doctype html><html><head></head><body><code>data-farm-stylex="css" data-farm-stylex="runtime"</code></body></html>';
+
+    const result = await plugin.render?.html?.(html, { pathname: "/" }, { config: {} } as never);
+
+    expect(result).toContain('<link rel="stylesheet" href="/virtual:stylex.css"');
+    expect(result).toContain('<script type="module" src="/@id/virtual:stylex:runtime"');
+  });
+
   it("does not inject development assets into production HTML", async () => {
     const plugin = stylex();
     await plugin.configure?.({ plugins: [plugin] }, {
