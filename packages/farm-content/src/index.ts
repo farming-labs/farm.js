@@ -1,28 +1,36 @@
 import path from "node:path";
 import { definePlugin } from "@farm.js/core/plugin";
 import fg from "fast-glob";
+import { asset } from "./assets.js";
 import { collection, files, isSupportedContentFile } from "./config.js";
 import { loadContentCollections, writeContentServerModule } from "./loader.js";
 import type { ContentCollections, ContentOptions, ContentPlugin } from "./types.js";
 
 const CONTENT_SERVER_ID = "@farm.js/content/server";
 
-export { collection, files };
+export { asset, collection, files };
 export type { ContentFilesOptions } from "./config.js";
 export type {
   AppContentEntry,
   AppContentRegistry,
+  ContentAssetField,
+  ContentAssetFields,
+  ContentAssetsInput,
+  ContentAssetValue,
   ContentCollection,
   ContentCollectionInput,
   ContentCollectionName,
   ContentCollections,
   ContentEntry,
+  ContentFileAsset,
   ContentFileSource,
+  ContentImageAsset,
   ContentOptions,
   ContentPlugin,
   ContentSchema,
   ContentTransformContext,
   InferContentCollectionEntry,
+  InferContentAssetFields,
   InferContentRegistry,
   InferContentSchema,
 } from "./types.js";
@@ -71,7 +79,7 @@ export function content<const TCollections extends ContentCollections>(
   async function rebuild(): Promise<void> {
     const loaded = await loadContentCollections(root, options.collections);
     sourceFiles = new Set(loaded.sourceFiles);
-    await writeContentServerModule(generatedFile, loaded.collections);
+    await writeContentServerModule(generatedFile, loaded.collections, loaded.assetImports);
   }
 
   function createContentVitePlugin() {

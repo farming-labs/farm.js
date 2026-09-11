@@ -1,4 +1,4 @@
-import { content, collection, files } from "@farm.js/content";
+import { asset, content, collection, files } from "@farm.js/content";
 import { defineConfig } from "@farm.js/core";
 import { z } from "zod";
 
@@ -20,6 +20,10 @@ export default defineConfig({
         posts: collection({
           source: files("content/posts/**/*.md"),
           schema: post,
+          assets: {
+            image: asset.image().optional(),
+            downloads: asset.files().default([]),
+          },
           transform: ({ data, words }) => ({
             ...data,
             readingMinutes: Math.max(1, Math.ceil(words / 220)),

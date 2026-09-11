@@ -1,7 +1,10 @@
 import path from "node:path";
+import { normalizeContentAssetFields } from "./assets.js";
 import type {
+  ContentAssetsInput,
   ContentCollection,
   ContentCollectionInput,
+  ContentDataWithAssets,
   ContentFileSource,
   ContentSchema,
   InferContentSchema,
@@ -34,8 +37,11 @@ export function files(
 
 export function collection<
   TSchema extends ContentSchema<any>,
-  TTransformed = InferContentSchema<TSchema>,
->(input: ContentCollectionInput<TSchema, TTransformed>): ContentCollection<TTransformed> {
+  const TAssets extends ContentAssetsInput = undefined,
+  TTransformed = ContentDataWithAssets<InferContentSchema<TSchema>, TAssets>,
+>(
+  input: ContentCollectionInput<TSchema, TTransformed, TAssets>,
+): ContentCollection<TTransformed, InferContentSchema<TSchema>> {
   if (!input || typeof input !== "object") {
     throw new TypeError("Content collection must be an object");
   }
@@ -50,12 +56,23 @@ export function collection<
   if (input.transform !== undefined && typeof input.transform !== "function") {
     throw new TypeError("Content collection transform must be a function");
   }
+  if (input.assets !== undefined && input.assets !== true && typeof input.assets !== "object") {
+    throw new TypeError("Content collection assets must be true or an asset declaration object");
+  }
+
+  const assets =
+    input.assets === true
+      ? true
+      : input.assets === undefined
+        ? undefined
+        : normalizeContentAssetFields(input.assets);
 
   return Object.freeze({
     source: input.source,
     schema: input.schema,
+    ...(assets === undefined ? {} : { assets }),
     ...(input.transform ? { transform: input.transform } : {}),
-  }) as unknown as ContentCollection<TTransformed>;
+  }) as unknown as ContentCollection<TTransformed, InferContentSchema<TSchema>>;
 }
 
 export function isSupportedContentFile(filePath: string): boolean {

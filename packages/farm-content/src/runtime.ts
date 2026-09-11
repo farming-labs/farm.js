@@ -13,19 +13,25 @@ type EncodedContentValue =
   | ["array", EncodedContentValue[]]
   | ["object", Array<[string, EncodedContentValue]>];
 
-export function decodeContentValue(value: EncodedContentValue): any {
+export function decodeContentValue(
+  value: EncodedContentValue,
+  assetUrls: Readonly<Record<string, string>> = {},
+): any {
+  if (typeof value === "string") return replaceAssetUrls(value, assetUrls);
   if (!Array.isArray(value)) return value;
   const [kind, payload] = value;
   if (kind === "undefined") return undefined;
   if (kind === "date") return new Date(payload as string);
   if (kind === "bigint") return BigInt(payload as string);
   if (kind === "array")
-    return Object.freeze((payload as EncodedContentValue[]).map(decodeContentValue));
+    return Object.freeze(
+      (payload as EncodedContentValue[]).map((entry) => decodeContentValue(entry, assetUrls)),
+    );
   if (kind === "object") {
     const result: Record<string, unknown> = Object.create(null);
     for (const [key, entry] of payload as Array<[string, EncodedContentValue]>) {
       Object.defineProperty(result, key, {
-        value: decodeContentValue(entry),
+        value: decodeContentValue(entry, assetUrls),
         enumerable: true,
         configurable: false,
         writable: false,
@@ -34,6 +40,14 @@ export function decodeContentValue(value: EncodedContentValue): any {
     return Object.freeze(result);
   }
   throw new TypeError(`[farm:content] Unknown encoded content value: ${String(kind)}`);
+}
+
+function replaceAssetUrls(value: string, assetUrls: Readonly<Record<string, string>>): string {
+  let result = value;
+  for (const [token, url] of Object.entries(assetUrls)) {
+    if (result.includes(token)) result = result.split(token).join(url);
+  }
+  return result;
 }
 
 export function createContentRuntime(collections: RuntimeCollections) {

@@ -120,6 +120,7 @@ footer {
 .article header { padding-bottom: 48px; border-bottom: 4px solid #171714; }
 .article h1 { margin: 20px 0; font-size: clamp(3.8rem, 9vw, 7.5rem); font-weight: 500; letter-spacing: -0.065em; line-height: 0.86; }
 .article-deck { max-width: 42ch; margin: 0; color: #55544d; font-size: 1.3rem; line-height: 1.5; }
+.article-image { display: block; width: 100%; height: auto; margin-top: 40px; border: 1px solid #aaa79d; }
 .article-body { max-width: 660px; margin: 56px auto 0; font-size: 1.22rem; line-height: 1.75; }
 .article-body p:first-child::first-letter { float: left; margin: 0.08em 0.12em 0 0; color: #d24b2f; font-size: 4.3em; line-height: 0.72; }
 .article-tags { max-width: 660px; margin: 48px auto 0; }
