@@ -7,6 +7,9 @@ import {
   createCompiledComponentWithFeatures,
   createCompilerKeyedArrayAppend,
   createCompilerKeyedArrayFilter,
+  createCompilerKeyedArrayMapPipeline,
+  createCompilerKeyedArrayMappedStructuralAppend,
+  createCompilerKeyedArrayQueuedMapPipeline,
   createCompilerKeyedArraySlice,
   createCompilerKeyedArrayStructuralAppend,
   createCompilerKeyedArrayStructuralAppendMapPipeline,
@@ -55,6 +58,22 @@ function hintedAppend(previous: Item[], additions: readonly Item[]): unknown {
 
 function hintedStructuralAppend(previous: Item[], additions: readonly Item[]): unknown {
   return createCompilerKeyedArrayStructuralAppend(previous, [...previous, ...additions]);
+}
+
+function hintedMappedStructuralAppend(previous: Item[], additions: readonly Item[]): unknown {
+  return createCompilerKeyedArrayMappedStructuralAppend(previous, [...previous, ...additions]);
+}
+
+function hintedMap(previous: Item[], mapper: (item: Item, index: number) => Item): unknown {
+  return createCompilerKeyedArrayMapPipeline(previous, (current, applyMap) =>
+    applyMap(current, (current as Item[]).map, mapper),
+  );
+}
+
+function hintedQueuedMap(previous: Item[], mapper: (item: Item, index: number) => Item): unknown {
+  return createCompilerKeyedArrayQueuedMapPipeline(previous, (current, applyMap) =>
+    applyMap(current, (current as Item[]).map, mapper),
+  );
 }
 
 function hintedStructuralAppendMap(
@@ -119,6 +138,37 @@ function createAppendHarness(
     editedId: string,
     nextLabel: string,
     secondLabel?: string,
+  ) => void = () => undefined;
+  let filterMapThenAppend: (
+    removed: ReadonlySet<string>,
+    additions: readonly Item[],
+    editedId: string,
+    nextLabel: string,
+    secondLabel?: string,
+  ) => void = () => undefined;
+  let sliceMapThenAppend: (
+    start: number,
+    end: number,
+    additions: readonly Item[],
+    editedId: string,
+    nextLabel: string,
+  ) => void = () => undefined;
+  let filterMapThenAppendUnlinked: (
+    removed: ReadonlySet<string>,
+    additions: readonly Item[],
+    editedId: string,
+    nextLabel: string,
+  ) => void = () => undefined;
+  let filterTransformThenAppend: (
+    removed: ReadonlySet<string>,
+    additions: readonly Item[],
+    mapper: (item: Item, index: number) => Item,
+  ) => void = () => undefined;
+  let mapFilterThenAppend: (
+    removed: ReadonlySet<string>,
+    additions: readonly Item[],
+    editedId: string,
+    nextLabel: string,
   ) => void = () => undefined;
   let filterAppendThenTransform: (
     removed: ReadonlySet<string>,
@@ -192,6 +242,54 @@ function createAppendHarness(
               ),
             );
           }
+        };
+        filterMapThenAppend = (removed, additions, editedId, nextLabel, secondLabel) => {
+          state[0].set((previous) => hintedFilter(previous as Item[], removed));
+          state[0].set((previous) =>
+            hintedMap(previous as Item[], (item) =>
+              item.id === editedId ? { ...item, label: nextLabel } : item,
+            ),
+          );
+          if (secondLabel !== undefined) {
+            state[0].set((previous) =>
+              hintedMap(previous as Item[], (item) =>
+                item.id === editedId ? { ...item, label: secondLabel } : item,
+              ),
+            );
+          }
+          state[0].set((previous) => hintedMappedStructuralAppend(previous as Item[], additions));
+        };
+        sliceMapThenAppend = (start, end, additions, editedId, nextLabel) => {
+          state[0].set((previous) => hintedSlice(previous as Item[], start, end));
+          state[0].set((previous) =>
+            hintedMap(previous as Item[], (item) =>
+              item.id === editedId ? { ...item, label: nextLabel } : item,
+            ),
+          );
+          state[0].set((previous) => hintedMappedStructuralAppend(previous as Item[], additions));
+        };
+        filterMapThenAppendUnlinked = (removed, additions, editedId, nextLabel) => {
+          state[0].set((previous) => hintedFilter(previous as Item[], removed));
+          state[0].set((previous) =>
+            hintedMap(previous as Item[], (item) =>
+              item.id === editedId ? { ...item, label: nextLabel } : item,
+            ),
+          );
+          state[0].set((previous) => hintedStructuralAppend(previous as Item[], additions));
+        };
+        filterTransformThenAppend = (removed, additions, mapper) => {
+          state[0].set((previous) => hintedFilter(previous as Item[], removed));
+          state[0].set((previous) => hintedMap(previous as Item[], mapper));
+          state[0].set((previous) => hintedMappedStructuralAppend(previous as Item[], additions));
+        };
+        mapFilterThenAppend = (removed, additions, editedId, nextLabel) => {
+          state[0].set((previous) =>
+            hintedQueuedMap(previous as Item[], (item) =>
+              item.id === editedId ? { ...item, label: nextLabel } : item,
+            ),
+          );
+          state[0].set((previous) => hintedFilter(previous as Item[], removed));
+          state[0].set((previous) => hintedMappedStructuralAppend(previous as Item[], additions));
         };
         filterAppendThenTransform = (removed, additions, mapper) => {
           state[0].set((previous) => hintedFilter(previous as Item[], removed));
@@ -291,6 +389,37 @@ function createAppendHarness(
       nextLabel: string,
       secondLabel?: string,
     ) => sliceAppendThenMap(start, end, additions, editedId, nextLabel, secondLabel),
+    filterMapThenAppend: (
+      removed: ReadonlySet<string>,
+      additions: readonly Item[],
+      editedId: string,
+      nextLabel: string,
+      secondLabel?: string,
+    ) => filterMapThenAppend(removed, additions, editedId, nextLabel, secondLabel),
+    sliceMapThenAppend: (
+      start: number,
+      end: number,
+      additions: readonly Item[],
+      editedId: string,
+      nextLabel: string,
+    ) => sliceMapThenAppend(start, end, additions, editedId, nextLabel),
+    filterMapThenAppendUnlinked: (
+      removed: ReadonlySet<string>,
+      additions: readonly Item[],
+      editedId: string,
+      nextLabel: string,
+    ) => filterMapThenAppendUnlinked(removed, additions, editedId, nextLabel),
+    filterTransformThenAppend: (
+      removed: ReadonlySet<string>,
+      additions: readonly Item[],
+      mapper: (item: Item, index: number) => Item,
+    ) => filterTransformThenAppend(removed, additions, mapper),
+    mapFilterThenAppend: (
+      removed: ReadonlySet<string>,
+      additions: readonly Item[],
+      editedId: string,
+      nextLabel: string,
+    ) => mapFilterThenAppend(removed, additions, editedId, nextLabel),
     filterAppendThenTransform: (
       removed: ReadonlySet<string>,
       additions: readonly Item[],
@@ -457,6 +586,192 @@ describe("compiled keyed-array append hints", () => {
     expect(harness.counters.listRenders).toBe(1);
     expect(harness.counters.descriptorReads).toBe(2);
     expect(harness.counters.bindingReads).toBe(3);
+  });
+
+  it("retains mapped survivors when the append runs after the maps", async () => {
+    const initialItems = Array.from(
+      { length: 2_048 },
+      (_, index): Item => ({ id: `row-${index}`, label: `Row ${index}` }),
+    );
+    const harness = createAppendHarness(initialItems, false, true);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Inventory />));
+    const edited = container.querySelector('[data-key="row-512"]');
+    const untouched = container.querySelector('[data-key="row-1536"]');
+    const removed = container.querySelector('[data-key="row-1024"]');
+    harness.counters.keyReads = 0;
+    harness.counters.descriptorReads = 0;
+    harness.counters.bindingReads = 0;
+
+    await act(async () => {
+      harness.filterMapThenAppend(
+        new Set(["row-1024"]),
+        [{ id: "row-2048", label: "Row 2048" }],
+        "row-512",
+        "Edited survivor",
+        "Edited survivor twice",
+      );
+      await flushCompilerUpdates();
+    });
+
+    expect(container.querySelector('[data-key="row-512"]')).toBe(edited);
+    expect(container.querySelector('[data-key="row-1536"]')).toBe(untouched);
+    expect(container.querySelector('[data-key="row-1024"]')).toBeNull();
+    expect(removed?.isConnected).toBe(false);
+    expect(edited?.textContent).toBe("Edited survivor twice");
+    expect(container.querySelector("li:last-child")?.textContent).toBe("Row 2048");
+    expect(container.querySelectorAll("li")).toHaveLength(2_048);
+    expect(harness.counters.executions).toBe(1);
+    expect(harness.counters.listRenders).toBe(1);
+    expect(harness.counters.keyReads).toBe(2);
+    expect(harness.counters.descriptorReads).toBe(1);
+    expect(harness.counters.bindingReads).toBe(2);
+  });
+
+  it("retains mapped survivors from a sliced interval before appending", async () => {
+    const harness = createAppendHarness(
+      [
+        { id: "a", label: "Alpha" },
+        { id: "b", label: "Beta" },
+        { id: "c", label: "Gamma" },
+        { id: "d", label: "Delta" },
+      ],
+      false,
+      true,
+    );
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Inventory />));
+    const beta = container.querySelector('[data-key="b"]');
+    const gamma = container.querySelector('[data-key="c"]');
+
+    await act(async () => {
+      harness.sliceMapThenAppend(1, 3, [{ id: "e", label: "Epsilon" }], "c", "Gamma edited");
+      await flushCompilerUpdates();
+    });
+
+    expect([...container.querySelectorAll("li")].map((row) => row.textContent)).toEqual([
+      "Beta",
+      "Gamma edited",
+      "Epsilon",
+    ]);
+    expect(container.querySelector('[data-key="b"]')).toBe(beta);
+    expect(container.querySelector('[data-key="c"]')).toBe(gamma);
+    expect(harness.counters.executions).toBe(1);
+    expect(harness.counters.listRenders).toBe(1);
+  });
+
+  it("retains mapped lineage when removal follows the map before appending", async () => {
+    const harness = createAppendHarness(
+      [
+        { id: "a", label: "Alpha" },
+        { id: "b", label: "Beta" },
+        { id: "c", label: "Gamma" },
+      ],
+      false,
+      true,
+    );
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Inventory />));
+    const beta = container.querySelector('[data-key="b"]');
+    const gamma = container.querySelector('[data-key="c"]');
+
+    await act(async () => {
+      harness.mapFilterThenAppend(
+        new Set(["a"]),
+        [{ id: "d", label: "Delta" }],
+        "c",
+        "Gamma edited",
+      );
+      await flushCompilerUpdates();
+    });
+
+    expect([...container.querySelectorAll("li")].map((row) => row.textContent)).toEqual([
+      "Beta",
+      "Gamma edited",
+      "Delta",
+    ]);
+    expect(container.querySelector('[data-key="b"]')).toBe(beta);
+    expect(container.querySelector('[data-key="c"]')).toBe(gamma);
+    expect(harness.counters.executions).toBe(1);
+    expect(harness.counters.listRenders).toBe(1);
+  });
+
+  it("keeps the complete fallback when mapped append authorization is absent", async () => {
+    const harness = createAppendHarness(
+      [
+        { id: "a", label: "Alpha" },
+        { id: "b", label: "Beta" },
+        { id: "c", label: "Gamma" },
+      ],
+      false,
+      true,
+    );
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Inventory />));
+    harness.counters.keyReads = 0;
+
+    await act(async () => {
+      harness.filterMapThenAppendUnlinked(
+        new Set(["b"]),
+        [{ id: "d", label: "Delta" }],
+        "c",
+        "Gamma edited",
+      );
+      await flushCompilerUpdates();
+    });
+
+    expect([...container.querySelectorAll("li")].map((row) => row.textContent)).toEqual([
+      "Alpha",
+      "Gamma edited",
+      "Delta",
+    ]);
+    expect(harness.counters.keyReads).toBe(3);
+  });
+
+  it("falls back atomically when a pre-append map changes a surviving key", async () => {
+    const harness = createAppendHarness(
+      [
+        { id: "a", label: "Alpha" },
+        { id: "b", label: "Beta" },
+        { id: "c", label: "Gamma" },
+      ],
+      false,
+      true,
+    );
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Inventory />));
+    const alpha = container.querySelector('[data-key="a"]');
+
+    await act(async () => {
+      harness.filterTransformThenAppend(new Set(["c"]), [{ id: "d", label: "Delta" }], (item) =>
+        item.id === "b" ? { ...item, id: "renamed-b", label: "Renamed" } : item,
+      );
+      await flushCompilerUpdates();
+    });
+
+    expect([...container.querySelectorAll("li")].map((row) => row.textContent)).toEqual([
+      "Alpha",
+      "Renamed",
+      "Delta",
+    ]);
+    expect(container.querySelector('[data-key="a"]')).toBe(alpha);
+    expect(container.querySelector('[data-key="b"]')).toBeNull();
+    expect(container.querySelector('[data-key="renamed-b"]')).not.toBeNull();
   });
 
   it("creates an appended row from its final mapped value", async () => {
@@ -676,6 +991,7 @@ describe("compiled keyed-array append hints", () => {
       { id: "c", label: "Gamma" },
     ];
     let replaceFirst: () => void = () => undefined;
+    let replaceMappedFirst: () => void = () => undefined;
     const Inventory = createCompiledComponentWithFeatures(
       {
         displayName: "StructuralAppendForm",
@@ -691,6 +1007,17 @@ describe("compiled keyed-array append hints", () => {
               hintedStructuralAppendMap(previous as Item[], (item) =>
                 item.id === "b" ? { ...item, label: "Beta edited" } : item,
               ),
+            );
+          };
+          replaceMappedFirst = () => {
+            state[0].set((previous) => hintedFilter(previous as Item[], new Set(["c"])));
+            state[0].set((previous) =>
+              hintedMap(previous as Item[], (item) =>
+                item.id === "b" ? { ...item, label: "Beta mapped before append" } : item,
+              ),
+            );
+            state[0].set((previous) =>
+              hintedMappedStructuralAppend(previous as Item[], [{ id: "e", label: "Epsilon" }]),
             );
           };
           return (
@@ -758,6 +1085,20 @@ describe("compiled keyed-array append hints", () => {
       "Beta edited",
       "Gamma",
       "Delta",
+    ]);
+
+    await act(async () => {
+      replaceMappedFirst();
+      await flushCompilerUpdates();
+    });
+
+    expect(container.querySelector('[data-key="b"]')).toBe(beta);
+    expect(document.activeElement).toBe(beta);
+    expect([beta.selectionStart, beta.selectionEnd]).toEqual([1, 3]);
+    expect([...container.querySelectorAll("input")].map((input) => input.value)).toEqual([
+      "Beta mapped before append",
+      "Delta",
+      "Epsilon",
     ]);
   });
 
@@ -900,6 +1241,43 @@ describe("compiled keyed-array append hints", () => {
     expect(harness.counters.keyReads).toBe(3);
   });
 
+  it("falls back when committed data changes before a mapped structural append", async () => {
+    const initialItems: Item[] = [
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+      { id: "c", label: "Gamma" },
+    ];
+    const harness = createAppendHarness(initialItems, false, true);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Inventory />));
+    const alpha = container.querySelector('[data-key="a"]');
+    const beta = container.querySelector('[data-key="b"]');
+    initialItems[1] = { id: "b", label: "Beta externally replaced" };
+    harness.counters.keyReads = 0;
+
+    await act(async () => {
+      harness.filterMapThenAppend(
+        new Set(["c"]),
+        [{ id: "d", label: "Delta" }],
+        "a",
+        "Alpha edited",
+      );
+      await flushCompilerUpdates();
+    });
+
+    expect([...container.querySelectorAll("li")].map((row) => row.textContent)).toEqual([
+      "Alpha edited",
+      "Beta externally replaced",
+      "Delta",
+    ]);
+    expect(container.querySelector('[data-key="a"]')).toBe(alpha);
+    expect(container.querySelector('[data-key="b"]')).toBe(beta);
+    expect(harness.counters.keyReads).toBe(3);
+  });
+
   it("rejects a hint chained after an unhinted update in the same flush", async () => {
     const harness = createAppendHarness([
       { id: "a", label: "Alpha" },
@@ -953,6 +1331,8 @@ describe("compiled keyed-array append hints", () => {
     expect(createCompilerKeyedArrayAppend(proxy, next)).toBe(next);
     expect(() => createCompilerKeyedArrayStructuralAppend(proxy, next)).not.toThrow();
     expect(createCompilerKeyedArrayStructuralAppend(proxy, next)).toBe(next);
+    expect(() => createCompilerKeyedArrayMappedStructuralAppend(proxy, next)).not.toThrow();
+    expect(createCompilerKeyedArrayMappedStructuralAppend(proxy, next)).toBe(next);
     expect(() =>
       createCompilerKeyedArrayStructuralAppendMapPipeline(proxy, () => next),
     ).not.toThrow();
@@ -1014,7 +1394,7 @@ describe("compiled keyed-array append hints", () => {
   it("shares one append hint across multiple keyed boundaries", async () => {
     const initialItems: Item[] = [{ id: "a", label: "Alpha" }];
     let append: () => void = () => undefined;
-    let filterThenAppend: () => void = () => undefined;
+    let filterMapThenAppend: () => void = () => undefined;
     let keyReads = 0;
     const Inventory = createCompiledComponentWithFeatures(
       {
@@ -1026,15 +1406,15 @@ describe("compiled keyed-array append hints", () => {
             state[0].set((previous) =>
               hintedAppend(previous as Item[], [{ id: "b", label: "Beta" }]),
             );
-          filterThenAppend = () => {
+          filterMapThenAppend = () => {
             state[0].set((previous) => hintedFilter(previous as Item[], new Set(["a"])));
             state[0].set((previous) =>
-              hintedStructuralAppend(previous as Item[], [{ id: "c", label: "Gamma" }]),
-            );
-            state[0].set((previous) =>
-              hintedStructuralAppendMap(previous as Item[], (item) =>
+              hintedMap(previous as Item[], (item) =>
                 item.id === "b" ? { ...item, label: "Beta edited" } : item,
               ),
+            );
+            state[0].set((previous) =>
+              hintedMappedStructuralAppend(previous as Item[], [{ id: "c", label: "Gamma" }]),
             );
           };
           const list = (id: number, owner: string) => (
@@ -1094,7 +1474,7 @@ describe("compiled keyed-array append hints", () => {
 
     keyReads = 0;
     await act(async () => {
-      filterThenAppend();
+      filterMapThenAppend();
       await flushCompilerUpdates();
     });
 
@@ -1255,6 +1635,106 @@ describe("compiled keyed-array append hints", () => {
     expect(harness.counters.executions).toBe(1);
   }, 20_000);
 
+  it("matches React across 2,000 randomized removals, maps, and later appends", async () => {
+    const initialItems = Array.from(
+      { length: 1_001 },
+      (_, index): Item => ({ id: `row-${index}`, label: `Row ${index}` }),
+    );
+    const harness = createAppendHarness(initialItems, false, true);
+    let updateReact: (
+      kind: "filter" | "slice",
+      removed: ReadonlySet<string>,
+      additions: readonly Item[],
+      editedId: string,
+      nextLabel: string,
+    ) => void = () => undefined;
+    function Normal() {
+      const [items, setItems] = useState(initialItems);
+      updateReact = (kind, removed, additions, editedId, nextLabel) => {
+        setItems((previous) =>
+          kind === "slice"
+            ? previous.slice(0, previous.length - removed.size)
+            : previous.filter((item) => !removed.has(item.id)),
+        );
+        setItems((previous) =>
+          previous.map((item) => (item.id === editedId ? { ...item, label: nextLabel } : item)),
+        );
+        setItems((previous) => [...previous, ...additions]);
+      };
+      return (
+        <ol>
+          {items.map((item) => (
+            <li data-key={item.id} key={item.id}>
+              {item.label}
+            </li>
+          ))}
+        </ol>
+      );
+    }
+    const compiledContainer = document.createElement("div");
+    const reactContainer = document.createElement("div");
+    document.body.append(compiledContainer, reactContainer);
+    const compiledRoot = createRoot(compiledContainer);
+    const reactRoot = createRoot(reactContainer);
+    roots.push(compiledRoot, reactRoot);
+    await act(async () => {
+      compiledRoot.render(<harness.Inventory />);
+      reactRoot.render(<Normal />);
+    });
+    const stableRow = compiledContainer.querySelector('[data-key="row-0"]');
+    let active = initialItems.map((item) => item.id);
+    let seed = 0x243f6a88;
+    let nextId = initialItems.length;
+
+    for (let batch = 0; batch < 200; batch += 1) {
+      const kind = batch % 2 === 0 ? "filter" : "slice";
+      const removed = new Set<string>();
+      if (kind === "slice") {
+        for (const id of active.slice(-5)) removed.add(id);
+      } else {
+        const removable = active.slice(1);
+        while (removed.size < 5) {
+          seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0;
+          removed.add(removable[seed % removable.length]);
+        }
+      }
+      const additions = Array.from({ length: 5 }, () => {
+        const id = `row-${nextId++}`;
+        return { id, label: `Mapped append ${id}` };
+      });
+      const survivors =
+        kind === "slice"
+          ? active.slice(0, active.length - removed.size)
+          : active.filter((id) => !removed.has(id));
+      seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0;
+      const editedId = survivors[seed % survivors.length];
+      const nextLabel = `Mapped ${batch}-${seed % 10_000}`;
+      await act(async () => {
+        if (kind === "slice") {
+          harness.sliceMapThenAppend(
+            0,
+            active.length - removed.size,
+            additions,
+            editedId,
+            nextLabel,
+          );
+        } else {
+          harness.filterMapThenAppend(removed, additions, editedId, nextLabel);
+        }
+        updateReact(kind, removed, additions, editedId, nextLabel);
+        await flushCompilerUpdates();
+      });
+      expect([...compiledContainer.querySelectorAll("li")].map((row) => row.outerHTML)).toEqual(
+        [...reactContainer.querySelectorAll("li")].map((row) => row.outerHTML),
+      );
+      active = survivors;
+      active.push(...additions.map((item) => item.id));
+    }
+
+    expect(compiledContainer.querySelector('[data-key="row-0"]')).toBe(stableRow);
+    expect(harness.counters.executions).toBe(1);
+  }, 20_000);
+
   it("hydrates in StrictMode and drops a queued append after unmount", async () => {
     const harness = createAppendHarness([{ id: "a", label: "Alpha" }], false, true);
     const container = document.createElement("div");
@@ -1285,7 +1765,7 @@ describe("compiled keyed-array append hints", () => {
     expect(recoverable).toEqual([]);
 
     await act(async () => {
-      harness.filterAppendThenMap(
+      harness.filterMapThenAppend(
         new Set(["a"]),
         [{ id: "c", label: "Gamma" }],
         "b",
@@ -1297,7 +1777,7 @@ describe("compiled keyed-array append hints", () => {
 
     roots.pop();
     act(() => {
-      harness.filterAppendThenMap(
+      harness.filterMapThenAppend(
         new Set(["b"]),
         [{ id: "d", label: "Delta" }],
         "c",

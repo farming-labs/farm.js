@@ -1049,6 +1049,62 @@ export function StandardTableBenchmark() {
           Queued filter + append + map (snapshot control)
         </button>
         <button
+          data-action="table-filter-map-append-queued"
+          type="button"
+          onClick={() => {
+            const incoming = {
+              id: (seed + 1_300_000) * 10_000 + 1,
+              label: "queued mapped-before-append row",
+              amount: 4_096,
+              region: "AMR" as const,
+              status: "review" as const,
+            };
+            setRows((current) => current.filter((row) => row.id % 10_000 !== 7_001));
+            setRows((current) =>
+              current.map((row) =>
+                row.id % 10_000 === 5_001
+                  ? { ...row, amount: row.amount + 1, label: `${row.label} reviewed` }
+                  : row,
+              ),
+            );
+            setRows((current) => [...current, incoming]);
+            setOperation("filter, map, and append across queued setters");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queued filter + map + append
+        </button>
+        <button
+          data-action="table-filter-map-append-queued-snapshot"
+          type="button"
+          onClick={() => {
+            const incoming = {
+              id: (seed + 1_300_000) * 10_000 + 1,
+              label: "queued mapped-before-append row",
+              amount: 4_096,
+              region: "AMR" as const,
+              status: "review" as const,
+            };
+            setRows((current) => {
+              return current.filter((row) => row.id % 10_000 !== 7_001);
+            });
+            setRows((current) => {
+              return current.map((row) =>
+                row.id % 10_000 === 5_001
+                  ? { ...row, amount: row.amount + 1, label: `${row.label} reviewed` }
+                  : row,
+              );
+            });
+            setRows((current) => {
+              return [...current, incoming];
+            });
+            setOperation("filter, map, and append (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queued filter + map + append (snapshot control)
+        </button>
+        <button
           data-action="table-map-structural-reorder-pipeline"
           type="button"
           onClick={() => {

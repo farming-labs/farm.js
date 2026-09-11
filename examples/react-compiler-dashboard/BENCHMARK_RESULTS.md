@@ -2,6 +2,40 @@
 
 Latest run: 2026-09-10
 
+## Mapped survivors before a later append — 2026-09-10
+
+An index-independent keyed-row `filter()` or bounded `slice()` can now keep its original survivor
+lineage when one or more adjacent same-key `map()` setters run before a later immutable append. A
+safe map may also run before the structural removal. Previously, these call orders reached the
+correct DOM through complete keyed reconciliation. The new path connects mapped survivors back to
+their committed rows, validates the full native result before mutation, removes only rejected rows,
+patches only changed survivors, and creates only the fresh suffix.
+
+| Mode   | Filter + map + append | Compiled fallback | vs React | vs fallback |
+| ------ | ---------------------: | ----------------: | -------: | ----------: |
+| Static |               13.40 ms |          25.40 ms |    5.19x |       1.90x |
+| Hybrid |               13.90 ms |          27.60 ms |    5.00x |       1.99x |
+
+Both modes passed the 2x React and 1.25x compiled-control floors. The bracketed React median was
+69.50 ms. Every sample verified the final 10,000-row order, complete survivor DOM identity, the
+removed row's disconnection, the changed survivor's label and amount, and a fresh appended node.
+Correctness, the broad 10% no-regression gate, optimization persistence, and the new feature gate
+passed; the established 10k/20k update persistence remained between 12.30x and 16.33x. One
+unchanged static queued-window-resize measurement reached 3.87x against its 4x React floor while
+still passing its compiled-control floor at 1.57x. The immediately preceding high-sample
+confirmation passed every aggregate and individual gate, so no threshold was relaxed.
+
+Package coverage includes filter-map-append, slice-map-append, map-filter-append, multiple maps,
+multiple keyed boundaries, changed-key fallback, stale committed-data fallback before key reads,
+controlled-input focus and selection, Strict Mode hydration, unmount before flush, React 18.3.1 and
+19.2.8, and 2,000 randomized transitions matched with normal React. The optional
+structural-append-map fixture is 18,708 bytes gzip, within its existing 18,889-byte ceiling.
+
+Numbers are browser medians from a complete production-build run with 5 warmups, 10 measured
+samples per compiler action, 20 bracketed React samples, and 3 scale cycles, using Chrome
+153.0.8010.36 and Node.js 23.11.0 on Apple M1 macOS arm64. The command reported the isolated
+unchanged timing miss described above rather than a full all-gates pass.
+
 ## Queued filter, append, and maps — 2026-09-10
 
 An index-independent keyed-row `filter()` can now retain its original survivor positions through

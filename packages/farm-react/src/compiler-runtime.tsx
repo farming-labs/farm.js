@@ -15,7 +15,7 @@ interface CompilerKeyedArrayAppendHint {
   readonly sourceToken: object;
   readonly startIndex: number;
   readonly resultLength: number;
-  readonly mappedItemSources?: ReadonlyMap<number, unknown>;
+  readonly mappedItemSources?: ReadonlyMap<number, unknown> | CompilerMappedItemSources;
   readonly mappedItemValues?: ReadonlyMap<number, unknown>;
   readonly mappedSurvivorsValidated?: boolean;
   readonly structuralUpdate?: CompilerKeyedArrayFilterHint;
@@ -458,7 +458,7 @@ function compilerKeyedArrayStructuralAppendMapUpdate(
 ):
   | {
       readonly startIndex: number;
-      readonly mappedItemSources?: ReadonlyMap<number, unknown>;
+      readonly mappedItemSources?: ReadonlyMap<number, unknown> | CompilerMappedItemSources;
       readonly mappedSurvivorsValidated?: true;
       readonly structuralSurvivorRange?: {
         readonly end: number;
@@ -474,7 +474,7 @@ function compilerKeyedArrayStructuralAppendMapUpdate(
     !update ||
     update.sourceToken !== sourceToken ||
     !update.structuralUpdate ||
-    (requireMappedUpdate && (!update.mappedItemSources || !update.mappedSurvivorsValidated))
+    (requireMappedUpdate && !update.mappedItemSources)
   ) {
     return undefined;
   }
@@ -1185,6 +1185,67 @@ export function createCompilerKeyedArrayStructuralAppend(
   }
 }
 
+/** @internal Records an append that directly follows compiler-proven mapped structural work. */
+export function createCompilerKeyedArrayMappedStructuralAppend(
+  previous: unknown,
+  value: unknown,
+): unknown {
+  try {
+    const previousTarget = compilerObject(previous);
+    const valueTarget = compilerObject(value);
+    if (
+      !previousTarget ||
+      !valueTarget ||
+      !Array.isArray(previous) ||
+      !Array.isArray(value) ||
+      Object.getPrototypeOf(previous) !== NATIVE_ARRAY_PROTOTYPE ||
+      Object.getPrototypeOf(value) !== NATIVE_ARRAY_PROTOTYPE ||
+      previous[Symbol.iterator] !== NATIVE_ARRAY_ITERATOR
+    ) {
+      return value;
+    }
+    const startIndex = previous.length;
+    if (value.length < startIndex) return value;
+    const committedSource = COMPILER_KEYED_COMMITTED_COLLECTIONS.has(previousTarget);
+    const previousUpdate = committedSource
+      ? undefined
+      : COMPILER_KEYED_ARRAY_APPENDS.get(previousTarget);
+    const previousMappedUpdate =
+      !committedSource && !previousUpdate
+        ? COMPILER_KEYED_ARRAY_REORDERS.get(previousTarget)
+        : undefined;
+    const mappedStructuralUpdate =
+      previousMappedUpdate?.mapped &&
+      previousMappedUpdate.kind === undefined &&
+      previousMappedUpdate.structuralUpdate &&
+      previousMappedUpdate.resultLength === previous.length
+        ? previousMappedUpdate
+        : undefined;
+    const structuralUpdate =
+      previousUpdate?.structuralUpdate || mappedStructuralUpdate?.structuralUpdate;
+    const sourceToken = previousUpdate?.sourceToken || mappedStructuralUpdate?.sourceToken;
+    const mappedItemSources =
+      previousUpdate?.mappedItemSources || mappedStructuralUpdate?.mappedItemSources;
+    if (!sourceToken || !structuralUpdate || !mappedItemSources) return value;
+    COMPILER_KEYED_ARRAY_APPENDS.set(valueTarget, {
+      sourceToken,
+      startIndex,
+      resultLength: value.length,
+      structuralUpdate,
+      mappedItemSources,
+      ...(previousUpdate?.mappedSurvivorsValidated ? { mappedSurvivorsValidated: true } : {}),
+      ...(previousUpdate?.mappedItemValues
+        ? { mappedItemValues: previousUpdate.mappedItemValues }
+        : {}),
+      ...(previousUpdate ? { previous: previousUpdate } : {}),
+    });
+    return value;
+  } catch {
+    // Metadata must never change the behavior of an otherwise valid update.
+    return value;
+  }
+}
+
 /** @internal Executes safe maps while retaining structural append lineage. */
 export function createCompilerKeyedArrayStructuralAppendMapPipeline(
   previous: unknown,
@@ -1221,8 +1282,10 @@ export function createCompilerKeyedArrayStructuralAppendMapPipeline(
       if (!survivorRange && !survivorIndices) {
         appendUpdate = undefined;
       } else {
-        if (appendUpdate.mappedItemSources) {
-          mappedItemSources = new Map(appendUpdate.mappedItemSources);
+        if (appendUpdate.mappedSurvivorsValidated && appendUpdate.mappedItemSources) {
+          mappedItemSources = new Map(
+            appendUpdate.mappedItemSources as ReadonlyMap<number, unknown>,
+          );
         }
         if (appendUpdate.mappedItemValues) {
           mappedItemValues = new Map(appendUpdate.mappedItemValues);
@@ -1269,10 +1332,18 @@ export function createCompilerKeyedArrayStructuralAppendMapPipeline(
       if (index < survivorCount) {
         const sourceIndex = survivorRange ? survivorRange.start + index : survivorIndices?.[index];
         committedItem = sourceIndex === undefined ? undefined : committedItems?.[sourceIndex];
-        const expectedItem = mappedItemValues.has(index)
-          ? mappedItemValues.get(index)
-          : committedItem;
-        if (!Object.is(item, expectedItem)) eligible = false;
+        if (mappedItemValues.has(index)) {
+          if (!Object.is(item, mappedItemValues.get(index))) eligible = false;
+        } else if (appendUpdate?.mappedItemSources && !appendUpdate.mappedSurvivorsValidated) {
+          const mappedStructuralSources =
+            appendUpdate.mappedItemSources as CompilerMappedItemSources;
+          const sourceItem = mappedStructuralSources.has(item)
+            ? mappedStructuralSources.get(item)
+            : item;
+          if (!Object.is(sourceItem, committedItem)) eligible = false;
+        } else if (!Object.is(item, committedItem)) {
+          eligible = false;
+        }
       }
       const mappedItem = NATIVE_REFLECT_APPLY(
         callback as (...values: readonly unknown[]) => unknown,
@@ -5812,6 +5883,13 @@ function reconcileCompilerKeyedArrayStructuralAppendMap(
   );
   if (!update || !update.mappedItemSources || !Array.isArray(finalValue)) return undefined;
 
+  const mappedItemSources = update.mappedSurvivorsValidated
+    ? (update.mappedItemSources as ReadonlyMap<number, unknown>)
+    : undefined;
+  const mappedStructuralSources = update.mappedSurvivorsValidated
+    ? undefined
+    : (update.mappedItemSources as CompilerMappedItemSources);
+
   const previousInstances = [...instances.values()];
   const survivorRange = update.structuralSurvivorRange;
   const survivorIndices = update.structuralSurvivors;
@@ -5827,14 +5905,37 @@ function reconcileCompilerKeyedArrayStructuralAppendMap(
   const appendedKeys = new Set<string>();
   const appended: CompilerKeyedRowInstance[] = [];
   try {
-    if (survivorIndices) {
+    if (mappedStructuralSources) {
+      for (let index = 0; index < survivorCount; index += 1) {
+        const sourceIndex = survivorRange ? survivorRange.start + index : survivorIndices![index];
+        const instance = previousInstances[sourceIndex];
+        const item = finalValue[index];
+        const sourceItem = mappedStructuralSources.has(item)
+          ? mappedStructuralSources.get(item)
+          : item;
+        if (!instance || instance.index !== sourceIndex || !Object.is(instance.item, sourceItem)) {
+          return undefined;
+        }
+      }
+      for (let index = 0; index < survivorCount; index += 1) {
+        const sourceIndex = survivorRange ? survivorRange.start + index : survivorIndices![index];
+        const instance = previousInstances[sourceIndex];
+        const item = finalValue[index];
+        const sourceItem = mappedStructuralSources.has(item)
+          ? mappedStructuralSources.get(item)
+          : item;
+        if (Object.is(item, sourceItem)) continue;
+        if (keyedRowIdentity(props.rowKey(item, index)) !== instance.key) return undefined;
+        const bindingUpdates = prepareKeyedRowBindingUpdates(props, instance, item, index);
+        if (!bindingUpdates) return undefined;
+        changed.push({ bindingUpdates, instance, item });
+      }
+    } else if (survivorIndices) {
       for (let index = 0; index < survivorCount; index += 1) {
         const sourceIndex = survivorIndices[index];
         const instance = previousInstances[sourceIndex];
         const item = finalValue[index];
-        const expectedItem = update.mappedItemSources.has(index)
-          ? update.mappedItemSources.get(index)
-          : item;
+        const expectedItem = mappedItemSources!.has(index) ? mappedItemSources!.get(index) : item;
         if (
           !instance ||
           instance.index !== sourceIndex ||
@@ -5844,7 +5945,7 @@ function reconcileCompilerKeyedArrayStructuralAppendMap(
         }
       }
     }
-    for (const [index, sourceItem] of update.mappedItemSources) {
+    for (const [index, sourceItem] of mappedItemSources || []) {
       if (!Number.isSafeInteger(index) || index < 0 || index >= survivorCount) {
         return undefined;
       }

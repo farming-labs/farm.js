@@ -98,6 +98,12 @@ safe maps. The filter's recorded survivor positions let the commit avoid a secon
 scan while still validating the complete native result before mutation. Both compiler modes must
 remain at least 2x faster than React and 1.25x faster than the block-bodied compiled control.
 
+The mapped-append comparison uses the other common order: filter one row, update a surviving row,
+then append a fresh row. It verifies that the compiler retains the original survivor identity
+through the intervening map instead of returning to complete keyed reconciliation. Both compiler
+modes must remain at least 2x faster than React and 1.25x faster than the matching block-bodied
+control.
+
 Keyed array prepends have the same independent comparison. A concise functional prepend is
 measured against bracketed React and an equivalent block-bodied compiled snapshot control. Both
 compiler modes must remain at least 3x faster than React at 10,000 and 20,000 existing rows, and at
@@ -381,6 +387,9 @@ The default JSON report is `/tmp/farm-react-dashboard-benchmark.json`; change it
   block-bodied control reaches the same DOM through complete reconciliation; the hinted path
   validates the final positional lineage once, patches only changed survivors, and mounts the final
   incoming suffix without recreating unchanged rows.
+- The filter-map-append control maps one retained row before adding the new suffix. Its block-bodied
+  control performs the same native operations through complete reconciliation; the hinted path
+  carries the changed survivor back to its committed row, then removes and appends atomically.
 - The prepend snapshot control does the same work at the beginning of the array. It isolates the
   saved suffix scan while the hinted path still creates and inserts every required new DOM row.
 - The slice snapshot control retains the same 9,000-row suffix through an unsupported block-bodied
