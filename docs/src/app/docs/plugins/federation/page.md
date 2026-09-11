@@ -185,8 +185,9 @@ owns every shared-package rule.
 | `dev.remoteHmr` | `false`                          | Enable cross-application HMR or use `"full-reload"` while editing. |
 
 Remote entries may use absolute `http` or `https` URLs, root-relative URLs, or the standard Module
-Federation remote string form. Credentials are rejected in URLs. Put authentication at the API
-boundary rather than embedding secrets in a browser manifest URL.
+Federation `name@URL` string form. Farm applies the same protocol, credential, and network-path
+validation to every form. Put authentication at the API boundary rather than embedding secrets in
+a browser manifest URL.
 
 ## Deployment and CSS
 

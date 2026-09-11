@@ -136,7 +136,7 @@ function normalizeRemotes(
     Object.entries(remotes).map(([alias, value]) => {
       normalizeRemoteAlias(alias);
       if (typeof value === "string") {
-        return [alias, nonEmptyString(value, `Federation remote ${alias}`)];
+        return [alias, normalizeRemoteString(value, alias)];
       }
       assertPlainObject(value, `Federation remote ${alias}`);
       const entry = normalizeRemoteEntry(value.entry, alias);
@@ -221,7 +221,17 @@ function normalizeRemoteAlias(value: string): string {
 
 function normalizeRemoteEntry(value: string, alias: string): string {
   const entry = nonEmptyString(value, `Federation remote ${alias} entry`);
-  if (entry.startsWith("/")) return entry;
+  if (entry.startsWith("/")) {
+    if (entry.startsWith("//") || entry.includes("\\")) {
+      throw new TypeError(
+        `Federation remote ${alias} entry must be a root-relative URL, not a network-path URL`,
+      );
+    }
+    return entry;
+  }
+  if (entry.includes("\\")) {
+    throw new TypeError(`Federation remote ${alias} entry must use URL separators`);
+  }
   let parsed: URL;
   try {
     parsed = new URL(entry);
@@ -238,6 +248,24 @@ function normalizeRemoteEntry(value: string, alias: string): string {
     throw new TypeError(`Federation remote ${alias} entry must use HTTP without URL credentials`);
   }
   return parsed.href;
+}
+
+function normalizeRemoteString(value: string, alias: string): string {
+  const remote = nonEmptyString(value, `Federation remote ${alias}`);
+  if (/^(?:https?:)?\//i.test(remote)) return normalizeRemoteEntry(remote, alias);
+
+  const separator = remote.indexOf("@");
+  if (separator <= 0 || separator === remote.length - 1) {
+    throw new TypeError(
+      `Federation remote ${alias} must be an HTTP URL, root-relative URL, or name@URL`,
+    );
+  }
+
+  const name = remote.slice(0, separator);
+  if (/\s|[/?#\\]/.test(name) || hasControlCharacter(name)) {
+    throw new TypeError(`Federation remote ${alias} has an invalid remote name`);
+  }
+  return `${name}@${normalizeRemoteEntry(remote.slice(separator + 1), alias)}`;
 }
 
 function normalizeShareScope(value: string | string[], alias: string): string | string[] {
