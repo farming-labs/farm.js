@@ -13,6 +13,8 @@ import {
 import { getFarmPluginIntegrationContext } from "./plugin-integration-context";
 
 type MaybePromise<T> = T | Promise<T>;
+/** @internal Marks a Node response whose intercepted end is awaiting response hooks. */
+export const FARM_NODE_RESPONSE_END_PENDING = Symbol.for("farm.nodeResponseEndPending");
 declare const FARM_PLUGIN_INTEGRATION_INSTANCE: unique symbol;
 declare const FARM_PLUGIN_INTEGRATION_BOUND: unique symbol;
 
@@ -1363,7 +1365,7 @@ export class PluginManager {
           // Check if response is already sent (only for beforeRequest)
           if (hookName === "beforeRequest") {
             const res = args[1];
-            if (res && res.writableEnded) {
+            if (res && (res.writableEnded || res[FARM_NODE_RESPONSE_END_PENDING])) {
               return true;
             }
           }
