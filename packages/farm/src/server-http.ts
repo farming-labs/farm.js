@@ -1,3 +1,5 @@
+import { assertBrowserStableRoutePath } from "./routing/specificity";
+
 export const DEFAULT_FARM_SERVER_BODY_SIZE_LIMIT = 10_000_000;
 export const DEFAULT_FARM_SERVER_HEADERS_TIMEOUT = 60_000;
 export const DEFAULT_FARM_SERVER_REQUEST_TIMEOUT = 300_000;
@@ -229,7 +231,9 @@ function normalizeHealthPath(value: string, optionName: string): string {
   if (!path.startsWith("/") || path.includes("?") || path.includes("#") || path.includes("*")) {
     throw new TypeError(`${optionName} must be an absolute pathname without a query or wildcard`);
   }
-  return path.length > 1 ? path.replace(/\/+$/, "") || "/" : path;
+  const normalized = path.length > 1 ? path.replace(/\/+$/, "") || "/" : path;
+  assertBrowserStableRoutePath(normalized);
+  return normalized;
 }
 
 export function parseBodySizeLimit(value: number | string, optionName = "bodySizeLimit"): number {
