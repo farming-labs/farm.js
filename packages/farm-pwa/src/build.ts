@@ -215,7 +215,7 @@ self.addEventListener("fetch", (event) => {
   }
 
   if (IMAGE_OPTIONS && request.destination === "image") {
-    event.respondWith(staleWhileRevalidateImage(request));
+    event.respondWith(staleWhileRevalidateImage(event, request));
   }
 });
 
@@ -242,7 +242,7 @@ async function handleNavigation(request, url) {
   }
 }
 
-async function staleWhileRevalidateImage(request) {
+async function staleWhileRevalidateImage(event, request) {
   if (request.headers.has("authorization")) return fetch(request);
 
   const cache = await caches.open(IMAGE_CACHE);
@@ -252,7 +252,7 @@ async function staleWhileRevalidateImage(request) {
   const update = fetchAndCacheImage(request, cache);
 
   if (fresh) {
-    void update.catch(() => undefined);
+    event.waitUntil(update.catch(() => undefined));
     return cached;
   }
 
