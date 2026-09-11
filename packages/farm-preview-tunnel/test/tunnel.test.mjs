@@ -124,6 +124,37 @@ test("replaces client-supplied forwarding headers at the relay boundary", async 
   }
 });
 
+test("removes headers nominated by Connection in both proxy directions", async () => {
+  const target = createServer((request, response) => {
+    response.setHeader("connection", "x-response-hop");
+    response.setHeader("x-response-hop", "remove-me");
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({ requestHop: request.headers["x-request-hop"] }));
+  });
+  await listen(target);
+  const targetAddress = target.address();
+  const relay = createPersistentPreviewRelay();
+  const relayAddress = await relay.listen();
+  const agent = await startTypeScriptPreviewAgent({
+    relayUrl: relayAddress.websocketUrl,
+    name: "connection-headers",
+    targetUrl: `http://127.0.0.1:${targetAddress.port}`,
+  });
+
+  try {
+    const response = await requestWithHost(agent.publicUrl, new URL(agent.publicUrl).host, {
+      connection: "x-request-hop",
+      "x-request-hop": "remove-me",
+    });
+    assert.equal(JSON.parse(response.body).requestHop, undefined);
+    assert.equal(response.headers["x-response-hop"], undefined);
+  } finally {
+    await agent.close();
+    await relay.close();
+    await close(target);
+  }
+});
+
 test("preserves repeated cookies and removes encoding after decoding a response", async () => {
   const target = createServer((_request, response) => {
     response.statusCode = 200;
@@ -608,7 +639,7 @@ function startStalledUpload(value) {
   });
 }
 
-function requestWithHost(value, host) {
+function requestWithHost(value, host, headers = {}) {
   const url = new URL(value);
   return new Promise((resolve, reject) => {
     const request = createRequest(
@@ -616,7 +647,7 @@ function requestWithHost(value, host) {
         host: url.hostname,
         port: url.port,
         path: `${url.pathname}${url.search}`,
-        headers: { host },
+        headers: { ...headers, host },
       },
       (response) => {
         const chunks = [];
@@ -625,6 +656,7 @@ function requestWithHost(value, host) {
           resolve({
             status: response.statusCode,
             body: Buffer.concat(chunks).toString(),
+            headers: response.headers,
           });
         });
       },

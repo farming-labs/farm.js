@@ -10,18 +10,7 @@ import {
   type TunnelRequestMessage,
   type TunnelResponseMessage,
 } from "./protocol.js";
-
-const HOP_BY_HOP_HEADERS = new Set([
-  "connection",
-  "content-length",
-  "keep-alive",
-  "proxy-authenticate",
-  "proxy-authorization",
-  "te",
-  "trailer",
-  "transfer-encoding",
-  "upgrade",
-]);
+import { getHopByHopHeaderNames, getRecordHeader } from "./headers.js";
 
 export interface PersistentPreviewRelayOptions {
   host?: string;
@@ -570,8 +559,9 @@ function getEncodedBodySize(body: string | undefined) {
 }
 
 function writeTunnelResponse(response: ServerResponse, message: TunnelResponseMessage) {
+  const hopByHopHeaders = getHopByHopHeaderNames(getRecordHeader(message.headers, "connection"));
   for (const [name, value] of Object.entries(message.headers)) {
-    if (!HOP_BY_HOP_HEADERS.has(name.toLowerCase())) {
+    if (!hopByHopHeaders.has(name.toLowerCase())) {
       response.setHeader(name, value);
     }
   }
@@ -656,11 +646,12 @@ function normalizeIncomingHeaders(
   publicDomain: string | undefined,
 ) {
   const normalized: Record<string, string> = {};
+  const hopByHopHeaders = getHopByHopHeaderNames(request.headers.connection);
   for (const [name, value] of Object.entries(request.headers)) {
     const lowerName = name.toLowerCase();
     if (
       value === undefined ||
-      HOP_BY_HOP_HEADERS.has(lowerName) ||
+      hopByHopHeaders.has(lowerName) ||
       lowerName === "forwarded" ||
       lowerName.startsWith("x-forwarded-")
     ) {

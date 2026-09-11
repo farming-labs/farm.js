@@ -274,6 +274,40 @@ test("keeps gateway requests beneath the configured target path", async () => {
   }
 });
 
+test("removes headers nominated by Connection in both gateway directions", async () => {
+  const server = await createTestServer((req, res) => {
+    res.setHeader("connection", "x-response-hop");
+    res.setHeader("x-response-hop", "remove-me");
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({ requestHop: req.headers["x-request-hop"] }));
+  });
+
+  try {
+    const response = await forwardGatewayRequest(
+      {
+        localUrl: `http://localhost:${server.port}`,
+        host: "localhost",
+        port: server.port,
+        source: "port",
+      },
+      {
+        id: "req_connection_headers",
+        method: "GET",
+        path: "/",
+        headers: {
+          connection: "x-request-hop",
+          "x-request-hop": "remove-me",
+        },
+      },
+    );
+
+    assert.equal(JSON.parse(Buffer.from(response.body, "base64").toString()).requestHop, undefined);
+    assert.equal(response.headers["x-response-hop"], undefined);
+  } finally {
+    await server.close();
+  }
+});
+
 test("forwards local redirects without following them", async () => {
   const server = await createTestServer((req, res) => {
     if (req.url === "/redirect") {

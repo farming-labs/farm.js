@@ -177,6 +177,51 @@ test("replays every Set-Cookie header to the public visitor", async () => {
   }
 });
 
+test("removes headers nominated by Connection in both polling proxy directions", async () => {
+  const store = new MemoryPreviewGatewayStore();
+  const gateway = await createGatewayServer(store);
+
+  try {
+    const session = await fetch(`${gateway.url}/api/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "connection-check", localUrl: "http://localhost:4321" }),
+    }).then((response) => response.json());
+
+    const publicRequest = requestWithHeaders(`${gateway.url}/__preview/connection-check/headers`, {
+      connection: "x-request-hop",
+      "x-request-hop": "remove-me",
+    });
+    const poll = await fetch(
+      `${gateway.url}/api/sessions/${session.id}/requests?token=${session.token}&wait=1000`,
+    ).then((response) => response.json());
+    assert.equal(poll.requests[0].headers["x-request-hop"], undefined);
+
+    await fetch(
+      `${gateway.url}/api/sessions/${session.id}/responses/${poll.requests[0].id}?token=${session.token}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          status: 200,
+          headers: {
+            connection: "x-response-hop",
+            "x-response-hop": "remove-me",
+          },
+          body: Buffer.from("ok").toString("base64"),
+          encoding: "base64",
+        }),
+      },
+    );
+
+    const response = await publicRequest;
+    assert.equal(response.status, 200);
+    assert.equal(response.headers["x-response-hop"], undefined);
+  } finally {
+    await gateway.close();
+  }
+});
+
 test("expires stale preview clients before queueing public requests", async () => {
   const store = new MemoryPreviewGatewayStore();
   const gateway = await createGatewayServer(store, {
@@ -362,4 +407,31 @@ async function createGatewayServer(store, options = {}) {
         server.close((error) => (error ? reject(error) : resolve()));
       }),
   };
+}
+
+function requestWithHeaders(value, headers) {
+  const url = new URL(value);
+  return new Promise((resolve, reject) => {
+    const request = createRequest(
+      {
+        host: url.hostname,
+        port: url.port,
+        path: `${url.pathname}${url.search}`,
+        headers,
+      },
+      (response) => {
+        const chunks = [];
+        response.on("data", (chunk) => chunks.push(chunk));
+        response.once("end", () => {
+          resolve({
+            status: response.statusCode,
+            body: Buffer.concat(chunks).toString(),
+            headers: response.headers,
+          });
+        });
+      },
+    );
+    request.once("error", reject);
+    request.end();
+  });
 }
