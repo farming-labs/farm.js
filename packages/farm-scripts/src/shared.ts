@@ -265,6 +265,10 @@ function normalizeScriptSource(value: unknown): string {
         "script root-relative src cannot contain backslashes or control characters",
       );
     }
+    const pathname = src.split(/[?#]/, 1)[0] || "/";
+    if (pathname.split("/").some((segment) => !isStableRootRelativeSegment(segment))) {
+      throw new TypeError("script root-relative src contains a browser-unstable path segment");
+    }
     return src;
   }
   if (!/^https?:\/\//i.test(src)) {
@@ -283,6 +287,26 @@ function normalizeScriptSource(value: unknown): string {
     throw new TypeError("script src cannot contain URL credentials");
   }
   return src;
+}
+
+function isStableRootRelativeSegment(segment: string): boolean {
+  if (!segment) return true;
+  let decoded = segment;
+  try {
+    decoded = decodeURIComponent(segment);
+  } catch {
+    // Malformed escapes remain literal in browser pathnames.
+  }
+  return (
+    decoded !== "." &&
+    decoded !== ".." &&
+    !decoded.includes("/") &&
+    !decoded.includes("\\") &&
+    !Array.from(decoded).some((character) => {
+      const code = character.charCodeAt(0);
+      return code <= 31 || (code >= 127 && code <= 159);
+    })
+  );
 }
 
 function normalizeDataAttributes(value: ScriptDefinition["attributes"]): Record<string, string> {
