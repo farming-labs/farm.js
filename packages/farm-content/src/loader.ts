@@ -29,9 +29,9 @@ export interface LoadedContent {
 export async function loadContentCollections(
   root: string,
   collections: ContentCollections,
+  sourceFiles: Set<string> = new Set(),
 ): Promise<LoadedContent> {
   const loaded: Record<string, readonly ContentEntry<any>[]> = Object.create(null);
-  const sourceFiles = new Set<string>();
   const assetImports = new Map<string, ContentAssetImport>();
 
   for (const [name, definition] of Object.entries(collections)) {

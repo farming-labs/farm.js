@@ -157,6 +157,100 @@ describe("content plugin", () => {
     await vi.waitFor(() => expect(send).toHaveBeenCalledWith({ type: "full-reload" }));
   });
 
+  it("recovers after a newly added content file is fixed", async () => {
+    const root = await createFixture();
+    const plugin = content({
+      collections: {
+        posts: collection({
+          source: files("content/*.{json,md}"),
+          schema: { parse: (value: unknown) => value as { title: string } },
+        }),
+      },
+    });
+    const configured = await plugin.configure?.({ root, plugins: [plugin] }, {
+      config: {} as never,
+      isDev: true,
+      isProd: false,
+    } as never);
+    const vitePlugin = (configured as any).vite.plugins[0];
+    let listener: ((event: string, file: string) => void) | undefined;
+    const send = vi.fn();
+    vitePlugin.configureServer({
+      watcher: {
+        on: (_event: string, callback: typeof listener) => {
+          listener = callback;
+        },
+      },
+      moduleGraph: {
+        getModulesByFile: () => new Set(),
+        invalidateModule: vi.fn(),
+      },
+      ws: { send },
+      httpServer: null,
+    });
+
+    const addedFile = path.join(root, "content", "new.json");
+    await writeFile(addedFile, "{");
+    listener?.("add", addedFile);
+    await vi.waitFor(() =>
+      expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "error" })),
+    );
+
+    send.mockClear();
+    await writeFile(addedFile, JSON.stringify({ title: "Recovered" }));
+    listener?.("change", addedFile);
+
+    await vi.waitFor(() => expect(send).toHaveBeenCalledWith({ type: "full-reload" }));
+  });
+
+  it("recovers when a missing referenced asset is created", async () => {
+    const root = await createFixture();
+    const plugin = content({
+      collections: {
+        posts: collection({
+          source: files("content/*.md"),
+          schema: { parse: (value: unknown) => value as { title: string } },
+          assets: true,
+        }),
+      },
+    });
+    const configured = await plugin.configure?.({ root, plugins: [plugin] }, {
+      config: {} as never,
+      isDev: true,
+      isProd: false,
+    } as never);
+    const vitePlugin = (configured as any).vite.plugins[0];
+    let listener: ((event: string, file: string) => void) | undefined;
+    const send = vi.fn();
+    vitePlugin.configureServer({
+      watcher: {
+        on: (_event: string, callback: typeof listener) => {
+          listener = callback;
+        },
+      },
+      moduleGraph: {
+        getModulesByFile: () => new Set(),
+        invalidateModule: vi.fn(),
+      },
+      ws: { send },
+      httpServer: null,
+    });
+
+    const contentFile = path.join(root, "content", "hello.md");
+    const missingAsset = path.join(root, "content", "guide.pdf");
+    await writeFile(contentFile, "---\ntitle: Hello\n---\n[Guide](./guide.pdf)\n");
+    listener?.("change", contentFile);
+    await vi.waitFor(() =>
+      expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "error" })),
+    );
+
+    send.mockClear();
+    await writeFile(missingAsset, "%PDF recovered\n");
+    listener?.("add", missingAsset);
+
+    await vi.waitFor(() => expect(send).toHaveBeenCalledWith({ type: "full-reload" }));
+  });
+
   it("rejects duplicate plugin instances", async () => {
     const root = await createFixture();
     const plugin = createPlugin();

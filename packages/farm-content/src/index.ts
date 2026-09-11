@@ -77,9 +77,15 @@ export function content<const TCollections extends ContentCollections>(
   }) as ContentPlugin<TCollections>;
 
   async function rebuild(): Promise<void> {
-    const loaded = await loadContentCollections(root, options.collections);
-    sourceFiles = new Set(loaded.sourceFiles);
-    await writeContentServerModule(generatedFile, loaded.collections, loaded.assetImports);
+    const attemptedSourceFiles = new Set<string>();
+    try {
+      const loaded = await loadContentCollections(root, options.collections, attemptedSourceFiles);
+      await writeContentServerModule(generatedFile, loaded.collections, loaded.assetImports);
+      sourceFiles = new Set(loaded.sourceFiles);
+    } catch (error) {
+      sourceFiles = new Set([...sourceFiles, ...attemptedSourceFiles]);
+      throw error;
+    }
   }
 
   function createContentVitePlugin() {
