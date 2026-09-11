@@ -2,6 +2,38 @@
 
 Latest run: 2026-09-10
 
+## Queued filter, append, and maps — 2026-09-10
+
+An index-independent keyed-row `filter()` can now retain its original survivor positions through
+one or more adjacent immutable appends and immediately following same-key `map()` setters. The map
+wrapper validates every survivor against the committed item snapshot while native `map()` already
+visits it. The commit then removes only rejected rows, patches only changed survivors, and creates
+the mapped suffix from its final values, with all keys, bindings, and detached rows prepared before
+the first DOM write.
+
+| Mode   | Filter + append + maps | Compiled fallback | vs React | vs fallback |
+| ------ | ---------------------: | ----------------: | -------: | ----------: |
+| Static |               18.00 ms |          32.10 ms |    4.35x |       1.78x |
+| Hybrid |               18.60 ms |          29.20 ms |    4.21x |       1.57x |
+
+Both modes passed the 2x React and 1.25x compiled-control floors. The bracketed React median was
+78.30 ms. Every sample verified the final 10,000-row order, complete survivor DOM identity, the
+middle row's disconnection, the changed survivor's final label and amount, and the fresh mapped
+suffix. The existing bounded-slice comparison remained separate and also passed at 9.79x and 10.38x
+versus React. Correctness, the broad 10% no-regression gate, optimization persistence, and zero
+compiled-owner executions passed.
+
+Package coverage includes mixed filter/slice lineage, multiple following maps, mapped incoming
+rows, changed-key fallback, external mutation, controlled-input focus and selection, multiple keyed
+boundaries, Strict Mode hydration, unmount before flush, React 18.3.1 and 19.2.8, and 2,000
+randomized transitions matched with normal React. The optional structural-append-map runtime is
+18,633 bytes gzip, within its persisted 18,664-byte cap.
+
+Numbers are medians from a reduced complete-dashboard run with 2 warmups and 7 measured samples per
+compiler action, bracketed by 14 React samples, using Chrome 153.0.8010.36 and Node.js 23.11.0 on
+Apple M1 macOS arm64. The aggregate correctness, performance, and optimization-persistence result
+passed.
+
 ## Queued slice, append, and maps — 2026-09-10
 
 Adjacent keyed-row setters can now retain one positional proof through a bounded `slice()`, one or
@@ -23,7 +55,7 @@ suffix. The broad 10% no-regression gate, optimization-persistence gate, and zer
 checks also passed.
 
 Compiler and runtime coverage includes multiple following maps, a mapped incoming suffix,
-changed-key fallback, filters retaining complete reconciliation, controlled-input focus and
+changed-key fallback, controlled-input focus and
 selection, custom and revoked methods, external mutation, Strict Mode, hydration, unmount before
 flush, React 18.3.1 and 19.2.8, and 2,000 randomized transitions matched with normal React. The new
 optional runtime measures 18,408 bytes gzip in its isolated fixture. The older structural-append

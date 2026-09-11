@@ -2732,7 +2732,7 @@ function rewriteQueuedKeyedArrayStructuralMapHints(
         if (containsAppend) {
           if (
             structuralState === state.index &&
-            structuralKind === "slice" &&
+            structuralKind !== undefined &&
             structuralMapState !== state.index
           ) {
             structuralAppendState = state.index;

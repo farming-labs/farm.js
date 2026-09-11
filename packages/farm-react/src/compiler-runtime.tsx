@@ -460,10 +460,11 @@ function compilerKeyedArrayStructuralAppendMapUpdate(
       readonly startIndex: number;
       readonly mappedItemSources?: ReadonlyMap<number, unknown>;
       readonly mappedSurvivorsValidated?: true;
-      readonly structuralSurvivorRange: {
+      readonly structuralSurvivorRange?: {
         readonly end: number;
         readonly start: number;
       };
+      readonly structuralSurvivors?: readonly number[];
     }
   | undefined {
   const target = compilerObject(value);
@@ -494,7 +495,15 @@ function compilerKeyedArrayStructuralAppendMapUpdate(
     expectedStart,
     first.startIndex,
   );
-  if (!structuralSurvivorRange) return undefined;
+  const structuralSurvivors = structuralSurvivorRange
+    ? undefined
+    : compilerKeyedArrayFilterSurvivorsFromUpdate(
+        update.structuralUpdate,
+        sourceToken,
+        expectedStart,
+        first.startIndex,
+      )?.indices;
+  if (!structuralSurvivorRange && !structuralSurvivors) return undefined;
   let length = first.startIndex;
   const startIndex = length;
   for (const current of updates) {
@@ -504,7 +513,8 @@ function compilerKeyedArrayStructuralAppendMapUpdate(
   return length === value.length
     ? {
         startIndex,
-        structuralSurvivorRange,
+        ...(structuralSurvivorRange ? { structuralSurvivorRange } : {}),
+        ...(structuralSurvivors ? { structuralSurvivors } : {}),
         ...(update.mappedItemSources ? { mappedItemSources: update.mappedItemSources } : {}),
         ...(update.mappedSurvivorsValidated ? { mappedSurvivorsValidated: true as const } : {}),
       }
@@ -1183,6 +1193,7 @@ export function createCompilerKeyedArrayStructuralAppendMapPipeline(
   let appendUpdate: CompilerKeyedArrayAppendHint | undefined;
   let committedItems: readonly unknown[] | undefined;
   let survivorRange: { readonly end: number; readonly start: number } | undefined;
+  let survivorIndices: readonly number[] | undefined;
   let mappedItemSources = new Map<number, unknown>();
   let mappedItemValues = new Map<number, unknown>();
   try {
@@ -1206,7 +1217,8 @@ export function createCompilerKeyedArrayStructuralAppendMapPipeline(
           )
         : undefined;
       survivorRange = structuralAppend?.structuralSurvivorRange;
-      if (!survivorRange) {
+      survivorIndices = structuralAppend?.structuralSurvivors;
+      if (!survivorRange && !survivorIndices) {
         appendUpdate = undefined;
       } else {
         if (appendUpdate.mappedItemSources) {
@@ -1250,10 +1262,13 @@ export function createCompilerKeyedArrayStructuralAppendMapPipeline(
     const wrappedCallback = (item: unknown, index: number, source: unknown): unknown => {
       if (index !== expectedIndex) eligible = false;
       expectedIndex = index + 1;
-      const survivorCount = survivorRange ? survivorRange.end - survivorRange.start : 0;
+      const survivorCount = survivorRange
+        ? survivorRange.end - survivorRange.start
+        : (survivorIndices?.length ?? 0);
       let committedItem: unknown;
       if (index < survivorCount) {
-        committedItem = committedItems?.[survivorRange!.start + index];
+        const sourceIndex = survivorRange ? survivorRange.start + index : survivorIndices?.[index];
+        committedItem = sourceIndex === undefined ? undefined : committedItems?.[sourceIndex];
         const expectedItem = mappedItemValues.has(index)
           ? mappedItemValues.get(index)
           : committedItem;
@@ -5799,7 +5814,11 @@ function reconcileCompilerKeyedArrayStructuralAppendMap(
 
   const previousInstances = [...instances.values()];
   const survivorRange = update.structuralSurvivorRange;
-  const survivorCount = survivorRange.end - survivorRange.start;
+  const survivorIndices = update.structuralSurvivors;
+  const survivorCount = survivorRange
+    ? survivorRange.end - survivorRange.start
+    : (survivorIndices?.length ?? 0);
+  if (!survivorRange && !survivorIndices) return undefined;
   const changed: Array<{
     bindingUpdates: CompilerPreparedKeyedRowBindingUpdate[];
     instance: CompilerKeyedRowInstance;
@@ -5808,16 +5827,32 @@ function reconcileCompilerKeyedArrayStructuralAppendMap(
   const appendedKeys = new Set<string>();
   const appended: CompilerKeyedRowInstance[] = [];
   try {
+    if (survivorIndices) {
+      for (let index = 0; index < survivorCount; index += 1) {
+        const sourceIndex = survivorIndices[index];
+        const instance = previousInstances[sourceIndex];
+        const item = finalValue[index];
+        const expectedItem = update.mappedItemSources.has(index)
+          ? update.mappedItemSources.get(index)
+          : item;
+        if (
+          !instance ||
+          instance.index !== sourceIndex ||
+          !Object.is(instance.item, expectedItem)
+        ) {
+          return undefined;
+        }
+      }
+    }
     for (const [index, sourceItem] of update.mappedItemSources) {
       if (!Number.isSafeInteger(index) || index < 0 || index >= survivorCount) {
         return undefined;
       }
-      const sourceIndex = survivorRange.start + index;
-      const instance = previousInstances[sourceIndex];
+      const instance =
+        previousInstances[survivorRange ? survivorRange.start + index : survivorIndices![index]];
       const item = finalValue[index];
       if (
         !instance ||
-        instance.index !== sourceIndex ||
         !Object.is(instance.item, sourceItem) ||
         keyedRowIdentity(props.rowKey(item, index)) !== instance.key
       ) {
@@ -5847,20 +5882,34 @@ function reconcileCompilerKeyedArrayStructuralAppendMap(
   }
 
   const mutableInstances = instances as Map<string, CompilerKeyedRowInstance>;
-  for (let index = 0; index < survivorRange.start; index += 1) {
-    const instance = previousInstances[index];
-    instance.scope?.cleanup();
-    instance.element.remove();
-    mutableInstances.delete(instance.key);
-  }
-  for (let index = survivorRange.end; index < previousInstances.length; index += 1) {
-    const instance = previousInstances[index];
-    instance.scope?.cleanup();
-    instance.element.remove();
-    mutableInstances.delete(instance.key);
-  }
-  for (let index = survivorRange.start; index < survivorRange.end; index += 1) {
-    previousInstances[index].index = index - survivorRange.start;
+  if (survivorRange) {
+    for (let index = 0; index < survivorRange.start; index += 1) {
+      const instance = previousInstances[index];
+      instance.scope?.cleanup();
+      instance.element.remove();
+      mutableInstances.delete(instance.key);
+    }
+    for (let index = survivorRange.end; index < previousInstances.length; index += 1) {
+      const instance = previousInstances[index];
+      instance.scope?.cleanup();
+      instance.element.remove();
+      mutableInstances.delete(instance.key);
+    }
+    for (let index = survivorRange.start; index < survivorRange.end; index += 1) {
+      previousInstances[index].index = index - survivorRange.start;
+    }
+  } else {
+    const survivorSet = new Set(survivorIndices);
+    for (let index = 0; index < previousInstances.length; index += 1) {
+      if (survivorSet.has(index)) continue;
+      const instance = previousInstances[index];
+      instance.scope?.cleanup();
+      instance.element.remove();
+      mutableInstances.delete(instance.key);
+    }
+    for (let index = 0; index < survivorIndices!.length; index += 1) {
+      previousInstances[survivorIndices![index]].index = index;
+    }
   }
   if (appended.length > 0) {
     const fragment = root.ownerDocument.createDocumentFragment();
