@@ -959,6 +959,16 @@ export async function resolveConfig(
       (mode === "production" ? await generateBuildId() : "development"),
   );
   const basePath = normalizeFarmConfigBasePath(userConfig.basePath);
+  const openapi = {
+    enabled: false,
+    route: "/docs/reference",
+    title: "API Documentation",
+    description: "Auto-generated API documentation",
+    version: "1.0.0",
+    servers: [{ url: "http://localhost:3000", description: "Development server" }],
+    ...userConfig.openapi,
+  };
+  if (openapi.route !== undefined) validateConfigRouteSource(openapi.route, "openapi.route");
 
   const resolved: ResolvedFarmConfig = {
     [FARM_RESOLVED_CUSTOM_CONTEXT]: typeof userConfig.context === "function",
@@ -1007,15 +1017,7 @@ export async function resolveConfig(
     theme: resolveFarmThemeConfig(userConfig.theme, basePath),
     publicDir: userConfig.publicDir || "public",
     i18n: resolveFarmI18nConfig(userConfig.i18n, { root, mode, basePath }),
-    openapi: {
-      enabled: false,
-      route: "/docs/reference",
-      title: "API Documentation",
-      description: "Auto-generated API documentation",
-      version: "1.0.0",
-      servers: [{ url: "http://localhost:3000", description: "Development server" }],
-      ...userConfig.openapi,
-    },
+    openapi,
     middleware: userConfig.middleware || {},
     notFound: userConfig.notFound || {},
     context: userConfig.context || (() => undefined),

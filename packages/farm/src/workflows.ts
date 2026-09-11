@@ -8,6 +8,7 @@ import {
 import { searchParamsToObject } from "./search-params";
 import { decodeRouteSegment } from "./utils/decode";
 import { toPosixPath } from "./utils";
+import { validateConfigRouteSource } from "./plugins/route-pattern";
 import {
   isAbsolute as isAbsolutePath,
   normalize as normalizePath,
@@ -435,7 +436,9 @@ function normalizeWorkflowDir(value: string): string {
 function normalizeWorkflowRoute(route: string): string {
   const trimmed = route.trim();
   if (!trimmed || trimmed === "/") return DEFAULT_FARM_WORKFLOW_ROUTE;
-  return `/${trimSlashes(trimmed)}`;
+  const normalized = `/${trimSlashes(trimmed)}`;
+  validateConfigRouteSource(normalized, "workflows.route");
+  return normalized;
 }
 
 function normalizeWorkflowId(id: string): string {

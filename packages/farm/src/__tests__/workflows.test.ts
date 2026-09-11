@@ -27,6 +27,17 @@ afterEach(() => {
 });
 
 describe("Farm workflows", () => {
+  it("rejects workflow routes that browsers reinterpret", () => {
+    for (const route of [
+      "/api/../workflows",
+      "/api/%2e%2e/workflows",
+      "/api/%2Fworkflows",
+      "/api\\workflows",
+    ]) {
+      expect(() => resolveWorkflowsConfig({ route })).toThrow();
+    }
+  });
+
   it("defines cron workflow modules with typed schedule metadata", () => {
     const cron = defineCron({
       id: "daily-digest",

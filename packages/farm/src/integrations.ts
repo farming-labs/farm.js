@@ -13,6 +13,7 @@ import type { InferFarmIntegrationOrmClient } from "./integration-orm";
 import { setFarmPluginIntegrationContext } from "./plugin-integration-context";
 import { decodeRouteSegment } from "./utils/decode";
 import { assertTerminalCatchAll } from "./routing/specificity";
+import { validateConfigRouteSource } from "./plugins/route-pattern";
 import type {
   FarmPlugin,
   FarmPluginContext,
@@ -1116,6 +1117,7 @@ export function defineIntegration<
       : undefined;
 
   for (const route of allRoutes || []) {
+    validateConfigRouteSource(route.path, `Integration route "${route.path}"`);
     assertTerminalCatchAll(route.path, "api");
   }
 
