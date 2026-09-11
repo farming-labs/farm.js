@@ -307,7 +307,7 @@ export async function forwardGatewayRequest(
 
   const method = request.method.toUpperCase();
   const hasBody = method !== "GET" && method !== "HEAD" && Boolean(request.body);
-  const response = await fetch(`${target.localUrl}${request.path}`, {
+  const response = await fetch(resolveGatewayTargetUrl(target.localUrl, request.path), {
     method,
     headers,
     body: hasBody
@@ -345,6 +345,22 @@ export async function forwardGatewayRequest(
     body: responseBody.toString("base64"),
     encoding: "base64",
   };
+}
+
+function resolveGatewayTargetUrl(targetUrl: string, requestPath: string): URL {
+  if (!requestPath.startsWith("/") || /^[/\\]{2}/.test(requestPath)) {
+    throw new Error("Preview request path cannot change the local target authority.");
+  }
+
+  const base = new URL(targetUrl);
+  base.pathname = base.pathname.endsWith("/") ? base.pathname : `${base.pathname}/`;
+  base.search = "";
+  base.hash = "";
+  const resolved = new URL(requestPath.slice(1), base);
+  if (resolved.origin !== base.origin || !resolved.pathname.startsWith(base.pathname)) {
+    throw new Error("Preview request path cannot leave the local target path.");
+  }
+  return resolved;
 }
 
 async function readResponseBody(response: Response, maxBytes: number) {

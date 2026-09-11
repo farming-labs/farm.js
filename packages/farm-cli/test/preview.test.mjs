@@ -236,6 +236,44 @@ test("forwards a gateway request to the local target", async () => {
   }
 });
 
+test("keeps gateway requests beneath the configured target path", async () => {
+  const requests = [];
+  const server = await createTestServer((req, res) => {
+    requests.push(req.url);
+    res.end(req.url);
+  });
+  const target = {
+    localUrl: `http://localhost:${server.port}/console`,
+    host: "localhost",
+    port: server.port,
+    source: "url",
+  };
+
+  try {
+    const response = await forwardGatewayRequest(target, {
+      id: "req_nested",
+      method: "GET",
+      path: "/dashboard?view=compact",
+    });
+    assert.equal(
+      Buffer.from(response.body, "base64").toString(),
+      "/console/dashboard?view=compact",
+    );
+
+    await assert.rejects(
+      forwardGatewayRequest(target, {
+        id: "req_escape",
+        method: "GET",
+        path: "/%2e%2e/admin",
+      }),
+      /cannot leave the local target path/,
+    );
+    assert.deepEqual(requests, ["/console/dashboard?view=compact"]);
+  } finally {
+    await server.close();
+  }
+});
+
 test("forwards local redirects without following them", async () => {
   const server = await createTestServer((req, res) => {
     if (req.url === "/redirect") {
