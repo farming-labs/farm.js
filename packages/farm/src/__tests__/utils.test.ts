@@ -160,6 +160,18 @@ describe("parseRoutePath", () => {
     );
   });
 
+  it("rejects file route segments that browsers reinterpret", () => {
+    for (const routePath of [
+      "docs/../admin/page.tsx",
+      "docs/%2e%2e/admin/page.tsx",
+      "docs/%2Fadmin/page.tsx",
+      "docs/%5cadmin/page.tsx",
+      "docs/%00admin/page.tsx",
+    ]) {
+      expect(() => parseRoutePath(routePath)).toThrow(/browser-unstable/);
+    }
+  });
+
   it("should parse root page", () => {
     const result = parseRoutePath("page.tsx");
     expect(result.segments).toEqual([]);

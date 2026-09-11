@@ -28,6 +28,13 @@ export class ReservedRouteParameterError extends AmbiguousRouteError {
   }
 }
 
+export class BrowserUnstableRouteError extends TypeError {
+  constructor(message: string) {
+    super(message);
+    this.name = "BrowserUnstableRouteError";
+  }
+}
+
 const SEGMENT_RANK: Record<RouteSegmentSpecificity, number> = {
   static: 4,
   dynamic: 3,
@@ -62,6 +69,48 @@ const PAGE_PARAMETER_PATTERN = /^(?:\[\[\.\.\.(.+)\]\]|\[\.\.\.(.+)\]|\[(.+)\])$
 const ROUTER_PARAMETER_PATTERN =
   /^(?:\[\[\.\.\.([A-Za-z0-9_$-]+)\]\]|\[\.\.\.([A-Za-z0-9_$-]+)\]|\[([A-Za-z0-9_$-]+)\]|:([A-Za-z0-9_$-]+)|\*([A-Za-z0-9_$-]+)\??)$/;
 const RESERVED_PARAMETER_NAMES = new Set(["__proto__", "constructor", "prototype"]);
+
+export function assertBrowserStableRoutePath(pattern: string): void {
+  if (pattern.includes("\\") || hasControlCharacter(pattern)) {
+    throw new BrowserUnstableRouteError(
+      `Route path "${pattern}" cannot contain backslashes or control characters.`,
+    );
+  }
+
+  for (const segment of pattern.split("/").filter(Boolean)) {
+    if (
+      (segment.startsWith("(") && segment.endsWith(")")) ||
+      (segment.startsWith("[") && segment.endsWith("]"))
+    ) {
+      continue;
+    }
+
+    let decoded = segment;
+    try {
+      decoded = decodeURIComponent(segment);
+    } catch {
+      // Malformed escapes stay literal in browser pathnames.
+    }
+    if (
+      decoded === "." ||
+      decoded === ".." ||
+      decoded.includes("/") ||
+      decoded.includes("\\") ||
+      hasControlCharacter(decoded)
+    ) {
+      throw new BrowserUnstableRouteError(
+        `Route path "${pattern}" contains browser-unstable segment "${segment}".`,
+      );
+    }
+  }
+}
+
+function hasControlCharacter(value: string): boolean {
+  return Array.from(value).some((character) => {
+    const code = character.charCodeAt(0);
+    return code <= 31 || (code >= 127 && code <= 159);
+  });
+}
 
 export function assertUniqueRouteParameters(
   pattern: string,
