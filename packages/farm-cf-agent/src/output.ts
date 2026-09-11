@@ -262,8 +262,16 @@ async function assertRealPathInsideRoot(
   target: string,
   label: string,
 ): Promise<void> {
-  const realRoot = await realpath(root);
-  const realTarget = await realpath(target);
+  let realRoot: string;
+  let realTarget: string;
+  try {
+    [realRoot, realTarget] = await Promise.all([realpath(root), realpath(target)]);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new Error(`${label} was not found at ${target}.`);
+    }
+    throw error;
+  }
   const pathFromRoot = relative(realRoot, realTarget);
   if (pathFromRoot === ".." || pathFromRoot.startsWith(`..${sep}`) || isAbsolute(pathFromRoot)) {
     throw new Error(`${label} must be inside the Farm project root, including through symlinks.`);
