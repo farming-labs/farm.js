@@ -48,6 +48,20 @@ describe("config route plugins", () => {
     ).toThrow('Redirect "/old" statusCode must be one of 301, 302, 303, 307, or 308');
   });
 
+  it("rejects route sources that browsers normalize differently", () => {
+    for (const source of [
+      "/docs/../admin",
+      "/docs/%2e%2e/admin",
+      "/docs/%2Fadmin",
+      "/docs/%5Cadmin",
+      "/docs\\admin",
+    ]) {
+      expect(() => createRedirectsPlugin([{ source, destination: "/safe" }])).toThrow(
+        /browser-unstable|backslashes/,
+      );
+    }
+  });
+
   it("falls back safely when a request carries a malformed Host header", async () => {
     const redirectRequest = createRequest("/old");
     redirectRequest.headers.host = "%";

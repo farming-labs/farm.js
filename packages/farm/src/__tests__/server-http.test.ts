@@ -100,6 +100,22 @@ describe("Farm server HTTP policy", () => {
     expect(resolveFarmServerConfig({ health: false }).health.enabled).toBe(false);
   });
 
+  it("rejects health paths that browsers normalize to a different endpoint", () => {
+    for (const livenessPath of [
+      "/health/../private",
+      "/health/%2e%2e/private",
+      "/health/%2Fprivate",
+      "/health/%5Cprivate",
+      "/health\\private",
+    ]) {
+      expect(() =>
+        resolveFarmServerConfig({
+          health: { livenessPath, readinessPath: "/health/ready" },
+        }),
+      ).toThrow(/browser-unstable|backslashes/);
+    }
+  });
+
   it("rejects streamed Web request bodies above the limit", async () => {
     const request = new Request("https://example.com/upload", {
       method: "POST",

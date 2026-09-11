@@ -1,5 +1,6 @@
 import { localizeFarmHref, resolveFarmLocalePath } from "../i18n/routing";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
+import { assertBrowserStableRoutePath } from "../routing/specificity";
 
 type ConfigRoutePatternToken =
   | { kind: "param"; name: string; captureIndex: number; catchAll: boolean }
@@ -32,6 +33,7 @@ export function validateConfigRouteSource(source: string, field = "Config route 
   ) {
     throw new Error(`${field} cannot contain backslashes or control characters.`);
   }
+  assertBrowserStableRoutePath(source);
   return source;
 }
 
