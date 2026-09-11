@@ -282,17 +282,18 @@ suffix in one fragment. Existing survivors are neither rebound nor recreated, an
 adjacent append setters are collapsed into the same final suffix. This keeps the unavoidable native
 filter or slice work while removing the keyed runtime's second full scan.
 
-After a bounded slice, one or more immediately following safe same-key `map()` setters can retain
-that proof too. Farm records changed indices while the native maps already visit them, validates the
-final dense array before touching the DOM, and patches only changed survivors. A mapped incoming
-suffix is still created directly from its final value. The owner stays mounted, sliced-away rows
-are removed, survivor DOM identity is preserved, and the suffix is appended once. Filter-based
-chains keep complete reconciliation because Farm must revalidate every survivor key after indexes
-shift; this avoids trading React identity semantics for a misleading fast path.
+After an index-independent filter or bounded slice, one or more immediately following safe same-key
+`map()` setters can retain that proof too. Farm carries the filter's original survivor indices or
+the slice's retained interval into the native maps, validates each visited survivor against the
+committed item snapshot, and records only changed indices. Before touching the DOM it revalidates
+the complete dense result, every changed key and binding, and every incoming row. It then removes
+only rejected rows, patches only changed survivors, and creates the mapped suffix directly from its
+final values. The owner stays mounted, survivor DOM identity is preserved, and the suffix is
+appended once.
 
 Only concise updater results that form one direct chain for the same state array are linked. The row
-and key must be compiler-owned and index-independent. A filter before append, a map or reorder
-between the structural step and append, an unsupported or non-adjacent map after append, an
+and key must be compiler-owned and index-independent. A map or reorder between the structural step
+and append, an unsupported or non-adjacent map after append, an
 unhinted update to that state, another dirty row dependency, collection-reading binding, custom,
 sparse, or subclassed array, nested or React-owned row, duplicate final key, or reuse of any
 committed key in the appended suffix keeps complete React reconciliation before a DOM write. A

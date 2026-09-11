@@ -89,9 +89,14 @@ immediately following safe same-key maps. It verifies that the changed survivor 
 and receives its final label and amount, the sliced-away row disconnects, and the mapped incoming
 suffix is newly mounted. Both compiler modes must remain at least 2x faster than React and 1.25x
 faster than the equivalent block-bodied compiled control. Package tests compare 2,000 randomized
-filter-or-slice, append, and map transitions with normal React; bounded slices take the fast path
-while filters retain complete reconciliation. The suite also covers multiple maps, controlled-input
-selection, hydration, unmount, native method errors, changed keys, and pre-mutation fallback.
+filter-or-slice, append, and map transitions with normal React. The suite also covers multiple maps,
+mixed filter/slice chains, controlled-input selection, hydration, unmount, native method errors,
+changed keys, external mutation, and pre-mutation fallback.
+
+A separate filter-based comparison removes a middle row, appends one row, and runs the same two
+safe maps. The filter's recorded survivor positions let the commit avoid a second key-and-binding
+scan while still validating the complete native result before mutation. Both compiler modes must
+remain at least 2x faster than React and 1.25x faster than the block-bodied compiled control.
 
 Keyed array prepends have the same independent comparison. A concise functional prepend is
 measured against bracketed React and an equivalent block-bodied compiled snapshot control. Both

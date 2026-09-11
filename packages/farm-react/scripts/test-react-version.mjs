@@ -2262,10 +2262,10 @@ const testSource = String.raw`
       const items = () => state[0].get();
       structuralAppendRows = () => {
         state[0].set((previous) =>
-          createCompilerKeyedArraySlice(
+          createCompilerKeyedArrayFilter(
             previous,
-            previous.slice,
-            1,
+            previous.filter,
+            (item) => item.id !== "a",
           ),
         );
         state[0].set((previous) =>

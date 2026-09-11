@@ -207,7 +207,7 @@ describe("React AOT keyed-array append hints", () => {
     expect(result.code).not.toContain("createCompilerKeyedArrayStructuralAppendMapPipeline");
   });
 
-  it("keeps filter, append, and map chains on complete reconciliation", async () => {
+  it("retains filtered survivor lineage through following safe map setters", async () => {
     const result = await compile(`
       import { useState } from "react";
       export function Inventory({ expiredId, incoming, editedId, nextLabel }) {
@@ -231,8 +231,9 @@ describe("React AOT keyed-array append hints", () => {
     expect(result.optimizations.keyedArrayFilterHints).toBe(1);
     expect(result.optimizations.keyedArrayAppendHints).toBe(1);
     expect(result.optimizations.keyedMapUpdateHints).toBe(1);
-    expect(result.code).toContain("createCompilerKeyedMapUpdate");
-    expect(result.code).not.toContain("createCompilerKeyedArrayStructuralAppendMapPipeline");
+    expect(result.code).toContain("createCompilerKeyedArrayStructuralAppend");
+    expect(result.code).toContain("createCompilerKeyedArrayStructuralAppendMapPipeline");
+    expect(result.code).toContain("keyedRowsStructuralAppendMapHintedRuntimeFeature");
   });
 
   it("does not retain structural append lineage when a map runs before the append", async () => {

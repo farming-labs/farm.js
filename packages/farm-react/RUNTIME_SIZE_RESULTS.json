@@ -94,14 +94,14 @@
         "brotli": 51844
       },
       "compilerOn": {
-        "raw": 261669,
-        "gzip": 78546,
-        "brotli": 67291
+        "raw": 262343,
+        "gzip": 78771,
+        "brotli": 67528
       },
       "compilerPremium": {
-        "raw": 68688,
-        "gzip": 18408,
-        "brotli": 15447
+        "raw": 69362,
+        "gzip": 18633,
+        "brotli": 15684
       }
     },
     "keyedPrepend": {

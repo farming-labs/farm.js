@@ -1278,6 +1278,50 @@ async function measureTrial(browser, trial, compilerMode, port) {
             ),
         );
 
+        const measureFilterAppendMap = async (action) => {
+          const rows = [...table.querySelectorAll("tbody tr")];
+          const removed = rows.find(
+            (row) => Number(row.getAttribute("data-row-id")) % 10_000 === 7_001,
+          );
+          const target = rows.find(
+            (row) => Number(row.getAttribute("data-row-id")) % 10_000 === 5_001,
+          );
+          const amount = Number(target?.querySelector("td:nth-child(4)")?.textContent?.slice(1));
+          if (!removed || !target || !Number.isFinite(amount)) {
+            throw new Error("Queued filter-append-map source rows are invalid.");
+          }
+          const survivors = rows.filter((row) => row !== removed);
+          await runTableAction(action, () => {
+            const nextRows = [...table.querySelectorAll("tbody tr")];
+            const appended = nextRows.at(-1);
+            return (
+              nextRows.length === 10_000 &&
+              rowsMatch(nextRows.slice(0, -1), survivors) &&
+              target.querySelector("td:nth-child(2)")?.textContent?.endsWith(" reviewed") ===
+                true &&
+              target.querySelector("td:nth-child(4)")?.textContent === `$${amount + 1}` &&
+              appended?.querySelector("td:nth-child(2)")?.textContent ===
+                "queued filter mapped incoming row" &&
+              !rows.includes(appended) &&
+              !removed.isConnected
+            );
+          });
+        };
+
+        const tableFilterAppendMapQueued = await measureTable(
+          async () => create10000(),
+          async () =>
+            measureFilterAppendMap(() => tableButton("table-filter-append-map-queued").click()),
+        );
+
+        const tableFilterAppendMapQueuedSnapshot = await measureTable(
+          async () => create10000(),
+          async () =>
+            measureFilterAppendMap(() =>
+              tableButton("table-filter-append-map-queued-snapshot").click(),
+            ),
+        );
+
         const prepareMapStructuralReorderPipeline = async () => {
           await create10000();
           const rows = [...table.querySelectorAll("tbody tr")];
@@ -2035,6 +2079,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
             executionsAdded: Number(tableExecutions.textContent) - initialTableExecutions,
             filterReorderPipeline: tableFilterReorderPipeline,
             filterReorderPipelineSnapshot: tableFilterReorderPipelineSnapshot,
+            filterAppendMapQueued: tableFilterAppendMapQueued,
+            filterAppendMapQueuedSnapshot: tableFilterAppendMapQueuedSnapshot,
             structuralAppendQueued: tableStructuralAppendQueued,
             structuralAppendQueuedSnapshot: tableStructuralAppendQueuedSnapshot,
             structuralAppendMapQueued: tableStructuralAppendMapQueued,
@@ -2183,6 +2229,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
         executionsAdded: result.table.executionsAdded,
         filterReorderPipeline: timingSummary(result.table.filterReorderPipeline),
         filterReorderPipelineSnapshot: timingSummary(result.table.filterReorderPipelineSnapshot),
+        filterAppendMapQueued: timingSummary(result.table.filterAppendMapQueued),
+        filterAppendMapQueuedSnapshot: timingSummary(result.table.filterAppendMapQueuedSnapshot),
         structuralAppendQueued: timingSummary(result.table.structuralAppendQueued),
         structuralAppendQueuedSnapshot: timingSummary(result.table.structuralAppendQueuedSnapshot),
         structuralAppendMapQueued: timingSummary(result.table.structuralAppendMapQueued),
@@ -2404,6 +2452,8 @@ const tableMetrics = [
   "denseMapLookup",
   "filterReorderPipeline",
   "filterReorderPipelineSnapshot",
+  "filterAppendMapQueued",
+  "filterAppendMapQueuedSnapshot",
   "structuralAppendQueued",
   "structuralAppendQueuedSnapshot",
   "structuralAppendMapQueued",
@@ -3112,6 +3162,28 @@ const keyedStructuralAppendMapRegressions = keyedStructuralAppendMapResults.filt
     !Number.isFinite(snapshotSpeedup) ||
     snapshotSpeedup < keyedStructuralAppendMapMinimumSnapshotSpeedup,
 );
+// A safe filter can retain its original survivor positions through adjacent append and map setters.
+// Keep this distinct from the bounded-slice gate so both structural lineage variants remain covered.
+const keyedFilterAppendMapMinimumSpeedup = 2;
+const keyedFilterAppendMapMinimumSnapshotSpeedup = 1.25;
+const keyedFilterAppendMapResults = ["static", "hybrid"].map((mode) => {
+  const pipelineMedianMs = comparisons.table.filterAppendMapQueued[mode].medianMs;
+  const snapshotMedianMs = comparisons.table.filterAppendMapQueuedSnapshot[mode].medianMs;
+  return {
+    mode,
+    pipelineMedianMs,
+    snapshotMedianMs,
+    snapshotSpeedup: snapshotMedianMs / pipelineMedianMs,
+    speedup: comparisons.table.filterAppendMapQueued[`${mode}VsBaseline`].speedup,
+  };
+});
+const keyedFilterAppendMapRegressions = keyedFilterAppendMapResults.filter(
+  ({ snapshotSpeedup, speedup }) =>
+    !Number.isFinite(speedup) ||
+    speedup < keyedFilterAppendMapMinimumSpeedup ||
+    !Number.isFinite(snapshotSpeedup) ||
+    snapshotSpeedup < keyedFilterAppendMapMinimumSnapshotSpeedup,
+);
 // A safe filter, terminal map, and two native reverses in adjacent setters change membership and
 // row data while restoring the survivor order in one queued commit. The combined path must remove
 // the rejected row, patch the changed survivor, and retain structural lineage through both reorder
@@ -3529,6 +3601,7 @@ const passed =
   keyedStructuralReorderRegressions.length === 0 &&
   keyedStructuralAppendRegressions.length === 0 &&
   keyedStructuralAppendMapRegressions.length === 0 &&
+  keyedFilterAppendMapRegressions.length === 0 &&
   keyedMappedStructuralReorderRegressions.length === 0 &&
   keyedMapReorderRegressions.length === 0 &&
   keyedMultiMapReorderRegressions.length === 0 &&
@@ -3718,6 +3791,13 @@ const report = {
     regressions: keyedStructuralAppendMapRegressions,
     results: keyedStructuralAppendMapResults,
     status: keyedStructuralAppendMapRegressions.length === 0 ? "PASS" : "FAIL",
+  },
+  keyedFilterAppendMapHintGate: {
+    minimumSnapshotSpeedup: keyedFilterAppendMapMinimumSnapshotSpeedup,
+    minimumSpeedup: keyedFilterAppendMapMinimumSpeedup,
+    regressions: keyedFilterAppendMapRegressions,
+    results: keyedFilterAppendMapResults,
+    status: keyedFilterAppendMapRegressions.length === 0 ? "PASS" : "FAIL",
   },
   keyedMappedStructuralReorderHintGate: {
     minimumSnapshotSpeedup: keyedMappedStructuralReorderMinimumSnapshotSpeedup,
