@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { lstat, mkdir, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { definePlugin } from "@farm.js/core/plugin";
 import { analyzeBuild, evaluateLimits, formatBytes } from "./analyze.js";
@@ -100,10 +100,64 @@ export function analyzer(options: AnalyzerOptions = {}) {
 }
 
 async function writeOutput(root: string, output: string, contents: string): Promise<string> {
-  const file = path.resolve(root, output);
-  await mkdir(path.dirname(file), { recursive: true });
+  const resolvedRoot = await realpath(root);
+  const relative = path.relative(resolvedRoot, path.resolve(resolvedRoot, output));
+  if (!relative || isOutsideRoot(relative)) {
+    throw new TypeError("Analyzer output must stay inside the project root");
+  }
+
+  const parts = relative.split(path.sep);
+  const filename = parts.pop()!;
+  let directory = resolvedRoot;
+  for (const part of parts) {
+    const candidate = path.join(directory, part);
+    const entry = await getPathEntry(candidate);
+    if (entry) {
+      if (!entry.isDirectory() && !entry.isSymbolicLink()) {
+        throw new TypeError(`Analyzer output parent is not a directory: ${candidate}`);
+      }
+      directory = entry.isSymbolicLink() ? await realpath(candidate) : candidate;
+      assertInsideRoot(resolvedRoot, directory);
+    } else {
+      await mkdir(candidate);
+      directory = candidate;
+    }
+  }
+
+  let file = path.join(directory, filename);
+  const entry = await getPathEntry(file);
+  if (entry?.isSymbolicLink()) {
+    file = await realpath(file);
+    assertInsideRoot(resolvedRoot, file);
+  }
   await writeFile(file, contents, "utf8");
   return file;
+}
+
+function assertInsideRoot(root: string, candidate: string): void {
+  const relative = path.relative(root, candidate);
+  if (isOutsideRoot(relative)) {
+    throw new TypeError(
+      "Analyzer output must stay inside the project root after resolving symbolic links",
+    );
+  }
+}
+
+function isOutsideRoot(relative: string): boolean {
+  return relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative);
+}
+
+function isMissingFileError(error: unknown): error is NodeJS.ErrnoException {
+  return (error as NodeJS.ErrnoException)?.code === "ENOENT";
+}
+
+async function getPathEntry(file: string) {
+  try {
+    return await lstat(file);
+  } catch (error) {
+    if (isMissingFileError(error)) return undefined;
+    throw error;
+  }
 }
 
 function formatViolations(
