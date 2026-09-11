@@ -7,19 +7,7 @@ import type {
   TunnelResponseMessage,
 } from "./protocol.js";
 import { isRelayToAgentMessage } from "./protocol.js";
-
-const HOP_BY_HOP_HEADERS = new Set([
-  "connection",
-  "content-length",
-  "host",
-  "keep-alive",
-  "proxy-authenticate",
-  "proxy-authorization",
-  "te",
-  "trailer",
-  "transfer-encoding",
-  "upgrade",
-]);
+import { getHopByHopHeaderNames, getRecordHeader } from "./headers.js";
 
 export interface TypeScriptPreviewAgentOptions {
   relayUrl: string;
@@ -207,8 +195,11 @@ async function forwardRequest(
 
   try {
     const headers = new Headers();
+    const requestHopByHopHeaders = getHopByHopHeaderNames(
+      getRecordHeader(request.headers, "connection"),
+    );
     for (const [name, value] of Object.entries(request.headers)) {
-      if (!HOP_BY_HOP_HEADERS.has(name.toLowerCase())) headers.set(name, value);
+      if (!requestHopByHopHeaders.has(name.toLowerCase())) headers.set(name, value);
     }
     const method = request.method.toUpperCase();
     const result = await fetch(resolveTargetUrl(options.targetUrl, request.path), {
@@ -222,12 +213,13 @@ async function forwardRequest(
       signal: controller.signal,
     });
     const responseHeaders: Record<string, string | string[]> = {};
+    const responseHopByHopHeaders = getHopByHopHeaderNames(result.headers.get("connection"));
     for (const [name, value] of result.headers) {
       const normalizedName = name.toLowerCase();
       if (
         normalizedName !== "content-encoding" &&
         normalizedName !== "set-cookie" &&
-        !HOP_BY_HOP_HEADERS.has(normalizedName)
+        !responseHopByHopHeaders.has(normalizedName)
       ) {
         responseHeaders[name] = value;
       }

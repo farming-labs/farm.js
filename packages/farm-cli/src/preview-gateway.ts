@@ -73,6 +73,24 @@ const HOP_BY_HOP_HEADERS = new Set([
   "upgrade",
 ]);
 
+function getHopByHopHeaderNames(headers: Record<string, string | string[]> | Headers): Set<string> {
+  const names = new Set(HOP_BY_HOP_HEADERS);
+  let connection: string | string[] | null | undefined;
+  if (headers instanceof Headers) {
+    connection = headers.get("connection");
+  } else {
+    connection = Object.entries(headers).find(([name]) => name.toLowerCase() === "connection")?.[1];
+  }
+  const values = Array.isArray(connection) ? connection : connection ? [connection] : [];
+  for (const value of values) {
+    for (const name of value.split(",")) {
+      const normalized = name.trim().toLowerCase();
+      if (normalized) names.add(normalized);
+    }
+  }
+  return names;
+}
+
 export function createPreviewGatewayPlan(
   target: PreviewTarget,
   options: Pick<PreviewFarmOptions, "gatewayUrl" | "name"> = {},
@@ -295,9 +313,11 @@ export async function forwardGatewayRequest(
   options: ForwardGatewayRequestOptions = {},
 ): Promise<PreviewGatewayResponse> {
   const headers = new Headers();
-  for (const [key, value] of Object.entries(request.headers || {})) {
+  const requestHeaders = request.headers || {};
+  const requestHopByHopHeaders = getHopByHopHeaderNames(requestHeaders);
+  for (const [key, value] of Object.entries(requestHeaders)) {
     const normalized = key.toLowerCase();
-    if (HOP_BY_HOP_HEADERS.has(normalized) || normalized.startsWith("sec-websocket-")) {
+    if (requestHopByHopHeaders.has(normalized) || normalized.startsWith("sec-websocket-")) {
       continue;
     }
     headers.set(key, value);
@@ -318,12 +338,13 @@ export async function forwardGatewayRequest(
   });
 
   const responseHeaders: Record<string, string | string[]> = {};
+  const responseHopByHopHeaders = getHopByHopHeaderNames(response.headers);
   response.headers.forEach((value, key) => {
     const normalized = key.toLowerCase();
     // Set-Cookie is collected separately: Headers.forEach folds repeated
     // headers into one comma-joined value, which corrupts multiple cookies.
     if (
-      !HOP_BY_HOP_HEADERS.has(normalized) &&
+      !responseHopByHopHeaders.has(normalized) &&
       normalized !== "content-encoding" &&
       normalized !== "set-cookie"
     ) {
