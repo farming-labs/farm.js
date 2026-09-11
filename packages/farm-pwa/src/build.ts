@@ -332,22 +332,9 @@ async function assertWorkerPathInsidePublicDir(
   publicDir: string,
   workerPath: string,
 ): Promise<void> {
-  const realPublicDir = await realpath(publicDir);
-  let existingAncestor = workerPath;
-
-  while (true) {
-    try {
-      existingAncestor = await realpath(existingAncestor);
-      break;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      const parent = path.dirname(existingAncestor);
-      if (parent === existingAncestor) throw error;
-      existingAncestor = parent;
-    }
-  }
-
-  const relativePath = path.relative(realPublicDir, existingAncestor);
+  const prospectivePublicDir = await resolveProspectiveRealPath(publicDir);
+  const prospectiveWorkerPath = await resolveProspectiveRealPath(workerPath);
+  const relativePath = path.relative(prospectivePublicDir, prospectiveWorkerPath);
   if (
     relativePath === ".." ||
     relativePath.startsWith(`..${path.sep}`) ||
@@ -356,6 +343,23 @@ async function assertWorkerPathInsidePublicDir(
     throw new Error(
       "[farm:pwa] Service worker output must stay inside the public output directory, including through symlinks.",
     );
+  }
+}
+
+async function resolveProspectiveRealPath(candidate: string): Promise<string> {
+  const missingSegments: string[] = [];
+  let existingAncestor = path.resolve(candidate);
+
+  while (true) {
+    try {
+      return path.join(await realpath(existingAncestor), ...missingSegments);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      const parent = path.dirname(existingAncestor);
+      if (parent === existingAncestor) throw error;
+      missingSegments.unshift(path.basename(existingAncestor));
+      existingAncestor = parent;
+    }
   }
 }
 

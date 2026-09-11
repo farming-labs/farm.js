@@ -114,6 +114,25 @@ describe("writePwaBuildArtifacts", () => {
     expect(await readFile(path.join(publicDir, "app", "sw.js"), "utf8")).toBe(customWorker);
   });
 
+  it("creates a missing public directory for a custom service worker", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "farm-pwa-empty-output-"));
+    temporaryDirectories.push(root);
+    const customWorker = "self.skipWaiting();\n";
+    await writeFile(path.join(root, "custom-worker.js"), customWorker);
+
+    const result = await writePwaBuildArtifacts({
+      root,
+      outputDir: root,
+      preset: "node-server",
+      basePath: "/",
+      options: resolvePwaOptions({
+        serviceWorker: { source: "custom-worker.js", type: "module" },
+      }),
+    });
+
+    await expect(readFile(result.workerPath, "utf8")).resolves.toBe(customWorker);
+  });
+
   it("prefixes every logical static route without requiring basePath folders on disk", async () => {
     const { root } = await createOutput("node-server");
     const result = await writePwaBuildArtifacts({
