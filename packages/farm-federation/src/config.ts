@@ -222,7 +222,7 @@ function normalizeRemoteAlias(value: string): string {
 function normalizeRemoteEntry(value: string, alias: string): string {
   const entry = nonEmptyString(value, `Federation remote ${alias} entry`);
   if (entry.startsWith("/")) {
-    if (entry.startsWith("//") || entry.includes("\\")) {
+    if (entry.startsWith("//") || entry.includes("\\") || !hasBrowserStablePathname(entry)) {
       throw new TypeError(
         `Federation remote ${alias} entry must be a root-relative URL, not a network-path URL`,
       );
@@ -283,7 +283,7 @@ function normalizeOutputFile(value: string): string {
     value.includes("\\") ||
     value.includes("?") ||
     value.includes("#") ||
-    segments.some((segment) => !segment || segment === "." || segment === "..") ||
+    segments.some((segment) => !isBrowserStablePathSegment(segment)) ||
     !/\.m?js$/i.test(filename)
   ) {
     throw new TypeError("Federation filename must be a safe relative .js or .mjs path");
@@ -296,7 +296,11 @@ function optionalPublicPath(value: string | undefined): string | undefined {
   const publicPath = nonEmptyString(value, "Federation publicPath");
   if (publicPath === "auto") return publicPath;
   if (publicPath.startsWith("/")) {
-    if (publicPath.startsWith("//") || publicPath.includes("\\")) {
+    if (
+      publicPath.startsWith("//") ||
+      publicPath.includes("\\") ||
+      !hasBrowserStablePathname(publicPath)
+    ) {
       throw new TypeError(
         "Federation publicPath must be a root-relative URL, not a network-path URL",
       );
@@ -320,6 +324,28 @@ function optionalPublicPath(value: string | undefined): string | undefined {
     throw new TypeError("Federation publicPath must use HTTP without URL credentials");
   }
   return parsed.href;
+}
+
+function hasBrowserStablePathname(value: string): boolean {
+  const pathname = value.split(/[?#]/, 1)[0] || "/";
+  return pathname.split("/").every((segment) => !segment || isBrowserStablePathSegment(segment));
+}
+
+function isBrowserStablePathSegment(segment: string): boolean {
+  if (!segment) return false;
+  let decoded = segment;
+  try {
+    decoded = decodeURIComponent(segment);
+  } catch {
+    // Malformed escapes remain literal in browser pathnames.
+  }
+  return (
+    decoded !== "." &&
+    decoded !== ".." &&
+    !decoded.includes("/") &&
+    !decoded.includes("\\") &&
+    !hasControlCharacter(decoded)
+  );
 }
 
 function booleanOption(value: boolean | undefined, label: string): boolean | undefined {
