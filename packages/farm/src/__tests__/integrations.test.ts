@@ -225,6 +225,23 @@ describe("integrations runtime", () => {
     expect(dynamic?.params).toEqual({ id: "%E0" });
   });
 
+  it("rejects integration catch-all parameters before later path segments", () => {
+    expect(() =>
+      defineIntegration({
+        category: "agent",
+        type: "invalid-catch-all",
+        instance: {},
+        routes: [
+          integrationRoute.get("/api/[...slug]/admin", {
+            handler: async () => new Response("unexpected"),
+          }),
+        ],
+      }),
+    ).toThrow(
+      'Catch-all segment "[...slug]" must be the final segment in route "/api/[...slug]/admin".',
+    );
+  });
+
   it("rejects duplicate plugin names from one integration", () => {
     const integration = defineIntegration({
       category: "custom",

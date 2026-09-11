@@ -12,6 +12,7 @@ import type {
 import type { InferFarmIntegrationOrmClient } from "./integration-orm";
 import { setFarmPluginIntegrationContext } from "./plugin-integration-context";
 import { decodeRouteSegment } from "./utils/decode";
+import { assertTerminalCatchAll } from "./routing/specificity";
 import type {
   FarmPlugin,
   FarmPluginContext,
@@ -1113,6 +1114,10 @@ export function defineIntegration<
     routes?.length || endpointRoutes.length
       ? ([...(routes || []), ...endpointRoutes] as readonly FarmIntegrationRoute[])
       : undefined;
+
+  for (const route of allRoutes || []) {
+    assertTerminalCatchAll(route.path, "api");
+  }
 
   const derivedApi =
     integration.api ||
