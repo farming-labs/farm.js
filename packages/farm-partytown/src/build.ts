@@ -1,4 +1,4 @@
-import { readFile, realpath, writeFile } from "node:fs/promises";
+import { lstat, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { partytownSnippet, type PartytownConfig } from "@qwik.dev/partytown/integration";
 import { copyLibFiles, libDirPath } from "@qwik.dev/partytown/utils";
@@ -31,6 +31,9 @@ export async function writePartytownBuildArtifacts(
   const debug = input.options.debug ?? false;
   await assertAssetsPathInsidePublicDir(publicDir, assetsDir);
 
+  // This directory is entirely plugin-owned. Recreate it so stale files and
+  // nested symlinks cannot redirect copyFile outside the verified destination.
+  await rm(assetsDir, { recursive: true, force: true });
   await copyLibFiles(assetsDir, { debugDir: debug });
   const bootstrapPath = path.join(assetsDir, PARTYTOWN_BOOTSTRAP);
   await writeFile(bootstrapPath, createPartytownBootstrap(input.options, basePath, false), "utf8");
@@ -168,6 +171,18 @@ async function resolveProspectiveRealPath(candidate: string): Promise<string> {
       return path.join(await realpath(existingAncestor), ...missingSegments);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      let existingEntry = false;
+      try {
+        await lstat(existingAncestor);
+        existingEntry = true;
+      } catch (statError) {
+        if ((statError as NodeJS.ErrnoException).code !== "ENOENT") throw statError;
+      }
+      if (existingEntry) {
+        throw new Error(
+          "[farm:partytown] Asset output must stay inside the public output directory, including through symlinks.",
+        );
+      }
       const parent = path.dirname(existingAncestor);
       if (parent === existingAncestor) throw error;
       missingSegments.unshift(path.basename(existingAncestor));
