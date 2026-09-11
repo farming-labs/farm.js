@@ -167,26 +167,8 @@ export function assertTerminalCatchAll(pattern: string, syntax: RoutePatternSynt
 export function getRoutePatternShape(pattern: string, syntax: RoutePatternSyntax = "page"): string {
   assertTerminalCatchAll(pattern, syntax);
   const segments = splitRoutePattern(pattern, syntax).map((segment) => {
-    const parameterName = syntax === "router" ? ROUTER_PARAMETER_NAME : ".+";
-    const supportsColonAndStar = syntax === "router";
-    if (
-      new RegExp(`^\\[\\[\\.\\.\\.${parameterName}\\]\\]$`).test(segment) ||
-      (supportsColonAndStar && new RegExp(`^\\*${parameterName}\\?$`).test(segment))
-    ) {
-      return "optional-catch-all";
-    }
-    if (
-      new RegExp(`^\\[\\.\\.\\.${parameterName}\\]$`).test(segment) ||
-      (supportsColonAndStar && new RegExp(`^\\*${parameterName}$`).test(segment))
-    ) {
-      return "catch-all";
-    }
-    if (
-      new RegExp(`^\\[${parameterName}\\]$`).test(segment) ||
-      (supportsColonAndStar && new RegExp(`^:${parameterName}$`).test(segment))
-    ) {
-      return "dynamic";
-    }
+    const specificity = getPatternSegmentSpecificity(segment, syntax);
+    if (specificity !== "static") return specificity;
 
     try {
       return `static:${decodeURIComponent(segment)}`;
@@ -196,4 +178,43 @@ export function getRoutePatternShape(pattern: string, syntax: RoutePatternSyntax
   });
 
   return segments.length === 0 ? "/" : JSON.stringify(segments);
+}
+
+/** Return the specificity of every URL-consuming segment in a route pattern. */
+export function getRoutePatternSpecificity(
+  pattern: string,
+  syntax: RoutePatternSyntax = "page",
+): RouteSegmentSpecificity[] {
+  assertTerminalCatchAll(pattern, syntax);
+  return splitRoutePattern(pattern, syntax).map((segment) =>
+    getPatternSegmentSpecificity(segment, syntax),
+  );
+}
+
+function getPatternSegmentSpecificity(
+  segment: string,
+  syntax: RoutePatternSyntax,
+): RouteSegmentSpecificity {
+  const parameterName = syntax === "router" ? ROUTER_PARAMETER_NAME : ".+";
+  const supportsColonAndStar = syntax === "router";
+  if (
+    new RegExp(`^\\[\\[\\.\\.\\.${parameterName}\\]\\]$`).test(segment) ||
+    (supportsColonAndStar && new RegExp(`^\\*${parameterName}\\?$`).test(segment))
+  ) {
+    return "optional-catch-all";
+  }
+  if (
+    new RegExp(`^\\[\\.\\.\\.${parameterName}\\]$`).test(segment) ||
+    (supportsColonAndStar && new RegExp(`^\\*${parameterName}$`).test(segment))
+  ) {
+    return "catch-all";
+  }
+  if (
+    new RegExp(`^\\[${parameterName}\\]$`).test(segment) ||
+    (supportsColonAndStar && new RegExp(`^:${parameterName}$`).test(segment))
+  ) {
+    return "dynamic";
+  }
+
+  return "static";
 }
