@@ -98,6 +98,25 @@ describe.sequential("writeSearchIndex", () => {
     await expect(readFile(sentinelPath, "utf8")).resolves.toBe("keep me");
     await expect(access(path.join(externalSearchDir, "pagefind.js"))).rejects.toThrow();
   });
+
+  it("rejects a dangling symlink in the output path", async () => {
+    const { root, outputDir, publicDir } = await createOutput();
+    const externalDir = path.join(root, "missing-external");
+    await writeFile(path.join(publicDir, "index.html"), page("Home", "Farm home"));
+    await symlink(externalDir, path.join(publicDir, "app"), "junction");
+
+    await expect(
+      writeSearchIndex({
+        outputDir,
+        publicDir,
+        preset: "node-server",
+        basePath: "/app",
+        options: resolveSearchOptions(),
+      }),
+    ).rejects.toThrow("including through symlinks");
+
+    await expect(access(externalDir)).rejects.toThrow();
+  });
 });
 
 describe("search route matching", () => {

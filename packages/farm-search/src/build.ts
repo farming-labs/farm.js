@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, realpath, rm } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, realpath, rm } from "node:fs/promises";
 import path from "node:path";
 import * as pagefind from "pagefind";
 import type { ResolvedSearchOptions } from "./config.js";
@@ -213,6 +213,14 @@ async function assertOutputPathInside(publicDir: string, outputPath: string): Pr
       break;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      try {
+        await lstat(existingAncestor);
+        throw new Error(
+          "[farm:search] Search output must stay inside the public output directory, including through symlinks",
+        );
+      } catch (statError) {
+        if ((statError as NodeJS.ErrnoException).code !== "ENOENT") throw statError;
+      }
       const parent = path.dirname(existingAncestor);
       if (parent === existingAncestor) throw error;
       existingAncestor = parent;
