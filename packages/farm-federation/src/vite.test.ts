@@ -69,6 +69,11 @@ describe("Farm federation Vite boundary", () => {
     expect(transform).not.toHaveBeenCalled();
     expect(wrapped.call({}, "source", "/src/file.ts", { ssr: false })).toEqual({ code: "client" });
     expect(transform).toHaveBeenCalledOnce();
+
+    expect(
+      wrapped.call({ environment: { name: "rsc" } }, "source", "/src/server-component.tsx", {}),
+    ).toBeNull();
+    expect(transform).toHaveBeenCalledOnce();
   });
 
   it("blocks configured remote imports from Farm's server graph", () => {
@@ -85,6 +90,14 @@ describe("Farm federation Vite boundary", () => {
     expect(resolveId.call({}, "local-module", "/src/page.tsx", { ssr: true })).toBeNull();
     expect(() =>
       resolveId.call({}, "checkout/CheckoutButton", "/src/page.tsx", { ssr: true }),
+    ).toThrow("browser modules only");
+    expect(() =>
+      resolveId.call(
+        { environment: { name: "rsc" } },
+        "checkout/CheckoutButton",
+        "/src/app/page.tsx",
+        {},
+      ),
     ).toThrow("browser modules only");
     expect(
       resolveId.call({}, "checkout/CheckoutButton", "/src/page.tsx", { ssr: false }),
