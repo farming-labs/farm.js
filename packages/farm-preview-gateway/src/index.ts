@@ -99,6 +99,22 @@ const HOP_BY_HOP_HEADERS = new Set([
   "upgrade",
 ]);
 
+function getHopByHopHeaderNames(headers: Headers | Record<string, string | string[]>): Set<string> {
+  const names = new Set(HOP_BY_HOP_HEADERS);
+  const connection =
+    headers instanceof Headers
+      ? headers.get("connection")
+      : Object.entries(headers).find(([name]) => name.toLowerCase() === "connection")?.[1];
+  const values = Array.isArray(connection) ? connection : connection ? [connection] : [];
+  for (const value of values) {
+    for (const name of value.split(",")) {
+      const normalized = name.trim().toLowerCase();
+      if (normalized) names.add(normalized);
+    }
+  }
+  return names;
+}
+
 export function createPreviewGatewayHandler(options: PreviewGatewayOptions = {}) {
   const store = options.store || createPreviewGatewayStoreFromEnv();
   const config = {
@@ -661,9 +677,10 @@ async function proxyPublicRequest(
   }
 
   const headers = new Headers();
+  const responseHopByHopHeaders = getHopByHopHeaderNames(response.headers || {});
   for (const [key, value] of Object.entries(response.headers || {})) {
     const normalized = key.toLowerCase();
-    if (HOP_BY_HOP_HEADERS.has(normalized)) {
+    if (responseHopByHopHeaders.has(normalized)) {
       continue;
     }
     // Append multi-valued headers (Set-Cookie) so every value reaches the
@@ -748,10 +765,11 @@ async function serializePreviewRequest(
 ): Promise<PreviewGatewayRequest> {
   const method = request.method.toUpperCase();
   const headers: Record<string, string> = {};
+  const requestHopByHopHeaders = getHopByHopHeaderNames(request.headers);
   request.headers.forEach((value, key) => {
     const normalized = key.toLowerCase();
     if (
-      !HOP_BY_HOP_HEADERS.has(normalized) &&
+      !requestHopByHopHeaders.has(normalized) &&
       normalized !== "forwarded" &&
       !normalized.startsWith("x-forwarded-")
     ) {
