@@ -180,52 +180,6 @@ describe("integrations runtime", () => {
     expect(globalIntegration).toBeUndefined();
   });
 
-  it("keeps static plugin arrays compatible and propagates server ownership", () => {
-    const contributedPlugin = {
-      name: "platform:contribution",
-    };
-    const integration = defineIntegration({
-      category: "agent",
-      type: "platform-plugins",
-      instance: {},
-      serverRuntime: false,
-      plugins: [contributedPlugin],
-    });
-
-    const plugins = resolveIntegrationPlugins({ agent: integration });
-
-    expect(plugins[1]).not.toBe(contributedPlugin);
-    expect(plugins[1].name).toBe(contributedPlugin.name);
-    expect(getFarmIntegrationPluginServerRuntime(plugins[1])).toBe(false);
-    expect(getFarmIntegrationPluginOwner(plugins[1])?.source).toBe("contribution");
-  });
-
-  it("matches routes with malformed percent-encoded segments instead of throwing", () => {
-    const integration = defineIntegration({
-      category: "agent",
-      type: "proxy",
-      instance: {},
-      routes: [
-        integrationRoute.get("/agents/[...path]", { handler: async () => new Response("ok") }),
-        integrationRoute.get("/items/[id]", { handler: async () => new Response("ok") }),
-      ],
-    });
-
-    // decodeURIComponent throws on these segments; matching must keep the
-    // raw value instead of throwing before any handler runs.
-    const catchAll = matchIntegrationRoute(
-      { agent: integration },
-      { pathname: "/agents/%E0/logs", method: "GET" },
-    );
-    expect(catchAll?.params).toEqual({ path: ["%E0", "logs"] });
-
-    const dynamic = matchIntegrationRoute(
-      { agent: integration },
-      { pathname: "/items/%E0", method: "GET" },
-    );
-    expect(dynamic?.params).toEqual({ id: "%E0" });
-  });
-
   it.each([undefined, "ALL", "all"] as const)(
     "dispatches integration routes with method %s for every request method",
     async (method) => {
@@ -275,6 +229,52 @@ describe("integrations runtime", () => {
       await manager.runHookParallel("shutdown", { reason: "test" });
     },
   );
+
+  it("keeps static plugin arrays compatible and propagates server ownership", () => {
+    const contributedPlugin = {
+      name: "platform:contribution",
+    };
+    const integration = defineIntegration({
+      category: "agent",
+      type: "platform-plugins",
+      instance: {},
+      serverRuntime: false,
+      plugins: [contributedPlugin],
+    });
+
+    const plugins = resolveIntegrationPlugins({ agent: integration });
+
+    expect(plugins[1]).not.toBe(contributedPlugin);
+    expect(plugins[1].name).toBe(contributedPlugin.name);
+    expect(getFarmIntegrationPluginServerRuntime(plugins[1])).toBe(false);
+    expect(getFarmIntegrationPluginOwner(plugins[1])?.source).toBe("contribution");
+  });
+
+  it("matches routes with malformed percent-encoded segments instead of throwing", () => {
+    const integration = defineIntegration({
+      category: "agent",
+      type: "proxy",
+      instance: {},
+      routes: [
+        integrationRoute.get("/agents/[...path]", { handler: async () => new Response("ok") }),
+        integrationRoute.get("/items/[id]", { handler: async () => new Response("ok") }),
+      ],
+    });
+
+    // decodeURIComponent throws on these segments; matching must keep the
+    // raw value instead of throwing before any handler runs.
+    const catchAll = matchIntegrationRoute(
+      { agent: integration },
+      { pathname: "/agents/%E0/logs", method: "GET" },
+    );
+    expect(catchAll?.params).toEqual({ path: ["%E0", "logs"] });
+
+    const dynamic = matchIntegrationRoute(
+      { agent: integration },
+      { pathname: "/items/%E0", method: "GET" },
+    );
+    expect(dynamic?.params).toEqual({ id: "%E0" });
+  });
 
   it("rejects integration catch-all parameters before later path segments", () => {
     expect(() =>
