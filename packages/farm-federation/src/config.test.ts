@@ -116,6 +116,13 @@ describe("resolveFederationOptions", () => {
         resolveFederationOptions({ name: "host", remotes: { checkout: entry } }, reactRenderer),
       ).toThrow();
     }
+    for (const publicPath of [
+      "//cdn.example.com/assets/",
+      "/\\cdn.example.com/assets/",
+      "https:\\cdn.example.com\\assets\\",
+    ]) {
+      expect(() => resolveFederationOptions({ name: "host", publicPath }, reactRenderer)).toThrow();
+    }
     expect(() =>
       resolveFederationOptions({ name: "host", serverRemotes: {} } as never, reactRenderer),
     ).toThrow("issues/885");
