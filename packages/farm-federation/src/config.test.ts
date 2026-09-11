@@ -96,6 +96,16 @@ describe("resolveFederationOptions", () => {
     expect(() =>
       resolveFederationOptions({ name: "remote", filename: "../remoteEntry.js" }, reactRenderer),
     ).toThrow("safe relative");
+    for (const filename of [
+      "%2e%2e/remoteEntry.js",
+      "assets/%2FremoteEntry.js",
+      "assets/%5cremoteEntry.js",
+      "assets/%00remoteEntry.js",
+    ]) {
+      expect(() => resolveFederationOptions({ name: "remote", filename }, reactRenderer)).toThrow(
+        "safe relative",
+      );
+    }
     expect(() =>
       resolveFederationOptions(
         {
@@ -111,6 +121,10 @@ describe("resolveFederationOptions", () => {
       "//checkout.example.com/remoteEntry.js",
       "/\\checkout.example.com/remoteEntry.js",
       "checkout@file:///tmp/remoteEntry.js",
+      "/assets/%2e%2e/remoteEntry.js",
+      "/assets/%2FremoteEntry.js",
+      "/assets/%5cremoteEntry.js",
+      "/assets/%00remoteEntry.js",
     ]) {
       expect(() =>
         resolveFederationOptions({ name: "host", remotes: { checkout: entry } }, reactRenderer),
@@ -120,6 +134,10 @@ describe("resolveFederationOptions", () => {
       "//cdn.example.com/assets/",
       "/\\cdn.example.com/assets/",
       "https:\\cdn.example.com\\assets\\",
+      "/assets/%2e%2e/federation/",
+      "/assets/%2Ffederation/",
+      "/assets/%5cfederation/",
+      "/assets/%00federation/",
     ]) {
       expect(() => resolveFederationOptions({ name: "host", publicPath }, reactRenderer)).toThrow();
     }
