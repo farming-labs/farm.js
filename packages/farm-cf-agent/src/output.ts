@@ -1,4 +1,4 @@
-import { access, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parse, printParseErrorCode, type ParseError } from "jsonc-parser";
 import { normalizeAgentRoutePrefix } from "@farm.js/core/agent-runtime";
@@ -36,6 +36,7 @@ export async function writeCloudflareAgentOutput(
   const outputDir = resolve(root, options.outputDir);
   const configPath = resolve(root, options.config);
   assertInsideRoot(root, configPath, "Wrangler config");
+  await assertRealPathInsideRoot(root, configPath, "Wrangler config");
 
   const configDirectory = dirname(configPath);
   const config = await readWranglerConfig(configPath);
@@ -253,6 +254,19 @@ function assertInsideRoot(root: string, target: string, label: string): void {
   const pathFromRoot = relative(root, target);
   if (pathFromRoot === ".." || pathFromRoot.startsWith(`..${sep}`) || isAbsolute(pathFromRoot)) {
     throw new Error(`${label} must be inside the Farm project root.`);
+  }
+}
+
+async function assertRealPathInsideRoot(
+  root: string,
+  target: string,
+  label: string,
+): Promise<void> {
+  const realRoot = await realpath(root);
+  const realTarget = await realpath(target);
+  const pathFromRoot = relative(realRoot, realTarget);
+  if (pathFromRoot === ".." || pathFromRoot.startsWith(`..${sep}`) || isAbsolute(pathFromRoot)) {
+    throw new Error(`${label} must be inside the Farm project root, including through symlinks.`);
   }
 }
 
