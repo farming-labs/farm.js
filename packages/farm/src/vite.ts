@@ -25,7 +25,7 @@ import {
 import type { FarmDocsAPIHandler } from "./docs";
 import { createMarkdownMirrorResponse, resolveMarkdownMirrorTarget } from "./markdown";
 import { createFarmMarkdownSourceResponse, isFarmMarkdownPageFile } from "./app-markdown";
-import { sendWebResponse } from "./server/response";
+import { applyWebResponseHeaders, sendWebResponse } from "./server/response";
 import {
   getClientModuleMetadata,
   getIslandStrategyExport,
@@ -418,9 +418,7 @@ function applyWebResponseToNodeResponse(
   for (const name of res.getHeaderNames()) {
     res.removeHeader(name);
   }
-  response.headers.forEach((value, key) => {
-    res.setHeader(key, value);
-  });
+  applyWebResponseHeaders(res as any, response.headers);
 }
 
 function toNodeResponseBuffer(chunk: unknown, encoding?: unknown): Buffer | undefined {

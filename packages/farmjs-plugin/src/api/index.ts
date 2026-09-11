@@ -25,6 +25,7 @@
 import type { Plugin, ViteDevServer } from "vite";
 import { _withAfterNodeMiddleware } from "@farm.js/core/after";
 import { invokeAPIRouteEndpoint } from "@farm.js/core/api/runtime";
+import { sendWebResponse } from "@farm.js/core/server";
 
 export interface FarmApiOptions {
   /** Source directory containing the api folder (default: 'src') */
@@ -396,14 +397,7 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
               const duration = Date.now() - startTime;
               logResponse(method, pathname, response.status, duration);
 
-              // Send response
-              res.statusCode = response.status;
-              response.headers.forEach((value, key) => {
-                res.setHeader(key, value);
-              });
-
-              const responseBody = await response.text();
-              res.end(responseBody);
+              await sendWebResponse(res, response);
             } catch (error: any) {
               const duration = Date.now() - startTime;
               logResponse(method, pathname, 500, duration);
