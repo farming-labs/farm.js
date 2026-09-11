@@ -260,6 +260,18 @@ export async function proxyAgentRuntimeRequest(
     const upstream = await (options.fetch || globalThis.fetch)(targetUrl, init);
     const responseHeaders = new Headers(upstream.headers);
     removeHopByHopHeaders(responseHeaders);
+    // Fetch decodes supported content codings before exposing the body while retaining
+    // the upstream metadata. Forwarding those headers would make the client
+    // try to decode an already-decoded stream and trust a stale byte length.
+    const contentCodings = responseHeaders.get("content-encoding")?.toLowerCase().split(",");
+    if (
+      upstream.body &&
+      contentCodings?.length &&
+      contentCodings.every((coding) => ["gzip", "x-gzip", "deflate", "br"].includes(coding.trim()))
+    ) {
+      responseHeaders.delete("content-encoding");
+      responseHeaders.delete("content-length");
+    }
     rewriteProxyLocation(responseHeaders, upstreamOrigin, incomingUrl.origin);
 
     return new Response(upstream.body, {
@@ -516,7 +528,9 @@ function createProxyRequestHeaders(input: Headers, incomingUrl: URL): Headers {
   removeHopByHopHeaders(headers);
   headers.delete("host");
   headers.delete("content-length");
-  headers.delete("accept-encoding");
+  // Node fetch supplies its own compression preference when this header is
+  // absent, then exposes a decoded body with the original encoding headers.
+  headers.set("accept-encoding", "identity");
   if (!headers.has("x-forwarded-host")) headers.set("x-forwarded-host", incomingUrl.host);
   if (!headers.has("x-forwarded-proto")) {
     headers.set("x-forwarded-proto", incomingUrl.protocol.replace(":", ""));
