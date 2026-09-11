@@ -1,6 +1,7 @@
 import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { runInNewContext } from "node:vm";
 import { afterEach, describe, expect, it } from "vitest";
 import { generateServiceWorker, writePwaBuildArtifacts } from "./build";
 import { resolvePwaOptions } from "./config";
@@ -218,5 +219,76 @@ describe("generateServiceWorker", () => {
     expect(worker).toContain("if (IMAGE_OPTIONS && request.destination");
     expect(worker).toContain('request.headers.has("authorization")');
     expect(worker).toContain('policy.includes("no-cache")');
+  });
+
+  it("keeps a background image revalidation alive after returning a cached response", async () => {
+    const worker = generateServiceWorker({
+      basePath: "/",
+      cacheId: "test",
+      precacheUrls: [],
+      staticRoutes: {},
+      offlineRoute: false,
+      update: "prompt",
+      images: { strategy: "swr", limit: 10, ttlMs: 60_000 },
+    });
+    const listeners = new Map<string, (event: any) => void>();
+    let resolveNetworkResponse!: (response: Response) => void;
+    const networkResponse = new Promise<Response>((resolve) => {
+      resolveNetworkResponse = resolve;
+    });
+    let stored = false;
+    const cached = new Response("cached", {
+      headers: { "x-farm-pwa-cached-at": String(Date.now()) },
+    });
+    const cache = {
+      match: async () => cached,
+      put: async () => {
+        stored = true;
+      },
+      keys: async () => [],
+    };
+
+    runInNewContext(worker, {
+      caches: { open: async () => cache },
+      fetch: async () => networkResponse,
+      Headers,
+      Response,
+      Set,
+      URL,
+      self: {
+        addEventListener(type: string, listener: (event: any) => void) {
+          listeners.set(type, listener);
+        },
+        clients: { claim: async () => undefined },
+        location: { origin: "https://example.test" },
+        skipWaiting: async () => undefined,
+      },
+    });
+
+    let responsePromise!: Promise<Response>;
+    let lifetimePromise!: Promise<unknown>;
+    listeners.get("fetch")?.({
+      request: {
+        destination: "image",
+        headers: new Headers(),
+        method: "GET",
+        mode: "cors",
+        url: "https://example.test/photo.png",
+      },
+      respondWith(value: Promise<Response>) {
+        responsePromise = value;
+      },
+      waitUntil(value: Promise<unknown>) {
+        lifetimePromise = value;
+      },
+    });
+
+    expect(lifetimePromise).toBeDefined();
+    expect(await (await responsePromise).text()).toBe("cached");
+    expect(stored).toBe(false);
+
+    resolveNetworkResponse(new Response("updated", { headers: { "cache-control": "public" } }));
+    await lifetimePromise;
+    expect(stored).toBe(true);
   });
 });

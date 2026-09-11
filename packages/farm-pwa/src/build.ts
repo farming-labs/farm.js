@@ -215,7 +215,9 @@ self.addEventListener("fetch", (event) => {
   }
 
   if (IMAGE_OPTIONS && request.destination === "image") {
-    event.respondWith(staleWhileRevalidateImage(request));
+    const image = staleWhileRevalidateImage(request);
+    event.respondWith(image.response);
+    event.waitUntil(image.lifetime);
   }
 });
 
@@ -242,26 +244,36 @@ async function handleNavigation(request, url) {
   }
 }
 
-async function staleWhileRevalidateImage(request) {
-  if (request.headers.has("authorization")) return fetch(request);
+function staleWhileRevalidateImage(request) {
+  let update = Promise.resolve();
+  const response = (async () => {
+    if (request.headers.has("authorization")) return fetch(request);
 
-  const cache = await caches.open(IMAGE_CACHE);
-  const cached = await cache.match(request);
-  const cachedAt = Number(cached?.headers.get("x-farm-pwa-cached-at") || 0);
-  const fresh = cached && Date.now() - cachedAt <= IMAGE_OPTIONS.ttlMs;
-  const update = fetchAndCacheImage(request, cache);
+    const cache = await caches.open(IMAGE_CACHE);
+    const cached = await cache.match(request);
+    const cachedAt = Number(cached?.headers.get("x-farm-pwa-cached-at") || 0);
+    const fresh = cached && Date.now() - cachedAt <= IMAGE_OPTIONS.ttlMs;
+    update = fetchAndCacheImage(request, cache);
 
-  if (fresh) {
-    void update.catch(() => undefined);
-    return cached;
-  }
+    if (fresh) return cached;
 
-  try {
-    return await update;
-  } catch (error) {
-    if (cached) return cached;
-    throw error;
-  }
+    try {
+      return await update;
+    } catch (error) {
+      if (cached) return cached;
+      throw error;
+    }
+  })();
+  const lifetime = response
+    .then(
+      () => update,
+      () => update,
+    )
+    .then(
+      () => undefined,
+      () => undefined,
+    );
+  return { response, lifetime };
 }
 
 async function fetchAndCacheImage(request, cache) {
