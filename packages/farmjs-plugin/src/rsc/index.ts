@@ -36,6 +36,7 @@ import { transformFarmServerFns } from "./server-fn-transform.js";
 import { transformAutomaticOptimizedBoundaries } from "./automatic-optimized-boundary.js";
 import { resolveRscBuildOutputPath } from "./build-paths.js";
 import { assertRscPackageCompatibility } from "./compatibility.js";
+import { sendRscDevelopmentResponse } from "./dev-response.js";
 import fs from "fs/promises";
 import path from "path";
 import { devServableFileExists } from "../dev-static.js";
@@ -1268,28 +1269,17 @@ if (document.readyState === 'loading') {
                 throw new Error("[Farm.js] Could not load RSC entry in rsc environment");
               const response = await rscEntry.default.fetch(request);
 
-              res.statusCode = response.status;
-              response.headers.forEach((value: string, key: string) => {
-                if (key.toLowerCase() !== "transfer-encoding") res.setHeader(key, value);
-              });
-              if (response.body) {
-                const reader = response.body.getReader();
-                const pump = async () => {
-                  while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    res.write(Buffer.from(value));
-                  }
-                  res.end();
-                };
-                await pump();
-              } else {
-                res.end();
-              }
+              await sendRscDevelopmentResponse(res, response);
               const duration = Date.now() - startTime;
               logResponse(method, pathname, response.status, duration);
               return;
             } catch (rscError: any) {
+              if (res.headersSent || res.writableEnded || res.destroyed) {
+                console.error("[Farm.js] RSC dev response error:", rscError);
+                if (!res.destroyed)
+                  res.destroy(rscError instanceof Error ? rscError : new Error(String(rscError)));
+                return;
+              }
               // RSC pipeline failed; fall back to legacy SSR for GET only
               if (method !== "GET") {
                 const duration = Date.now() - startTime;
