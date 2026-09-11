@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -100,6 +100,35 @@ test("keeps generated deployment configs inside the Farm root", async () => {
     );
   } finally {
     if (root) await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("rejects a Cloudflare Agent config that resolves outside the Farm root", async () => {
+  let temporaryRoot;
+
+  try {
+    temporaryRoot = await mkdtemp(path.join(tmpdir(), "farm-cli-cf-agent-symlink-"));
+    const root = path.join(temporaryRoot, "project");
+    const externalDirectory = path.join(temporaryRoot, "external");
+    await mkdir(path.join(root, ".farm", "cf-agent"), { recursive: true });
+    await mkdir(externalDirectory);
+    await writeFile(path.join(externalDirectory, "wrangler.jsonc"), "{}\n");
+    await symlink(externalDirectory, path.join(root, "cloudflare"), "junction");
+    await writeFile(
+      path.join(root, ".farm", "cf-agent", "deploy.json"),
+      JSON.stringify({
+        version: 1,
+        provider: "cloudflare-agents",
+        config: "cloudflare/wrangler.jsonc",
+      }),
+    );
+
+    assert.throws(
+      () => resolveCloudflareAgentDeployPlan(root),
+      /must stay inside the Farm project root/,
+    );
+  } finally {
+    if (temporaryRoot) await rm(temporaryRoot, { recursive: true, force: true });
   }
 });
 

@@ -1,5 +1,5 @@
 import { execFileSync } from "child_process";
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readFileSync, realpathSync } from "fs";
 import path from "path";
 import {
   getDeployTargetForPreset,
@@ -600,6 +600,7 @@ export function resolveCloudflareAgentDeployPlan(
   if (!existsSync(configPath)) {
     throw new Error(`Cloudflare Agents deployment config was not found at ${configPath}.`);
   }
+  assertRealPathInsideProject(projectRoot, configPath, "Cloudflare Agents deployment config");
 
   const environment = metadata.environment;
   if (environment !== undefined && (typeof environment !== "string" || !environment.trim())) {
@@ -652,6 +653,12 @@ function assertPathInsideProject(projectRoot: string, candidate: string, label: 
   ) {
     throw new Error(`${label} must stay inside the Farm project root.`);
   }
+}
+
+function assertRealPathInsideProject(projectRoot: string, candidate: string, label: string): void {
+  const realProjectRoot = realpathSync(projectRoot);
+  const realCandidate = realpathSync(candidate);
+  assertPathInsideProject(realProjectRoot, realCandidate, label);
 }
 
 function assertWranglerInstalled(root: string): void {
