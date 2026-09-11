@@ -283,8 +283,8 @@ describe("generateServiceWorker", () => {
       },
     });
 
-    expect(await (await responsePromise).text()).toBe("cached");
     expect(lifetimePromise).toBeDefined();
+    expect(await (await responsePromise).text()).toBe("cached");
     expect(stored).toBe(false);
 
     resolveNetworkResponse(new Response("updated", { headers: { "cache-control": "public" } }));
