@@ -1,7 +1,7 @@
 import { definePlugin } from "@farm.js/core/plugin";
 import stylexUnplugin, { type UserOptions } from "@stylexjs/unplugin";
 import { resolveStylexOptions, type StyleXOptions } from "./config.js";
-import { injectStylexDevelopmentAssets } from "./html.js";
+import { injectStylexDevelopmentAssets, stripStylexDevelopmentBasePath } from "./html.js";
 
 export type { StyleXOptions };
 
@@ -9,6 +9,7 @@ export type { StyleXOptions };
 export function stylex(options: StyleXOptions = {}) {
   const resolved = resolveStylexOptions(options);
   let development = false;
+  let configuredBasePath = "/";
 
   return definePlugin({
     name: "farm:stylex",
@@ -22,6 +23,7 @@ export function stylex(options: StyleXOptions = {}) {
       }
 
       development = context.isDev;
+      configuredBasePath = readBasePath(config.basePath) ?? "/";
       // @stylexjs/unplugin documents and implements externalPackages, but its
       // 0.19.0 UserOptions declaration does not include the property yet.
       const compilerOptions: Partial<UserOptions> & { externalPackages: string[] } = {
@@ -31,23 +33,63 @@ export function stylex(options: StyleXOptions = {}) {
         devMode: context.isDev ? "full" : "off",
       };
       const vitePlugin = createStylexVitePlugin(compilerOptions, context.isDev);
+      const basePathPlugin =
+        context.isDev && hasBasePath(configuredBasePath)
+          ? createStylexBasePathVitePlugin(configuredBasePath)
+          : undefined;
 
       return {
         ...config,
         vite: {
           ...config.vite,
-          plugins: [vitePlugin, ...(config.vite?.plugins ?? [])],
+          plugins: [
+            ...(basePathPlugin ? [basePathPlugin] : []),
+            vitePlugin,
+            ...(config.vite?.plugins ?? []),
+          ],
         },
       };
     },
 
     render: {
-      html(html) {
+      html(html, _render, context) {
         if (!development) return html;
-        return injectStylexDevelopmentAssets(html);
+        return injectStylexDevelopmentAssets(
+          html,
+          readBasePath(context.config.basePath) ?? configuredBasePath,
+        );
       },
     },
   });
+}
+
+function readBasePath(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function hasBasePath(value: string): boolean {
+  return value.replace(/^\/+|\/+$/g, "").length > 0;
+}
+
+function createStylexBasePathVitePlugin(basePath: string) {
+  return {
+    name: "farm:stylex-base-path",
+    enforce: "pre" as const,
+    configureServer(server: {
+      middlewares: {
+        use(
+          middleware: (request: { url?: string }, response: unknown, next: () => void) => void,
+        ): void;
+      };
+    }) {
+      server.middlewares.use((request, _response, next) => {
+        if (request.url) {
+          request.url = stripStylexDevelopmentBasePath(request.url, basePath);
+        }
+        next();
+      });
+    },
+  };
 }
 
 function createStylexVitePlugin(
