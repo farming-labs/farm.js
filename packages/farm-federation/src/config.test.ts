@@ -42,13 +42,14 @@ describe("resolveFederationOptions", () => {
         remotes: {
           checkout: { entry: "https://checkout.example.com/mf-manifest.json" },
           catalog: "catalog@https://catalog.example.com/remoteEntry.js",
+          account: "https://account.example.com/mf-manifest.json",
         },
         types: false,
       },
       reactRenderer,
     );
 
-    expect(resolved.remoteAliases).toEqual(["checkout", "catalog"]);
+    expect(resolved.remoteAliases).toEqual(["checkout", "catalog", "account"]);
     expect(resolved.upstream.remotes).toEqual({
       checkout: {
         name: "checkout",
@@ -56,6 +57,7 @@ describe("resolveFederationOptions", () => {
         type: "module",
       },
       catalog: "catalog@https://catalog.example.com/remoteEntry.js",
+      account: "https://account.example.com/mf-manifest.json",
     });
     expect(resolved.upstream.manifest).toBe(false);
     expect(resolved.upstream.dts).toBe(false);
@@ -103,6 +105,17 @@ describe("resolveFederationOptions", () => {
         reactRenderer,
       ),
     ).toThrow("must use HTTP");
+    for (const entry of [
+      "https://user:secret@checkout.example.com/remoteEntry.js",
+      "checkout@https://user:secret@checkout.example.com/remoteEntry.js",
+      "//checkout.example.com/remoteEntry.js",
+      "/\\checkout.example.com/remoteEntry.js",
+      "checkout@file:///tmp/remoteEntry.js",
+    ]) {
+      expect(() =>
+        resolveFederationOptions({ name: "host", remotes: { checkout: entry } }, reactRenderer),
+      ).toThrow();
+    }
     expect(() =>
       resolveFederationOptions({ name: "host", serverRemotes: {} } as never, reactRenderer),
     ).toThrow("issues/885");
