@@ -17,15 +17,25 @@ export function getFarmBasePath(): string {
 export function applyFarmBasePath(href: string, basePath = getFarmBasePath()): string {
   const normalizedBasePath = normalizeFarmBasePath(basePath);
   if (!normalizedBasePath || !href.startsWith("/") || href.startsWith("//")) return href;
+  const canonicalHref = canonicalizeAppRelativeHref(href);
   if (
-    href === normalizedBasePath ||
-    href.startsWith(`${normalizedBasePath}/`) ||
-    href.startsWith(`${normalizedBasePath}?`) ||
-    href.startsWith(`${normalizedBasePath}#`)
+    canonicalHref === normalizedBasePath ||
+    canonicalHref.startsWith(`${normalizedBasePath}/`) ||
+    canonicalHref.startsWith(`${normalizedBasePath}?`) ||
+    canonicalHref.startsWith(`${normalizedBasePath}#`)
   ) {
-    return href;
+    return canonicalHref;
   }
-  return `${normalizedBasePath}${href}`;
+  return `${normalizedBasePath}${canonicalHref}`;
+}
+
+function canonicalizeAppRelativeHref(href: string): string {
+  const origin = "http://farm.local";
+  const resolved = new URL(href, origin);
+  if (resolved.origin !== origin) {
+    throw new Error("Farm app-relative href cannot change the URL origin.");
+  }
+  return `${resolved.pathname}${resolved.search}${resolved.hash}`;
 }
 
 export function stripFarmBasePath(pathname: string, basePath = getFarmBasePath()): string {

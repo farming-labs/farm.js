@@ -9,6 +9,20 @@ describe("Farm base paths", () => {
     expect(applyFarmBasePath("//cdn.example/reports", "/console")).toBe("//cdn.example/reports");
   });
 
+  it("canonicalizes app-relative hrefs before applying the base path", () => {
+    expect(applyFarmBasePath("/%2e%2e/admin?mode=edit#settings", "/console")).toBe(
+      "/console/admin?mode=edit#settings",
+    );
+    expect(applyFarmBasePath("/reports/../admin", "/console")).toBe("/console/admin");
+    expect(applyFarmBasePath("/console/%2e%2e/admin", "/console")).toBe("/console/admin");
+  });
+
+  it("rejects app-relative hrefs that browsers interpret as another origin", () => {
+    expect(() => applyFarmBasePath("/\\evil.example/path", "/console")).toThrow(
+      /cannot change the URL origin/,
+    );
+  });
+
   it("strips the base path without changing paths outside it", () => {
     expect(stripFarmBasePath("/console/reports", "/console")).toBe("/reports");
     expect(stripFarmBasePath("/console", "/console")).toBe("/");
