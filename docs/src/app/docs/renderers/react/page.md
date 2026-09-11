@@ -1148,15 +1148,35 @@ preserves every retained element, and creates only that final incoming suffix. I
 checked against the complete committed window; reusing an expired key takes full keyed
 reconciliation so React key identity is preserved.
 
+Safe same-key maps may be immediately adjacent to either side of one rolling setter:
+
+```tsx
+setItems((current) =>
+  current.map((item) => (item.id === editedId ? { ...item, label: nextLabel } : item)),
+);
+setItems((current) => [...current.slice(trimCount), ...nextItems]);
+setItems((current) =>
+  current.map((item) => (item.id === selectedId ? { ...item, selected: true } : item)),
+);
+```
+
+Farm links mapped retained items back to their committed rows, creates the incoming suffix from its
+final mapped values, and prepares every changed binding and incoming row before the first live DOM
+write. Unchanged survivors keep their elements, focus, selection, scopes, and delegated-event
+indexes. The compiler lowers this composition through the existing structural append/map runtime,
+so it does not add another browser runtime feature.
+
 The proof remains intentionally narrow: one compiler-safe slice bound, compiler-owned host rows,
 and index-independent render and key callbacks. A second slice bound, literal zero, effectful bound
 expressions, block-bodied updates, custom slice behavior, sparse or subclassed arrays, queued
 chains containing a mixed or unhinted intermediate update, collection-reading bindings, index-aware
-rows, React-owned rows, nested host blocks, row conditionals, unrelated dirty dependencies, and
-failed runtime validation all keep complete keyed reconciliation. Runtime bounds that evaluate to
-a fractional, non-numeric, unsafe, or no-op value preserve native results and use that fallback. No
-new component or option is required. Reports expose emitted sites as
-`keyedArrayRollingWindowHints`; only modules with such a site retain the optional all-hint runtime.
+rows, React-owned rows, nested host blocks, row conditionals, more than one rolling setter in a
+mapped segment, a statement or unsupported setter between the map and rolling calls, unrelated
+dirty dependencies, changed mapped keys, and failed runtime validation all keep complete keyed
+reconciliation. Runtime bounds that evaluate to a fractional, non-numeric, unsafe, or no-op value
+preserve native results and use that fallback. No new component or option is required. Reports
+expose emitted sites as `keyedArrayRollingWindowHints`; unmapped rolling modules retain the smaller
+optional all-hint runtime.
 
 #### Keyed array known-position hints
 
@@ -2398,12 +2418,12 @@ The package and example test suites verify more than generated code:
   focused controlled-input identity and selection, update delegated event indexes, and cover native
   evaluation and coercion, unsafe evaluated bounds, queued slice/filter chains, Strict Mode
   hydration, unmount cleanup, custom methods, proxies, and conservative fallback;
-- 250 committed fixed-bound, 1,000 randomized runtime-bound, and 1,000 randomized queued keyed
-  rolling-window commits match normal React; targeted tests require work to equal only the final
-  incoming suffix, preserve retained DOM identity, update delegated indexes, preserve controlled
-  focus and selection, and cover unsafe evaluated bounds, reused or discarded intermediate keys,
-  custom slices, mixed queued chains, collection-dependent rows, Strict Mode hydration, and unmount
-  cleanup;
+- 250 committed fixed-bound, 1,000 randomized runtime-bound, 1,000 randomized queued, and 2,000
+  randomized mapped keyed rolling-window commits match normal React; targeted tests require work
+  to equal only the final incoming suffix plus changed survivor bindings, preserve retained DOM
+  identity, update delegated indexes, preserve controlled focus and selection, and cover changed
+  mapped keys, unsafe evaluated bounds, reused or discarded intermediate keys, custom slices,
+  mixed queued chains, collection-dependent rows, Strict Mode hydration, and unmount cleanup;
 - 2,000 deterministic randomized keyed-array removals match normal React; targeted tests require
   zero surviving descriptor and binding reads, preserve DOM identity, and cover queued filters,
   unhinted-chain fallback, collection-reading rows, StrictMode hydration, and unmount cleanup;

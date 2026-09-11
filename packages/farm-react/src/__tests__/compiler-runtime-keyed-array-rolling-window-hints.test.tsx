@@ -5,8 +5,13 @@ import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createCompiledComponent,
+  createCompilerKeyedArrayMappedStructuralAppend,
+  createCompilerKeyedArrayQueuedMapPipeline,
   createCompilerKeyedArrayRollingWindow,
   createCompilerKeyedArraySlice,
+  createCompilerKeyedArrayStructuralAppend,
+  createCompilerKeyedArrayStructuralAppendMapPipeline,
+  finalizeCompilerKeyedArrayMappedStructuralUpdate,
   type CompilerKeyedRowElement,
 } from "../compiler-runtime";
 
@@ -20,6 +25,7 @@ interface Item {
 }
 
 const roots: Root[] = [];
+const stressIt = process.env.FARM_REACT_STRESS === "1" ? it : it.skip;
 
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -45,6 +51,39 @@ function hintedRoll(previous: Item[], remove: number, incoming: readonly Item[])
   ]) as Item[];
 }
 
+function hintedQueuedMap(previous: Item[], mapper: (item: Item, index: number) => Item): Item[] {
+  return createCompilerKeyedArrayQueuedMapPipeline(previous, (current, applyMap) =>
+    applyMap(current, (current as Item[]).map, mapper),
+  ) as Item[];
+}
+
+function hintedStructuralRoll(
+  previous: Item[],
+  remove: number,
+  incoming: readonly Item[],
+  mapped: boolean,
+): Item[] {
+  const retained = createCompilerKeyedArraySlice(previous, previous.slice, remove) as Item[];
+  const structural = mapped
+    ? (finalizeCompilerKeyedArrayMappedStructuralUpdate(retained) as Item[])
+    : retained;
+  const value = [...retained, ...incoming];
+  return (
+    mapped
+      ? createCompilerKeyedArrayMappedStructuralAppend(structural, value)
+      : createCompilerKeyedArrayStructuralAppend(structural, value)
+  ) as Item[];
+}
+
+function hintedStructuralRollMap(
+  previous: Item[],
+  mapper: (item: Item, index: number) => Item,
+): Item[] {
+  return createCompilerKeyedArrayStructuralAppendMapPipeline(previous, (current, applyMap) =>
+    applyMap(current, (current as Item[]).map, mapper),
+  ) as Item[];
+}
+
 function rowDescriptor(item: Item, text = item.label): CompilerKeyedRowElement {
   return {
     kind: "element",
@@ -59,6 +98,12 @@ function createRollingHarness(initialItems: Item[], readsCollection = false) {
   const counters = { executions: 0, renders: 0, keys: 0, descriptors: 0, bindings: 0 };
   let roll: (remove: number, incoming: readonly Item[]) => void = () => undefined;
   let customRoll: (incoming: Item) => void = () => undefined;
+  let mappedRoll: (
+    remove: number,
+    incoming: readonly Item[],
+    before?: (item: Item, index: number) => Item,
+    after?: (item: Item, index: number) => Item,
+  ) => void = () => undefined;
   const Feed = createCompiledComponent({
     displayName: "RollingFeed",
     initialize: () => [initialItems],
@@ -79,6 +124,17 @@ function createRollingHarness(initialItems: Item[], readsCollection = false) {
             incoming,
           ]) as Item[];
         });
+      mappedRoll = (remove, incoming, before, after) => {
+        if (before) {
+          state[0].set((previous) => hintedQueuedMap(previous as Item[], before));
+        }
+        state[0].set((previous) =>
+          hintedStructuralRoll(previous as Item[], remove, incoming, before !== undefined),
+        );
+        if (after) {
+          state[0].set((previous) => hintedStructuralRollMap(previous as Item[], after));
+        }
+      };
       const text = (item: Item) =>
         readsCollection ? `${items().length}: ${item.label}` : item.label;
       return (
@@ -132,6 +188,12 @@ function createRollingHarness(initialItems: Item[], readsCollection = false) {
     Feed,
     counters,
     customRoll: (incoming: Item) => customRoll(incoming),
+    mappedRoll: (
+      remove: number,
+      incoming: readonly Item[],
+      before?: (item: Item, index: number) => Item,
+      after?: (item: Item, index: number) => Item,
+    ) => mappedRoll(remove, incoming, before, after),
     roll: (remove: number, incoming: readonly Item[]) => roll(remove, incoming),
   };
 }
@@ -171,6 +233,86 @@ describe("compiled keyed-array rolling-window hints", () => {
     expect(harness.counters.keys).toBe(2);
     expect(harness.counters.descriptors).toBe(2);
     expect(harness.counters.bindings).toBe(2);
+  });
+
+  it("patches mapped survivors and prepares only the incoming rolling suffix", async () => {
+    const initialItems = Array.from(
+      { length: 2_048 },
+      (_, index): Item => ({ id: `row-${index}`, label: `Row ${index}` }),
+    );
+    const harness = createRollingHarness(initialItems);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Feed />));
+    const survivor = container.querySelector('[data-key="row-1024"]');
+    const untouched = container.querySelector('[data-key="row-1536"]');
+    harness.counters.keys = 0;
+    harness.counters.descriptors = 0;
+    harness.counters.bindings = 0;
+
+    await act(async () => {
+      harness.mappedRoll(
+        2,
+        [
+          { id: "row-2048", label: "Row 2048" },
+          { id: "row-2049", label: "Row 2049" },
+        ],
+        (item) => (item.id === "row-1024" ? { ...item, label: "Mapped survivor" } : item),
+        (item) =>
+          item.id === "row-1024"
+            ? { ...item, label: "Mapped survivor twice" }
+            : item.id === "row-2049"
+              ? { ...item, label: "Mapped incoming" }
+              : item,
+      );
+      await flushCompilerUpdates();
+    });
+
+    expect(container.querySelector('[data-key="row-0"]')).toBeNull();
+    expect(container.querySelector('[data-key="row-1"]')).toBeNull();
+    expect(container.querySelector('[data-key="row-1024"]')).toBe(survivor);
+    expect(container.querySelector('[data-key="row-1536"]')).toBe(untouched);
+    expect(survivor?.textContent).toBe("Mapped survivor twice");
+    expect(container.querySelector("li:last-child")?.textContent).toBe("Mapped incoming");
+    expect(container.querySelectorAll("li")).toHaveLength(2_048);
+    expect(harness.counters.executions).toBe(1);
+    expect(harness.counters.renders).toBe(1);
+    expect(harness.counters.keys).toBe(3);
+    expect(harness.counters.descriptors).toBe(2);
+    expect(harness.counters.bindings).toBe(3);
+  });
+
+  it("falls back atomically when a mapped rolling survivor changes key", async () => {
+    const harness = createRollingHarness([
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+      { id: "c", label: "Gamma" },
+    ]);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Feed />));
+    const gamma = container.querySelector('[data-key="c"]');
+
+    await act(async () => {
+      harness.mappedRoll(1, [{ id: "d", label: "Delta" }], (item) =>
+        item.id === "b" ? { ...item, id: "renamed-b", label: "Renamed" } : item,
+      );
+      await flushCompilerUpdates();
+    });
+
+    expect([...container.querySelectorAll("li")].map((row) => row.textContent)).toEqual([
+      "Renamed",
+      "Gamma",
+      "Delta",
+    ]);
+    expect(container.querySelector('[data-key="a"]')).toBeNull();
+    expect(container.querySelector('[data-key="b"]')).toBeNull();
+    expect(container.querySelector('[data-key="renamed-b"]')).not.toBeNull();
+    expect(container.querySelector('[data-key="c"]')).toBe(gamma);
   });
 
   it("composes queued rolling windows and creates only the final incoming suffix", async () => {
@@ -413,7 +555,7 @@ describe("compiled keyed-array rolling-window hints", () => {
     expect(harness.counters.keys).toBe(6);
   });
 
-  it("preserves controlled focus and updates delegated indexes after queued rolls", async () => {
+  it("preserves controlled focus and delegated indexes through a mapped rolling window", async () => {
     const initialItems = ["a", "b", "c", "d"].map((id) => ({
       id,
       label: id.toUpperCase().repeat(4),
@@ -427,10 +569,25 @@ describe("compiled keyed-array rolling-window hints", () => {
         const items = () => state[0].get() as Item[];
         queue = () => {
           state[0].set((previous) =>
-            hintedRoll(previous as Item[], 1, [{ id: "e", label: "EEEE" }]),
+            hintedQueuedMap(previous as Item[], (item) =>
+              item.id === "d" ? { ...item, label: "DDDD mapped" } : item,
+            ),
           );
           state[0].set((previous) =>
-            hintedRoll(previous as Item[], 1, [{ id: "f", label: "FFFF" }]),
+            hintedStructuralRoll(
+              previous as Item[],
+              2,
+              [
+                { id: "e", label: "EEEE" },
+                { id: "f", label: "FFFF" },
+              ],
+              true,
+            ),
+          );
+          state[0].set((previous) =>
+            hintedStructuralRollMap(previous as Item[], (item) =>
+              item.id === "d" ? { ...item, label: "DDDD mapped twice" } : item,
+            ),
           );
         };
         return (
@@ -706,6 +863,95 @@ describe("compiled keyed-array rolling-window hints", () => {
     expect(harness.counters.bindings).toBe(incomingCount);
   }, 30_000);
 
+  stressIt(
+    "matches React through 2,000 randomized mapped rolling-window updates",
+    async () => {
+      const initialItems = Array.from(
+        { length: 48 },
+        (_, index): Item => ({ id: `mapped-row-${index}`, label: `Mapped row ${index}` }),
+      );
+      const harness = createRollingHarness(initialItems);
+      let updateReact: (
+        remove: number,
+        incoming: readonly Item[],
+        editedId: string,
+        beforeLabel: string,
+        afterLabel: string,
+      ) => void = () => undefined;
+      let expected = initialItems;
+      let seed = 0x5a17ed;
+      let nextId = initialItems.length;
+      const random = () => {
+        seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0;
+        return seed;
+      };
+      function NormalFeed() {
+        const [items, setItems] = useState(initialItems);
+        updateReact = (remove, incoming, editedId, beforeLabel, afterLabel) => {
+          setItems((previous) =>
+            previous.map((item) => (item.id === editedId ? { ...item, label: beforeLabel } : item)),
+          );
+          setItems((previous) => [...previous.slice(remove), ...incoming]);
+          setItems((previous) =>
+            previous.map((item) => (item.id === editedId ? { ...item, label: afterLabel } : item)),
+          );
+        };
+        return (
+          <ol>
+            {items.map((item) => (
+              <li key={item.id}>{item.label}</li>
+            ))}
+          </ol>
+        );
+      }
+      const compiledContainer = document.createElement("div");
+      const reactContainer = document.createElement("div");
+      document.body.append(compiledContainer, reactContainer);
+      const compiledRoot = createRoot(compiledContainer);
+      const reactRoot = createRoot(reactContainer);
+      roots.push(compiledRoot, reactRoot);
+      await act(async () => {
+        compiledRoot.render(<harness.Feed />);
+        reactRoot.render(<NormalFeed />);
+      });
+
+      for (let update = 0; update < 2_000; update += 1) {
+        const remove = 1 + (random() % 4);
+        const incoming = Array.from({ length: remove }, (): Item => {
+          const id = nextId++;
+          return { id: `mapped-row-${id}`, label: `Mapped row ${id}` };
+        });
+        const editedIndex = remove + (random() % (expected.length - remove));
+        const editedId = expected[editedIndex].id;
+        const beforeLabel = `Before ${update}`;
+        const afterLabel = `After ${update}`;
+        const before = (item: Item) =>
+          item.id === editedId ? { ...item, label: beforeLabel } : item;
+        const after = (item: Item) =>
+          item.id === editedId ? { ...item, label: afterLabel } : item;
+
+        expected = expected.map(before);
+        expected = [...expected.slice(remove), ...incoming].map(after);
+        await act(async () => {
+          harness.mappedRoll(remove, incoming, before, after);
+          updateReact(remove, incoming, editedId, beforeLabel, afterLabel);
+          await flushCompilerUpdates();
+        });
+        if (update % 50 === 0) {
+          expect(compiledContainer.textContent).toBe(reactContainer.textContent);
+        }
+      }
+
+      expect(compiledContainer.textContent).toBe(reactContainer.textContent);
+      expect([...compiledContainer.querySelectorAll("li")].map((row) => row.textContent)).toEqual(
+        expected.map((item) => item.label),
+      );
+      expect(harness.counters.executions).toBe(1);
+      expect(harness.counters.renders).toBe(1);
+    },
+    30_000,
+  );
+
   it("hydrates in StrictMode and drops a queued rolling update after unmount", async () => {
     const harness = createRollingHarness([
       { id: "a", label: "Alpha" },
@@ -743,6 +989,56 @@ describe("compiled keyed-array rolling-window hints", () => {
     act(() => {
       harness.roll(1, [{ id: "e", label: "Epsilon" }]);
       harness.roll(1, [{ id: "f", label: "Phi" }]);
+      root.unmount();
+    });
+    await flushCompilerUpdates();
+    expect(container.innerHTML).toBe("");
+  });
+
+  it("hydrates mapped rolling windows in StrictMode and ignores an abandoned flush", async () => {
+    const harness = createRollingHarness([
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+      { id: "c", label: "Gamma" },
+    ]);
+    const container = document.createElement("div");
+    container.innerHTML = renderToString(
+      <StrictMode>
+        <harness.Feed />
+      </StrictMode>,
+    );
+    document.body.append(container);
+    const recoverable: unknown[] = [];
+    let root!: Root;
+    await act(async () => {
+      root = hydrateRoot(
+        container,
+        <StrictMode>
+          <harness.Feed />
+        </StrictMode>,
+        { onRecoverableError: (error) => recoverable.push(error) },
+      );
+    });
+    roots.push(root);
+
+    await act(async () => {
+      harness.mappedRoll(
+        1,
+        [{ id: "d", label: "Delta" }],
+        (item) => (item.id === "c" ? { ...item, label: "Gamma mapped" } : item),
+        (item) => (item.id === "d" ? { ...item, label: "Delta mapped" } : item),
+      );
+      await flushCompilerUpdates();
+    });
+    expect(container.textContent).toBe("BetaGamma mappedDelta mapped");
+    expect(recoverable).toEqual([]);
+
+    roots.pop();
+    act(() => {
+      harness.mappedRoll(1, [{ id: "e", label: "Epsilon" }], (item) => ({
+        ...item,
+        label: `${item.label}!`,
+      }));
       root.unmount();
     });
     await flushCompilerUpdates();

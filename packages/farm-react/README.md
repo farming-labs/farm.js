@@ -395,11 +395,30 @@ final incoming suffix. This form supports one
 safe-integer literal or compiler-safe runtime slice bound and compiler-owned, index-independent
 host rows. Identifiers, property reads, side-effect-free arithmetic and conditionals, and safe
 `Math` calls are supported while preserving native lookup, evaluation, results, and errors.
+
+Immediately adjacent safe same-key maps may run before, after, or on both sides of one rolling
+setter:
+
+```tsx
+setItems((current) =>
+  current.map((item) => (item.id === editedId ? { ...item, label: nextLabel } : item)),
+);
+setItems((current) => [...current.slice(trimCount), ...nextItems]);
+setItems((current) =>
+  current.map((item) => (item.id === selectedId ? { ...item, selected: true } : item)),
+);
+```
+
+The compiler carries mapped survivor identity through the retained tail, creates incoming rows
+from their final mapped values, and patches only changed survivors. It reuses the optional
+structural append/map runtime rather than adding another browser helper.
+
 Effectful expressions, reused keys, block-bodied updaters, custom slice behavior,
 collection-reading or index-aware rows, nested or React-owned rows, mixed or unhinted queued chains,
-unsafe or no-op evaluated bounds, and failed checks use complete keyed reconciliation. The
-optional all-hint runtime is selected only for modules that emit this optimization. Reports expose
-the site count as `keyedArrayRollingWindowHints`.
+more than one rolling setter in a mapped segment, non-adjacent maps, changed mapped keys, unsafe or
+no-op evaluated bounds, and failed checks use complete keyed reconciliation. Unmapped rolling
+modules retain the smaller optional all-hint runtime. Reports expose the site count as
+`keyedArrayRollingWindowHints`.
 
 Native known-position updates can avoid a complete keyed scan too:
 

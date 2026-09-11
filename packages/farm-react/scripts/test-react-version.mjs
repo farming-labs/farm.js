@@ -50,6 +50,7 @@ const testSource = String.raw`
     createCompilerKeyedArrayMapReorder,
     createCompilerKeyedArrayPositionUpdate,
     createCompilerKeyedArrayPrepend,
+    createCompilerKeyedArrayQueuedMapPipeline,
     createCompilerKeyedArrayReorder,
     createCompilerKeyedArraySort,
     createCompilerKeyedArraySlice,
@@ -58,6 +59,7 @@ const testSource = String.raw`
     createCompilerKeyedArrayStructuralPrepend,
     createCompilerKeyedArrayWindowReplace,
     createCompilerKeyedMapUpdate,
+    finalizeCompilerKeyedArrayMappedStructuralUpdate,
     keyedRowsStructuralAppendMapHintedRuntimeFeature,
   } = await import(
     "@farm.js/react/compiler-runtime"
@@ -2276,6 +2278,7 @@ const testSource = String.raw`
 
   let structuralAppendRows = () => undefined;
   let mappedStructuralAppendRows = () => undefined;
+  let mappedRollingRows = () => undefined;
   let structuralAppendExecutions = 0;
   const StructuralAppendRows = createCompiledComponentWithFeatures({
     displayName: "CompatibilityStructuralAppendRows",
@@ -2331,6 +2334,32 @@ const testSource = String.raw`
             ...previous,
             { id: "e", label: "Epsilon" },
           ]),
+        );
+      };
+      mappedRollingRows = () => {
+        state[0].set((previous) =>
+          createCompilerKeyedArrayQueuedMapPipeline(previous, (current, applyMap) =>
+            applyMap(current, current.map, (item) =>
+              item.id === "d" ? { ...item, label: "Delta mapped first" } : item,
+            ),
+          ),
+        );
+        state[0].set((previous) => {
+          const retained = createCompilerKeyedArraySlice(previous, previous.slice, 1);
+          const structural = finalizeCompilerKeyedArrayMappedStructuralUpdate(retained);
+          return createCompilerKeyedArrayMappedStructuralAppend(structural, [
+            ...retained,
+            { id: "f", label: "Phi" },
+          ]);
+        });
+        state[0].set((previous) =>
+          createCompilerKeyedArrayStructuralAppendMapPipeline(
+            previous,
+            (current, applyMap) =>
+              applyMap(current, current.map, (item) =>
+                item.id === "d" ? { ...item, label: "Delta mapped twice" } : item,
+              ),
+          ),
         );
       };
       return React.createElement(
@@ -2392,6 +2421,17 @@ const testSource = String.raw`
   );
   assert.equal(structuralAppendContainer.querySelector("[data-key='c']"), structuralGamma);
   assert.equal(structuralBeta.isConnected, false);
+  assert.equal(structuralAppendExecutions, 1);
+  const structuralDelta = structuralAppendContainer.querySelector("[data-key='d']");
+  mappedRollingRows();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(
+    [...structuralAppendContainer.querySelectorAll("li")].map((row) => row.textContent),
+    ["Delta mapped twice", "Epsilon", "Phi"],
+  );
+  assert.equal(structuralAppendContainer.querySelector("[data-key='d']"), structuralDelta);
+  assert.equal(structuralGamma.isConnected, false);
   assert.equal(structuralAppendExecutions, 1);
   flushSync(() => structuralAppendRoot.unmount());
 

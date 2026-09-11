@@ -257,6 +257,62 @@ export function StandardTableBenchmark() {
           Roll runtime-count window (snapshot control)
         </button>
         <button
+          data-action="table-roll-window-map"
+          type="button"
+          onClick={() => {
+            const nextSeed = seed + 1;
+            const additions = buildRows(1_000, nextSeed);
+            const trimCount = 1_000;
+            setSeed(nextSeed);
+            setRows((current) =>
+              current.map((row) =>
+                row.id % 1_000 === 1
+                  ? { ...row, label: `${row.label} reviewed` }
+                  : row,
+              ),
+            );
+            setRows((current) => [...current.slice(trimCount), ...additions]);
+            setRows((current) =>
+              current.map((row) =>
+                row.id % 1_000 === 1 ? { ...row, amount: row.amount + 1 } : row,
+              ),
+            );
+            setOperation("map, roll, and map runtime-count window");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Map + roll window + map
+        </button>
+        <button
+          data-action="table-roll-window-map-snapshot"
+          type="button"
+          onClick={() => {
+            const nextSeed = seed + 1;
+            const additions = buildRows(1_000, nextSeed);
+            const trimCount = 1_000;
+            setSeed(nextSeed);
+            setRows((current) =>
+              current.map((row) =>
+                row.id % 1_000 === 1
+                  ? { ...row, label: `${row.label} reviewed` }
+                  : row,
+              ),
+            );
+            setRows((current) => {
+              return [...current.slice(trimCount), ...additions];
+            });
+            setRows((current) =>
+              current.map((row) =>
+                row.id % 1_000 === 1 ? { ...row, amount: row.amount + 1 } : row,
+              ),
+            );
+            setOperation("map, roll, and map window (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Map + roll window + map (snapshot control)
+        </button>
+        <button
           data-action="table-roll-window-queued"
           type="button"
           onClick={() => {

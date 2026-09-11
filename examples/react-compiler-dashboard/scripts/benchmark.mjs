@@ -591,6 +591,44 @@ async function measureTrial(browser, trial, compilerMode, port) {
           },
         );
 
+        const tableMappedRollingWindow = await measureTable(
+          async () => ensure10000(),
+          async () => {
+            const rows = table.querySelectorAll("tbody tr");
+            const firstSurvivor = rows[1_000];
+            const previousText = firstSurvivor?.textContent;
+            const previousLast = rows[9_999]?.getAttribute("data-row-id");
+            await runTableAction(
+              () => tableButton("table-roll-window-map").click(),
+              () =>
+                rowCount() === 10_000 &&
+                table.querySelector("tbody tr") === firstSurvivor &&
+                firstSurvivor?.textContent !== previousText &&
+                table.querySelector("tbody tr:last-child")?.getAttribute("data-row-id") !==
+                  previousLast,
+            );
+          },
+        );
+
+        const tableMappedRollingWindowSnapshot = await measureTable(
+          async () => ensure10000(),
+          async () => {
+            const rows = table.querySelectorAll("tbody tr");
+            const firstSurvivor = rows[1_000];
+            const previousText = firstSurvivor?.textContent;
+            const previousLast = rows[9_999]?.getAttribute("data-row-id");
+            await runTableAction(
+              () => tableButton("table-roll-window-map-snapshot").click(),
+              () =>
+                rowCount() === 10_000 &&
+                table.querySelector("tbody tr") === firstSurvivor &&
+                firstSurvivor?.textContent !== previousText &&
+                table.querySelector("tbody tr:last-child")?.getAttribute("data-row-id") !==
+                  previousLast,
+            );
+          },
+        );
+
         const tableRollingWindowQueued = await measureTable(
           async () => ensure10000(),
           async () => {
@@ -2275,6 +2313,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
             remove: tableRemove,
             removeSnapshot: tableRemoveSnapshot,
             replace: tableReplace,
+            mappedRollingWindow: tableMappedRollingWindow,
+            mappedRollingWindowSnapshot: tableMappedRollingWindowSnapshot,
             rollingWindow: tableRollingWindow,
             rollingWindowQueued: tableRollingWindowQueued,
             rollingWindowQueuedSnapshot: tableRollingWindowQueuedSnapshot,
@@ -2461,6 +2501,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
         remove: timingSummary(result.table.remove),
         removeSnapshot: timingSummary(result.table.removeSnapshot),
         replace: timingSummary(result.table.replace),
+        mappedRollingWindow: timingSummary(result.table.mappedRollingWindow),
+        mappedRollingWindowSnapshot: timingSummary(result.table.mappedRollingWindowSnapshot),
         rollingWindow: timingSummary(result.table.rollingWindow),
         rollingWindowQueued: timingSummary(result.table.rollingWindowQueued),
         rollingWindowQueuedSnapshot: timingSummary(result.table.rollingWindowQueuedSnapshot),
@@ -2632,6 +2674,8 @@ const tableMetrics = [
   "swap",
   "remove",
   "removeSnapshot",
+  "mappedRollingWindow",
+  "mappedRollingWindowSnapshot",
   "rollingWindow",
   "rollingWindowQueued",
   "rollingWindowQueuedSnapshot",
@@ -2881,6 +2925,29 @@ const keyedRollingWindowRegressions = keyedRollingWindowResults.filter(
     speedup < keyedRollingWindowMinimumSpeedup ||
     !Number.isFinite(snapshotSpeedup) ||
     snapshotSpeedup < keyedRollingWindowMinimumSnapshotSpeedup,
+);
+// A mapped rolling window should retain the same committed-row proof across safe maps on either
+// side of the boundary change. Protect both the React-relative win and the improvement over an
+// equivalent compiled control whose block-bodied rolling setter must reconcile the full list.
+const keyedMappedRollingWindowMinimumSpeedup = 2;
+const keyedMappedRollingWindowMinimumSnapshotSpeedup = 1.25;
+const keyedMappedRollingWindowResults = ["static", "hybrid"].map((mode) => {
+  const rollingMedianMs = comparisons.table.mappedRollingWindow[mode].medianMs;
+  const snapshotMedianMs = comparisons.table.mappedRollingWindowSnapshot[mode].medianMs;
+  return {
+    mode,
+    rollingMedianMs,
+    snapshotMedianMs,
+    snapshotSpeedup: snapshotMedianMs / rollingMedianMs,
+    speedup: comparisons.table.mappedRollingWindow[`${mode}VsBaseline`].speedup,
+  };
+});
+const keyedMappedRollingWindowRegressions = keyedMappedRollingWindowResults.filter(
+  ({ snapshotSpeedup, speedup }) =>
+    !Number.isFinite(speedup) ||
+    speedup < keyedMappedRollingWindowMinimumSpeedup ||
+    !Number.isFinite(snapshotSpeedup) ||
+    snapshotSpeedup < keyedMappedRollingWindowMinimumSnapshotSpeedup,
 );
 // Two queued rolling setters should collapse to the final retained committed suffix and incoming
 // rows. Keep the queued 10,000-row workload ahead of both React and an equivalent block-bodied
@@ -3797,6 +3864,7 @@ const passed =
   keyedPrependRegressions.length === 0 &&
   keyedSliceRegressions.length === 0 &&
   keyedRollingWindowRegressions.length === 0 &&
+  keyedMappedRollingWindowRegressions.length === 0 &&
   keyedQueuedRollingWindowRegressions.length === 0 &&
   keyedBatchInsertRegressions.length === 0 &&
   keyedWindowReplaceRegressions.length === 0 &&
@@ -3884,6 +3952,13 @@ const report = {
     regressions: keyedRollingWindowRegressions,
     results: keyedRollingWindowResults,
     status: keyedRollingWindowRegressions.length === 0 ? "PASS" : "FAIL",
+  },
+  keyedMappedRollingWindowHintGate: {
+    minimumSnapshotSpeedup: keyedMappedRollingWindowMinimumSnapshotSpeedup,
+    minimumSpeedup: keyedMappedRollingWindowMinimumSpeedup,
+    regressions: keyedMappedRollingWindowRegressions,
+    results: keyedMappedRollingWindowResults,
+    status: keyedMappedRollingWindowRegressions.length === 0 ? "PASS" : "FAIL",
   },
   keyedQueuedRollingWindowHintGate: {
     minimumSnapshotSpeedup: keyedQueuedRollingWindowMinimumSnapshotSpeedup,
