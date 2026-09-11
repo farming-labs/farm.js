@@ -152,11 +152,13 @@ export interface GenerateServiceWorkerOptions {
 export function generateServiceWorker(options: GenerateServiceWorkerOptions): string {
   const routeFiles = Object.fromEntries(
     Object.entries(options.staticRoutes).map(([route, file]) => [
-      route,
+      encodePathname(route),
       toPublicUrl(file, options.basePath),
     ]),
   );
-  const offlineFile = options.offlineRoute ? (routeFiles[options.offlineRoute] ?? null) : null;
+  const offlineFile = options.offlineRoute
+    ? (routeFiles[encodePathname(options.offlineRoute)] ?? null)
+    : null;
   const cacheScope = createHash("sha256")
     .update(normalizeBasePath(options.basePath))
     .digest("hex")
@@ -391,4 +393,11 @@ function toPublicUrl(file: string, basePath: string): string {
     .map((segment) => encodeURIComponent(segment))
     .join("/")}`;
   return withBasePath(url, basePath);
+}
+
+function encodePathname(pathname: string): string {
+  return pathname
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
 }
