@@ -166,4 +166,19 @@ describe("React compiler coverage report", () => {
 
     await expect(readFile(externalReport, "utf8")).resolves.toBe("keep me");
   });
+
+  it("rejects a dangling symlink in the report path", async () => {
+    const temporaryRoot = await mkdtemp(join(tmpdir(), "farm-react-report-"));
+    temporaryDirectories.push(temporaryRoot);
+    const projectRoot = join(temporaryRoot, "project");
+    const externalDirectory = join(temporaryRoot, "external");
+    await mkdir(projectRoot);
+    await mkdir(externalDirectory);
+    await symlink(externalDirectory, join(projectRoot, "reports"), "junction");
+    await rm(externalDirectory, { recursive: true });
+
+    await expect(
+      writeReactCompilerReport(projectRoot, "reports/compiler.json", observations(projectRoot)),
+    ).rejects.toThrow("including through symlinks");
+  });
 });

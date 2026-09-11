@@ -1,4 +1,4 @@
-import { mkdir, realpath, writeFile } from "node:fs/promises";
+import { lstat, mkdir, realpath, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import type { CompileReactModuleResult, CompilerDiagnostic } from "./compiler";
 
@@ -172,6 +172,18 @@ async function assertReportPathInsideProject(
       break;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      let existingEntry = false;
+      try {
+        await lstat(existingAncestor);
+        existingEntry = true;
+      } catch (statError) {
+        if ((statError as NodeJS.ErrnoException).code !== "ENOENT") throw statError;
+      }
+      if (existingEntry) {
+        throw new Error(
+          "The React compiler report file must stay inside the project root, including through symlinks.",
+        );
+      }
       const parent = dirname(existingAncestor);
       if (parent === existingAncestor) throw error;
       existingAncestor = parent;
