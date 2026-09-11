@@ -71,6 +71,18 @@ describe("programmatic routes", () => {
     );
   });
 
+  it("rejects route declarations that browsers reinterpret", () => {
+    for (const routePath of [
+      "/docs/../admin",
+      "/docs/%2e%2e/admin",
+      "/docs/%2Fadmin",
+      "/docs/%5cadmin",
+      "/docs/%00admin",
+    ]) {
+      expect(() => parseProgrammaticRoutePath(routePath)).toThrow(/browser-unstable/);
+    }
+  });
+
   it("keeps programmatic route groups out of URL segments", () => {
     expect(parseProgrammaticRoutePath("/(marketing)/pricing")).toEqual({
       filePath: "(marketing)/pricing/page.tsx",

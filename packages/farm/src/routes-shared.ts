@@ -1,5 +1,9 @@
 import type { ParsedRoute } from "./types";
-import { assertTerminalCatchAll, assertUniqueRouteParameters } from "./routing/specificity";
+import {
+  assertBrowserStableRoutePath,
+  assertTerminalCatchAll,
+  assertUniqueRouteParameters,
+} from "./routing/specificity";
 
 export const PROGRAMMATIC_ROUTE_FILE_NAMES = [
   "farm.route.ts",
@@ -124,6 +128,7 @@ export function normalizeProgrammaticRoutePath(routePath: string): string {
   }
   const withSlash = routePath.startsWith("/") ? routePath : `/${routePath}`;
   const withoutTrailing = withSlash.length > 1 ? withSlash.replace(/\/+$/, "") : withSlash;
+  assertBrowserStableRoutePath(withoutTrailing);
   return withoutTrailing || "/";
 }
 
