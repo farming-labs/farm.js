@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -48,6 +48,41 @@ describe("analyzer", () => {
         {} as never,
       ),
     ).rejects.toThrow("size limit exceeded");
+  });
+
+  it("does not write reports through a directory symlink outside the project", async () => {
+    const root = await createMinimalOutput();
+    const outside = await mkdtemp(path.join(os.tmpdir(), "farm-analyzer-outside-"));
+    await symlink(
+      outside,
+      path.join(root, "reports"),
+      process.platform === "win32" ? "junction" : "dir",
+    );
+    const plugin = analyzer({ output: "reports/build.html", json: false });
+
+    try {
+      await expect(
+        plugin.build?.after?.(
+          {
+            root,
+            preset: "node-server",
+            universal: true,
+            distDir: ".farm",
+            outputDir: path.join(root, ".farm/.output"),
+            success: true,
+          },
+          {} as never,
+        ),
+      ).rejects.toThrow("after resolving symbolic links");
+      await expect(readFile(path.join(outside, "build.html"), "utf8")).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    } finally {
+      await Promise.all([
+        rm(root, { recursive: true, force: true }),
+        rm(outside, { recursive: true, force: true }),
+      ]);
+    }
   });
 });
 
