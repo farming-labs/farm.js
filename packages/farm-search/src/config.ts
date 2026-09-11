@@ -104,11 +104,31 @@ function normalizeOutput(value: string): string {
     value.includes("\\") ||
     value.includes("?") ||
     value.includes("#") ||
-    segments.some((segment) => segment === "." || segment === ".." || !segment)
+    segments.some((segment) => !isStableOutputSegment(segment))
   ) {
     throw new TypeError("Search output must stay inside the public output directory");
   }
   return normalized;
+}
+
+function isStableOutputSegment(segment: string): boolean {
+  if (!segment) return false;
+  let decoded = segment;
+  try {
+    decoded = decodeURIComponent(segment);
+  } catch {
+    // Malformed escapes remain literal in browser pathnames.
+  }
+  return (
+    decoded !== "." &&
+    decoded !== ".." &&
+    !decoded.includes("/") &&
+    !decoded.includes("\\") &&
+    !Array.from(decoded).some((character) => {
+      const code = character.charCodeAt(0);
+      return code <= 31 || (code >= 127 && code <= 159);
+    })
+  );
 }
 
 function normalizeLanguage(value: string | undefined): string | undefined {

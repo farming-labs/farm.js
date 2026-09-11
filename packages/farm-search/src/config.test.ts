@@ -45,6 +45,14 @@ describe("resolveSearchOptions", () => {
     expect(() => resolveSearchOptions({ output: "search\\index" })).toThrow(
       "inside the public output directory",
     );
+    for (const output of [
+      "%2e%2e/search",
+      "search/%2Findex",
+      "search/%5cindex",
+      "search/%00index",
+    ]) {
+      expect(() => resolveSearchOptions({ output })).toThrow("inside the public output directory");
+    }
     expect(() => resolveSearchOptions({ language: "english" })).toThrow("ISO 639-1");
     expect(() => resolveSearchOptions({ excerptLength: 0 })).toThrow("excerptLength");
     expect(() => resolveSearchOptions({ verbose: "yes" } as never)).toThrow(
