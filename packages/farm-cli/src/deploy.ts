@@ -632,6 +632,9 @@ function resolveConfiguredCloudflareAgentDeployPlan(
   const projectRoot = path.resolve(root);
   const sourceConfigPath = path.resolve(projectRoot, configuredPath);
   assertPathInsideProject(projectRoot, sourceConfigPath, "Cloudflare Agents source config");
+  if (existsSync(sourceConfigPath)) {
+    assertRealPathInsideProject(projectRoot, sourceConfigPath, "Cloudflare Agents source config");
+  }
   const configPath = path.join(path.dirname(sourceConfigPath), ".farm-cf-agent.wrangler.jsonc");
   const environment = integration.instance.environment;
 

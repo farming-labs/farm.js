@@ -173,6 +173,45 @@ test("plans the generated Cloudflare Agent config before the first build", async
   }
 });
 
+test("rejects a configured Cloudflare Agent source config through an outside symlink", async () => {
+  let temporaryRoot;
+
+  try {
+    temporaryRoot = await mkdtemp(path.join(tmpdir(), "farm-cli-cf-agent-source-symlink-"));
+    const root = path.join(temporaryRoot, "project");
+    const externalDirectory = path.join(temporaryRoot, "external");
+    await mkdir(root);
+    await mkdir(externalDirectory);
+    await writeFile(path.join(externalDirectory, "wrangler.jsonc"), "{}\n");
+    await symlink(externalDirectory, path.join(root, "cloudflare"), "junction");
+    await writeFile(
+      path.join(root, "farm.config.mjs"),
+      [
+        "export default {",
+        "  deploy: { target: 'cloudflare', preset: 'cloudflare-module' },",
+        "  integrations: {",
+        "    agent: {",
+        "      kind: 'farm-integration',",
+        "      category: 'agent',",
+        "      type: 'cloudflare',",
+        "      serverRuntime: false,",
+        "      instance: { config: 'cloudflare/wrangler.jsonc' },",
+        "    },",
+        "  },",
+        "};",
+        "",
+      ].join("\n"),
+    );
+
+    await assert.rejects(
+      () => createFarmDeployPlan({ root }),
+      /Cloudflare Agents source config must stay inside the Farm project root/,
+    );
+  } finally {
+    if (temporaryRoot) await rm(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
 test("reports Netlify deploys as production operations", async () => {
   let root;
 
