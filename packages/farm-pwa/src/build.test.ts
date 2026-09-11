@@ -136,6 +136,33 @@ describe("writePwaBuildArtifacts", () => {
     ]);
   });
 
+  it("matches static routes containing spaces and Unicode as browser pathnames", async () => {
+    const { root, publicDir } = await createOutput("node-server");
+    await mkdir(path.join(publicDir, "café"), { recursive: true });
+    await mkdir(path.join(publicDir, "release notes"), { recursive: true });
+    await writeFile(path.join(publicDir, "café", "index.html"), "<h1>Café</h1>");
+    await writeFile(path.join(publicDir, "release notes", "index.html"), "<h1>Release notes</h1>");
+
+    const result = await writePwaBuildArtifacts({
+      outputDir: root,
+      preset: "node-server",
+      basePath: "/app",
+      options: resolvePwaOptions({ offline: "/café", cache: "auto" }),
+    });
+
+    expect(result.staticRoutes).toMatchObject({
+      "/app/café": "café/index.html",
+      "/app/release notes": "release notes/index.html",
+    });
+    expect(result.precacheUrls).toContain("/app/caf%C3%A9/index.html");
+    expect(result.precacheUrls).toContain("/app/release%20notes/index.html");
+
+    const worker = await readFile(result.workerPath, "utf8");
+    expect(worker).toContain('"/app/caf%C3%A9":"/app/caf%C3%A9/index.html"');
+    expect(worker).toContain('"/app/release%20notes":"/app/release%20notes/index.html"');
+    expect(worker).toContain('const OFFLINE_FILE = "/app/caf%C3%A9/index.html"');
+  });
+
   it("fails the build when the offline fallback is not an emitted static page", async () => {
     const { root } = await createOutput("node-server");
     await expect(
