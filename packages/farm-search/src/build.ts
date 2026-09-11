@@ -192,7 +192,12 @@ async function collectHtmlFiles(root: string, ignoredDirectory: string): Promise
 function resolveOutputPath(publicDir: string, bundlePath: string): string {
   const outputPath = path.resolve(publicDir, `.${bundlePath}`);
   const relative = path.relative(publicDir, outputPath);
-  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+  if (
+    !relative ||
+    relative === ".." ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative)
+  ) {
     throw new Error("[farm:search] Search output must stay inside the public output directory");
   }
   return outputPath;
@@ -215,7 +220,7 @@ async function assertOutputPathInside(publicDir: string, outputPath: string): Pr
   }
 
   const relative = path.relative(realPublicDir, existingAncestor);
-  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
     throw new Error(
       "[farm:search] Search output must stay inside the public output directory, including through symlinks",
     );
