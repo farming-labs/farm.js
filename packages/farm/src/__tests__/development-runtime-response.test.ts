@@ -1,6 +1,7 @@
 // @vitest-environment node
 
 import fs from "node:fs/promises";
+import { createServer as createNodeServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,6 +28,17 @@ async function writeModule(root: string, relativePath: string, source: string): 
   await fs.writeFile(filePath, source);
 }
 
+async function getAvailablePort(): Promise<number> {
+  const server = createNodeServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Missing test server address");
+  await new Promise<void>((resolve, reject) =>
+    server.close((error) => (error ? reject(error) : resolve())),
+  );
+  return address.port;
+}
+
 describe("development runtime response bridge", () => {
   it("passes streamed binary short-circuit responses through runtime.after without corruption", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-development-runtime-response-"));
@@ -47,6 +59,11 @@ describe("development runtime response bridge", () => {
     await fs.writeFile(
       path.join(root, "farm.config.ts"),
       `export default {
+  redirects: async () => [{ source: "/redirect", destination: "/" }],
+  headers: async () => [{
+    source: "/redirect",
+    headers: [{ key: "x-late-config-header", value: "must-not-run" }],
+  }],
   plugins: [{
     name: "binary-runtime-response",
     beforeRequest(req, res) {
@@ -82,7 +99,7 @@ export default function Page() { return <main>home</main>; }`,
 
     const server = await createServer({ root, images: { provider: "none" } });
     servers.add(server);
-    await server.listen(0);
+    await server.listen(await getAvailablePort());
     const address = server.httpServer?.address();
     if (!address || typeof address === "string") throw new Error("Missing dev server address");
 
@@ -92,6 +109,14 @@ export default function Page() { return <main>home</main>; }`,
     expect(response.status).toBe(200);
     expect(response.headers.get("x-runtime-body")).toBe("00ff018002");
     expect([...bytes]).toEqual([0, 255, 1, 128, 2]);
+
+    const redirectResponse = await fetch(`http://localhost:${address.port}/redirect`, {
+      redirect: "manual",
+    });
+    expect(redirectResponse.status).toBe(307);
+    expect(redirectResponse.headers.get("location")).toBe("/");
+    expect(redirectResponse.headers.get("x-late-config-header")).toBeNull();
+    expect(redirectResponse.headers.get("x-runtime-body")).toBe("");
 
     const pageResponse = await fetch(`http://localhost:${address.port}/`);
     expect(pageResponse.headers.get("x-runtime-body")).toMatch(/^[a-f0-9]+$/);

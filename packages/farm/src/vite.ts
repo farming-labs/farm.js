@@ -3,7 +3,12 @@ import type { FarmConfig, FarmRequest } from "./types";
 import { FarmApp } from "./app";
 import { logger, toPosixPath, toViteModuleId } from "./utils";
 import { defaultGlobalCSS } from "./default-styles";
-import type { FarmPlugin, FarmPluginRuntimeSession, PluginManager } from "./plugin";
+import {
+  FARM_NODE_RESPONSE_END_PENDING,
+  type FarmPlugin,
+  type FarmPluginRuntimeSession,
+  type PluginManager,
+} from "./plugin";
 import { generateFarmClientPluginEntryCode } from "./client-plugin-build";
 import { APIRouteManager } from "./api/route-manager";
 import { DEFAULT_FARM_API_BASE_PATH } from "./api/config";
@@ -428,6 +433,29 @@ function toNodeResponseBuffer(chunk: unknown, encoding?: unknown): Buffer | unde
   );
 }
 
+function applyNodeWriteHeadHeaders(res: any, headers: unknown): void {
+  if (Array.isArray(headers)) {
+    const grouped = new Map<string, { name: string; values: Array<string | number> }>();
+    for (let index = 0; index + 1 < headers.length; index += 2) {
+      const name = String(headers[index]);
+      const key = name.toLowerCase();
+      const entry = grouped.get(key) ?? { name, values: [] };
+      const value = headers[index + 1];
+      entry.values.push(...(Array.isArray(value) ? value : [value]).map(String));
+      grouped.set(key, entry);
+    }
+    for (const { name, values } of grouped.values()) {
+      res.setHeader(name, values.length === 1 ? values[0] : values);
+    }
+    return;
+  }
+
+  if (!headers || typeof headers !== "object") return;
+  for (const [name, value] of Object.entries(headers)) {
+    if (value !== undefined) res.setHeader(name, value);
+  }
+}
+
 function interceptFarmDevPageResponse(options: {
   req: any;
   res: any;
@@ -459,6 +487,8 @@ function interceptFarmDevPageResponse(options: {
   } = options;
   const originalWrite = res.write.bind(res);
   const originalEnd = res.end.bind(res);
+  const originalWriteHead = res.writeHead.bind(res);
+  const originalFlushHeaders = res.flushHeaders?.bind(res);
   let afterResponseCalled = false;
   let interceptedEnd = false;
   const htmlChunks: Buffer[] = [];
@@ -467,6 +497,31 @@ function interceptFarmDevPageResponse(options: {
   const bufferPluginResponse = Boolean(
     hasHTMLTransformHook || (runtimeSession && hasRuntimeAfterHook),
   );
+  const shouldBufferCurrentResponse = () => {
+    const contentTypeHeader = res.getHeader("content-type") || res.getHeader("Content-Type");
+    const contentType = typeof contentTypeHeader === "string" ? contentTypeHeader : "";
+    return contentType.includes("text/html")
+      ? bufferPluginResponse
+      : Boolean(runtimeSession && hasRuntimeAfterHook);
+  };
+
+  res.writeHead = ((statusCode: number, ...args: unknown[]) => {
+    const statusMessage = typeof args[0] === "string" ? args[0] : undefined;
+    const headers = statusMessage === undefined ? args[0] : args[1];
+    res.statusCode = statusCode;
+    if (statusMessage !== undefined) res.statusMessage = statusMessage;
+    applyNodeWriteHeadHeaders(res, headers);
+
+    if (shouldBufferCurrentResponse()) return res;
+    return statusMessage === undefined
+      ? originalWriteHead(statusCode)
+      : originalWriteHead(statusCode, statusMessage);
+  }) as any;
+
+  if (originalFlushHeaders) {
+    res.flushHeaders = (() =>
+      shouldBufferCurrentResponse() ? undefined : originalFlushHeaders()) as any;
+  }
 
   res.write = ((chunk: unknown, ...args: unknown[]) => {
     const contentTypeHeader = res.getHeader("content-type") || res.getHeader("Content-Type");
@@ -497,7 +552,8 @@ function interceptFarmDevPageResponse(options: {
 
   res.end = ((...args: unknown[]) => {
     interceptedEnd = true;
-    if (afterResponseCalled) return originalEnd(...args);
+    res[FARM_NODE_RESPONSE_END_PENDING] = true;
+    if (afterResponseCalled) return res;
 
     afterResponseCalled = true;
     options.logResponse(method, urlPath, res.statusCode || 200, Date.now() - startTime, "PAGE");
@@ -571,7 +627,14 @@ function interceptFarmDevPageResponse(options: {
       .then(() =>
         hasAfterResponseHook ? pm.runHookParallel("afterResponse", req, res) : undefined,
       )
-      .then(() => originalEnd(...originalEndArgs))
+      .then(() => {
+        res.write = originalWrite;
+        res.end = originalEnd;
+        res.writeHead = originalWriteHead;
+        if (originalFlushHeaders) res.flushHeaders = originalFlushHeaders;
+        delete res[FARM_NODE_RESPONSE_END_PENDING];
+        originalEnd(...originalEndArgs);
+      })
       .catch((error) => {
         void options.emitError(error);
         console.error("Error in afterResponse hook:", error);
@@ -580,8 +643,18 @@ function interceptFarmDevPageResponse(options: {
           : Boolean(runtimeSession && hasRuntimeAfterHook);
         if (shouldBufferResponse) {
           const body = Buffer.concat(isHtmlResponse ? htmlChunks : responseChunks);
+          res.write = originalWrite;
+          res.end = originalEnd;
+          res.writeHead = originalWriteHead;
+          if (originalFlushHeaders) res.flushHeaders = originalFlushHeaders;
+          delete res[FARM_NODE_RESPONSE_END_PENDING];
           originalEnd(body, callback);
         } else {
+          res.write = originalWrite;
+          res.end = originalEnd;
+          res.writeHead = originalWriteHead;
+          if (originalFlushHeaders) res.flushHeaders = originalFlushHeaders;
+          delete res[FARM_NODE_RESPONSE_END_PENDING];
           originalEnd(...originalEndArgs);
         }
       });
