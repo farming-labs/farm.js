@@ -358,6 +358,46 @@ describe("generated server action security", () => {
     expect(apiRouteMap.get("/api/shared")?.handlers.POST).toBe(projectSharedPost);
   });
 
+  it("rejects duplicate API methods within one route source", () => {
+    const entry = generateRscEntry(context);
+    const registryStart = entry.indexOf("const apiRouteMethods =");
+    const registryEnd = entry.indexOf("\n\nregisterApiRouteSources(apiRouteModules", registryStart);
+    const { registerApiRouteSources } = new Function(
+      `${entry.slice(registryStart, registryEnd)}; return { registerApiRouteSources };`,
+    )() as {
+      registerApiRouteSources: (
+        fileModules: unknown[],
+        definitionModules: Array<{
+          sourceIndex: number;
+          filePath: string;
+          module: Record<string, Function>;
+        }>,
+        sourceCount: number,
+      ) => void;
+    };
+    const first = Object.assign(() => "first", {
+      __path: "/api/shared",
+      __method: "GET",
+    });
+    const second = Object.assign(() => "second", {
+      __path: "/api/shared",
+      __method: "GET",
+    });
+
+    expect(() =>
+      registerApiRouteSources(
+        [],
+        [
+          { sourceIndex: 0, filePath: "/src/routes-a.ts", module: { first } },
+          { sourceIndex: 0, filePath: "/src/routes-b.ts", module: { second } },
+        ],
+        1,
+      ),
+    ).toThrow(
+      "Duplicate API route for GET /api/shared: /src/routes-a.ts conflicts with /src/routes-b.ts",
+    );
+  });
+
   it("keeps project precedence when layer and project APIs use different discovery styles", () => {
     const entry = generateRscEntry({
       ...context,
