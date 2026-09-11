@@ -104,36 +104,50 @@ function splitSetCookieHeader(value: string): string[] {
   return cookies.filter(Boolean);
 }
 
-export async function sendWebResponse(res: ServerResponse, response: Response): Promise<void> {
-  res.statusCode = response.status;
-
-  const appendSetCookies = (cookies: readonly string[]) => {
-    const existing = typeof res.getHeader === "function" ? res.getHeader("Set-Cookie") : undefined;
-    const existingCookies = Array.isArray(existing)
-      ? existing.map(String)
-      : existing === undefined
-        ? []
-        : [String(existing)];
-    res.setHeader("Set-Cookie", [...existingCookies, ...cookies]);
-  };
-
-  const responseHeaders = response.headers as Headers & {
+export function applyWebResponseHeaders(
+  res: Pick<ServerResponse, "setHeader"> & Partial<Pick<ServerResponse, "getHeader">>,
+  headers: Headers,
+  options: { appendSetCookie?: boolean } = {},
+): void {
+  const responseHeaders = headers as Headers & {
     getSetCookie?: () => string[];
     raw?: () => Record<string, string[]>;
   };
   const rawSetCookies = responseHeaders.raw?.()["set-cookie"];
   const setCookies = responseHeaders.getSetCookie?.() || rawSetCookies || [];
-  if (setCookies.length > 0) {
-    appendSetCookies(setCookies);
-  }
+  const existing =
+    options.appendSetCookie && typeof res.getHeader === "function"
+      ? res.getHeader("Set-Cookie")
+      : undefined;
+  const existingCookies = Array.isArray(existing)
+    ? existing.map(String)
+    : existing === undefined
+      ? []
+      : [String(existing)];
 
-  response.headers.forEach((value, key) => {
+  let fallbackSetCookie = "";
+  headers.forEach((value, key) => {
     if (key.toLowerCase() === "set-cookie") {
-      if (setCookies.length === 0) appendSetCookies(splitSetCookieHeader(value));
+      fallbackSetCookie = value;
       return;
     }
     res.setHeader(key, value);
   });
+
+  const cookies =
+    setCookies.length > 0
+      ? setCookies
+      : fallbackSetCookie
+        ? splitSetCookieHeader(fallbackSetCookie)
+        : [];
+  if (cookies.length > 0) {
+    res.setHeader("Set-Cookie", [...existingCookies, ...cookies]);
+  }
+}
+
+export async function sendWebResponse(res: ServerResponse, response: Response): Promise<void> {
+  res.statusCode = response.status;
+  applyWebResponseHeaders(res, response.headers, { appendSetCookie: true });
 
   if (!response.body) {
     res.end();

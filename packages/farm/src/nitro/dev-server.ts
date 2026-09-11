@@ -3,6 +3,7 @@ import type { ViteDevServer } from "vite";
 import type { IncomingMessage, ServerResponse } from "http";
 import { H3Event, toNodeListener } from "h3";
 import { fromWebHandler } from "h3";
+import { sendWebResponse } from "../server/response";
 
 /**
  * Convert Node.js request to Web Standard Request
@@ -35,29 +36,7 @@ function nodeToWebRequest(req: IncomingMessage, baseUrl: string): Request {
  * Convert Web Standard Response to Node.js response
  */
 async function webToNodeResponse(res: ServerResponse, webRes: Response): Promise<void> {
-  // Set status
-  res.statusCode = webRes.status;
-
-  // Set headers
-  webRes.headers.forEach((value, key) => {
-    res.setHeader(key, value);
-  });
-
-  // Write body
-  if (webRes.body) {
-    const reader = webRes.body.getReader();
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        res.write(value);
-      }
-    } finally {
-      reader.releaseLock();
-    }
-  }
-
-  res.end();
+  await sendWebResponse(res, webRes);
 }
 
 /**
