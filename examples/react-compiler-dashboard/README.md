@@ -118,6 +118,13 @@ must remain at least 2x faster than bracketed React and 1.25x faster than the co
 Every sample checks all 9,999 survivor identities and order, the disconnected rejected row, and the
 fresh first row.
 
+Mapped structural prepends add a second 10,000-row gate. The concise path drops the oldest row,
+prepends one row, updates one surviving row, and maps the new prefix across adjacent setters. The
+matching block-bodied control performs the same native work without compiler lineage. Both compiler
+modes must remain at least 2x faster than React and 1.25x faster than that control. Every sample
+checks survivor identity and order, the changed survivor value, the final mapped prefix, and cleanup
+of the removed row.
+
 Keyed array slices have an independent retained-window comparison. A concise
 `slice(trimCount)` uses an event-local runtime bound and is measured against bracketed React and an
 equivalent block-bodied compiled snapshot control. Both compiler modes must remain at least 3x

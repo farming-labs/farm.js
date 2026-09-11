@@ -121,6 +121,23 @@
         "brotli": 11122
       }
     },
+    "keyedStructuralPrependMap": {
+      "compilerOff": {
+        "raw": 192982,
+        "gzip": 60137,
+        "brotli": 51899
+      },
+      "compilerOn": {
+        "raw": 268174,
+        "gzip": 79707,
+        "brotli": 68090
+      },
+      "compilerPremium": {
+        "raw": 75192,
+        "gzip": 19570,
+        "brotli": 16191
+      }
+    },
     "keyedPrepend": {
       "compilerOff": {
         "raw": 192902,
@@ -281,18 +298,18 @@
         "brotli": 51666
       },
       "full": {
-        "raw": 299239,
-        "gzip": 84361,
-        "brotli": 71836
+        "raw": 302676,
+        "gzip": 84903,
+        "brotli": 72203
       },
       "coreOnly": {
         "raw": 204922,
         "gzip": 63685,
         "brotli": 54902
       },
-      "fullRuntimePremiumGzip": 24442,
+      "fullRuntimePremiumGzip": 24984,
       "coreRuntimePremiumGzip": 3766,
-      "gzipReductionPercent": 84.6
+      "gzipReductionPercent": 84.9
     }
   }
 }

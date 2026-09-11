@@ -955,6 +955,72 @@ export function StandardTableBenchmark() {
           Queued remove + prepend (snapshot control)
         </button>
         <button
+          data-action="table-structural-prepend-map-queued"
+          type="button"
+          onClick={() => {
+            const incoming = {
+              id: (seed + 1_075_000) * 10_000 + 1,
+              label: "queued prepended row",
+              amount: 4_096,
+              region: "AMR" as const,
+              status: "review" as const,
+            };
+            setRows((current) => current.slice(1));
+            setRows((current) => [incoming, ...current]);
+            setRows((current) =>
+              current.map((row) =>
+                row.id % 10_000 === 5_001
+                  ? { ...row, amount: row.amount + 1, label: `${row.label} reviewed` }
+                  : row,
+              ),
+            );
+            setRows((current) =>
+              current.map((row) =>
+                row.id === incoming.id ? { ...row, label: "queued mapped prepended row" } : row,
+              ),
+            );
+            setOperation("remove, prepend, and map across queued setters");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queued remove + prepend + map
+        </button>
+        <button
+          data-action="table-structural-prepend-map-queued-snapshot"
+          type="button"
+          onClick={() => {
+            const incoming = {
+              id: (seed + 1_075_000) * 10_000 + 1,
+              label: "queued prepended row",
+              amount: 4_096,
+              region: "AMR" as const,
+              status: "review" as const,
+            };
+            setRows((current) => {
+              return current.slice(1);
+            });
+            setRows((current) => {
+              return [incoming, ...current];
+            });
+            setRows((current) => {
+              return current.map((row) =>
+                row.id % 10_000 === 5_001
+                  ? { ...row, amount: row.amount + 1, label: `${row.label} reviewed` }
+                  : row,
+              );
+            });
+            setRows((current) => {
+              return current.map((row) =>
+                row.id === incoming.id ? { ...row, label: "queued mapped prepended row" } : row,
+              );
+            });
+            setOperation("remove, prepend, and map (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queued remove + prepend + map (snapshot control)
+        </button>
+        <button
           data-action="table-structural-append-map-queued"
           type="button"
           onClick={() => {

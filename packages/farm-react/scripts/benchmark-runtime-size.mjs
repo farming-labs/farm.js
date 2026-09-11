@@ -63,6 +63,8 @@ const [
   keyedStructuralAppendMapOn,
   keyedStructuralPrependOff,
   keyedStructuralPrependOn,
+  keyedStructuralPrependMapOff,
+  keyedStructuralPrependMapOn,
   keyedPrependOff,
   keyedPrependOn,
   keyedPositionOff,
@@ -99,6 +101,8 @@ const [
   bundle("keyed-structural-append-map.tsx", true),
   bundle("keyed-structural-prepend.tsx", false),
   bundle("keyed-structural-prepend.tsx", true),
+  bundle("keyed-structural-prepend-map.tsx", false),
+  bundle("keyed-structural-prepend-map.tsx", true),
   bundle("keyed-prepend.tsx", false),
   bundle("keyed-prepend.tsx", true),
   bundle("keyed-position.tsx", false),
@@ -194,6 +198,14 @@ if (
   !keyedStructuralPrependOn.code.includes("prependIndexIndependent")
 ) {
   throw new Error("Keyed structural-prepend fixture did not retain its isolated composed runtime.");
+}
+if (
+  !keyedStructuralPrependMapOn.code.includes("FarmCompiledKeyedRows") ||
+  !keyedStructuralPrependMapOn.code.includes("keyed-rows:structural-prepend-map-hinted")
+) {
+  throw new Error(
+    "Keyed structural-prepend-map fixture did not retain its optional mapped runtime.",
+  );
 }
 if (
   !keyedPrependOn.code.includes("FarmCompiledKeyedRows") ||
@@ -433,6 +445,23 @@ const results = {
         brotli: keyedStructuralPrependOn.brotli - keyedStructuralPrependOff.brotli,
       },
     },
+    keyedStructuralPrependMap: {
+      compilerOff: {
+        raw: keyedStructuralPrependMapOff.raw,
+        gzip: keyedStructuralPrependMapOff.gzip,
+        brotli: keyedStructuralPrependMapOff.brotli,
+      },
+      compilerOn: {
+        raw: keyedStructuralPrependMapOn.raw,
+        gzip: keyedStructuralPrependMapOn.gzip,
+        brotli: keyedStructuralPrependMapOn.brotli,
+      },
+      compilerPremium: {
+        raw: keyedStructuralPrependMapOn.raw - keyedStructuralPrependMapOff.raw,
+        gzip: keyedStructuralPrependMapOn.gzip - keyedStructuralPrependMapOff.gzip,
+        brotli: keyedStructuralPrependMapOn.brotli - keyedStructuralPrependMapOff.brotli,
+      },
+    },
     keyedPrepend: {
       compilerOff: {
         raw: keyedPrependOff.raw,
@@ -644,6 +673,13 @@ if (checkOnly) {
       maximum:
         (reference.fixtures.keyedStructuralPrepend?.compilerPremium.gzip ??
           results.fixtures.keyedStructuralPrepend.compilerPremium.gzip) + 256,
+    },
+    {
+      name: "keyed structural-prepend-map compiler premium",
+      current: results.fixtures.keyedStructuralPrependMap.compilerPremium.gzip,
+      maximum:
+        (reference.fixtures.keyedStructuralPrependMap?.compilerPremium.gzip ??
+          results.fixtures.keyedStructuralPrependMap.compilerPremium.gzip) + 256,
     },
     {
       name: "keyed prepend compiler premium",

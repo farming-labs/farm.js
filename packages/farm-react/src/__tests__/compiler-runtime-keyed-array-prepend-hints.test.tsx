@@ -6,9 +6,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createCompiledComponent,
   createCompilerKeyedArrayFilter,
+  createCompilerKeyedArrayMapPipeline,
+  createCompilerKeyedArrayMappedStructuralPrepend,
   createCompilerKeyedArrayPrepend,
+  createCompilerKeyedArrayQueuedMapPipeline,
   createCompilerKeyedArraySlice,
   createCompilerKeyedArrayStructuralPrepend,
+  createCompilerKeyedArrayStructuralPrependMapPipeline,
   type CompilerKeyedRowElement,
 } from "../compiler-runtime";
 
@@ -68,6 +72,34 @@ function hintedStructuralPrepend(previous: Item[], additions: readonly Item[]): 
   return createCompilerKeyedArrayStructuralPrepend(previous, [...additions, ...previous]) as Item[];
 }
 
+function hintedMappedStructuralPrepend(previous: Item[], additions: readonly Item[]): Item[] {
+  return createCompilerKeyedArrayMappedStructuralPrepend(previous, [
+    ...additions,
+    ...previous,
+  ]) as Item[];
+}
+
+function hintedMap(previous: Item[], mapper: (item: Item, index: number) => Item): Item[] {
+  return createCompilerKeyedArrayMapPipeline(previous, (current, applyMap) =>
+    applyMap(current, (current as Item[]).map, mapper),
+  ) as Item[];
+}
+
+function hintedQueuedMap(previous: Item[], mapper: (item: Item, index: number) => Item): Item[] {
+  return createCompilerKeyedArrayQueuedMapPipeline(previous, (current, applyMap) =>
+    applyMap(current, (current as Item[]).map, mapper),
+  ) as Item[];
+}
+
+function hintedStructuralPrependMap(
+  previous: Item[],
+  mapper: (item: Item, index: number) => Item,
+): Item[] {
+  return createCompilerKeyedArrayStructuralPrependMapPipeline(previous, (current, applyMap) =>
+    applyMap(current, (current as Item[]).map, mapper),
+  ) as Item[];
+}
+
 function rowDescriptor(item: Item, text = item.label): CompilerKeyedRowElement {
   return {
     kind: "element",
@@ -96,6 +128,31 @@ function createPrependHarness(initialItems: Item[], readsCollection = false) {
   ) => void = () => undefined;
   let sliceThenPrepend: (start: number, end: number, additions: readonly Item[]) => void = () =>
     undefined;
+  let filterPrependThenMap: (
+    removed: ReadonlySet<string>,
+    additions: readonly Item[],
+    editedId: string,
+    nextLabel: string,
+    secondLabel?: string,
+  ) => void = () => undefined;
+  let sliceMapThenPrepend: (
+    start: number,
+    end: number,
+    additions: readonly Item[],
+    editedId: string,
+    nextLabel: string,
+  ) => void = () => undefined;
+  let mapFilterThenPrepend: (
+    removed: ReadonlySet<string>,
+    additions: readonly Item[],
+    editedId: string,
+    nextLabel: string,
+  ) => void = () => undefined;
+  let filterPrependThenTransform: (
+    removed: ReadonlySet<string>,
+    additions: readonly Item[],
+    mapper: (item: Item, index: number) => Item,
+  ) => void = () => undefined;
   let filterThenMismatchedPrepend: (removed: ReadonlySet<string>, addition: Item) => void = () =>
     undefined;
   let plainBetweenFilterAndPrepend: (removed: ReadonlySet<string>, addition: Item) => void = () =>
@@ -122,6 +179,45 @@ function createPrependHarness(initialItems: Item[], readsCollection = false) {
       sliceThenPrepend = (start, end, additions) => {
         state[0].set((previous) => hintedSlice(previous as Item[], start, end));
         state[0].set((previous) => hintedStructuralPrepend(previous as Item[], additions));
+      };
+      filterPrependThenMap = (removed, additions, editedId, nextLabel, secondLabel) => {
+        state[0].set((previous) => hintedFilter(previous as Item[], removed));
+        state[0].set((previous) => hintedStructuralPrepend(previous as Item[], additions));
+        state[0].set((previous) =>
+          hintedStructuralPrependMap(previous as Item[], (item) =>
+            item.id === editedId ? { ...item, label: nextLabel } : item,
+          ),
+        );
+        if (secondLabel !== undefined) {
+          state[0].set((previous) =>
+            hintedStructuralPrependMap(previous as Item[], (item) =>
+              item.id === editedId ? { ...item, label: secondLabel } : item,
+            ),
+          );
+        }
+      };
+      sliceMapThenPrepend = (start, end, additions, editedId, nextLabel) => {
+        state[0].set((previous) => hintedSlice(previous as Item[], start, end));
+        state[0].set((previous) =>
+          hintedMap(previous as Item[], (item) =>
+            item.id === editedId ? { ...item, label: nextLabel } : item,
+          ),
+        );
+        state[0].set((previous) => hintedMappedStructuralPrepend(previous as Item[], additions));
+      };
+      mapFilterThenPrepend = (removed, additions, editedId, nextLabel) => {
+        state[0].set((previous) =>
+          hintedQueuedMap(previous as Item[], (item) =>
+            item.id === editedId ? { ...item, label: nextLabel } : item,
+          ),
+        );
+        state[0].set((previous) => hintedFilter(previous as Item[], removed));
+        state[0].set((previous) => hintedMappedStructuralPrepend(previous as Item[], additions));
+      };
+      filterPrependThenTransform = (removed, additions, mapper) => {
+        state[0].set((previous) => hintedFilter(previous as Item[], removed));
+        state[0].set((previous) => hintedStructuralPrepend(previous as Item[], additions));
+        state[0].set((previous) => hintedStructuralPrependMap(previous as Item[], mapper));
       };
       filterThenMismatchedPrepend = (removed, addition) => {
         state[0].set((previous) => hintedFilter(previous as Item[], removed));
@@ -206,6 +302,18 @@ function createPrependHarness(initialItems: Item[], readsCollection = false) {
     counters,
     filterThenMismatchedPrepend: (removed: ReadonlySet<string>, addition: Item) =>
       filterThenMismatchedPrepend(removed, addition),
+    filterPrependThenMap: (
+      removed: ReadonlySet<string>,
+      additions: readonly Item[],
+      editedId: string,
+      nextLabel: string,
+      secondLabel?: string,
+    ) => filterPrependThenMap(removed, additions, editedId, nextLabel, secondLabel),
+    filterPrependThenTransform: (
+      removed: ReadonlySet<string>,
+      additions: readonly Item[],
+      mapper: (item: Item, index: number) => Item,
+    ) => filterPrependThenTransform(removed, additions, mapper),
     filterThenPrepend: (removed: ReadonlySet<string>, additions: readonly Item[]) =>
       filterThenPrepend(removed, additions),
     filterThenPrependTwice: (
@@ -214,12 +322,25 @@ function createPrependHarness(initialItems: Item[], readsCollection = false) {
       second: readonly Item[],
     ) => filterThenPrependTwice(removed, first, second),
     mismatchedPrepend: (addition: Item) => mismatchedPrepend(addition),
+    mapFilterThenPrepend: (
+      removed: ReadonlySet<string>,
+      additions: readonly Item[],
+      editedId: string,
+      nextLabel: string,
+    ) => mapFilterThenPrepend(removed, additions, editedId, nextLabel),
     plainBetweenFilterAndPrepend: (removed: ReadonlySet<string>, addition: Item) =>
       plainBetweenFilterAndPrepend(removed, addition),
     plainThenPrepend: (addition: Item) => plainThenPrepend(addition),
     prepend: (additions: readonly Item[]) => prepend(additions),
     sliceThenPrepend: (start: number, end: number, additions: readonly Item[]) =>
       sliceThenPrepend(start, end, additions),
+    sliceMapThenPrepend: (
+      start: number,
+      end: number,
+      additions: readonly Item[],
+      editedId: string,
+      nextLabel: string,
+    ) => sliceMapThenPrepend(start, end, additions, editedId, nextLabel),
   };
 }
 
@@ -342,6 +463,215 @@ describe("compiled keyed-array prepend hints", () => {
     expect(harness.counters.keyReads).toBe(2);
     expect(harness.counters.descriptorReads).toBe(2);
     expect(harness.counters.bindingReads).toBe(2);
+  });
+
+  it("patches mapped survivors while creating only the prepended prefix", async () => {
+    const initialItems = Array.from(
+      { length: 2_048 },
+      (_, index): Item => ({ id: `row-${index}`, label: `Row ${index}` }),
+    );
+    const harness = createPrependHarness(initialItems);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Feed />));
+    const edited = container.querySelector('[data-key="row-512"]');
+    const untouched = container.querySelector('[data-key="row-1536"]');
+    const removed = container.querySelector('[data-key="row-0"]');
+    harness.counters.keyReads = 0;
+    harness.counters.descriptorReads = 0;
+    harness.counters.bindingReads = 0;
+
+    await act(async () => {
+      harness.filterPrependThenMap(
+        new Set(["row-0"]),
+        [
+          { id: "row-new-0", label: "New 0" },
+          { id: "row-new-1", label: "New 1" },
+        ],
+        "row-512",
+        "Edited survivor",
+        "Edited survivor twice",
+      );
+      await flushCompilerUpdates();
+    });
+
+    expect(container.querySelector('[data-key="row-512"]')).toBe(edited);
+    expect(container.querySelector('[data-key="row-1536"]')).toBe(untouched);
+    expect(container.querySelector('[data-key="row-0"]')).toBeNull();
+    expect(removed?.isConnected).toBe(false);
+    expect(edited?.textContent).toBe("Edited survivor twice");
+    expect([...container.querySelectorAll("li")].slice(0, 2).map((row) => row.textContent)).toEqual(
+      ["New 0", "New 1"],
+    );
+    expect(container.querySelectorAll("li")).toHaveLength(2_049);
+    expect(harness.counters.executions).toBe(1);
+    expect(harness.counters.listRenders).toBe(1);
+    expect(harness.counters.keyReads).toBe(3);
+    expect(harness.counters.descriptorReads).toBe(2);
+    expect(harness.counters.bindingReads).toBe(3);
+  });
+
+  it("retains mapped survivors when the prepend runs after the maps", async () => {
+    const harness = createPrependHarness([
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+      { id: "c", label: "Gamma" },
+      { id: "d", label: "Delta" },
+    ]);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Feed />));
+    const beta = container.querySelector('[data-key="b"]');
+    const gamma = container.querySelector('[data-key="c"]');
+
+    await act(async () => {
+      harness.sliceMapThenPrepend(1, 3, [{ id: "e", label: "Epsilon" }], "c", "Gamma edited");
+      await flushCompilerUpdates();
+    });
+
+    expect([...container.querySelectorAll("li")].map((row) => row.textContent)).toEqual([
+      "Epsilon",
+      "Beta",
+      "Gamma edited",
+    ]);
+    expect(container.querySelector('[data-key="b"]')).toBe(beta);
+    expect(container.querySelector('[data-key="c"]')).toBe(gamma);
+    expect(harness.counters.executions).toBe(1);
+    expect(harness.counters.listRenders).toBe(1);
+  });
+
+  it("retains mapped lineage when removal follows the map before prepending", async () => {
+    const harness = createPrependHarness([
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+      { id: "c", label: "Gamma" },
+    ]);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Feed />));
+    const beta = container.querySelector('[data-key="b"]');
+    const gamma = container.querySelector('[data-key="c"]');
+
+    await act(async () => {
+      harness.mapFilterThenPrepend(
+        new Set(["a"]),
+        [{ id: "d", label: "Delta" }],
+        "c",
+        "Gamma edited",
+      );
+      await flushCompilerUpdates();
+    });
+
+    expect([...container.querySelectorAll("li")].map((row) => row.textContent)).toEqual([
+      "Delta",
+      "Beta",
+      "Gamma edited",
+    ]);
+    expect(container.querySelector('[data-key="b"]')).toBe(beta);
+    expect(container.querySelector('[data-key="c"]')).toBe(gamma);
+    expect(harness.counters.executions).toBe(1);
+    expect(harness.counters.listRenders).toBe(1);
+  });
+
+  it("falls back atomically when a mapped survivor changes key", async () => {
+    const harness = createPrependHarness([
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+      { id: "c", label: "Gamma" },
+    ]);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Feed />));
+    const alpha = container.querySelector('[data-key="a"]');
+
+    await act(async () => {
+      harness.filterPrependThenTransform(new Set(["c"]), [{ id: "d", label: "Delta" }], (item) =>
+        item.id === "b" ? { ...item, id: "renamed-b", label: "Renamed" } : item,
+      );
+      await flushCompilerUpdates();
+    });
+
+    expect([...container.querySelectorAll("li")].map((row) => row.textContent)).toEqual([
+      "Delta",
+      "Alpha",
+      "Renamed",
+    ]);
+    expect(container.querySelector('[data-key="a"]')).toBe(alpha);
+    expect(container.querySelector('[data-key="b"]')).toBeNull();
+    expect(container.querySelector('[data-key="renamed-b"]')).not.toBeNull();
+  });
+
+  it("falls back when committed data changes before a mapped structural prepend", async () => {
+    const initialItems: Item[] = [
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+      { id: "c", label: "Gamma" },
+    ];
+    const harness = createPrependHarness(initialItems);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Feed />));
+    const alpha = container.querySelector('[data-key="a"]');
+    const beta = container.querySelector('[data-key="b"]');
+    initialItems[1] = { id: "b", label: "Beta externally replaced" };
+    harness.counters.keyReads = 0;
+
+    await act(async () => {
+      harness.filterPrependThenMap(
+        new Set(["c"]),
+        [{ id: "d", label: "Delta" }],
+        "a",
+        "Alpha edited",
+      );
+      await flushCompilerUpdates();
+    });
+
+    expect([...container.querySelectorAll("li")].map((row) => row.textContent)).toEqual([
+      "Delta",
+      "Alpha edited",
+      "Beta externally replaced",
+    ]);
+    expect(container.querySelector('[data-key="a"]')).toBe(alpha);
+    expect(container.querySelector('[data-key="b"]')).toBe(beta);
+    expect(harness.counters.keyReads).toBe(3);
+  });
+
+  it("creates prepended rows from their final mapped values", async () => {
+    const harness = createPrependHarness([
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+      { id: "c", label: "Gamma" },
+    ]);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Feed />));
+
+    await act(async () => {
+      harness.filterPrependThenTransform(new Set(["c"]), [{ id: "d", label: "Delta" }], (item) =>
+        item.id === "b" || item.id === "d" ? { ...item, label: `${item.label} mapped` } : item,
+      );
+      await flushCompilerUpdates();
+    });
+
+    expect([...container.querySelectorAll("li")].map((row) => row.textContent)).toEqual([
+      "Delta mapped",
+      "Alpha",
+      "Beta mapped",
+    ]);
+    expect(harness.counters.executions).toBe(1);
+    expect(harness.counters.listRenders).toBe(1);
   });
 
   it("mounts only the prefix when the structural step rejects every row", async () => {
@@ -501,6 +831,12 @@ describe("compiled keyed-array prepend hints", () => {
     expect(createCompilerKeyedArrayPrepend(proxy, next)).toBe(next);
     expect(() => createCompilerKeyedArrayStructuralPrepend(proxy, next)).not.toThrow();
     expect(createCompilerKeyedArrayStructuralPrepend(proxy, next)).toBe(next);
+    expect(() => createCompilerKeyedArrayMappedStructuralPrepend(proxy, next)).not.toThrow();
+    expect(createCompilerKeyedArrayMappedStructuralPrepend(proxy, next)).toBe(next);
+    expect(() =>
+      createCompilerKeyedArrayStructuralPrependMapPipeline(proxy, () => next),
+    ).not.toThrow();
+    expect(createCompilerKeyedArrayStructuralPrependMapPipeline(proxy, () => next)).toBe(next);
   });
 
   it("keeps structural prepend on fallback when rows read the collection", async () => {
@@ -551,6 +887,11 @@ describe("compiled keyed-array prepend hints", () => {
               { id: "d", label: "Delta" },
               { id: "e", label: "Epsilon" },
             ]),
+          );
+          state[0].set((previous) =>
+            hintedStructuralPrependMap(previous as Item[], (item) =>
+              item.id === "b" ? { ...item, label: "Beta edited" } : item,
+            ),
           );
         };
         return (
@@ -616,7 +957,7 @@ describe("compiled keyed-array prepend hints", () => {
     expect([...container.querySelectorAll("input")].map((input) => input.value)).toEqual([
       "Delta",
       "Epsilon",
-      "Beta",
+      "Beta edited",
     ]);
   });
 
@@ -856,6 +1197,83 @@ describe("compiled keyed-array prepend hints", () => {
     20_000,
   );
 
+  stressIt(
+    "matches React across 2,000 randomized mapped structural prepends",
+    async () => {
+      const initialItems = Array.from(
+        { length: 64 },
+        (_, index): Item => ({ id: `seed-${index}`, label: `Seed ${index}` }),
+      );
+      const harness = createPrependHarness(initialItems);
+      let updateReact: (
+        removedId: string,
+        addition: Item,
+        editedId: string,
+        nextLabel: string,
+      ) => void = () => undefined;
+      function Normal() {
+        const [items, setItems] = useState(initialItems);
+        updateReact = (removedId, addition, editedId, nextLabel) =>
+          setItems((previous) =>
+            [addition, ...previous.filter((item) => item.id !== removedId)].map((item) =>
+              item.id === editedId ? { ...item, label: nextLabel } : item,
+            ),
+          );
+        return (
+          <ol>
+            {items.map((item) => (
+              <li data-key={item.id} key={item.id}>
+                {item.label}
+              </li>
+            ))}
+          </ol>
+        );
+      }
+      const compiledContainer = document.createElement("div");
+      const reactContainer = document.createElement("div");
+      document.body.append(compiledContainer, reactContainer);
+      const compiledRoot = createRoot(compiledContainer);
+      const reactRoot = createRoot(reactContainer);
+      roots.push(compiledRoot, reactRoot);
+      await act(async () => {
+        compiledRoot.render(<harness.Feed />);
+        reactRoot.render(<Normal />);
+      });
+      harness.counters.descriptorReads = 0;
+      harness.counters.bindingReads = 0;
+      let active = initialItems;
+      let seed = 0x85ebca6b;
+
+      for (let update = 0; update < 2_000; update += 1) {
+        seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0;
+        const removedIndex = seed % active.length;
+        const removedId = active[removedIndex].id;
+        const survivors = active.filter((item) => item.id !== removedId);
+        const editedId = survivors[(seed >>> 8) % survivors.length].id;
+        const addition = { id: `new-${update}`, label: `New ${update}` };
+        const nextLabel = `Edited ${update}`;
+        await act(async () => {
+          harness.filterPrependThenMap(new Set([removedId]), [addition], editedId, nextLabel);
+          updateReact(removedId, addition, editedId, nextLabel);
+          await flushCompilerUpdates();
+        });
+        active = [addition, ...survivors].map((item) =>
+          item.id === editedId ? { ...item, label: nextLabel } : item,
+        );
+        if ((update + 1) % 20 === 0) {
+          expect([...compiledContainer.querySelectorAll("li")].map((row) => row.outerHTML)).toEqual(
+            [...reactContainer.querySelectorAll("li")].map((row) => row.outerHTML),
+          );
+        }
+      }
+      expect(active).toHaveLength(64);
+      expect(harness.counters.executions).toBe(1);
+      expect(harness.counters.descriptorReads).toBe(2_000);
+      expect(harness.counters.bindingReads).toBe(4_000);
+    },
+    30_000,
+  );
+
   it("hydrates in StrictMode and drops a queued prepend after unmount", async () => {
     const harness = createPrependHarness([{ id: "a", label: "Alpha" }]);
     const container = document.createElement("div");
@@ -886,10 +1304,15 @@ describe("compiled keyed-array prepend hints", () => {
     expect(recoverable).toEqual([]);
 
     await act(async () => {
-      harness.filterThenPrepend(new Set(["a"]), [{ id: "c", label: "Gamma" }]);
+      harness.filterPrependThenMap(
+        new Set(["a"]),
+        [{ id: "c", label: "Gamma" }],
+        "b",
+        "Beta edited",
+      );
       await flushCompilerUpdates();
     });
-    expect(container.textContent).toBe("GammaBeta");
+    expect(container.textContent).toBe("GammaBeta edited");
     expect(recoverable).toEqual([]);
 
     roots.pop();

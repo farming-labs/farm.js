@@ -39,6 +39,9 @@ interface CompilerKeyedArrayPrependHint {
   readonly sourceLength: number;
   readonly resultLength: number;
   readonly prefixLength: number;
+  readonly mappedItemSources?: ReadonlyMap<number, unknown> | CompilerMappedItemSources;
+  readonly mappedItemValues?: ReadonlyMap<number, unknown>;
+  readonly mappedSurvivorsValidated?: boolean;
   readonly structuralUpdate?: CompilerKeyedArrayFilterHint;
   readonly previous?: CompilerKeyedArrayPrependHint;
 }
@@ -633,6 +636,84 @@ function compilerKeyedArrayStructuralPrependUpdate(
         prefixLength,
         structuralUpdate,
         ...(survivorResult ? { structuralSurvivors: survivorResult } : {}),
+      }
+    : undefined;
+}
+
+function compilerKeyedArrayStructuralPrependMapUpdate(
+  value: unknown,
+  sourceToken: object | undefined,
+  expectedLength: number,
+  requireMappedUpdate = false,
+):
+  | {
+      readonly prefixLength: number;
+      readonly mappedItemSources?: ReadonlyMap<number, unknown> | CompilerMappedItemSources;
+      readonly mappedSurvivorsValidated?: true;
+      readonly structuralSurvivorRange?: {
+        readonly end: number;
+        readonly start: number;
+      };
+      readonly structuralSurvivors?: readonly number[];
+    }
+  | undefined {
+  const target = compilerObject(value);
+  if (!target || !sourceToken || !Array.isArray(value)) return undefined;
+  const update = COMPILER_KEYED_ARRAY_PREPENDS.get(target);
+  if (
+    !update ||
+    update.sourceToken !== sourceToken ||
+    !update.structuralUpdate ||
+    (requireMappedUpdate && !update.mappedItemSources)
+  ) {
+    return undefined;
+  }
+  const updates: CompilerKeyedArrayPrependHint[] = [];
+  for (
+    let current: CompilerKeyedArrayPrependHint | undefined = update;
+    current;
+    current = current.previous
+  ) {
+    if (current.sourceToken !== sourceToken) return undefined;
+    updates.push(current);
+  }
+  updates.reverse();
+  const first = updates[0];
+  const structuralSurvivorRange = compilerKeyedArraySliceSurvivorRangeFromUpdate(
+    update.structuralUpdate,
+    sourceToken,
+    expectedLength,
+    first.sourceLength,
+  );
+  const structuralSurvivors = structuralSurvivorRange
+    ? undefined
+    : compilerKeyedArrayFilterSurvivorsFromUpdate(
+        update.structuralUpdate,
+        sourceToken,
+        expectedLength,
+        first.sourceLength,
+      )?.indices;
+  if (!structuralSurvivorRange && !structuralSurvivors) return undefined;
+  let length = first.sourceLength;
+  let prefixLength = 0;
+  for (const current of updates) {
+    if (
+      current.sourceLength !== length ||
+      current.prefixLength < 1 ||
+      current.resultLength !== current.sourceLength + current.prefixLength
+    ) {
+      return undefined;
+    }
+    length = current.resultLength;
+    prefixLength += current.prefixLength;
+  }
+  return length === value.length
+    ? {
+        prefixLength,
+        ...(structuralSurvivorRange ? { structuralSurvivorRange } : {}),
+        ...(structuralSurvivors ? { structuralSurvivors } : {}),
+        ...(update.mappedItemSources ? { mappedItemSources: update.mappedItemSources } : {}),
+        ...(update.mappedSurvivorsValidated ? { mappedSurvivorsValidated: true as const } : {}),
       }
     : undefined;
 }
@@ -1550,6 +1631,201 @@ export function createCompilerKeyedArrayStructuralPrepend(
     // Metadata must never change the behavior of an otherwise valid update.
     return value;
   }
+}
+
+/** @internal Records a prepend that directly follows compiler-proven mapped structural work. */
+export function createCompilerKeyedArrayMappedStructuralPrepend(
+  previous: unknown,
+  value: unknown,
+): unknown {
+  try {
+    const previousTarget = compilerObject(previous);
+    const valueTarget = compilerObject(value);
+    if (
+      !previousTarget ||
+      !valueTarget ||
+      !Array.isArray(previous) ||
+      !Array.isArray(value) ||
+      Object.getPrototypeOf(previous) !== NATIVE_ARRAY_PROTOTYPE ||
+      Object.getPrototypeOf(value) !== NATIVE_ARRAY_PROTOTYPE ||
+      previous[Symbol.iterator] !== NATIVE_ARRAY_ITERATOR
+    ) {
+      return value;
+    }
+    const sourceLength = previous.length;
+    const prefixLength = value.length - sourceLength;
+    if (prefixLength < 1) return value;
+    const committedSource = COMPILER_KEYED_COMMITTED_COLLECTIONS.has(previousTarget);
+    const previousUpdate = committedSource
+      ? undefined
+      : COMPILER_KEYED_ARRAY_PREPENDS.get(previousTarget);
+    const previousMappedUpdate =
+      !committedSource && !previousUpdate
+        ? COMPILER_KEYED_ARRAY_REORDERS.get(previousTarget)
+        : undefined;
+    const mappedStructuralUpdate =
+      previousMappedUpdate?.mapped &&
+      previousMappedUpdate.kind === undefined &&
+      previousMappedUpdate.structuralUpdate &&
+      previousMappedUpdate.resultLength === previous.length
+        ? previousMappedUpdate
+        : undefined;
+    const structuralUpdate =
+      previousUpdate?.structuralUpdate || mappedStructuralUpdate?.structuralUpdate;
+    const sourceToken = previousUpdate?.sourceToken || mappedStructuralUpdate?.sourceToken;
+    const mappedItemSources =
+      previousUpdate?.mappedItemSources || mappedStructuralUpdate?.mappedItemSources;
+    if (!sourceToken || !structuralUpdate || !mappedItemSources) return value;
+    COMPILER_KEYED_ARRAY_PREPENDS.set(valueTarget, {
+      sourceToken,
+      sourceLength,
+      resultLength: value.length,
+      prefixLength,
+      structuralUpdate,
+      mappedItemSources,
+      ...(previousUpdate?.mappedSurvivorsValidated ? { mappedSurvivorsValidated: true } : {}),
+      ...(previousUpdate?.mappedItemValues
+        ? { mappedItemValues: previousUpdate.mappedItemValues }
+        : {}),
+      ...(previousUpdate ? { previous: previousUpdate } : {}),
+    });
+    return value;
+  } catch {
+    // Metadata must never change the behavior of an otherwise valid update.
+    return value;
+  }
+}
+
+/** @internal Executes safe maps while retaining structural prepend lineage. */
+export function createCompilerKeyedArrayStructuralPrependMapPipeline(
+  previous: unknown,
+  pipeline: (...values: readonly unknown[]) => unknown,
+): unknown {
+  let prependUpdate: CompilerKeyedArrayPrependHint | undefined;
+  let committedItems: readonly unknown[] | undefined;
+  let survivorRange: { readonly end: number; readonly start: number } | undefined;
+  let survivorIndices: readonly number[] | undefined;
+  let prefixLength = 0;
+  try {
+    const previousTarget = compilerObject(previous);
+    if (
+      !previousTarget ||
+      !Array.isArray(previous) ||
+      Object.getPrototypeOf(previous) !== NATIVE_ARRAY_PROTOTYPE ||
+      !(prependUpdate = COMPILER_KEYED_ARRAY_PREPENDS.get(previousTarget)) ||
+      !prependUpdate.structuralUpdate ||
+      prependUpdate.resultLength !== previous.length
+    ) {
+      prependUpdate = undefined;
+    } else {
+      committedItems = COMPILER_KEYED_COMMITTED_ITEM_SNAPSHOTS.get(prependUpdate.sourceToken);
+      const structuralPrepend = committedItems
+        ? compilerKeyedArrayStructuralPrependMapUpdate(
+            previous,
+            prependUpdate.sourceToken,
+            committedItems.length,
+          )
+        : undefined;
+      survivorRange = structuralPrepend?.structuralSurvivorRange;
+      survivorIndices = structuralPrepend?.structuralSurvivors;
+      prefixLength = structuralPrepend?.prefixLength || 0;
+      if (!survivorRange && !survivorIndices) {
+        prependUpdate = undefined;
+      }
+    }
+  } catch {
+    prependUpdate = undefined;
+  }
+
+  let eligible = prependUpdate !== undefined;
+  const survivorCount = survivorRange
+    ? survivorRange.end - survivorRange.start
+    : (survivorIndices?.length ?? 0);
+  const applyMap = (collection: unknown, method: unknown, callback: unknown): unknown => {
+    if (method !== NATIVE_ARRAY_MAP || !eligible) {
+      const value = NATIVE_REFLECT_APPLY(
+        method as (...values: readonly unknown[]) => unknown,
+        collection,
+        [callback],
+      );
+      if (method !== NATIVE_ARRAY_MAP) eligible = false;
+      return value;
+    }
+
+    let expectedIndex = 0;
+    let expectedLength = -1;
+    try {
+      if (
+        !Array.isArray(collection) ||
+        Object.getPrototypeOf(collection) !== NATIVE_ARRAY_PROTOTYPE
+      ) {
+        eligible = false;
+      } else {
+        expectedLength = collection.length;
+      }
+    } catch {
+      eligible = false;
+    }
+    const wrappedCallback = (item: unknown, index: number, source: unknown): unknown => {
+      if (index !== expectedIndex) eligible = false;
+      expectedIndex = index + 1;
+      return NATIVE_REFLECT_APPLY(
+        callback as (...values: readonly unknown[]) => unknown,
+        undefined,
+        [item, index, source],
+      );
+    };
+    const value = NATIVE_REFLECT_APPLY(
+      method as (...values: readonly unknown[]) => unknown,
+      collection,
+      [wrappedCallback],
+    );
+    try {
+      if (
+        expectedIndex !== expectedLength ||
+        !Array.isArray(value) ||
+        Object.getPrototypeOf(value) !== NATIVE_ARRAY_PROTOTYPE ||
+        value.length !== expectedLength
+      ) {
+        eligible = false;
+      }
+    } catch {
+      eligible = false;
+    }
+    return value;
+  };
+  const value = NATIVE_REFLECT_APPLY(pipeline, undefined, [previous, applyMap]);
+  if (!eligible || !prependUpdate) return value;
+  try {
+    const valueTarget = compilerObject(value);
+    if (
+      !valueTarget ||
+      !Array.isArray(value) ||
+      Object.getPrototypeOf(value) !== NATIVE_ARRAY_PROTOTYPE ||
+      value.length !== prefixLength + survivorCount
+    ) {
+      return value;
+    }
+    const mappedItemSources = new Map<number, unknown>();
+    const mappedItemValues = new Map<number, unknown>();
+    for (let index = 0; index < survivorCount; index += 1) {
+      const sourceIndex = survivorRange ? survivorRange.start + index : survivorIndices![index];
+      const committedItem = committedItems![sourceIndex];
+      const mappedItem = value[prefixLength + index];
+      if (Object.is(mappedItem, committedItem)) continue;
+      mappedItemSources.set(index, committedItem);
+      mappedItemValues.set(index, mappedItem);
+    }
+    COMPILER_KEYED_ARRAY_PREPENDS.set(valueTarget, {
+      ...prependUpdate,
+      mappedItemSources,
+      mappedItemValues,
+      mappedSurvivorsValidated: true,
+    });
+  } catch {
+    // Metadata must never change the result of a successful native update.
+  }
+  return value;
 }
 
 /** @internal Executes Array.filter while recording compiler-proven removal positions. */
@@ -5616,6 +5892,11 @@ const keyedCompleteCompatibilityUpdateRuntime: KeyedUpdateRuntime = {
   prepend: reconcileCompilerKeyedArrayPrependWithStructural,
 };
 
+const keyedCompleteStructuralPrependMapUpdateRuntime: KeyedUpdateRuntime = {
+  ...keyedCompleteCompatibilityUpdateRuntime,
+  prepend: reconcileCompilerKeyedArrayPrependMapWithStructural,
+};
+
 interface KeyedRowsRuntimeOptions {
   conditionals?: KeyedRowConditionalRuntime;
   hostBlocks?: KeyedRowHostRuntime;
@@ -7390,10 +7671,199 @@ function reconcileCompilerKeyedArrayStructuralPrepend(
   return keyedRowInstancesByKey([...prepended, ...survivors]);
 }
 
+function reconcileCompilerKeyedArrayStructuralPrependMap(
+  props: CompilerKeyedRowsBlockProps,
+  dirtyState: ReadonlySet<number>,
+  collectionToken: object | undefined,
+  instances: ReadonlyMap<string, CompilerKeyedRowInstance>,
+  root: Element,
+  reactOwnedRows: boolean,
+): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined {
+  if (
+    reactOwnedRows ||
+    props.hostBlocks ||
+    (props.conditionals?.length || 0) > 0 ||
+    !props.filterIndexIndependent ||
+    !props.prependIndexIndependent ||
+    props.collectionDependency === undefined
+  ) {
+    return undefined;
+  }
+  const collectionDependency = props.collectionDependency;
+  if (props.bindings.some((binding) => binding.dependencies?.includes(collectionDependency))) {
+    return undefined;
+  }
+  const dependencies = props.dependencies || props.structureDependencies;
+  const relevantDirty = (dependencies || []).filter((index) => dirtyState.has(index));
+  if (relevantDirty.length !== 1 || relevantDirty[0] !== collectionDependency) {
+    return undefined;
+  }
+
+  const finalValue = props.items();
+  const update = compilerKeyedArrayStructuralPrependMapUpdate(
+    finalValue,
+    collectionToken,
+    instances.size,
+    true,
+  );
+  if (!update || !update.mappedItemSources || !Array.isArray(finalValue)) return undefined;
+
+  const mappedItemSources = update.mappedSurvivorsValidated
+    ? (update.mappedItemSources as ReadonlyMap<number, unknown>)
+    : undefined;
+  const mappedStructuralSources = update.mappedSurvivorsValidated
+    ? undefined
+    : (update.mappedItemSources as CompilerMappedItemSources);
+  const previousInstances = [...instances.values()];
+  const survivorRange = update.structuralSurvivorRange;
+  const survivorIndices = update.structuralSurvivors;
+  const survivorCount = survivorRange
+    ? survivorRange.end - survivorRange.start
+    : (survivorIndices?.length ?? 0);
+  if (!survivorRange && !survivorIndices) return undefined;
+  const changed: Array<{
+    bindingUpdates: CompilerPreparedKeyedRowBindingUpdate[];
+    instance: CompilerKeyedRowInstance;
+    item: unknown;
+  }> = [];
+  const knownKeys = new Set(instances.keys());
+  const prepended: CompilerKeyedRowInstance[] = [];
+  try {
+    if (mappedStructuralSources) {
+      for (let index = 0; index < survivorCount; index += 1) {
+        const sourceIndex = survivorRange ? survivorRange.start + index : survivorIndices![index];
+        const instance = previousInstances[sourceIndex];
+        const item = finalValue[update.prefixLength + index];
+        const sourceItem = mappedStructuralSources.has(item)
+          ? mappedStructuralSources.get(item)
+          : item;
+        if (!instance || instance.index !== sourceIndex || !Object.is(instance.item, sourceItem)) {
+          return undefined;
+        }
+      }
+      for (let index = 0; index < survivorCount; index += 1) {
+        const sourceIndex = survivorRange ? survivorRange.start + index : survivorIndices![index];
+        const instance = previousInstances[sourceIndex];
+        const item = finalValue[update.prefixLength + index];
+        const sourceItem = mappedStructuralSources.has(item)
+          ? mappedStructuralSources.get(item)
+          : item;
+        if (Object.is(item, sourceItem)) continue;
+        if (keyedRowIdentity(props.rowKey(item, update.prefixLength + index)) !== instance.key) {
+          return undefined;
+        }
+        const bindingUpdates = prepareKeyedRowBindingUpdates(
+          props,
+          instance,
+          item,
+          update.prefixLength + index,
+        );
+        if (!bindingUpdates) return undefined;
+        changed.push({ bindingUpdates, instance, item });
+      }
+    } else if (survivorIndices) {
+      for (let index = 0; index < survivorCount; index += 1) {
+        const sourceIndex = survivorIndices[index];
+        const instance = previousInstances[sourceIndex];
+        const item = finalValue[update.prefixLength + index];
+        const expectedItem = mappedItemSources!.has(index) ? mappedItemSources!.get(index) : item;
+        if (
+          !instance ||
+          instance.index !== sourceIndex ||
+          !Object.is(instance.item, expectedItem)
+        ) {
+          return undefined;
+        }
+      }
+    }
+    for (const [index, sourceItem] of mappedItemSources || []) {
+      if (!Number.isSafeInteger(index) || index < 0 || index >= survivorCount) {
+        return undefined;
+      }
+      const instance =
+        previousInstances[survivorRange ? survivorRange.start + index : survivorIndices![index]];
+      const finalIndex = update.prefixLength + index;
+      const item = finalValue[finalIndex];
+      if (
+        !instance ||
+        !Object.is(instance.item, sourceItem) ||
+        keyedRowIdentity(props.rowKey(item, finalIndex)) !== instance.key
+      ) {
+        return undefined;
+      }
+      const bindingUpdates = prepareKeyedRowBindingUpdates(props, instance, item, finalIndex);
+      if (!bindingUpdates) return undefined;
+      changed.push({ bindingUpdates, instance, item });
+    }
+    for (let index = 0; index < update.prefixLength; index += 1) {
+      const item = finalValue[index];
+      const key = keyedRowIdentity(props.rowKey(item, index));
+      // Reusing a committed key may require React to move an existing row.
+      if (knownKeys.has(key)) return undefined;
+      knownKeys.add(key);
+      const descriptor = props.create(item, index);
+      prepended.push({
+        key,
+        element: createCompilerHostElement(root.ownerDocument, descriptor),
+        values: readKeyedRowBindingValues(props, item, index),
+        item,
+        index,
+        conditionalValues: EMPTY_KEYED_ROW_CONDITIONAL_VALUES,
+      });
+    }
+  } catch {
+    return undefined;
+  }
+
+  if (survivorRange) {
+    for (let index = 0; index < survivorRange.start; index += 1) {
+      previousInstances[index].scope?.cleanup();
+      previousInstances[index].element.remove();
+    }
+    for (let index = survivorRange.end; index < previousInstances.length; index += 1) {
+      previousInstances[index].scope?.cleanup();
+      previousInstances[index].element.remove();
+    }
+  } else {
+    const survivorSet = new Set(survivorIndices);
+    for (let index = 0; index < previousInstances.length; index += 1) {
+      if (survivorSet.has(index)) continue;
+      previousInstances[index].scope?.cleanup();
+      previousInstances[index].element.remove();
+    }
+  }
+  const survivors = survivorRange
+    ? previousInstances.slice(survivorRange.start, survivorRange.end)
+    : survivorIndices!.map((index) => previousInstances[index]);
+  if (prepended.length > 0) {
+    const fragment = root.ownerDocument.createDocumentFragment();
+    for (const instance of prepended) fragment.append(instance.element);
+    root.insertBefore(fragment, survivors[0]?.element || root.firstChild);
+  }
+  for (let index = 0; index < survivors.length; index += 1) {
+    survivors[index].index = update.prefixLength + index;
+  }
+  for (const { bindingUpdates, instance, item } of changed) {
+    applyPreparedKeyedRowBindingUpdates(props, instance, bindingUpdates);
+    instance.item = item;
+  }
+  return keyedRowInstancesByKey([...prepended, ...survivors]);
+}
+
 function reconcileCompilerKeyedArrayPrependWithStructural(
   ...args: Parameters<typeof reconcileCompilerKeyedArrayPrepend>
 ): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined {
   return (
+    reconcileCompilerKeyedArrayStructuralPrepend(...args) ||
+    reconcileCompilerKeyedArrayPrepend(...args)
+  );
+}
+
+function reconcileCompilerKeyedArrayPrependMapWithStructural(
+  ...args: Parameters<typeof reconcileCompilerKeyedArrayPrepend>
+): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined {
+  return (
+    reconcileCompilerKeyedArrayStructuralPrependMap(...args) ||
     reconcileCompilerKeyedArrayStructuralPrepend(...args) ||
     reconcileCompilerKeyedArrayPrepend(...args)
   );
@@ -9256,6 +9726,15 @@ export const keyedRowsStructuralPrependHintedRuntimeFeature: CompilerRuntimeFeat
   }),
 };
 
+export const keyedRowsStructuralPrependMapHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:structural-prepend-map-hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner, {
+      keyedUpdates: keyedCompleteStructuralPrependMapUpdateRuntime,
+    }),
+  }),
+};
+
 export const keyedRowsPrependHintedRuntimeFeature: CompilerRuntimeFeature = {
   name: "keyed-rows:prepend-hinted",
   create: (owner) => ({
@@ -9413,6 +9892,17 @@ export const keyedRowsConditionalStructuralPrependHintedRuntimeFeature: Compiler
   }),
 };
 
+export const keyedRowsConditionalStructuralPrependMapHintedRuntimeFeature: CompilerRuntimeFeature =
+  {
+    name: "keyed-rows:conditional:structural-prepend-map-hinted",
+    create: (owner) => ({
+      KeyedRows: createKeyedRowsBlockComponent(owner, {
+        conditionals: createKeyedRowConditionalRuntime(),
+        keyedUpdates: keyedCompleteStructuralPrependMapUpdateRuntime,
+      }),
+    }),
+  };
+
 export const keyedRowsConditionalPrependHintedRuntimeFeature: CompilerRuntimeFeature = {
   name: "keyed-rows:conditional:prepend-hinted",
   create: (owner) => ({
@@ -9568,6 +10058,16 @@ export const keyedRowsHostStructuralPrependHintedRuntimeFeature: CompilerRuntime
     KeyedRows: createKeyedRowsBlockComponent(owner, {
       hostBlocks: createKeyedRowHostRuntime(),
       keyedUpdates: keyedCompleteCompatibilityUpdateRuntime,
+    }),
+  }),
+};
+
+export const keyedRowsHostStructuralPrependMapHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:host:structural-prepend-map-hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner, {
+      hostBlocks: createKeyedRowHostRuntime(),
+      keyedUpdates: keyedCompleteStructuralPrependMapUpdateRuntime,
     }),
   }),
 };
@@ -9745,6 +10245,17 @@ export const keyedRowsCompleteStructuralPrependHintedRuntimeFeature: CompilerRun
   }),
 };
 
+export const keyedRowsCompleteStructuralPrependMapHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:complete:structural-prepend-map-hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponent(owner, {
+      conditionals: createKeyedRowConditionalRuntime(),
+      hostBlocks: createKeyedRowHostRuntime(),
+      keyedUpdates: keyedCompleteStructuralPrependMapUpdateRuntime,
+    }),
+  }),
+};
+
 export const keyedRowsCompletePrependHintedRuntimeFeature: CompilerRuntimeFeature = {
   name: "keyed-rows:complete:prepend-hinted",
   create: (owner) => ({
@@ -9773,7 +10284,7 @@ const keyedRowsCompleteCompatibilityRuntimeFeature: CompilerRuntimeFeature = {
     KeyedRows: createKeyedRowsBlockComponent(owner, {
       conditionals: createKeyedRowConditionalRuntime(),
       hostBlocks: createKeyedRowHostRuntime(),
-      keyedUpdates: keyedCompleteCompatibilityUpdateRuntime,
+      keyedUpdates: keyedCompleteStructuralPrependMapUpdateRuntime,
     }),
   }),
 };
