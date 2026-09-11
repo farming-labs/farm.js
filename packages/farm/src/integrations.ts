@@ -3183,7 +3183,11 @@ function matchesMethod(methods: readonly string[], method: string | undefined): 
     return false;
   }
 
-  return methods.some((item) => item.toUpperCase() === method.toUpperCase());
+  const normalizedMethod = method.toUpperCase();
+  return methods.some((item) => {
+    const candidate = item.toUpperCase();
+    return candidate === "ALL" || candidate === normalizedMethod;
+  });
 }
 
 function matchesMatcher(
