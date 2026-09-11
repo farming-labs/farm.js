@@ -88,7 +88,6 @@ const DEFAULT_MAX_RESPONSE_BODY_BYTES = 1024 * 1024 * 5;
 const DEFAULT_POLL_REQUEST_LIMIT = 50;
 const HOP_BY_HOP_HEADERS = new Set([
   "connection",
-  "content-encoding",
   "content-length",
   "keep-alive",
   "proxy-authenticate",
@@ -680,7 +679,7 @@ async function proxyPublicRequest(
   const responseHopByHopHeaders = getHopByHopHeaderNames(response.headers || {});
   for (const [key, value] of Object.entries(response.headers || {})) {
     const normalized = key.toLowerCase();
-    if (responseHopByHopHeaders.has(normalized)) {
+    if (responseHopByHopHeaders.has(normalized) || normalized === "content-encoding") {
       continue;
     }
     // Append multi-valued headers (Set-Cookie) so every value reaches the
