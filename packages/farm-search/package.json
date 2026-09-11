@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/search",
-  "version": "0.1.0-beta.0",
+  "version": "0.1.0-beta.1",
   "description": "Build-time static page search for Farm.js applications",
   "keywords": [
     "farm.js",
