@@ -65,6 +65,14 @@ describe("resolveScriptsOptions", () => {
     expect(() => defineScript({ name: "x", src: "/vendor/unsafe\nscript.js" })).toThrow(
       "control characters",
     );
+    for (const [index, src] of [
+      "/%2e%2e/vendor.js",
+      "/vendor/%2Fscript.js",
+      "/vendor/%5cscript.js",
+      "/vendor/%00script.js",
+    ].entries()) {
+      expect(() => defineScript({ name: `unstable-${index}`, src })).toThrow("browser-unstable");
+    }
     expect(() =>
       defineScript({ name: "x", src: "/vendor.js", global: "window.__proto__.x" }),
     ).toThrow("relative to window");
