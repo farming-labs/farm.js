@@ -199,6 +199,19 @@ describe("createFarmDocsHandler", () => {
     expect(response == null || response.status === 404).toBe(true);
   });
 
+  it("does not serve docs files through symlinks outside the content directory", async () => {
+    const { root, docs, docsDir } = await createDocsFixture();
+    const privateDir = path.join(root, "private");
+    await fs.mkdir(privateDir);
+    await fs.writeFile(path.join(privateDir, "page.md"), "# Private\n\nTOP_SECRET_VALUE");
+    await fs.symlink(privateDir, path.join(docsDir, "leak"), "junction");
+
+    const handler = createFarmDocsHandler(docs, { root, srcDir: "src" });
+    const response = await handler(new Request("http://farm.test/docs/leak"));
+
+    expect(response == null || response.status === 404).toBe(true);
+  });
+
   it("serves docs markdown files as HTML", async () => {
     const { root, docs } = await createDocsFixture();
     const handler = createFarmDocsHandler(docs, { root, srcDir: "src" });
