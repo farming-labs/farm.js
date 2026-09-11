@@ -69,6 +69,143 @@ describe("React AOT keyed-array rolling-window hints", () => {
     expect(result.code).toContain("trimCount");
   });
 
+  it("retains same-key maps on both sides of one rolling-window setter", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Feed({ next, editedId, nextLabel }) {
+        const [rows, setRows] = useState([{ id: "a", label: "Alpha" }]);
+        return <section>
+          <button onClick={() => {
+            setRows((current) => current.map((row) =>
+              row.id === editedId ? { ...row, label: nextLabel } : row
+            ));
+            setRows((current) => [...current.slice(1), next]);
+            setRows((current) => current.map((row) =>
+              row.id === next.id ? { ...row, selected: true } : row
+            ));
+          }}>Roll and edit</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </section>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Feed"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.optimizations.keyedArrayRollingWindowHints).toBe(1);
+    expect(result.optimizations.keyedMapUpdateHints).toBe(2);
+    expect(result.code).toContain("createCompilerKeyedArrayQueuedMapPipeline");
+    expect(result.code).toContain("finalizeCompilerKeyedArrayMappedStructuralUpdate");
+    expect(result.code).toContain("createCompilerKeyedArrayMappedStructuralAppend");
+    expect(result.code).toContain("createCompilerKeyedArrayStructuralAppendMapPipeline");
+    expect(result.code).toContain("keyedRowsStructuralAppendMapHintedRuntimeFeature");
+    expect(result.code).not.toContain("createCompilerKeyedArrayRollingWindow");
+  });
+
+  it("lowers a rolling window followed by maps through the structural append runtime", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Feed({ next, editedId, nextLabel }) {
+        const [rows, setRows] = useState([{ id: "a", label: "Alpha" }]);
+        return <section>
+          <button onClick={() => {
+            setRows((current) => [...current.slice(1), next]);
+            setRows((current) => current.map((row) =>
+              row.id === editedId ? { ...row, label: nextLabel } : row
+            ));
+          }}>Roll and edit</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </section>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Feed"]);
+    expect(result.optimizations.keyedArrayRollingWindowHints).toBe(1);
+    expect(result.optimizations.keyedMapUpdateHints).toBe(1);
+    expect(result.code).toContain("createCompilerKeyedArrayStructuralAppend");
+    expect(result.code).toContain("createCompilerKeyedArrayStructuralAppendMapPipeline");
+    expect(result.code).toContain("keyedRowsStructuralAppendMapHintedRuntimeFeature");
+    expect(result.code).not.toContain("createCompilerKeyedArrayRollingWindow");
+  });
+
+  it("keeps the dedicated rolling helper when mapped and plain sites share a module", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Feed({ next, editedId, nextLabel }) {
+        const [rows, setRows] = useState([{ id: "a", label: "Alpha" }]);
+        return <section>
+          <button onClick={() => {
+            setRows((current) => [...current.slice(1), next]);
+          }}>Roll</button>
+          <button onClick={() => {
+            setRows((current) => current.map((row) =>
+              row.id === editedId ? { ...row, label: nextLabel } : row
+            ));
+            setRows((current) => [...current.slice(1), next]);
+          }}>Map and roll</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </section>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Feed"]);
+    expect(result.optimizations.keyedArrayRollingWindowHints).toBe(2);
+    expect(result.code).toContain("createCompilerKeyedArrayRollingWindow");
+    expect(result.code).toContain("createCompilerKeyedArrayMappedStructuralAppend");
+    expect(result.code).toContain("keyedRowsStructuralAppendMapHintedRuntimeFeature");
+  });
+
+  it("does not merge maps with a segment containing two rolling setters", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Feed({ next, editedId, nextLabel }) {
+        const [rows, setRows] = useState([{ id: "a", label: "Alpha" }]);
+        return <section>
+          <button onClick={() => {
+            setRows((current) => current.map((row) =>
+              row.id === editedId ? { ...row, label: nextLabel } : row
+            ));
+            setRows((current) => [...current.slice(1), next]);
+            setRows((current) => [...current.slice(1), next]);
+            setRows((current) => current.map((row) =>
+              row.id === next.id ? { ...row, selected: true } : row
+            ));
+          }}>Roll twice</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </section>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Feed"]);
+    expect(result.optimizations.keyedArrayRollingWindowHints).toBe(2);
+    expect(result.code).toContain("createCompilerKeyedArrayRollingWindow");
+    expect(result.code).not.toContain("createCompilerKeyedArrayMappedStructuralAppend");
+    expect(result.code).not.toContain("createCompilerKeyedArrayStructuralAppendMapPipeline");
+  });
+
+  it("does not connect rolling-window maps across another statement", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Feed({ next, editedId, nextLabel }) {
+        const [rows, setRows] = useState([{ id: "a", label: "Alpha" }]);
+        return <section>
+          <button onClick={() => {
+            setRows((current) => [...current.slice(1), next]);
+            logRoll();
+            setRows((current) => current.map((row) =>
+              row.id === editedId ? { ...row, label: nextLabel } : row
+            ));
+          }}>Roll and edit</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </section>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Feed"]);
+    expect(result.code).toContain("createCompilerKeyedArrayRollingWindow");
+    expect(result.code).not.toContain("createCompilerKeyedArrayStructuralAppendMapPipeline");
+    expect(result.code).not.toContain("keyedRowsStructuralAppendMapHintedRuntimeFeature");
+  });
+
   it.each([
     {
       name: "an index-dependent row",

@@ -2,6 +2,41 @@
 
 Latest run: 2026-09-11
 
+## Mapped updates through a rolling window — 2026-09-11
+
+Immediately adjacent, same-key `map()` setters can now retain committed-row lineage across one
+rolling-window update. The maintained workload updates retained data, expires a 1,000-row prefix,
+appends a 1,000-row suffix, and applies another map before React commits. Previously, the rolling
+step discarded the mapped lineage and the final update used complete keyed reconciliation. The new
+path validates the final array and keys before the first DOM write, patches changed survivors,
+preserves unchanged rows, and creates only the incoming suffix.
+
+| Mode   | Map + roll + map | Compiled fallback | vs React | vs fallback |
+| ------ | ---------------: | ----------------: | -------: | ----------: |
+| Static |         16.50 ms |          27.10 ms |    4.10x |       1.64x |
+| Hybrid |         16.30 ms |          29.10 ms |    4.15x |       1.79x |
+
+Both modes passed the 2x React and 1.25x compiled-control floors. The bracketed React median was
+67.70 ms. Every sample checked the final 10,000-row count, the changed retained value, preserved
+survivor DOM identity, a fresh suffix, browser errors, and zero compiled owner executions. The
+broad 10% no-regression gate and the 10k/20k optimization-persistence gate passed. Two unchanged
+hybrid reorder controls were noisy: structural reorder measured 1.2466x against its 1.25x control
+floor, and queued map-then-reorder measured 1.157x against its 1.20x control floor. Their React
+speedups remained 3.35x and 8.99x, respectively. No threshold was relaxed.
+
+Compiler coverage includes maps before, after, and on both sides of one rolling setter; mixed plain
+and mapped sites; and conservative fallback for multiple rolling setters or an intervening
+statement. Runtime coverage checks changed-key fallback before mutation, exact key, descriptor, and
+binding work, controlled-input focus and selection, delegated indexes, Strict Mode hydration,
+recoverable errors, unmount-before-flush cleanup, React 18.3.1 and 19.2.8, and 2,000 randomized
+transitions matched with normal React. The implementation reuses the existing optional structural
+append/map runtime; the runtime-size suite remains green with an 84.9% core-runtime gzip reduction.
+
+Numbers are browser medians from a complete production-build run with 5 warmups, 10 measured
+samples per compiler action, 20 bracketed React samples, and 3 scale cycles, using Chrome
+153.0.8010.36 and Node.js 23.11.0 on Apple M1 macOS arm64. Correctness and the new performance gate
+passed; the command reported the two isolated unchanged timing misses described above.
+
 ## Queued removal followed by prepend — 2026-09-11
 
 An index-independent keyed-row `filter()` or bounded `slice()` can now retain its committed-row

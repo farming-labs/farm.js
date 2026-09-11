@@ -143,6 +143,13 @@ React and 1.25x faster than their compiled controls. The report must contain a n
 proportional only to the final incoming suffix, randomized dynamic and queued updates, and complete
 fallback for unsafe evaluated bounds or broken chains.
 
+Mapped rolling windows have another independent 10,000-row gate. The workload updates retained
+row data, expires a 1,000-row prefix while appending 1,000 rows, and applies a second same-key map
+before the commit. The concise path is measured against React and an equivalent compiled control
+whose block-bodied rolling setter intentionally breaks lineage. Both compiler modes must remain at
+least 2x faster than React and 1.25x faster than that control. Every sample verifies the retained
+DOM identity, mapped value, exact row count, fresh suffix, and zero compiled owner executions.
+
 Exact-position insertions, removals, and replacements have separate 10,000-row comparisons. Concise
 native `toSpliced(position, 0, item)`, `toSpliced(position, 0, ...items)`, `toSpliced(position, 1)`,
 `toSpliced(position, 64)`, `toSpliced(position, 1, replacement)`, and

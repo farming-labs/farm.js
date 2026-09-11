@@ -3000,6 +3000,194 @@ function rewriteQueuedKeyedArrayStructuralPrependMapHints(
   };
 }
 
+function rewriteQueuedKeyedArrayRollingWindowMapHints(
+  root: t.JSXElement,
+  statesBySetter: ReadonlyMap<string, StateBinding>,
+  mapUpdateIdentifier: t.Identifier,
+  mapPipelineIdentifier: t.Identifier,
+  queuedMapPipelineIdentifier: t.Identifier,
+  rollingWindowIdentifier: t.Identifier,
+  structuralAppendIdentifier: t.Identifier,
+  mappedStructuralAppendIdentifier: t.Identifier,
+  structuralAppendMapPipelineIdentifier: t.Identifier,
+  mappedStructuralIdentifier: t.Identifier,
+  allowed: boolean,
+): {
+  root: t.JSXElement;
+  leadingMapCount: number;
+  mappedRollingWindowCount: number;
+  rollingWindowCount: number;
+  structuralRollingWindowCount: number;
+  trailingMapCount: number;
+} {
+  if (!allowed) {
+    return {
+      root: t.cloneNode(root, true),
+      leadingMapCount: 0,
+      mappedRollingWindowCount: 0,
+      rollingWindowCount: 0,
+      structuralRollingWindowCount: 0,
+      trailingMapCount: 0,
+    };
+  }
+  const file = expressionFile(t.cloneNode(root, true));
+  let leadingMapCount = 0;
+  let mappedRollingWindowCount = 0;
+  let rollingWindowCount = 0;
+  let structuralRollingWindowCount = 0;
+  let trailingMapCount = 0;
+
+  type MapStep = {
+    count: number;
+    updater: t.ArrowFunctionExpression & { body: t.CallExpression };
+  };
+  type RollingStep = {
+    call: t.CallExpression;
+  };
+  type SegmentStep = { kind: "map"; value: MapStep } | { kind: "rolling"; value: RollingStep };
+
+  const mapStep = (updater: t.ArrowFunctionExpression): MapStep | undefined => {
+    if (!t.isCallExpression(updater.body)) return undefined;
+    const count =
+      countKeyedArrayMapPipeline(updater, mapUpdateIdentifier) ||
+      countKeyedArrayMapPipeline(updater, mapPipelineIdentifier);
+    return count > 0
+      ? {
+          count,
+          updater: updater as t.ArrowFunctionExpression & { body: t.CallExpression },
+        }
+      : undefined;
+  };
+  const rollingStep = (updater: t.ArrowFunctionExpression): RollingStep | undefined => {
+    if (!t.isBlockStatement(updater.body)) return undefined;
+    const statement = updater.body.body.at(-1);
+    if (
+      !t.isReturnStatement(statement) ||
+      !statement.argument ||
+      !t.isCallExpression(statement.argument) ||
+      !t.isIdentifier(statement.argument.callee, { name: rollingWindowIdentifier.name }) ||
+      statement.argument.arguments.length !== 3 ||
+      !t.isExpression(statement.argument.arguments[1]) ||
+      !t.isExpression(statement.argument.arguments[2])
+    ) {
+      return undefined;
+    }
+    return { call: statement.argument };
+  };
+
+  traverse(file, {
+    BlockStatement(path) {
+      let segment: SegmentStep[] = [];
+      let segmentState: number | undefined;
+      const flushSegment = (): void => {
+        const rollingIndices = segment.flatMap((step, index) =>
+          step.kind === "rolling" ? [index] : [],
+        );
+        if (rollingIndices.length !== 1 || segment.length < 2) {
+          segment = [];
+          segmentState = undefined;
+          return;
+        }
+        const rollingIndex = rollingIndices[0];
+        const leadingMaps = segment.slice(0, rollingIndex).filter((step) => step.kind === "map");
+        const trailingMaps = segment.slice(rollingIndex + 1).filter((step) => step.kind === "map");
+        if (leadingMaps.length === 0 && trailingMaps.length === 0) {
+          segment = [];
+          segmentState = undefined;
+          return;
+        }
+
+        const rolling = segment[rollingIndex];
+        if (rolling.kind !== "rolling") return;
+        const retained = rolling.value.call.arguments[1];
+        const value = rolling.value.call.arguments[2];
+        if (!t.isExpression(retained) || !t.isExpression(value)) return;
+        const hasLeadingMaps = leadingMaps.length > 0;
+        rolling.value.call.callee = t.cloneNode(
+          hasLeadingMaps ? mappedStructuralAppendIdentifier : structuralAppendIdentifier,
+        );
+        rolling.value.call.arguments = [
+          hasLeadingMaps
+            ? t.callExpression(t.cloneNode(mappedStructuralIdentifier), [
+                t.cloneNode(retained, true),
+              ])
+            : t.cloneNode(retained, true),
+          t.cloneNode(value, true),
+        ];
+        rollingWindowCount += 1;
+        if (hasLeadingMaps) {
+          mappedRollingWindowCount += 1;
+          for (const step of leadingMaps) {
+            if (step.kind !== "map") continue;
+            step.value.updater.body.callee = t.cloneNode(queuedMapPipelineIdentifier);
+            leadingMapCount += step.value.count;
+          }
+        } else {
+          structuralRollingWindowCount += 1;
+        }
+        for (const step of trailingMaps) {
+          if (step.kind !== "map") continue;
+          step.value.updater.body.callee = t.cloneNode(structuralAppendMapPipelineIdentifier);
+          trailingMapCount += step.value.count;
+        }
+        segment = [];
+        segmentState = undefined;
+      };
+
+      const statements = path.get("body") as NodePath<t.Statement>[];
+      for (const statementPath of statements) {
+        const statement = statementPath.node;
+        if (!t.isExpressionStatement(statement) || !t.isCallExpression(statement.expression)) {
+          flushSegment();
+          continue;
+        }
+        const setterCall = statement.expression;
+        if (
+          !t.isIdentifier(setterCall.callee) ||
+          statementPath.scope.hasBinding(setterCall.callee.name) ||
+          setterCall.arguments.length !== 1
+        ) {
+          flushSegment();
+          continue;
+        }
+        const state = statesBySetter.get(setterCall.callee.name);
+        const updater = setterCall.arguments[0];
+        if (
+          !state ||
+          !t.isArrowFunctionExpression(updater) ||
+          updater.async ||
+          updater.generator ||
+          updater.params.length !== 1 ||
+          !t.isIdentifier(updater.params[0])
+        ) {
+          flushSegment();
+          continue;
+        }
+        if (segmentState !== undefined && segmentState !== state.index) flushSegment();
+        const nextMap = mapStep(updater);
+        const nextRolling = rollingStep(updater);
+        if (!nextMap && !nextRolling) {
+          flushSegment();
+          continue;
+        }
+        segmentState = state.index;
+        segment.push(
+          nextMap ? { kind: "map", value: nextMap } : { kind: "rolling", value: nextRolling! },
+        );
+      }
+      flushSegment();
+    },
+  });
+  return {
+    root: (file.program.body[0] as t.ExpressionStatement).expression as t.JSXElement,
+    leadingMapCount,
+    mappedRollingWindowCount,
+    rollingWindowCount,
+    structuralRollingWindowCount,
+    trailingMapCount,
+  };
+}
+
 function rewriteQueuedKeyedArrayStructuralReorderHints(
   root: t.JSXElement,
   statesBySetter: ReadonlyMap<string, StateBinding>,
@@ -8370,11 +8558,13 @@ function compileCandidate(
     keyedArrayMapReorderHints: number;
     keyedArrayMapSortHints: number;
     keyedArrayMapUpdateHints: number;
+    keyedArrayMappedRollingWindowHints: number;
     keyedArrayMappedStructuralHints: number;
     keyedArrayMappedStructuralAppendHints: number;
     keyedArrayMappedStructuralPrependHints: number;
     keyedArrayQueuedMapUpdateHints: number;
     keyedArrayStructuralAppendMapHints: number;
+    keyedArrayStructuralRollingWindowHints: number;
     keyedArrayStructuralPrependMapHints: number;
     keyedArrayStructuralReorderHints: number;
     keyedArrayStructuralSortHints: number;
@@ -9225,6 +9415,60 @@ function compileCandidate(
         queuedStructuralPrependMapHintedRoot.structuralPrependMapCount;
     }
   }
+  const queuedRollingWindowMapHintedRoot = rewriteQueuedKeyedArrayRollingWindowMapHints(
+    expandedReactiveRoot,
+    statesBySetter,
+    keyedMapUpdateIdentifier,
+    keyedArrayMapPipelineIdentifier,
+    keyedArrayQueuedMapPipelineIdentifier,
+    keyedArrayRollingWindowIdentifier,
+    keyedArrayAppendIdentifier,
+    keyedArrayMappedStructuralAppendIdentifier,
+    keyedArrayStructuralAppendMapPipelineIdentifier,
+    keyedArrayMappedStructuralIdentifier,
+    allowKeyedArrayMapPipelines,
+  );
+  let appliedMappedRollingWindowHints = 0;
+  if (queuedRollingWindowMapHintedRoot.rollingWindowCount > 0) {
+    const hintedBlockAnalysis = analyzeComposableBlocks(
+      queuedRollingWindowMapHintedRoot.root,
+      reactiveByValue,
+      safeGlobals,
+      listNames,
+      allowedComponentNames,
+    );
+    const hintedAnalysis = analyzeHostTree(
+      queuedRollingWindowMapHintedRoot.root,
+      reactiveByValue,
+      safeGlobals,
+      hintedBlockAnalysis.conditionalExpressions || new Set<t.Expression>(),
+      hintedBlockAnalysis.keyedExpressions || new Set<t.Expression>(),
+      hintedBlockAnalysis.ownedElements || new Set<t.JSXElement>(),
+      hintedBlockAnalysis.componentElements || new Set<t.JSXElement>(),
+    );
+    if (!hintedBlockAnalysis.reason && !hintedAnalysis.reason) {
+      expandedReactiveRoot = queuedRollingWindowMapHintedRoot.root;
+      blockAnalysis = hintedBlockAnalysis;
+      analysis = hintedAnalysis;
+      appliedMappedRollingWindowHints = queuedRollingWindowMapHintedRoot.rollingWindowCount;
+      appliedQueuedStructuralAppendMapHints +=
+        queuedRollingWindowMapHintedRoot.mappedRollingWindowCount +
+        queuedRollingWindowMapHintedRoot.trailingMapCount;
+      compilerUsage.keyedArrayMapUpdateHints +=
+        queuedRollingWindowMapHintedRoot.leadingMapCount +
+        queuedRollingWindowMapHintedRoot.trailingMapCount;
+      compilerUsage.keyedArrayQueuedMapUpdateHints +=
+        queuedRollingWindowMapHintedRoot.leadingMapCount;
+      compilerUsage.keyedArrayStructuralAppendMapHints +=
+        queuedRollingWindowMapHintedRoot.trailingMapCount;
+      compilerUsage.keyedArrayMappedRollingWindowHints +=
+        queuedRollingWindowMapHintedRoot.mappedRollingWindowCount;
+      compilerUsage.keyedArrayMappedStructuralHints +=
+        queuedRollingWindowMapHintedRoot.mappedRollingWindowCount;
+      compilerUsage.keyedArrayStructuralRollingWindowHints +=
+        queuedRollingWindowMapHintedRoot.structuralRollingWindowCount;
+    }
+  }
   const queuedMapReorderHintedRoot = rewriteQueuedKeyedArrayMapReorderHints(
     expandedReactiveRoot,
     statesBySetter,
@@ -9427,8 +9671,9 @@ function compileCandidate(
     blockPlans,
     hasKeyedUpdateHints,
     hasKeyedArrayRemovalHints,
-    appliedKeyedArrayAppendHints > 0 &&
-      (appliedKeyedArrayFilterHints > 0 || appliedKeyedArraySliceHints > 0),
+    (appliedKeyedArrayAppendHints > 0 &&
+      (appliedKeyedArrayFilterHints > 0 || appliedKeyedArraySliceHints > 0)) ||
+      compilerUsage.keyedArrayStructuralRollingWindowHints > 0,
     appliedQueuedStructuralAppendMapHints > 0,
     appliedKeyedArrayPrependHints > 0,
     appliedKeyedArrayPrependHints > 0 && hasKeyedArrayRemovalHints,
@@ -9441,7 +9686,7 @@ function compileCandidate(
       appliedQueuedReorderMapHints > 0 ||
       appliedQueuedMappedStructuralHints > 0 ||
       appliedQueuedStructuralMapHints > 0,
-    appliedKeyedArrayRollingWindowHints > 0,
+    appliedKeyedArrayRollingWindowHints > appliedMappedRollingWindowHints,
   );
   markShortCircuitBindings(analysis.bindings || []);
   assignStableBindingTargets(analysis.bindings || []);
@@ -9655,11 +9900,13 @@ export async function compileReactModule(
     keyedArrayMapReorderHints: 0,
     keyedArrayMapSortHints: 0,
     keyedArrayMapUpdateHints: 0,
+    keyedArrayMappedRollingWindowHints: 0,
     keyedArrayMappedStructuralHints: 0,
     keyedArrayMappedStructuralAppendHints: 0,
     keyedArrayMappedStructuralPrependHints: 0,
     keyedArrayQueuedMapUpdateHints: 0,
     keyedArrayStructuralAppendMapHints: 0,
+    keyedArrayStructuralRollingWindowHints: 0,
     keyedArrayStructuralPrependMapHints: 0,
     keyedArrayStructuralReorderHints: 0,
     keyedArrayStructuralSortHints: 0,
@@ -9846,9 +10093,10 @@ export async function compileReactModule(
         const hasKeyedArrayMapReorderHints =
           compilerUsage.keyedArrayMapReorderHints + compilerUsage.keyedArrayMapSortHints > 0;
         const hasKeyedArrayStructuralAppendHints =
-          optimizationCounts.keyedArrayAppendHints > 0 &&
-          (optimizationCounts.keyedArrayFilterHints > 0 ||
-            optimizationCounts.keyedArraySliceHints > 0);
+          (optimizationCounts.keyedArrayAppendHints > 0 &&
+            (optimizationCounts.keyedArrayFilterHints > 0 ||
+              optimizationCounts.keyedArraySliceHints > 0)) ||
+          compilerUsage.keyedArrayStructuralRollingWindowHints > 0;
         const hasUnmappedKeyedArrayAppendHints =
           optimizationCounts.keyedArrayAppendHints >
           compilerUsage.keyedArrayMappedStructuralAppendHints;
@@ -9916,7 +10164,8 @@ export async function compileReactModule(
                       ),
                     ]
                   : []),
-                ...(compilerUsage.keyedArrayMappedStructuralAppendHints > 0
+                ...(compilerUsage.keyedArrayMappedStructuralAppendHints > 0 ||
+                compilerUsage.keyedArrayMappedRollingWindowHints > 0
                   ? [
                       t.importSpecifier(
                         keyedArrayMappedStructuralAppendIdentifier,
@@ -9940,7 +10189,8 @@ export async function compileReactModule(
                       ),
                     ]
                   : []),
-                ...(hasUnmappedKeyedArrayAppendHints
+                ...(hasUnmappedKeyedArrayAppendHints ||
+                compilerUsage.keyedArrayStructuralRollingWindowHints > 0
                   ? [
                       t.importSpecifier(
                         keyedArrayAppendIdentifier,
@@ -10033,7 +10283,9 @@ export async function compileReactModule(
                       ),
                     ]
                   : []),
-                ...(optimizationCounts.keyedArrayRollingWindowHints > 0
+                ...(optimizationCounts.keyedArrayRollingWindowHints >
+                compilerUsage.keyedArrayMappedRollingWindowHints +
+                  compilerUsage.keyedArrayStructuralRollingWindowHints
                   ? [
                       t.importSpecifier(
                         keyedArrayRollingWindowIdentifier,
