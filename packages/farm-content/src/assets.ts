@@ -246,14 +246,15 @@ export async function resolveContentAsset(
       error,
     );
   }
-  assertInsideRoot(actualPath, await realpath(context.root), context, diagnosticPath);
+  const actualRoot = await realpath(context.root);
+  assertInsideRoot(actualPath, actualRoot, context, diagnosticPath);
   context.sourceFiles.add(actualPath);
   if (!fileStats.isFile()) {
     throw assetError(context, diagnosticPath, `Asset ${JSON.stringify(reference)} is not a file`);
   }
 
   const bytes = await readFile(actualPath);
-  const token = registerAssetImport(actualPath, context.imports);
+  const token = registerAssetImport(actualPath, actualRoot, context.imports);
   const common = {
     src: `${token}${parsed.suffix}`,
     source: reference,
@@ -433,8 +434,12 @@ function parseRelativeAssetReference(
   return { path: decodedPath, suffix };
 }
 
-function registerAssetImport(filePath: string, imports: Map<string, ContentAssetImport>): string {
-  const normalized = filePath.replace(/\\/g, "/");
+function registerAssetImport(
+  filePath: string,
+  root: string,
+  imports: Map<string, ContentAssetImport>,
+): string {
+  const normalized = path.relative(root, filePath).replace(/\\/g, "/");
   const token = `__FARM_CONTENT_ASSET_${createHash("sha256")
     .update(normalized)
     .digest("hex")

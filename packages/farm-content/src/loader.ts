@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 import fg from "fast-glob";
 import matter from "gray-matter";
@@ -52,6 +52,9 @@ export async function writeContentServerModule(
   collections: Readonly<Record<string, readonly ContentEntry<any>[]>>,
   assetImports: ReadonlyMap<string, ContentAssetImport> = new Map(),
 ): Promise<void> {
+  const outputDirectory = path.dirname(outputFile);
+  await mkdir(outputDirectory, { recursive: true });
+  const actualOutputDirectory = await realpath(outputDirectory);
   const encoded = encodeContentValue(collections);
   const imports = [...assetImports.values()].sort((left, right) =>
     left.token.localeCompare(right.token),
@@ -59,7 +62,9 @@ export async function writeContentServerModule(
   const importSource = imports
     .map(
       (asset, index) =>
-        `import farmContentAsset${index} from ${JSON.stringify(`${toViteFileId(asset.filePath)}?url`)};`,
+        `import farmContentAsset${index} from ${JSON.stringify(
+          `${toViteImportSpecifier(actualOutputDirectory, asset.filePath)}?url`,
+        )};`,
     )
     .join("\n");
   const assetUrls = imports.length
@@ -77,7 +82,6 @@ export const getCollection = runtime.getCollection;
 export const getEntry = runtime.getEntry;
 export const getEntryOrThrow = runtime.getEntryOrThrow;
 `;
-  await mkdir(path.dirname(outputFile), { recursive: true });
   await writeFileIfChanged(outputFile, source);
 }
 
@@ -318,9 +322,9 @@ function normalizePath(value: string): string {
   return value.replace(/\\/g, "/");
 }
 
-function toViteFileId(filePath: string): string {
-  const normalized = normalizePath(filePath);
-  return normalized.startsWith("/") ? `/@fs${normalized}` : `/@fs/${normalized}`;
+function toViteImportSpecifier(outputDirectory: string, filePath: string): string {
+  const relative = normalizePath(path.relative(outputDirectory, filePath));
+  return relative.startsWith(".") ? relative : `./${relative}`;
 }
 
 type EncodedContentValue =

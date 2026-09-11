@@ -48,6 +48,38 @@ const postSchema = {
 };
 
 describe("content collection loading", () => {
+  it("generates identical asset modules from identical checkout layouts", async () => {
+    const buildGeneratedModule = async () => {
+      const root = await fixtureRoot();
+      await writeFile(
+        path.join(root, "content", "posts", "hello.md"),
+        "---\ntitle: Hello\nhero: ./hero.svg\n---\nHello\n",
+      );
+      await writeFile(
+        path.join(root, "content", "posts", "hero.svg"),
+        '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"/>',
+      );
+      const loaded = await loadContentCollections(root, {
+        posts: collection({
+          source: files("content/posts/hello.md"),
+          schema: {
+            parse(value: unknown) {
+              return { title: String((value as Record<string, unknown>).title) };
+            },
+          },
+          assets: { hero: asset.image() },
+        }),
+      });
+      const output = path.join(root, ".farm", "content", "server.mjs");
+      await writeContentServerModule(output, loaded.collections, loaded.assetImports);
+      const source = await readFile(output, "utf8");
+      expect(source).toContain('from "../../content/posts/hero.svg?url"');
+      return source;
+    };
+
+    expect(await buildGeneratedModule()).toBe(await buildGeneratedModule());
+  });
+
   it("loads Markdown, MDX, and JSON with stable IDs and transformed data", async () => {
     const root = await fixtureRoot();
     const loaded = await loadContentCollections(root, {
