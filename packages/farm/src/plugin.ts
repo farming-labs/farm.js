@@ -11,6 +11,11 @@ import {
   setRequestContext,
 } from "./request-context";
 import { getFarmPluginIntegrationContext } from "./plugin-integration-context";
+import { normalizeFarmBasePath, stripFarmBasePath } from "./base-path";
+import {
+  normalizeFarmPluginRuntimeEndpointPath,
+  normalizeRuntimeEndpointRequestPath,
+} from "./plugin-runtime-endpoint";
 
 type MaybePromise<T> = T | Promise<T>;
 declare const FARM_PLUGIN_INTEGRATION_INSTANCE: unique symbol;
@@ -183,6 +188,7 @@ export interface ShutdownPayload {
 
 export type FarmPluginRuntimeKind =
   | "request"
+  | "endpoint"
   | "page"
   | "api"
   | "action"
@@ -227,6 +233,30 @@ export type FarmPluginRuntimeContextEvent<
   TState = unknown,
   TIntegrationInstance = unknown,
 > = FarmPluginRuntimeBaseEvent<TState, TIntegrationInstance>;
+
+export interface FarmPluginRuntimeEndpointEvent<
+  TState = unknown,
+  TIntegrationInstance = unknown,
+> extends FarmPluginRuntimeBaseEvent<TState, TIntegrationInstance> {
+  /** Normalized application-relative path registered by the endpoint. */
+  path: string;
+}
+
+export interface FarmPluginRuntimeEndpoint<
+  TState = unknown,
+  TIntegrationInstance = unknown,
+  TIntegrationBound extends boolean = false,
+> {
+  /** Exact application-relative pathname, before Farm's configured basePath. */
+  path: string;
+  handler(
+    event: FarmPluginRuntimeEventFor<
+      FarmPluginRuntimeEndpointEvent<TState, TIntegrationInstance>,
+      TIntegrationInstance,
+      TIntegrationBound
+    >,
+  ): MaybePromise<Response>;
+}
 
 export interface FarmPluginRuntimeBeforeEvent<
   TState = unknown,
@@ -311,6 +341,8 @@ export interface FarmPluginRuntimeHooks<
   TIntegrationInstance = unknown,
   TIntegrationBound extends boolean = false,
 > {
+  /** Exact request endpoints owned by this plugin. */
+  endpoints?: readonly FarmPluginRuntimeEndpoint<TState, TIntegrationInstance, TIntegrationBound>[];
   start?(
     event: FarmPluginRuntimeEventFor<
       FarmPluginRuntimeStartEvent<TState, TIntegrationInstance>,
@@ -647,6 +679,11 @@ export class PluginManager {
   private plugins: FarmPlugin[] = [];
   private hookPresence = new Map<keyof FarmPlugin, boolean>();
   private runtimeHookPresence = new Map<"context" | "before" | "after" | "error", boolean>();
+  private runtimeEndpoints?: Array<{
+    plugin: FarmPlugin;
+    endpoint: FarmPluginRuntimeEndpoint;
+    path: string;
+  }>;
   private context: FarmPluginContext;
   private pluginStates = new Map<FarmPlugin, unknown>();
   private setupComplete = false;
@@ -778,6 +815,99 @@ export class PluginManager {
       signal: request.signal,
       waitUntil,
     };
+  }
+
+  private getRuntimeEndpoints(): Array<{
+    plugin: FarmPlugin;
+    endpoint: FarmPluginRuntimeEndpoint;
+    path: string;
+  }> {
+    if (this.runtimeEndpoints) return this.runtimeEndpoints;
+
+    const endpoints: Array<{
+      plugin: FarmPlugin;
+      endpoint: FarmPluginRuntimeEndpoint;
+      path: string;
+    }> = [];
+    const owners = new Map<string, string>();
+
+    for (const plugin of this.getSortedPlugins()) {
+      const configured = plugin.runtime?.endpoints;
+      if (configured === undefined) continue;
+      if (!Array.isArray(configured)) {
+        throw new TypeError(`Farm plugin "${plugin.name}" runtime.endpoints must be an array`);
+      }
+
+      for (const endpoint of configured) {
+        if (!endpoint || typeof endpoint !== "object") {
+          throw new TypeError(
+            `Farm plugin "${plugin.name}" runtime.endpoints must contain endpoint objects`,
+          );
+        }
+        const path = normalizeFarmPluginRuntimeEndpointPath(
+          endpoint.path,
+          `Farm plugin "${plugin.name}" runtime endpoint`,
+        );
+        if (typeof endpoint.handler !== "function") {
+          throw new TypeError(
+            `Farm plugin "${plugin.name}" runtime endpoint ${path} requires a handler`,
+          );
+        }
+        const owner = owners.get(path);
+        if (owner) {
+          throw new Error(
+            `Farm plugin runtime endpoint ${path} from "${plugin.name}" conflicts with "${owner}"`,
+          );
+        }
+        owners.set(path, plugin.name);
+        endpoints.push({ plugin, endpoint, path });
+      }
+    }
+
+    this.runtimeEndpoints = endpoints;
+    return endpoints;
+  }
+
+  private async runRuntimeEndpoint(
+    request: Request,
+    options: FarmPluginRuntimeRequestOptions,
+    waitUntil: (promise: Promise<unknown>) => void,
+    onMatch: (options: FarmPluginRuntimeRequestOptions) => void,
+  ): Promise<Response | undefined> {
+    const endpoints = this.getRuntimeEndpoints();
+    if (endpoints.length === 0) return undefined;
+
+    const requestPathname = new URL(request.url).pathname;
+    const basePath = normalizeFarmBasePath(this.context.config.basePath);
+    if (basePath && requestPathname !== basePath && !requestPathname.startsWith(`${basePath}/`)) {
+      return undefined;
+    }
+    const pathname = normalizeRuntimeEndpointRequestPath(
+      stripFarmBasePath(requestPathname, basePath),
+    );
+    const match = endpoints.find((entry) => entry.path === pathname);
+    if (!match) return undefined;
+
+    const endpointOptions: FarmPluginRuntimeRequestOptions = {
+      ...options,
+      kind: "endpoint",
+      route: {
+        pathname: requestPathname,
+        pattern: match.path,
+        params: {},
+      },
+    };
+    onMatch(endpointOptions);
+    const response = await match.endpoint.handler({
+      ...this.createRuntimeBaseEvent(match.plugin, request, endpointOptions, waitUntil),
+      path: match.path,
+    });
+    if (!(response instanceof Response)) {
+      throw new TypeError(
+        `Farm plugin "${match.plugin.name}" runtime endpoint ${match.path} must return a Response`,
+      );
+    }
+    return response;
   }
 
   private async createRuntimeRequestContext(
@@ -1020,6 +1150,7 @@ export class PluginManager {
     this.plugins.push(plugin);
     this.hookPresence.clear();
     this.runtimeHookPresence.clear();
+    this.runtimeEndpoints = undefined;
   }
 
   addPlugins(plugins: FarmPlugin[]) {
@@ -1059,6 +1190,7 @@ export class PluginManager {
 
   hasRuntimeRequestHooks(): boolean {
     return (
+      this.getRuntimeEndpoints().length > 0 ||
       this.hasRuntimeHook("context") ||
       this.hasRuntimeHook("before") ||
       this.hasRuntimeHook("after") ||
@@ -1156,10 +1288,34 @@ export class PluginManager {
           void Promise.resolve(promise).catch(() => {});
         };
     let activeRequest = request;
+    let activeOptions = options;
     let runtimeContext: Readonly<Record<string, unknown>> = Object.freeze({});
 
     try {
-      runtimeContext = await this.createRuntimeRequestContext(activeRequest, options, waitUntil);
+      const endpoint = await this.runRuntimeEndpoint(
+        activeRequest,
+        activeOptions,
+        waitUntil,
+        (nextOptions) => {
+          activeOptions = nextOptions;
+        },
+      );
+      if (endpoint) {
+        return {
+          request: activeRequest,
+          response: endpoint,
+          ctx: runtimeContext,
+          startedAt,
+          options: activeOptions,
+          waitUntil,
+        };
+      }
+
+      runtimeContext = await this.createRuntimeRequestContext(
+        activeRequest,
+        activeOptions,
+        waitUntil,
+      );
 
       let response: Response | undefined;
       for (const plugin of this.getSortedPlugins()) {
@@ -1167,7 +1323,7 @@ export class PluginManager {
         if (!before) continue;
 
         const result = await before({
-          ...this.createRuntimeBaseEvent(plugin, activeRequest, options, waitUntil),
+          ...this.createRuntimeBaseEvent(plugin, activeRequest, activeOptions, waitUntil),
           ctx: runtimeContext,
         });
 
@@ -1193,7 +1349,7 @@ export class PluginManager {
         response,
         ctx: runtimeContext,
         startedAt,
-        options,
+        options: activeOptions,
         waitUntil,
       };
     } catch (error) {
@@ -1202,7 +1358,7 @@ export class PluginManager {
         error,
         runtimeContext,
         Date.now() - startedAt,
-        options,
+        activeOptions,
         waitUntil,
       );
       throw error;

@@ -4,9 +4,9 @@ import { createLoggerPlugin } from "../plugins/logger";
 import { getRequestContext, getRequestContextSnapshot } from "../request-context";
 import type { PageProps } from "../types";
 
-function createManager() {
+function createManager(config: Record<string, unknown> = {}) {
   return new PluginManager({
-    config: {},
+    config,
     isDev: true,
     isProd: false,
   });
@@ -171,6 +171,97 @@ describe("plugin lifecycle hooks", () => {
     expect(await response.text()).toBe("ok");
     expect(seen).toEqual(["before:trace:/products", "after:trace:/products:201"]);
     await expect(Promise.all(background)).resolves.toEqual(["trace:/products"]);
+  });
+
+  it("dispatches exact runtime endpoints before ordinary request hooks", async () => {
+    const manager = createManager({ basePath: "/store" });
+    const fallback = vi.fn(() => new Response("fallback"));
+    const context = vi.fn(() => ({ traceId: "unused" }));
+    const after = vi.fn(({ response }) => {
+      const headers = new Headers(response.headers);
+      headers.set("x-observed", "true");
+      return new Response(response.body, { status: response.status, headers });
+    });
+    const endpoint = vi.fn(({ kind, path, route, state }) =>
+      Response.json({ kind, path, route: route?.pathname, state: state.name }),
+    );
+
+    manager.addPlugins([
+      definePlugin({
+        name: "status",
+        setup() {
+          return { name: "ready" };
+        },
+        runtime: {
+          endpoints: [{ path: "/health/ready/", handler: endpoint }],
+        },
+      }),
+      definePlugin({
+        name: "ordinary-context",
+        runtime: { context, after },
+      }),
+    ]);
+
+    expect(manager.hasRuntimeRequestHooks()).toBe(true);
+    const response = await manager.runRuntimeRequest(
+      new Request("http://localhost/store/health/ready/"),
+      fallback,
+      { kind: "page" },
+    );
+
+    expect(fallback).not.toHaveBeenCalled();
+    expect(context).not.toHaveBeenCalled();
+    expect(endpoint).toHaveBeenCalledOnce();
+    expect(after).toHaveBeenCalledOnce();
+    expect(after.mock.calls[0]?.[0]).toMatchObject({ kind: "endpoint", ctx: {} });
+    expect(response.headers.get("x-observed")).toBe("true");
+    await expect(response.json()).resolves.toEqual({
+      kind: "endpoint",
+      path: "/health/ready",
+      route: "/store/health/ready/",
+      state: "ready",
+    });
+
+    const outsideBasePath = await manager.runRuntimeRequest(
+      new Request("http://localhost/health/ready"),
+      fallback,
+    );
+    expect(await outsideBasePath.text()).toBe("fallback");
+    expect(endpoint).toHaveBeenCalledOnce();
+
+    const ordinary = await manager.runRuntimeRequest(
+      new Request("http://localhost/store/products"),
+      fallback,
+    );
+    expect(await ordinary.text()).toBe("fallback");
+    expect(context).toHaveBeenCalledTimes(2);
+    expect(after).toHaveBeenCalledTimes(3);
+  });
+
+  it("rejects invalid and conflicting runtime endpoints", () => {
+    const invalid = createManager();
+    invalid.addPlugin(
+      definePlugin({
+        name: "invalid-endpoint",
+        runtime: {
+          endpoints: [{ path: "/status/*", handler: () => new Response() }],
+        },
+      }),
+    );
+    expect(() => invalid.hasRuntimeRequestHooks()).toThrow("must be an exact pathname");
+
+    const conflicting = createManager();
+    conflicting.addPlugins([
+      definePlugin({
+        name: "first-endpoint",
+        runtime: { endpoints: [{ path: "/status", handler: () => new Response() }] },
+      }),
+      definePlugin({
+        name: "second-endpoint",
+        runtime: { endpoints: [{ path: "/status/", handler: () => new Response() }] },
+      }),
+    ]);
+    expect(() => conflicting.hasRuntimeRequestHooks()).toThrow('conflicts with "first-endpoint"');
   });
 
   it("supports runtime short circuits and reports errors", async () => {
