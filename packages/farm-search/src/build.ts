@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, rm } from "node:fs/promises";
+import { mkdir, readFile, readdir, realpath, rm } from "node:fs/promises";
 import path from "node:path";
 import * as pagefind from "pagefind";
 import type { ResolvedSearchOptions } from "./config.js";
@@ -25,6 +25,7 @@ export async function writeSearchIndex(input: SearchBuildInput): Promise<SearchB
   const basePath = normalizeBasePath(input.basePath);
   const bundlePath = withBasePath(`/${input.options.output}`, basePath);
   const outputPath = resolveOutputPath(publicDir, bundlePath);
+  await assertOutputPathInside(publicDir, outputPath);
   const htmlFiles = await collectHtmlFiles(publicDir, outputPath);
   const routes = htmlFiles
     .map((file) => ({
@@ -195,6 +196,30 @@ function resolveOutputPath(publicDir: string, bundlePath: string): string {
     throw new Error("[farm:search] Search output must stay inside the public output directory");
   }
   return outputPath;
+}
+
+async function assertOutputPathInside(publicDir: string, outputPath: string): Promise<void> {
+  const realPublicDir = await realpath(publicDir);
+  let existingAncestor = outputPath;
+
+  while (true) {
+    try {
+      existingAncestor = await realpath(existingAncestor);
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      const parent = path.dirname(existingAncestor);
+      if (parent === existingAncestor) throw error;
+      existingAncestor = parent;
+    }
+  }
+
+  const relative = path.relative(realPublicDir, existingAncestor);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error(
+      "[farm:search] Search output must stay inside the public output directory, including through symlinks",
+    );
+  }
 }
 
 function pagefindError(action: string, errors: string[]): Error {

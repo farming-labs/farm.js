@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -73,6 +73,30 @@ describe.sequential("writeSearchIndex", () => {
         options: resolveSearchOptions({ include: ["/docs/**"] }),
       }),
     ).rejects.toThrow("No static HTML pages matched");
+  });
+
+  it("does not delete or write outside publicDir through a symlinked output parent", async () => {
+    const { root, outputDir, publicDir } = await createOutput();
+    const externalDir = path.join(root, "external");
+    const externalSearchDir = path.join(externalDir, "_farm", "search");
+    const sentinelPath = path.join(externalSearchDir, "sentinel.txt");
+    await mkdir(externalSearchDir, { recursive: true });
+    await writeFile(sentinelPath, "keep me");
+    await writeFile(path.join(publicDir, "index.html"), page("Home", "Farm home"));
+    await symlink(externalDir, path.join(publicDir, "app"), "junction");
+
+    await expect(
+      writeSearchIndex({
+        outputDir,
+        publicDir,
+        preset: "node-server",
+        basePath: "/app",
+        options: resolveSearchOptions(),
+      }),
+    ).rejects.toThrow("including through symlinks");
+
+    await expect(readFile(sentinelPath, "utf8")).resolves.toBe("keep me");
+    await expect(access(path.join(externalSearchDir, "pagefind.js"))).rejects.toThrow();
   });
 });
 
