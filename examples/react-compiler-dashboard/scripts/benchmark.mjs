@@ -1269,6 +1269,50 @@ async function measureTrial(browser, trial, compilerMode, port) {
             ),
         );
 
+        const measureStructuralPrependMap = async (action) => {
+          const rows = [...table.querySelectorAll("tbody tr")];
+          const removed = rows[0];
+          const target = rows.find(
+            (row) => Number(row.getAttribute("data-row-id")) % 10_000 === 5_001,
+          );
+          const amount = Number(target?.querySelector("td:nth-child(4)")?.textContent?.slice(1));
+          if (!removed || !target || !Number.isFinite(amount)) {
+            throw new Error("Queued structural-prepend-map source rows are invalid.");
+          }
+          const survivors = rows.slice(1);
+          await runTableAction(action, () => {
+            const nextRows = [...table.querySelectorAll("tbody tr")];
+            const prepended = nextRows[0];
+            return (
+              nextRows.length === 10_000 &&
+              prepended?.querySelector("td:nth-child(2)")?.textContent ===
+                "queued mapped prepended row" &&
+              !rows.includes(prepended) &&
+              rowsMatch(nextRows.slice(1), survivors) &&
+              target.querySelector("td:nth-child(2)")?.textContent?.endsWith(" reviewed") ===
+                true &&
+              target.querySelector("td:nth-child(4)")?.textContent === `$${amount + 1}` &&
+              !removed.isConnected
+            );
+          });
+        };
+
+        const tableStructuralPrependMapQueued = await measureTable(
+          async () => create10000(),
+          async () =>
+            measureStructuralPrependMap(() =>
+              tableButton("table-structural-prepend-map-queued").click(),
+            ),
+        );
+
+        const tableStructuralPrependMapQueuedSnapshot = await measureTable(
+          async () => create10000(),
+          async () =>
+            measureStructuralPrependMap(() =>
+              tableButton("table-structural-prepend-map-queued-snapshot").click(),
+            ),
+        );
+
         const measureStructuralAppendMap = async (action) => {
           const rows = [...table.querySelectorAll("tbody tr")];
           const removed = rows[0];
@@ -2166,6 +2210,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
             structuralAppendQueuedSnapshot: tableStructuralAppendQueuedSnapshot,
             structuralPrependQueued: tableStructuralPrependQueued,
             structuralPrependQueuedSnapshot: tableStructuralPrependQueuedSnapshot,
+            structuralPrependMapQueued: tableStructuralPrependMapQueued,
+            structuralPrependMapQueuedSnapshot: tableStructuralPrependMapQueuedSnapshot,
             structuralAppendMapQueued: tableStructuralAppendMapQueued,
             structuralAppendMapQueuedSnapshot: tableStructuralAppendMapQueuedSnapshot,
             mapStructuralReorderPipeline: tableMapStructuralReorderPipeline,
@@ -2321,6 +2367,10 @@ async function measureTrial(browser, trial, compilerMode, port) {
         structuralPrependQueued: timingSummary(result.table.structuralPrependQueued),
         structuralPrependQueuedSnapshot: timingSummary(
           result.table.structuralPrependQueuedSnapshot,
+        ),
+        structuralPrependMapQueued: timingSummary(result.table.structuralPrependMapQueued),
+        structuralPrependMapQueuedSnapshot: timingSummary(
+          result.table.structuralPrependMapQueuedSnapshot,
         ),
         structuralAppendMapQueued: timingSummary(result.table.structuralAppendMapQueued),
         structuralAppendMapQueuedSnapshot: timingSummary(
@@ -2549,6 +2599,8 @@ const tableMetrics = [
   "structuralAppendQueuedSnapshot",
   "structuralPrependQueued",
   "structuralPrependQueuedSnapshot",
+  "structuralPrependMapQueued",
+  "structuralPrependMapQueuedSnapshot",
   "structuralAppendMapQueued",
   "structuralAppendMapQueuedSnapshot",
   "mapStructuralReorderPipeline",
@@ -3255,6 +3307,29 @@ const keyedStructuralPrependRegressions = keyedStructuralPrependResults.filter(
     !Number.isFinite(snapshotSpeedup) ||
     snapshotSpeedup < keyedStructuralPrependMinimumSnapshotSpeedup,
 );
+// A following same-key map can retain a bounded slice's survivor and prefix proof. The hinted path
+// should patch only changed survivors, create only the final prefix, and stay ahead of both React
+// and the equivalent block-bodied compiled control at 10,000 rows.
+const keyedStructuralPrependMapMinimumSpeedup = 2;
+const keyedStructuralPrependMapMinimumSnapshotSpeedup = 1.25;
+const keyedStructuralPrependMapResults = ["static", "hybrid"].map((mode) => {
+  const pipelineMedianMs = comparisons.table.structuralPrependMapQueued[mode].medianMs;
+  const snapshotMedianMs = comparisons.table.structuralPrependMapQueuedSnapshot[mode].medianMs;
+  return {
+    mode,
+    pipelineMedianMs,
+    snapshotMedianMs,
+    snapshotSpeedup: snapshotMedianMs / pipelineMedianMs,
+    speedup: comparisons.table.structuralPrependMapQueued[`${mode}VsBaseline`].speedup,
+  };
+});
+const keyedStructuralPrependMapRegressions = keyedStructuralPrependMapResults.filter(
+  ({ snapshotSpeedup, speedup }) =>
+    !Number.isFinite(speedup) ||
+    speedup < keyedStructuralPrependMapMinimumSpeedup ||
+    !Number.isFinite(snapshotSpeedup) ||
+    snapshotSpeedup < keyedStructuralPrependMapMinimumSnapshotSpeedup,
+);
 // A following same-key map can keep a bounded slice's stable-key and suffix proof. The hinted path
 // should patch only changed survivors while retaining the structural append speedup over React and
 // the equivalent block-bodied compiled control.
@@ -3739,6 +3814,7 @@ const passed =
   keyedStructuralReorderRegressions.length === 0 &&
   keyedStructuralAppendRegressions.length === 0 &&
   keyedStructuralPrependRegressions.length === 0 &&
+  keyedStructuralPrependMapRegressions.length === 0 &&
   keyedStructuralAppendMapRegressions.length === 0 &&
   keyedFilterAppendMapRegressions.length === 0 &&
   keyedFilterMapAppendRegressions.length === 0 &&
@@ -3931,6 +4007,13 @@ const report = {
     regressions: keyedStructuralPrependRegressions,
     results: keyedStructuralPrependResults,
     status: keyedStructuralPrependRegressions.length === 0 ? "PASS" : "FAIL",
+  },
+  keyedStructuralPrependMapHintGate: {
+    minimumSnapshotSpeedup: keyedStructuralPrependMapMinimumSnapshotSpeedup,
+    minimumSpeedup: keyedStructuralPrependMapMinimumSpeedup,
+    regressions: keyedStructuralPrependMapRegressions,
+    results: keyedStructuralPrependMapResults,
+    status: keyedStructuralPrependMapRegressions.length === 0 ? "PASS" : "FAIL",
   },
   keyedStructuralAppendMapHintGate: {
     minimumSnapshotSpeedup: keyedStructuralAppendMapMinimumSnapshotSpeedup,

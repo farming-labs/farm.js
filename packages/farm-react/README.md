@@ -318,6 +318,18 @@ setItems((current) => [nextItem, ...current]);
 
 setItems((current) => current.slice(start, end));
 setItems((current) => [...nextItems, ...current]);
+
+setItems((current) => current.filter((item) => item.id !== expiredId));
+setItems((current) => [nextItem, ...current]);
+setItems((current) =>
+  current.map((item) => (item.id === targetId ? { ...item, label: nextLabel } : item)),
+);
+
+setItems((current) => current.slice(start, end));
+setItems((current) =>
+  current.map((item) => (item.id === targetId ? { ...item, label: nextLabel } : item)),
+);
+setItems((current) => [nextItem, ...current]);
 ```
 
 Farm validates the committed source and queued prepend chain, creates only the new prefix, inserts
@@ -327,12 +339,19 @@ positions into the prepend. The runtime removes only rejected rows, preserves ev
 node, and creates only the final prefix instead of rescanning and rebinding the whole result.
 Multiple adjacent prepends share the same proof.
 
+One or more immediately adjacent safe same-key `map()` setters may run after the prepend or between
+the removal and prepend. A safe map may also run immediately before the removal. Farm carries every
+survivor back to its committed row, validates the complete dense result and every final key, then
+patches only changed survivors and creates the prefix from its final mapped values. A surviving DOM
+node keeps its identity even when its item object changes.
+
 Index-aware rows, collection-reading bindings or keys, React-owned or nested row structures,
-middle insertion, direct replacement, a reordered or mapped structural chain, duplicate final
-keys, reuse of any committed key in the new prefix, custom or sparse arrays, and failed validation
-use complete keyed reconciliation before any DOM mutation. The compiler report exposes the
-emitted-site count as `keyedArrayPrependHints`; no option or component API is added, and modules
-without both removal and prepend sites omit the composed runtime.
+middle insertion, direct replacement, a reordered structural chain, an unsupported or non-adjacent
+map, duplicate final keys, reuse of any committed key in the new prefix, custom or sparse arrays,
+and failed validation use complete keyed reconciliation before any DOM mutation. A mapped survivor
+whose key changes also falls back before mutation. The compiler report exposes the emitted-site
+count as `keyedArrayPrependHints`; no option or component API is added, and modules without the
+accepted removal, prepend, and map chain omit its mapped runtime.
 
 Native slices with compiler-safe bounds can carry their exact retained interval into the same
 removal runtime:

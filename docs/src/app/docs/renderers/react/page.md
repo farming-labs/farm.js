@@ -1029,6 +1029,18 @@ setItems((current) => [nextItem, ...current]);
 
 setItems((current) => current.slice(start, end));
 setItems((current) => [...nextItems, ...current]);
+
+setItems((current) => current.filter((item) => item.id !== expiredId));
+setItems((current) => [nextItem, ...current]);
+setItems((current) =>
+  current.map((item) => (item.id === targetId ? { ...item, label: nextLabel } : item)),
+);
+
+setItems((current) => current.slice(start, end));
+setItems((current) =>
+  current.map((item) => (item.id === targetId ? { ...item, label: nextLabel } : item)),
+);
+setItems((current) => [nextItem, ...current]);
 ```
 
 At build time, Farm recognizes a concise functional setter whose array literal ends with exactly
@@ -1049,15 +1061,21 @@ every survivor identity, and every prefix key, descriptor, and binding. It then 
 rows, inserts the prepared prefix once, and updates survivor event indexes. Surviving rows keep
 their exact DOM nodes and do not rerun their bindings.
 
+One or more immediately adjacent safe same-key `map()` setters may run after the prepend or between
+the removal and prepend. A safe map may also run immediately before the removal. Farm carries every
+survivor back to its committed row, validates the complete dense result and all final keys and
+bindings before mutation, then patches only changed survivors and creates the prefix from its final
+mapped values. The component owner stays mounted and surviving DOM identity is preserved.
+
 This proof requires compiler-owned host rows whose render callback and key do not read the row
 index. Index-aware rows, collection-derived keys, collection-reading bindings, React-owned or
 nested host-block rows, row conditionals, middle insertion, direct replacement, block-bodied
-updaters, a reordered or mapped structural chain, duplicate final keys, reuse of any committed key
-in the prefix, custom, sparse, or subclassed arrays, an unrelated dirty dependency, or any failed
-runtime check keeps complete keyed reconciliation before a DOM write. A prepend queued after an
-unhinted update also falls back. Reports expose emitted sites as `keyedArrayPrependHints`; no option
-or component API is added, and modules without both removal and prepend sites omit the composed
-runtime.
+updaters, a reordered structural chain, an unsupported or non-adjacent map, duplicate final keys,
+reuse of any committed key in the prefix, custom, sparse, or subclassed arrays, an unrelated dirty
+dependency, or any failed runtime check keeps complete keyed reconciliation before a DOM write. A
+mapped survivor whose key changes and a prepend queued after an unhinted update also fall back.
+Reports expose emitted sites as `keyedArrayPrependHints`; no option or component API is added, and
+modules without the accepted removal, prepend, and map chain omit its mapped runtime.
 
 #### Keyed array slice hints
 
@@ -2370,7 +2388,10 @@ The package and example test suites verify more than generated code:
   row, update delegated event indexes, and cover queued updates, StrictMode hydration, unmount,
   invalid metadata, custom arrays, and conservative fallback; another 2,000 randomized queued
   filter-or-slice followed by prepend transitions match normal React while targeted tests preserve
-  survivor identity, controlled-input focus and selection, and atomic fallback;
+  survivor identity, controlled-input focus and selection, and atomic fallback; 2,000 additional
+  randomized removal, prepend, and same-key map transitions verify changed-survivor-only binding
+  writes, final mapped prefix creation, Strict Mode hydration, external mutation, and changed-key
+  fallback;
 - 2,000 deterministic queued keyed-array slices and 1,000 randomized runtime-bound slices match
   normal React; compiler tests cover literal and compiler-safe runtime bounds while rejecting calls
   and mutations; targeted tests require zero surviving key, descriptor, and binding reads, preserve
