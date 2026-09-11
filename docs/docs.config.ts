@@ -338,6 +338,7 @@ const sidebar = [
           { label: "Search", slug: "plugins/search", icon: "search" },
           { label: "Scripts", slug: "plugins/scripts", icon: "code" },
           { label: "Sentry", slug: "plugins/sentry", icon: "brand-sentry" },
+          { label: "StyleX", slug: "plugins/stylex", icon: "braces" },
           { label: "WebMCP", slug: "plugins/webmcp", icon: "sparkles" },
         ],
       },
