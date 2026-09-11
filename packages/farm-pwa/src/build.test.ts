@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { runInNewContext } from "node:vm";
@@ -174,6 +174,26 @@ describe("writePwaBuildArtifacts", () => {
         options: resolvePwaOptions({ offline: "/missing" }),
       }),
     ).rejects.toThrow("was not emitted as a static page");
+  });
+
+  it("does not write a service worker outside publicDir through a symlinked parent", async () => {
+    const { root, publicDir } = await createOutput("node-server");
+    const externalDirectory = path.join(root, "external");
+    const externalWorker = path.join(externalDirectory, "sw.js");
+    await mkdir(externalDirectory);
+    await writeFile(externalWorker, "keep me");
+    await symlink(externalDirectory, path.join(publicDir, "app"), "junction");
+
+    await expect(
+      writePwaBuildArtifacts({
+        outputDir: root,
+        preset: "node-server",
+        basePath: "/app",
+        options: resolvePwaOptions(),
+      }),
+    ).rejects.toThrow("including through symlinks");
+
+    await expect(readFile(externalWorker, "utf8")).resolves.toBe("keep me");
   });
 });
 

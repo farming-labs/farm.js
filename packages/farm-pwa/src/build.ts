@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { ResolvedPwaOptions } from "./config.js";
 
@@ -38,6 +38,7 @@ export async function writePwaBuildArtifacts(input: PwaBuildInput): Promise<PwaB
   const basePath = normalizeBasePath(input.basePath);
   const workerRelativePath = path.posix.join(basePath.replace(/^\//, ""), "sw.js");
   const workerPath = path.join(publicDir, ...workerRelativePath.split("/"));
+  await assertWorkerPathInsidePublicDir(publicDir, workerPath);
 
   if (input.options.serviceWorker) {
     const sourcePath = path.resolve(
@@ -325,6 +326,37 @@ export function resolvePwaPublicDir(outputDir: string, preset: string): string {
     outputDir,
     preset === "vercel" || preset === "vercel-edge" ? "static" : "public",
   );
+}
+
+async function assertWorkerPathInsidePublicDir(
+  publicDir: string,
+  workerPath: string,
+): Promise<void> {
+  const realPublicDir = await realpath(publicDir);
+  let existingAncestor = workerPath;
+
+  while (true) {
+    try {
+      existingAncestor = await realpath(existingAncestor);
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      const parent = path.dirname(existingAncestor);
+      if (parent === existingAncestor) throw error;
+      existingAncestor = parent;
+    }
+  }
+
+  const relativePath = path.relative(realPublicDir, existingAncestor);
+  if (
+    relativePath === ".." ||
+    relativePath.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relativePath)
+  ) {
+    throw new Error(
+      "[farm:pwa] Service worker output must stay inside the public output directory, including through symlinks.",
+    );
+  }
 }
 
 export function normalizeBasePath(value: string | undefined): string {
