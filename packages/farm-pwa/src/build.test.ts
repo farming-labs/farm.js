@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { runInNewContext } from "node:vm";
@@ -114,6 +114,25 @@ describe("writePwaBuildArtifacts", () => {
     expect(await readFile(path.join(publicDir, "app", "sw.js"), "utf8")).toBe(customWorker);
   });
 
+  it("creates a missing public directory for a custom service worker", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "farm-pwa-empty-output-"));
+    temporaryDirectories.push(root);
+    const customWorker = "self.skipWaiting();\n";
+    await writeFile(path.join(root, "custom-worker.js"), customWorker);
+
+    const result = await writePwaBuildArtifacts({
+      root,
+      outputDir: root,
+      preset: "node-server",
+      basePath: "/",
+      options: resolvePwaOptions({
+        serviceWorker: { source: "custom-worker.js", type: "module" },
+      }),
+    });
+
+    await expect(readFile(result.workerPath, "utf8")).resolves.toBe(customWorker);
+  });
+
   it("prefixes every logical static route without requiring basePath folders on disk", async () => {
     const { root } = await createOutput("node-server");
     const result = await writePwaBuildArtifacts({
@@ -174,6 +193,45 @@ describe("writePwaBuildArtifacts", () => {
         options: resolvePwaOptions({ offline: "/missing" }),
       }),
     ).rejects.toThrow("was not emitted as a static page");
+  });
+
+  it("does not write a service worker outside publicDir through a symlinked parent", async () => {
+    const { root, publicDir } = await createOutput("node-server");
+    const externalDirectory = path.join(root, "external");
+    const externalWorker = path.join(externalDirectory, "sw.js");
+    await mkdir(externalDirectory);
+    await writeFile(externalWorker, "keep me");
+    await symlink(externalDirectory, path.join(publicDir, "app"), "junction");
+
+    await expect(
+      writePwaBuildArtifacts({
+        outputDir: root,
+        preset: "node-server",
+        basePath: "/app",
+        options: resolvePwaOptions(),
+      }),
+    ).rejects.toThrow("including through symlinks");
+
+    await expect(readFile(externalWorker, "utf8")).resolves.toBe("keep me");
+  });
+
+  it("rejects a dangling service worker symlink before creating its external target", async () => {
+    const { root, publicDir } = await createOutput("node-server");
+    const externalWorker = path.join(root, "external-worker.js");
+    const workerDirectory = path.join(publicDir, "app");
+    await mkdir(workerDirectory);
+    await symlink(externalWorker, path.join(workerDirectory, "sw.js"), "file");
+
+    await expect(
+      writePwaBuildArtifacts({
+        outputDir: root,
+        preset: "node-server",
+        basePath: "/app",
+        options: resolvePwaOptions(),
+      }),
+    ).rejects.toThrow("including through symlinks");
+
+    await expect(readFile(externalWorker)).rejects.toThrow();
   });
 });
 

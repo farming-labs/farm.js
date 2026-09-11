@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { ResolvedPwaOptions } from "./config.js";
 
@@ -38,6 +38,7 @@ export async function writePwaBuildArtifacts(input: PwaBuildInput): Promise<PwaB
   const basePath = normalizeBasePath(input.basePath);
   const workerRelativePath = path.posix.join(basePath.replace(/^\//, ""), "sw.js");
   const workerPath = path.join(publicDir, ...workerRelativePath.split("/"));
+  await assertWorkerPathInsidePublicDir(publicDir, workerPath);
 
   if (input.options.serviceWorker) {
     const sourcePath = path.resolve(
@@ -325,6 +326,53 @@ export function resolvePwaPublicDir(outputDir: string, preset: string): string {
     outputDir,
     preset === "vercel" || preset === "vercel-edge" ? "static" : "public",
   );
+}
+
+async function assertWorkerPathInsidePublicDir(
+  publicDir: string,
+  workerPath: string,
+): Promise<void> {
+  const prospectivePublicDir = await resolveProspectiveRealPath(publicDir);
+  const prospectiveWorkerPath = await resolveProspectiveRealPath(workerPath);
+  const relativePath = path.relative(prospectivePublicDir, prospectiveWorkerPath);
+  if (
+    relativePath === ".." ||
+    relativePath.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relativePath)
+  ) {
+    throw new Error(
+      "[farm:pwa] Service worker output must stay inside the public output directory, including through symlinks.",
+    );
+  }
+}
+
+async function resolveProspectiveRealPath(candidate: string): Promise<string> {
+  const missingSegments: string[] = [];
+  let existingAncestor = path.resolve(candidate);
+
+  while (true) {
+    try {
+      return path.join(await realpath(existingAncestor), ...missingSegments);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      let existingEntry = false;
+      try {
+        await lstat(existingAncestor);
+        existingEntry = true;
+      } catch (statError) {
+        if ((statError as NodeJS.ErrnoException).code !== "ENOENT") throw statError;
+      }
+      if (existingEntry) {
+        throw new Error(
+          "[farm:pwa] Service worker output must stay inside the public output directory, including through symlinks.",
+        );
+      }
+      const parent = path.dirname(existingAncestor);
+      if (parent === existingAncestor) throw error;
+      missingSegments.unshift(path.basename(existingAncestor));
+      existingAncestor = parent;
+    }
+  }
 }
 
 export function normalizeBasePath(value: string | undefined): string {
