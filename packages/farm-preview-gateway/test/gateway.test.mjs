@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createServer, request as createRequest } from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
+import { gunzipSync, gzipSync } from "node:zlib";
 import { createNodePreviewGatewayHandler, MemoryPreviewGatewayStore } from "../dist/index.js";
 
 test("proxies a public preview request through the gateway queue", async () => {
@@ -217,6 +218,50 @@ test("removes headers nominated by Connection in both polling proxy directions",
     const response = await publicRequest;
     assert.equal(response.status, 200);
     assert.equal(response.headers["x-response-hop"], undefined);
+  } finally {
+    await gateway.close();
+  }
+});
+
+test("preserves Content-Encoding for compressed public request bodies", async () => {
+  const store = new MemoryPreviewGatewayStore();
+  const gateway = await createGatewayServer(store);
+
+  try {
+    const session = await fetch(`${gateway.url}/api/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "encoding-check", localUrl: "http://localhost:4321" }),
+    }).then((response) => response.json());
+    const compressedBody = gzipSync(JSON.stringify({ message: "compressed" }));
+
+    const publicRequest = fetch(`${gateway.url}/__preview/encoding-check/messages`, {
+      method: "POST",
+      headers: {
+        "content-encoding": "gzip",
+        "content-type": "application/json",
+      },
+      body: compressedBody,
+    });
+    const poll = await fetch(
+      `${gateway.url}/api/sessions/${session.id}/requests?token=${session.token}&wait=1000`,
+    ).then((response) => response.json());
+    const queued = poll.requests[0];
+
+    assert.equal(queued.headers["content-encoding"], "gzip");
+    assert.deepEqual(JSON.parse(gunzipSync(Buffer.from(queued.body, "base64")).toString("utf8")), {
+      message: "compressed",
+    });
+
+    await fetch(
+      `${gateway.url}/api/sessions/${session.id}/responses/${queued.id}?token=${session.token}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ status: 204 }),
+      },
+    );
+    assert.equal((await publicRequest).status, 204);
   } finally {
     await gateway.close();
   }
