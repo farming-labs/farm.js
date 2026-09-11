@@ -294,7 +294,18 @@ function normalizeOutputFile(value: string): string {
 function optionalPublicPath(value: string | undefined): string | undefined {
   if (value === undefined) return undefined;
   const publicPath = nonEmptyString(value, "Federation publicPath");
-  if (publicPath === "auto" || publicPath.startsWith("/")) return publicPath;
+  if (publicPath === "auto") return publicPath;
+  if (publicPath.startsWith("/")) {
+    if (publicPath.startsWith("//") || publicPath.includes("\\")) {
+      throw new TypeError(
+        "Federation publicPath must be a root-relative URL, not a network-path URL",
+      );
+    }
+    return publicPath;
+  }
+  if (publicPath.includes("\\")) {
+    throw new TypeError("Federation publicPath must use URL separators");
+  }
   let parsed: URL;
   try {
     parsed = new URL(publicPath);
