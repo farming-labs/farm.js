@@ -74,6 +74,9 @@ context.
 `HEAD` follows normal HTTP semantics. A route can export a dedicated `HEAD` handler, otherwise Farm
 uses its `GET` handler and returns the same status and headers without a response body.
 
+This also applies to production RSC builds. They support `QUERY` exports, prefer an explicit
+`HEAD` handler, and return `405` with an `Allow` header for unsupported methods.
+
 ## Body and query input
 
 ```ts
