@@ -55,6 +55,7 @@ const testSource = String.raw`
     createCompilerKeyedArraySlice,
     createCompilerKeyedArrayStructuralAppend,
     createCompilerKeyedArrayStructuralAppendMapPipeline,
+    createCompilerKeyedArrayStructuralPrepend,
     createCompilerKeyedArrayWindowReplace,
     createCompilerKeyedMapUpdate,
     keyedRowsStructuralAppendMapHintedRuntimeFeature,
@@ -1914,6 +1915,7 @@ const testSource = String.raw`
   flushSync(() => sliceRoot.unmount());
 
   let prependRows = () => undefined;
+  let refreshPrependRows = () => undefined;
   let prependKeyReads = 0;
   let prependBindingReads = 0;
   const PrependRows = createCompiledComponent({
@@ -1928,12 +1930,25 @@ const testSource = String.raw`
         state[0].set((previous) =>
           createCompilerKeyedArrayPrepend(previous, [addition, ...previous]),
         );
+      refreshPrependRows = (removedId, addition) => {
+        state[0].set((previous) =>
+          createCompilerKeyedArrayFilter(
+            previous,
+            previous.filter,
+            (item) => item.id !== removedId,
+          ),
+        );
+        state[0].set((previous) =>
+          createCompilerKeyedArrayStructuralPrepend(previous, [addition, ...previous]),
+        );
+      };
       return React.createElement(
         "section",
         null,
         React.createElement(blocks.KeyedRows, {
           collectionDependency: 0,
           dependencies: [0],
+          filterIndexIndependent: true,
           prependIndexIndependent: true,
           id: 0,
           items,
@@ -1988,6 +2003,16 @@ const testSource = String.raw`
   assert.equal(prependContainer.querySelector("[data-key='b']"), prependBeta);
   assert.equal(prependKeyReads, 2);
   assert.equal(prependBindingReads, 2);
+  prependKeyReads = 0;
+  prependBindingReads = 0;
+  refreshPrependRows("a", { id: "e", label: "Epsilon" });
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(prependContainer.textContent, "EpsilonDeltaGammaBeta");
+  assert.equal(prependContainer.querySelector("[data-key='a']"), null);
+  assert.equal(prependContainer.querySelector("[data-key='b']"), prependBeta);
+  assert.equal(prependKeyReads, 4);
+  assert.equal(prependBindingReads, 1);
   flushSync(() => prependRoot.unmount());
 
   let editableRowExecutions = 0;

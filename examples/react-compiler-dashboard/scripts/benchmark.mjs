@@ -1234,6 +1234,41 @@ async function measureTrial(browser, trial, compilerMode, port) {
             ),
         );
 
+        const measureStructuralPrepend = async (action) => {
+          const rows = [...table.querySelectorAll("tbody tr")];
+          const removed = rows[0];
+          if (!removed) throw new Error("Queued structural-prepend source row is missing.");
+          const survivors = rows.slice(1);
+          await runTableAction(action, () => {
+            const nextRows = [...table.querySelectorAll("tbody tr")];
+            const prepended = nextRows[0];
+            return (
+              nextRows.length === 10_000 &&
+              prepended?.querySelector("td:nth-child(2)")?.textContent ===
+                "queued prepended row" &&
+              !rows.includes(prepended) &&
+              rowsMatch(nextRows.slice(1), survivors) &&
+              !removed.isConnected
+            );
+          });
+        };
+
+        const tableStructuralPrependQueued = await measureTable(
+          async () => create10000(),
+          async () =>
+            measureStructuralPrepend(() =>
+              tableButton("table-structural-prepend-queued").click(),
+            ),
+        );
+
+        const tableStructuralPrependQueuedSnapshot = await measureTable(
+          async () => create10000(),
+          async () =>
+            measureStructuralPrepend(() =>
+              tableButton("table-structural-prepend-queued-snapshot").click(),
+            ),
+        );
+
         const measureStructuralAppendMap = async (action) => {
           const rows = [...table.querySelectorAll("tbody tr")];
           const removed = rows[0];
@@ -2129,6 +2164,8 @@ async function measureTrial(browser, trial, compilerMode, port) {
             filterMapAppendQueuedSnapshot: tableFilterMapAppendQueuedSnapshot,
             structuralAppendQueued: tableStructuralAppendQueued,
             structuralAppendQueuedSnapshot: tableStructuralAppendQueuedSnapshot,
+            structuralPrependQueued: tableStructuralPrependQueued,
+            structuralPrependQueuedSnapshot: tableStructuralPrependQueuedSnapshot,
             structuralAppendMapQueued: tableStructuralAppendMapQueued,
             structuralAppendMapQueuedSnapshot: tableStructuralAppendMapQueuedSnapshot,
             mapStructuralReorderPipeline: tableMapStructuralReorderPipeline,
@@ -2281,6 +2318,10 @@ async function measureTrial(browser, trial, compilerMode, port) {
         filterMapAppendQueuedSnapshot: timingSummary(result.table.filterMapAppendQueuedSnapshot),
         structuralAppendQueued: timingSummary(result.table.structuralAppendQueued),
         structuralAppendQueuedSnapshot: timingSummary(result.table.structuralAppendQueuedSnapshot),
+        structuralPrependQueued: timingSummary(result.table.structuralPrependQueued),
+        structuralPrependQueuedSnapshot: timingSummary(
+          result.table.structuralPrependQueuedSnapshot,
+        ),
         structuralAppendMapQueued: timingSummary(result.table.structuralAppendMapQueued),
         structuralAppendMapQueuedSnapshot: timingSummary(
           result.table.structuralAppendMapQueuedSnapshot,
@@ -2506,6 +2547,8 @@ const tableMetrics = [
   "filterMapAppendQueuedSnapshot",
   "structuralAppendQueued",
   "structuralAppendQueuedSnapshot",
+  "structuralPrependQueued",
+  "structuralPrependQueuedSnapshot",
   "structuralAppendMapQueued",
   "structuralAppendMapQueuedSnapshot",
   "mapStructuralReorderPipeline",
@@ -3189,6 +3232,29 @@ const keyedStructuralAppendRegressions = keyedStructuralAppendResults.filter(
     !Number.isFinite(snapshotSpeedup) ||
     snapshotSpeedup < keyedStructuralAppendMinimumSnapshotSpeedup,
 );
+// A bounded slice followed by an adjacent immutable prepend keeps an exact committed survivor
+// interval. The hinted path should remove only rejected rows, create only the new prefix, and stay
+// ahead of React and the equivalent block-bodied compiled control at 10,000 rows.
+const keyedStructuralPrependMinimumSpeedup = 2;
+const keyedStructuralPrependMinimumSnapshotSpeedup = 1.25;
+const keyedStructuralPrependResults = ["static", "hybrid"].map((mode) => {
+  const pipelineMedianMs = comparisons.table.structuralPrependQueued[mode].medianMs;
+  const snapshotMedianMs = comparisons.table.structuralPrependQueuedSnapshot[mode].medianMs;
+  return {
+    mode,
+    pipelineMedianMs,
+    snapshotMedianMs,
+    snapshotSpeedup: snapshotMedianMs / pipelineMedianMs,
+    speedup: comparisons.table.structuralPrependQueued[`${mode}VsBaseline`].speedup,
+  };
+});
+const keyedStructuralPrependRegressions = keyedStructuralPrependResults.filter(
+  ({ snapshotSpeedup, speedup }) =>
+    !Number.isFinite(speedup) ||
+    speedup < keyedStructuralPrependMinimumSpeedup ||
+    !Number.isFinite(snapshotSpeedup) ||
+    snapshotSpeedup < keyedStructuralPrependMinimumSnapshotSpeedup,
+);
 // A following same-key map can keep a bounded slice's stable-key and suffix proof. The hinted path
 // should patch only changed survivors while retaining the structural append speedup over React and
 // the equivalent block-bodied compiled control.
@@ -3672,6 +3738,7 @@ const passed =
   keyedReorderPipelineRegressions.length === 0 &&
   keyedStructuralReorderRegressions.length === 0 &&
   keyedStructuralAppendRegressions.length === 0 &&
+  keyedStructuralPrependRegressions.length === 0 &&
   keyedStructuralAppendMapRegressions.length === 0 &&
   keyedFilterAppendMapRegressions.length === 0 &&
   keyedFilterMapAppendRegressions.length === 0 &&
@@ -3857,6 +3924,13 @@ const report = {
     regressions: keyedStructuralAppendRegressions,
     results: keyedStructuralAppendResults,
     status: keyedStructuralAppendRegressions.length === 0 ? "PASS" : "FAIL",
+  },
+  keyedStructuralPrependHintGate: {
+    minimumSnapshotSpeedup: keyedStructuralPrependMinimumSnapshotSpeedup,
+    minimumSpeedup: keyedStructuralPrependMinimumSpeedup,
+    regressions: keyedStructuralPrependRegressions,
+    results: keyedStructuralPrependResults,
+    status: keyedStructuralPrependRegressions.length === 0 ? "PASS" : "FAIL",
   },
   keyedStructuralAppendMapHintGate: {
     minimumSnapshotSpeedup: keyedStructuralAppendMapMinimumSnapshotSpeedup,

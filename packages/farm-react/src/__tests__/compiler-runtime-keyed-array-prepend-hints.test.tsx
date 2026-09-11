@@ -5,7 +5,10 @@ import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createCompiledComponent,
+  createCompilerKeyedArrayFilter,
   createCompilerKeyedArrayPrepend,
+  createCompilerKeyedArraySlice,
+  createCompilerKeyedArrayStructuralPrepend,
   type CompilerKeyedRowElement,
 } from "../compiler-runtime";
 
@@ -27,6 +30,7 @@ interface Counters {
 }
 
 const roots: Root[] = [];
+const stressIt = process.env.FARM_REACT_STRESS === "1" ? it : it.skip;
 
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -48,6 +52,22 @@ function hintedPrepend(previous: Item[], additions: readonly Item[]): Item[] {
   return createCompilerKeyedArrayPrepend(previous, [...additions, ...previous]) as Item[];
 }
 
+function hintedFilter(previous: Item[], removed: ReadonlySet<string>): Item[] {
+  return createCompilerKeyedArrayFilter(
+    previous,
+    previous.filter,
+    (item: Item) => !removed.has(item.id),
+  ) as Item[];
+}
+
+function hintedSlice(previous: Item[], start: number, end?: number): Item[] {
+  return createCompilerKeyedArraySlice(previous, previous.slice, start, end) as Item[];
+}
+
+function hintedStructuralPrepend(previous: Item[], additions: readonly Item[]): Item[] {
+  return createCompilerKeyedArrayStructuralPrepend(previous, [...additions, ...previous]) as Item[];
+}
+
 function rowDescriptor(item: Item, text = item.label): CompilerKeyedRowElement {
   return {
     kind: "element",
@@ -67,6 +87,19 @@ function createPrependHarness(initialItems: Item[], readsCollection = false) {
     bindingReads: 0,
   };
   let prepend: (additions: readonly Item[]) => void = () => undefined;
+  let filterThenPrepend: (removed: ReadonlySet<string>, additions: readonly Item[]) => void = () =>
+    undefined;
+  let filterThenPrependTwice: (
+    removed: ReadonlySet<string>,
+    first: readonly Item[],
+    second: readonly Item[],
+  ) => void = () => undefined;
+  let sliceThenPrepend: (start: number, end: number, additions: readonly Item[]) => void = () =>
+    undefined;
+  let filterThenMismatchedPrepend: (removed: ReadonlySet<string>, addition: Item) => void = () =>
+    undefined;
+  let plainBetweenFilterAndPrepend: (removed: ReadonlySet<string>, addition: Item) => void = () =>
+    undefined;
   let plainThenPrepend: (addition: Item) => void = () => undefined;
   let mismatchedPrepend: (addition: Item) => void = () => undefined;
   const Feed = createCompiledComponent({
@@ -77,6 +110,34 @@ function createPrependHarness(initialItems: Item[], readsCollection = false) {
       const items = () => state[0].get() as Item[];
       prepend = (additions) =>
         state[0].set((previous) => hintedPrepend(previous as Item[], additions));
+      filterThenPrepend = (removed, additions) => {
+        state[0].set((previous) => hintedFilter(previous as Item[], removed));
+        state[0].set((previous) => hintedStructuralPrepend(previous as Item[], additions));
+      };
+      filterThenPrependTwice = (removed, first, second) => {
+        state[0].set((previous) => hintedFilter(previous as Item[], removed));
+        state[0].set((previous) => hintedStructuralPrepend(previous as Item[], first));
+        state[0].set((previous) => hintedStructuralPrepend(previous as Item[], second));
+      };
+      sliceThenPrepend = (start, end, additions) => {
+        state[0].set((previous) => hintedSlice(previous as Item[], start, end));
+        state[0].set((previous) => hintedStructuralPrepend(previous as Item[], additions));
+      };
+      filterThenMismatchedPrepend = (removed, addition) => {
+        state[0].set((previous) => hintedFilter(previous as Item[], removed));
+        state[0].set((previous) => {
+          const source = previous as Item[];
+          return createCompilerKeyedArrayStructuralPrepend(source, [
+            addition,
+            ...source.slice().reverse(),
+          ]) as Item[];
+        });
+      };
+      plainBetweenFilterAndPrepend = (removed, addition) => {
+        state[0].set((previous) => hintedFilter(previous as Item[], removed));
+        state[0].set((previous) => [...(previous as Item[])]);
+        state[0].set((previous) => hintedStructuralPrepend(previous as Item[], [addition]));
+      };
       plainThenPrepend = (addition) => {
         state[0].set((previous) => [...(previous as Item[])]);
         state[0].set((previous) => hintedPrepend(previous as Item[], [addition]));
@@ -99,6 +160,7 @@ function createPrependHarness(initialItems: Item[], readsCollection = false) {
             dependencies={[0]}
             id={0}
             items={items}
+            filterIndexIndependent
             prependIndexIndependent
             structureDependencies={[0]}
             render={() => {
@@ -142,9 +204,22 @@ function createPrependHarness(initialItems: Item[], readsCollection = false) {
   return {
     Feed,
     counters,
+    filterThenMismatchedPrepend: (removed: ReadonlySet<string>, addition: Item) =>
+      filterThenMismatchedPrepend(removed, addition),
+    filterThenPrepend: (removed: ReadonlySet<string>, additions: readonly Item[]) =>
+      filterThenPrepend(removed, additions),
+    filterThenPrependTwice: (
+      removed: ReadonlySet<string>,
+      first: readonly Item[],
+      second: readonly Item[],
+    ) => filterThenPrependTwice(removed, first, second),
     mismatchedPrepend: (addition: Item) => mismatchedPrepend(addition),
+    plainBetweenFilterAndPrepend: (removed: ReadonlySet<string>, addition: Item) =>
+      plainBetweenFilterAndPrepend(removed, addition),
     plainThenPrepend: (addition: Item) => plainThenPrepend(addition),
     prepend: (additions: readonly Item[]) => prepend(additions),
+    sliceThenPrepend: (start: number, end: number, additions: readonly Item[]) =>
+      sliceThenPrepend(start, end, additions),
   };
 }
 
@@ -185,6 +260,162 @@ describe("compiled keyed-array prepend hints", () => {
     expect(harness.counters.keyReads).toBe(2);
     expect(harness.counters.descriptorReads).toBe(2);
     expect(harness.counters.bindingReads).toBe(2);
+  });
+
+  it("removes rejected rows and creates only the prepended prefix", async () => {
+    const initialItems = Array.from(
+      { length: 2_048 },
+      (_, index): Item => ({ id: `row-${index}`, label: `Row ${index}` }),
+    );
+    const harness = createPrependHarness(initialItems);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Feed />));
+    const first = container.querySelector('[data-key="row-0"]');
+    const middle = container.querySelector('[data-key="row-1024"]');
+    const last = container.querySelector('[data-key="row-2047"]');
+    harness.counters.keyReads = 0;
+    harness.counters.descriptorReads = 0;
+    harness.counters.bindingReads = 0;
+
+    await act(async () => {
+      harness.filterThenPrependTwice(
+        new Set(["row-1024"]),
+        [{ id: "row-new-0", label: "New 0" }],
+        [{ id: "row-new-1", label: "New 1" }],
+      );
+      await flushCompilerUpdates();
+    });
+
+    expect([...container.querySelectorAll("li")].slice(0, 2).map((row) => row.textContent)).toEqual(
+      ["New 1", "New 0"],
+    );
+    expect(container.querySelector('[data-key="row-0"]')).toBe(first);
+    expect(container.querySelector('[data-key="row-1024"]')).toBeNull();
+    expect(middle?.isConnected).toBe(false);
+    expect(container.querySelector('[data-key="row-2047"]')).toBe(last);
+    expect(container.querySelectorAll("li")).toHaveLength(2_049);
+    expect(harness.counters.executions).toBe(1);
+    expect(harness.counters.listRenders).toBe(1);
+    expect(harness.counters.descriptorReads).toBe(2);
+    expect(harness.counters.bindingReads).toBe(2);
+  });
+
+  it("retains a sliced survivor interval through a batched prepend", async () => {
+    const harness = createPrependHarness([
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+      { id: "c", label: "Gamma" },
+      { id: "d", label: "Delta" },
+    ]);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Feed />));
+    const beta = container.querySelector('[data-key="b"]');
+    const gamma = container.querySelector('[data-key="c"]');
+    harness.counters.keyReads = 0;
+    harness.counters.descriptorReads = 0;
+    harness.counters.bindingReads = 0;
+
+    await act(async () => {
+      harness.sliceThenPrepend(1, 3, [
+        { id: "e", label: "Epsilon" },
+        { id: "f", label: "Phi" },
+      ]);
+      await flushCompilerUpdates();
+    });
+
+    expect([...container.querySelectorAll("li")].map((row) => row.textContent)).toEqual([
+      "Epsilon",
+      "Phi",
+      "Beta",
+      "Gamma",
+    ]);
+    expect(container.querySelector('[data-key="b"]')).toBe(beta);
+    expect(container.querySelector('[data-key="c"]')).toBe(gamma);
+    expect(harness.counters.executions).toBe(1);
+    expect(harness.counters.listRenders).toBe(1);
+    expect(harness.counters.keyReads).toBe(2);
+    expect(harness.counters.descriptorReads).toBe(2);
+    expect(harness.counters.bindingReads).toBe(2);
+  });
+
+  it("mounts only the prefix when the structural step rejects every row", async () => {
+    const harness = createPrependHarness([
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+    ]);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Feed />));
+    const previousRows = [...container.querySelectorAll("li")];
+    harness.counters.descriptorReads = 0;
+    harness.counters.bindingReads = 0;
+
+    await act(async () => {
+      harness.filterThenPrepend(new Set(["a", "b"]), [{ id: "c", label: "Gamma" }]);
+      await flushCompilerUpdates();
+    });
+
+    expect([...container.querySelectorAll("li")].map((row) => row.textContent)).toEqual(["Gamma"]);
+    expect(previousRows.every((row) => !row.isConnected)).toBe(true);
+    expect(harness.counters.descriptorReads).toBe(1);
+    expect(harness.counters.bindingReads).toBe(1);
+  });
+
+  it("falls back atomically for reused committed keys, invalid order, and broken lineage", async () => {
+    const harness = createPrependHarness([
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+      { id: "c", label: "Gamma" },
+    ]);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Feed />));
+    const beta = container.querySelector('[data-key="b"]');
+
+    await act(async () => {
+      harness.filterThenPrepend(new Set(["b"]), [{ id: "b", label: "Beta reused" }]);
+      await flushCompilerUpdates();
+    });
+    expect(container.querySelector('[data-key="b"]')).toBe(beta);
+    expect(container.querySelector('[data-key="b"]')?.textContent).toBe("Beta reused");
+
+    await act(async () => {
+      harness.filterThenMismatchedPrepend(new Set(["a"]), {
+        id: "d",
+        label: "Delta",
+      });
+      await flushCompilerUpdates();
+    });
+    expect([...container.querySelectorAll("li")].map((row) => row.textContent)).toEqual([
+      "Delta",
+      "Gamma",
+      "Beta reused",
+    ]);
+
+    harness.counters.bindingReads = 0;
+    await act(async () => {
+      harness.plainBetweenFilterAndPrepend(new Set(["c"]), {
+        id: "e",
+        label: "Epsilon",
+      });
+      await flushCompilerUpdates();
+    });
+    expect([...container.querySelectorAll("li")].map((row) => row.textContent)).toEqual([
+      "Epsilon",
+      "Delta",
+      "Beta reused",
+    ]);
+    expect(harness.counters.bindingReads).toBeGreaterThan(1);
   });
 
   it("composes queued prepends and rejects an unhinted or invalid source chain", async () => {
@@ -268,6 +499,125 @@ describe("compiled keyed-array prepend hints", () => {
     const next: Item[] = [{ id: "safe", label: "Safe" }];
     expect(() => createCompilerKeyedArrayPrepend(proxy, next)).not.toThrow();
     expect(createCompilerKeyedArrayPrepend(proxy, next)).toBe(next);
+    expect(() => createCompilerKeyedArrayStructuralPrepend(proxy, next)).not.toThrow();
+    expect(createCompilerKeyedArrayStructuralPrepend(proxy, next)).toBe(next);
+  });
+
+  it("keeps structural prepend on fallback when rows read the collection", async () => {
+    const harness = createPrependHarness(
+      [
+        { id: "a", label: "Alpha" },
+        { id: "b", label: "Beta" },
+        { id: "c", label: "Gamma" },
+      ],
+      true,
+    );
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Feed />));
+    harness.counters.bindingReads = 0;
+
+    await act(async () => {
+      harness.filterThenPrepend(new Set(["b"]), [{ id: "d", label: "Delta" }]);
+      await flushCompilerUpdates();
+    });
+
+    expect([...container.querySelectorAll("li")].map((row) => row.textContent)).toEqual([
+      "3: Delta",
+      "3: Alpha",
+      "3: Gamma",
+    ]);
+    expect(harness.counters.bindingReads).toBeGreaterThan(1);
+  });
+
+  it("preserves focus and selection on a surviving controlled input", async () => {
+    const initialItems: Item[] = [
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+      { id: "c", label: "Gamma" },
+    ];
+    let refresh = () => undefined;
+    const Feed = createCompiledComponent({
+      displayName: "StructuralPrependForm",
+      initialize: () => [initialItems],
+      render(_props: Record<string, never>, state, blocks) {
+        const items = () => state[0].get() as Item[];
+        refresh = () => {
+          state[0].set((previous) => hintedFilter(previous as Item[], new Set(["a", "c"])));
+          state[0].set((previous) =>
+            hintedStructuralPrepend(previous as Item[], [
+              { id: "d", label: "Delta" },
+              { id: "e", label: "Epsilon" },
+            ]),
+          );
+        };
+        return (
+          <section>
+            <blocks.KeyedRows
+              collectionDependency={0}
+              dependencies={[0]}
+              filterIndexIndependent
+              id={0}
+              items={items}
+              prependIndexIndependent
+              structureDependencies={[0]}
+              render={() => (
+                <div>
+                  {items().map((item) => (
+                    <input data-key={item.id} key={item.id} readOnly value={item.label} />
+                  ))}
+                </div>
+              )}
+              rowKey={(item) => (item as Item).id}
+              create={(item) => ({
+                kind: "element",
+                tag: "input",
+                attributes: [
+                  { name: "data-key", value: (item as Item).id },
+                  { name: "readOnly", value: true },
+                  { name: "value", value: (item as Item).label },
+                ],
+                styles: [],
+                children: [],
+              })}
+              bindings={[
+                {
+                  kind: "attribute",
+                  name: "value",
+                  path: [],
+                  read: (item) => (item as Item).label,
+                },
+              ]}
+            />
+          </section>
+        );
+      },
+      bindings: [{ kind: "block", id: 0, dependencies: [0] }],
+    });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<Feed />));
+    const beta = container.querySelector('[data-key="b"]') as HTMLInputElement;
+    beta.focus();
+    beta.setSelectionRange(1, 3);
+
+    await act(async () => {
+      refresh();
+      await flushCompilerUpdates();
+    });
+
+    expect(container.querySelector('[data-key="b"]')).toBe(beta);
+    expect(document.activeElement).toBe(beta);
+    expect([beta.selectionStart, beta.selectionEnd]).toEqual([1, 3]);
+    expect([...container.querySelectorAll("input")].map((input) => input.value)).toEqual([
+      "Delta",
+      "Epsilon",
+      "Beta",
+    ]);
   });
 
   it("updates delegated event indexes after existing rows shift", async () => {
@@ -276,6 +626,7 @@ describe("compiled keyed-array prepend hints", () => {
       { id: "b", label: "Beta" },
     ];
     let prepend = () => undefined;
+    let removeAndPrepend = () => undefined;
     const calls: string[] = [];
     const Feed = createCompiledComponent({
       displayName: "PrependEventFeed",
@@ -286,6 +637,15 @@ describe("compiled keyed-array prepend hints", () => {
           state[0].set((previous) =>
             hintedPrepend(previous as Item[], [{ id: "x", label: "Extra" }]),
           );
+        removeAndPrepend = () => {
+          state[0].set((previous) => hintedFilter(previous as Item[], new Set(["a"])));
+          state[0].set((previous) =>
+            hintedStructuralPrepend(previous as Item[], [
+              { id: "y", label: "New Y" },
+              { id: "z", label: "New Z" },
+            ]),
+          );
+        };
         return (
           <section>
             <blocks.KeyedRows
@@ -301,6 +661,7 @@ describe("compiled keyed-array prepend hints", () => {
               ]}
               id={0}
               items={items}
+              filterIndexIndependent
               prependIndexIndependent
               structureDependencies={[0]}
               render={(event) => (
@@ -353,7 +714,14 @@ describe("compiled keyed-array prepend hints", () => {
     await act(async () => {
       (container.querySelector('[data-row-button="b"]') as HTMLButtonElement).click();
     });
-    expect(calls).toEqual(["b:2"]);
+    await act(async () => {
+      removeAndPrepend();
+      await flushCompilerUpdates();
+    });
+    await act(async () => {
+      (container.querySelector('[data-row-button="b"]') as HTMLButtonElement).click();
+    });
+    expect(calls).toEqual(["b:2", "b:3"]);
   });
 
   it("matches React through 2,000 deterministic prepends", async () => {
@@ -407,6 +775,87 @@ describe("compiled keyed-array prepend hints", () => {
     expect(harness.counters.executions).toBe(1);
   }, 15_000);
 
+  stressIt(
+    "matches React across 2,000 randomized structural prepend updates",
+    async () => {
+      const initialItems = Array.from(
+        { length: 64 },
+        (_, index): Item => ({ id: `seed-${index}`, label: `Seed ${index}` }),
+      );
+      const harness = createPrependHarness(initialItems);
+      let updateReact: (kind: "filter" | "slice", removedId: string, addition: Item) => void = () =>
+        undefined;
+      function Normal() {
+        const [items, setItems] = useState(initialItems);
+        updateReact = (kind, removedId, addition) =>
+          setItems((previous) => [
+            addition,
+            ...(kind === "filter"
+              ? previous.filter((item) => item.id !== removedId)
+              : previous.slice(1)),
+          ]);
+        return (
+          <ol data-owner="react">
+            {items.map((item) => (
+              <li data-key={item.id} key={item.id}>
+                {item.label}
+              </li>
+            ))}
+          </ol>
+        );
+      }
+      const compiledContainer = document.createElement("div");
+      const reactContainer = document.createElement("div");
+      document.body.append(compiledContainer, reactContainer);
+      const compiledRoot = createRoot(compiledContainer);
+      const reactRoot = createRoot(reactContainer);
+      roots.push(compiledRoot, reactRoot);
+      await act(async () => {
+        compiledRoot.render(<harness.Feed />);
+        reactRoot.render(<Normal />);
+      });
+      harness.counters.descriptorReads = 0;
+      harness.counters.bindingReads = 0;
+      let active = initialItems.map((item) => item.id);
+      let seed = 0x9e3779b9;
+      let nextId = 0;
+
+      for (let update = 0; update < 2_000; update += 1) {
+        seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0;
+        const kind = seed % 2 === 0 ? "filter" : "slice";
+        const removedId = kind === "filter" ? active[(seed >>> 1) % active.length] : active[0];
+        const addition = {
+          id: `new-${nextId}`,
+          label: `New ${nextId}`,
+        };
+        nextId += 1;
+        await act(async () => {
+          if (kind === "filter") {
+            harness.filterThenPrepend(new Set([removedId]), [addition]);
+          } else {
+            harness.sliceThenPrepend(1, active.length, [addition]);
+          }
+          updateReact(kind, removedId, addition);
+          await flushCompilerUpdates();
+        });
+        active =
+          kind === "filter"
+            ? [addition.id, ...active.filter((id) => id !== removedId)]
+            : [addition.id, ...active.slice(1)];
+        if ((update + 1) % 20 === 0) {
+          expect([...compiledContainer.querySelectorAll("li")].map((row) => row.outerHTML)).toEqual(
+            [...reactContainer.querySelectorAll("li")].map((row) => row.outerHTML),
+          );
+        }
+      }
+      expect(active).toHaveLength(64);
+      expect(harness.counters.executions).toBe(1);
+      expect(harness.counters.descriptorReads).toBe(2_000);
+      expect(harness.counters.bindingReads).toBe(2_000);
+    },
+    20_000,
+  );
+
   it("hydrates in StrictMode and drops a queued prepend after unmount", async () => {
     const harness = createPrependHarness([{ id: "a", label: "Alpha" }]);
     const container = document.createElement("div");
@@ -436,9 +885,16 @@ describe("compiled keyed-array prepend hints", () => {
     expect(container.textContent).toBe("BetaAlpha");
     expect(recoverable).toEqual([]);
 
+    await act(async () => {
+      harness.filterThenPrepend(new Set(["a"]), [{ id: "c", label: "Gamma" }]);
+      await flushCompilerUpdates();
+    });
+    expect(container.textContent).toBe("GammaBeta");
+    expect(recoverable).toEqual([]);
+
     roots.pop();
     act(() => {
-      harness.prepend([{ id: "c", label: "Gamma" }]);
+      harness.filterThenPrepend(new Set(["b"]), [{ id: "d", label: "Delta" }]);
       root.unmount();
     });
     await flushCompilerUpdates();

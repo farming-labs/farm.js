@@ -312,14 +312,27 @@ The mirror-image prepend form is supported when the keyed row and key do not rea
 ```tsx
 setItems((current) => [nextItem, ...current]);
 setItems((current) => [...nextItems, ...current]);
+
+setItems((current) => current.filter((item) => item.id !== expiredId));
+setItems((current) => [nextItem, ...current]);
+
+setItems((current) => current.slice(start, end));
+setItems((current) => [...nextItems, ...current]);
 ```
 
 Farm validates the committed source and queued prepend chain, creates only the new prefix, inserts
 it before the first existing row, and shifts the stored indexes used by delegated row events.
-Existing row DOM and bindings stay in place. Index-aware rows, collection-reading bindings or
-keys, React-owned row structures, middle insertion, direct replacement, duplicate keys, custom or
-sparse arrays, and failed validation use complete keyed reconciliation. The compiler report
-exposes the emitted-site count as `keyedArrayPrependHints`.
+When an adjacent filter or bounded slice runs first, the compiler also carries the exact survivor
+positions into the prepend. The runtime removes only rejected rows, preserves every surviving DOM
+node, and creates only the final prefix instead of rescanning and rebinding the whole result.
+Multiple adjacent prepends share the same proof.
+
+Index-aware rows, collection-reading bindings or keys, React-owned or nested row structures,
+middle insertion, direct replacement, a reordered or mapped structural chain, duplicate final
+keys, reuse of any committed key in the new prefix, custom or sparse arrays, and failed validation
+use complete keyed reconciliation before any DOM mutation. The compiler report exposes the
+emitted-site count as `keyedArrayPrependHints`; no option or component API is added, and modules
+without both removal and prepend sites omit the composed runtime.
 
 Native slices with compiler-safe bounds can carry their exact retained interval into the same
 removal runtime:

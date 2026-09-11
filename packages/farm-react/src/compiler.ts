@@ -379,6 +379,7 @@ type CompilerRuntimeFeatureName =
   | "keyed-rows-filter-hinted"
   | "keyed-rows-structural-append-hinted"
   | "keyed-rows-structural-append-map-hinted"
+  | "keyed-rows-structural-prepend-hinted"
   | "keyed-rows-prepend-hinted"
   | "keyed-rows-filter-prepend-hinted"
   | "keyed-rows-conditional"
@@ -394,6 +395,7 @@ type CompilerRuntimeFeatureName =
   | "keyed-rows-conditional-filter-hinted"
   | "keyed-rows-conditional-structural-append-hinted"
   | "keyed-rows-conditional-structural-append-map-hinted"
+  | "keyed-rows-conditional-structural-prepend-hinted"
   | "keyed-rows-conditional-prepend-hinted"
   | "keyed-rows-conditional-filter-prepend-hinted"
   | "keyed-rows-host"
@@ -409,6 +411,7 @@ type CompilerRuntimeFeatureName =
   | "keyed-rows-host-filter-hinted"
   | "keyed-rows-host-structural-append-hinted"
   | "keyed-rows-host-structural-append-map-hinted"
+  | "keyed-rows-host-structural-prepend-hinted"
   | "keyed-rows-host-prepend-hinted"
   | "keyed-rows-host-filter-prepend-hinted"
   | "keyed-rows-complete"
@@ -424,6 +427,7 @@ type CompilerRuntimeFeatureName =
   | "keyed-rows-complete-filter-hinted"
   | "keyed-rows-complete-structural-append-hinted"
   | "keyed-rows-complete-structural-append-map-hinted"
+  | "keyed-rows-complete-structural-prepend-hinted"
   | "keyed-rows-complete-prepend-hinted"
   | "keyed-rows-complete-filter-prepend-hinted"
   | "keyed-ranges"
@@ -449,6 +453,7 @@ const COMPILER_RUNTIME_FEATURE_EXPORTS: Record<CompilerRuntimeFeatureName, strin
   "keyed-rows-filter-hinted": "keyedRowsFilterHintedRuntimeFeature",
   "keyed-rows-structural-append-hinted": "keyedRowsStructuralAppendHintedRuntimeFeature",
   "keyed-rows-structural-append-map-hinted": "keyedRowsStructuralAppendMapHintedRuntimeFeature",
+  "keyed-rows-structural-prepend-hinted": "keyedRowsStructuralPrependHintedRuntimeFeature",
   "keyed-rows-prepend-hinted": "keyedRowsPrependHintedRuntimeFeature",
   "keyed-rows-filter-prepend-hinted": "keyedRowsFilterPrependHintedRuntimeFeature",
   "keyed-rows-conditional": "keyedRowsConditionalRuntimeFeature",
@@ -469,6 +474,8 @@ const COMPILER_RUNTIME_FEATURE_EXPORTS: Record<CompilerRuntimeFeatureName, strin
     "keyedRowsConditionalStructuralAppendHintedRuntimeFeature",
   "keyed-rows-conditional-structural-append-map-hinted":
     "keyedRowsConditionalStructuralAppendMapHintedRuntimeFeature",
+  "keyed-rows-conditional-structural-prepend-hinted":
+    "keyedRowsConditionalStructuralPrependHintedRuntimeFeature",
   "keyed-rows-conditional-prepend-hinted": "keyedRowsConditionalPrependHintedRuntimeFeature",
   "keyed-rows-conditional-filter-prepend-hinted":
     "keyedRowsConditionalFilterPrependHintedRuntimeFeature",
@@ -486,6 +493,7 @@ const COMPILER_RUNTIME_FEATURE_EXPORTS: Record<CompilerRuntimeFeatureName, strin
   "keyed-rows-host-structural-append-hinted": "keyedRowsHostStructuralAppendHintedRuntimeFeature",
   "keyed-rows-host-structural-append-map-hinted":
     "keyedRowsHostStructuralAppendMapHintedRuntimeFeature",
+  "keyed-rows-host-structural-prepend-hinted": "keyedRowsHostStructuralPrependHintedRuntimeFeature",
   "keyed-rows-host-prepend-hinted": "keyedRowsHostPrependHintedRuntimeFeature",
   "keyed-rows-host-filter-prepend-hinted": "keyedRowsHostFilterPrependHintedRuntimeFeature",
   "keyed-rows-complete": "keyedRowsCompleteRuntimeFeature",
@@ -504,6 +512,8 @@ const COMPILER_RUNTIME_FEATURE_EXPORTS: Record<CompilerRuntimeFeatureName, strin
     "keyedRowsCompleteStructuralAppendHintedRuntimeFeature",
   "keyed-rows-complete-structural-append-map-hinted":
     "keyedRowsCompleteStructuralAppendMapHintedRuntimeFeature",
+  "keyed-rows-complete-structural-prepend-hinted":
+    "keyedRowsCompleteStructuralPrependHintedRuntimeFeature",
   "keyed-rows-complete-prepend-hinted": "keyedRowsCompletePrependHintedRuntimeFeature",
   "keyed-rows-complete-filter-prepend-hinted": "keyedRowsCompleteFilterPrependHintedRuntimeFeature",
   "keyed-ranges": "keyedRangesRuntimeFeature",
@@ -518,6 +528,7 @@ function runtimeFeaturesForPlans(
   keyedArrayStructuralAppendHints: boolean,
   keyedArrayStructuralAppendMapHints: boolean,
   keyedArrayPrependHints: boolean,
+  keyedArrayStructuralPrependHints: boolean,
   keyedArrayPositionHints: boolean,
   keyedArrayBatchInsertHints: boolean,
   keyedArrayWindowReplaceHints: boolean,
@@ -549,38 +560,49 @@ function runtimeFeaturesForPlans(
             : "keyed-rows";
     const arrayRangeHints =
       keyedArrayRollingWindowHints || keyedArrayFilterHints || keyedArrayPrependHints;
-    const hintSuffix = keyedArrayStructuralAppendMapHints
-      ? "-structural-append-map-hinted"
-      : keyedArrayStructuralAppendHints
-        ? "-structural-append-hinted"
-        : keyedArrayWindowReplaceHints
-          ? arrayRangeHints || keyedArrayReorderHints
-            ? "-window-every-hinted"
-            : "-window-position-hinted"
-          : keyedArrayBatchInsertHints
+    const needsCombinedStructuralPrependRuntime =
+      keyedArrayStructuralPrependHints &&
+      (keyedArrayStructuralAppendMapHints ||
+        keyedArrayStructuralAppendHints ||
+        keyedArrayWindowReplaceHints ||
+        keyedArrayBatchInsertHints ||
+        keyedArrayPositionHints ||
+        keyedArrayReorderHints ||
+        keyedArrayRollingWindowHints);
+    const hintSuffix = needsCombinedStructuralPrependRuntime
+      ? "-structural-prepend-hinted"
+      : keyedArrayStructuralAppendMapHints
+        ? "-structural-append-map-hinted"
+        : keyedArrayStructuralAppendHints
+          ? "-structural-append-hinted"
+          : keyedArrayWindowReplaceHints
             ? arrayRangeHints || keyedArrayReorderHints
-              ? "-batch-every-hinted"
-              : "-batch-position-hinted"
-            : (keyedArrayPositionHints && (arrayRangeHints || keyedArrayReorderHints)) ||
-                (keyedArrayReorderHints && arrayRangeHints)
-              ? "-every-hinted"
-              : keyedArrayRollingWindowHints
-                ? "-all-hinted"
-                : keyedArrayPositionHints
-                  ? "-position-hinted"
-                  : keyedArrayMapReorderHints && keyedRowsFeature === "keyed-rows"
-                    ? "-map-reorder-hinted"
-                    : keyedArrayReorderHints
-                      ? "-reorder-hinted"
-                      : keyedArrayFilterHints && keyedArrayPrependHints
-                        ? "-filter-prepend-hinted"
-                        : keyedArrayFilterHints
-                          ? "-filter-hinted"
-                          : keyedArrayPrependHints
-                            ? "-prepend-hinted"
-                            : keyedMapUpdateHints
-                              ? "-hinted"
-                              : "";
+              ? "-window-every-hinted"
+              : "-window-position-hinted"
+            : keyedArrayBatchInsertHints
+              ? arrayRangeHints || keyedArrayReorderHints
+                ? "-batch-every-hinted"
+                : "-batch-position-hinted"
+              : (keyedArrayPositionHints && (arrayRangeHints || keyedArrayReorderHints)) ||
+                  (keyedArrayReorderHints && arrayRangeHints)
+                ? "-every-hinted"
+                : keyedArrayRollingWindowHints
+                  ? "-all-hinted"
+                  : keyedArrayPositionHints
+                    ? "-position-hinted"
+                    : keyedArrayMapReorderHints && keyedRowsFeature === "keyed-rows"
+                      ? "-map-reorder-hinted"
+                      : keyedArrayReorderHints
+                        ? "-reorder-hinted"
+                        : keyedArrayFilterHints && keyedArrayPrependHints
+                          ? "-filter-prepend-hinted"
+                          : keyedArrayFilterHints
+                            ? "-filter-hinted"
+                            : keyedArrayPrependHints
+                              ? "-prepend-hinted"
+                              : keyedMapUpdateHints
+                                ? "-hinted"
+                                : "";
     features.add(`${keyedRowsFeature}${hintSuffix}` as CompilerRuntimeFeatureName);
   }
   return [...features].sort();
@@ -9171,6 +9193,7 @@ function compileCandidate(
       (appliedKeyedArrayFilterHints > 0 || appliedKeyedArraySliceHints > 0),
     appliedQueuedStructuralAppendMapHints > 0,
     appliedKeyedArrayPrependHints > 0,
+    appliedKeyedArrayPrependHints > 0 && hasKeyedArrayRemovalHints,
     appliedKeyedArrayPositionHints > 0,
     appliedKeyedArrayBatchInsertHints > 0,
     appliedKeyedArrayWindowReplaceHints > 0,
@@ -9578,6 +9601,10 @@ export async function compileReactModule(
         const hasUnmappedKeyedArrayAppendHints =
           optimizationCounts.keyedArrayAppendHints >
           compilerUsage.keyedArrayMappedStructuralAppendHints;
+        const hasKeyedArrayStructuralPrependHints =
+          optimizationCounts.keyedArrayPrependHints > 0 &&
+          (optimizationCounts.keyedArrayFilterHints > 0 ||
+            optimizationCounts.keyedArraySliceHints > 0);
         if (compiled.length > 0) {
           programPath.unshiftContainer(
             "body",
@@ -9667,7 +9694,11 @@ export async function compileReactModule(
                   ? [
                       t.importSpecifier(
                         keyedArrayPrependIdentifier,
-                        t.identifier("createCompilerKeyedArrayPrepend"),
+                        t.identifier(
+                          hasKeyedArrayStructuralPrependHints
+                            ? "createCompilerKeyedArrayStructuralPrepend"
+                            : "createCompilerKeyedArrayPrepend",
+                        ),
                       ),
                     ]
                   : []),

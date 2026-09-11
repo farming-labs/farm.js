@@ -86,6 +86,65 @@ describe("React AOT keyed-array prepend hints", () => {
 
   it.each([
     {
+      name: "filter",
+      remove: "current.filter((row) => row.id !== expiredId)",
+    },
+    {
+      name: "slice",
+      remove: "current.slice(start, end)",
+    },
+  ])("retains $name survivor lineage through a later prepend", async ({ remove }) => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Feed({ expiredId, start, end, incoming }) {
+        const [rows, setRows] = useState([{ id: "a", label: "Alpha" }]);
+        return <main>
+          <button onClick={() => {
+            setRows((current) => ${remove});
+            setRows((current) => [incoming, ...current]);
+          }}>
+            Refresh
+          </button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </main>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Feed"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.optimizations.keyedArrayPrependHints).toBe(1);
+    expect(result.code).toContain("createCompilerKeyedArrayStructuralPrepend");
+    expect(result.code).toContain("keyedRowsFilterPrependHintedRuntimeFeature");
+  });
+
+  it("keeps structural prepend available beside other keyed update capabilities", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Feed({ expiredId, incoming, trailing }) {
+        const [rows, setRows] = useState([{ id: "a", label: "Alpha" }]);
+        return <main>
+          <button onClick={() => {
+            setRows((current) => current.filter((row) => row.id !== expiredId));
+            setRows((current) => [incoming, ...current]);
+          }}>Prepend</button>
+          <button onClick={() => {
+            setRows((current) => current.filter((row) => row.id !== expiredId));
+            setRows((current) => [...current, trailing]);
+          }}>Append</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </main>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Feed"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.code).toContain("createCompilerKeyedArrayStructuralPrepend");
+    expect(result.code).toContain("createCompilerKeyedArrayStructuralAppend");
+    expect(result.code).toContain("keyedRowsStructuralPrependHintedRuntimeFeature");
+  });
+
+  it.each([
+    {
       name: "an index-sensitive row",
       row: "(row, index) => <li key={row.id}>{index}: {row.label}</li>",
       update: 'setRows((current) => [{ id: "b", label: "Beta" }, ...current])',
