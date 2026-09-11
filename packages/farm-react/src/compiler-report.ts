@@ -1,5 +1,5 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, relative, resolve } from "node:path";
+import { mkdir, realpath, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import type { CompileReactModuleResult, CompilerDiagnostic } from "./compiler";
 
 export interface ReactCompilerModuleObservation {
@@ -152,8 +152,36 @@ export async function writeReactCompilerReport(
   observations: Iterable<ReactCompilerModuleObservation>,
 ): Promise<string> {
   const outputPath = resolve(projectRoot, reportFile);
+  await assertReportPathInsideProject(projectRoot, outputPath);
   const report = createReactCompilerReport(projectRoot, observations);
   await mkdir(dirname(outputPath), { recursive: true });
   await writeFile(outputPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
   return outputPath;
+}
+
+async function assertReportPathInsideProject(
+  projectRoot: string,
+  outputPath: string,
+): Promise<void> {
+  const realProjectRoot = await realpath(projectRoot);
+  let existingAncestor = outputPath;
+
+  while (true) {
+    try {
+      existingAncestor = await realpath(existingAncestor);
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      const parent = dirname(existingAncestor);
+      if (parent === existingAncestor) throw error;
+      existingAncestor = parent;
+    }
+  }
+
+  const relativePath = relative(realProjectRoot, existingAncestor);
+  if (relativePath === ".." || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath)) {
+    throw new Error(
+      "The React compiler report file must stay inside the project root, including through symlinks.",
+    );
+  }
 }

@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -147,5 +147,23 @@ describe("React compiler coverage report", () => {
     expect(outputPath).toBe(join(projectRoot, ".farm", "react-compiler.json"));
     expect(report.version).toBe(1);
     expect(report.summary.compiled).toBe(2);
+  });
+
+  it("does not write a report outside the project through a symlinked parent", async () => {
+    const temporaryRoot = await mkdtemp(join(tmpdir(), "farm-react-report-"));
+    temporaryDirectories.push(temporaryRoot);
+    const projectRoot = join(temporaryRoot, "project");
+    const externalDirectory = join(temporaryRoot, "external");
+    const externalReport = join(externalDirectory, "compiler.json");
+    await mkdir(projectRoot);
+    await mkdir(externalDirectory);
+    await writeFile(externalReport, "keep me");
+    await symlink(externalDirectory, join(projectRoot, "reports"), "junction");
+
+    await expect(
+      writeReactCompilerReport(projectRoot, "reports/compiler.json", observations(projectRoot)),
+    ).rejects.toThrow("including through symlinks");
+
+    await expect(readFile(externalReport, "utf8")).resolves.toBe("keep me");
   });
 });
