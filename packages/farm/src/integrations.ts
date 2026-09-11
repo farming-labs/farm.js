@@ -1,3 +1,4 @@
+import { validateConfigRouteSource } from "./plugins/route-pattern";
 import type { ComponentType, ReactNode } from "react";
 import { api as integrationApi, defineIntegrationAPIOperation } from "./integration-api";
 import type {
@@ -13,7 +14,6 @@ import type { InferFarmIntegrationOrmClient } from "./integration-orm";
 import { setFarmPluginIntegrationContext } from "./plugin-integration-context";
 import { decodeRouteSegment } from "./utils/decode";
 import { assertTerminalCatchAll } from "./routing/specificity";
-import { validateConfigRouteSource } from "./plugins/route-pattern";
 import type {
   FarmPlugin,
   FarmPluginContext,
