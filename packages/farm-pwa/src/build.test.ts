@@ -214,6 +214,25 @@ describe("writePwaBuildArtifacts", () => {
 
     await expect(readFile(externalWorker, "utf8")).resolves.toBe("keep me");
   });
+
+  it("rejects a dangling service worker symlink before creating its external target", async () => {
+    const { root, publicDir } = await createOutput("node-server");
+    const externalWorker = path.join(root, "external-worker.js");
+    const workerDirectory = path.join(publicDir, "app");
+    await mkdir(workerDirectory);
+    await symlink(externalWorker, path.join(workerDirectory, "sw.js"), "file");
+
+    await expect(
+      writePwaBuildArtifacts({
+        outputDir: root,
+        preset: "node-server",
+        basePath: "/app",
+        options: resolvePwaOptions(),
+      }),
+    ).rejects.toThrow("including through symlinks");
+
+    await expect(readFile(externalWorker)).rejects.toThrow();
+  });
 });
 
 describe("generateServiceWorker", () => {

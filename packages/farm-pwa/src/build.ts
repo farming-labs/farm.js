@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readdir, readFile, realpath, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { ResolvedPwaOptions } from "./config.js";
 
@@ -355,6 +355,18 @@ async function resolveProspectiveRealPath(candidate: string): Promise<string> {
       return path.join(await realpath(existingAncestor), ...missingSegments);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      let existingEntry = false;
+      try {
+        await lstat(existingAncestor);
+        existingEntry = true;
+      } catch (statError) {
+        if ((statError as NodeJS.ErrnoException).code !== "ENOENT") throw statError;
+      }
+      if (existingEntry) {
+        throw new Error(
+          "[farm:pwa] Service worker output must stay inside the public output directory, including through symlinks.",
+        );
+      }
       const parent = path.dirname(existingAncestor);
       if (parent === existingAncestor) throw error;
       missingSegments.unshift(path.basename(existingAncestor));
