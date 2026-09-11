@@ -220,6 +220,7 @@ function wrapEnvironmentHook(hook: unknown, optionsIndex: number): unknown {
 function isServerEnvironment(context: unknown, options: unknown): boolean {
   const environmentName = (context as { environment?: { name?: unknown } })?.environment?.name;
   return (
+    environmentName === "rsc" ||
     environmentName === "ssr" ||
     environmentName === "server" ||
     Boolean((options as { ssr?: unknown } | undefined)?.ssr)
