@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import {
   buildDocsAgentDiscoverySpec,
@@ -174,6 +174,20 @@ function resolveInside(root: string, target: string): string | null {
   return null;
 }
 
+function resolveExistingFileInside(root: string, target: string): string | null {
+  const safePath = resolveInside(root, target);
+  if (!safePath) return null;
+
+  try {
+    const realRoot = realpathSync(root);
+    const realTarget = realpathSync(safePath);
+    const containedTarget = resolveInside(realRoot, realTarget);
+    return containedTarget && statSync(containedTarget).isFile() ? containedTarget : null;
+  } catch {
+    return null;
+  }
+}
+
 export function isFarmDocsRequest(docs: FarmDocsResolvedConfig | undefined, request: Request) {
   if (!docs?.enabled) return false;
   if (request.method !== "GET" && request.method !== "HEAD") return false;
@@ -245,8 +259,8 @@ function findDocsPageFile(contentDir: string, slug: string): string | null {
         ];
 
   for (const candidate of candidates) {
-    const safePath = resolveInside(contentDir, candidate);
-    if (safePath && existsSync(safePath) && statSync(safePath).isFile()) {
+    const safePath = resolveExistingFileInside(contentDir, candidate);
+    if (safePath) {
       return safePath;
     }
   }
