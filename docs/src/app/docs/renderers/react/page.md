@@ -980,6 +980,12 @@ setItems((current) => [...current, incoming]);
 setItems((current) =>
   current.map((item) => (item.id === targetId ? { ...item, label: nextLabel } : item)),
 );
+
+setItems((current) => current.filter((item) => item.id !== expiredId));
+setItems((current) =>
+  current.map((item) => (item.id === targetId ? { ...item, label: nextLabel } : item)),
+);
+setItems((current) => [...current, incoming]);
 ```
 
 The setters still execute in order and still create their normal native arrays. Before changing the
@@ -990,23 +996,22 @@ suffix in one fragment. Existing survivors are neither rebound nor recreated, an
 adjacent append setters are collapsed into the same final suffix. This keeps the unavoidable native
 filter or slice work while removing the keyed runtime's second full scan.
 
-After an index-independent filter or bounded slice, one or more immediately following safe same-key
-`map()` setters can retain that proof too. Farm carries the filter's original survivor indices or
-the slice's retained interval into the native maps, validates each visited survivor against the
-committed item snapshot, and records only changed indices. Before touching the DOM it revalidates
-the complete dense result, every changed key and binding, and every incoming row. It then removes
-only rejected rows, patches only changed survivors, and creates the mapped suffix directly from its
-final values. The owner stays mounted, survivor DOM identity is preserved, and the suffix is
+One or more immediately adjacent safe same-key `map()` setters may run between the filter or slice
+and the append, after the append, or in both positions. A safe map may also precede the structural
+removal. Farm carries the original survivor indices or retained interval through those native maps
+and records each replacement against its committed row. Before touching the DOM it validates the
+complete dense result, every survivor identity, every changed key and binding, and every incoming
+row. It then removes only rejected rows, patches only changed survivors, and creates the suffix from
+its final values. The owner stays mounted, survivor DOM identity is preserved, and the suffix is
 appended once.
 
 Only concise updater results that form one direct chain for the same state array are linked. The row
-and key must be compiler-owned and index-independent. A map or reorder between the structural step
-and append, an unsupported or non-adjacent map after append, an
-unhinted update to that state, another dirty row dependency, collection-reading binding, custom,
-sparse, or subclassed array, nested or React-owned row, duplicate final key, or reuse of any
-committed key in the appended suffix keeps complete React reconciliation before a DOM write. A
-mapped survivor whose key changes also falls back before mutation. No API or configuration is
-added. Compiler reports use the existing
+and key must be compiler-owned and index-independent. A reorder in the structural-append chain, an
+unsupported or non-adjacent map, an unhinted update to that state, another dirty row dependency,
+collection-reading binding, custom, sparse, or subclassed array, nested or React-owned row,
+duplicate final key, or reuse of any committed key in the appended suffix keeps complete React
+reconciliation before a DOM write. A mapped survivor whose key changes also falls back before
+mutation. No API or configuration is added. Compiler reports use the existing
 `keyedArrayFilterHints`, `keyedArraySliceHints`, and `keyedArrayAppendHints` counts, and modules
 without both accepted operations omit the composed runtime.
 
@@ -2338,9 +2343,10 @@ The package and example test suites verify more than generated code:
 - 2,000 deterministic keyed-array appends match normal React; targeted tests require key,
   descriptor, and binding reads to equal only the appended suffix and cover queued updates,
   multi-boundary sharing, StrictMode hydration/unmount, and conservative fallback;
-- 2,000 randomized queued filter-or-slice, append, and map transitions match normal React, with
-  both structural sources retaining their committed survivor positions through the composed fast
-  path; targeted tests require survivor DOM identity, changed-survivor-only binding writes, mixed
+- 2,000 randomized queued filter-or-slice, append, and map transitions plus 2,000 transitions with
+  maps before the append match normal React, with both structural sources retaining their committed
+  survivor positions through the composed fast path; targeted tests require survivor DOM identity,
+  changed-survivor-only binding writes, mixed
   filter/slice chains, controlled-input focus and selection, multiple maps, multi-boundary sharing,
   Strict Mode
   hydration, nested unmount cleanup, changed-key and removed-key reuse fallback, and atomic

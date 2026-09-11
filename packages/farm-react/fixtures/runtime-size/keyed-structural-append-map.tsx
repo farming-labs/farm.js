@@ -15,10 +15,10 @@ export function StructuralAppendMapTable() {
       <button
         onClick={() => {
           setRows((current) => current.slice(1));
-          setRows((current) => [...current, { id: 1_001, label: "Appended row" }]);
           setRows((current) =>
             current.map((row) => (row.id === 750 ? { ...row, label: "Updated row" } : row)),
           );
+          setRows((current) => [...current, { id: 1_001, label: "Appended row" }]);
         }}
       >
         Replace and update

@@ -46,6 +46,7 @@ const testSource = String.raw`
     createCompilerKeyedArrayBatchInsert,
     createCompilerKeyedArrayFilter,
     createCompilerKeyedArrayMapPipeline,
+    createCompilerKeyedArrayMappedStructuralAppend,
     createCompilerKeyedArrayMapReorder,
     createCompilerKeyedArrayPositionUpdate,
     createCompilerKeyedArrayPrepend,
@@ -2249,6 +2250,7 @@ const testSource = String.raw`
   flushSync(() => derivedCollectionRoot.unmount());
 
   let structuralAppendRows = () => undefined;
+  let mappedStructuralAppendRows = () => undefined;
   let structuralAppendExecutions = 0;
   const StructuralAppendRows = createCompiledComponentWithFeatures({
     displayName: "CompatibilityStructuralAppendRows",
@@ -2282,6 +2284,28 @@ const testSource = String.raw`
                 item.id === "c" ? { ...item, label: "Gamma edited" } : item,
               ),
           ),
+        );
+      };
+      mappedStructuralAppendRows = () => {
+        state[0].set((previous) =>
+          createCompilerKeyedArrayFilter(
+            previous,
+            previous.filter,
+            (item) => item.id !== "b",
+          ),
+        );
+        state[0].set((previous) =>
+          createCompilerKeyedArrayMapPipeline(
+            previous,
+            previous.map,
+            (item) => item.id === "c" ? { ...item, label: "Gamma mapped first" } : item,
+          ),
+        );
+        state[0].set((previous) =>
+          createCompilerKeyedArrayMappedStructuralAppend(previous, [
+            ...previous,
+            { id: "e", label: "Epsilon" },
+          ]),
         );
       };
       return React.createElement(
@@ -2333,6 +2357,16 @@ const testSource = String.raw`
   assert.equal(structuralAppendContainer.querySelector("[data-key='b']"), structuralBeta);
   assert.equal(structuralAppendContainer.querySelector("[data-key='c']"), structuralGamma);
   assert.equal(structuralAlpha.isConnected, false);
+  assert.equal(structuralAppendExecutions, 1);
+  mappedStructuralAppendRows();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(
+    [...structuralAppendContainer.querySelectorAll("li")].map((row) => row.textContent),
+    ["Gamma mapped first", "Delta", "Epsilon"],
+  );
+  assert.equal(structuralAppendContainer.querySelector("[data-key='c']"), structuralGamma);
+  assert.equal(structuralBeta.isConnected, false);
   assert.equal(structuralAppendExecutions, 1);
   flushSync(() => structuralAppendRoot.unmount());
 

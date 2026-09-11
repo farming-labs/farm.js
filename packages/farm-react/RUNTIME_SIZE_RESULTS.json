@@ -90,18 +90,18 @@
     "keyedStructuralAppendMap": {
       "compilerOff": {
         "raw": 192981,
-        "gzip": 60138,
-        "brotli": 51844
+        "gzip": 60137,
+        "brotli": 51861
       },
       "compilerOn": {
-        "raw": 262343,
-        "gzip": 78771,
-        "brotli": 67528
+        "raw": 263083,
+        "gzip": 78845,
+        "brotli": 67473
       },
       "compilerPremium": {
-        "raw": 69362,
-        "gzip": 18633,
-        "brotli": 15684
+        "raw": 70102,
+        "gzip": 18708,
+        "brotli": 15612
       }
     },
     "keyedPrepend": {

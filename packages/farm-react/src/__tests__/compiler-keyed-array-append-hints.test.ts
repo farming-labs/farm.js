@@ -236,7 +236,7 @@ describe("React AOT keyed-array append hints", () => {
     expect(result.code).toContain("keyedRowsStructuralAppendMapHintedRuntimeFeature");
   });
 
-  it("does not retain structural append lineage when a map runs before the append", async () => {
+  it("retains structural append lineage when a safe map runs before the append", async () => {
     const result = await compile(`
       import { useState } from "react";
       export function Inventory({ expiredId, incoming, editedId, nextLabel }) {
@@ -248,9 +248,6 @@ describe("React AOT keyed-array append hints", () => {
               row.id === editedId ? { ...row, label: nextLabel } : row
             ));
             setRows((current) => [...current, incoming]);
-            setRows((current) => current.map((row) =>
-              row.id === incoming.id ? { ...row, selected: true } : row
-            ));
           }}>
             Refresh rows
           </button>
@@ -260,7 +257,72 @@ describe("React AOT keyed-array append hints", () => {
     `);
 
     expect(result.compiled).toEqual(["Inventory"]);
-    expect(result.code).not.toContain("createCompilerKeyedArrayStructuralAppendMapPipeline");
+    expect(result.diagnostics).toEqual([]);
+    expect(result.optimizations.keyedArrayFilterHints).toBe(1);
+    expect(result.optimizations.keyedArrayAppendHints).toBe(1);
+    expect(result.optimizations.keyedMapUpdateHints).toBe(1);
+    expect(result.code).toContain("createCompilerKeyedArrayMapPipeline");
+    expect(result.code).toContain("createCompilerKeyedArrayMappedStructuralAppend");
+    expect(result.code).not.toContain("createCompilerKeyedArrayStructuralAppend as");
+    expect(result.code).not.toContain("createCompilerKeyedArrayStructuralAppendMapPipeline as");
+    expect(result.code).toContain("keyedRowsStructuralAppendMapHintedRuntimeFeature");
+  });
+
+  it("does not link a mapped structural append across intervening work", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Inventory({ expiredId, incoming, editedId, nextLabel }) {
+        const [rows, setRows] = useState([{ id: "a", label: "Alpha" }]);
+        return <main>
+          <button onClick={() => {
+            setRows((current) => current.filter((row) => row.id !== expiredId));
+            setRows((current) => current.map((row) =>
+              row.id === editedId ? { ...row, label: nextLabel } : row
+            ));
+            logRefresh();
+            setRows((current) => [...current, incoming]);
+          }}>
+            Refresh rows
+          </button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </main>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Inventory"]);
+    expect(result.code).not.toContain("createCompilerKeyedArrayMappedStructuralAppend");
+    expect(result.code).not.toContain("keyedRowsStructuralAppendMapHintedRuntimeFeature");
+  });
+
+  it("retains a safe map through a following structural removal and append", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Inventory({ expiredId, incoming, editedId, nextLabel }) {
+        const [rows, setRows] = useState([{ id: "a", label: "Alpha" }]);
+        return <main>
+          <button onClick={() => {
+            setRows((current) => current.map((row) =>
+              row.id === editedId ? { ...row, label: nextLabel } : row
+            ));
+            setRows((current) => current.filter((row) => row.id !== expiredId));
+            setRows((current) => [...current, incoming]);
+          }}>
+            Refresh rows
+          </button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </main>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Inventory"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.optimizations.keyedArrayFilterHints).toBe(1);
+    expect(result.optimizations.keyedArrayAppendHints).toBe(1);
+    expect(result.optimizations.keyedMapUpdateHints).toBe(1);
+    expect(result.code).toContain("createCompilerKeyedArrayQueuedMapPipeline");
+    expect(result.code).toContain("finalizeCompilerKeyedArrayMappedStructuralUpdate");
+    expect(result.code).toContain("createCompilerKeyedArrayMappedStructuralAppend");
+    expect(result.code).toContain("keyedRowsStructuralAppendMapHintedRuntimeFeature");
   });
 
   it("does not hint a collection when an existing row key reads its length", async () => {
