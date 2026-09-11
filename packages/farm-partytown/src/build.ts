@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { partytownSnippet, type PartytownConfig } from "@qwik.dev/partytown/integration";
 import { copyLibFiles, libDirPath } from "@qwik.dev/partytown/utils";
@@ -29,6 +29,7 @@ export async function writePartytownBuildArtifacts(
   const relativeAssetsDir = path.posix.join(basePath.slice(1), PARTYTOWN_DIRECTORY);
   const assetsDir = path.join(publicDir, ...relativeAssetsDir.split("/"));
   const debug = input.options.debug ?? false;
+  await assertAssetsPathInsidePublicDir(publicDir, assetsDir);
 
   await copyLibFiles(assetsDir, { debugDir: debug });
   const bootstrapPath = path.join(assetsDir, PARTYTOWN_BOOTSTRAP);
@@ -138,6 +139,41 @@ export function partytownAssetUrl(file: string, basePath: string): string {
 
 export function resolvePartytownPublicDir(outputDir: string, preset: string): string {
   return path.join(outputDir, preset.startsWith("vercel") ? "static" : "public");
+}
+
+async function assertAssetsPathInsidePublicDir(
+  publicDir: string,
+  assetsDir: string,
+): Promise<void> {
+  const prospectivePublicDir = await resolveProspectiveRealPath(publicDir);
+  const prospectiveAssetsDir = await resolveProspectiveRealPath(assetsDir);
+  const relativePath = path.relative(prospectivePublicDir, prospectiveAssetsDir);
+  if (
+    relativePath === ".." ||
+    relativePath.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relativePath)
+  ) {
+    throw new Error(
+      "[farm:partytown] Asset output must stay inside the public output directory, including through symlinks.",
+    );
+  }
+}
+
+async function resolveProspectiveRealPath(candidate: string): Promise<string> {
+  const missingSegments: string[] = [];
+  let existingAncestor = path.resolve(candidate);
+
+  while (true) {
+    try {
+      return path.join(await realpath(existingAncestor), ...missingSegments);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      const parent = path.dirname(existingAncestor);
+      if (parent === existingAncestor) throw error;
+      missingSegments.unshift(path.basename(existingAncestor));
+      existingAncestor = parent;
+    }
+  }
 }
 
 function contentTypeFor(file: string): string {

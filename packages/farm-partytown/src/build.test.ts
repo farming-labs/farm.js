@@ -1,4 +1,4 @@
-import { access, mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -66,6 +66,30 @@ describe("Partytown assets", () => {
     await expect(
       access(path.join(result.assetsDir, "debug", "partytown-sw.js")),
     ).resolves.toBeUndefined();
+  });
+
+  it("does not copy assets outside publicDir through a symlinked parent", async () => {
+    const outputDir = await mkdtemp(path.join(tmpdir(), "farm-partytown-symlink-"));
+    temporaryDirectories.push(outputDir);
+    const publicDir = path.join(outputDir, "public");
+    const externalDirectory = path.join(outputDir, "external");
+    const sentinelPath = path.join(externalDirectory, "sentinel.txt");
+    await mkdir(publicDir);
+    await mkdir(externalDirectory);
+    await writeFile(sentinelPath, "keep me");
+    await symlink(externalDirectory, path.join(publicDir, "dashboard"), "junction");
+
+    await expect(
+      writePartytownBuildArtifacts({
+        outputDir,
+        preset: "node-server",
+        basePath: "/dashboard",
+        options: resolvePartytownOptions({}),
+      }),
+    ).rejects.toThrow("including through symlinks");
+
+    await expect(readFile(sentinelPath, "utf8")).resolves.toBe("keep me");
+    await expect(access(path.join(externalDirectory, "~partytown"))).rejects.toThrow();
   });
 
   it("serves only library files below the configured development path", async () => {
