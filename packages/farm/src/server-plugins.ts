@@ -14,5 +14,7 @@ export type {
   FarmPluginLifecycle,
   FarmRequestPluginContext,
   FarmRequestStore,
+  FarmPluginRuntimeEndpoint,
+  FarmPluginRuntimeEndpointEvent,
 } from "./plugin";
 export type { RedirectConfig, HeaderConfig, RewriteConfig } from "./config";

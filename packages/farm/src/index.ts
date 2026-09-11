@@ -216,6 +216,8 @@ export type {
   FarmPluginStateContext,
   FarmPluginRuntimeBaseEvent,
   FarmPluginRuntimeContextEvent,
+  FarmPluginRuntimeEndpoint,
+  FarmPluginRuntimeEndpointEvent,
   FarmPluginRuntimeBeforeEvent,
   FarmPluginRuntimeAfterEvent,
   FarmPluginRuntimeErrorEvent,

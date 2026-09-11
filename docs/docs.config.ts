@@ -355,6 +355,7 @@ const sidebar = [
           { label: "Content", slug: "plugins/content", icon: "file" },
           { label: "DevTools", slug: "plugins/devtools", icon: "monitor" },
           { label: "Federation", slug: "plugins/federation", icon: "network" },
+          { label: "Health", slug: "plugins/health", icon: "activity" },
           { label: "Hints", slug: "plugins/hints", icon: "lightbulb" },
           { label: "MSW", slug: "plugins/msw", icon: "shield" },
           { label: "Partytown", slug: "plugins/partytown", icon: "zap" },

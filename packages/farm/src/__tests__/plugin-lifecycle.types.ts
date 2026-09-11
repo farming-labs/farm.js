@@ -23,6 +23,17 @@ const inferredPlugin = definePlugin({
     };
   },
   runtime: {
+    endpoints: [
+      {
+        path: "/status",
+        handler({ path, state, kind }) {
+          expectTypeOf(path).toEqualTypeOf<string>();
+          expectTypeOf(state.tracer.start).toBeFunction();
+          expectTypeOf(kind).toEqualTypeOf<import("../plugin").FarmPluginRuntimeKind>();
+          return Response.json({ status: "ok" });
+        },
+      },
+    ],
     context({ request, state }) {
       expectTypeOf(state.tracer.start).parameter(0).toEqualTypeOf<string>();
       return {

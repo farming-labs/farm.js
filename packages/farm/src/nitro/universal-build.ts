@@ -111,6 +111,7 @@ import {
 } from "../renderer";
 import { appendMiddlewareRoutePath } from "../middleware/path";
 import type { FarmRenderer } from "../renderer";
+import { farmPluginMayAffectRuntimePath } from "../plugin-runtime-endpoint";
 
 // Type alias for OutputBundle
 type OutputBundle = Rollup.OutputBundle;
@@ -742,6 +743,17 @@ function hasFarmServerRuntimePlugins(config: ResolvedFarmConfig): boolean {
 
 function hasFarmPluginRoutes(config: ResolvedFarmConfig): boolean {
   return (config.plugins || []).some((plugin) => Boolean(plugin.routes));
+}
+
+function farmServerRuntimePluginsMayHandlePath(
+  config: ResolvedFarmConfig,
+  pathname: string,
+): boolean {
+  return (config.plugins || []).some(
+    (plugin) =>
+      getFarmIntegrationPluginServerRuntime(plugin) !== false &&
+      farmPluginMayAffectRuntimePath(plugin, pathname),
+  );
 }
 
 export async function discoverMiddlewareRoutes(
@@ -5460,7 +5472,7 @@ const farmPluginRuntime = ${
       ? `configuredPlugins.length > 0
   ? (() => {
       const manager = new PluginManager({
-        config: farmUserConfig || {},
+        config: { ...(farmUserConfig || {}), basePath: ${JSON.stringify(config.basePath)} },
         isDev: false,
         isProd: true,
       });
@@ -8657,7 +8669,7 @@ function getPhysicalPrerenderBypassReason(options: {
   if (appMiddlewareMayHandlePath(middlewareRoutes, pathname)) return "app middleware";
   if (configMiddlewareMayHandlePath(config.middleware, pathname)) return "configured middleware";
   if (hasCustomFarmRouteContext(config)) return "request context";
-  if (hasFarmServerRuntimePlugins(config)) return "server runtime plugin";
+  if (farmServerRuntimePluginsMayHandlePath(config, pathname)) return "server runtime plugin";
 
   const manifestEntry = getManifestPageEntry(routeRuntimeManifest, pathname);
   if (manifestEntry?.rendering === "dynamic") return "dynamic runtime manifest";
