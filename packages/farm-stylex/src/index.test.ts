@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { build as viteBuild } from "vite";
 import { stylex } from "./index.js";
 
@@ -52,6 +52,44 @@ describe("stylex plugin", () => {
     expect(first).toContain('<script type="module" src="/@id/virtual:stylex:runtime"');
     expect((second as string).match(/virtual:stylex\.css/g)).toHaveLength(1);
     expect((second as string).match(/virtual:stylex:runtime/g)).toHaveLength(1);
+  });
+
+  it("prefixes development assets with Farm's base path", async () => {
+    const plugin = stylex();
+    const configured = await plugin.configure?.({ basePath: "/docs/", plugins: [plugin] }, {
+      config: {} as never,
+      isDev: true,
+      isProd: false,
+    } as never);
+    const html = "<!doctype html><html><head></head><body></body></html>";
+
+    const result = await plugin.render?.html?.(html, { pathname: "/docs" }, {
+      config: { basePath: "/docs/" },
+    } as never);
+
+    expect(result).toContain('<link rel="stylesheet" href="/docs/virtual:stylex.css"');
+    expect(result).toContain('<script type="module" src="/docs/@id/virtual:stylex:runtime"');
+
+    let middleware:
+      | ((request: { url?: string }, response: unknown, next: () => void) => void)
+      | undefined;
+    const basePathPlugin = (configured as any).vite.plugins[0];
+    expect(basePathPlugin.name).toBe("farm:stylex-base-path");
+    basePathPlugin.configureServer({
+      middlewares: {
+        use: (handler: typeof middleware) => {
+          middleware = handler;
+        },
+      },
+    });
+
+    const cssRequest = { url: "/docs/virtual:stylex.css?t=1" };
+    middleware?.(cssRequest, {}, vi.fn());
+    expect(cssRequest.url).toBe("/virtual:stylex.css?t=1");
+
+    const runtimeRequest = { url: "/docs/@id/virtual:stylex:runtime" };
+    middleware?.(runtimeRequest, {}, vi.fn());
+    expect(runtimeRequest.url).toBe("/@id/virtual:stylex:runtime");
   });
 
   it("does not mistake page content for injected development assets", async () => {
