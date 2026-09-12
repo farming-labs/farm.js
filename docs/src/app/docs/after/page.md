@@ -34,6 +34,9 @@ export default async function ProductPage({ params }) {
 ```
 
 Farm waits for a streamed response body to finish before starting the callback. Redirect and not-found responses use the same request lifecycle.
+Cancelling a Web response also finishes that lifecycle, even if the stream producer's cleanup
+is still pending. Farm starts `after()` callbacks and stops counting the response as active;
+the caller of `cancel()` still receives the producer's cleanup promise, including any rejection.
 
 ## Use it in an API route
 

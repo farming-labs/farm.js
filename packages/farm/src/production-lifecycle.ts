@@ -256,25 +256,35 @@ function trackResponseCompletion(
   }
 
   const reader = response.body.getReader();
+  let released = false;
+  const releaseReader = () => {
+    if (released) return;
+    released = true;
+    reader.releaseLock();
+  };
   const body = new ReadableStream<Uint8Array>({
     async pull(controller) {
       try {
         const result = await reader.read();
         if (result.done) {
+          releaseReader();
           finish();
           controller.close();
           return;
         }
         controller.enqueue(result.value);
       } catch (error) {
+        releaseReader();
         finish();
         controller.error(error);
       }
     },
-    async cancel(reason) {
+    cancel(reason) {
       try {
-        await reader.cancel(reason);
+        // Cancellation closes the response now; producer cleanup may finish later.
+        return reader.cancel(reason);
       } finally {
+        releaseReader();
         finish();
       }
     },
