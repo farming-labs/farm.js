@@ -327,10 +327,12 @@ export function StandardTableBenchmark() {
             setRows((current) => [...current.slice(trimCount), ...firstAdditions]);
             setRows((current) =>
               current.map((row) => {
-                if (row.id === reviewedId) {
+                const matchesReviewed = row.id === reviewedId;
+                if (matchesReviewed) {
                   return { ...row, amount: row.amount + 1, label: `${row.label} reviewed` };
                 }
-                if (row.id === escalatedId) {
+                const matchesEscalated = row.id === escalatedId;
+                if (matchesEscalated) {
                   return { ...row, amount: row.amount + 2, label: `${row.label} escalated` };
                 }
                 return row;

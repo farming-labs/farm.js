@@ -2,6 +2,41 @@
 
 Latest run: 2026-09-12
 
+## Safe local aliases in keyed maps — 2026-09-12
+
+Structured keyed `map()` callbacks may now introduce immutable local `const` aliases when every
+binding is a simple identifier and every initializer passes the compiler's existing safe-expression
+proof. This supports common code such as naming row matches or derived scalar values before the
+return tree. Mutable or destructured declarations, object/array/function literals, unknown calls,
+mutation, and fallthrough keep complete keyed reconciliation. This is a compiler eligibility
+change only; it adds no runtime helper, option, report field, or runtime-size baseline.
+
+The maintained 10,000-row mapped rolling-chain workload now names both branch conditions with local
+aliases between two queued 50-row rolls. It verifies both retained DOM identities, branch-specific
+labels and amounts, the exact incoming suffix, browser errors, and zero compiled owner executions.
+The complete production browser suite passed every correctness, performance, optimization-
+persistence, and scalability gate with unchanged thresholds.
+
+| Mode   | Local-alias mapped chain | Compiled fallback | vs React | vs fallback |
+| ------ | -----------------------: | ----------------: | -------: | ----------: |
+| Static |                  4.40 ms |          15.40 ms |   15.90x |       3.50x |
+| Hybrid |                  5.00 ms |          16.20 ms |   13.99x |       3.24x |
+
+Both modes cleared the unchanged 2x React and 1.25x compiled-control floors. The bracketed React
+median was 69.95 ms. The compiler report retained two mapped rolling-chain steps and 34 keyed map
+hints. The example bundle was 31,682 bytes gzip in static mode and 31,681 bytes gzip in hybrid mode;
+the focused runtime-size suite retained every existing byte baseline.
+
+Compiler coverage includes multiple aliases, safe `Math` and primitive conversion calls, chained
+maps, map-and-sort pipelines, rolling-window lineage, mutable and destructured declarations,
+effectful initializers, fallthrough, and all-row replacement. The full React suite, dedicated stress
+suite, and React 18.3.1/19.2.8 compatibility checks preserve the existing behavior and fallback
+boundaries.
+
+Numbers are browser medians from the complete production-build command with 5 warmups, 10 measured
+samples per compiler action, 20 bracketed React samples, 60 dashboard samples of 10 updates, and 3
+scale cycles, using Chrome 153.0.8010.36 and Node.js 23.11.0 on Apple M1 macOS arm64.
+
 ## Structured block-bodied same-key maps — 2026-09-12
 
 Compiler-safe keyed `map()` callbacks may now use structured blocks made only from fully returning

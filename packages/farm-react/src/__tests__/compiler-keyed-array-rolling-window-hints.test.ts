@@ -200,8 +200,10 @@ describe("React AOT keyed-array rolling-window hints", () => {
           <button onClick={() => {
             setRows((current) => [...current.slice(1), nextOne]);
             setRows((current) => current.map((row) => {
-              if (row.id === firstId) return { ...row, label: nextLabel };
-              if (row.id === secondId) return { ...row, label: nextLabel };
+              const matchesFirst = row.id === firstId;
+              if (matchesFirst) return { ...row, label: nextLabel };
+              const matchesSecond = row.id === secondId;
+              if (matchesSecond) return { ...row, label: nextLabel };
               return row;
             }));
             setRows((current) => [...current.slice(1), nextTwo]);
