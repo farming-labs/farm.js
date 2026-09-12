@@ -34,6 +34,8 @@ export default function RootLayout({ children }: LayoutProps) {
 
 A layout file wraps every page below its folder. Use this for dashboards, docs, account settings, or any area with shared navigation and chrome.
 
+With experimental React Server Components enabled, layouts compose in the same order: the root layout wraps the nested layout, which wraps the page. Adding a dashboard layout does not remove the root navigation or its Client Component providers. Layouts receive `children` and the matched `params`, following `LayoutProps`; server-only layouts do not require client hydration just because they wrap interactive children.
+
 **src/app/dashboard/layout.tsx**
 
 ```tsx

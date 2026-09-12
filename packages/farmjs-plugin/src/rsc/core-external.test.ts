@@ -239,6 +239,7 @@ export const schema = z.string();`;
   it.each([
     { name: "default", api: undefined, baseURL: "/api", mount: "/api" },
     { name: "cache-variants", api: undefined, baseURL: "/api", mount: "/api" },
+    { name: "nested-layouts", api: undefined, baseURL: "/api", mount: "/api" },
     {
       name: "custom",
       api: {
@@ -386,6 +387,45 @@ export const schema = z.string();`;
           );
         }
         const fixtureModules = path.join(fixtureRoot, "node_modules");
+        if (name === "nested-layouts") {
+          const writeRoute = (file: string, source: string) => {
+            const target = path.join(srcDir, file);
+            mkdirSync(path.dirname(target), { recursive: true });
+            writeFileSync(target, source);
+          };
+          writeRoute(
+            "nested/layout.tsx",
+            `import { useId } from "react"; export default function Layout({ children }) { const id = useId(); return <section id={id}>Nested layout {children}</section>; }`,
+          );
+          writeRoute(
+            "nested/page.tsx",
+            `export default function Page() { return <main>Nested page</main>; }`,
+          );
+          writeRoute(
+            "components/provider.tsx",
+            `"use client";
+            import { createContext, useContext } from "react";
+            const Context = createContext("missing provider");
+            export function Provider({ children }) { return <Context.Provider value="root provider present">{children}</Context.Provider>; }
+            export function Consumer() { return <p>{useContext(Context)}</p>; }
+          `,
+          );
+          writeRoute(
+            "nested/client/page.tsx",
+            `"use client";
+            import { useState } from "react"; import { Consumer } from "../../components/provider";
+            export default function Page() { const [count, setCount] = useState(0); return <main>Client page<Consumer /><button onClick={() => setCount(count + 1)}>Count {count}</button></main>; }
+          `,
+          );
+          writeRoute(
+            "async-layout/[id]/layout.tsx",
+            `export default async function Layout({ children, params }) { await Promise.resolve(); return <aside>Async layout {params.id} {children}</aside>; }`,
+          );
+          writeRoute(
+            "async-layout/[id]/page.tsx",
+            `export default async function Page() { await Promise.resolve(); return <p>Async page</p>; }`,
+          );
+        }
         for (const packageName of [
           "@farm.js/core",
           "@vitejs/plugin-rsc",
@@ -411,8 +451,9 @@ export const schema = z.string();`;
         }
         writeFileSync(
           path.join(srcDir, "layout.tsx"),
-          `export default function Layout({ children }) {
-  return <html><body>{children}</body></html>;
+          `${name === "nested-layouts" ? 'import { Provider } from "./components/provider";' : ""}
+export default function Layout({ children }) {
+  return ${name === "nested-layouts" ? "<section>Root layout marker <Provider>{children}</Provider></section>" : "<html><body>{children}</body></html>"};
 }`,
         );
         writeFileSync(
@@ -734,6 +775,36 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
             });
             expect(await wildcard.text(), logs).toContain("RSC root runtime fixture");
             expect(wildcard.headers.get("vary")).toBe("*");
+          }
+        }
+        if (name === "nested-layouts") {
+          for (const [pathname, markers] of [
+            ["/", ["Root layout marker"]],
+            ["/nested", ["Root layout marker", "Nested layout", "Nested page"]],
+            ["/async-layout/42", ["Root layout marker", "Async layout", "42", "Async page"]],
+          ] as const) {
+            for (const accept of ["text/html", "text/x-component"]) {
+              const response = await fetch(origin + pathname, {
+                headers: { accept },
+                signal: AbortSignal.timeout(10_000),
+              });
+              expect(response.status, logs).toBe(200);
+              const body = await response.text();
+              for (const marker of markers) expect(body, logs).toContain(marker);
+            }
+          }
+          const client = await fetch(origin + "/nested/client", {
+            signal: AbortSignal.timeout(10_000),
+          });
+          expect(client.status, logs).toBe(200);
+          const body = await client.text();
+          for (const marker of [
+            "Root layout marker",
+            "Nested layout",
+            "root provider present",
+            "Client page",
+          ]) {
+            expect(body, logs).toContain(marker);
           }
         }
         // A custom API prefix is not a server-action URL, even with actions enabled.
