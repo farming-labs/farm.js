@@ -128,13 +128,19 @@ export async function renderHTML(firstArg, options = {}) {
   if (!bootstrap && PROD_BOOTSTRAP !== "__FARM_BOOTSTRAP_SCRIPT__") bootstrap = PROD_BOOTSTRAP;
   
   // Use renderToPipeableStream so Suspense streams: fallback (loading.tsx) first, then resolved content.
-  const { pipe } = renderToPipeableStream(React.createElement(Root), {
-    ...(bootstrap && { bootstrapScriptContent: bootstrap }),
-    formState: options.formState,
-  });
   const { PassThrough, Readable } = await import('stream');
   const passThrough = new PassThrough();
-  pipe(passThrough);
+  // Do not commit an empty response when the shell cannot render. Reject back
+  // to the request handler so it can render error.tsx through RSC and SSR.
+  await new Promise((resolve, reject) => {
+    const { pipe } = renderToPipeableStream(React.createElement(Root), {
+      ...(bootstrap && { bootstrapScriptContent: bootstrap }),
+      formState: options.formState,
+      onShellReady() { pipe(passThrough); resolve(); },
+      onShellError: reject,
+      onError(error) { console.error('[RSC] SSR render error:', error); },
+    });
+  });
 
   const CLIENT_ENTRY_HREF = "__FARM_CLIENT_ENTRY_HREF__";
   const PLACEHOLDER_STR = "__FARM_CLIENT_ENTRY_HREF__";

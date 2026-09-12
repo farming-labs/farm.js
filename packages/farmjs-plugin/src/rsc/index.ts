@@ -31,6 +31,7 @@ import type { FarmLayerEntry, ResolvedFarmLayer } from "@farm.js/core/server";
 import { farmEnvironmentFunctionsPlugin } from "@farm.js/core/environment/vite";
 import { generateRscEntry } from "./entries/rsc.js";
 import { generateSsrEntry } from "./entries/ssr.js";
+import { generateErrorFallbackEntry } from "./entries/error-fallback.js";
 import { generateClientEntry, serverFnTransportErrorClientRuntime } from "./entries/client.js";
 import { transformFarmRouteActionClients } from "./route-action-transform.js";
 import { transformFarmServerFns } from "./server-fn-transform.js";
@@ -726,6 +727,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           }),
           deploymentId,
           debug,
+          development: env.command === "serve",
         };
 
         logInfo(`srcDir: ${entryContext.srcDir}, outDir: ${entryContext.outDir}`);
@@ -738,6 +740,10 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
         await fs.writeFile(entryRscPath, generateRscEntry(entryContext));
         await fs.writeFile(entrySsrPath, generateSsrEntry(entryContext));
         await fs.writeFile(entryClientPath, generateClientEntry(entryContext));
+        await fs.writeFile(
+          path.join(entriesDir, "error-fallback.tsx"),
+          generateErrorFallbackEntry(),
+        );
         logInfo(`Wrote RSC entries to ${entriesDir}`);
 
         // User must add rsc({ entries: { rsc, ssr, client } }) to config.plugins so the RSC plugin

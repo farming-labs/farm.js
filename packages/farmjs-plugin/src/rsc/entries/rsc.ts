@@ -29,6 +29,7 @@ export function generateRscEntry(ctx: EntryContext): string {
   const debugLog = `// Debug disabled`;
   let code = `
 import React from 'react';
+import ServerErrorFallback from '/.farm/rsc-entries/error-fallback.tsx';
 import { registerAPIRouteShape } from '@farm.js/core/api/runtime';
 import {
   renderToReadableStream,
@@ -62,6 +63,7 @@ import {
 } from '@farm.js/core/api/runtime';
 import { _runWithAfterRequest } from '@farm.js/core/after';
 import { _runWithCurrentRequest, searchParamsToObject } from '@farm.js/core/internal/production-runtime';
+import { getFarmRedirectError, isFarmNotFoundError } from '@farm.js/core/internal/production-runtime';
 
 const farmDeploymentId = ${JSON.stringify(ctx.deploymentId)};
 const farmApiBasePath = ${JSON.stringify(ctx.apiBasePath ?? "/api")};
@@ -546,6 +548,9 @@ function getLayoutModules(pageFilePath) {
  */
 async function handleFarmRequest(request) {
   let url = new URL(request.url);
+  let errorData = new Map();
+  let errorContext = new Map();
+  let errorHeaders = new Headers();
   try {
   debug('Handling request:', request.method, url.pathname);
 
@@ -594,6 +599,9 @@ async function handleFarmRequest(request) {
   const middlewareData = Object.fromEntries(middlewareResult.data);
   const middlewareContext = middlewareResult.context;
   const middlewareHeaders = new Headers(middlewareResult.headers);
+  errorData = middlewareResult.data;
+  errorContext = middlewareContext;
+  errorHeaders = middlewareHeaders;
   if (middlewareResult.data.size || middlewareContext.size) {
     middlewareHeaders.set('cache-control', 'private, no-store');
   }
@@ -906,6 +914,9 @@ async function handleFarmRequest(request) {
     )
   );
   } catch (err) {
+    const redirect = getFarmRedirectError(err);
+    if (redirect) return new Response(null, { status: redirect.status, headers: { location: redirect.url, 'cache-control': 'no-store' } });
+    if (isFarmNotFoundError(err)) return new Response('Not Found', { status: 404, headers: { 'cache-control': 'no-store' } });
     console.error('[RSC] Handler error:', err);
     if (request.method === 'POST') {
       if (request.signal.aborted) {
@@ -920,50 +931,72 @@ async function handleFarmRequest(request) {
         },
       });
     }
-    // If route has error.tsx, render it (Next.js-style: SSR error goes to route error boundary)
+    // Render outside the failed page/layout tree, but retain request context.
     const pathname = url.pathname.replace(/\\/$/, '') || '/';
-    const ErrorComponent = getMatchingError(pathname, glob);
+    const ErrorComponent = getMatchingError(pathname, '');
     if (ErrorComponent) {
       try {
-        const matched = matchRoute(pathname);
-        const layoutPattern = matched ? matched.pattern : null;
-        const LayoutModules = matched ? getLayoutModules(layoutPattern) : [];
-        const Layout = LayoutModules[LayoutModules.length - 1]?.default;
-        const LayoutComp = Layout || (function PassThrough({ children }) { return children; });
-        const errParams = matched ? matched.params : {};
-        const errSearchParams = searchParamsToObject(url.searchParams);
-        const errorElement = h(ErrorComponent, {
-          error: err,
-          reset: () => {},
-          params: errParams,
-          path: pathname,
-          searchParams: errSearchParams,
-        });
-        const layoutContent = LayoutComp.constructor.name === 'AsyncFunction' || LayoutComp.toString().includes('async')
-          ? await LayoutComp({ children: errorElement })
-          : h(LayoutComp, null, errorElement);
-        const rootInner = h('div', { 'data-farm-root': 'true' }, layoutContent);
-        const doc = h('html', null,
-          h('head', null,
-            h('meta', { charSet: 'utf-8' }),
-            h('meta', { name: 'viewport', content: 'width=device-width, initial-scale=1' }),
-            h('link', { rel: 'icon', href: 'data:,' }),
-            h('title', null, 'Error'),
-            h('link', { rel: 'stylesheet', href: globalsCssPath, as: 'style', precedence: 'default' })
-          ),
-          h('body', null, h('div', { id: 'root' }, rootInner))
+        return await _runWithCurrentRequest(request, () =>
+          _runWithMiddlewareData(errorData, () =>
+            _runWithMiddlewareContext(errorContext, async () => {
+              const h = React.createElement;
+              const matched = matchRoute(pathname);
+              const errSearchParams = searchParamsToObject(url.searchParams);
+              const fallbackProps = {
+                params: matched?.params || {},
+                path: pathname,
+                search: url.search,
+                searchParams: errSearchParams,
+                middlewareData: Object.fromEntries(errorData),
+              };
+              // Preserve the original failure in logs, not production payloads.
+              const message = ${ctx.development === true ? "true" : "false"} && err instanceof Error
+                ? err.message : 'Internal Server Error';
+              const isClientBoundary = ErrorComponent.$$typeof === Symbol.for('react.client.reference');
+              const errorElement = isClientBoundary
+                ? h(ServerErrorFallback, { Fallback: ErrorComponent, message, fallbackProps })
+                : h(ErrorComponent, { ...fallbackProps, error: new Error(message), reset: () => {} });
+              const rootInner = h('div', { 'data-farm-root': 'true' }, errorElement);
+              const payload = {
+                root: h('html', null,
+                  h('head', null, h('meta', { charSet: 'utf-8' }), h('title', null, 'Error')),
+                  h('body', null, h('div', { id: 'root' }, rootInner))),
+                rootContent: rootInner,
+                metadata: { title: 'Error' },
+              };
+              const rscStream = renderToReadableStream(payload);
+              const headers = new Headers(errorHeaders);
+              headers.set('cache-control', 'private, no-store');
+              headers.set('x-content-type-options', 'nosniff');
+              applyActionResponseHeaders(headers, request);
+              if ((request.headers.get('accept') || '').includes('text/x-component')) {
+                headers.set('content-type', 'text/x-component');
+                return new Response(rscStream, { status: 500, headers });
+              }
+              let ssr;
+              if (typeof import.meta.viteRsc?.loadModule === 'function') {
+                ssr = await import.meta.viteRsc.loadModule('ssr', 'index');
+              } else if (typeof globalThis.__VITE_RSC_LOAD_SSR__ === 'function') {
+                ssr = await globalThis.__VITE_RSC_LOAD_SSR__();
+              }
+              if (!ssr) {
+                void rscStream.cancel().catch(() => {});
+                throw new Error('SSR environment unavailable');
+              }
+              const html = await ssr.renderHTML({ payload, rscStream });
+              headers.set('content-type', 'text/html; charset=utf-8');
+              return new Response(html, { status: 500, headers });
+            })
+          )
         );
-        const renderToString = (await import('react-dom/server')).renderToString;
-        const html = '<!DOCTYPE html>' + renderToString(doc);
-        return new Response(html, { status: 500, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
-      } catch (e) {
-        console.error('[RSC] Error boundary render failed:', e);
+      } catch (fallbackError) {
+        console.error('[RSC] Error boundary render failed:', fallbackError);
       }
     }
     const message = 'Internal Server Error';
     return new Response(JSON.stringify({ error: true, url: request.url, status: 500, message }), {
       status: 500,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'private, no-store' },
     });
   }
 }
