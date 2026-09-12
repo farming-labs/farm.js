@@ -144,8 +144,11 @@ void check;
       expect(emitted).not.toContain("zod");
       expect(emitted).not.toContain("handler");
       const clientDir = path.join(root, ".farm", "client");
-      const clientFiles = await fs.readdir(clientDir, { recursive: true });
-      for (const file of clientFiles.filter((file) => file.endsWith(".js"))) {
+      const clientFiles = (await fs.readdir(clientDir, { recursive: true })).filter((file) =>
+        file.endsWith(".js"),
+      );
+      expect(clientFiles.length).toBeGreaterThan(0);
+      for (const file of clientFiles) {
         expect(await fs.readFile(path.join(clientDir, file), "utf8")).not.toContain(
           "server-only-plugin-route-sentinel",
         );
