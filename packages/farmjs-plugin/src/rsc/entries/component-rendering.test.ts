@@ -20,13 +20,24 @@ function render(kind: "Page" | "Layout", Component: unknown) {
     isPage ? "// Route-level loading boundary" : "// Single wrapper",
     start,
   );
+  expect(start).toBeGreaterThanOrEqual(0);
+  expect(end).toBeGreaterThan(start);
   return new AsyncFunction(
-    kind,
+    "Page",
+    "Layout",
+    "LayoutModules",
     "h",
     "pageProps",
     "initialPageContent",
     `${isPage ? "" : "const pageContent = initialPageContent;"}${entry.slice(start, end)}; return ${isPage ? "pageContent" : "layoutContent"};`,
-  )(Component, React.createElement, { params: { id: "1" } }, "child");
+  )(
+    Component,
+    Component,
+    [{ default: Component }],
+    React.createElement,
+    { params: { id: "1" } },
+    "child",
+  );
 }
 
 it.each(["Page", "Layout"] as const)(
