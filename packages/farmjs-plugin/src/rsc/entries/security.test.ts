@@ -261,7 +261,7 @@ describe("generated server action security", () => {
     expect(layoutMetadata).toBeLessThan(pageMetadata);
 
     const mergeStart = serverEntry.indexOf("function mergeDocumentMetadata(...sources)");
-    const mergeEnd = serverEntry.indexOf("\n}\n\n/**\n * Find every applicable", mergeStart) + 2;
+    const mergeEnd = serverEntry.indexOf("\n}\n\n/**\n * Find modules", mergeStart) + 2;
     const mergeDocumentMetadata = new Function(
       `${serverEntry.slice(mergeStart, mergeEnd)}; return mergeDocumentMetadata;`,
     )() as (...sources: Array<{ title?: string; description?: string } | undefined>) => {
@@ -277,7 +277,7 @@ describe("generated server action security", () => {
     ).toEqual({ title: "Nested", description: "Page description" });
     expect(mergeDocumentMetadata(undefined, {})).toEqual({});
 
-    const layoutsStart = serverEntry.indexOf("function getLayoutModules(pageFilePath)");
+    const layoutsStart = serverEntry.indexOf("function getRouteModules(");
     const layoutsEnd = serverEntry.indexOf("\n}\n\n/**\n * Main request handler", layoutsStart) + 2;
     const applicableLayouts = new Function(`
       const root = { default() {}, metadata: { title: 'Root' } };

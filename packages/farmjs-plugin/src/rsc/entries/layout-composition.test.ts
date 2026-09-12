@@ -14,7 +14,7 @@ const entry = generateRscEntry({
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 
 it("retains a layout module reused at more than one ancestor", () => {
-  const start = entry.indexOf("function getLayoutModules(pageFilePath)");
+  const start = entry.indexOf("function getRouteModules(");
   const end = entry.indexOf("\n}\n\n/**\n * Main request handler", start) + 2;
   const shared = { default: () => null };
   const getLayouts = new Function(
