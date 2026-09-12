@@ -4410,6 +4410,7 @@ function generateVirtualEntryCode(
   createFarmThemeDocumentParts,
   createFarmLocaleCookie,
   createFarmProductionLifecycle,
+  createFarmNodeRequestAbortSignal,
   createProductionMiddlewareRunner,
   getTheme as getFarmTheme,
   emitFarmEvent,
@@ -7543,6 +7544,7 @@ export async function fetch(request, context) {
     },
   );
 }
+export { createFarmNodeRequestAbortSignal };
 export default { fetch, lifecycle: farmProductionLifecycle };
   `.trim();
 }
@@ -7906,7 +7908,7 @@ async function buildNitroUniversal(
 // This file adapts Farm's Web fetch handler to Nitro's event handler contract.
 
 import { useNitroApp } from 'nitro/runtime'
-import handler, { farmProductionLifecycle } from './${ssrEntryFile}'
+import handler, { farmProductionLifecycle, createFarmNodeRequestAbortSignal } from './${ssrEntryFile}'
 
 export { farmProductionLifecycle }
 
@@ -7952,7 +7954,13 @@ function createResponseFinishedHook(event) {
 
 // Export the event handler for Nitro
 export default async function farmNitroEventHandler(event) {
-  const response = await handler.fetch(event.req, {
+  // Some Node adapters abort their Request on normal IncomingMessage close.
+  // Use the same actual disconnect events as Farm's development server.
+  const node = event.node
+  const request = node?.req && node?.res
+    ? new Request(event.req, { signal: createFarmNodeRequestAbortSignal(node.req, node.res) })
+    : event.req
+  const response = await handler.fetch(request, {
     waitUntil: (promise) => event.waitUntil(promise),
     onResponseFinished: createResponseFinishedHook(event),
   })

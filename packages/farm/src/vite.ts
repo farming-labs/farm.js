@@ -80,6 +80,7 @@ import {
 } from "./server/vite-config";
 import { resolveFarmDocsFontAssets, toFarmDocsPublicFontAssets } from "./docs/fonts";
 import {
+  createFarmNodeRequestAbortSignal,
   createFarmRequestBodyErrorResponse,
   readNodeRequestBody,
   resolveFarmServerConfig,
@@ -283,50 +284,7 @@ function createRequestFromNodeRequest(
   });
 }
 
-interface FarmNodeAbortRequest {
-  aborted?: boolean;
-  once(event: "aborted", listener: () => void): unknown;
-  off(event: "aborted", listener: () => void): unknown;
-}
-
-interface FarmNodeAbortResponse {
-  writableEnded: boolean;
-  once(event: "close" | "finish", listener: () => void): unknown;
-  off(event: "close" | "finish", listener: () => void): unknown;
-}
-
-/** Exported for tests: forwards a disconnected dev client to Web Request consumers. */
-export function createFarmNodeRequestAbortSignal(
-  req: FarmNodeAbortRequest,
-  res: FarmNodeAbortResponse,
-): AbortSignal {
-  const controller = new AbortController();
-  let disposed = false;
-  const dispose = () => {
-    if (disposed) return;
-    disposed = true;
-    req.off("aborted", abort);
-    res.off("close", abortOnEarlyClose);
-    res.off("finish", dispose);
-    controller.signal.removeEventListener("abort", dispose);
-  };
-  const abort = () => controller.abort();
-  const abortOnEarlyClose = () => {
-    if (!res.writableEnded) abort();
-    dispose();
-  };
-
-  if (req.aborted) {
-    controller.abort();
-    return controller.signal;
-  }
-
-  req.once("aborted", abort);
-  res.once("close", abortOnEarlyClose);
-  res.once("finish", dispose);
-  controller.signal.addEventListener("abort", dispose, { once: true });
-  return controller.signal;
-}
+export { createFarmNodeRequestAbortSignal } from "./server-http";
 
 /** Exported for tests: the request boundary all Farm dev middlewares share. */
 export function withFarmRequestTracing(
