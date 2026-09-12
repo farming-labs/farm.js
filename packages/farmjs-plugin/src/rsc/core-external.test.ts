@@ -306,6 +306,32 @@ export const schema = z.string();`;
           );
           if (name === "default") {
             writeRoute(
+              "accounts/[id]/page.tsx",
+              `export default async function Page() { throw new Error("private dynamic account failure"); }`,
+            );
+            writeRoute(
+              "accounts/[id]/error.tsx",
+              `"use client"; export default function ErrorPage() { return <main>Dynamic account error rendered</main>; }`,
+            );
+            writeRoute(
+              "accounts/new/page.tsx",
+              `export default async function Page() { throw new Error("private static account failure"); }`,
+            );
+            for (const [folder, marker] of [
+              ["(shop)/products", "Grouped product error rendered"],
+              ["docs/[[...slug]]", "Optional docs error rendered"],
+              ["middleware-failure", "Unselected page error rendered"],
+            ]) {
+              writeRoute(
+                `${folder}/page.tsx`,
+                `export default async function Page() { throw new Error("private boundary ancestry failure"); }`,
+              );
+              writeRoute(
+                `${folder}/error.tsx`,
+                `"use client"; export default function ErrorPage() { return <main>${marker}</main>; }`,
+              );
+            }
+            writeRoute(
               "users/[id]/page.tsx",
               `export default function Page({ params }) { return <main>Dynamic user {params.id}</main>; }`,
             );
@@ -638,6 +664,31 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
 
         const origin = `http://127.0.0.1:${port}`;
         if (name === "default") {
+          for (const [pathname, expected, excluded] of [
+            ["/accounts/new", "Route error rendered", "Dynamic account error rendered"],
+            ["/accounts/alice", "Dynamic account error rendered", "Route error rendered"],
+            ["/products", "Grouped product error rendered", "Route error rendered"],
+            ["/docs", "Optional docs error rendered", "Route error rendered"],
+            ["/docs/a/b", "Optional docs error rendered", "Route error rendered"],
+            ["/middleware-failure", "Route error rendered", "Unselected page error rendered"],
+          ]) {
+            for (const accept of ["text/html", "text/x-component"]) {
+              const response = await fetch(origin + pathname, {
+                headers: { accept },
+                signal: AbortSignal.timeout(10_000),
+              });
+              const body = await response.text();
+              expect(response.status, logs).toBe(500);
+              expect(response.headers.get("content-type")).toContain(accept);
+              expect(response.headers.get("cache-control")).toBe("private, no-store");
+              expect(body).not.toContain("private ");
+              // Flight contains client module references; HTML contains rendered fallback UI.
+              if (accept === "text/html") {
+                expect(body, logs).toContain(expected);
+                expect(body, logs).not.toContain(excluded);
+              }
+            }
+          }
           for (const uploadCase of [
             {
               path: "/api/echo",

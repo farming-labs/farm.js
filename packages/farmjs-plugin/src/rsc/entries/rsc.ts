@@ -323,57 +323,6 @@ debug('Discovered middlewares:', Object.keys(middlewares));
 debug('Discovered API routes:', Array.from(apiRouteMap.keys()));
 
 /**
- * Convert loading/error file path to route pattern (segment the boundary applies to).
- * Inlined to avoid runtime dependency on plugin package; logic is simple and covered by e2e.
- */
-function boundaryPathToRoute(filePath, globVal, kind) {
-  const re = kind === 'loading' ? /\\/loading\\.[tj]sx?$/i : /\\/error\\.[tj]sx?$/i;
-  let route = filePath.replace(globVal, '').replace(re, '').replace(/\\\\/g, '/') || '/';
-  route = route.replace(/\\[([^\\]]+)\\]/g, ':$1');
-  return route;
-}
-function getMatchingLoading(pathname, globVal) {
-  const normalized = pathname.replace(/\\/$/, '') || '/';
-  const pathParts = normalized.split('/').filter(Boolean);
-  let best = null, bestLength = -1;
-  for (const filePath of Object.keys(loadings)) {
-    const pattern = boundaryPathToRoute(filePath, globVal, 'loading');
-    const patternParts = pattern === '/' ? [] : pattern.split('/').filter(Boolean);
-    if (patternParts.length > pathParts.length) continue;
-    let matches = true;
-    for (let i = 0; i < patternParts.length; i++) {
-      const p = patternParts[i], seg = pathParts[i];
-      if (!seg || (p.startsWith(':') && p !== ':...') || p === ':...') continue;
-      if (!p.startsWith(':') && p !== seg) { matches = false; break; }
-    }
-    if (matches && patternParts.length > bestLength && loadings[filePath]?.default) {
-      best = loadings[filePath].default; bestLength = patternParts.length;
-    }
-  }
-  return best;
-}
-function getMatchingError(pathname, globVal) {
-  const normalized = pathname.replace(/\\/$/, '') || '/';
-  const pathParts = normalized.split('/').filter(Boolean);
-  let best = null, bestLength = -1;
-  for (const filePath of Object.keys(errors)) {
-    const pattern = boundaryPathToRoute(filePath, globVal, 'error');
-    const patternParts = pattern === '/' ? [] : pattern.split('/').filter(Boolean);
-    if (patternParts.length > pathParts.length) continue;
-    let matches = true;
-    for (let i = 0; i < patternParts.length; i++) {
-      const p = patternParts[i], seg = pathParts[i];
-      if (!seg || (p.startsWith(':') && p !== ':...') || p === ':...') continue;
-      if (!p.startsWith(':') && p !== seg) { matches = false; break; }
-    }
-    if (matches && patternParts.length > bestLength && errors[filePath]?.default) {
-      best = errors[filePath].default; bestLength = patternParts.length;
-    }
-  }
-  return best;
-}
-
-/**
  * Convert middleware file path to route path
  * e.g., '/src/middleware.ts' -> '/'
  * e.g., '/src/counter/middleware.ts' -> '/counter'
@@ -476,14 +425,14 @@ function mergeDocumentMetadata(...sources) {
 }
 
 /**
- * Find every applicable layout module from root to the page directory.
- * Rendering and document metadata share the complete root -> nested layouts
- * -> page chain.
+ * Find modules along the selected page's actual file ancestry, root to leaf.
+ * Keep route groups and catch-all folders; matching URL prefixes can pick
+ * boundaries from a sibling page that the router did not select.
  */
-function getLayoutModules(pageFilePath) {
+function getRouteModules(pageFilePath, modules, kind) {
   const tryKeys = (...keys) => {
     for (const k of keys) {
-      if (layouts[k]?.default) return layouts[k];
+      if (modules[k]?.default) return modules[k];
     }
     return null;
   };
@@ -495,18 +444,29 @@ function getLayoutModules(pageFilePath) {
   for (let depth = 0; depth <= parts.length; depth++) {
     const relativeDir = parts.slice(0, depth).join('/');
     const absoluteDir = relativeDir ? '/' + relativeDir : '';
-    let matchedLayout = null;
+    let matchedModule = null;
     for (const ext of extensions) {
-      matchedLayout = tryKeys(
-        absoluteDir + '/layout.' + ext,
-        relativeDir ? relativeDir + '/layout.' + ext : 'layout.' + ext,
+      matchedModule = tryKeys(
+        absoluteDir + '/' + kind + '.' + ext,
+        relativeDir ? relativeDir + '/' + kind + '.' + ext : kind + '.' + ext,
       );
-      if (matchedLayout) break;
+      if (matchedModule) break;
     }
-    if (matchedLayout) matches.push(matchedLayout);
+    if (matchedModule) matches.push(matchedModule);
   }
 
   return matches;
+}
+
+function getLayoutModules(pageFilePath) {
+  return getRouteModules(pageFilePath, layouts, 'layout');
+}
+
+function getMatchingBoundary(pageFilePath, modules, kind) {
+  // Before page selection (for example, middleware failure), only the root
+  // boundary applies. Do not guess a route from a partially processed URL.
+  const matches = getRouteModules(pageFilePath ?? '/page.tsx', modules, kind);
+  return matches.at(-1)?.default ?? null;
 }
 
 /**
@@ -515,6 +475,7 @@ function getLayoutModules(pageFilePath) {
  */
 async function handleFarmRequest(request) {
   let url = new URL(request.url);
+  let matchedPage = null;
   let errorData = new Map();
   let errorContext = new Map();
   let errorHeaders = new Headers();
@@ -717,6 +678,7 @@ async function handleFarmRequest(request) {
   code += `
   // Match the URL to a page component
   const matched = matchRoute(url.pathname);
+  matchedPage = matched;
   
   if (!matched) {
     debug('404 - No route found for:', url.pathname);
@@ -758,14 +720,14 @@ async function handleFarmRequest(request) {
   }
   
   // Route-level loading boundary: wrap in Suspense so async content shows fallback
-  const LoadingComponent = getMatchingLoading(url.pathname, glob);
+  const LoadingComponent = getMatchingBoundary(pattern, loadings, 'loading');
   if (LoadingComponent) {
     const loadingFallback = h(LoadingComponent, { params, path: url.pathname });
     pageContent = h(React.Suspense, { fallback: loadingFallback }, pageContent);
   }
   
   // Route-level error boundary (Next.js error.tsx): catches render errors in this segment
-  const ErrorComponent = getMatchingError(url.pathname, glob);
+  const ErrorComponent = getMatchingBoundary(pattern, errors, 'error');
   if (ErrorComponent) {
     pageContent = h(RouteErrorBoundary, {
       Fallback: ErrorComponent,
@@ -904,17 +866,16 @@ async function handleFarmRequest(request) {
     }
     // Render outside the failed page/layout tree, but retain request context.
     const pathname = url.pathname.replace(/\\/$/, '') || '/';
-    const ErrorComponent = getMatchingError(pathname, '');
+    const ErrorComponent = getMatchingBoundary(matchedPage?.pattern, errors, 'error');
     if (ErrorComponent) {
       try {
         return await _runWithCurrentRequest(request, () =>
           _runWithMiddlewareData(errorData, () =>
             _runWithMiddlewareContext(errorContext, async () => {
               const h = React.createElement;
-              const matched = matchRoute(pathname);
               const errSearchParams = searchParamsToObject(url.searchParams);
               const fallbackProps = {
-                params: matched?.params || {},
+                params: matchedPage?.params || {},
                 path: pathname,
                 search: url.search,
                 searchParams: errSearchParams,

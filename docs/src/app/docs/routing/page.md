@@ -1033,6 +1033,10 @@ export default function DashboardError({ error, reset }: ErrorProps) {
 
 With experimental RSC enabled, failures before the HTML shell is sent render the nearest
 `error.tsx` through RSC and SSR with status `500` and `Cache-Control: private, no-store`.
+RSC loading and error boundaries follow the selected page's file ancestors, including route
+groups and catch-all folders. For example, `/users/[id]/error.tsx` does not handle a sibling
+`/users/new/page.tsx`. Failures before page selection, such as middleware errors, use only the
+root error boundary when one exists.
 This fallback uses a standalone document shell, outside the failed page/layout tree, so a broken
 layout cannot prevent the error UI from rendering. Client boundaries receive a client-owned
 `reset()` that reloads the current URL. Production responses show a generic error message;
