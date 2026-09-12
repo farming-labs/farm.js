@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import { mkdtemp, mkdir, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { gzipSync } from "node:zlib";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   applyAgentRuntimeViteProxy,
@@ -183,6 +184,74 @@ describe("agent runtime proxy", () => {
     expect(response.headers.get("x-upstream-auth")).toBe("Bearer secret");
     expect(response.headers.get("x-forwarded-host")).toBe("farm.test");
     expect(await response.text()).toBe("POST:hello:done");
+  });
+
+  it("does not forward stale compression metadata after fetch decodes the body", async () => {
+    const payload = "decoded agent response";
+    const compressed = gzipSync(payload);
+    let acceptEncoding: string | undefined;
+    const server = createServer((request, response) => {
+      acceptEncoding = request.headers["accept-encoding"];
+      // Ignore identity to exercise the defensive response normalization too.
+      response.writeHead(200, {
+        "content-encoding": "gzip",
+        "content-length": compressed.byteLength,
+        "content-type": "text/plain",
+      });
+      response.end(compressed);
+    });
+    const origin = await listen(server);
+    cleanups.push(() => close(server));
+
+    const response = await proxyAgentRuntimeRequest(
+      new Request("http://farm.test/agents/compressed", {
+        headers: { "accept-encoding": "br, gzip" },
+      }),
+      origin,
+    );
+
+    expect(acceptEncoding).toBe("identity");
+    expect(response.headers.get("content-encoding")).toBeNull();
+    expect(response.headers.get("content-length")).toBeNull();
+    expect(await response.text()).toBe(payload);
+  });
+
+  it.each(["HEAD", "GET"])(
+    "preserves encoded representation metadata for bodyless %s responses",
+    async (method) => {
+      const server = createServer((_request, response) => {
+        response.writeHead(method === "HEAD" ? 200 : 304, {
+          "content-encoding": "gzip",
+          "content-length": "123",
+        });
+        response.end();
+      });
+      const origin = await listen(server);
+      cleanups.push(() => close(server));
+      const response = await proxyAgentRuntimeRequest(
+        new Request("http://farm.test/agents/metadata", { method }),
+        origin,
+      );
+      expect(response.body).toBeNull();
+      expect(response.headers.get("content-encoding")).toBe("gzip");
+      expect(response.headers.get("content-length")).toBe("123");
+    },
+  );
+
+  it("preserves metadata for content codings Fetch does not decode", async () => {
+    const server = createServer((_request, response) => {
+      response.writeHead(200, { "content-encoding": "custom", "content-length": "3" });
+      response.end("raw");
+    });
+    const origin = await listen(server);
+    cleanups.push(() => close(server));
+    const response = await proxyAgentRuntimeRequest(
+      new Request("http://farm.test/agents/raw"),
+      origin,
+    );
+    expect(response.headers.get("content-encoding")).toBe("custom");
+    expect(response.headers.get("content-length")).toBe("3");
+    expect(await response.text()).toBe("raw");
   });
 
   it("rewrites upstream redirects and sanitizes connection failures", async () => {
