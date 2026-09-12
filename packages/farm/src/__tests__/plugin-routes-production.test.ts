@@ -43,6 +43,7 @@ import { defineConfig, definePlugin } from "@farm.js/core";
 import { z } from "zod";
 export default defineConfig({
   telemetry: false,
+  vite: { server: { host: "127.0.0.1", strictPort: false } },
   plugins: [definePlugin({
     name: "test:published-routes",
     routes: ({ route }) => {
@@ -74,11 +75,13 @@ export default defineConfig({
       await expect(build(config, { root, universal: false })).rejects.toThrow(
         "Plugin API routes require the default universal production build",
       );
-      const dev = await startDevServer({ root, vite: { server: { host: "127.0.0.1" } } }, 0);
+      // The app config owns Vite settings; createServer's argument only locates it.
+      const dev = await startDevServer({ root }, 0);
       try {
         const address = dev.httpServer!.address();
         if (!address || typeof address === "string")
           throw new Error("Dev server did not bind a TCP port");
+        expect(address.address).toBe("127.0.0.1");
         const response = await fetch(
           `http://127.0.0.1:${address.port}/api/projects/p1/uploads/u1`,
           {
