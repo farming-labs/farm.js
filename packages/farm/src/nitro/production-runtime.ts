@@ -58,6 +58,8 @@ export {
   reportFarmPreloadWarnings,
 } from "../preload";
 export { searchParamsToObject } from "../search-params";
+export { parseRoutePath, matchRoute as matchFarmPageRoute } from "../utils";
+export { compareRouteSpecificity, getRoutePatternSpecificity } from "../routing/specificity";
 export { createFarmLegacyRequest } from "./legacy-request";
 export {
   renderFarmLegacyErrorHtml,
