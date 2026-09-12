@@ -15,6 +15,7 @@ import { setFarmPluginIntegrationContext } from "./plugin-integration-context";
 import { decodeRouteSegment } from "./utils/decode";
 import {
   assertTerminalCatchAll,
+  assertUniqueRouteParameters,
   compareRouteSpecificity,
   getRoutePatternSpecificity,
 } from "./routing/specificity";
@@ -1121,6 +1122,7 @@ export function defineIntegration<
       : undefined;
 
   for (const route of allRoutes || []) {
+    assertUniqueRouteParameters(route.path, "api");
     validateConfigRouteSource(route.path, `Integration route "${route.path}"`);
     assertTerminalCatchAll(route.path, "api");
   }
@@ -2242,15 +2244,19 @@ function normalizeIntegrationRoutes(
   routes: readonly FarmIntegrationRoute[],
 ): NormalizedIntegrationRoute[] {
   return routes
-    .map((route, index) => ({
-      index,
-      route: {
-        ...route,
-        methods: normalizeIntegrationRouteMethods(route),
-        input: normalizeIntegrationRouteInputSchemas(route),
-      },
-      specificity: getRoutePatternSpecificity(route.path, "api"),
-    }))
+    .map((route, index) => {
+      // Raw FarmIntegration objects and direct dispatch also pass through here.
+      assertUniqueRouteParameters(route.path, "api");
+      return {
+        index,
+        route: {
+          ...route,
+          methods: normalizeIntegrationRouteMethods(route),
+          input: normalizeIntegrationRouteInputSchemas(route),
+        },
+        specificity: getRoutePatternSpecificity(route.path, "api"),
+      };
+    })
     .sort(
       (left, right) =>
         compareRouteSpecificity(left.specificity, right.specificity) || left.index - right.index,

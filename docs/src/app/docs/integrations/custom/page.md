@@ -563,6 +563,11 @@ Within an integration, static paths take precedence over dynamic parameters, fol
 catch-all paths. For example, `/api/items/new` wins over `/api/items/[id]` regardless of
 declaration order. Routes with equal specificity keep their declaration order.
 
+Parameter names must be unique within a route. Use `/api/teams/[teamId]/members/[memberId]`,
+not two `[id]` segments, so both identifiers reach the handler. Farm rejects `__proto__`,
+`constructor`, and `prototype` as parameter names, including catch-all parameters. Validation
+applies to plain routes, typed builders, grouped endpoints, and raw integration objects.
+
 `integrationRoute` is the route factory. It supports `get`, `post`, `put`, `patch`, `delete`, `options`, and `head`.
 
 ```ts
