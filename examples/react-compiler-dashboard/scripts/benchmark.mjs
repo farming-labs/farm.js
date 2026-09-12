@@ -643,22 +643,32 @@ async function measureTrial(browser, trial, compilerMode, port) {
           const rows = table.querySelectorAll("tbody tr");
           const reviewedSurvivor = rows[100];
           const escalatedSurvivor = rows[101];
+          const secondaryReviewedSurvivor = rows[102];
           const reviewedLabel = reviewedSurvivor?.querySelector("td:nth-child(2)")?.textContent;
           const escalatedLabel = escalatedSurvivor?.querySelector("td:nth-child(2)")?.textContent;
+          const secondaryReviewedLabel = secondaryReviewedSurvivor
+            ?.querySelector("td:nth-child(2)")
+            ?.textContent;
           const reviewedAmount = Number(
             reviewedSurvivor?.querySelector("td:nth-child(4)")?.textContent?.slice(1),
           );
           const escalatedAmount = Number(
             escalatedSurvivor?.querySelector("td:nth-child(4)")?.textContent?.slice(1),
           );
+          const secondaryReviewedAmount = Number(
+            secondaryReviewedSurvivor?.querySelector("td:nth-child(4)")?.textContent?.slice(1),
+          );
           const previousLast = rows[9_999]?.getAttribute("data-row-id");
           if (
             !reviewedSurvivor ||
             !escalatedSurvivor ||
+            !secondaryReviewedSurvivor ||
             !reviewedLabel ||
             !escalatedLabel ||
+            !secondaryReviewedLabel ||
             !Number.isFinite(reviewedAmount) ||
-            !Number.isFinite(escalatedAmount)
+            !Number.isFinite(escalatedAmount) ||
+            !Number.isFinite(secondaryReviewedAmount)
           ) {
             throw new Error("Mapped rolling-chain source rows are invalid.");
           }
@@ -668,6 +678,7 @@ async function measureTrial(browser, trial, compilerMode, port) {
               rowCount() === 10_000 &&
               nextRows[0] === reviewedSurvivor &&
               nextRows[1] === escalatedSurvivor &&
+              nextRows[2] === secondaryReviewedSurvivor &&
               reviewedSurvivor.querySelector("td:nth-child(2)")?.textContent ===
                 `${reviewedLabel} reviewed` &&
               reviewedSurvivor.querySelector("td:nth-child(4)")?.textContent ===
@@ -676,6 +687,10 @@ async function measureTrial(browser, trial, compilerMode, port) {
                 `${escalatedLabel} escalated` &&
               escalatedSurvivor.querySelector("td:nth-child(4)")?.textContent ===
                 `$${escalatedAmount + 2}` &&
+              secondaryReviewedSurvivor.querySelector("td:nth-child(2)")?.textContent ===
+                `${secondaryReviewedLabel} reviewed` &&
+              secondaryReviewedSurvivor.querySelector("td:nth-child(4)")?.textContent ===
+                `$${secondaryReviewedAmount + 1}` &&
               nextRows[9_999]?.getAttribute("data-row-id") !== previousLast
             );
           });

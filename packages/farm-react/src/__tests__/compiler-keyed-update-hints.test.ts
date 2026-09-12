@@ -236,10 +236,10 @@ describe("React AOT keyed update hints", () => {
     });
   });
 
-  it("records fully returning switch branches inside structured map callbacks", async () => {
+  it("records grouped switch labels inside structured map callbacks", async () => {
     const result = await compile(`
       import { useState } from "react";
-      export function Inventory({ reviewedId, escalatedId, delta }) {
+      export function Inventory({ reviewedId, archivedId, escalatedId, delta }) {
         const [items, setItems] = useState([
           { id: "a", label: "Alpha", amount: 1 },
           { id: "b", label: "Beta", amount: 2 },
@@ -250,6 +250,7 @@ describe("React AOT keyed update hints", () => {
               const target = row.id;
               switch (target) {
                 case reviewedId:
+                case archivedId:
                   return { ...row, label: "Reviewed" };
                 case escalatedId: {
                   const nextAmount = Math.round(row.amount + delta);
@@ -369,11 +370,18 @@ describe("React AOT keyed update hints", () => {
         'setItems((current) => current.map((row) => { switch (row.id) { case "a": return { ...row, label: "Updated" }; case "b": return row; } }))',
     },
     {
-      name: "a switch with a fallthrough case",
+      name: "a switch with a partially executed fallthrough case",
       declaration: "",
       collection: "items",
       update:
-        'setItems((current) => current.map((row) => { switch (row.id) { case "a": case "b": return { ...row, label: "Updated" }; default: return row; } }))',
+        'setItems((current) => current.map((row) => { switch (row.id) { case "a": const label = row.label; case "b": return { ...row, label }; default: return row; } }))',
+    },
+    {
+      name: "a switch with a dangling grouped label",
+      declaration: "",
+      collection: "items",
+      update:
+        'setItems((current) => current.map((row) => { switch (row.id) { case "a": return { ...row, label: "Updated" }; default: return row; case "b": } }))',
     },
     {
       name: "a switch with a break path",

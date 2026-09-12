@@ -236,14 +236,15 @@ Each stage requires an inline synchronous conditional mapper that returns the or
 least one path and an object-spread replacement on another. The callback may be a concise expression
 or a structured block containing fully returning `if` or `switch` branches and proven local `const`
 aliases. Each alias needs a simple identifier and compiler-safe initializer. A `switch` needs one
-`default`, a complete return from every case, safe discriminant and case expressions, and no shared
-fallthrough cases or trailing statements. An unsupported mapper anywhere in the chain disables the
-complete setter hint. Custom methods still execute but record no metadata. Key changes, structural
+`default`, a complete return from every case, safe discriminant and case expressions, and no trailing
+statements. Consecutive empty labels may share the next fully returning body; partially executed
+fallthrough and dangling labels are rejected. An unsupported mapper anywhere in the chain disables
+the complete setter hint. Custom methods still execute but record no metadata. Key changes, structural
 edits, sparse or subclassed arrays, relevant mixed dependencies, and failed runtime checks use the
 existing complete reconciliation and LIS path. Non-functional setters, derived collections,
 referenced callbacks, mutable or destructured declarations, effectful initializers, other
-intermediate statements, fallthrough, mutating mappers, and other unproven forms are simply not
-hinted. No new option is required. A compiler report counts prepared map calls as
+intermediate statements, partial or dangling fallthrough, mutating mappers, and other unproven forms
+are simply not hinted. No new option is required. A compiler report counts prepared map calls as
 `keyedMapUpdateHints`. The separate hint runtime capability is imported only when that count is
 nonzero, so direct-only and ordinary keyed builds do not retain it.
 
@@ -572,9 +573,10 @@ Every condition must be compiler-safe, and every leaf must return the original i
 object spread of it, with at least one unchanged and one replacement path. Concise expressions and
 blocks made from fully returning `if` or `switch` branches plus local `const` aliases are accepted.
 Each alias must have a simple identifier and compiler-safe initializer. A switch requires one
-`default`, complete returning cases, and no fallthrough. Mutable or destructured declarations,
-effectful initializers, other intermediate statements, fallthrough, and ambiguous leaves use
-complete keyed reconciliation. A runtime key change also falls back before any DOM write.
+`default` and complete returning cases. Consecutive empty labels may share the next body, while
+partial or dangling fallthrough is rejected. Mutable or destructured declarations, effectful
+initializers, other intermediate statements, and ambiguous leaves use complete keyed
+reconciliation. A runtime key change also falls back before any DOM write.
 
 Farm executes every native map and reorder call normally. For consecutive accepted maps, it checks
 each native call but compares only the input and final result of that map segment, avoiding a full
@@ -587,11 +589,11 @@ an object-spread replacement, plus index-independent compiler-owned host rows. C
 and structured blocks with proven local `const` aliases plus fully returning `if` or `switch`
 branches are supported.
 Changed keys, referenced callbacks, mutable, destructured, or effectful declarations, other
-intermediate statements or fallthrough, unconditional replacements, `thisArg`, structural calls in
-the same chain, computed or custom methods, sparse or subclassed arrays, collection-reading
-bindings, nested or React-owned rows, and failed checks use complete keyed reconciliation. Reports
-use the existing map, sort, and reorder hint counters, and unrelated modules do not retain this
-optional runtime.
+intermediate statements or partial/dangling fallthrough, unconditional replacements, `thisArg`,
+structural calls in the same chain, computed or custom methods, sparse or subclassed arrays,
+collection-reading bindings, nested or React-owned rows, and failed checks use complete keyed
+reconciliation. Reports use the existing map, sort, and reorder hint counters, and unrelated modules
+do not retain this optional runtime.
 
 The maps may also finish the concise pipeline:
 
