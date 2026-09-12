@@ -14,18 +14,15 @@ import { _runWithFarmI18nRequest, type FarmI18nRuntime } from "../i18n/server";
 import {
   getAllowedAPIRouteMethods,
   invokeAPIRouteEndpoint,
+  registerAPIRouteShape,
+  type APIRouteShapeSource,
   matchAPIRouteAtBasePath,
   matchAPIRoute,
   resolveAPIRouteEndpoint,
   type APIRouteMatch,
 } from "./runtime";
 import { isFarmAPIRouteFileName } from "./route-files";
-import {
-  AmbiguousRouteError,
-  assertUniqueRouteParameters,
-  getRoutePatternShape,
-  NonTerminalCatchAllRouteError,
-} from "../routing/specificity";
+import { AmbiguousRouteError, NonTerminalCatchAllRouteError } from "../routing/specificity";
 
 export interface APIRoute extends FarmRouteRuntimeConfig {
   path: string;
@@ -71,7 +68,7 @@ export class APIRouteManager {
   private routes: Map<string, APIRoute> = new Map();
   private endpointSources: Map<string, Map<string, { appDir: string; filePath: string }>> =
     new Map();
-  private routeShapes = new Map<string, { routePath: string; appDir: string; filePath: string }>();
+  private routeShapes = new Map<string, APIRouteShapeSource<string>>();
   private viteServer?: ViteDevServer;
   private appDirs: string[];
   private throwOnLoadError: boolean;
@@ -375,21 +372,11 @@ export class APIRouteManager {
   }
 
   private registerRouteShape(routePath: string, filePath: string, appDir: string): void {
-    assertUniqueRouteParameters(routePath, "api");
-    const shape = getRoutePatternShape(routePath, "api");
-    const existing = this.routeShapes.get(shape);
-
-    if (existing && existing.routePath !== routePath) {
-      if (existing.appDir === appDir) {
-        throw new AmbiguousRouteError(
-          `Ambiguous API routes "${existing.routePath}" and "${routePath}" match the same URLs. Found ${existing.filePath} and ${filePath}. Keep only one route for this URL shape.`,
-        );
-      }
-      this.routes.delete(existing.routePath);
-      this.endpointSources.delete(existing.routePath);
+    const replacedPath = registerAPIRouteShape(this.routeShapes, routePath, filePath, appDir);
+    if (replacedPath) {
+      this.routes.delete(replacedPath);
+      this.endpointSources.delete(replacedPath);
     }
-
-    this.routeShapes.set(shape, { routePath, appDir, filePath });
   }
 
   /**
