@@ -237,6 +237,7 @@ export const schema = z.string();`;
 
   it.each([
     { name: "default", api: undefined, baseURL: "/api", mount: "/api" },
+    { name: "cache-variants", api: undefined, baseURL: "/api", mount: "/api" },
     {
       name: "custom",
       api: {
@@ -255,7 +256,7 @@ export const schema = z.string();`;
     },
   ])(
     "builds and boots an isolated RSC app with the $name API root",
-    async ({ api, baseURL, mount }) => {
+    async ({ name, api, baseURL, mount }) => {
       const fixtureRoot = mkdtempSync(path.join(tmpdir(), "farm-rsc-root-runtime-"));
       const isolatedRoot = mkdtempSync(path.join(tmpdir(), "farm-rsc-root-output-"));
       const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -272,6 +273,15 @@ export const schema = z.string();`;
             type: "module",
           }),
         );
+        if (name === "cache-variants") {
+          writeFileSync(
+            path.join(srcDir, "middleware.ts"),
+            `export function middleware(request, context) {
+            context.headers.set("cache-control", "public, max-age=60");
+            context.headers.set("vary", new URL(request.url).searchParams.has("wildcard") ? "*" : "Origin, aCcEpT");
+          }`,
+          );
+        }
         const fixtureModules = path.join(fixtureRoot, "node_modules");
         for (const packageName of [
           "@farm.js/core",
@@ -394,6 +404,7 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
           logLevel: "silent",
           srcDir: "src",
           outDir: "dist",
+          esbuild: { jsxDev: false },
           experimental: { serverComponents: true, serverActions: true },
           api,
           plugins,
@@ -486,6 +497,27 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
         expect(aliasedResponse.status, logs).toBe(200);
         expect((await aliasedResponse.json()).requestPath).toBe(`${mount}/root-runtime`);
 
+        if (name === "cache-variants") {
+          for (const accept of ["text/html", "text/x-component"]) {
+            const page = await fetch(origin + "/", {
+              headers: { accept },
+              signal: AbortSignal.timeout(10_000),
+            });
+            expect(page.status, logs).toBe(200);
+            expect(page.headers.get("content-type")).toContain(accept);
+            expect(await page.text(), logs).toContain("RSC root runtime fixture");
+            expect(page.headers.get("cache-control")).toBe("public, max-age=60");
+            const fields = page.headers.get("vary")?.toLowerCase().split(/,\s*/);
+            expect(fields).toEqual(expect.arrayContaining(["accept", "origin", "accept-encoding"]));
+            expect(fields?.filter((value) => value === "accept")).toHaveLength(1);
+            const wildcard = await fetch(origin + "/?wildcard", {
+              headers: { accept },
+              signal: AbortSignal.timeout(10_000),
+            });
+            expect(await wildcard.text(), logs).toContain("RSC root runtime fixture");
+            expect(wildcard.headers.get("vary")).toBe("*");
+          }
+        }
         // A custom API prefix is not a server-action URL, even with actions enabled.
         const post = await fetch(`${origin}${mount}/echo`, {
           method: "POST",
