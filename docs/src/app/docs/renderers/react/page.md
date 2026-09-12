@@ -1169,6 +1169,7 @@ setItems((current) =>
 );
 ```
 
+Each map may use a compiler-safe nested conditional to update several retained rows.
 Farm links mapped retained items back to their committed rows, creates the incoming suffix from its
 final mapped values, and prepares every changed binding and incoming row before the first live DOM
 write. Unchanged survivors keep their elements, focus, selection, scopes, and delegated-event
@@ -1383,6 +1384,26 @@ by comparing the input and final result of each consecutive map segment. The int
 need no separate full scan, and the final replacements still point directly to their committed
 source rows. The complete pipeline then needs one final keyed reconciliation rather than a growing
 chain of intermediate snapshots.
+
+One callback may select several rows with nested conditional expressions:
+
+```tsx
+setItems((current) =>
+  current.map((item) =>
+    item.id === reviewedId
+      ? { ...item, status: "reviewed" }
+      : item.id === escalatedId
+        ? { ...item, status: "escalated", priority: 1 }
+        : item,
+  ),
+);
+```
+
+The compiler recursively proves every condition and leaf. Each leaf must return the original item
+or a compiler-safe object spread of that item, with at least one unchanged and one replacement
+path. Calls, mutation, block bodies, and any other effectful or ambiguous branch keep complete keyed
+reconciliation. Runtime key validation remains atomic, so a replacement that changes its key falls
+back before the first DOM write.
 
 Before changing the DOM, the runtime verifies ordinary dense arrays, exact native methods, the
 committed collection token, equal lengths, a unique one-to-one source-item match, and the key of
@@ -2436,7 +2457,8 @@ The package and example test suites verify more than generated code:
   survivor bindings, preserve retained DOM identity, update delegated indexes, preserve controlled
   focus and selection, and cover changed mapped keys, unsafe evaluated bounds, reused or discarded
   intermediate keys, custom slices, mixed queued chains, collection-dependent rows, Strict Mode
-  hydration, React 18/19, and unmount cleanup;
+  hydration, React 18/19, and unmount cleanup; compiler tests accept recursively proven
+  multi-branch maps while rejecting effectful leaves and callbacks that replace every row;
 - 2,000 deterministic randomized keyed-array removals match normal React; targeted tests require
   zero surviving descriptor and binding reads, preserve DOM identity, and cover queued filters,
   unhinted-chain fallback, collection-reading rows, StrictMode hydration, and unmount cleanup;

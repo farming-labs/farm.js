@@ -2,6 +2,39 @@
 
 Latest run: 2026-09-11
 
+## Multi-branch same-key maps — 2026-09-11
+
+One compiler-safe `map()` callback may now select several rows with a nested conditional chain.
+Every condition is proven recursively, and every leaf must return the original item or an object
+spread of that item. Effectful or ambiguous branches still use complete keyed reconciliation, and
+changed replacement keys still trigger the atomic runtime fallback.
+
+The maintained 10,000-row workload performs a 50-row roll, updates two different retained rows in
+one nested map, and performs another 50-row roll before React commits. Previously, the nested map
+was not eligible and broke the rolling-window chain. The block-bodied rolling control performs the
+same JavaScript and DOM result without compiler lineage.
+
+| Mode   | Two-branch mapped chain | Compiled fallback | vs React | vs fallback |
+| ------ | ----------------------: | ----------------: | -------: | ----------: |
+| Static |                 3.50 ms |          13.80 ms |   16.46x |       3.94x |
+| Hybrid |                 3.40 ms |          14.20 ms |   16.94x |       4.18x |
+
+Both modes passed the unchanged 2x React and 1.25x compiled-control floors. The bracketed React
+median was 57.60 ms. Every sample checked the final 10,000-row count, both retained DOM identities,
+both branch-specific label and amount changes, the final incoming suffix, browser errors, and zero
+compiled owner executions. The compiler report recorded two mapped rolling-chain steps and 34
+safe keyed maps in both compiled modes.
+
+Every existing correctness, performance, optimization-persistence, feature, and scalability gate
+passed. The established 10k/20k persistence speedups remained between 13.95x and 19.73x. The
+compiler runtime-size baselines are unchanged because recursive branch proof is build-time only;
+the complete example bundles were 31,682 bytes gzip in both compiler modes.
+
+Numbers are browser medians from the complete production-build command with 5 warmups, 10 measured
+samples per compiler action, 20 bracketed React samples, 60 dashboard samples of 10 updates, and 3
+scale cycles, using Chrome 153.0.8010.36 and Node.js 23.11.0 on Apple M1 macOS arm64. The aggregate
+command and every individual gate passed.
+
 ## Same-key maps through multiple rolling windows — 2026-09-11
 
 One synchronous setter segment can now retain committed-row lineage through more than one

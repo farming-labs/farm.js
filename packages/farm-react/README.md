@@ -413,6 +413,7 @@ setItems((current) =>
 );
 ```
 
+Each map may use a compiler-safe nested conditional to update several retained rows.
 The compiler carries mapped survivor identity through the retained tail, creates incoming rows
 from their final mapped values, and patches only changed committed survivors. A single rolling
 setter uses the optional structural append/map runtime. Multiple rolling setters keep their
@@ -545,14 +546,33 @@ setItems((current) =>
 );
 ```
 
+One callback may select several rows through nested conditional expressions:
+
+```tsx
+setItems((current) =>
+  current.map((item) =>
+    item.id === reviewedId
+      ? { ...item, status: "reviewed" }
+      : item.id === escalatedId
+        ? { ...item, status: "escalated", priority: 1 }
+        : item,
+  ),
+);
+```
+
+Every condition must be compiler-safe, and every leaf must return the original item or a safe
+object spread of it, with at least one unchanged and one replacement path. Effectful calls,
+mutation, block bodies, and ambiguous leaves use complete keyed reconciliation. A runtime key
+change also falls back before any DOM write.
+
 Farm executes every native map and reorder call normally. For consecutive accepted maps, it checks
 each native call but compares only the input and final result of that map segment, avoiding a full
 lineage scan for every intermediate array. It verifies the committed token, dense-array shape, a
 one-to-one source-item match, and every final replacement key before touching the DOM, then runs one
 LIS and patches each changed row once. Unchanged rows need no second key or binding read. Queued
 supported map-and-reorder setters compose against the same committed rows. Every accepted map
-requires an inline synchronous conditional mapper that returns either the original item or an
-object-spread replacement, plus index-independent compiler-owned host rows. Changed keys,
+requires an inline synchronous conditional mapper whose leaves return either the original item or
+an object-spread replacement, plus index-independent compiler-owned host rows. Changed keys,
 referenced or block-bodied callbacks, unconditional replacements, `thisArg`, structural calls in
 the same chain, computed or custom methods, sparse or subclassed arrays, collection-reading
 bindings, nested or React-owned rows, and failed checks use complete keyed reconciliation. Reports

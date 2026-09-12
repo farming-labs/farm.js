@@ -108,6 +108,44 @@ describe("React AOT keyed update hints", () => {
     });
   });
 
+  it("records one keyed update for a safe multi-branch map", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Inventory({ firstId, secondId, firstLabel, secondLabel }) {
+        const [items, setItems] = useState([
+          { id: "a", label: "Alpha", selected: false },
+          { id: "b", label: "Beta", selected: false },
+        ]);
+        return (
+          <section>
+            <button onClick={() => setItems((current) => current.map((row) =>
+              row.id === firstId
+                ? { ...row, label: firstLabel }
+                : row.id === secondId
+                  ? { ...row, label: secondLabel, selected: true }
+                  : row
+            ))}>Update two rows</button>
+            <ul>{items.map((item) => <li key={item.id}>{item.label}</li>)}</ul>
+          </section>
+        );
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Inventory"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.optimizations.keyedMapUpdateHints).toBe(1);
+    expect(result.code.match(/createCompilerKeyedMapUpdate\(/g)).toHaveLength(1);
+    expect(result.code).toContain("keyedRowsHintedRuntimeFeature");
+    await expect(
+      transformWithEsbuild(result.code, "/app/KeyedUpdateHints.tsx", {
+        loader: "tsx",
+        jsx: "automatic",
+      }),
+    ).resolves.toMatchObject({
+      code: expect.stringContaining("createCompilerKeyedMapUpdate"),
+    });
+  });
+
   it("supports direct-state public List rows without adding a public option", async () => {
     const result = await compile(`
       import { useState } from "react";
@@ -153,6 +191,13 @@ describe("React AOT keyed update hints", () => {
       collection: "items",
       update:
         'setItems((current) => current.map((row) => row.id === "a" ? { ...row, label: "First" } : row).map((row) => ({ ...row, label: "Updated" })))',
+    },
+    {
+      name: "a conditional mapper that replaces every row",
+      declaration: "",
+      collection: "items",
+      update:
+        'setItems((current) => current.map((row) => row.id === "a" ? { ...row, label: "First" } : { ...row, label: "Other" }))',
     },
     {
       name: "a potentially mutating mapper",
