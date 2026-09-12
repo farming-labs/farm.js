@@ -225,6 +225,55 @@ describe("integrations runtime", () => {
     expect(dynamic?.params).toEqual({ id: "%E0" });
   });
 
+  it("matches the most specific integration route regardless of declaration order", async () => {
+    const integration = defineIntegration({
+      category: "agent",
+      type: "specific-routes",
+      instance: {},
+      routes: [
+        integrationRoute.get("/api/[...path]", {
+          handler: async () => new Response("catch-all"),
+        }),
+        integrationRoute.get("/api/items/[id]", {
+          handler: async () => new Response("dynamic"),
+        }),
+        integrationRoute.get("/api/items/new", {
+          handler: async () => new Response("static"),
+        }),
+      ],
+    });
+
+    expect(
+      matchIntegrationRoute({ agent: integration }, { pathname: "/api/items/new", method: "GET" })
+        ?.route.path,
+    ).toBe("/api/items/new");
+    expect(
+      matchIntegrationRoute({ agent: integration }, { pathname: "/api/items/123", method: "GET" })
+        ?.route.path,
+    ).toBe("/api/items/[id]");
+    const manager = createManager();
+    manager.addPlugins(resolveIntegrationPlugins({ specific: integration }));
+    await manager.runHookParallel("init");
+    const runtime = getRegisteredIntegrationRuntime("specific")!;
+    for (const [pathname, expected] of [
+      ["/api/items/new", "static"],
+      ["/api/items/123", "dynamic"],
+      ["/api/other/deep", "catch-all"],
+    ]) {
+      const res = createResponse();
+      expect(
+        await manager.runHookParallel("beforeRequest", createRequest(pathname) as any, res as any),
+      ).toBe(true);
+      expect(res.body.toString()).toBe(expected);
+      const response = await dispatchIntegrationRequest(
+        runtime,
+        new Request(`http://localhost${pathname}`),
+      );
+      expect(await response?.text()).toBe(expected);
+    }
+    await manager.runHookParallel("shutdown", { reason: "test" });
+  });
+
   it("rejects integration catch-all parameters before later path segments", () => {
     expect(() =>
       defineIntegration({

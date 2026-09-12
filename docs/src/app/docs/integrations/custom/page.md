@@ -555,6 +555,10 @@ export const acme = defineIntegration({
 
 ## Typed routes
 
+Within an integration, static paths take precedence over dynamic parameters, followed by
+catch-all paths. For example, `/api/items/new` wins over `/api/items/[id]` regardless of
+declaration order. Routes with equal specificity keep their declaration order.
+
 `integrationRoute` is the route factory. It supports `get`, `post`, `put`, `patch`, `delete`, `options`, and `head`.
 
 ```ts

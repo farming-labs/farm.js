@@ -12,7 +12,11 @@ import type {
 import type { InferFarmIntegrationOrmClient } from "./integration-orm";
 import { setFarmPluginIntegrationContext } from "./plugin-integration-context";
 import { decodeRouteSegment } from "./utils/decode";
-import { assertTerminalCatchAll } from "./routing/specificity";
+import {
+  assertTerminalCatchAll,
+  compareRouteSpecificity,
+  getRoutePatternSpecificity,
+} from "./routing/specificity";
 import type {
   FarmPlugin,
   FarmPluginContext,
@@ -2235,11 +2239,21 @@ type NormalizedIntegrationRoute = Omit<FarmIntegrationRoute, "method" | "methods
 function normalizeIntegrationRoutes(
   routes: readonly FarmIntegrationRoute[],
 ): NormalizedIntegrationRoute[] {
-  return routes.map((route) => ({
-    ...route,
-    methods: normalizeIntegrationRouteMethods(route),
-    input: normalizeIntegrationRouteInputSchemas(route),
-  }));
+  return routes
+    .map((route, index) => ({
+      index,
+      route: {
+        ...route,
+        methods: normalizeIntegrationRouteMethods(route),
+        input: normalizeIntegrationRouteInputSchemas(route),
+      },
+      specificity: getRoutePatternSpecificity(route.path, "api"),
+    }))
+    .sort(
+      (left, right) =>
+        compareRouteSpecificity(left.specificity, right.specificity) || left.index - right.index,
+    )
+    .map(({ route }) => route);
 }
 
 function normalizeIntegrationRouteMethods(route: Pick<FarmIntegrationRoute, "method" | "methods">) {
