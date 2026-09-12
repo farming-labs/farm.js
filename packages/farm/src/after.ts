@@ -168,9 +168,11 @@ function wrapResponseBody(
         finishSoon(state);
       }
     },
-    async cancel(reason) {
+    cancel(reason) {
       try {
-        await reader.cancel(reason);
+        // Preserve the caller's cleanup promise, but response completion must
+        // not depend on whether producer-owned cancellation ever settles.
+        return reader.cancel(reason);
       } finally {
         releaseReader();
         finishSoon(state);
