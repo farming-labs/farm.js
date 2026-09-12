@@ -322,6 +322,7 @@ export function StandardTableBenchmark() {
             const secondAdditions = buildRows(50, secondSeed);
             const reviewedId = rows[100].id;
             const escalatedId = rows[101].id;
+            const secondaryReviewedId = rows[102].id;
             const trimCount = 50;
             setSeed(secondSeed);
             setRows((current) => [...current.slice(trimCount), ...firstAdditions]);
@@ -330,6 +331,7 @@ export function StandardTableBenchmark() {
                 const target = row.id;
                 switch (target) {
                   case reviewedId:
+                  case secondaryReviewedId:
                     return { ...row, amount: row.amount + 1, label: `${row.label} reviewed` };
                   case escalatedId: {
                     const nextAmount = row.amount + 2;
@@ -357,6 +359,7 @@ export function StandardTableBenchmark() {
             const secondAdditions = buildRows(50, secondSeed);
             const reviewedId = rows[100].id;
             const escalatedId = rows[101].id;
+            const secondaryReviewedId = rows[102].id;
             const trimCount = 50;
             setSeed(secondSeed);
             setRows((current) => {
@@ -364,7 +367,7 @@ export function StandardTableBenchmark() {
             });
             setRows((current) =>
               current.map((row) =>
-                row.id === reviewedId
+                row.id === reviewedId || row.id === secondaryReviewedId
                   ? { ...row, amount: row.amount + 1, label: `${row.label} reviewed` }
                   : row.id === escalatedId
                     ? { ...row, amount: row.amount + 2, label: `${row.label} escalated` }

@@ -232,7 +232,6 @@ describe("React AOT keyed-array rolling-window hints", () => {
               const target = row.id;
               switch (target) {
                 case firstId:
-                  return { ...row, label: nextLabel };
                 case secondId:
                   return { ...row, label: nextLabel };
                 default:

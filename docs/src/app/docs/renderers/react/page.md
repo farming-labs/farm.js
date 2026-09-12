@@ -922,16 +922,18 @@ conditional: at least one path returns the original item and another returns a n
 spreads that item. This may be a concise expression or a structured block made from fully returning
 `if` or `switch` branches plus immutable local `const` aliases. Each alias needs a simple identifier
 and a compiler-safe initializer. A `switch` needs one `default`, a complete return from every case,
-and no shared fallthrough cases or trailing statements. Its discriminant, case tests, conditions,
-and replacement values must use the same safe expression subset. The hint runtime is retained only
-in modules where at least one such call is emitted; direct-only and ordinary keyed builds do not
-import that capability.
+and no trailing statements. Consecutive empty case labels may share the next fully returning body;
+a case that executes anything before falling through, or a final label with no body, is rejected.
+Its discriminant, case tests, conditions, and replacement values must use the same safe expression
+subset. The hint runtime is retained only in modules where at least one such call is emitted;
+direct-only and ordinary keyed builds do not import that capability.
 
 ```tsx
 setItems((current) =>
   current.map((item) => {
     switch (item.status) {
       case "draft":
+      case "queued":
         return { ...item, label: draftLabel };
       case "published":
         return { ...item, label: publishedLabel };
@@ -955,8 +957,8 @@ array, unsupported mapper anywhere in the chain, changed key, insert, removal, r
 second dependency, or failed runtime check uses the existing complete keyed reconciliation and LIS
 path. Native results and thrown mapper or method errors are preserved. Derived collections,
 non-functional setters, referenced callbacks, mutable or destructured local declarations,
-effectful initializers, other intermediate statements, fallthrough, mutating replacements, and
-other unproven shapes also keep that existing path. This is an optimization hint, not a new
+effectful initializers, other intermediate statements, partial or dangling fallthrough, mutating
+replacements, and other unproven shapes also keep that existing path. This is an optimization hint, not a new
 correctness contract or a way to bypass React fallback behavior. The compiler report exposes the
 number of prepared map calls as `keyedMapUpdateHints`.
 
@@ -1426,9 +1428,9 @@ The compiler recursively proves every condition and leaf. Each leaf must return 
 or a compiler-safe object spread of that item, with at least one unchanged and one replacement
 path. Block bodies may also introduce local `const` aliases with simple identifier bindings and
 compiler-safe initializers. Mutable or destructured declarations, object/array/function literals,
-unknown calls, loops, mutation, fallthrough, and any other effectful or ambiguous control flow keep
-complete keyed reconciliation. Runtime key validation remains atomic, so a replacement that changes
-its key falls back before the first DOM write.
+unknown calls, loops, mutation, partial or dangling fallthrough, and any other effectful or ambiguous
+control flow keep complete keyed reconciliation. Runtime key validation remains atomic, so a
+replacement that changes its key falls back before the first DOM write.
 
 Before changing the DOM, the runtime verifies ordinary dense arrays, exact native methods, the
 committed collection token, equal lengths, a unique one-to-one source-item match, and the key of
@@ -1604,13 +1606,14 @@ sort or any other order ambiguity keeps the general permutation path.
 
 The proof requires every map callback to be inline, synchronous, compiler-safe, and to return the
 original item on one conditional path and an object-spread replacement on another. Concise
-expressions and structured blocks containing proven local `const` aliases plus `if`/`return` paths
-are accepted. It requires compiler-owned host rows whose render and key do not observe the index.
+expressions and structured blocks containing proven local `const` aliases plus fully returning `if`
+or `switch` branches are accepted. It requires compiler-owned host rows whose render and key do not observe the index.
 Referenced callbacks, mutable, destructured, or effectful declarations, other intermediate
-statements, fallthrough, unconditional replacements, changed or duplicate keys, `thisArg`, maps
-after structural steps, computed or custom methods, sparse or subclassed arrays, collection-reading
-bindings, React-owned rows, nested host blocks, row conditionals, unrelated dirty dependencies, or
-failed runtime validation use complete keyed reconciliation before any fast-path DOM write.
+statements, partial or dangling fallthrough, unconditional replacements, changed or duplicate keys,
+`thisArg`, maps after structural steps, computed or custom methods, sparse or subclassed arrays,
+collection-reading bindings, React-owned rows, nested host blocks, row conditionals, unrelated dirty
+dependencies, or failed runtime validation use complete keyed reconciliation before any fast-path
+DOM write.
 
 No API or option is added. Reports count the prepared map and reorder calls through the existing
 `keyedMapUpdateHints`, `keyedArraySortHints`, and `keyedArrayReorderHints` fields. Modules that do
@@ -2485,8 +2488,8 @@ The package and example test suites verify more than generated code:
   focus and selection, and cover changed mapped keys, unsafe evaluated bounds, reused or discarded
   intermediate keys, custom slices, mixed queued chains, collection-dependent rows, Strict Mode
   hydration, React 18/19, and unmount cleanup; compiler tests accept recursively proven
-  `if` and fully returning `switch` maps while rejecting effectful leaves, switch fallthrough, and
-  callbacks that replace every row;
+  `if` and fully returning `switch` maps, including grouped empty labels, while rejecting effectful
+  leaves, partial or dangling fallthrough, and callbacks that replace every row;
 - 2,000 deterministic randomized keyed-array removals match normal React; targeted tests require
   zero surviving descriptor and binding reads, preserve DOM identity, and cover queued filters,
   unhinted-chain fallback, collection-reading rows, StrictMode hydration, and unmount cleanup;

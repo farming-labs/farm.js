@@ -1307,12 +1307,13 @@ function proveSafeKeyedMapSwitchStatement(
   }
 
   let proof: SafeKeyedMapBranchProof | undefined;
-  for (const switchCase of statement.cases) {
-    if (
-      (switchCase.test && validateDerivedExpression(switchCase.test, safeGlobals)) ||
-      switchCase.consequent.length === 0
-    ) {
+  for (const [index, switchCase] of statement.cases.entries()) {
+    if (switchCase.test && validateDerivedExpression(switchCase.test, safeGlobals)) {
       return undefined;
+    }
+    if (switchCase.consequent.length === 0) {
+      if (index === statement.cases.length - 1) return undefined;
+      continue;
     }
     const branch =
       switchCase.consequent.length === 1 && t.isBlockStatement(switchCase.consequent[0])
