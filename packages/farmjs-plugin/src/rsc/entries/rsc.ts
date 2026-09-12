@@ -190,17 +190,24 @@ const routeDefinitionModules = collectRouteModuleEntries([${routeSourceRoots
 const apiRouteMethods = ['GET', 'HEAD', 'QUERY', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'];
 const apiRouteMap = new Map();
 
-function registerApiEndpoint(routePath, filePath, method, endpoint) {
+function registerApiEndpoint(routePath, filePath, method, endpoint, sourceIndex) {
   if (!routePath || typeof endpoint !== 'function') return;
   const normalizedMethod = String(method || 'GET').toUpperCase();
   let route = apiRouteMap.get(routePath);
   if (!route) {
-    route = { path: routePath, methods: [], handlers: {}, files: {} };
+    route = { path: routePath, methods: [], handlers: {}, files: {}, sources: {} };
     apiRouteMap.set(routePath, route);
+  }
+  if (route.sources[normalizedMethod] === sourceIndex) {
+    throw new Error(
+      'Duplicate API route for ' + normalizedMethod + ' ' + routePath + ': ' +
+      route.files[normalizedMethod] + ' conflicts with ' + filePath
+    );
   }
   if (!route.methods.includes(normalizedMethod)) route.methods.push(normalizedMethod);
   route.handlers[normalizedMethod] = endpoint;
   route.files[normalizedMethod] = filePath;
+  route.sources[normalizedMethod] = sourceIndex;
 }
 
 function getProgrammaticApiRoutes(routeModule) {
@@ -228,7 +235,7 @@ function registerApiRouteSources(fileModules, definitionModules, sourceCount) {
       const routePath = relativePath.replace(/\\/route\\.[tj]sx?$/i, '') || '/api';
       for (const method of apiRouteMethods) {
         if (typeof routeModule?.[method] === 'function') {
-          registerApiEndpoint(routePath, filePath, method, routeModule[method]);
+          registerApiEndpoint(routePath, filePath, method, routeModule[method], sourceIndex);
         }
       }
     }
@@ -238,13 +245,13 @@ function registerApiRouteSources(fileModules, definitionModules, sourceCount) {
       const { filePath, module: routeModule } = entry;
       for (const endpoint of Object.values(routeModule)) {
         if (typeof endpoint === 'function' && endpoint.__path) {
-          registerApiEndpoint(endpoint.__path, filePath, endpoint.__method || 'GET', endpoint);
+          registerApiEndpoint(endpoint.__path, filePath, endpoint.__method || 'GET', endpoint, sourceIndex);
         }
       }
 
       for (const route of getProgrammaticApiRoutes(routeModule)) {
         for (const [method, endpoint] of Object.entries(route.methods || {})) {
-          registerApiEndpoint(route.path, filePath, method, endpoint);
+          registerApiEndpoint(route.path, filePath, method, endpoint, sourceIndex);
         }
       }
     }
