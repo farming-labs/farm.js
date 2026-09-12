@@ -2,6 +2,43 @@
 
 Latest run: 2026-09-11
 
+## Same-key maps through multiple rolling windows — 2026-09-11
+
+One synchronous setter segment can now retain committed-row lineage through more than one
+`slice()`-plus-append rolling step with compiler-safe same-key `map()` updates before, between, or
+after those steps. The maintained 10,000-row workload performs a 50-row roll, updates one retained
+row, and performs a second 50-row roll before React commits. Previously, the intermediate map
+broke rolling-window lineage and the final value used complete keyed reconciliation. The new path
+validates the complete chain before its first DOM write, removes only expired rows, patches only
+changed survivors, creates only the final suffix, and keeps surviving DOM nodes in place.
+
+| Mode   | Roll + map + roll | Compiled fallback | vs React | vs fallback |
+| ------ | ----------------: | ----------------: | -------: | ----------: |
+| Static |           3.10 ms |          14.80 ms |   18.39x |       4.77x |
+| Hybrid |           3.10 ms |          13.90 ms |   18.39x |       4.48x |
+
+Both modes passed the unchanged 2x React and 1.25x compiled-control floors. The bracketed React
+median was 57.00 ms. Every sample checked the final 10,000-row count, retained DOM identity, the
+mapped label and amount, the final incoming suffix, browser errors, and zero compiled owner
+executions. The compiler report recorded two `keyedArrayMappedRollingWindowChainHints` in each
+compiled mode. Correctness, the broad 10% no-regression gate, every existing feature gate,
+optimization persistence, and normalized scalability all passed; the established 10k/20k update
+speedups remained between 13.72x and 17.93x.
+
+Compiler and runtime coverage includes maps before, between, and after two rolling setters;
+unsupported callbacks and intervening setters; changed-key and reused-key fallback before DOM
+mutation; exact key, descriptor, and binding work; controlled-input focus and selection; delegated
+event indexes; Strict Mode hydration; unmount-before-flush cancellation; React 18.3.1 and 19.2.8;
+and 2,000 randomized multi-window chains compared with normal React. The mapped-chain runtime is
+isolated in its own tree-shakable feature and measures a 20,115-byte gzip compiler premium. The
+ordinary rolling and structural-append fixtures grew by only 75 and 106 bytes gzip, respectively,
+and remain inside their existing +256-byte budgets.
+
+Numbers are browser medians from the complete production-build command with 5 warmups, 10 measured
+samples per compiler action, 20 bracketed React samples, 60 dashboard samples of 10 updates, and 3
+scale cycles, using Chrome 153.0.8010.36 and Node.js 23.11.0 on Apple M1 macOS arm64. The aggregate
+command and every individual gate passed.
+
 ## Mapped updates through a rolling window — 2026-09-11
 
 Immediately adjacent, same-key `map()` setters can now retain committed-row lineage across one

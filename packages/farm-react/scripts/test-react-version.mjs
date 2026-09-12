@@ -52,6 +52,8 @@ const testSource = String.raw`
     createCompilerKeyedArrayPrepend,
     createCompilerKeyedArrayQueuedMapPipeline,
     createCompilerKeyedArrayReorder,
+    createCompilerKeyedArrayMappedRollingWindow,
+    createCompilerKeyedArrayRollingWindowMapPipeline,
     createCompilerKeyedArraySort,
     createCompilerKeyedArraySlice,
     createCompilerKeyedArrayStructuralAppend,
@@ -60,6 +62,7 @@ const testSource = String.raw`
     createCompilerKeyedArrayWindowReplace,
     createCompilerKeyedMapUpdate,
     finalizeCompilerKeyedArrayMappedStructuralUpdate,
+    keyedRowsMappedRollingWindowHintedRuntimeFeature,
     keyedRowsStructuralAppendMapHintedRuntimeFeature,
   } = await import(
     "@farm.js/react/compiler-runtime"
@@ -2434,6 +2437,108 @@ const testSource = String.raw`
   assert.equal(structuralGamma.isConnected, false);
   assert.equal(structuralAppendExecutions, 1);
   flushSync(() => structuralAppendRoot.unmount());
+
+  let mappedRollingChainRows = () => undefined;
+  let mappedRollingChainExecutions = 0;
+  const MappedRollingChainRows = createCompiledComponentWithFeatures({
+    displayName: "CompatibilityMappedRollingChainRows",
+    initialize: () => [[
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+      { id: "c", label: "Gamma" },
+      { id: "d", label: "Delta" },
+    ]],
+    render(_props, state, blocks) {
+      mappedRollingChainExecutions += 1;
+      const items = () => state[0].get();
+      const map = (previous, mapper) =>
+        createCompilerKeyedArrayRollingWindowMapPipeline(previous, (current, applyMap) =>
+          applyMap(current, current.map, mapper),
+        );
+      const roll = (previous, incoming) => {
+        const retained = createCompilerKeyedArraySlice(previous, previous.slice, 1);
+        return createCompilerKeyedArrayMappedRollingWindow(previous, retained, [
+          ...retained,
+          incoming,
+        ]);
+      };
+      mappedRollingChainRows = () => {
+        state[0].set((previous) =>
+          map(previous, (item) =>
+            item.id === "c" ? { ...item, label: "Gamma before" } : item,
+          ),
+        );
+        state[0].set((previous) => roll(previous, { id: "e", label: "Epsilon" }));
+        state[0].set((previous) =>
+          map(previous, (item) =>
+            item.id === "c"
+              ? { ...item, label: "Gamma middle" }
+              : item.id === "e"
+                ? { ...item, label: "Epsilon middle" }
+                : item,
+          ),
+        );
+        state[0].set((previous) => roll(previous, { id: "f", label: "Phi" }));
+        state[0].set((previous) =>
+          map(previous, (item) =>
+            item.id === "c"
+              ? { ...item, label: "Gamma after" }
+              : item.id === "f"
+                ? { ...item, label: "Phi after" }
+                : item,
+          ),
+        );
+      };
+      return React.createElement(
+        "section",
+        null,
+        React.createElement(blocks.KeyedRows, {
+          collectionDependency: 0,
+          dependencies: [0],
+          filterIndexIndependent: true,
+          id: 0,
+          items,
+          structureDependencies: [0],
+          render: () =>
+            React.createElement(
+              "ol",
+              null,
+              items().map((item) =>
+                React.createElement("li", { key: item.id, "data-key": item.id }, item.label),
+              ),
+            ),
+          rowKey: (item) => item.id,
+          create: (item) => ({
+            kind: "element",
+            tag: "li",
+            attributes: [{ name: "data-key", value: item.id }],
+            styles: [],
+            children: [item.label],
+          }),
+          bindings: [{ kind: "text", path: [], dependencies: [], read: (item) => [item.label] }],
+        }),
+      );
+    },
+    bindings: [{ kind: "block", id: 0, dependencies: [0] }],
+  }, [keyedRowsMappedRollingWindowHintedRuntimeFeature]);
+  const mappedRollingChainContainer = document.createElement("div");
+  document.body.append(mappedRollingChainContainer);
+  const mappedRollingChainRoot = createRoot(mappedRollingChainContainer);
+  flushSync(() => mappedRollingChainRoot.render(React.createElement(MappedRollingChainRows)));
+  const mappedRollingChainGamma = mappedRollingChainContainer.querySelector("[data-key='c']");
+  mappedRollingChainRows();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(
+    [...mappedRollingChainContainer.querySelectorAll("li")].map((row) => row.textContent),
+    ["Gamma after", "Delta", "Epsilon middle", "Phi after"],
+  );
+  assert.equal(
+    mappedRollingChainContainer.querySelector("[data-key='c']"),
+    mappedRollingChainGamma,
+  );
+  assert.equal(mappedRollingChainExecutions, 1);
+  flushSync(() => mappedRollingChainRoot.unmount());
 
   let islandExecutions = 0;
   let islandChildExecutions = 0;

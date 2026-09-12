@@ -150,6 +150,13 @@ whose block-bodied rolling setter intentionally breaks lineage. Both compiler mo
 least 2x faster than React and 1.25x faster than that control. Every sample verifies the retained
 DOM identity, mapped value, exact row count, fresh suffix, and zero compiled owner executions.
 
+Mapped rolling-window chains have a separate gate so the single-window result cannot hide a chain
+regression. The 10,000-row workload runs one same-key map between two queued 50-row rolls. Its
+block-bodied control performs the same native work but cannot retain compiler lineage. Both
+compiler modes must remain at least 2x faster than React and 1.25x faster than that control, and the
+compiler report must contain both mapped rolling-chain steps. Every sample verifies the final
+retained identity and values plus the final incoming suffix.
+
 Exact-position insertions, removals, and replacements have separate 10,000-row comparisons. Concise
 native `toSpliced(position, 0, item)`, `toSpliced(position, 0, ...items)`, `toSpliced(position, 1)`,
 `toSpliced(position, 64)`, `toSpliced(position, 1, replacement)`, and

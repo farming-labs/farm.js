@@ -154,20 +154,23 @@ describe("React AOT keyed-array rolling-window hints", () => {
     expect(result.code).toContain("keyedRowsStructuralAppendMapHintedRuntimeFeature");
   });
 
-  it("does not merge maps with a segment containing two rolling setters", async () => {
+  it("retains safe maps through a segment containing two rolling setters", async () => {
     const result = await compile(`
       import { useState } from "react";
-      export function Feed({ next, editedId, nextLabel }) {
+      export function Feed({ nextOne, nextTwo, editedId, nextLabel }) {
         const [rows, setRows] = useState([{ id: "a", label: "Alpha" }]);
         return <section>
           <button onClick={() => {
             setRows((current) => current.map((row) =>
               row.id === editedId ? { ...row, label: nextLabel } : row
             ));
-            setRows((current) => [...current.slice(1), next]);
-            setRows((current) => [...current.slice(1), next]);
+            setRows((current) => [...current.slice(1), nextOne]);
             setRows((current) => current.map((row) =>
-              row.id === next.id ? { ...row, selected: true } : row
+              row.id === nextOne.id ? { ...row, label: nextLabel } : row
+            ));
+            setRows((current) => [...current.slice(1), nextTwo]);
+            setRows((current) => current.map((row) =>
+              row.id === nextTwo.id ? { ...row, label: nextLabel } : row
             ));
           }}>Roll twice</button>
           <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
@@ -177,9 +180,42 @@ describe("React AOT keyed-array rolling-window hints", () => {
 
     expect(result.compiled).toEqual(["Feed"]);
     expect(result.optimizations.keyedArrayRollingWindowHints).toBe(2);
-    expect(result.code).toContain("createCompilerKeyedArrayRollingWindow");
+    expect(result.optimizations.keyedArrayMappedRollingWindowChainHints).toBe(2);
+    expect(result.optimizations.keyedMapUpdateHints).toBe(3);
+    expect(result.code).toContain("createCompilerKeyedArrayMappedRollingWindow");
+    expect(result.code).toContain("createCompilerKeyedArrayRollingWindowMapPipeline");
+    expect(result.code).toContain("keyedRowsMappedRollingWindowHintedRuntimeFeature");
+    expect(result.code).not.toMatch(/\bcreateCompilerKeyedArrayRollingWindow\b/);
+    expect(result.code).not.toContain("createCompilerKeyedArrayQueuedMapPipeline");
     expect(result.code).not.toContain("createCompilerKeyedArrayMappedStructuralAppend");
     expect(result.code).not.toContain("createCompilerKeyedArrayStructuralAppendMapPipeline");
+  });
+
+  it("does not emit a rolling-window chain hint for an unsupported map callback", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Feed({ nextOne, nextTwo, firstId, secondId, nextLabel }) {
+        const [rows, setRows] = useState([{ id: "a", label: "Alpha" }]);
+        return <section>
+          <button onClick={() => {
+            setRows((current) => [...current.slice(1), nextOne]);
+            setRows((current) => current.map((row) =>
+              row.id === firstId
+                ? { ...row, label: nextLabel }
+                : row.id === secondId
+                  ? { ...row, label: nextLabel }
+                  : row
+            ));
+            setRows((current) => [...current.slice(1), nextTwo]);
+          }}>Roll around unsupported map</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </section>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Feed"]);
+    expect(result.optimizations.keyedArrayMappedRollingWindowChainHints).toBe(0);
+    expect(result.code).not.toContain("createCompilerKeyedArrayRollingWindowMapPipeline");
   });
 
   it("does not connect rolling-window maps across another statement", async () => {
@@ -204,6 +240,36 @@ describe("React AOT keyed-array rolling-window hints", () => {
     expect(result.code).toContain("createCompilerKeyedArrayRollingWindow");
     expect(result.code).not.toContain("createCompilerKeyedArrayStructuralAppendMapPipeline");
     expect(result.code).not.toContain("keyedRowsStructuralAppendMapHintedRuntimeFeature");
+  });
+
+  it("separates mapped rolling segments around an unsupported setter", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Feed({ nextOne, nextTwo, editedId, nextLabel }) {
+        const [rows, setRows] = useState([{ id: "a", label: "Alpha" }]);
+        return <section>
+          <button onClick={() => {
+            setRows((current) => current.map((row) =>
+              row.id === editedId ? { ...row, label: nextLabel } : row
+            ));
+            setRows((current) => [...current.slice(1), nextOne]);
+            setRows((current) => current.customTransform());
+            setRows((current) => [...current.slice(1), nextTwo]);
+            setRows((current) => current.map((row) =>
+              row.id === editedId ? { ...row, label: nextLabel } : row
+            ));
+          }}>Roll around unsupported work</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </section>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Feed"]);
+    expect(result.optimizations.keyedArrayRollingWindowHints).toBe(2);
+    expect(result.code).toContain("current.customTransform()");
+    expect(result.code).toContain("createCompilerKeyedArrayMappedStructuralAppend");
+    expect(result.code).toContain("createCompilerKeyedArrayStructuralAppendMapPipeline");
+    expect(result.code).not.toContain("createCompilerKeyedArrayRollingWindow");
   });
 
   it.each([
