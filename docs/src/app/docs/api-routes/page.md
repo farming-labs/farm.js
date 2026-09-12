@@ -193,6 +193,10 @@ soon as the source yields it, respects response backpressure, cancels the source
 disconnects, and defaults to `Cache-Control: no-store`. Use ordinary `Response` objects for binary
 downloads or protocols that are not JSON event streams.
 
+When Farm bridges a streamed `Response` to Node, a failed response write also cancels the
+upstream body. Put producer cleanup in the stream's `cancel()` callback. Farm preserves the
+original write error and does not wait indefinitely for that cleanup to finish.
+
 ## Endpoint middleware
 
 Put plain async functions in `middleware`. There is no middleware factory and no `next()` callback. Functions run in declaration order after endpoint input validation.

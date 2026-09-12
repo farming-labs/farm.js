@@ -206,6 +206,10 @@ export async function sendWebResponse(res: ServerResponse, response: Response): 
 
     res.end();
   } catch (error) {
+    // Releasing the lock does not stop the producer. Cancel it when the
+    // downstream write fails, without waiting on app-owned cleanup or letting
+    // a cancellation failure replace the original error.
+    void reader.cancel(error).catch(() => {});
     if (!res.writableEnded) {
       const responseError = error instanceof Error ? error : new Error(String(error));
       if (typeof res.destroy === "function") {
