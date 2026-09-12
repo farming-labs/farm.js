@@ -26,6 +26,7 @@ import { parseAst, type ConfigEnv, type Plugin, type UserConfig } from "vite";
 import { init as initModuleLexer, parse as parseModuleImports } from "es-module-lexer";
 import type { FarmRscPluginOptions, EntryContext } from "./types.js";
 import type { FarmServerActionsConfig } from "@farm.js/core/server-action-security";
+import type { FarmAPIConfig } from "@farm.js/core/api";
 import type { FarmLayerEntry, ResolvedFarmLayer } from "@farm.js/core/server";
 import { farmEnvironmentFunctionsPlugin } from "@farm.js/core/environment/vite";
 import { generateRscEntry } from "./entries/rsc.js";
@@ -59,6 +60,10 @@ const { getFarmLayerAliases, getFarmSourceRoots, resolveFarmLayers } = require_(
 const { searchParamsToObject } = require_(
   "@farm.js/core/internal/production-runtime",
 ) as typeof import("@farm.js/core/internal/production-runtime");
+const { resolveFarmAPIConfig, resolveFarmAPIServerBasePath } = require_(
+  "@farm.js/core/api",
+) as typeof import("@farm.js/core/api");
+const { getResolvedEnv } = require_("@farm.js/core/env") as typeof import("@farm.js/core/env");
 
 export type { FarmRscPluginOptions, EntryContext };
 export { buildRscNitro, waitForRscManifest, waitForRscOutputs } from "./nitro-build.js";
@@ -74,6 +79,7 @@ export interface FarmRscConfig {
   layers?: readonly ResolvedFarmLayer[];
   outDir?: string;
   basePath?: string;
+  api?: FarmAPIConfig;
   port?: number;
   experimental?: {
     /**
@@ -131,6 +137,7 @@ export function defineConfig(config: FarmRscConfig = {}): UserConfig {
     layers: config.layers,
     outDir: config.outDir ?? "dist",
     basePath: config.basePath ?? "/",
+    api: config.api,
     serverActions: config.serverActions,
     deploymentId: config.deploymentId,
     generateBuildId: config.generateBuildId,
@@ -613,6 +620,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           srcDir?: string;
           outDir?: string;
           basePath?: string;
+          api?: FarmAPIConfig;
           root?: string;
           extends?: readonly FarmLayerEntry[];
           layers?: readonly ResolvedFarmLayer[];
@@ -658,6 +666,11 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
         }
 
         // Read user's directory configuration
+        const api = await resolveFarmAPIConfig(c.api, {
+          root,
+          mode: env.command === "build" ? "production" : "development",
+          env: getResolvedEnv(),
+        });
         const srcDir = c.srcDir ?? "src";
         const outDir = c.outDir ?? "dist";
         const deploymentId = normalizeFarmDeploymentId(
@@ -700,6 +713,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           srcDir,
           outDir,
           basePath: c.basePath ?? "/",
+          apiBasePath: resolveFarmAPIServerBasePath(api),
           routesDir: options.routesDir,
           globalCssPath,
           routeRoots,
@@ -755,6 +769,9 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
         return {
           appType: "custom" as const,
           builder: { sharedConfigBuild: true } as any,
+          define: {
+            __FARM_API_BASE_URL__: JSON.stringify(api.baseURL),
+          },
           ssr: {
             external: [
               "react",
