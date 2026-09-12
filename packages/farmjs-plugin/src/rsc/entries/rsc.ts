@@ -64,6 +64,12 @@ import {
 import { _runWithAfterRequest } from '@farm.js/core/after';
 import { _runWithCurrentRequest, searchParamsToObject } from '@farm.js/core/internal/production-runtime';
 import { getFarmRedirectError, isFarmNotFoundError } from '@farm.js/core/internal/production-runtime';
+import {
+  parseRoutePath,
+  matchFarmPageRoute,
+  compareRouteSpecificity,
+  getRoutePatternSpecificity,
+} from '@farm.js/core/internal/production-runtime';
 
 const farmDeploymentId = ${JSON.stringify(ctx.deploymentId)};
 const farmApiBasePath = ${JSON.stringify(ctx.apiBasePath ?? "/api")};
@@ -389,16 +395,13 @@ async function executeMiddleware(request) {
 /**
  * Convert file path to route pattern
  * e.g., '/src/about/page.tsx' -> '/about'
- * e.g., '/src/blog/[slug]/page.tsx' -> '/blog/:slug'
+ * e.g., '/blog/[slug]/page.tsx' -> '/blog/[slug]'
  */
 function filePathToRoute(filePath) {
   let route = filePath
     .replace('', '')
     .replace(/\\/page\\.[tj]sx?$/, '')
     .replace(/\\/page$/, '') || '/';
-  
-  // Convert [param] to :param for matching
-  route = route.replace(/\\[([^\\]]+)\\]/g, ':$1');
   
   return route;
 }
@@ -429,52 +432,14 @@ const RouteErrorBoundary = React.Component
       return children;
     };
 
-/**
- * Match a URL pathname to a route pattern
- * Supports dynamic segments like :id and catch-all like *
- */
-function matchPath(pattern, pathname) {
-  const patternParts = pattern.split('/').filter(Boolean);
-  const pathParts = pathname.split('/').filter(Boolean);
-  
-  // Special case for root
-  if (pattern === '/' && pathname === '/') {
-    return { params: {} };
-  }
-  
-  if (patternParts.length !== pathParts.length) {
-    // Check for catch-all
-    const lastPattern = patternParts[patternParts.length - 1];
-    if (!lastPattern?.startsWith(':...')) {
-      return null;
-    }
-  }
-  
-  const params = {};
-  
-  for (let i = 0; i < patternParts.length; i++) {
-    const patternPart = patternParts[i];
-    const pathPart = pathParts[i];
-    
-    if (patternPart.startsWith(':...')) {
-      // Catch-all segment
-      const paramName = patternPart.slice(4);
-      params[paramName] = pathParts.slice(i).join('/');
-      return { params };
-    }
-    
-    if (patternPart.startsWith(':')) {
-      // Dynamic segment
-      const paramName = patternPart.slice(1);
-      params[paramName] = pathPart;
-    } else if (patternPart !== pathPart) {
-      // Static segment mismatch
-      return null;
-    }
-  }
-  
-  return { params };
-}
+// Parse and rank once per entry initialization, not on every request. Use the
+// same validation, decoding and specificity rules as Farm's ordinary router.
+const pageRoutes = Object.entries(pages).map(([filePath, module]) => ({
+  filePath,
+  module,
+  segments: parseRoutePath(filePath).segments,
+  specificity: getRoutePatternSpecificity(filePathToRoute(filePath)),
+})).sort((left, right) => compareRouteSpecificity(left.specificity, right.specificity));
 
 /**
  * Simple file-based router
@@ -483,17 +448,16 @@ function matchPath(pattern, pathname) {
 function matchRoute(pathname) {
   const normalized = pathname.replace(/\\/$/, '') || '/';
   
-  for (const filePath of Object.keys(pages)) {
-    const pattern = filePathToRoute(filePath);
-    const match = matchPath(pattern, normalized);
+  for (const { filePath, module, segments } of pageRoutes) {
+    const match = matchFarmPageRoute(normalized, segments);
     
-    if (match) {
-      debug('Matched route:', pattern, 'for path:', normalized);
+    if (match.matches) {
+      debug('Matched route:', filePath, 'for path:', normalized);
       return {
-        Page: pages[filePath].default,
+        Page: module.default,
         pattern: filePath,
         params: match.params,
-        pageMetadata: pages[filePath].metadata,
+        pageMetadata: module.metadata,
       };
     }
   }
