@@ -190,6 +190,52 @@ describe("React AOT keyed update hints", () => {
     });
   });
 
+  it("records safe local const aliases inside structured map callbacks", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Inventory({ firstId, secondId, delta }) {
+        const [items, setItems] = useState([
+          { id: "a", label: "Alpha", amount: 1, selected: false },
+          { id: "b", label: "Beta", amount: 2, selected: false },
+        ]);
+        return (
+          <section>
+            <button onClick={() => setItems((current) => current
+              .map((row) => {
+                const matchesFirst = row.id === firstId,
+                  nextAmount = Math.round(row.amount + delta);
+                if (matchesFirst) return { ...row, amount: nextAmount };
+                const matchesSecond = row.id === secondId;
+                if (matchesSecond) return { ...row, label: String(nextAmount) };
+                return row;
+              })
+              .map((row) => {
+                const matches = row.id === firstId;
+                return matches ? { ...row, selected: true } : row;
+              })
+            )}>Update aliased rows</button>
+            <ul>{items.map((item) => <li key={item.id}>{item.label}</li>)}</ul>
+          </section>
+        );
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Inventory"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.optimizations.keyedMapUpdateHints).toBe(2);
+    expect(result.code.match(/createCompilerKeyedMapUpdate\(/g)).toHaveLength(1);
+    expect(result.code.match(/_farmApplyMap\d*\(/g)).toHaveLength(2);
+    expect(result.code).toContain("keyedRowsHintedRuntimeFeature");
+    await expect(
+      transformWithEsbuild(result.code, "/app/KeyedUpdateHints.tsx", {
+        loader: "tsx",
+        jsx: "automatic",
+      }),
+    ).resolves.toMatchObject({
+      code: expect.stringContaining("createCompilerKeyedMapUpdate"),
+    });
+  });
+
   it("supports direct-state public List rows without adding a public option", async () => {
     const result = await compile(`
       import { useState } from "react";
@@ -223,11 +269,32 @@ describe("React AOT keyed update hints", () => {
         'setItems((current) => current.map((row) => row.id === "a" ? { ...row, label: "Updated" } : row))',
     },
     {
-      name: "a block-bodied mapper with an intermediate declaration",
+      name: "a mutable local declaration",
       declaration: "",
       collection: "items",
       update:
-        'setItems((current) => current.map((row) => { const matches = row.id === "a"; return matches ? { ...row, label: "Updated" } : row; }))',
+        'setItems((current) => current.map((row) => { let matches = row.id === "a"; return matches ? { ...row, label: "Updated" } : row; }))',
+    },
+    {
+      name: "a destructured local declaration",
+      declaration: "",
+      collection: "items",
+      update:
+        'setItems((current) => current.map((row) => { const { id } = row; return id === "a" ? { ...row, label: "Updated" } : row; }))',
+    },
+    {
+      name: "an effectful local initializer",
+      declaration: 'const matches = (row) => row.id === "a";',
+      collection: "items",
+      update:
+        'setItems((current) => current.map((row) => { const selected = matches(row); return selected ? { ...row, label: "Updated" } : row; }))',
+    },
+    {
+      name: "an object-valued local initializer",
+      declaration: "",
+      collection: "items",
+      update:
+        'setItems((current) => current.map((row) => { const metadata = { id: row.id }; return metadata.id === "a" ? { ...row, label: "Updated" } : row; }))',
     },
     {
       name: "an effectful block condition",

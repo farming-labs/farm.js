@@ -920,7 +920,8 @@ the direct `useState` collection used by a compiled keyed map or `List`. The set
 or more consecutive `map()` calls. Every mapper must be an inline arrow whose returning paths are
 conditional: at least one path returns the original item and another returns a new object that
 spreads that item. This may be a concise expression or a structured block made only from `if` and
-`return` statements. The conditions and replacement values must use the compiler's safe expression
+`return` statements plus immutable local `const` aliases. Each alias needs a simple identifier and a
+compiler-safe initializer. The conditions and replacement values must use the same safe expression
 subset. The hint runtime is retained only in modules where at least one such call is emitted;
 direct-only and ordinary keyed builds do not import that capability.
 
@@ -936,10 +937,11 @@ Farm preserves each source property lookup and call. It records metadata only af
 array, unsupported mapper anywhere in the chain, changed key, insert, removal, reorder, relevant
 second dependency, or failed runtime check uses the existing complete keyed reconciliation and LIS
 path. Native results and thrown mapper or method errors are preserved. Derived collections,
-non-functional setters, referenced callbacks, block bodies with intermediate statements or
-fallthrough, mutating replacements, and other unproven shapes also keep that existing path. This is
-an optimization hint, not a new correctness contract or a way to bypass React fallback behavior.
-The compiler report exposes the number of prepared map calls as `keyedMapUpdateHints`.
+non-functional setters, referenced callbacks, mutable or destructured local declarations,
+effectful initializers, other intermediate statements, fallthrough, mutating replacements, and
+other unproven shapes also keep that existing path. This is an optimization hint, not a new
+correctness contract or a way to bypass React fallback behavior. The compiler report exposes the
+number of prepared map calls as `keyedMapUpdateHints`.
 
 #### Keyed array append hints
 
@@ -1391,8 +1393,10 @@ One callback may select several rows with nested expressions or structured early
 ```tsx
 setItems((current) =>
   current.map((item) => {
-    if (item.id === reviewedId) return { ...item, status: "reviewed" };
-    if (item.id === escalatedId) {
+    const matchesReviewed = item.id === reviewedId;
+    if (matchesReviewed) return { ...item, status: "reviewed" };
+    const matchesEscalated = item.id === escalatedId;
+    if (matchesEscalated) {
       return { ...item, status: "escalated", priority: 1 };
     }
     return item;
@@ -1402,10 +1406,11 @@ setItems((current) =>
 
 The compiler recursively proves every condition and leaf. Each leaf must return the original item
 or a compiler-safe object spread of that item, with at least one unchanged and one replacement
-path. Block bodies may contain only fully returning `if`/`return` paths; declarations, loops,
-mutation, calls, fallthrough, and any other effectful or ambiguous control flow keep complete keyed
-reconciliation. Runtime key validation remains atomic, so a replacement that changes its key falls
-back before the first DOM write.
+path. Block bodies may also introduce local `const` aliases with simple identifier bindings and
+compiler-safe initializers. Mutable or destructured declarations, object/array/function literals,
+unknown calls, loops, mutation, fallthrough, and any other effectful or ambiguous control flow keep
+complete keyed reconciliation. Runtime key validation remains atomic, so a replacement that changes
+its key falls back before the first DOM write.
 
 Before changing the DOM, the runtime verifies ordinary dense arrays, exact native methods, the
 committed collection token, equal lengths, a unique one-to-one source-item match, and the key of
@@ -1581,13 +1586,13 @@ sort or any other order ambiguity keeps the general permutation path.
 
 The proof requires every map callback to be inline, synchronous, compiler-safe, and to return the
 original item on one conditional path and an object-spread replacement on another. Concise
-expressions and structured blocks containing only `if`/`return` paths are accepted. It requires
-compiler-owned host rows whose render and key do not observe the index. Referenced callbacks,
-intermediate statements, fallthrough, unconditional replacements, changed or duplicate keys,
-`thisArg`, maps after structural steps, computed or custom methods, sparse or subclassed arrays,
-collection-reading bindings, React-owned rows, nested host blocks, row conditionals, unrelated dirty
-dependencies, or failed runtime validation use complete keyed reconciliation before any fast-path
-DOM write.
+expressions and structured blocks containing proven local `const` aliases plus `if`/`return` paths
+are accepted. It requires compiler-owned host rows whose render and key do not observe the index.
+Referenced callbacks, mutable, destructured, or effectful declarations, other intermediate
+statements, fallthrough, unconditional replacements, changed or duplicate keys, `thisArg`, maps
+after structural steps, computed or custom methods, sparse or subclassed arrays, collection-reading
+bindings, React-owned rows, nested host blocks, row conditionals, unrelated dirty dependencies, or
+failed runtime validation use complete keyed reconciliation before any fast-path DOM write.
 
 No API or option is added. Reports count the prepared map and reorder calls through the existing
 `keyedMapUpdateHints`, `keyedArraySortHints`, and `keyedArrayReorderHints` fields. Modules that do

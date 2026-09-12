@@ -1274,6 +1274,26 @@ function proveSafeKeyedMapStatement(
     : proveSafeKeyedMapStatements([statement], item, safeGlobals);
 }
 
+function isSafeKeyedMapConstDeclaration(
+  statement: t.VariableDeclaration,
+  item: t.Identifier,
+  safeGlobals: ReadonlySet<string>,
+): boolean {
+  return (
+    statement.kind === "const" &&
+    statement.declarations.length > 0 &&
+    statement.declarations.every(
+      (declaration) =>
+        t.isIdentifier(declaration.id) &&
+        declaration.id.name !== item.name &&
+        !safeGlobals.has(declaration.id.name) &&
+        declaration.init != null &&
+        t.isExpression(declaration.init) &&
+        !validateDerivedExpression(declaration.init, safeGlobals),
+    )
+  );
+}
+
 function proveSafeKeyedMapStatements(
   statements: readonly t.Statement[],
   item: t.Identifier,
@@ -1286,6 +1306,11 @@ function proveSafeKeyedMapStatements(
       return undefined;
     }
     return proveSafeKeyedMapExpression(statement.argument, item, safeGlobals);
+  }
+  if (t.isVariableDeclaration(statement)) {
+    return isSafeKeyedMapConstDeclaration(statement, item, safeGlobals)
+      ? proveSafeKeyedMapStatements(remaining, item, safeGlobals)
+      : undefined;
   }
   if (!t.isIfStatement(statement) || validateDerivedExpression(statement.test, safeGlobals)) {
     return undefined;

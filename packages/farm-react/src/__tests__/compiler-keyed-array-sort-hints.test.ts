@@ -302,8 +302,10 @@ describe("React AOT keyed-array sort hints", () => {
         return <section>
           <button onClick={() => setRows((current) => current
             .map((row) => {
-              if (row.id === firstId) return { ...row, rank: 4 };
-              if (row.id === secondId) return { ...row, rank: 3 };
+              const matchesFirst = row.id === firstId;
+              if (matchesFirst) return { ...row, rank: 4 };
+              const matchesSecond = row.id === secondId;
+              if (matchesSecond) return { ...row, rank: 3 };
               return row;
             })
             .toSorted((left, right) => left.rank - right.rank)
@@ -486,9 +488,9 @@ describe("React AOT keyed-array sort hints", () => {
       pipeline: "current.map(updateRow).toSorted((a, b) => a.rank - b.rank)",
     },
     {
-      name: "an unproven block-bodied mapper",
+      name: "a mutable block-local alias",
       pipeline:
-        "current.map((row) => { const matches = row.id === editedId; return matches ? { ...row, rank: 0 } : row; }).toSorted((a, b) => a.rank - b.rank)",
+        "current.map((row) => { let matches = row.id === editedId; return matches ? { ...row, rank: 0 } : row; }).toSorted((a, b) => a.rank - b.rank)",
     },
     {
       name: "an unsupported second mapper",
