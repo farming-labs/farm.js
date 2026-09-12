@@ -57,6 +57,10 @@ export default function BlogPage() {
 
 Use dynamic rendering for request-specific pages such as dashboards, account settings, and pages that depend on cookies, headers, or per-user data.
 
+With experimental React Server Components enabled, Farm streams HTML while inserting the styles,
+hydration payload, and client script. HTML injection preserves UTF-8 bytes across stream chunks,
+including emoji and non-ASCII content, without buffering the entire page.
+
 **src/app/dashboard/page.tsx**
 
 ```tsx
