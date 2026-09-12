@@ -1,8 +1,41 @@
 // @vitest-environment node
 import { setImmediate } from "node:timers/promises";
+import { EventEmitter } from "node:events";
 import { expect, it, vi } from "vitest";
 import { invokeAPIRouteEndpoint } from "../api/runtime";
-import { bufferFarmRequestBody, readFarmRequestBody } from "../server-http";
+import {
+  bufferFarmRequestBody,
+  readFarmRequestBody,
+  createFarmNodeRequestAbortSignal,
+} from "../server-http";
+
+it("does not treat Node upload completion as a disconnect", async () => {
+  const nodeRequest = new EventEmitter();
+  const nodeResponse = Object.assign(new EventEmitter(), { writableEnded: false });
+  const signal = createFarmNodeRequestAbortSignal(nodeRequest, nodeResponse);
+  const request = new Request("https://farm.test/api/upload", {
+    method: "POST",
+    signal,
+    duplex: "half",
+    body: new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new TextEncoder().encode("complete"));
+        controller.close();
+        nodeRequest.emit("close");
+      },
+    }),
+  } as RequestInit);
+  const endpoint = vi.fn(async (request: Request) => new Response(await request.text()));
+  const response = await invokeAPIRouteEndpoint(endpoint, request);
+  expect(await response.text()).toBe("complete");
+  expect(endpoint).toHaveBeenCalledOnce();
+  expect(signal.aborted).toBe(false);
+  // Receiving the whole upload does not prevent a later response disconnect.
+  nodeResponse.emit("close");
+  expect(signal.aborted).toBe(true);
+  expect(nodeRequest.listenerCount("aborted")).toBe(0);
+  expect(nodeResponse.listenerCount("finish")).toBe(0);
+});
 
 it.each([false, true])(
   "does not dispatch an upload aborted during a pending read (cloned: %s)",

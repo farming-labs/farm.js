@@ -1,5 +1,50 @@
 import { assertBrowserStableRoutePath } from "./routing/specificity";
 
+interface FarmNodeAbortRequest {
+  aborted?: boolean;
+  once(event: "aborted", listener: () => void): unknown;
+  off(event: "aborted", listener: () => void): unknown;
+}
+
+interface FarmNodeAbortResponse {
+  writableEnded: boolean;
+  once(event: "close" | "finish", listener: () => void): unknown;
+  off(event: "close" | "finish", listener: () => void): unknown;
+}
+
+/** Share disconnect semantics between development and production Node requests. */
+export function createFarmNodeRequestAbortSignal(
+  req: FarmNodeAbortRequest,
+  res: FarmNodeAbortResponse,
+): AbortSignal {
+  const controller = new AbortController();
+  let disposed = false;
+  const dispose = () => {
+    if (disposed) return;
+    disposed = true;
+    req.off("aborted", abort);
+    res.off("close", abortOnEarlyClose);
+    res.off("finish", dispose);
+    controller.signal.removeEventListener("abort", dispose);
+  };
+  const abort = () => controller.abort();
+  const abortOnEarlyClose = () => {
+    if (!res.writableEnded) abort();
+    dispose();
+  };
+
+  if (req.aborted) {
+    controller.abort();
+    return controller.signal;
+  }
+
+  req.once("aborted", abort);
+  res.once("close", abortOnEarlyClose);
+  res.once("finish", dispose);
+  controller.signal.addEventListener("abort", dispose, { once: true });
+  return controller.signal;
+}
+
 export const DEFAULT_FARM_SERVER_BODY_SIZE_LIMIT = 10_000_000;
 export const DEFAULT_FARM_SERVER_HEADERS_TIMEOUT = 60_000;
 export const DEFAULT_FARM_SERVER_REQUEST_TIMEOUT = 300_000;

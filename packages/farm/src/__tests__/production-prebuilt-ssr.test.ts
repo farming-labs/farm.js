@@ -2497,6 +2497,7 @@ export async function QUERY(request: Request) {
     body: await request.json(),
   });
 }
+export const POST = QUERY;
 `.trim(),
       );
       const config = await resolveConfig(
@@ -2538,22 +2539,23 @@ export async function QUERY(request: Request) {
         },
         "/api/after-response",
       );
-      await runProductionRequest(
-        path.join(root, ".farm", ".output", "server"),
-        async (response) => {
-          expect(response.status).toBe(200);
-          await expect(response.json()).resolves.toEqual({
-            method: "QUERY",
-            body: { filters: ["tools", "seeds"] },
-          });
-        },
-        "/api/structured-search",
-        {
-          method: "QUERY",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ filters: ["tools", "seeds"] }),
-        },
-      );
+      for (const method of ["POST", "QUERY"])
+        await runProductionRequest(
+          path.join(root, ".farm", ".output", "server"),
+          async (response) => {
+            expect(response.status).toBe(200);
+            await expect(response.json()).resolves.toEqual({
+              method,
+              body: { filters: ["tools", "seeds"] },
+            });
+          },
+          "/api/structured-search",
+          {
+            method,
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ filters: ["tools", "seeds"] }),
+          },
+        );
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
