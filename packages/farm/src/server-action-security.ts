@@ -451,12 +451,15 @@ async function readBodyWithLimit(request: Request, limit: number): Promise<Uint8
 
       total += value.byteLength;
       if (total > limit) {
-        await reader.cancel("Server action body is too large");
-        throw new ServerActionRequestError(
+        const error = new ServerActionRequestError(
           "BODY_TOO_LARGE",
           413,
           "Server action body is too large",
         );
+        // As with API bodies, a cloned stream may wait for its untouched tee
+        // branch. Cleanup must neither delay rejection nor replace its error.
+        void reader.cancel(error).catch(() => {});
+        throw error;
       }
       chunks.push(value);
     }
