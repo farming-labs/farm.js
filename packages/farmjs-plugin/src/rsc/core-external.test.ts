@@ -305,6 +305,22 @@ export const schema = z.string();`;
           );
           if (name === "default") {
             writeRoute(
+              "users/[id]/page.tsx",
+              `export default function Page({ params }) { return <main>Dynamic user {params.id}</main>; }`,
+            );
+            writeRoute(
+              "users/new/page.tsx",
+              `export default function Page() { return <main>Static new user</main>; }`,
+            );
+            writeRoute(
+              "optional/[[...slug]]/page.tsx",
+              `export default function Page({ params }) { return <main>Optional catch-all {JSON.stringify(params)}</main>; }`,
+            );
+            writeRoute(
+              "(marketing)/pricing/page.tsx",
+              `export default function Page() { return <p>Grouped pricing</p>; }`,
+            );
+            writeRoute(
               "error.tsx",
               `"use client"; export default function ErrorPage({ error, reset, path, searchParams }) {
               return <main>Route error rendered <p>{error.message}</p><p>{path}</p><p>{JSON.stringify(searchParams)}</p><button onClick={reset}>Reset</button></main>;
@@ -656,6 +672,24 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
         const aliasedResponse = await fetch(`${origin}${mount}/root-runtime`);
         expect(aliasedResponse.status, logs).toBe(200);
         expect((await aliasedResponse.json()).requestPath).toBe(`${mount}/root-runtime`);
+        if (name === "default") {
+          for (const [pathname, marker] of [
+            ["/users/new", "Static new user"],
+            ["/users/alice", "Dynamic user"],
+            ["/optional", "Optional catch-all"],
+            ["/optional/a/b", "Optional catch-all"],
+            ["/pricing", "Grouped pricing"],
+          ]) {
+            for (const accept of ["text/html", "text/x-component"]) {
+              const response = await fetch(origin + pathname, {
+                headers: { accept },
+                signal: AbortSignal.timeout(10_000),
+              });
+              expect(response.status, logs).toBe(200);
+              expect(await response.text(), logs).toContain(marker);
+            }
+          }
+        }
 
         if (name === "cache-variants") {
           for (const accept of ["text/html", "text/x-component"]) {
