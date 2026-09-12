@@ -95,6 +95,9 @@ export interface EntryContext {
 
   /** Whether debug mode is enabled */
   debug: boolean;
+
+  /** True only for the Vite serve command, never for a production build. */
+  development?: boolean;
 }
 
 /**

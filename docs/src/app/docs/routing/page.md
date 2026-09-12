@@ -1029,6 +1029,17 @@ export default function DashboardError({ error, reset }: ErrorProps) {
 
 `error.tsx` receives `error`, `reset`, `params`, `path`, `search`, `searchParams`, middleware data, and plugin context. The closest route error boundary handles normal render/data failures. Redirects and `notFound()` still escape to Farm's redirect and not-found handling.
 
+With experimental RSC enabled, failures before the HTML shell is sent render the nearest
+`error.tsx` through RSC and SSR with status `500` and `Cache-Control: private, no-store`.
+This fallback uses a standalone document shell, outside the failed page/layout tree, so a broken
+layout cannot prevent the error UI from rendering. Client boundaries receive a client-owned
+`reset()` that reloads the current URL. Production responses show a generic error message;
+the original exception stays in server logs. Development responses can show the error message.
+
+If no boundary exists, or the boundary itself fails during SSR, Farm returns a generic non-cacheable
+500 response. Failures after streaming starts cannot change the already-sent status code and remain
+subject to React's streaming recovery behavior.
+
 Place `not-found.*` at the app root to customize unmatched URLs. When the component lives elsewhere,
 set its project-relative path explicitly; Farm uses the same file in development and production and
 fails startup or build when the path is missing or incompatible with the selected renderer:

@@ -265,6 +265,68 @@ export const schema = z.string();`;
       try {
         const srcDir = path.join(fixtureRoot, "src");
         mkdirSync(srcDir, { recursive: true });
+        if (name === "default" || name === "custom") {
+          const writeRoute = (file: string, source: string) => {
+            const target = path.join(srcDir, file);
+            mkdirSync(path.dirname(target), { recursive: true });
+            writeFileSync(target, source);
+          };
+          writeRoute(
+            "broken/page.tsx",
+            `export default async function Page() { throw new Error("private page failure"); }`,
+          );
+          writeRoute(
+            "layout-failure/page.tsx",
+            `export default function Page() { return <p>page</p>; }`,
+          );
+          writeRoute(
+            "layout-failure/layout.tsx",
+            `export default async function Layout() { throw new Error("private layout failure"); }`,
+          );
+          writeRoute(
+            "sync-failure/page.tsx",
+            `export default function Page() { throw new Error("private sync failure"); }`,
+          );
+          writeRoute(
+            "middleware.ts",
+            `export function middleware(request, context) {
+            if (new URL(request.url).pathname === "/middleware-failure") throw new Error("private middleware failure");
+            context.headers.set("cache-control", "public, max-age=60");
+          }`,
+          );
+          writeRoute(
+            "go/page.tsx",
+            `import { redirect } from "@farm.js/core/navigation"; export default async function Page() { redirect("/", 307); }`,
+          );
+          writeRoute(
+            "missing/page.tsx",
+            `import { notFound } from "@farm.js/core/navigation"; export default async function Page() { notFound(); }`,
+          );
+          if (name === "default") {
+            writeRoute(
+              "error.tsx",
+              `"use client"; export default function ErrorPage({ error, reset, path, searchParams }) {
+              return <main>Route error rendered <p>{error.message}</p><p>{path}</p><p>{JSON.stringify(searchParams)}</p><button onClick={reset}>Reset</button></main>;
+            }`,
+            );
+            writeRoute(
+              "bad-boundary/page.tsx",
+              `export default async function Page() { throw new Error("private original failure"); }`,
+            );
+            writeRoute(
+              "bad-boundary/error.tsx",
+              `"use client"; export default function ErrorPage() { throw new Error("private boundary failure"); }`,
+            );
+            writeRoute(
+              "server-boundary/page.tsx",
+              `export default async function Page() { throw new Error("private server failure"); }`,
+            );
+            writeRoute(
+              "server-boundary/error.tsx",
+              `export default function ErrorPage({ error }) { return <main>Server error rendered {error.message}</main>; }`,
+            );
+          }
+        }
         writeFileSync(
           path.join(fixtureRoot, "package.json"),
           JSON.stringify({
@@ -493,6 +555,64 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
         });
 
         const origin = `http://127.0.0.1:${port}`;
+        if (name === "default" || name === "custom") {
+          for (const route of ["broken", "layout-failure", "sync-failure", "middleware-failure"]) {
+            const error = await fetch(origin + "/" + route + "?tag=a&tag=b", {
+              signal: AbortSignal.timeout(10_000),
+            });
+            const body = await error.text();
+            expect(error.status, logs).toBe(500);
+            expect(error.headers.get("cache-control")).toBe("private, no-store");
+            expect(body).not.toContain("private page failure");
+            expect(body).not.toContain("private layout failure");
+            expect(body).not.toContain("private sync failure");
+            expect(body).not.toContain("private middleware failure");
+            if (name === "default") {
+              expect(error.headers.get("content-type")).toContain("text/html");
+              expect(body, logs).toContain("Route error rendered");
+              expect(body).toContain("Internal Server Error");
+              expect(body).toContain("Reset");
+              expect(body).toContain("/" + route);
+              expect(body).toContain("&quot;tag&quot;:[&quot;a&quot;,&quot;b&quot;]");
+            } else {
+              expect(JSON.parse(body).message).toBe("Internal Server Error");
+            }
+          }
+          expect(logs).not.toContain("glob is not defined");
+          expect(logs).toContain("private page failure");
+          const go = await fetch(origin + "/go", { redirect: "manual" });
+          expect(go.status).toBe(307);
+          expect(go.headers.get("location")).toBe("/");
+          expect((await fetch(origin + "/missing")).status).toBe(404);
+          const postFailure = await fetch(origin + "/middleware-failure", {
+            method: "POST",
+            headers: { origin },
+            body: "x",
+          });
+          expect(postFailure.status).toBe(500);
+          expect(await postFailure.text()).toBe("Server function failed");
+          if (name === "default") {
+            const flight = await fetch(origin + "/broken", {
+              headers: { accept: "text/x-component" },
+              signal: AbortSignal.timeout(10_000),
+            });
+            expect(flight.status).toBe(500);
+            expect(flight.headers.get("content-type")).toContain("text/x-component");
+            const body = await flight.text();
+            expect(body).toContain("rootContent");
+            expect(body).not.toContain("private page failure");
+            const serverBoundary = await fetch(origin + "/server-boundary", {
+              signal: AbortSignal.timeout(10_000),
+            });
+            expect(serverBoundary.status).toBe(500);
+            expect(await serverBoundary.text(), logs).toContain("Server error rendered");
+            const badBoundary = await fetch(origin + "/bad-boundary", {
+              signal: AbortSignal.timeout(10_000),
+            });
+            expect(badBoundary.status).toBe(500);
+            expect(await badBoundary.json()).toMatchObject({ message: "Internal Server Error" });
+          }
+        }
         const aliasedResponse = await fetch(`${origin}${mount}/root-runtime`);
         expect(aliasedResponse.status, logs).toBe(200);
         expect((await aliasedResponse.json()).requestPath).toBe(`${mount}/root-runtime`);
