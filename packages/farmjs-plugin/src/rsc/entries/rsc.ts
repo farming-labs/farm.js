@@ -53,7 +53,11 @@ import {
   applyProductionMiddlewareHeaders,
   createProductionMiddlewareRunner,
 } from '@farm.js/core/middleware';
-import { invokeAPIRouteEndpoint, matchAPIRoute } from '@farm.js/core/api/runtime';
+import {
+  getAllowedAPIRouteMethods,
+  invokeAPIRouteEndpoint,
+  matchAPIRoute,
+} from '@farm.js/core/api/runtime';
 import { _runWithAfterRequest } from '@farm.js/core/after';
 import { _runWithCurrentRequest, searchParamsToObject } from '@farm.js/core/internal/production-runtime';
 
@@ -183,7 +187,7 @@ const routeDefinitionModules = collectRouteModuleEntries([${routeSourceRoots
     )
     .join(", ")}]);
 
-const apiRouteMethods = ['GET', 'HEAD', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'];
+const apiRouteMethods = ['GET', 'HEAD', 'QUERY', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'];
 const apiRouteMap = new Map();
 
 function registerApiEndpoint(routePath, filePath, method, endpoint) {
@@ -255,11 +259,15 @@ async function handleAPIRequest(request) {
   if (!match) return null;
 
   const method = request.method.toUpperCase();
-  const endpoint = match.route.handlers[method];
+  const endpoint = match.route.handlers[method] ??
+    (method === 'HEAD' ? match.route.handlers.GET : undefined);
   if (!endpoint) {
     return new Response(JSON.stringify({ error: 'Method Not Allowed' }), {
       status: 405,
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Allow': getAllowedAPIRouteMethods(match.route).join(', '),
+        'Content-Type': 'application/json',
+      },
     });
   }
 

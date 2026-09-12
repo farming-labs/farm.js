@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { transformWithEsbuild } from "vite";
+import {
+  getAllowedAPIRouteMethods,
+  invokeAPIRouteEndpoint,
+  matchAPIRoute,
+} from "@farm.js/core/api/runtime";
 import type { EntryContext } from "../types.js";
 import { generateClientEntry } from "./client.js";
 import { generateRscEntry } from "./rsc.js";
@@ -120,6 +125,9 @@ describe("generated server action security", () => {
     );
     expect(entry).toContain("getProgrammaticApiRoutes(routeModule)");
     expect(entry).toContain("from '@farm.js/core/api/runtime'");
+    expect(entry).toContain("'GET', 'HEAD', 'QUERY', 'POST'");
+    expect(entry).toContain("method === 'HEAD' ? match.route.handlers.GET : undefined");
+    expect(entry).toContain("getAllowedAPIRouteMethods(match.route).join(', ')");
     expect(entry).toContain("invokeAPIRouteEndpoint(endpoint, request, match.params)");
     expect(entry).toContain("error: 'Internal Server Error'");
     expect(entry).not.toContain("error?.message || 'Internal Server Error'");
@@ -138,6 +146,99 @@ describe("generated server action security", () => {
     expect(actionValidation).toBeLessThan(middleware);
     expect(middleware).toBeLessThan(apiDispatch);
     expect(apiDispatch).toBeLessThan(actionDecode);
+  });
+
+  it("keeps QUERY and implicit HEAD behavior in the generated API runtime", async () => {
+    const entry = generateRscEntry(context);
+    const registryStart = entry.indexOf("const apiRouteMethods =");
+    const registryEnd = entry.indexOf("\n\nregisterApiRouteSources(apiRouteModules", registryStart);
+    const { apiRouteMap, registerApiRouteSources } = new Function(
+      `${entry.slice(registryStart, registryEnd)}; return { apiRouteMap, registerApiRouteSources };`,
+    )() as {
+      apiRouteMap: Map<
+        string,
+        { path: string; methods: string[]; handlers: Record<string, Function> }
+      >;
+      registerApiRouteSources: (
+        fileModules: Array<{
+          sourceIndex: number;
+          filePath: string;
+          relativePath: string;
+          module: Record<string, Function>;
+        }>,
+        definitionModules: unknown[],
+        sourceCount: number,
+      ) => void;
+    };
+    const get = () => new Response("get", { headers: { "x-handler": "get" } });
+    const query = async (request: Request) => Response.json({ query: await request.json() });
+    registerApiRouteSources(
+      [
+        {
+          sourceIndex: 0,
+          filePath: "/src/app/api/items/route.ts",
+          relativePath: "/api/items/route.ts",
+          module: { GET: get, QUERY: query },
+        },
+        {
+          sourceIndex: 0,
+          filePath: "/src/app/api/explicit/route.ts",
+          relativePath: "/api/explicit/route.ts",
+          module: {
+            GET: get,
+            HEAD: () => new Response("head", { headers: { "x-handler": "head" } }),
+          },
+        },
+      ],
+      [],
+      1,
+    );
+
+    expect(apiRouteMap.get("/api/items")?.handlers.QUERY).toBe(query);
+
+    const handlerStart = entry.indexOf("async function handleAPIRequest(request)");
+    const handlerEnd = entry.indexOf("\nconst farmMiddlewareRunner", handlerStart);
+    const createHandler = new Function(
+      "apiRouteMap",
+      "matchAPIRoute",
+      "getAllowedAPIRouteMethods",
+      "invokeAPIRouteEndpoint",
+      `${entry.slice(handlerStart, handlerEnd)}; return handleAPIRequest;`,
+    );
+    const handleAPIRequest = createHandler(
+      apiRouteMap,
+      matchAPIRoute,
+      getAllowedAPIRouteMethods,
+      invokeAPIRouteEndpoint,
+    ) as (request: Request) => Promise<Response | null>;
+
+    const headResponse = await handleAPIRequest(
+      new Request("https://farm.test/api/items", { method: "HEAD" }),
+    );
+    expect(headResponse?.status).toBe(200);
+    expect(headResponse?.headers.get("x-handler")).toBe("get");
+    expect(await headResponse?.text()).toBe("");
+
+    const explicitHead = await handleAPIRequest(
+      new Request("https://farm.test/api/explicit", { method: "HEAD" }),
+    );
+    expect(explicitHead?.headers.get("x-handler")).toBe("head");
+    expect(await explicitHead?.text()).toBe("");
+    const queryResponse = await handleAPIRequest(
+      new Request("https://farm.test/api/items", {
+        method: "QUERY",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ term: "farm" }),
+      }),
+    );
+    expect(queryResponse?.status).toBe(200);
+    expect(await queryResponse?.json()).toEqual({ query: { term: "farm" } });
+
+    const rejected = await handleAPIRequest(
+      new Request("https://farm.test/api/items", { method: "POST" }),
+    );
+    expect(rejected?.status).toBe(405);
+    expect(rejected?.headers.get("allow")).toBe("GET, HEAD, QUERY");
   });
 
   it("merges layout/page metadata and clears stale document metadata during navigation", () => {
