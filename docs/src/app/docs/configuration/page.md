@@ -338,6 +338,11 @@ server mount and browser URL cannot resolve to different origins or paths.
 The option configures `createAPIClient()` automatically. An explicit per-client `baseURL` still
 takes precedence.
 
+This also applies to RSC builds and their Nitro servers, including apps configured with
+`defineConfig` from `@farm.js/plugin/rsc`. API requests at the custom prefix stay on the API
+pipeline rather than being decoded as server actions. The canonical `/api` routes remain available;
+an external API URL changes the client destination only, not the local server mount.
+
 ## Isolated client hydration
 
 React applications can keep using `"use client"` without enabling React Server Components. By

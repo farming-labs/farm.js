@@ -56,12 +56,14 @@ import {
 import {
   getAllowedAPIRouteMethods,
   invokeAPIRouteEndpoint,
-  matchAPIRoute,
+  isFarmAPIPathname,
+  matchAPIRouteAtBasePath,
 } from '@farm.js/core/api/runtime';
 import { _runWithAfterRequest } from '@farm.js/core/after';
 import { _runWithCurrentRequest, searchParamsToObject } from '@farm.js/core/internal/production-runtime';
 
 const farmDeploymentId = ${JSON.stringify(ctx.deploymentId)};
+const farmApiBasePath = ${JSON.stringify(ctx.apiBasePath ?? "/api")};
 `;
   if (ctx.actionsEnabled) {
     code += `import {
@@ -262,7 +264,7 @@ registerApiRouteSources(apiRouteModules, routeDefinitionModules, ${routeSourceRo
 
 async function handleAPIRequest(request) {
   const url = new URL(request.url);
-  const match = matchAPIRoute(apiRouteMap, url.pathname);
+  const match = matchAPIRouteAtBasePath(apiRouteMap, url.pathname, farmApiBasePath);
   if (!match) return null;
 
   const method = request.method.toUpperCase();
@@ -548,9 +550,9 @@ async function handleFarmRequest(request) {
     return createFarmDeploymentMismatchResponse(deploymentMismatch);
   }
 
-  const initialApiMatch = matchAPIRoute(apiRouteMap, url.pathname);
+  const initialApiMatch = matchAPIRouteAtBasePath(apiRouteMap, url.pathname, farmApiBasePath);
   const isInitialApiRequest = Boolean(initialApiMatch) ||
-    url.pathname === '/api' || url.pathname.startsWith('/api/');
+    isFarmAPIPathname(url.pathname, farmApiBasePath) || isFarmAPIPathname(url.pathname);
 
   ${
     ctx.actionsEnabled
@@ -603,7 +605,7 @@ async function handleFarmRequest(request) {
   if (apiResponse) {
     return applyProductionMiddlewareHeaders(apiResponse, middlewareHeaders);
   }
-  if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
+  if (isFarmAPIPathname(url.pathname, farmApiBasePath) || isFarmAPIPathname(url.pathname)) {
     return applyProductionMiddlewareHeaders(new Response(
       JSON.stringify({ error: 'API route not found', pathname: url.pathname }),
       { status: 404, headers: { 'Content-Type': 'application/json' } },

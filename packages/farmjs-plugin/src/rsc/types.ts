@@ -68,6 +68,9 @@ export interface EntryContext {
   /** Base URL path, e.g. '/' */
   basePath: string;
 
+  /** Resolved same-origin mount for canonical /api routes. */
+  apiBasePath?: string;
+
   /** Route files subdirectory within srcDir */
   routesDir?: string;
 

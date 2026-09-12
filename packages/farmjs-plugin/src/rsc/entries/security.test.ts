@@ -3,7 +3,7 @@ import { transformWithEsbuild } from "vite";
 import {
   getAllowedAPIRouteMethods,
   invokeAPIRouteEndpoint,
-  matchAPIRoute,
+  matchAPIRouteAtBasePath,
 } from "@farm.js/core/api/runtime";
 import type { EntryContext } from "../types.js";
 import { generateClientEntry } from "./client.js";
@@ -134,7 +134,7 @@ describe("generated server action security", () => {
     expect(entry).toContain("if (request.method === 'POST' && !isInitialApiRequest)");
     expect(entry).toContain("applyProductionMiddlewareHeaders(apiResponse, middlewareHeaders)");
 
-    const apiClassification = entry.indexOf("const initialApiMatch = matchAPIRoute(");
+    const apiClassification = entry.indexOf("const initialApiMatch = matchAPIRouteAtBasePath(");
     const actionValidation = entry.indexOf("validateServerActionRequest(request");
     const middleware = entry.indexOf("const middlewareResult = await executeMiddleware(request");
     const apiDispatch = entry.indexOf(
@@ -200,16 +200,18 @@ describe("generated server action security", () => {
     const handlerEnd = entry.indexOf("\nconst farmMiddlewareRunner", handlerStart);
     const createHandler = new Function(
       "apiRouteMap",
-      "matchAPIRoute",
+      "matchAPIRouteAtBasePath",
       "getAllowedAPIRouteMethods",
       "invokeAPIRouteEndpoint",
+      "farmApiBasePath",
       `${entry.slice(handlerStart, handlerEnd)}; return handleAPIRequest;`,
     );
     const handleAPIRequest = createHandler(
       apiRouteMap,
-      matchAPIRoute,
+      matchAPIRouteAtBasePath,
       getAllowedAPIRouteMethods,
       invokeAPIRouteEndpoint,
+      "/api",
     ) as (request: Request) => Promise<Response | null>;
 
     const headResponse = await handleAPIRequest(
