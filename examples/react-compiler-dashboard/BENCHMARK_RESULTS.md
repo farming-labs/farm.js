@@ -1,6 +1,42 @@
 # Complex dashboard and 21,000-row peak result
 
-Latest run: 2026-09-11
+Latest run: 2026-09-12
+
+## Structured block-bodied same-key maps — 2026-09-12
+
+Compiler-safe keyed `map()` callbacks may now use structured blocks made only from fully returning
+`if`/`return` paths. The compiler proves every condition and return value before emitting an
+existing same-key hint. A declaration, loop, call, mutation, ambiguous return, or fallthrough keeps
+complete keyed reconciliation. This is a build-time eligibility change; it adds no runtime helper,
+option, or bundle-size baseline.
+
+The maintained 10,000-row mapped rolling-chain workload now uses two early-return branches between
+two queued 50-row rolls. It updates two different retained rows and checks both DOM identities,
+branch-specific labels and amounts, the exact incoming suffix, browser errors, and zero compiled
+owner executions. The control performs the same result with unsupported block-bodied rolling
+setters.
+
+| Mode   | Block-bodied mapped chain | Compiled fallback | vs React | vs fallback |
+| ------ | -------------------------: | ----------------: | -------: | ----------: |
+| Static |                    3.40 ms |          14.90 ms |   19.62x |       4.38x |
+| Hybrid |                    4.10 ms |          16.30 ms |   16.27x |       3.98x |
+
+Both modes passed the unchanged 2x React and 1.25x compiled-control floors. The bracketed React
+median was 66.70 ms. A second complete run under heavier concurrent machine load also passed this
+target gate at 12.65x/10.67x versus React and 3.63x/4.04x versus the control. In both runs the broad
+performance, optimization-persistence, and scalability gates passed, the compiler report retained
+two mapped rolling-chain steps and 34 keyed map hints, and the compiler example bundle remained
+31,682 bytes gzip in both compiler modes.
+
+Compiler coverage includes concise nested expressions, early-return chains, single-return block
+wrappers, map-and-sort pipelines, effectful conditions, intermediate statements, fallthrough, and
+atomic runtime fallback. The focused compiler tests, full runtime suite with timeout-only cases
+rerun serially, React 18.3.1/19.2.8 compatibility, and runtime-size checks preserve the existing
+behavior and fallback boundaries.
+
+Numbers are browser medians from the complete production-build command with 5 warmups, 10 measured
+samples per compiler action, 20 bracketed React samples, 60 dashboard samples of 10 updates, and 3
+scale cycles, using Chrome 153.0.8010.36 and Node.js 23.11.0 on Apple M1 macOS arm64.
 
 ## Multi-branch same-key maps — 2026-09-11
 

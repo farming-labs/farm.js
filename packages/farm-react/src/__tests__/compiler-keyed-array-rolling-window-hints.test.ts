@@ -199,15 +199,13 @@ describe("React AOT keyed-array rolling-window hints", () => {
         return <section>
           <button onClick={() => {
             setRows((current) => [...current.slice(1), nextOne]);
-            setRows((current) => current.map((row) =>
-              row.id === firstId
-                ? { ...row, label: nextLabel }
-                : row.id === secondId
-                  ? { ...row, label: nextLabel }
-                  : row
-            ));
+            setRows((current) => current.map((row) => {
+              if (row.id === firstId) return { ...row, label: nextLabel };
+              if (row.id === secondId) return { ...row, label: nextLabel };
+              return row;
+            }));
             setRows((current) => [...current.slice(1), nextTwo]);
-          }}>Roll around unsupported map</button>
+          }}>Roll around structured map</button>
           <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
         </section>;
       }

@@ -232,15 +232,16 @@ once; intermediate arrays never receive DOM work. Every user `map()` remains O(n
 keyed runtime's second full key-and-binding scan. Queued hints compose. The source method lookup,
 native result, callback order, and thrown errors are preserved.
 
-Each stage requires an inline synchronous conditional mapper that returns the original item or an
-object-spread replacement. An unsupported mapper anywhere in the chain disables the complete
-setter hint. Custom methods still execute but record no metadata. Key changes, structural edits,
-sparse or subclassed arrays, relevant mixed dependencies, and failed runtime checks use the
-existing complete reconciliation and LIS path. Non-functional setters, derived collections,
-block-bodied or mutating mappers, and other unproven forms are simply not hinted. No new option is
-required. A compiler report counts prepared map calls as `keyedMapUpdateHints`. The separate hint
-runtime capability is imported only when that count is nonzero, so direct-only and ordinary keyed
-builds do not retain it.
+Each stage requires an inline synchronous conditional mapper that returns the original item on at
+least one path and an object-spread replacement on another. The callback may be a concise expression
+or a structured block containing only fully returning `if`/`return` paths. An unsupported mapper
+anywhere in the chain disables the complete setter hint. Custom methods still execute but record no
+metadata. Key changes, structural edits, sparse or subclassed arrays, relevant mixed dependencies,
+and failed runtime checks use the existing complete reconciliation and LIS path. Non-functional
+setters, derived collections, referenced callbacks, intermediate statements, fallthrough, mutating
+mappers, and other unproven forms are simply not hinted. No new option is required. A compiler
+report counts prepared map calls as `keyedMapUpdateHints`. The separate hint runtime capability is
+imported only when that count is nonzero, so direct-only and ordinary keyed builds do not retain it.
 
 The same optional runtime recognizes conservative immutable appends on a direct keyed array:
 
@@ -546,24 +547,25 @@ setItems((current) =>
 );
 ```
 
-One callback may select several rows through nested conditional expressions:
+One callback may select several rows through nested expressions or structured early returns:
 
 ```tsx
 setItems((current) =>
-  current.map((item) =>
-    item.id === reviewedId
-      ? { ...item, status: "reviewed" }
-      : item.id === escalatedId
-        ? { ...item, status: "escalated", priority: 1 }
-        : item,
-  ),
+  current.map((item) => {
+    if (item.id === reviewedId) return { ...item, status: "reviewed" };
+    if (item.id === escalatedId) {
+      return { ...item, status: "escalated", priority: 1 };
+    }
+    return item;
+  }),
 );
 ```
 
 Every condition must be compiler-safe, and every leaf must return the original item or a safe
-object spread of it, with at least one unchanged and one replacement path. Effectful calls,
-mutation, block bodies, and ambiguous leaves use complete keyed reconciliation. A runtime key
-change also falls back before any DOM write.
+object spread of it, with at least one unchanged and one replacement path. Concise expressions and
+blocks made only from fully returning `if`/`return` paths are accepted. Effectful calls, mutation,
+intermediate statements, fallthrough, and ambiguous leaves use complete keyed reconciliation. A
+runtime key change also falls back before any DOM write.
 
 Farm executes every native map and reorder call normally. For consecutive accepted maps, it checks
 each native call but compares only the input and final result of that map segment, avoiding a full
@@ -572,12 +574,12 @@ one-to-one source-item match, and every final replacement key before touching th
 LIS and patches each changed row once. Unchanged rows need no second key or binding read. Queued
 supported map-and-reorder setters compose against the same committed rows. Every accepted map
 requires an inline synchronous conditional mapper whose leaves return either the original item or
-an object-spread replacement, plus index-independent compiler-owned host rows. Changed keys,
-referenced or block-bodied callbacks, unconditional replacements, `thisArg`, structural calls in
-the same chain, computed or custom methods, sparse or subclassed arrays, collection-reading
-bindings, nested or React-owned rows, and failed checks use complete keyed reconciliation. Reports
-use the existing map, sort, and reorder hint counters, and unrelated modules do not retain this
-optional runtime.
+an object-spread replacement, plus index-independent compiler-owned host rows. Concise expressions
+and structured `if`/`return` blocks are supported. Changed keys, referenced callbacks, intermediate
+statements or fallthrough, unconditional replacements, `thisArg`, structural calls in the same
+chain, computed or custom methods, sparse or subclassed arrays, collection-reading bindings, nested
+or React-owned rows, and failed checks use complete keyed reconciliation. Reports use the existing
+map, sort, and reorder hint counters, and unrelated modules do not retain this optional runtime.
 
 The maps may also finish the concise pipeline:
 

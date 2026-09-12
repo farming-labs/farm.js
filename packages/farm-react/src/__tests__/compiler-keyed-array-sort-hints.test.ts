@@ -291,6 +291,37 @@ describe("React AOT keyed-array sort hints", () => {
     expect(result.code).toContain("keyedRowsMapReorderHintedRuntimeFeature");
   });
 
+  it("carries a structured block-bodied map through a native sort", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Table({ firstId, secondId }) {
+        const [rows, setRows] = useState([
+          { id: "a", label: "Alpha", rank: 1 },
+          { id: "b", label: "Beta", rank: 2 },
+        ]);
+        return <section>
+          <button onClick={() => setRows((current) => current
+            .map((row) => {
+              if (row.id === firstId) return { ...row, rank: 4 };
+              if (row.id === secondId) return { ...row, rank: 3 };
+              return row;
+            })
+            .toSorted((left, right) => left.rank - right.rank)
+          )}>Edit and sort</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </section>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Table"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.optimizations.keyedMapUpdateHints).toBe(1);
+    expect(result.optimizations.keyedArraySortHints).toBe(1);
+    expect(result.code).toContain("createCompilerKeyedArrayMapPipeline");
+    expect(result.code).toContain("createCompilerKeyedArrayMapReorder");
+    expect(result.code).toContain("keyedRowsMapReorderHintedRuntimeFeature");
+  });
+
   it("preserves every step in an exact mapped reverse-parity pipeline", async () => {
     const result = await compile(`
       import { useState } from "react";
@@ -455,9 +486,9 @@ describe("React AOT keyed-array sort hints", () => {
       pipeline: "current.map(updateRow).toSorted((a, b) => a.rank - b.rank)",
     },
     {
-      name: "a block-bodied mapper",
+      name: "an unproven block-bodied mapper",
       pipeline:
-        "current.map((row) => { return row.id === editedId ? { ...row, rank: 0 } : row; }).toSorted((a, b) => a.rank - b.rank)",
+        "current.map((row) => { const matches = row.id === editedId; return matches ? { ...row, rank: 0 } : row; }).toSorted((a, b) => a.rank - b.rank)",
     },
     {
       name: "an unsupported second mapper",
