@@ -327,15 +327,17 @@ export function StandardTableBenchmark() {
             setRows((current) => [...current.slice(trimCount), ...firstAdditions]);
             setRows((current) =>
               current.map((row) => {
-                const matchesReviewed = row.id === reviewedId;
-                if (matchesReviewed) {
-                  return { ...row, amount: row.amount + 1, label: `${row.label} reviewed` };
+                const target = row.id;
+                switch (target) {
+                  case reviewedId:
+                    return { ...row, amount: row.amount + 1, label: `${row.label} reviewed` };
+                  case escalatedId: {
+                    const nextAmount = row.amount + 2;
+                    return { ...row, amount: nextAmount, label: `${row.label} escalated` };
+                  }
+                  default:
+                    return row;
                 }
-                const matchesEscalated = row.id === escalatedId;
-                if (matchesEscalated) {
-                  return { ...row, amount: row.amount + 2, label: `${row.label} escalated` };
-                }
-                return row;
               }),
             );
             setRows((current) => [...current.slice(trimCount), ...secondAdditions]);

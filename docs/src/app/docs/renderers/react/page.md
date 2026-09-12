@@ -919,11 +919,28 @@ This needs no option or component primitive. At build time, Farm recognizes a fu
 the direct `useState` collection used by a compiled keyed map or `List`. The setter may contain one
 or more consecutive `map()` calls. Every mapper must be an inline arrow whose returning paths are
 conditional: at least one path returns the original item and another returns a new object that
-spreads that item. This may be a concise expression or a structured block made only from `if` and
-`return` statements plus immutable local `const` aliases. Each alias needs a simple identifier and a
-compiler-safe initializer. The conditions and replacement values must use the same safe expression
-subset. The hint runtime is retained only in modules where at least one such call is emitted;
-direct-only and ordinary keyed builds do not import that capability.
+spreads that item. This may be a concise expression or a structured block made from fully returning
+`if` or `switch` branches plus immutable local `const` aliases. Each alias needs a simple identifier
+and a compiler-safe initializer. A `switch` needs one `default`, a complete return from every case,
+and no shared fallthrough cases or trailing statements. Its discriminant, case tests, conditions,
+and replacement values must use the same safe expression subset. The hint runtime is retained only
+in modules where at least one such call is emitted; direct-only and ordinary keyed builds do not
+import that capability.
+
+```tsx
+setItems((current) =>
+  current.map((item) => {
+    switch (item.status) {
+      case "draft":
+        return { ...item, label: draftLabel };
+      case "published":
+        return { ...item, label: publishedLabel };
+      default:
+        return item;
+    }
+  }),
+);
+```
 
 Every native `map()` still runs and is still O(n). After the complete chain succeeds, Farm compares
 the committed and final item identities once, validates the final key and position for every
@@ -1388,7 +1405,8 @@ need no separate full scan, and the final replacements still point directly to t
 source rows. The complete pipeline then needs one final keyed reconciliation rather than a growing
 chain of intermediate snapshots.
 
-One callback may select several rows with nested expressions or structured early returns:
+One callback may select several rows with nested expressions, structured early returns, or a fully
+returning `switch`:
 
 ```tsx
 setItems((current) =>
@@ -2467,7 +2485,8 @@ The package and example test suites verify more than generated code:
   focus and selection, and cover changed mapped keys, unsafe evaluated bounds, reused or discarded
   intermediate keys, custom slices, mixed queued chains, collection-dependent rows, Strict Mode
   hydration, React 18/19, and unmount cleanup; compiler tests accept recursively proven
-  multi-branch maps while rejecting effectful leaves and callbacks that replace every row;
+  `if` and fully returning `switch` maps while rejecting effectful leaves, switch fallthrough, and
+  callbacks that replace every row;
 - 2,000 deterministic randomized keyed-array removals match normal React; targeted tests require
   zero surviving descriptor and binding reads, preserve DOM identity, and cover queued filters,
   unhinted-chain fallback, collection-reading rows, StrictMode hydration, and unmount cleanup;
