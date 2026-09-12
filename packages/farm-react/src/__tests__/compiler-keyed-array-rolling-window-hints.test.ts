@@ -191,7 +191,7 @@ describe("React AOT keyed-array rolling-window hints", () => {
     expect(result.code).not.toContain("createCompilerKeyedArrayStructuralAppendMapPipeline");
   });
 
-  it("does not emit a rolling-window chain hint for an unsupported map callback", async () => {
+  it("retains a rolling-window chain through a safe multi-branch map callback", async () => {
     const result = await compile(`
       import { useState } from "react";
       export function Feed({ nextOne, nextTwo, firstId, secondId, nextLabel }) {
@@ -208,6 +208,35 @@ describe("React AOT keyed-array rolling-window hints", () => {
             ));
             setRows((current) => [...current.slice(1), nextTwo]);
           }}>Roll around unsupported map</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </section>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Feed"]);
+    expect(result.optimizations.keyedArrayMappedRollingWindowChainHints).toBe(2);
+    expect(result.optimizations.keyedMapUpdateHints).toBe(1);
+    expect(result.code).toContain("createCompilerKeyedArrayRollingWindowMapPipeline");
+    expect(result.code).toContain("createCompilerKeyedArrayMappedRollingWindow");
+  });
+
+  it("does not emit a rolling-window chain hint when one nested map branch is effectful", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Feed({ nextOne, nextTwo, firstId, secondId, computeLabel }) {
+        const [rows, setRows] = useState([{ id: "a", label: "Alpha" }]);
+        return <section>
+          <button onClick={() => {
+            setRows((current) => [...current.slice(1), nextOne]);
+            setRows((current) => current.map((row) =>
+              row.id === firstId
+                ? { ...row, label: "First" }
+                : row.id === secondId
+                  ? { ...row, label: computeLabel(row) }
+                  : row
+            ));
+            setRows((current) => [...current.slice(1), nextTwo]);
+          }}>Roll around unsafe map</button>
           <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
         </section>;
       }

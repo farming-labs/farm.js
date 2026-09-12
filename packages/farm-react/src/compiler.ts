@@ -1241,13 +1241,32 @@ function isSafeKeyedMapResult(
   item: t.Identifier,
   safeGlobals: ReadonlySet<string>,
 ): boolean {
+  type BranchProof = { replacement: boolean; unchanged: boolean };
+  const proveBranch = (branch: t.Expression): BranchProof | undefined => {
+    if (isUnchangedMapItem(branch, item)) return { replacement: false, unchanged: true };
+    if (isSafeKeyedMapReplacement(branch, item, safeGlobals)) {
+      return { replacement: true, unchanged: false };
+    }
+    if (!t.isConditionalExpression(branch)) return undefined;
+    if (validateDerivedExpression(branch.test, safeGlobals)) return undefined;
+    const consequent = proveBranch(branch.consequent);
+    const alternate = proveBranch(branch.alternate);
+    if (!consequent || !alternate) return undefined;
+    return {
+      replacement: consequent.replacement || alternate.replacement,
+      unchanged: consequent.unchanged || alternate.unchanged,
+    };
+  };
+
   if (!t.isConditionalExpression(expression)) return false;
   if (validateDerivedExpression(expression.test, safeGlobals)) return false;
-  return (
-    (isUnchangedMapItem(expression.consequent, item) &&
-      isSafeKeyedMapReplacement(expression.alternate, item, safeGlobals)) ||
-    (isUnchangedMapItem(expression.alternate, item) &&
-      isSafeKeyedMapReplacement(expression.consequent, item, safeGlobals))
+  const consequent = proveBranch(expression.consequent);
+  const alternate = proveBranch(expression.alternate);
+  return Boolean(
+    consequent &&
+    alternate &&
+    (consequent.replacement || alternate.replacement) &&
+    (consequent.unchanged || alternate.unchanged),
   );
 }
 
