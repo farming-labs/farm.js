@@ -193,6 +193,10 @@ soon as the source yields it, respects response backpressure, cancels the source
 disconnects, and defaults to `Cache-Control: no-store`. Use ordinary `Response` objects for binary
 downloads or protocols that are not JSON event streams.
 
+The client decoder rejects malformed NDJSON with its original `SyntaxError` and cancels the
+source without waiting for cleanup or an unread response clone. Explicit stream cancellation
+and early iterator return still await the producer's cleanup.
+
 When Farm bridges a streamed `Response` to Node, a failed response write also cancels the
 upstream body. Put producer cleanup in the stream's `cancel()` callback. Farm preserves the
 original write error and does not wait indefinitely for that cleanup to finish.
