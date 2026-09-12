@@ -236,6 +236,50 @@ describe("React AOT keyed update hints", () => {
     });
   });
 
+  it("records fully returning switch branches inside structured map callbacks", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Inventory({ reviewedId, escalatedId, delta }) {
+        const [items, setItems] = useState([
+          { id: "a", label: "Alpha", amount: 1 },
+          { id: "b", label: "Beta", amount: 2 },
+        ]);
+        return (
+          <section>
+            <button onClick={() => setItems((current) => current.map((row) => {
+              const target = row.id;
+              switch (target) {
+                case reviewedId:
+                  return { ...row, label: "Reviewed" };
+                case escalatedId: {
+                  const nextAmount = Math.round(row.amount + delta);
+                  return { ...row, label: String(nextAmount), amount: nextAmount };
+                }
+                default:
+                  return row;
+              }
+            }))}>Update switched rows</button>
+            <ul>{items.map((item) => <li key={item.id}>{item.label}</li>)}</ul>
+          </section>
+        );
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Inventory"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.optimizations.keyedMapUpdateHints).toBe(1);
+    expect(result.code.match(/createCompilerKeyedMapUpdate\(/g)).toHaveLength(1);
+    expect(result.code).toContain("keyedRowsHintedRuntimeFeature");
+    await expect(
+      transformWithEsbuild(result.code, "/app/KeyedUpdateHints.tsx", {
+        loader: "tsx",
+        jsx: "automatic",
+      }),
+    ).resolves.toMatchObject({
+      code: expect.stringContaining("createCompilerKeyedMapUpdate"),
+    });
+  });
+
   it("supports direct-state public List rows without adding a public option", async () => {
     const result = await compile(`
       import { useState } from "react";
@@ -316,6 +360,55 @@ describe("React AOT keyed update hints", () => {
       collection: "items",
       update:
         'setItems((current) => current.map((row) => { if (row.id === "a") return { ...row, label: "Updated" }; return { ...row, label: "Other" }; }))',
+    },
+    {
+      name: "a switch without a default branch",
+      declaration: "",
+      collection: "items",
+      update:
+        'setItems((current) => current.map((row) => { switch (row.id) { case "a": return { ...row, label: "Updated" }; case "b": return row; } }))',
+    },
+    {
+      name: "a switch with a fallthrough case",
+      declaration: "",
+      collection: "items",
+      update:
+        'setItems((current) => current.map((row) => { switch (row.id) { case "a": case "b": return { ...row, label: "Updated" }; default: return row; } }))',
+    },
+    {
+      name: "a switch with a break path",
+      declaration: "",
+      collection: "items",
+      update:
+        'setItems((current) => current.map((row) => { switch (row.id) { case "a": return { ...row, label: "Updated" }; default: break; } return row; }))',
+    },
+    {
+      name: "an effectful switch discriminant",
+      declaration: "const resolveStatus = (row) => row.id;",
+      collection: "items",
+      update:
+        'setItems((current) => current.map((row) => { switch (resolveStatus(row)) { case "a": return { ...row, label: "Updated" }; default: return row; } }))',
+    },
+    {
+      name: "an effectful switch case test",
+      declaration: "const resolveStatus = (row) => row.id;",
+      collection: "items",
+      update:
+        'setItems((current) => current.map((row) => { switch (row.id) { case resolveStatus(row): return { ...row, label: "Updated" }; default: return row; } }))',
+    },
+    {
+      name: "a switch that replaces every row",
+      declaration: "",
+      collection: "items",
+      update:
+        'setItems((current) => current.map((row) => { switch (row.id) { case "a": return { ...row, label: "Updated" }; default: return { ...row, label: "Other" }; } }))',
+    },
+    {
+      name: "a switch followed by unreachable statements",
+      declaration: "",
+      collection: "items",
+      update:
+        'setItems((current) => current.map((row) => { switch (row.id) { case "a": return { ...row, label: "Updated" }; default: return row; } return row; }))',
     },
     {
       name: "an unsupported second mapper",

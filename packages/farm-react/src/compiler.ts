@@ -1294,6 +1294,36 @@ function isSafeKeyedMapConstDeclaration(
   );
 }
 
+function proveSafeKeyedMapSwitchStatement(
+  statement: t.SwitchStatement,
+  item: t.Identifier,
+  safeGlobals: ReadonlySet<string>,
+): SafeKeyedMapBranchProof | undefined {
+  if (
+    validateDerivedExpression(statement.discriminant, safeGlobals) ||
+    statement.cases.filter((switchCase) => switchCase.test === null).length !== 1
+  ) {
+    return undefined;
+  }
+
+  let proof: SafeKeyedMapBranchProof | undefined;
+  for (const switchCase of statement.cases) {
+    if (
+      (switchCase.test && validateDerivedExpression(switchCase.test, safeGlobals)) ||
+      switchCase.consequent.length === 0
+    ) {
+      return undefined;
+    }
+    const branch =
+      switchCase.consequent.length === 1 && t.isBlockStatement(switchCase.consequent[0])
+        ? proveSafeKeyedMapStatement(switchCase.consequent[0], item, safeGlobals)
+        : proveSafeKeyedMapStatements(switchCase.consequent, item, safeGlobals);
+    if (!branch) return undefined;
+    proof = proof ? mergeSafeKeyedMapBranchProofs(proof, branch) : branch;
+  }
+  return proof;
+}
+
 function proveSafeKeyedMapStatements(
   statements: readonly t.Statement[],
   item: t.Identifier,
@@ -1310,6 +1340,11 @@ function proveSafeKeyedMapStatements(
   if (t.isVariableDeclaration(statement)) {
     return isSafeKeyedMapConstDeclaration(statement, item, safeGlobals)
       ? proveSafeKeyedMapStatements(remaining, item, safeGlobals)
+      : undefined;
+  }
+  if (t.isSwitchStatement(statement)) {
+    return remaining.length === 0
+      ? proveSafeKeyedMapSwitchStatement(statement, item, safeGlobals)
       : undefined;
   }
   if (!t.isIfStatement(statement) || validateDerivedExpression(statement.test, safeGlobals)) {

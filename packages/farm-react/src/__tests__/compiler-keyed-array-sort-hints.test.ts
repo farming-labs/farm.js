@@ -324,6 +324,42 @@ describe("React AOT keyed-array sort hints", () => {
     expect(result.code).toContain("keyedRowsMapReorderHintedRuntimeFeature");
   });
 
+  it("carries a switch-branched map through a native sort", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Table({ firstId, secondId }) {
+        const [rows, setRows] = useState([
+          { id: "a", label: "Alpha", rank: 1 },
+          { id: "b", label: "Beta", rank: 2 },
+        ]);
+        return <section>
+          <button onClick={() => setRows((current) => current
+            .map((row) => {
+              switch (row.id) {
+                case firstId:
+                  return { ...row, rank: 4 };
+                case secondId:
+                  return { ...row, rank: 3 };
+                default:
+                  return row;
+              }
+            })
+            .toSorted((left, right) => left.rank - right.rank)
+          )}>Edit and sort switched rows</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </section>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Table"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.optimizations.keyedMapUpdateHints).toBe(1);
+    expect(result.optimizations.keyedArraySortHints).toBe(1);
+    expect(result.code).toContain("createCompilerKeyedArrayMapPipeline");
+    expect(result.code).toContain("createCompilerKeyedArrayMapReorder");
+    expect(result.code).toContain("keyedRowsMapReorderHintedRuntimeFeature");
+  });
+
   it("preserves every step in an exact mapped reverse-parity pipeline", async () => {
     const result = await compile(`
       import { useState } from "react";
