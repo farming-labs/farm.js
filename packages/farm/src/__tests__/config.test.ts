@@ -754,6 +754,17 @@ describe("resolveConfig", () => {
     }
   });
 
+  it("rejects OpenAPI routes that browsers reinterpret", async () => {
+    for (const route of [
+      "/docs/../reference",
+      "/docs/%2e%2e/reference",
+      "/docs/%2Freference",
+      "/docs\\reference",
+    ]) {
+      await expect(resolveConfig({ openapi: { route } }, "production")).rejects.toThrow();
+    }
+  });
+
   it("rejects route-rule keys that normalize to the same pathname", async () => {
     await expect(
       resolveConfig(

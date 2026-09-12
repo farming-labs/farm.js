@@ -1,3 +1,4 @@
+import { validateConfigRouteSource } from "./plugins/route-pattern";
 import type { ComponentType, ReactNode } from "react";
 import { api as integrationApi, defineIntegrationAPIOperation } from "./integration-api";
 import type {
@@ -1120,6 +1121,7 @@ export function defineIntegration<
       : undefined;
 
   for (const route of allRoutes || []) {
+    validateConfigRouteSource(route.path, `Integration route "${route.path}"`);
     assertTerminalCatchAll(route.path, "api");
   }
 

@@ -342,6 +342,19 @@ describe("integrations runtime", () => {
     );
   });
 
+  it("rejects integration routes that browsers reinterpret", () => {
+    for (const path of ["/api/../admin", "/api/%2e%2e/admin", "/api/%2Fadmin", "/api\\admin"]) {
+      expect(() =>
+        defineIntegration({
+          category: "custom",
+          type: "unstable-route",
+          instance: {},
+          routes: [{ path, handler: async () => new Response("unexpected") }],
+        }),
+      ).toThrow();
+    }
+  });
+
   it("rejects duplicate plugin names from one integration", () => {
     const integration = defineIntegration({
       category: "custom",
