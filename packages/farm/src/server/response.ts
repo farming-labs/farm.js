@@ -171,7 +171,7 @@ export async function sendWebResponse(res: ServerResponse, response: Response): 
       if (res.destroyed) {
         // The client disconnected mid-response; drop the rest of the body so
         // the handler can return.
-        await reader.cancel().catch(() => {});
+        void reader.cancel().catch(() => {});
         return;
       }
 
@@ -198,7 +198,7 @@ export async function sendWebResponse(res: ServerResponse, response: Response): 
 
       if (!res.write(value)) {
         if (!(await waitForWritable(res))) {
-          await reader.cancel().catch(() => {});
+          void reader.cancel().catch(() => {});
           return;
         }
       }
