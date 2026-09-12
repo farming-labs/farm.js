@@ -1,9 +1,11 @@
 export { _runWithAfterRequest } from "../after";
+export type { FarmServerConfig } from "../server-http";
 export {
   bufferFarmRequestBody,
   createFarmRequestBodyErrorResponse,
   matchesFarmIfNoneMatch,
   readFarmRequestBody,
+  readNodeRequestBody,
   resolveFarmServerConfig,
 } from "../server-http";
 export { createFarmProductionLifecycle } from "../production-lifecycle";
