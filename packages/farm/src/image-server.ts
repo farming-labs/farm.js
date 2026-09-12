@@ -394,7 +394,8 @@ async function fetchImageSource(
 async function readResponseWithLimit(response: Response, limit: number): Promise<Uint8Array> {
   const contentLength = response.headers.get("content-length");
   if (contentLength && Number(contentLength) > limit) {
-    await cancelResponseBody(response);
+    // Cleanup (including an unread tee branch) must not delay the size rejection.
+    void cancelResponseBody(response);
     throw new FarmImageRequestError("BODY_TOO_LARGE", 413, "Source image is too large");
   }
 
@@ -403,15 +404,20 @@ async function readResponseWithLimit(response: Response, limit: number): Promise
   const chunks: Uint8Array[] = [];
   let byteLength = 0;
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    byteLength += value.byteLength;
-    if (byteLength > limit) {
-      await reader.cancel();
-      throw new FarmImageRequestError("BODY_TOO_LARGE", 413, "Source image is too large");
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      byteLength += value.byteLength;
+      if (byteLength > limit) {
+        const error = new FarmImageRequestError("BODY_TOO_LARGE", 413, "Source image is too large");
+        void reader.cancel(error).catch(() => {});
+        throw error;
+      }
+      chunks.push(value);
     }
-    chunks.push(value);
+  } finally {
+    reader.releaseLock();
   }
 
   const result = new Uint8Array(byteLength);
