@@ -196,6 +196,8 @@ downloads or protocols that are not JSON event streams.
 When Farm bridges a streamed `Response` to Node, a failed response write also cancels the
 upstream body. Put producer cleanup in the stream's `cancel()` callback. Farm preserves the
 original write error and does not wait indefinitely for that cleanup to finish.
+Disconnects follow the same rule, including when the connection closes under backpressure:
+Farm releases its reader and response listeners without waiting for app-owned cancellation work.
 
 ## Endpoint middleware
 
