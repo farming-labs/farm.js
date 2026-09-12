@@ -749,9 +749,11 @@ async function handleFarmRequest(request) {
   // Helper to create elements without JSX
   const h = React.createElement;
   
-  // Render page content - handle async components
+  // Render page content - only native async functions need direct awaiting.
+  // Synchronous components must retain React's hook dispatcher. Source text
+  // containing the word async does not change how a component executes.
   let pageContent;
-  if (Page.constructor.name === 'AsyncFunction' || Page.toString().includes('async')) {
+  if (Page.constructor.name === 'AsyncFunction') {
     pageContent = await Page(pageProps);
   } else {
     pageContent = h(Page, pageProps);
@@ -776,7 +778,7 @@ async function handleFarmRequest(request) {
   
   // Render layout
   let layoutContent;
-  if (Layout.constructor.name === 'AsyncFunction' || Layout.toString().includes('async')) {
+  if (Layout.constructor.name === 'AsyncFunction') {
     layoutContent = await Layout({ children: pageContent });
   } else {
     layoutContent = h(Layout, null, pageContent);

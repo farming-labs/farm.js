@@ -327,6 +327,30 @@ export const schema = z.string();`;
             }`,
             );
             writeRoute(
+              "hook-control/page.tsx",
+              `import { useId } from "react"; export default function Page() { const id = useId(); return <main id={id}>Hook control</main>; }`,
+            );
+            writeRoute(
+              "hook-sniff/page.tsx",
+              `import { useId } from "react"; export default function Page() { const label = "async is just text"; const id = useId(); return <main id={id}>Hook scan {label}</main>; }`,
+            );
+            writeRoute(
+              "hook-layout/layout.tsx",
+              `import { useId } from "react"; export default function Layout({ children }) { const id = useId(); const label = "async is just text"; return <section id={id}>Hook layout {label} {children}</section>; }`,
+            );
+            writeRoute(
+              "hook-layout/page.tsx",
+              `export default function Page() { return <main>Hook layout page</main>; }`,
+            );
+            writeRoute(
+              "async-layout/[id]/layout.tsx",
+              `export default async function Layout({ children }) { await Promise.resolve(); return <aside>Async layout {children}</aside>; }`,
+            );
+            writeRoute(
+              "async-layout/[id]/page.tsx",
+              `export default async function Page({ params }) { await Promise.resolve(); return <p>Async page {params.id}</p>; }`,
+            );
+            writeRoute(
               "bad-boundary/page.tsx",
               `export default async function Page() { throw new Error("private original failure"); }`,
             );
@@ -726,6 +750,24 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
           body: "not an action",
         });
         expect(pagePost.status).toBe(403);
+        if (name === "default") {
+          for (const [pathname, markers] of [
+            ["/hook-control", ["Hook control"]],
+            ["/hook-sniff", ["Hook scan", "async is just text"]],
+            ["/hook-layout", ["Hook layout", "Hook layout page", "async is just text"]],
+            ["/async-layout/42", ["Async layout", "42", "Async page"]],
+          ] as const) {
+            for (const accept of ["text/html", "text/x-component"]) {
+              const response = await fetch(origin + pathname, {
+                headers: { accept },
+                signal: AbortSignal.timeout(10_000),
+              });
+              expect(response.status, logs).toBe(200);
+              const body = await response.text();
+              for (const marker of markers) expect(body, logs).toContain(marker);
+            }
+          }
+        }
 
         const missing = await fetch(`${origin}${mount}/missing-api-route`);
         expect(missing.status).toBe(404);

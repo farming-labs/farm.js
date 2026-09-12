@@ -48,6 +48,8 @@ storage, integrations, observability, and deployment output.
 | React Server Components and optimized boundaries | Available experimentally | Not applicable                  | Not applicable       | Not applicable       | Not applicable       |
 | Other integration UI providers and starters      | Available                | Provider-specific compatibility | React-oriented today | React-oriented today | React-oriented today |
 
+In experimental React Server Components, synchronous page and layout components are rendered through React, including supported server hooks such as `useId()`. A string or variable containing `async` does not make a component asynchronous. Stateful hooks and effects still belong in Client Components.
+
 Preact resolves the React-shaped bindings through `preact/compat`. Solid exposes signal-backed
 getters, Vue exposes refs and computed values, and Svelte exposes readable stores. The underlying
 navigation, action, query-cache, theme, and i18n transports live in the renderer-neutral
