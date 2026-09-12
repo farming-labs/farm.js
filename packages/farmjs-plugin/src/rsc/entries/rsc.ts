@@ -513,8 +513,8 @@ function mergeDocumentMetadata(...sources) {
 
 /**
  * Find every applicable layout module from root to the page directory.
- * Rendering still uses the nearest layout, while document metadata inherits
- * through the complete root -> nested layouts -> page chain.
+ * Rendering and document metadata share the complete root -> nested layouts
+ * -> page chain.
  */
 function getLayoutModules(pageFilePath) {
   const tryKeys = (...keys) => {
@@ -539,7 +539,7 @@ function getLayoutModules(pageFilePath) {
       );
       if (matchedLayout) break;
     }
-    if (matchedLayout && !matches.includes(matchedLayout)) matches.push(matchedLayout);
+    if (matchedLayout) matches.push(matchedLayout);
   }
 
   return matches;
@@ -761,8 +761,6 @@ async function handleFarmRequest(request) {
   
   const { Page, pattern, params, pageMetadata } = matched;
   const LayoutModules = getLayoutModules(pattern);
-  const LayoutModule = LayoutModules[LayoutModules.length - 1];
-  const Layout = LayoutModule?.default || (function PassThrough({ children }) { return children; });
   const metadata = mergeDocumentMetadata(
     ...LayoutModules.map((layoutModule) => layoutModule.metadata),
     pageMetadata,
@@ -812,12 +810,16 @@ async function handleFarmRequest(request) {
     });
   }
   
-  // Render layout
-  let layoutContent;
-  if (Layout.constructor.name === 'AsyncFunction') {
-    layoutContent = await Layout({ children: pageContent });
-  } else {
-    layoutContent = h(Layout, null, pageContent);
+  // Render layouts inside out so every ancestor wraps its descendants.
+  let layoutContent = pageContent;
+  for (let index = LayoutModules.length - 1; index >= 0; index--) {
+    const Layout = LayoutModules[index].default;
+    const layoutProps = { params: pageProps.params, children: layoutContent };
+    if (Layout.constructor.name === 'AsyncFunction') {
+      layoutContent = await Layout(layoutProps);
+    } else {
+      layoutContent = h(Layout, layoutProps);
+    }
   }
   
   // Single wrapper so #root has exactly one child (avoids duplicate block / "two pages" in DOM).
