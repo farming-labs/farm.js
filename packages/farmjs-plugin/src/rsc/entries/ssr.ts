@@ -43,41 +43,55 @@ const cssLinkTag = resolvedCssHref
   ? '<link rel="stylesheet" href="' + escapeHtmlAttribute(resolvedCssHref) + '" as="style" data-precedence="default">'
   : '';
 
-function injectIntoHeadStream(tag) {
+// Work on bytes: chunk boundaries need not align with UTF-8 code points.
+function injectBeforeStream(markerText, tag) {
   const encoder = new TextEncoder();
-  const decoder = new TextDecoder();
-  const marker = '</head>';
-  let buffer = '';
+  const marker = encoder.encode(markerText);
+  const insertion = encoder.encode(tag);
+  let buffer = new Uint8Array(0);
   let injected = false;
 
   return new TransformStream({
     transform(chunk, controller) {
-      const str = typeof chunk === "string" ? chunk : decoder.decode(chunk);
+      const bytes = typeof chunk === 'string' ? encoder.encode(chunk) : chunk;
       if (injected || !tag) {
-        controller.enqueue(typeof chunk === "string" ? encoder.encode(str) : chunk);
+        controller.enqueue(bytes);
         return;
       }
 
-      buffer += str;
-      const index = buffer.indexOf(marker);
+      const pending = new Uint8Array(buffer.length + bytes.length);
+      pending.set(buffer);
+      pending.set(bytes, buffer.length);
+      let index = -1;
+      outer: for (let i = 0; i <= pending.length - marker.length; i++) {
+        for (let j = 0; j < marker.length; j++) {
+          if (pending[i + j] !== marker[j]) continue outer;
+        }
+        index = i;
+        break;
+      }
       if (index >= 0) {
-        const before = buffer.slice(0, index);
-        const after = buffer.slice(index + marker.length);
-        controller.enqueue(encoder.encode(before + tag + marker + after));
-        buffer = '';
+        if (index) controller.enqueue(pending.subarray(0, index));
+        controller.enqueue(insertion);
+        controller.enqueue(pending.subarray(index));
+        buffer = new Uint8Array(0);
         injected = true;
         return;
       }
 
-      if (buffer.length > marker.length) {
-        controller.enqueue(encoder.encode(buffer.slice(0, buffer.length - marker.length)));
-        buffer = buffer.slice(-marker.length);
-      }
+      // Retain only a possible marker prefix, never the whole response.
+      const emitLength = Math.max(0, pending.length - marker.length + 1);
+      if (emitLength) controller.enqueue(pending.subarray(0, emitLength));
+      buffer = pending.slice(emitLength);
     },
     flush(controller) {
-      if (buffer) controller.enqueue(encoder.encode(buffer));
+      if (buffer.length) controller.enqueue(buffer);
     },
   });
+}
+
+function injectIntoHeadStream(tag) {
+  return injectBeforeStream('</head>', tag);
 }
 
 /** Collect Node stream (from renderToPipeableStream) into a single string. Supports Suspense. */
@@ -144,34 +158,7 @@ export async function renderHTML(firstArg, options = {}) {
   if (hasPayload) {
     // Stream HTML to the client while preserving the RSC payload for hydration.
     debug('Streaming HTML (loading fallback then content)');
-    const BODY_HTML_END = '</body></html>';
-    const TAG_LEN = BODY_HTML_END.length;
-    const encoder = new TextEncoder();
-    let streamBuf = '';
-    const streamingClientScriptInjector = new TransformStream({
-      transform(chunk, controller) {
-        const str = typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
-        if (!injectClientScriptInStream || !clientScriptTag) {
-          controller.enqueue(typeof chunk === "string" ? encoder.encode(str) : chunk);
-          return;
-        }
-        streamBuf += str;
-        while (streamBuf.length > TAG_LEN) {
-          const tail = streamBuf.slice(-TAG_LEN);
-          if (tail === BODY_HTML_END) {
-            const before = streamBuf.slice(0, streamBuf.length - TAG_LEN);
-            controller.enqueue(encoder.encode(before + clientScriptTag + BODY_HTML_END));
-            streamBuf = '';
-            return;
-          }
-          controller.enqueue(encoder.encode(streamBuf.slice(0, streamBuf.length - TAG_LEN)));
-          streamBuf = streamBuf.slice(-TAG_LEN);
-        }
-      },
-      flush(controller) {
-        if (streamBuf) controller.enqueue(encoder.encode(streamBuf));
-      }
-    });
+    const streamingClientScriptInjector = injectBeforeStream('</body></html>', clientScriptTag);
     const webStream = typeof Readable.toWeb === 'function'
       ? Readable.toWeb(passThrough)
       : new ReadableStream({
@@ -212,30 +199,7 @@ export async function renderHTML(firstArg, options = {}) {
       controller.close();
     }
   });
-  let clientBuffer = "";
-  let clientScriptInjected = false;
-  const injectClientScriptStream = new TransformStream({
-    transform(chunk, controller) {
-      const str = typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
-      if (!injectClientScriptInStream || clientScriptInjected) {
-        controller.enqueue(chunk);
-        return;
-      }
-      clientBuffer += str;
-      if (clientBuffer.includes("</body></html>")) {
-        const href = (typeof CLIENT_ENTRY_HREF === "string" && CLIENT_ENTRY_HREF.length > 0 && CLIENT_ENTRY_HREF.indexOf(PLACEHOLDER_STR) < 0) ? CLIENT_ENTRY_HREF : "";
-        const out = href ? clientBuffer.replace("</body></html>", '<script type="module" src="' + href + '"></script></body></html>') : clientBuffer;
-        controller.enqueue(new TextEncoder().encode(out));
-        clientBuffer = "";
-        clientScriptInjected = true;
-      }
-    },
-    flush(controller) {
-      if (clientBuffer) {
-        controller.enqueue(new TextEncoder().encode(clientBuffer));
-      }
-    }
-  });
+  const injectClientScriptStream = injectBeforeStream('</body></html>', clientScriptTag);
 
   let out = streamFromHtml.pipeThrough(injectRSCPayload(s2));
   out = out.pipeThrough(injectClientScriptStream);
