@@ -396,8 +396,8 @@ safe-integer literal or compiler-safe runtime slice bound and compiler-owned, in
 host rows. Identifiers, property reads, side-effect-free arithmetic and conditionals, and safe
 `Math` calls are supported while preserving native lookup, evaluation, results, and errors.
 
-Immediately adjacent safe same-key maps may run before, after, or on both sides of one rolling
-setter:
+Immediately adjacent safe same-key maps may run before, after, or between one or more rolling
+setters in the same synchronous setter segment:
 
 ```tsx
 setItems((current) =>
@@ -407,18 +407,25 @@ setItems((current) => [...current.slice(trimCount), ...nextItems]);
 setItems((current) =>
   current.map((item) => (item.id === selectedId ? { ...item, selected: true } : item)),
 );
+setItems((current) => [...current.slice(secondTrimCount), ...laterItems]);
+setItems((current) =>
+  current.map((item) => (item.id === editedId ? { ...item, status: "ready" } : item)),
+);
 ```
 
 The compiler carries mapped survivor identity through the retained tail, creates incoming rows
-from their final mapped values, and patches only changed survivors. It reuses the optional
-structural append/map runtime rather than adding another browser helper.
+from their final mapped values, and patches only changed committed survivors. A single rolling
+setter uses the optional structural append/map runtime. Multiple rolling setters keep their
+cumulative retained-window metadata and mapped provenance through an optional runtime dedicated to
+mapped rolling chains. No new public helper, option, or always-loaded browser code is added.
 
 Effectful expressions, reused keys, block-bodied updaters, custom slice behavior,
 collection-reading or index-aware rows, nested or React-owned rows, mixed or unhinted queued chains,
-more than one rolling setter in a mapped segment, non-adjacent maps, changed mapped keys, unsafe or
-no-op evaluated bounds, and failed checks use complete keyed reconciliation. Unmapped rolling
-modules retain the smaller optional all-hint runtime. Reports expose the site count as
-`keyedArrayRollingWindowHints`.
+a statement or unsupported setter inside the segment, changed mapped keys, unsafe or no-op
+evaluated bounds, and failed checks use complete keyed reconciliation. Unmapped rolling modules
+retain the smaller optional all-hint runtime. Reports expose each emitted rolling site as
+`keyedArrayRollingWindowHints`, each rolling step retained across a multi-window mapped chain as
+`keyedArrayMappedRollingWindowChainHints`, and each safe map as `keyedMapUpdateHints`.
 
 Native known-position updates can avoid a complete keyed scan too:
 
@@ -1021,6 +1028,8 @@ guarded compiler-safe runtime positions;
 and
 `keyedArrayReorderHints`, the number of compiler-proven native keyed-array reverse steps; and
 `keyedArraySortHints`, the number of compiler-proven native keyed-array sort steps; and
+`keyedArrayMappedRollingWindowChainHints`, the number of compiler-proven rolling steps retained
+across multi-window same-key map chains; and
 `keyedArrayRollingWindowHints`, the number of compiler-proven retained-tail plus incoming-suffix
 sites; and
 `keyedArraySliceHints`, the number of compiler-proven keyed-array slice sites with literal or guarded

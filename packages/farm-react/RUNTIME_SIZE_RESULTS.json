@@ -291,6 +291,23 @@
         "brotli": 10946
       }
     },
+    "keyedMappedRollingWindow": {
+      "compilerOff": {
+        "raw": 193043,
+        "gzip": 60160,
+        "brotli": 51857
+      },
+      "compilerOn": {
+        "raw": 270798,
+        "gzip": 80275,
+        "brotli": 68494
+      },
+      "compilerPremium": {
+        "raw": 77755,
+        "gzip": 20115,
+        "brotli": 16637
+      }
+    },
     "isolatedRuntime": {
       "control": {
         "raw": 192643,

@@ -19,6 +19,7 @@ export interface CompileReactModuleResult {
     keyedArrayPositionHints: number;
     keyedArrayReorderHints: number;
     keyedArraySortHints: number;
+    keyedArrayMappedRollingWindowChainHints: number;
     keyedArrayRollingWindowHints: number;
     keyedArraySliceHints: number;
     keyedCollectionUpdateHints: number;
@@ -373,6 +374,7 @@ type CompilerRuntimeFeatureName =
   | "keyed-rows-reorder-hinted"
   | "keyed-rows-map-reorder-hinted"
   | "keyed-rows-all-hinted"
+  | "keyed-rows-mapped-rolling-window-hinted"
   | "keyed-rows-every-hinted"
   | "keyed-rows-batch-every-hinted"
   | "keyed-rows-window-every-hinted"
@@ -390,6 +392,7 @@ type CompilerRuntimeFeatureName =
   | "keyed-rows-conditional-window-position-hinted"
   | "keyed-rows-conditional-reorder-hinted"
   | "keyed-rows-conditional-all-hinted"
+  | "keyed-rows-conditional-mapped-rolling-window-hinted"
   | "keyed-rows-conditional-every-hinted"
   | "keyed-rows-conditional-batch-every-hinted"
   | "keyed-rows-conditional-window-every-hinted"
@@ -407,6 +410,7 @@ type CompilerRuntimeFeatureName =
   | "keyed-rows-host-window-position-hinted"
   | "keyed-rows-host-reorder-hinted"
   | "keyed-rows-host-all-hinted"
+  | "keyed-rows-host-mapped-rolling-window-hinted"
   | "keyed-rows-host-every-hinted"
   | "keyed-rows-host-batch-every-hinted"
   | "keyed-rows-host-window-every-hinted"
@@ -424,6 +428,7 @@ type CompilerRuntimeFeatureName =
   | "keyed-rows-complete-window-position-hinted"
   | "keyed-rows-complete-reorder-hinted"
   | "keyed-rows-complete-all-hinted"
+  | "keyed-rows-complete-mapped-rolling-window-hinted"
   | "keyed-rows-complete-every-hinted"
   | "keyed-rows-complete-batch-every-hinted"
   | "keyed-rows-complete-window-every-hinted"
@@ -451,6 +456,7 @@ const COMPILER_RUNTIME_FEATURE_EXPORTS: Record<CompilerRuntimeFeatureName, strin
   "keyed-rows-reorder-hinted": "keyedRowsReorderHintedRuntimeFeature",
   "keyed-rows-map-reorder-hinted": "keyedRowsMapReorderHintedRuntimeFeature",
   "keyed-rows-all-hinted": "keyedRowsAllHintedRuntimeFeature",
+  "keyed-rows-mapped-rolling-window-hinted": "keyedRowsMappedRollingWindowHintedRuntimeFeature",
   "keyed-rows-every-hinted": "keyedRowsEveryHintedRuntimeFeature",
   "keyed-rows-batch-every-hinted": "keyedRowsBatchEveryHintedRuntimeFeature",
   "keyed-rows-window-every-hinted": "keyedRowsWindowEveryHintedRuntimeFeature",
@@ -470,6 +476,8 @@ const COMPILER_RUNTIME_FEATURE_EXPORTS: Record<CompilerRuntimeFeatureName, strin
     "keyedRowsConditionalWindowPositionHintedRuntimeFeature",
   "keyed-rows-conditional-reorder-hinted": "keyedRowsConditionalReorderHintedRuntimeFeature",
   "keyed-rows-conditional-all-hinted": "keyedRowsConditionalAllHintedRuntimeFeature",
+  "keyed-rows-conditional-mapped-rolling-window-hinted":
+    "keyedRowsConditionalMappedRollingWindowHintedRuntimeFeature",
   "keyed-rows-conditional-every-hinted": "keyedRowsConditionalEveryHintedRuntimeFeature",
   "keyed-rows-conditional-batch-every-hinted": "keyedRowsConditionalBatchEveryHintedRuntimeFeature",
   "keyed-rows-conditional-window-every-hinted":
@@ -493,6 +501,8 @@ const COMPILER_RUNTIME_FEATURE_EXPORTS: Record<CompilerRuntimeFeatureName, strin
   "keyed-rows-host-window-position-hinted": "keyedRowsHostWindowPositionHintedRuntimeFeature",
   "keyed-rows-host-reorder-hinted": "keyedRowsHostReorderHintedRuntimeFeature",
   "keyed-rows-host-all-hinted": "keyedRowsHostAllHintedRuntimeFeature",
+  "keyed-rows-host-mapped-rolling-window-hinted":
+    "keyedRowsHostMappedRollingWindowHintedRuntimeFeature",
   "keyed-rows-host-every-hinted": "keyedRowsHostEveryHintedRuntimeFeature",
   "keyed-rows-host-batch-every-hinted": "keyedRowsHostBatchEveryHintedRuntimeFeature",
   "keyed-rows-host-window-every-hinted": "keyedRowsHostWindowEveryHintedRuntimeFeature",
@@ -513,6 +523,8 @@ const COMPILER_RUNTIME_FEATURE_EXPORTS: Record<CompilerRuntimeFeatureName, strin
     "keyedRowsCompleteWindowPositionHintedRuntimeFeature",
   "keyed-rows-complete-reorder-hinted": "keyedRowsCompleteReorderHintedRuntimeFeature",
   "keyed-rows-complete-all-hinted": "keyedRowsCompleteAllHintedRuntimeFeature",
+  "keyed-rows-complete-mapped-rolling-window-hinted":
+    "keyedRowsCompleteMappedRollingWindowHintedRuntimeFeature",
   "keyed-rows-complete-every-hinted": "keyedRowsCompleteEveryHintedRuntimeFeature",
   "keyed-rows-complete-batch-every-hinted": "keyedRowsCompleteBatchEveryHintedRuntimeFeature",
   "keyed-rows-complete-window-every-hinted": "keyedRowsCompleteWindowEveryHintedRuntimeFeature",
@@ -546,6 +558,7 @@ function runtimeFeaturesForPlans(
   keyedArrayWindowReplaceHints: boolean,
   keyedArrayReorderHints: boolean,
   keyedArrayMapReorderHints: boolean,
+  keyedArrayMappedRollingWindowChainHints: boolean,
   keyedArrayRollingWindowHints: boolean,
 ): CompilerRuntimeFeatureName[] {
   const features = new Set<CompilerRuntimeFeatureName>();
@@ -581,42 +594,44 @@ function runtimeFeaturesForPlans(
         keyedArrayPositionHints ||
         keyedArrayReorderHints ||
         keyedArrayRollingWindowHints);
-    const hintSuffix = keyedArrayStructuralPrependMapHints
-      ? "-structural-prepend-map-hinted"
-      : needsCombinedStructuralPrependRuntime
-        ? "-structural-prepend-hinted"
-        : keyedArrayStructuralAppendMapHints
-          ? "-structural-append-map-hinted"
-          : keyedArrayStructuralAppendHints
-            ? "-structural-append-hinted"
-            : keyedArrayWindowReplaceHints
-              ? arrayRangeHints || keyedArrayReorderHints
-                ? "-window-every-hinted"
-                : "-window-position-hinted"
-              : keyedArrayBatchInsertHints
+    const hintSuffix = keyedArrayMappedRollingWindowChainHints
+      ? "-mapped-rolling-window-hinted"
+      : keyedArrayStructuralPrependMapHints
+        ? "-structural-prepend-map-hinted"
+        : needsCombinedStructuralPrependRuntime
+          ? "-structural-prepend-hinted"
+          : keyedArrayStructuralAppendMapHints
+            ? "-structural-append-map-hinted"
+            : keyedArrayStructuralAppendHints
+              ? "-structural-append-hinted"
+              : keyedArrayWindowReplaceHints
                 ? arrayRangeHints || keyedArrayReorderHints
-                  ? "-batch-every-hinted"
-                  : "-batch-position-hinted"
-                : (keyedArrayPositionHints && (arrayRangeHints || keyedArrayReorderHints)) ||
-                    (keyedArrayReorderHints && arrayRangeHints)
-                  ? "-every-hinted"
-                  : keyedArrayRollingWindowHints
-                    ? "-all-hinted"
-                    : keyedArrayPositionHints
-                      ? "-position-hinted"
-                      : keyedArrayMapReorderHints && keyedRowsFeature === "keyed-rows"
-                        ? "-map-reorder-hinted"
-                        : keyedArrayReorderHints
-                          ? "-reorder-hinted"
-                          : keyedArrayFilterHints && keyedArrayPrependHints
-                            ? "-filter-prepend-hinted"
-                            : keyedArrayFilterHints
-                              ? "-filter-hinted"
-                              : keyedArrayPrependHints
-                                ? "-prepend-hinted"
-                                : keyedMapUpdateHints
-                                  ? "-hinted"
-                                  : "";
+                  ? "-window-every-hinted"
+                  : "-window-position-hinted"
+                : keyedArrayBatchInsertHints
+                  ? arrayRangeHints || keyedArrayReorderHints
+                    ? "-batch-every-hinted"
+                    : "-batch-position-hinted"
+                  : (keyedArrayPositionHints && (arrayRangeHints || keyedArrayReorderHints)) ||
+                      (keyedArrayReorderHints && arrayRangeHints)
+                    ? "-every-hinted"
+                    : keyedArrayRollingWindowHints
+                      ? "-all-hinted"
+                      : keyedArrayPositionHints
+                        ? "-position-hinted"
+                        : keyedArrayMapReorderHints && keyedRowsFeature === "keyed-rows"
+                          ? "-map-reorder-hinted"
+                          : keyedArrayReorderHints
+                            ? "-reorder-hinted"
+                            : keyedArrayFilterHints && keyedArrayPrependHints
+                              ? "-filter-prepend-hinted"
+                              : keyedArrayFilterHints
+                                ? "-filter-hinted"
+                                : keyedArrayPrependHints
+                                  ? "-prepend-hinted"
+                                  : keyedMapUpdateHints
+                                    ? "-hinted"
+                                    : "";
     features.add(`${keyedRowsFeature}${hintSuffix}` as CompilerRuntimeFeatureName);
   }
   return [...features].sort();
@@ -3006,6 +3021,8 @@ function rewriteQueuedKeyedArrayRollingWindowMapHints(
   mapUpdateIdentifier: t.Identifier,
   mapPipelineIdentifier: t.Identifier,
   queuedMapPipelineIdentifier: t.Identifier,
+  rollingWindowMapPipelineIdentifier: t.Identifier,
+  mappedRollingWindowIdentifier: t.Identifier,
   rollingWindowIdentifier: t.Identifier,
   structuralAppendIdentifier: t.Identifier,
   mappedStructuralAppendIdentifier: t.Identifier,
@@ -3013,6 +3030,8 @@ function rewriteQueuedKeyedArrayRollingWindowMapHints(
   mappedStructuralIdentifier: t.Identifier,
   allowed: boolean,
 ): {
+  chainedMapCount: number;
+  chainedRollingWindowCount: number;
   root: t.JSXElement;
   leadingMapCount: number;
   mappedRollingWindowCount: number;
@@ -3022,6 +3041,8 @@ function rewriteQueuedKeyedArrayRollingWindowMapHints(
 } {
   if (!allowed) {
     return {
+      chainedMapCount: 0,
+      chainedRollingWindowCount: 0,
       root: t.cloneNode(root, true),
       leadingMapCount: 0,
       mappedRollingWindowCount: 0,
@@ -3031,6 +3052,8 @@ function rewriteQueuedKeyedArrayRollingWindowMapHints(
     };
   }
   const file = expressionFile(t.cloneNode(root, true));
+  let chainedMapCount = 0;
+  let chainedRollingWindowCount = 0;
   let leadingMapCount = 0;
   let mappedRollingWindowCount = 0;
   let rollingWindowCount = 0;
@@ -3083,7 +3106,31 @@ function rewriteQueuedKeyedArrayRollingWindowMapHints(
         const rollingIndices = segment.flatMap((step, index) =>
           step.kind === "rolling" ? [index] : [],
         );
-        if (rollingIndices.length !== 1 || segment.length < 2) {
+        if (rollingIndices.length === 0 || segment.length < 2) {
+          segment = [];
+          segmentState = undefined;
+          return;
+        }
+        if (rollingIndices.length > 1) {
+          const maps = segment.filter((step) => step.kind === "map");
+          if (maps.length === 0) {
+            segment = [];
+            segmentState = undefined;
+            return;
+          }
+          for (const step of maps) {
+            if (step.kind !== "map") continue;
+            step.value.updater.body.callee = t.cloneNode(rollingWindowMapPipelineIdentifier);
+            chainedMapCount += step.value.count;
+          }
+          for (const index of rollingIndices) {
+            const step = segment[index];
+            if (step.kind === "rolling") {
+              step.value.call.callee = t.cloneNode(mappedRollingWindowIdentifier);
+            }
+          }
+          chainedRollingWindowCount += rollingIndices.length;
+          rollingWindowCount += rollingIndices.length;
           segment = [];
           segmentState = undefined;
           return;
@@ -3179,6 +3226,8 @@ function rewriteQueuedKeyedArrayRollingWindowMapHints(
     },
   });
   return {
+    chainedMapCount,
+    chainedRollingWindowCount,
     root: (file.program.body[0] as t.ExpressionStatement).expression as t.JSXElement,
     leadingMapCount,
     mappedRollingWindowCount,
@@ -8522,6 +8571,8 @@ function compileCandidate(
   keyedArrayMappedStructuralPrependIdentifier: t.Identifier,
   keyedArrayStructuralPrependMapPipelineIdentifier: t.Identifier,
   keyedArrayQueuedMapPipelineIdentifier: t.Identifier,
+  keyedArrayRollingWindowMapPipelineIdentifier: t.Identifier,
+  keyedArrayMappedRollingWindowIdentifier: t.Identifier,
   keyedArrayMapReorderIdentifier: t.Identifier,
   keyedArrayMappedStructuralIdentifier: t.Identifier,
   keyedArrayPrependIdentifier: t.Identifier,
@@ -8545,6 +8596,7 @@ function compileCandidate(
     keyedArrayPositionHints: number;
     keyedArrayReorderHints: number;
     keyedArraySortHints: number;
+    keyedArrayMappedRollingWindowChainHints: number;
     keyedArrayRollingWindowHints: number;
     keyedArraySliceHints: number;
     keyedCollectionUpdateHints: number;
@@ -8559,6 +8611,7 @@ function compileCandidate(
     keyedArrayMapSortHints: number;
     keyedArrayMapUpdateHints: number;
     keyedArrayMappedRollingWindowHints: number;
+    keyedArrayMappedRollingWindowChainHints: number;
     keyedArrayMappedStructuralHints: number;
     keyedArrayMappedStructuralAppendHints: number;
     keyedArrayMappedStructuralPrependHints: number;
@@ -9421,6 +9474,8 @@ function compileCandidate(
     keyedMapUpdateIdentifier,
     keyedArrayMapPipelineIdentifier,
     keyedArrayQueuedMapPipelineIdentifier,
+    keyedArrayRollingWindowMapPipelineIdentifier,
+    keyedArrayMappedRollingWindowIdentifier,
     keyedArrayRollingWindowIdentifier,
     keyedArrayAppendIdentifier,
     keyedArrayMappedStructuralAppendIdentifier,
@@ -9429,6 +9484,7 @@ function compileCandidate(
     allowKeyedArrayMapPipelines,
   );
   let appliedMappedRollingWindowHints = 0;
+  let appliedMappedRollingWindowChainHints = 0;
   if (queuedRollingWindowMapHintedRoot.rollingWindowCount > 0) {
     const hintedBlockAnalysis = analyzeComposableBlocks(
       queuedRollingWindowMapHintedRoot.root,
@@ -9450,19 +9506,29 @@ function compileCandidate(
       expandedReactiveRoot = queuedRollingWindowMapHintedRoot.root;
       blockAnalysis = hintedBlockAnalysis;
       analysis = hintedAnalysis;
-      appliedMappedRollingWindowHints = queuedRollingWindowMapHintedRoot.rollingWindowCount;
+      appliedMappedRollingWindowHints =
+        queuedRollingWindowMapHintedRoot.rollingWindowCount -
+        queuedRollingWindowMapHintedRoot.chainedRollingWindowCount;
+      appliedMappedRollingWindowChainHints =
+        queuedRollingWindowMapHintedRoot.chainedRollingWindowCount;
       appliedQueuedStructuralAppendMapHints +=
         queuedRollingWindowMapHintedRoot.mappedRollingWindowCount +
         queuedRollingWindowMapHintedRoot.trailingMapCount;
       compilerUsage.keyedArrayMapUpdateHints +=
         queuedRollingWindowMapHintedRoot.leadingMapCount +
-        queuedRollingWindowMapHintedRoot.trailingMapCount;
+        queuedRollingWindowMapHintedRoot.trailingMapCount +
+        queuedRollingWindowMapHintedRoot.chainedMapCount;
       compilerUsage.keyedArrayQueuedMapUpdateHints +=
         queuedRollingWindowMapHintedRoot.leadingMapCount;
       compilerUsage.keyedArrayStructuralAppendMapHints +=
         queuedRollingWindowMapHintedRoot.trailingMapCount;
       compilerUsage.keyedArrayMappedRollingWindowHints +=
-        queuedRollingWindowMapHintedRoot.mappedRollingWindowCount;
+        queuedRollingWindowMapHintedRoot.mappedRollingWindowCount +
+        queuedRollingWindowMapHintedRoot.chainedRollingWindowCount;
+      compilerUsage.keyedArrayMappedRollingWindowChainHints +=
+        queuedRollingWindowMapHintedRoot.chainedRollingWindowCount;
+      optimizationCounts.keyedArrayMappedRollingWindowChainHints +=
+        queuedRollingWindowMapHintedRoot.chainedRollingWindowCount;
       compilerUsage.keyedArrayMappedStructuralHints +=
         queuedRollingWindowMapHintedRoot.mappedRollingWindowCount;
       compilerUsage.keyedArrayStructuralRollingWindowHints +=
@@ -9686,6 +9752,7 @@ function compileCandidate(
       appliedQueuedReorderMapHints > 0 ||
       appliedQueuedMappedStructuralHints > 0 ||
       appliedQueuedStructuralMapHints > 0,
+    appliedMappedRollingWindowChainHints > 0,
     appliedKeyedArrayRollingWindowHints > appliedMappedRollingWindowHints,
   );
   markShortCircuitBindings(analysis.bindings || []);
@@ -9887,6 +9954,7 @@ export async function compileReactModule(
     keyedArrayPositionHints: 0,
     keyedArrayReorderHints: 0,
     keyedArraySortHints: 0,
+    keyedArrayMappedRollingWindowChainHints: 0,
     keyedArrayRollingWindowHints: 0,
     keyedArraySliceHints: 0,
     keyedCollectionUpdateHints: 0,
@@ -9901,6 +9969,7 @@ export async function compileReactModule(
     keyedArrayMapSortHints: 0,
     keyedArrayMapUpdateHints: 0,
     keyedArrayMappedRollingWindowHints: 0,
+    keyedArrayMappedRollingWindowChainHints: 0,
     keyedArrayMappedStructuralHints: 0,
     keyedArrayMappedStructuralAppendHints: 0,
     keyedArrayMappedStructuralPrependHints: 0,
@@ -9978,6 +10047,13 @@ export async function compileReactModule(
         const keyedArrayQueuedMapPipelineIdentifier = programPath.scope.generateUidIdentifier(
           "createCompilerKeyedArrayQueuedMapPipeline",
         );
+        const keyedArrayRollingWindowMapPipelineIdentifier =
+          programPath.scope.generateUidIdentifier(
+            "createCompilerKeyedArrayRollingWindowMapPipeline",
+          );
+        const keyedArrayMappedRollingWindowIdentifier = programPath.scope.generateUidIdentifier(
+          "createCompilerKeyedArrayMappedRollingWindow",
+        );
         const keyedArrayMapReorderIdentifier = programPath.scope.generateUidIdentifier(
           "createCompilerKeyedArrayMapReorder",
         );
@@ -10050,6 +10126,8 @@ export async function compileReactModule(
             keyedArrayMappedStructuralPrependIdentifier,
             keyedArrayStructuralPrependMapPipelineIdentifier,
             keyedArrayQueuedMapPipelineIdentifier,
+            keyedArrayRollingWindowMapPipelineIdentifier,
+            keyedArrayMappedRollingWindowIdentifier,
             keyedArrayMapReorderIdentifier,
             keyedArrayMappedStructuralIdentifier,
             keyedArrayPrependIdentifier,
@@ -10165,7 +10243,8 @@ export async function compileReactModule(
                     ]
                   : []),
                 ...(compilerUsage.keyedArrayMappedStructuralAppendHints > 0 ||
-                compilerUsage.keyedArrayMappedRollingWindowHints > 0
+                compilerUsage.keyedArrayMappedRollingWindowHints >
+                  compilerUsage.keyedArrayMappedRollingWindowChainHints
                   ? [
                       t.importSpecifier(
                         keyedArrayMappedStructuralAppendIdentifier,
@@ -10186,6 +10265,22 @@ export async function compileReactModule(
                       t.importSpecifier(
                         keyedArrayQueuedMapPipelineIdentifier,
                         t.identifier("createCompilerKeyedArrayQueuedMapPipeline"),
+                      ),
+                    ]
+                  : []),
+                ...(compilerUsage.keyedArrayMappedRollingWindowChainHints > 0
+                  ? [
+                      t.importSpecifier(
+                        keyedArrayRollingWindowMapPipelineIdentifier,
+                        t.identifier("createCompilerKeyedArrayRollingWindowMapPipeline"),
+                      ),
+                    ]
+                  : []),
+                ...(compilerUsage.keyedArrayMappedRollingWindowChainHints > 0
+                  ? [
+                      t.importSpecifier(
+                        keyedArrayMappedRollingWindowIdentifier,
+                        t.identifier("createCompilerKeyedArrayMappedRollingWindow"),
                       ),
                     ]
                   : []),

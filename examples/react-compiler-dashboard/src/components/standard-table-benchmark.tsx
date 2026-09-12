@@ -313,6 +313,62 @@ export function StandardTableBenchmark() {
           Map + roll window + map (snapshot control)
         </button>
         <button
+          data-action="table-roll-window-map-chain"
+          type="button"
+          onClick={() => {
+            const firstSeed = seed + 1;
+            const secondSeed = seed + 2;
+            const firstAdditions = buildRows(50, firstSeed);
+            const secondAdditions = buildRows(50, secondSeed);
+            const targetId = rows[100].id;
+            const trimCount = 50;
+            setSeed(secondSeed);
+            setRows((current) => [...current.slice(trimCount), ...firstAdditions]);
+            setRows((current) =>
+              current.map((row) =>
+                row.id === targetId
+                  ? { ...row, amount: row.amount + 1, label: `${row.label} reviewed` }
+                  : row,
+              ),
+            );
+            setRows((current) => [...current.slice(trimCount), ...secondAdditions]);
+            setOperation("map through two queued rolling windows");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Map through two rolling windows
+        </button>
+        <button
+          data-action="table-roll-window-map-chain-snapshot"
+          type="button"
+          onClick={() => {
+            const firstSeed = seed + 1;
+            const secondSeed = seed + 2;
+            const firstAdditions = buildRows(50, firstSeed);
+            const secondAdditions = buildRows(50, secondSeed);
+            const targetId = rows[100].id;
+            const trimCount = 50;
+            setSeed(secondSeed);
+            setRows((current) => {
+              return [...current.slice(trimCount), ...firstAdditions];
+            });
+            setRows((current) =>
+              current.map((row) =>
+                row.id === targetId
+                  ? { ...row, amount: row.amount + 1, label: `${row.label} reviewed` }
+                  : row,
+              ),
+            );
+            setRows((current) => {
+              return [...current.slice(trimCount), ...secondAdditions];
+            });
+            setOperation("map through two rolling windows (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Map through two rolling windows (snapshot control)
+        </button>
+        <button
           data-action="table-roll-window-queued"
           type="button"
           onClick={() => {

@@ -5,13 +5,17 @@ import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createCompiledComponent,
+  createCompiledComponentWithFeatures,
   createCompilerKeyedArrayMappedStructuralAppend,
+  createCompilerKeyedArrayMappedRollingWindow,
   createCompilerKeyedArrayQueuedMapPipeline,
   createCompilerKeyedArrayRollingWindow,
+  createCompilerKeyedArrayRollingWindowMapPipeline,
   createCompilerKeyedArraySlice,
   createCompilerKeyedArrayStructuralAppend,
   createCompilerKeyedArrayStructuralAppendMapPipeline,
   finalizeCompilerKeyedArrayMappedStructuralUpdate,
+  keyedRowsMappedRollingWindowHintedRuntimeFeature,
   type CompilerKeyedRowElement,
 } from "../compiler-runtime";
 
@@ -51,8 +55,22 @@ function hintedRoll(previous: Item[], remove: number, incoming: readonly Item[])
   ]) as Item[];
 }
 
+function hintedMappedRoll(previous: Item[], remove: number, incoming: readonly Item[]): Item[] {
+  const retained = createCompilerKeyedArraySlice(previous, previous.slice, remove) as Item[];
+  return createCompilerKeyedArrayMappedRollingWindow(previous, retained, [
+    ...retained,
+    ...incoming,
+  ]) as Item[];
+}
+
 function hintedQueuedMap(previous: Item[], mapper: (item: Item, index: number) => Item): Item[] {
   return createCompilerKeyedArrayQueuedMapPipeline(previous, (current, applyMap) =>
+    applyMap(current, (current as Item[]).map, mapper),
+  ) as Item[];
+}
+
+function hintedRollingMap(previous: Item[], mapper: (item: Item, index: number) => Item): Item[] {
+  return createCompilerKeyedArrayRollingWindowMapPipeline(previous, (current, applyMap) =>
     applyMap(current, (current as Item[]).map, mapper),
   ) as Item[];
 }
@@ -104,86 +122,123 @@ function createRollingHarness(initialItems: Item[], readsCollection = false) {
     before?: (item: Item, index: number) => Item,
     after?: (item: Item, index: number) => Item,
   ) => void = () => undefined;
-  const Feed = createCompiledComponent({
-    displayName: "RollingFeed",
-    initialize: () => [initialItems],
-    render(_props: Record<string, never>, state, blocks) {
-      counters.executions += 1;
-      const items = () => state[0].get() as Item[];
-      roll = (remove, incoming) =>
-        state[0].set((previous) => hintedRoll(previous as Item[], remove, incoming));
-      customRoll = (incoming) =>
-        state[0].set((previous) => {
-          const source = previous as Item[];
-          const method = function (this: Item[]) {
-            return Array.prototype.slice.call(this, 1).reverse();
-          };
-          const retained = createCompilerKeyedArraySlice(source, method, 1) as Item[];
-          return createCompilerKeyedArrayRollingWindow(source, retained, [
-            ...retained,
-            incoming,
-          ]) as Item[];
-        });
-      mappedRoll = (remove, incoming, before, after) => {
-        if (before) {
-          state[0].set((previous) => hintedQueuedMap(previous as Item[], before));
-        }
-        state[0].set((previous) =>
-          hintedStructuralRoll(previous as Item[], remove, incoming, before !== undefined),
-        );
-        if (after) {
-          state[0].set((previous) => hintedStructuralRollMap(previous as Item[], after));
-        }
-      };
-      const text = (item: Item) =>
-        readsCollection ? `${items().length}: ${item.label}` : item.label;
-      return (
-        <section>
-          <blocks.KeyedRows
-            collectionDependency={0}
-            dependencies={[0]}
-            filterIndexIndependent
-            id={0}
-            items={items}
-            structureDependencies={[0]}
-            render={() => {
-              counters.renders += 1;
-              return (
-                <ul>
-                  {items().map((item) => (
-                    <li data-key={item.id} key={item.id}>
-                      {text(item)}
-                    </li>
-                  ))}
-                </ul>
-              );
-            }}
-            rowKey={(item) => {
-              counters.keys += 1;
-              return (item as Item).id;
-            }}
-            create={(item) => {
-              counters.descriptors += 1;
-              const row = item as Item;
-              return rowDescriptor(row, text(row));
-            }}
-            bindings={[
-              {
-                kind: "text",
-                path: [],
-                dependencies: readsCollection ? [0] : [],
-                read: (item) => {
-                  counters.bindings += 1;
-                  return [text(item as Item)];
+  let mappedRollChain: (
+    firstRemove: number,
+    firstIncoming: readonly Item[],
+    secondRemove: number,
+    secondIncoming: readonly Item[],
+    before?: (item: Item, index: number) => Item,
+    middle?: (item: Item, index: number) => Item,
+    after?: (item: Item, index: number) => Item,
+  ) => void = () => undefined;
+  const Feed = createCompiledComponentWithFeatures(
+    {
+      displayName: "RollingFeed",
+      initialize: () => [initialItems],
+      render(_props: Record<string, never>, state, blocks) {
+        counters.executions += 1;
+        const items = () => state[0].get() as Item[];
+        roll = (remove, incoming) =>
+          state[0].set((previous) => hintedRoll(previous as Item[], remove, incoming));
+        customRoll = (incoming) =>
+          state[0].set((previous) => {
+            const source = previous as Item[];
+            const method = function (this: Item[]) {
+              return Array.prototype.slice.call(this, 1).reverse();
+            };
+            const retained = createCompilerKeyedArraySlice(source, method, 1) as Item[];
+            return createCompilerKeyedArrayRollingWindow(source, retained, [
+              ...retained,
+              incoming,
+            ]) as Item[];
+          });
+        mappedRoll = (remove, incoming, before, after) => {
+          if (before) {
+            state[0].set((previous) => hintedQueuedMap(previous as Item[], before));
+          }
+          state[0].set((previous) =>
+            hintedStructuralRoll(previous as Item[], remove, incoming, before !== undefined),
+          );
+          if (after) {
+            state[0].set((previous) => hintedStructuralRollMap(previous as Item[], after));
+          }
+        };
+        mappedRollChain = (
+          firstRemove,
+          firstIncoming,
+          secondRemove,
+          secondIncoming,
+          before,
+          middle,
+          after,
+        ) => {
+          if (before) {
+            state[0].set((previous) => hintedRollingMap(previous as Item[], before));
+          }
+          state[0].set((previous) =>
+            hintedMappedRoll(previous as Item[], firstRemove, firstIncoming),
+          );
+          if (middle) {
+            state[0].set((previous) => hintedRollingMap(previous as Item[], middle));
+          }
+          state[0].set((previous) =>
+            hintedMappedRoll(previous as Item[], secondRemove, secondIncoming),
+          );
+          if (after) {
+            state[0].set((previous) => hintedRollingMap(previous as Item[], after));
+          }
+        };
+        const text = (item: Item) =>
+          readsCollection ? `${items().length}: ${item.label}` : item.label;
+        return (
+          <section>
+            <blocks.KeyedRows
+              collectionDependency={0}
+              dependencies={[0]}
+              filterIndexIndependent
+              id={0}
+              items={items}
+              structureDependencies={[0]}
+              render={() => {
+                counters.renders += 1;
+                return (
+                  <ul>
+                    {items().map((item) => (
+                      <li data-key={item.id} key={item.id}>
+                        {text(item)}
+                      </li>
+                    ))}
+                  </ul>
+                );
+              }}
+              rowKey={(item) => {
+                counters.keys += 1;
+                return (item as Item).id;
+              }}
+              create={(item) => {
+                counters.descriptors += 1;
+                const row = item as Item;
+                return rowDescriptor(row, text(row));
+              }}
+              bindings={[
+                {
+                  kind: "text",
+                  path: [],
+                  dependencies: readsCollection ? [0] : [],
+                  read: (item) => {
+                    counters.bindings += 1;
+                    return [text(item as Item)];
+                  },
                 },
-              },
-            ]}
-          />
-        </section>
-      );
+              ]}
+            />
+          </section>
+        );
+      },
+      bindings: [{ kind: "block", id: 0, dependencies: [0] }],
     },
-    bindings: [{ kind: "block", id: 0, dependencies: [0] }],
-  });
+    [keyedRowsMappedRollingWindowHintedRuntimeFeature],
+  );
   return {
     Feed,
     counters,
@@ -194,6 +249,24 @@ function createRollingHarness(initialItems: Item[], readsCollection = false) {
       before?: (item: Item, index: number) => Item,
       after?: (item: Item, index: number) => Item,
     ) => mappedRoll(remove, incoming, before, after),
+    mappedRollChain: (
+      firstRemove: number,
+      firstIncoming: readonly Item[],
+      secondRemove: number,
+      secondIncoming: readonly Item[],
+      before?: (item: Item, index: number) => Item,
+      middle?: (item: Item, index: number) => Item,
+      after?: (item: Item, index: number) => Item,
+    ) =>
+      mappedRollChain(
+        firstRemove,
+        firstIncoming,
+        secondRemove,
+        secondIncoming,
+        before,
+        middle,
+        after,
+      ),
     roll: (remove: number, incoming: readonly Item[]) => roll(remove, incoming),
   };
 }
@@ -282,6 +355,101 @@ describe("compiled keyed-array rolling-window hints", () => {
     expect(harness.counters.keys).toBe(3);
     expect(harness.counters.descriptors).toBe(2);
     expect(harness.counters.bindings).toBe(3);
+  });
+
+  it("retains mapped lineage through multiple rolling windows and creates each incoming row once", async () => {
+    const initialItems = Array.from(
+      { length: 2_048 },
+      (_, index): Item => ({ id: `row-${index}`, label: `Row ${index}` }),
+    );
+    const harness = createRollingHarness(initialItems);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Feed />));
+    const survivor = container.querySelector('[data-key="row-1024"]');
+    const untouched = container.querySelector('[data-key="row-1536"]');
+    harness.counters.keys = 0;
+    harness.counters.descriptors = 0;
+    harness.counters.bindings = 0;
+
+    await act(async () => {
+      harness.mappedRollChain(
+        2,
+        [
+          { id: "row-2048", label: "Row 2048" },
+          { id: "row-2049", label: "Row 2049" },
+        ],
+        3,
+        [
+          { id: "row-2050", label: "Row 2050" },
+          { id: "row-2051", label: "Row 2051" },
+          { id: "row-2052", label: "Row 2052" },
+        ],
+        (item) => (item.id === "row-1024" ? { ...item, label: "Before roll" } : item),
+        (item) =>
+          item.id === "row-1024"
+            ? { ...item, label: "Between rolls" }
+            : item.id === "row-2048"
+              ? { ...item, label: "First incoming mapped" }
+              : item,
+        (item) =>
+          item.id === "row-1024"
+            ? { ...item, label: "After both rolls" }
+            : item.id === "row-2052"
+              ? { ...item, label: "Last incoming mapped" }
+              : item,
+      );
+      await flushCompilerUpdates();
+    });
+
+    for (let index = 0; index < 5; index += 1) {
+      expect(container.querySelector(`[data-key="row-${index}"]`)).toBeNull();
+    }
+    expect(container.querySelector('[data-key="row-1024"]')).toBe(survivor);
+    expect(container.querySelector('[data-key="row-1536"]')).toBe(untouched);
+    expect(survivor?.textContent).toBe("After both rolls");
+    expect(container.querySelector('[data-key="row-2048"]')?.textContent).toBe(
+      "First incoming mapped",
+    );
+    expect(container.querySelector("li:last-child")?.textContent).toBe("Last incoming mapped");
+    expect(container.querySelectorAll("li")).toHaveLength(2_048);
+    expect(harness.counters.executions).toBe(1);
+    expect(harness.counters.renders).toBe(1);
+    expect(harness.counters.keys).toBe(6);
+    expect(harness.counters.descriptors).toBe(5);
+    expect(harness.counters.bindings).toBe(6);
+  });
+
+  it("falls back before DOM writes when a later mapped rolling survivor changes key", async () => {
+    const harness = createRollingHarness(
+      ["a", "b", "c", "d"].map((id) => ({ id, label: id.toUpperCase() })),
+    );
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Feed />));
+    const delta = container.querySelector('[data-key="d"]');
+
+    await act(async () => {
+      harness.mappedRollChain(
+        1,
+        [{ id: "e", label: "E" }],
+        1,
+        [{ id: "f", label: "F" }],
+        (item) => (item.id === "b" ? { ...item, label: "B before" } : item),
+        (item) => (item.id === "c" ? { ...item, label: "C between" } : item),
+        (item) => (item.id === "c" ? { ...item, id: "renamed-c", label: "C after" } : item),
+      );
+      await flushCompilerUpdates();
+    });
+
+    expect(container.textContent).toBe("C afterDEF");
+    expect(container.querySelector('[data-key="c"]')).toBeNull();
+    expect(container.querySelector('[data-key="renamed-c"]')?.textContent).toBe("C after");
+    expect(container.querySelector('[data-key="d"]')).toBe(delta);
   });
 
   it("falls back atomically when a mapped rolling survivor changes key", async () => {
@@ -562,6 +730,7 @@ describe("compiled keyed-array rolling-window hints", () => {
     }));
     const calls: string[] = [];
     let queue = () => undefined;
+    let queueChain = () => undefined;
     const Feed = createCompiledComponent({
       displayName: "QueuedRollingInteractiveFeed",
       initialize: () => [initialItems],
@@ -587,6 +756,29 @@ describe("compiled keyed-array rolling-window hints", () => {
           state[0].set((previous) =>
             hintedStructuralRollMap(previous as Item[], (item) =>
               item.id === "d" ? { ...item, label: "DDDD mapped twice" } : item,
+            ),
+          );
+        };
+        queueChain = () => {
+          state[0].set((previous) =>
+            hintedRollingMap(previous as Item[], (item) =>
+              item.id === "e" ? { ...item, label: "EEEE before" } : item,
+            ),
+          );
+          state[0].set((previous) =>
+            hintedRoll(previous as Item[], 1, [{ id: "g", label: "GGGG" }]),
+          );
+          state[0].set((previous) =>
+            hintedRollingMap(previous as Item[], (item) =>
+              item.id === "e" ? { ...item, label: "EEEE between" } : item,
+            ),
+          );
+          state[0].set((previous) =>
+            hintedRoll(previous as Item[], 1, [{ id: "h", label: "HHHH" }]),
+          );
+          state[0].set((previous) =>
+            hintedRollingMap(previous as Item[], (item) =>
+              item.id === "e" ? { ...item, label: "EEEE after" } : item,
             ),
           );
         };
@@ -674,6 +866,22 @@ describe("compiled keyed-array rolling-window hints", () => {
     expect(document.activeElement).toBe(input);
     expect([input.selectionStart, input.selectionEnd]).toEqual([1, 3]);
     expect(calls).toEqual(["d:1"]);
+
+    const chainInput = container.querySelector('[data-key="e"] input') as HTMLInputElement;
+    chainInput.focus();
+    chainInput.setSelectionRange(0, 2);
+    await act(async () => {
+      queueChain();
+      await flushCompilerUpdates();
+    });
+    await act(async () => {
+      (container.querySelector('[data-row-button="h"]') as HTMLButtonElement).click();
+    });
+
+    expect(container.querySelector('[data-key="e"] input')).toBe(chainInput);
+    expect(document.activeElement).toBe(chainInput);
+    expect([chainInput.selectionStart, chainInput.selectionEnd]).toEqual([0, 2]);
+    expect(calls).toEqual(["d:1", "h:3"]);
   });
 
   it("matches normal React through 250 committed rolling updates", async () => {
@@ -952,6 +1160,163 @@ describe("compiled keyed-array rolling-window hints", () => {
     30_000,
   );
 
+  stressIt(
+    "matches React through 2,000 randomized mapped multi-window chains",
+    async () => {
+      const initialItems = Array.from(
+        { length: 48 },
+        (_, index): Item => ({ id: `chain-row-${index}`, label: `Chain row ${index}` }),
+      );
+      const harness = createRollingHarness(initialItems);
+      let updateReact: (
+        firstRemove: number,
+        firstIncoming: readonly Item[],
+        secondRemove: number,
+        secondIncoming: readonly Item[],
+        editedId: string,
+        firstIncomingId: string,
+        secondIncomingId: string,
+        update: number,
+      ) => void = () => undefined;
+      let expected = initialItems;
+      let seed = 0xc4a1ed;
+      let nextId = initialItems.length;
+      const random = () => {
+        seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0;
+        return seed;
+      };
+      const mapLabel = (items: readonly Item[], id: string, label: string): Item[] =>
+        items.map((item) => (item.id === id ? { ...item, label } : item));
+      function NormalFeed() {
+        const [items, setItems] = useState(initialItems);
+        updateReact = (
+          firstRemove,
+          firstIncoming,
+          secondRemove,
+          secondIncoming,
+          editedId,
+          firstIncomingId,
+          secondIncomingId,
+          update,
+        ) => {
+          setItems((previous) => mapLabel(previous, editedId, `Before ${update}`));
+          setItems((previous) => [...previous.slice(firstRemove), ...firstIncoming]);
+          setItems((previous) =>
+            mapLabel(
+              mapLabel(previous, editedId, `Middle ${update}`),
+              firstIncomingId,
+              `First incoming ${update}`,
+            ),
+          );
+          setItems((previous) => [...previous.slice(secondRemove), ...secondIncoming]);
+          setItems((previous) =>
+            mapLabel(
+              mapLabel(previous, editedId, `After ${update}`),
+              secondIncomingId,
+              `Second incoming ${update}`,
+            ),
+          );
+        };
+        return (
+          <ol>
+            {items.map((item) => (
+              <li key={item.id}>{item.label}</li>
+            ))}
+          </ol>
+        );
+      }
+      const compiledContainer = document.createElement("div");
+      const reactContainer = document.createElement("div");
+      document.body.append(compiledContainer, reactContainer);
+      const compiledRoot = createRoot(compiledContainer);
+      const reactRoot = createRoot(reactContainer);
+      roots.push(compiledRoot, reactRoot);
+      await act(async () => {
+        compiledRoot.render(<harness.Feed />);
+        reactRoot.render(<NormalFeed />);
+      });
+
+      for (let update = 0; update < 2_000; update += 1) {
+        const firstRemove = 1 + (random() % 3);
+        const secondRemove = 1 + (random() % 3);
+        const firstIncoming = Array.from({ length: firstRemove }, (): Item => {
+          const id = nextId++;
+          return { id: `chain-row-${id}`, label: `Chain row ${id}` };
+        });
+        const secondIncoming = Array.from({ length: secondRemove }, (): Item => {
+          const id = nextId++;
+          return { id: `chain-row-${id}`, label: `Chain row ${id}` };
+        });
+        const editedIndex = firstRemove + secondRemove + (random() % 20);
+        const editedId = expected[editedIndex].id;
+        const firstIncomingId = firstIncoming.at(-1)!.id;
+        const secondIncomingId = secondIncoming.at(-1)!.id;
+        const before = (item: Item) =>
+          item.id === editedId ? { ...item, label: `Before ${update}` } : item;
+        const middle = (item: Item) =>
+          item.id === editedId
+            ? { ...item, label: `Middle ${update}` }
+            : item.id === firstIncomingId
+              ? { ...item, label: `First incoming ${update}` }
+              : item;
+        const after = (item: Item) =>
+          item.id === editedId
+            ? { ...item, label: `After ${update}` }
+            : item.id === secondIncomingId
+              ? { ...item, label: `Second incoming ${update}` }
+              : item;
+
+        expected = mapLabel(expected, editedId, `Before ${update}`);
+        expected = [...expected.slice(firstRemove), ...firstIncoming];
+        expected = mapLabel(
+          mapLabel(expected, editedId, `Middle ${update}`),
+          firstIncomingId,
+          `First incoming ${update}`,
+        );
+        expected = [...expected.slice(secondRemove), ...secondIncoming];
+        expected = mapLabel(
+          mapLabel(expected, editedId, `After ${update}`),
+          secondIncomingId,
+          `Second incoming ${update}`,
+        );
+
+        await act(async () => {
+          harness.mappedRollChain(
+            firstRemove,
+            firstIncoming,
+            secondRemove,
+            secondIncoming,
+            before,
+            middle,
+            after,
+          );
+          updateReact(
+            firstRemove,
+            firstIncoming,
+            secondRemove,
+            secondIncoming,
+            editedId,
+            firstIncomingId,
+            secondIncomingId,
+            update,
+          );
+          await flushCompilerUpdates();
+        });
+        if (update % 50 === 0) {
+          expect(compiledContainer.textContent).toBe(reactContainer.textContent);
+        }
+      }
+
+      expect(compiledContainer.textContent).toBe(reactContainer.textContent);
+      expect([...compiledContainer.querySelectorAll("li")].map((row) => row.textContent)).toEqual(
+        expected.map((item) => item.label),
+      );
+      expect(harness.counters.executions).toBe(1);
+      expect(harness.counters.renders).toBe(1);
+    },
+    45_000,
+  );
+
   it("hydrates in StrictMode and drops a queued rolling update after unmount", async () => {
     const harness = createRollingHarness([
       { id: "a", label: "Alpha" },
@@ -1039,6 +1404,62 @@ describe("compiled keyed-array rolling-window hints", () => {
         ...item,
         label: `${item.label}!`,
       }));
+      root.unmount();
+    });
+    await flushCompilerUpdates();
+    expect(container.innerHTML).toBe("");
+  });
+
+  it("hydrates mapped rolling chains in StrictMode and cancels their pending flush", async () => {
+    const harness = createRollingHarness(
+      ["a", "b", "c", "d"].map((id) => ({ id, label: id.toUpperCase() })),
+    );
+    const container = document.createElement("div");
+    container.innerHTML = renderToString(
+      <StrictMode>
+        <harness.Feed />
+      </StrictMode>,
+    );
+    document.body.append(container);
+    const recoverable: unknown[] = [];
+    let root!: Root;
+    await act(async () => {
+      root = hydrateRoot(
+        container,
+        <StrictMode>
+          <harness.Feed />
+        </StrictMode>,
+        { onRecoverableError: (error) => recoverable.push(error) },
+      );
+    });
+    roots.push(root);
+
+    await act(async () => {
+      harness.mappedRollChain(
+        1,
+        [{ id: "e", label: "E" }],
+        1,
+        [{ id: "f", label: "F" }],
+        (item) => (item.id === "c" ? { ...item, label: "C before" } : item),
+        (item) => (item.id === "c" ? { ...item, label: "C middle" } : item),
+        (item) => (item.id === "c" ? { ...item, label: "C after" } : item),
+      );
+      await flushCompilerUpdates();
+    });
+    expect(container.textContent).toBe("C afterDEF");
+    expect(recoverable).toEqual([]);
+
+    roots.pop();
+    act(() => {
+      harness.mappedRollChain(
+        1,
+        [{ id: "g", label: "G" }],
+        1,
+        [{ id: "h", label: "H" }],
+        (item) => ({ ...item, label: `${item.label}!` }),
+        (item) => item,
+        (item) => item,
+      );
       root.unmount();
     });
     await flushCompilerUpdates();
