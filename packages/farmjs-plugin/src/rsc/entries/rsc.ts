@@ -29,6 +29,7 @@ export function generateRscEntry(ctx: EntryContext): string {
   const debugLog = `// Debug disabled`;
   let code = `
 import React from 'react';
+import { registerAPIRouteShape } from '@farm.js/core/api/runtime';
 import {
   renderToReadableStream,
 `;
@@ -191,9 +192,12 @@ const routeDefinitionModules = collectRouteModuleEntries([${routeSourceRoots
 
 const apiRouteMethods = ['GET', 'HEAD', 'QUERY', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'];
 const apiRouteMap = new Map();
+const apiRouteShapes = new Map();
 
 function registerApiEndpoint(routePath, filePath, method, endpoint, sourceIndex) {
   if (!routePath || typeof endpoint !== 'function') return;
+  const replacedPath = registerAPIRouteShape(apiRouteShapes, routePath, filePath, sourceIndex);
+  if (replacedPath) apiRouteMap.delete(replacedPath);
   const normalizedMethod = String(method || 'GET').toUpperCase();
   let route = apiRouteMap.get(routePath);
   if (!route) {

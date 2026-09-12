@@ -12,6 +12,12 @@ Expose HTTP handlers from src/app/api and validate input with schemas before han
 
 API route modules export HTTP methods. Farm discovers them, runs the route pipeline, and can generate typed client callers from the route shape.
 
+Routes in one app source must have distinct URL shapes. For example, `/api/users/[id]` and
+`/api/users/[slug]` conflict even though their parameter names differ. Parameters must have unique,
+non-reserved names, and catch-alls must be the final segment. These checks also run in RSC builds.
+If a project overrides a layer's equivalent dynamic shape, the project route replaces it completely,
+so handlers do not receive parameters named by the lower-priority route.
+
 **src/app/api/hello/route.ts**
 
 ```ts

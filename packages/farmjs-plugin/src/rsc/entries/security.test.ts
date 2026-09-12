@@ -1,3 +1,4 @@
+import { registerAPIRouteShape } from "@farm.js/core/api/runtime";
 import { describe, expect, it } from "vitest";
 import { transformWithEsbuild } from "vite";
 import {
@@ -153,8 +154,9 @@ describe("generated server action security", () => {
     const registryStart = entry.indexOf("const apiRouteMethods =");
     const registryEnd = entry.indexOf("\n\nregisterApiRouteSources(apiRouteModules", registryStart);
     const { apiRouteMap, registerApiRouteSources } = new Function(
+      "registerAPIRouteShape",
       `${entry.slice(registryStart, registryEnd)}; return { apiRouteMap, registerApiRouteSources };`,
-    )() as {
+    )(registerAPIRouteShape) as {
       apiRouteMap: Map<
         string,
         { path: string; methods: string[]; handlers: Record<string, Function> }
@@ -443,8 +445,9 @@ describe("generated server action security", () => {
     const registryStart = entry.indexOf("const apiRouteMethods =");
     const registryEnd = entry.indexOf("\n\nregisterApiRouteSources(apiRouteModules", registryStart);
     const { apiRouteMap, registerApiRouteSources } = new Function(
+      "registerAPIRouteShape",
       `${entry.slice(registryStart, registryEnd)}; return { apiRouteMap, registerApiRouteSources };`,
-    )() as {
+    )(registerAPIRouteShape) as {
       apiRouteMap: Map<string, { handlers: Record<string, Function> }>;
       registerApiRouteSources: (
         fileModules: unknown[],
@@ -466,8 +469,9 @@ describe("generated server action security", () => {
     const registryStart = entry.indexOf("const apiRouteMethods =");
     const registryEnd = entry.indexOf("\n\nregisterApiRouteSources(apiRouteModules", registryStart);
     const { registerApiRouteSources } = new Function(
+      "registerAPIRouteShape",
       `${entry.slice(registryStart, registryEnd)}; return { registerApiRouteSources };`,
-    )() as {
+    )(registerAPIRouteShape) as {
       registerApiRouteSources: (
         fileModules: unknown[],
         definitionModules: Array<{
@@ -521,8 +525,9 @@ describe("generated server action security", () => {
     const registryStart = entry.indexOf("const apiRouteMethods =");
     const registryEnd = entry.indexOf("\n\nregisterApiRouteSources(apiRouteModules", registryStart);
     const { apiRouteMap, registerApiRouteSources } = new Function(
+      "registerAPIRouteShape",
       `${entry.slice(registryStart, registryEnd)}; return { apiRouteMap, registerApiRouteSources };`,
-    )() as {
+    )(registerAPIRouteShape) as {
       apiRouteMap: Map<string, { handlers: Record<string, Function> }>;
       registerApiRouteSources: (
         fileModules: Array<{

@@ -15,6 +15,8 @@ import { resolveFarmAPICanonicalPathname } from "./server-path";
 import { compareRouteSpecificity, type RouteSegmentSpecificity } from "../routing/specificity";
 import { omitFarmResponseBody } from "../response-body";
 
+export { registerAPIRouteShape, type APIRouteShapeSource } from "./route-shape";
+
 export type APIRouteParamValue = string | string[];
 export type APIRouteParams = Record<string, APIRouteParamValue>;
 
