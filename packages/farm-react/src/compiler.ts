@@ -1236,38 +1236,79 @@ function isSafeKeyedMapReplacement(
   return spreadsItem;
 }
 
-function isSafeKeyedMapResult(
+type SafeKeyedMapBranchProof = { replacement: boolean; unchanged: boolean };
+
+function mergeSafeKeyedMapBranchProofs(
+  left: SafeKeyedMapBranchProof,
+  right: SafeKeyedMapBranchProof,
+): SafeKeyedMapBranchProof {
+  return {
+    replacement: left.replacement || right.replacement,
+    unchanged: left.unchanged || right.unchanged,
+  };
+}
+
+function proveSafeKeyedMapExpression(
   expression: t.Expression,
   item: t.Identifier,
   safeGlobals: ReadonlySet<string>,
-): boolean {
-  type BranchProof = { replacement: boolean; unchanged: boolean };
-  const proveBranch = (branch: t.Expression): BranchProof | undefined => {
-    if (isUnchangedMapItem(branch, item)) return { replacement: false, unchanged: true };
-    if (isSafeKeyedMapReplacement(branch, item, safeGlobals)) {
-      return { replacement: true, unchanged: false };
-    }
-    if (!t.isConditionalExpression(branch)) return undefined;
-    if (validateDerivedExpression(branch.test, safeGlobals)) return undefined;
-    const consequent = proveBranch(branch.consequent);
-    const alternate = proveBranch(branch.alternate);
-    if (!consequent || !alternate) return undefined;
-    return {
-      replacement: consequent.replacement || alternate.replacement,
-      unchanged: consequent.unchanged || alternate.unchanged,
-    };
-  };
+): SafeKeyedMapBranchProof | undefined {
+  if (isUnchangedMapItem(expression, item)) return { replacement: false, unchanged: true };
+  if (isSafeKeyedMapReplacement(expression, item, safeGlobals)) {
+    return { replacement: true, unchanged: false };
+  }
+  if (!t.isConditionalExpression(expression)) return undefined;
+  if (validateDerivedExpression(expression.test, safeGlobals)) return undefined;
+  const consequent = proveSafeKeyedMapExpression(expression.consequent, item, safeGlobals);
+  const alternate = proveSafeKeyedMapExpression(expression.alternate, item, safeGlobals);
+  return consequent && alternate ? mergeSafeKeyedMapBranchProofs(consequent, alternate) : undefined;
+}
 
-  if (!t.isConditionalExpression(expression)) return false;
-  if (validateDerivedExpression(expression.test, safeGlobals)) return false;
-  const consequent = proveBranch(expression.consequent);
-  const alternate = proveBranch(expression.alternate);
-  return Boolean(
-    consequent &&
-    alternate &&
-    (consequent.replacement || alternate.replacement) &&
-    (consequent.unchanged || alternate.unchanged),
-  );
+function proveSafeKeyedMapStatement(
+  statement: t.Statement,
+  item: t.Identifier,
+  safeGlobals: ReadonlySet<string>,
+): SafeKeyedMapBranchProof | undefined {
+  return t.isBlockStatement(statement)
+    ? proveSafeKeyedMapStatements(statement.body, item, safeGlobals)
+    : proveSafeKeyedMapStatements([statement], item, safeGlobals);
+}
+
+function proveSafeKeyedMapStatements(
+  statements: readonly t.Statement[],
+  item: t.Identifier,
+  safeGlobals: ReadonlySet<string>,
+): SafeKeyedMapBranchProof | undefined {
+  const [statement, ...remaining] = statements;
+  if (!statement) return undefined;
+  if (t.isReturnStatement(statement)) {
+    if (remaining.length > 0 || !statement.argument || !t.isExpression(statement.argument)) {
+      return undefined;
+    }
+    return proveSafeKeyedMapExpression(statement.argument, item, safeGlobals);
+  }
+  if (!t.isIfStatement(statement) || validateDerivedExpression(statement.test, safeGlobals)) {
+    return undefined;
+  }
+
+  const consequent = proveSafeKeyedMapStatement(statement.consequent, item, safeGlobals);
+  const alternate = statement.alternate
+    ? remaining.length === 0
+      ? proveSafeKeyedMapStatement(statement.alternate, item, safeGlobals)
+      : undefined
+    : proveSafeKeyedMapStatements(remaining, item, safeGlobals);
+  return consequent && alternate ? mergeSafeKeyedMapBranchProofs(consequent, alternate) : undefined;
+}
+
+function isSafeKeyedMapBody(
+  body: t.BlockStatement | t.Expression,
+  item: t.Identifier,
+  safeGlobals: ReadonlySet<string>,
+): boolean {
+  const proof = t.isBlockStatement(body)
+    ? proveSafeKeyedMapStatements(body.body, item, safeGlobals)
+    : proveSafeKeyedMapExpression(body, item, safeGlobals);
+  return Boolean(proof?.replacement && proof.unchanged);
 }
 
 function keyedMapUpdatePipeline(
@@ -1293,8 +1334,7 @@ function keyedMapUpdatePipeline(
       callback.params.length === 0 ||
       callback.params.length > 3 ||
       callback.params.some((parameter) => !t.isIdentifier(parameter)) ||
-      !t.isExpression(callback.body) ||
-      !isSafeKeyedMapResult(callback.body, callback.params[0] as t.Identifier, safeGlobals)
+      !isSafeKeyedMapBody(callback.body, callback.params[0] as t.Identifier, safeGlobals)
     ) {
       return undefined;
     }
@@ -2041,8 +2081,7 @@ function keyedArrayReorderPipeline(
         callback.params.length === 0 ||
         callback.params.length > 3 ||
         callback.params.some((parameter) => !t.isIdentifier(parameter)) ||
-        !t.isExpression(callback.body) ||
-        !isSafeKeyedMapResult(callback.body, callback.params[0] as t.Identifier, safeGlobals)
+        !isSafeKeyedMapBody(callback.body, callback.params[0] as t.Identifier, safeGlobals)
       ) {
         return undefined;
       }

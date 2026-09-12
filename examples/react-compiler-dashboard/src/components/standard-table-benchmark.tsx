@@ -326,13 +326,15 @@ export function StandardTableBenchmark() {
             setSeed(secondSeed);
             setRows((current) => [...current.slice(trimCount), ...firstAdditions]);
             setRows((current) =>
-              current.map((row) =>
-                row.id === reviewedId
-                  ? { ...row, amount: row.amount + 1, label: `${row.label} reviewed` }
-                  : row.id === escalatedId
-                    ? { ...row, amount: row.amount + 2, label: `${row.label} escalated` }
-                  : row,
-              ),
+              current.map((row) => {
+                if (row.id === reviewedId) {
+                  return { ...row, amount: row.amount + 1, label: `${row.label} reviewed` };
+                }
+                if (row.id === escalatedId) {
+                  return { ...row, amount: row.amount + 2, label: `${row.label} escalated` };
+                }
+                return row;
+              }),
             );
             setRows((current) => [...current.slice(trimCount), ...secondAdditions]);
             setOperation("map through two queued rolling windows");

@@ -146,6 +146,50 @@ describe("React AOT keyed update hints", () => {
     });
   });
 
+  it("records structured block-bodied maps with safe returning paths", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Inventory({ firstId, secondId, firstLabel, secondLabel }) {
+        const [items, setItems] = useState([
+          { id: "a", label: "Alpha", selected: false },
+          { id: "b", label: "Beta", selected: false },
+        ]);
+        return (
+          <section>
+            <button onClick={() => setItems((current) => current
+              .map((row) => {
+                if (row.id === firstId) {
+                  return { ...row, label: firstLabel };
+                }
+                if (row.id === secondId) return { ...row, label: secondLabel };
+                return row;
+              })
+              .map((row) => {
+                return row.id === firstId ? { ...row, selected: true } : row;
+              })
+            )}>Update two rows</button>
+            <ul>{items.map((item) => <li key={item.id}>{item.label}</li>)}</ul>
+          </section>
+        );
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Inventory"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.optimizations.keyedMapUpdateHints).toBe(2);
+    expect(result.code.match(/createCompilerKeyedMapUpdate\(/g)).toHaveLength(1);
+    expect(result.code.match(/_farmApplyMap\d*\(/g)).toHaveLength(2);
+    expect(result.code).toContain("keyedRowsHintedRuntimeFeature");
+    await expect(
+      transformWithEsbuild(result.code, "/app/KeyedUpdateHints.tsx", {
+        loader: "tsx",
+        jsx: "automatic",
+      }),
+    ).resolves.toMatchObject({
+      code: expect.stringContaining("createCompilerKeyedMapUpdate"),
+    });
+  });
+
   it("supports direct-state public List rows without adding a public option", async () => {
     const result = await compile(`
       import { useState } from "react";
@@ -179,11 +223,32 @@ describe("React AOT keyed update hints", () => {
         'setItems((current) => current.map((row) => row.id === "a" ? { ...row, label: "Updated" } : row))',
     },
     {
-      name: "a block-bodied mapper",
+      name: "a block-bodied mapper with an intermediate declaration",
       declaration: "",
       collection: "items",
       update:
-        'setItems((current) => current.map((row) => { return row.id === "a" ? { ...row, label: "Updated" } : row; }))',
+        'setItems((current) => current.map((row) => { const matches = row.id === "a"; return matches ? { ...row, label: "Updated" } : row; }))',
+    },
+    {
+      name: "an effectful block condition",
+      declaration: 'const matches = (row) => row.id === "a";',
+      collection: "items",
+      update:
+        'setItems((current) => current.map((row) => { if (matches(row)) return { ...row, label: "Updated" }; return row; }))',
+    },
+    {
+      name: "a block body that can fall through",
+      declaration: "",
+      collection: "items",
+      update:
+        'setItems((current) => current.map((row) => { if (row.id === "a") return { ...row, label: "Updated" }; }))',
+    },
+    {
+      name: "a block body that replaces every row",
+      declaration: "",
+      collection: "items",
+      update:
+        'setItems((current) => current.map((row) => { if (row.id === "a") return { ...row, label: "Updated" }; return { ...row, label: "Other" }; }))',
     },
     {
       name: "an unsupported second mapper",
