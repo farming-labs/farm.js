@@ -916,17 +916,19 @@ setItems((current) =>
 ```
 
 This needs no option or component primitive. At build time, Farm recognizes a functional setter on
-the direct `useState` collection used by a compiled keyed map or `List`. The setter may contain one
-or more consecutive `map()` calls. Every mapper must be an inline arrow whose returning paths are
-conditional: at least one path returns the original item and another returns a new object that
-spreads that item. This may be a concise expression or a structured block made from fully returning
-`if` or `switch` branches plus immutable local `const` aliases. Each alias needs a simple identifier
-and a compiler-safe initializer. A `switch` needs one `default`, a complete return from every case,
-and no trailing statements. Consecutive empty case labels may share the next fully returning body;
-a case that executes anything before falling through, or a final label with no body, is rejected.
-Its discriminant, case tests, conditions, and replacement values must use the same safe expression
-subset. The hint runtime is retained only in modules where at least one such call is emitted;
-direct-only and ordinary keyed builds do not import that capability.
+the direct `useState` collection used by a compiled keyed map or `List`. The setter may be concise or
+use a block containing exactly one value-returning `return`, and that returned expression may contain
+one or more consecutive `map()` calls. Extra updater statements, conditional returns, or a missing
+return keep complete keyed reconciliation. Every mapper must be an inline arrow whose returning
+paths are conditional: at least one path returns the original item and another returns a new object
+that spreads that item. This may be a concise expression or a structured block made from fully
+returning `if` or `switch` branches plus immutable local `const` aliases. Each alias needs a simple
+identifier and a compiler-safe initializer. A `switch` needs one `default`, a complete return from
+every case, and no trailing statements. Consecutive empty case labels may share the next fully
+returning body; a case that executes anything before falling through, or a final label with no body,
+is rejected. Its discriminant, case tests, conditions, and replacement values must use the same safe
+expression subset. The hint runtime is retained only in modules where at least one such call is
+emitted; direct-only and ordinary keyed builds do not import that capability.
 
 ```tsx
 setItems((current) =>
@@ -1398,8 +1400,9 @@ setItems((current) =>
 );
 ```
 
-For a concise functional setter, Farm can prepare one or more consecutive safe same-key `map()`
-calls before or after native `toSorted()` or `toReversed()` calls as one update pipeline.
+For a concise functional setter or a setter block containing exactly one direct `return`, Farm can
+prepare one or more consecutive safe same-key `map()` calls before or after native `toSorted()` or
+`toReversed()` calls as one update pipeline.
 JavaScript still performs every map and reorder normally. For two or more accepted maps, the
 compiler runtime checks each native call as it completes but records replacement lineage only once,
 by comparing the input and final result of each consecutive map segment. The intermediate arrays
@@ -1604,7 +1607,8 @@ setters too. For example, a queued reverse followed by a safe map and another re
 changed row in committed order without moving DOM rows or constructing the generic source map. A
 sort or any other order ambiguity keeps the general permutation path.
 
-The proof requires every map callback to be inline, synchronous, compiler-safe, and to return the
+The setter may be concise or a block with exactly one direct value-returning `return`. The proof
+requires every map callback to be inline, synchronous, compiler-safe, and to return the
 original item on one conditional path and an object-spread replacement on another. Concise
 expressions and structured blocks containing proven local `const` aliases plus fully returning `if`
 or `switch` branches are accepted. It requires compiler-owned host rows whose render and key do not observe the index.

@@ -108,6 +108,43 @@ describe("React AOT keyed update hints", () => {
     });
   });
 
+  it("records keyed maps returned from a block-bodied state updater", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Inventory({ editedId, nextLabel }) {
+        const [items, setItems] = useState([
+          { id: "a", label: "Alpha", selected: false },
+          { id: "b", label: "Beta", selected: false },
+        ]);
+        return (
+          <section>
+            <button onClick={() => setItems((current) => {
+              return current
+                .map((row) => row.id === editedId ? { ...row, label: nextLabel } : row)
+                .map((row) => row.id === editedId ? { ...row, selected: true } : row);
+            })}>Update</button>
+            <ul>{items.map((item) => <li key={item.id}>{item.label}</li>)}</ul>
+          </section>
+        );
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Inventory"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.optimizations.keyedMapUpdateHints).toBe(2);
+    expect(result.code.match(/createCompilerKeyedMapUpdate\(/g)).toHaveLength(1);
+    expect(result.code.match(/_farmApplyMap\d*\(/g)).toHaveLength(2);
+    expect(result.code).toContain("keyedRowsHintedRuntimeFeature");
+    await expect(
+      transformWithEsbuild(result.code, "/app/KeyedUpdateHints.tsx", {
+        loader: "tsx",
+        jsx: "automatic",
+      }),
+    ).resolves.toMatchObject({
+      code: expect.stringContaining("createCompilerKeyedMapUpdate"),
+    });
+  });
+
   it("records one keyed update for a safe multi-branch map", async () => {
     const result = await compile(`
       import { useState } from "react";
@@ -312,6 +349,27 @@ describe("React AOT keyed update hints", () => {
       collection: "visible",
       update:
         'setItems((current) => current.map((row) => row.id === "a" ? { ...row, label: "Updated" } : row))',
+    },
+    {
+      name: "an updater block with statements before its return",
+      declaration: "",
+      collection: "items",
+      update:
+        'setItems((current) => { const next = current.map((row) => row.id === "a" ? { ...row, label: "Updated" } : row); return next; })',
+    },
+    {
+      name: "an updater block with conditional returns",
+      declaration: "",
+      collection: "items",
+      update:
+        'setItems((current) => { if (current.length > 0) return current.map((row) => row.id === "a" ? { ...row, label: "Updated" } : row); return current; })',
+    },
+    {
+      name: "an updater block without a return",
+      declaration: "",
+      collection: "items",
+      update:
+        'setItems((current) => { current.map((row) => row.id === "a" ? { ...row, label: "Updated" } : row); })',
     },
     {
       name: "a mutable local declaration",

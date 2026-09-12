@@ -1432,12 +1432,17 @@ function rewriteKeyedMapUpdateHints(
         updater.async ||
         updater.generator ||
         updater.params.length !== 1 ||
-        !t.isIdentifier(updater.params[0]) ||
-        !t.isExpression(updater.body)
+        !t.isIdentifier(updater.params[0])
       ) {
         return;
       }
-      const callbacks = keyedMapUpdatePipeline(updater.body, updater.params[0].name, safeGlobals);
+      const updateExpression = returnedExpression(updater);
+      if (!updateExpression) return;
+      const callbacks = keyedMapUpdatePipeline(
+        updateExpression,
+        updater.params[0].name,
+        safeGlobals,
+      );
       if (!callbacks) return;
 
       const previous = t.cloneNode(updater.params[0]);
