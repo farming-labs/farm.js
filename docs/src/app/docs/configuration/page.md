@@ -811,6 +811,8 @@ Prefer a CI release or commit identifier when a deployment runs on multiple serv
 
 ## Production notes
 
+- Production route discovery disables filesystem watching, including when `vite.server.watch`
+  is configured. That option still applies to development; a one-shot build does not need a live watcher.
 - Keep secrets in environment variables, not committed config.
 - Use `storage.driver` and `storage.mounts` for KV data read through `getStorage()`.
 - Use a raw object at `storage.client` only when schema-backed integrations need a database client; see [Database and ORM Clients](/docs/integrations/orm-storage).

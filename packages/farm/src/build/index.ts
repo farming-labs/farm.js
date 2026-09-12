@@ -333,6 +333,9 @@ async function createProjectModuleServer(
       ...viteConfig.server,
       middlewareMode: true,
       hmr: false,
+      // This server only loads modules for a single build. HMR alone does not
+      // disable filesystem watching, which can race with generated output.
+      watch: null,
     },
     optimizeDeps: {
       ...viteConfig.optimizeDeps,
