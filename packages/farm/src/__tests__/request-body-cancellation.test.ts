@@ -2,7 +2,97 @@
 import { setImmediate } from "node:timers/promises";
 import { expect, it, vi } from "vitest";
 import { invokeAPIRouteEndpoint } from "../api/runtime";
-import { bufferFarmRequestBody } from "../server-http";
+import { bufferFarmRequestBody, readFarmRequestBody } from "../server-http";
+
+it.each([false, true])(
+  "does not dispatch an upload aborted during a pending read (cloned: %s)",
+  async (cloned) => {
+    const abort = new AbortController();
+    const reason = new Error("upload disconnected");
+    let beganRead!: () => void;
+    const reading = new Promise<void>((resolve) => {
+      beganRead = resolve;
+    });
+    let sent = false;
+    const source = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          if (!sent) {
+            sent = true;
+            controller.enqueue(new TextEncoder().encode("partial"));
+          } else {
+            beganRead();
+          }
+        },
+      },
+      { highWaterMark: 0 },
+    );
+    const original = new Request("https://farm.test/api/upload", {
+      method: "POST",
+      body: source,
+      duplex: "half",
+      signal: abort.signal,
+    } as RequestInit);
+    const request = cloned ? original.clone() : original;
+    const endpoint = vi.fn(() => new Response("handler ran"));
+    let failure: unknown;
+    let completed = false;
+    const handling = invokeAPIRouteEndpoint(endpoint, request)
+      .catch((error) => {
+        failure = error;
+      })
+      .finally(() => {
+        completed = true;
+      });
+    try {
+      await reading;
+      abort.abort(reason);
+      await vi.waitFor(() => expect(completed).toBe(true));
+      expect(failure).toBe(reason);
+      expect(endpoint).not.toHaveBeenCalled();
+      expect(request.body!.locked).toBe(false);
+    } finally {
+      if (cloned) await original.body!.cancel();
+      await handling;
+    }
+  },
+);
+
+it("rejects an already-aborted upload with its original reason", async () => {
+  const reason = new Error("already disconnected");
+  const request = new Request("https://farm.test/api/upload", {
+    method: "POST",
+    body: "partial",
+    signal: AbortSignal.abort(reason),
+  });
+  const endpoint = vi.fn();
+  await expect(invokeAPIRouteEndpoint(endpoint, request)).rejects.toBe(reason);
+  expect(endpoint).not.toHaveBeenCalled();
+});
+
+it("does not mistake cancellation of an empty pending read for EOF", async () => {
+  const abort = new AbortController();
+  const request = new Request("https://farm.test/api/upload", {
+    method: "POST",
+    duplex: "half",
+    signal: abort.signal,
+    body: new ReadableStream<Uint8Array>(),
+  } as RequestInit);
+  const reading = readFarmRequestBody(request, 100);
+  const assertion = expect(reading).rejects.toMatchObject({ name: "AbortError" });
+  abort.abort();
+  await assertion;
+  expect(request.body!.locked).toBe(false);
+});
+
+it("accepts normal EOF without treating an empty upload as aborted", async () => {
+  const request = new Request("https://farm.test/api/upload", { method: "POST", body: "" });
+  const endpoint = vi.fn(async (request: Request) => new Response(await request.text()));
+  const response = await invokeAPIRouteEndpoint(endpoint, request);
+  expect(response.status).toBe(200);
+  expect(await response.text()).toBe("");
+  expect(endpoint).toHaveBeenCalledOnce();
+});
 
 it.each([
   { length: "3", status: 413 },

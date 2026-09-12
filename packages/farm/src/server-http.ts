@@ -310,6 +310,8 @@ export async function readFarmRequestBody(request: Request, limit: number): Prom
     while (true) {
       throwIfAborted(request.signal);
       const { done, value } = await reader.read();
+      // Cancellation resolves a pending read as EOF, not necessarily an error.
+      throwIfAborted(request.signal);
       if (done) break;
       if (!value) continue;
 
