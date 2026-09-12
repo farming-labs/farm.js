@@ -2,9 +2,31 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { format } from "oxfmt";
 import { APITypeGenerator } from "../type-generator";
 
 describe("APITypeGenerator", () => {
+  it("emits a route manifest that survives formatting unchanged", async () => {
+    const generator = new APITypeGenerator("/tmp/app");
+    for (const routes of [
+      [],
+      [
+        {
+          path: "/api/uploads/[id]",
+          methods: ["GET", "HEAD", "QUERY", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+          filePath: "/tmp/app/api/uploads/[id]/route.ts",
+          relativePath: "api/uploads/[id]/route.ts",
+        },
+      ],
+    ]) {
+      const source = generator.generateAPIRouter(routes);
+      const manifest = source.slice(source.indexOf("export const apiRoutes"));
+      const formatted = await format("api.generated.ts", manifest);
+      expect(formatted.errors).toEqual([]);
+      expect(formatted.code).toBe(manifest);
+    }
+  });
+
   it("quotes invalid TypeScript property keys in generated router types", () => {
     const generator = new APITypeGenerator("/tmp/app");
 

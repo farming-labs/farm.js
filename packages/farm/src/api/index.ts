@@ -5,3 +5,4 @@ export * from "./config";
 export { resolveFarmAPIServerBasePath } from "./server-path";
 export * from "./transport";
 export * from "./vite-plugin";
+export * from "./route";

@@ -14,6 +14,8 @@ import { readFarmI18nCatalogs } from "./i18n/catalog";
 import type { ResolvedFarmI18nConfig } from "./i18n/types";
 import { getFarmAppDirectories, getFarmSourceRoots, type ResolvedFarmLayer } from "./layers";
 import { writeFileIfChanged } from "./write-file-if-changed";
+import type { FarmPlugin } from "./plugin";
+import { resolvePluginRoutes } from "./api/route";
 
 export { generateFarmI18nTypes };
 
@@ -21,6 +23,7 @@ export interface GenerateFarmTypeArtifactsOptions {
   root: string;
   srcDir?: string;
   configPath?: string;
+  plugins?: readonly FarmPlugin[];
   extraRoutes?: string[];
   layers?: readonly ResolvedFarmLayer[];
   suppressLintOnLink?: boolean;
@@ -113,7 +116,36 @@ export async function generateFarmTypeArtifacts(
     const apiTypesPath = options.apiTypesOutFile
       ? resolve(root, options.apiTypesOutFile)
       : join(root, srcDir, "lib", "api.generated.ts");
-    const content = generator.generateAPIRouter(apiRoutes, { outFile: apiTypesPath });
+    const pluginRoutes = resolvePluginRoutes(options.plugins);
+    const configFiles = [
+      ...(options.layers ?? [])
+        .map((layer) => layer.configFile)
+        .filter((file): file is string => Boolean(file)),
+      options.configPath
+        ? resolve(root, options.configPath)
+        : [
+            "farm.config.ts",
+            "farm.config.mts",
+            "farm.config.js",
+            "farm.config.mjs",
+            "farm.config.cts",
+            "farm.config.cjs",
+            "config.ts",
+            "config.js",
+          ]
+            .map((name) => join(root, name))
+            .find((file) => existsSync(file)),
+    ].filter((file): file is string => Boolean(file));
+    if (pluginRoutes.length && !configFiles.length) {
+      throw new Error(
+        "Cannot generate plugin API types without a Farm config file. Pass configPath.",
+      );
+    }
+    const content = generator.generateAPIRouter(apiRoutes, {
+      outFile: apiTypesPath,
+      pluginConfigs: pluginRoutes.length ? [...new Set(configFiles)] : [],
+      pluginRoutes,
+    });
 
     writeOrCheckGeneratedFile(apiTypesPath, content, options.check, result.stalePaths);
 

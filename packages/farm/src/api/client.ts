@@ -20,6 +20,9 @@ import {
 } from "../cache-invalidation";
 import type { DefinedCacheKey, InferCacheKeyData, RouteDataCacheKey } from "../cache";
 import { getFarmAPIBaseURL, resolveFarmAPIRequestURL } from "./config";
+import { ClientRouteManifest, type APIRouteManifest, type BoundRouteParams } from "./client-routes";
+import type { RoutePathParams } from "./route";
+export type { APIRouteManifest } from "./client-routes";
 import {
   isFarmAPIStream,
   isJSONStreamResponse,
@@ -38,6 +41,8 @@ export type APIRouteRefMetadata = {
 };
 
 export type APIClientOptions = {
+  /** Generated path/method metadata required for dynamic shorthand and $params scopes. */
+  routes?: APIRouteManifest;
   baseURL?: string;
   headers?: Record<string, string>;
   credentials?: RequestCredentials;
@@ -312,8 +317,27 @@ type InferEndpointInput<T> = T extends {
     query: infer TQuery;
   };
 }
-  ? Simplify<BodyInputProp<InferEndpointBody<T>> & QueryInputProp<TQuery>>
-  : {};
+  ? Simplify<
+      BodyInputProp<InferEndpointBody<T>> &
+        QueryInputProp<TQuery> &
+        (T extends { __routeParams: infer P }
+          ? keyof P extends never
+            ? { params?: never }
+            : { params: P }
+          : {}) &
+        (T extends { __types: { inputHeaders: infer H } }
+          ? IsNever<H> extends true
+            ? {}
+            : RequiredKeys<H> extends never
+              ? { headers?: H }
+              : { headers: H }
+          : {})
+    >
+  : T extends { __routeParams: infer P }
+    ? keyof P extends never
+      ? { params?: never }
+      : { params: P }
+    : {};
 
 type InferEndpointOutput<T> = T extends {
   __types: {
@@ -345,7 +369,7 @@ type InferEndpointError<T> = T extends {
   : Error;
 
 // Type for a single endpoint method
-type EndpointMethod<T = any> = (<TUpdates extends readonly unknown[] = readonly OptimisticUpdate[]>(
+type EndpointCall<T = any> = <TUpdates extends readonly unknown[] = readonly OptimisticUpdate[]>(
   ...args: HasRequiredKeys<InferEndpointInput<T>> extends true
     ? [
         options: InferEndpointInput<T>,
@@ -355,17 +379,58 @@ type EndpointMethod<T = any> = (<TUpdates extends readonly unknown[] = readonly 
         options?: InferEndpointInput<T>,
         clientOptions?: ClientOptions<InferEndpointOutput<T>, InferEndpointError<T>, TUpdates>,
       ]
-) => Promise<APIResult<InferEndpointOutput<T>, InferEndpointError<T>>>) &
+) => Promise<APIResult<InferEndpointOutput<T>, InferEndpointError<T>>>;
+type EndpointMethod<T = any> = EndpointCall<T> &
   RouteRef<InferEndpointOutput<T>, InferEndpointInput<T>>;
 
-// Type for converting router structure to client structure
-type RouterToClient<T> = {
-  [K in keyof T]: T[K] extends TypedEndpointLike
-    ? EndpointMethod<T[K]>
+type DynamicKeys<T> = Extract<keyof T, `[${string}]`>;
+type MethodKeys = "get" | "head" | "query" | "post" | "put" | "patch" | "delete" | "options";
+type OwnMethodKeys<T> = {
+  [K in Extract<keyof T, MethodKeys>]: T[K] extends TypedEndpointLike | ((...args: any[]) => any)
+    ? K
+    : never;
+}[Extract<keyof T, MethodKeys>];
+type WithRouteParams<T, P> = T & { __routeParams: P };
+type UnionToIntersection<U> = (U extends unknown ? (v: U) => void : never) extends (
+  v: infer I,
+) => void
+  ? I
+  : never;
+type ChildMethods<T> = { [K in DynamicKeys<T>]: OwnMethodKeys<T[K]> }[DynamicKeys<T>];
+type MethodEndpoints<T, M extends PropertyKey, P> =
+  | (M extends OwnMethodKeys<T> ? WithRouteParams<T[M], P> : never)
+  | {
+      [K in DynamicKeys<T>]: M extends keyof T[K]
+        ? WithRouteParams<T[K][M], P & RoutePathParams<K>>
+        : never;
+    }[DynamicKeys<T>];
+type DistributedCall<T> = T extends unknown ? EndpointCall<T> : never;
+type ScopedMethod<T> = UnionToIntersection<DistributedCall<T>> &
+  EndpointCall<T> &
+  RouteRef<InferEndpointOutput<T>, InferEndpointInput<T>>;
+
+// Keep bracket access for compatibility; explicit binding preserves intermediate segments.
+type RouterToClient<T, P = {}> = {
+  [K in Exclude<keyof T, OwnMethodKeys<T>>]: T[K] extends TypedEndpointLike
+    ? EndpointMethod<WithRouteParams<T[K], P>>
     : T[K] extends Record<string, any>
-      ? RouterToClient<T[K]> // Recurssive handling of the multi level api routes
-      : EndpointMethod<T[K]>;
-};
+      ? RouterToClient<T[K], P & (K extends string ? RoutePathParams<K> : {})>
+      : EndpointMethod<WithRouteParams<T[K], P>>;
+} & {
+  [M in OwnMethodKeys<T> | ChildMethods<T>]: M extends ChildMethods<T>
+    ? ScopedMethod<MethodEndpoints<T, M, P>>
+    : M extends keyof T
+      ? EndpointMethod<WithRouteParams<T[M], P>>
+      : never;
+} & ([DynamicKeys<T>] extends [never]
+    ? {}
+    : {
+        $params: UnionToIntersection<
+          {
+            [K in DynamicKeys<T>]: (params: RoutePathParams<K>) => RouterToClient<T[K], P>;
+          }[DynamicKeys<T>]
+        >;
+      });
 
 export type RouteAPIClient<TRouter extends Record<string, any>> = RouterToClient<TRouter>;
 
@@ -1016,6 +1081,7 @@ export function createAPIClient<
     baseURL,
     isSameOriginAPIBaseURL(baseURL),
     rootAliases,
+    options.routes ? new ClientRouteManifest(options.routes) : undefined,
   ) as APIClient<TRouter, TIntegrations>;
 }
 
@@ -1136,16 +1202,42 @@ function createNestedProxy(
   baseURL: string,
   sameOrigin: boolean,
   rootAliases?: Record<string, unknown>,
+  manifest?: ClientRouteManifest,
+  bound: BoundRouteParams = {},
 ): any {
   const target = () => {};
   const proxy = new Proxy(target, {
     // When accessing a property (api.hello)
     get(_target, prop: string | symbol) {
+      if (prop === "$params") {
+        return (params: unknown) => {
+          if (!manifest)
+            throw new TypeError(
+              "$params requires createAPIClient({ routes: apiRoutes }) from the generated API manifest.",
+            );
+          const scope = manifest.bind(buildProxyRoutePath(path), params);
+          return createNestedProxy(
+            [...path, scope.segment],
+            client,
+            routeMeta,
+            baseURL,
+            sameOrigin,
+            rootAliases,
+            manifest,
+            Object.freeze({ ...bound, ...scope.params }),
+          );
+        };
+      }
       if (prop === FARM_API_ROUTE_REF_SYMBOL) {
         return path.length > 0;
       }
       if (prop === FARM_API_ROUTE_META_SYMBOL) {
-        const metadata = resolveRouteMeta({ path, baseURL });
+        let metadata;
+        try {
+          metadata = resolveRouteMeta({ path, baseURL, manifest, bound });
+        } catch {
+          return null;
+        } // An unbound/overloaded route has no single URL yet.
         const requestURL = resolveFarmAPIRequestURL(metadata.routePath, baseURL);
         return Object.freeze({
           path: `${requestURL.pathname}${requestURL.search}${requestURL.hash}`,
@@ -1171,6 +1263,8 @@ function createNestedProxy(
         baseURL,
         sameOrigin,
         rootAliases,
+        manifest,
+        bound,
       );
     },
 
@@ -1190,7 +1284,10 @@ function createNestedProxy(
         const [options, clientOptions] = args;
 
         // Call fetch client with explicit method
-        return client(routePath, method, options, clientOptions);
+        const resolved = manifest ? manifest.resolve(routePath, method, bound, options) : routePath;
+        if (!manifest && options?.params)
+          throw new TypeError("Dynamic params require the generated routes manifest.");
+        return client(resolved, method, options, clientOptions);
       } else {
         // Direct call without method: api.hello()
         // Use the full path and let the server determine the method (usually GET)
@@ -1200,12 +1297,14 @@ function createNestedProxy(
         const [options, clientOptions] = args;
 
         // Call fetch client (default method will be GET)
-        return client(routePath, options?.method || "GET", options, clientOptions);
+        const method = options?.method || "GET";
+        const resolved = manifest ? manifest.resolve(routePath, method, bound, options) : routePath;
+        return client(resolved, method, options, clientOptions);
       }
     },
   });
 
-  routeMeta.set(proxy, { path: [...path], baseURL });
+  routeMeta.set(proxy, { path: [...path], baseURL, manifest, bound });
   return proxy;
 }
 
@@ -1318,6 +1417,8 @@ type ScopedRequestState = {
 type RouteMeta = {
   path: string[];
   baseURL: string;
+  manifest?: ClientRouteManifest;
+  bound?: BoundRouteParams;
 };
 
 type OptimisticSnapshot = {
@@ -1475,7 +1576,7 @@ function resolveTargetKey(
     const meta = routeMeta.get(target);
     if (!meta) return null;
 
-    const { method, routePath } = resolveRouteMeta(meta);
+    const { method, routePath } = resolveRouteMeta(meta, input);
     return buildCacheKey(method, routePath, input ?? {}, meta.baseURL, defaultHeaders);
   }
 
@@ -1497,18 +1598,27 @@ function resolveTargetKey(
   return null;
 }
 
-function resolveRouteMeta(meta: RouteMeta): { routePath: string; method: string } {
+function resolveRouteMeta(meta: RouteMeta, input?: any): { routePath: string; method: string } {
   const httpMethods = ["get", "head", "query", "post", "put", "delete", "patch", "options"];
   const lastPart = meta.path[meta.path.length - 1];
   if (lastPart && httpMethods.includes(lastPart)) {
     return {
-      routePath: buildProxyRoutePath(meta.path.slice(0, -1)),
+      routePath: meta.manifest
+        ? meta.manifest.resolve(
+            buildProxyRoutePath(meta.path.slice(0, -1)),
+            lastPart.toUpperCase(),
+            meta.bound ?? {},
+            input,
+          )
+        : buildProxyRoutePath(meta.path.slice(0, -1)),
       method: lastPart.toUpperCase(),
     };
   }
 
   return {
-    routePath: buildProxyRoutePath(meta.path),
+    routePath: meta.manifest
+      ? meta.manifest.resolve(buildProxyRoutePath(meta.path), "GET", meta.bound ?? {}, input)
+      : buildProxyRoutePath(meta.path),
     method: "GET",
   };
 }

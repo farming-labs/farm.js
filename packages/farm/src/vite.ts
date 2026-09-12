@@ -1080,6 +1080,7 @@ export function farmPlugin(
             root: farmConfig.root,
             srcDir: farmConfig.srcDir,
             layers: farmConfig.layers,
+            plugins: farmConfig.plugins,
             extraRoutes: getExtraRouteTypes(),
             suppressLintOnLink: farmConfig.suppressLintOnLink,
             componentExtensions: farmConfig.renderer.componentExtensions,
@@ -1278,6 +1279,7 @@ export function farmPlugin(
       }
 
       apiRouteManager = new APIRouteManager(appDirs, server, {
+        plugins: farmConfig.plugins,
         i18n: farmApp.getI18nRuntime(),
         bodySizeLimit: serverConfig.bodySizeLimit,
         basePath: apiServerBasePath,

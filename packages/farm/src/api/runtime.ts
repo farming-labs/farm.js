@@ -12,19 +12,19 @@ import {
 } from "../server-http";
 import { DEFAULT_FARM_API_BASE_PATH, normalizeFarmAPIBasePath } from "./config";
 import { resolveFarmAPICanonicalPathname } from "./server-path";
-import { compareRouteSpecificity, type RouteSegmentSpecificity } from "../routing/specificity";
+import { parseRouteSchema } from "./route-schema";
 import { omitFarmResponseBody } from "../response-body";
 
 export { registerAPIRouteShape, type APIRouteShapeSource } from "./route-shape";
+export { mergePluginAPIRoutes } from "./plugin-route-runtime";
 
-export type APIRouteParamValue = string | string[];
-export type APIRouteParams = Record<string, APIRouteParamValue>;
-
-export interface APIRouteMatch<T extends { path: string }> {
-  route: T;
-  params: APIRouteParams;
-}
-
+export {
+  matchAPIRoute,
+  type APIRouteParams,
+  type APIRouteParamValue,
+  type APIRouteMatch,
+} from "./route-pattern";
+import { matchAPIRoute, type APIRouteParams, type APIRouteMatch } from "./route-pattern";
 interface APIRouteMethodTable {
   methods: string[];
   endpoints: Record<string, any>;
@@ -48,40 +48,6 @@ export function getAllowedAPIRouteMethods(route: APIRouteMethodTable): string[] 
     methods.splice(getIndex + 1, 0, "HEAD");
   }
   return methods;
-}
-
-export function matchAPIRoute<T extends { path: string }>(
-  routes: Map<string, T>,
-  pathname: string,
-): APIRouteMatch<T> | null {
-  const exactRoute = routes.get(pathname);
-  if (exactRoute) {
-    return { route: exactRoute, params: {} };
-  }
-
-  const normalizedPathname = normalizePathname(pathname);
-  if (normalizedPathname !== pathname) {
-    const normalizedRoute = routes.get(normalizedPathname);
-    if (normalizedRoute) {
-      return { route: normalizedRoute, params: {} };
-    }
-  }
-
-  let bestMatch: APIRouteMatch<T> | null = null;
-  let bestSpecificity: RouteSegmentSpecificity[] | null = null;
-
-  for (const route of routes.values()) {
-    const params = matchRoutePath(route.path, pathname);
-    if (!params) continue;
-
-    const specificity = getAPIRouteSpecificity(route.path);
-    if (bestSpecificity === null || compareRouteSpecificity(specificity, bestSpecificity) < 0) {
-      bestMatch = { route, params };
-      bestSpecificity = specificity;
-    }
-  }
-
-  return bestMatch;
 }
 
 /** Match canonical routes through a configurable same-origin public API path. */
@@ -174,20 +140,23 @@ async function invokeAPIRouteEndpointInContext(
   const headers = Object.fromEntries(request.headers.entries());
   const types = endpoint.__types || {};
 
-  const queryValidation = validateInput(types.query, query, "Invalid query parameters");
+  const queryValidation = await validateInput(types.query, query, "Invalid query parameters");
   if (queryValidation instanceof Response) {
     return queryValidation;
   }
 
-  const bodyValidation = validateInput(types.body, body, "Invalid request body");
+  const bodyValidation = await validateInput(types.body, body, "Invalid request body");
   if (bodyValidation instanceof Response) {
     return bodyValidation;
   }
 
-  const headersValidation = validateInput(types.headers, headers, "Invalid request headers");
+  const headersValidation = await validateInput(types.headers, headers, "Invalid request headers");
   if (headersValidation instanceof Response) {
     return headersValidation;
   }
+
+  const paramsValidation = await validateInput(types.params, params, "Invalid route parameters");
+  if (paramsValidation instanceof Response) return paramsValidation;
 
   const handlerContext = {
     query: queryValidation,
@@ -195,7 +164,7 @@ async function invokeAPIRouteEndpointInContext(
     headers: headersValidation,
     request,
     context: {},
-    params,
+    params: paramsValidation,
   };
   let execution: {
     result: unknown;
@@ -220,6 +189,13 @@ async function invokeAPIRouteEndpointInContext(
     throw error;
   }
 
+  if (execution.handlerExecuted && endpoint.__output && !isWebResponse(execution.result)) {
+    try {
+      execution.result = await parseRouteSchema(endpoint.__output, execution.result);
+    } catch {
+      throw new Error("API route returned a value that does not match its output schema.");
+    }
+  }
   const response = normalizeRouteResponse(execution.result);
   return attachEndpointInvalidations(response, execution.invalidations);
 }
@@ -377,117 +353,25 @@ function entriesToObject<TValue>(
   return output;
 }
 
-function validateInput(schema: any, value: unknown, error: string): unknown | Response {
-  if (!schema || typeof schema.parse !== "function") {
-    return value;
-  }
-
+async function validateInput(
+  schema: any,
+  value: unknown,
+  error: string,
+): Promise<unknown | Response> {
+  if (!schema) return value;
   try {
-    return schema.parse(value);
+    return await parseRouteSchema(schema, value);
   } catch (validationError: any) {
-    return new Response(
-      JSON.stringify({
-        error,
-        details: validationError.errors || validationError.issues || validationError.message,
-      }),
+    return Response.json(
       {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
+        error,
+        details: (validationError.issues || validationError.errors || []).map((issue: any) => ({
+          path: issue.path,
+          message: issue.message,
+          code: issue.code,
+        })),
       },
+      { status: 400 },
     );
-  }
-}
-
-function matchRoutePath(routePath: string, pathname: string): APIRouteParams | null {
-  const routeSegments = getPathSegments(routePath);
-  const pathnameSegments = getPathSegments(pathname);
-  const params: APIRouteParams = {};
-  let pathIndex = 0;
-
-  for (const routeSegment of routeSegments) {
-    const dynamicSegment = parseDynamicSegment(routeSegment);
-
-    if (dynamicSegment?.catchAll) {
-      const remainingSegments = pathnameSegments.slice(pathIndex).map(decodePathSegment);
-      if (remainingSegments.length === 0 && !dynamicSegment.optional) {
-        return null;
-      }
-      if (remainingSegments.length > 0) {
-        params[dynamicSegment.name] = remainingSegments;
-      }
-      pathIndex = pathnameSegments.length;
-      continue;
-    }
-
-    const pathnameSegment = pathnameSegments[pathIndex];
-    if (pathnameSegment === undefined) {
-      return null;
-    }
-
-    if (dynamicSegment) {
-      params[dynamicSegment.name] = decodePathSegment(pathnameSegment);
-      pathIndex++;
-      continue;
-    }
-
-    if (decodePathSegment(routeSegment) !== decodePathSegment(pathnameSegment)) {
-      return null;
-    }
-
-    pathIndex++;
-  }
-
-  return pathIndex === pathnameSegments.length ? params : null;
-}
-
-function getPathSegments(pathname: string): string[] {
-  return normalizePathname(pathname)
-    .split("/")
-    .filter((segment) => segment.length > 0);
-}
-
-function getAPIRouteSpecificity(routePath: string): RouteSegmentSpecificity[] {
-  return getPathSegments(routePath).map((segment) => {
-    const dynamic = parseDynamicSegment(segment);
-    if (!dynamic) return "static";
-    if (!dynamic.catchAll) return "dynamic";
-    return dynamic.optional ? "optional-catch-all" : "catch-all";
-  });
-}
-
-function normalizePathname(pathname: string): string {
-  if (pathname.length > 1 && pathname.endsWith("/")) {
-    return pathname.replace(/\/+$/, "");
-  }
-
-  return pathname;
-}
-
-function parseDynamicSegment(
-  segment: string,
-): { name: string; catchAll: boolean; optional: boolean } | null {
-  const optionalCatchAll = segment.match(/^\[\[\.\.\.(.+)\]\]$/);
-  if (optionalCatchAll?.[1]) {
-    return { name: optionalCatchAll[1], catchAll: true, optional: true };
-  }
-
-  const catchAll = segment.match(/^\[\.\.\.(.+)\]$/);
-  if (catchAll?.[1]) {
-    return { name: catchAll[1], catchAll: true, optional: false };
-  }
-
-  const dynamic = segment.match(/^\[(.+)\]$/);
-  if (dynamic?.[1]) {
-    return { name: dynamic[1], catchAll: false, optional: false };
-  }
-
-  return null;
-}
-
-function decodePathSegment(segment: string): string {
-  try {
-    return decodeURIComponent(segment);
-  } catch {
-    return segment;
   }
 }

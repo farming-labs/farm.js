@@ -1,3 +1,5 @@
+import { mergePluginAPIRoutes } from "./plugin-route-runtime";
+import type { FarmPlugin } from "../plugin";
 import * as fs from "fs";
 import * as path from "path";
 import type { ViteDevServer } from "vite";
@@ -25,6 +27,7 @@ import { isFarmAPIRouteFileName } from "./route-files";
 import { AmbiguousRouteError, NonTerminalCatchAllRouteError } from "../routing/specificity";
 
 export interface APIRoute extends FarmRouteRuntimeConfig {
+  pluginMethods?: string[];
   path: string;
   filePath: string;
   methods: string[];
@@ -32,6 +35,7 @@ export interface APIRoute extends FarmRouteRuntimeConfig {
 }
 
 export interface APIRouteManagerOptions {
+  plugins?: readonly FarmPlugin[];
   throwOnLoadError?: boolean;
   i18n?: FarmI18nRuntime;
   bodySizeLimit?: number;
@@ -65,6 +69,7 @@ export const API_ROUTE_METHODS = [
 ] as const;
 
 export class APIRouteManager {
+  private plugins: readonly FarmPlugin[];
   private routes: Map<string, APIRoute> = new Map();
   private endpointSources: Map<string, Map<string, { appDir: string; filePath: string }>> =
     new Map();
@@ -83,6 +88,7 @@ export class APIRouteManager {
   ) {
     this.appDirs = Array.isArray(appDir) ? [...appDir] : [appDir as string];
     this.viteServer = viteServer;
+    this.plugins = options.plugins ?? [];
     this.throwOnLoadError = options.throwOnLoadError === true;
     this.i18n = options.i18n;
     this.bodySizeLimit = options.bodySizeLimit;
@@ -116,6 +122,12 @@ export class APIRouteManager {
         await this.loadRootRoutes(appDir);
         await this.loadProgrammaticApiRoutes(appDir);
       }
+      this.routes = new Map(
+        mergePluginAPIRoutes([...this.routes.values()], this.plugins).map((route) => [
+          route.path,
+          route,
+        ]),
+      );
     } catch (error) {
       this.routes = previousRoutes;
       this.endpointSources = previousEndpointSources;

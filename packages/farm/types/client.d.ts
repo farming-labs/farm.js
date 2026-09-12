@@ -18,6 +18,10 @@ import type {
 } from "react";
 import type { DefinedCacheKey, InferCacheKeyData, RouteDataCacheKey } from "@farm.js/core/cache";
 import type { ServerFn } from "@farm.js/core/server-fn";
+import type {
+  RouteAPIClient as CoreRouteAPIClient,
+  APIClientOptions as CoreAPIClientOptions,
+} from "../dist/client";
 
 declare global {
   namespace FarmJS {
@@ -554,7 +558,7 @@ declare module "@farm.js/core/client" {
   export function isChunkLoadError(errorLike: unknown): boolean;
   export function installChunkErrorRecovery(options?: FarmChunkRecoveryOptions): () => void;
 
-  export interface APIClientOptions {
+  export interface APIClientOptions extends CoreAPIClientOptions {
     baseURL?: string;
     headers?: Record<string, string>;
     cacheDefaults?: CacheOptions;
@@ -1063,7 +1067,7 @@ declare module "@farm.js/core/client" {
 
   export function createAPIClient<TRouter extends Record<string, any>>(
     options?: APIClientOptions,
-  ): RouterToClient<TRouter>;
+  ): CoreRouteAPIClient<TRouter>;
 
   export function createServerAPIClient<TEndpoints extends Record<string, unknown>>(
     endpoints: TEndpoints,

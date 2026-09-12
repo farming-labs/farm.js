@@ -1,3 +1,7 @@
+import type { PluginRoutes, PluginRoutesFactory } from "./api/route";
+// Plugin factories must emit declarations through public exports, never bundled
+// declaration chunk paths, even when they only import @farm.js/core/plugin.
+export type { PluginRoutes, PluginRoutesFactory, RouteDefinition } from "./api/route";
 import type { FarmConfig, FarmRequest, FarmResponse } from "./types";
 import type { ViteDevServer } from "vite";
 import type { FarmClientPlugin } from "./client/plugin";
@@ -467,10 +471,13 @@ export interface FarmPlugin<
   TClientPublic = any,
   TIntegrationInstance = unknown,
   TIntegrationBound extends boolean = false,
+  TRoutes extends PluginRoutes = PluginRoutes,
 > {
   name: string;
   version?: string;
   enforce?: "pre" | "post";
+  /** Declarative API routes, mounted through the normal dev and production API pipeline. */
+  routes?: PluginRoutesFactory<TRoutes>;
 
   /** Transform Farm config before the development or production pipeline is created. */
   configure?: (
@@ -1423,6 +1430,7 @@ export function definePlugin<
   TClientState = unknown,
   TClientPublic = undefined,
   TIntegrationInstance = unknown,
+  const TRoutes extends PluginRoutes = PluginRoutes,
 >(
   plugin: FarmPlugin<
     TState,
@@ -1430,9 +1438,18 @@ export function definePlugin<
     TClientState,
     TClientPublic,
     TIntegrationInstance,
-    false
+    false,
+    TRoutes
   >,
-): FarmPlugin<TState, TRequestContext, TClientState, TClientPublic, TIntegrationInstance, false> {
+): FarmPlugin<
+  TState,
+  TRequestContext,
+  TClientState,
+  TClientPublic,
+  TIntegrationInstance,
+  false,
+  TRoutes
+> {
   return plugin;
 }
 

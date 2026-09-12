@@ -3,6 +3,7 @@ import { createLoggerPlugin, createEnvPlugin } from '@farm.js/core/plugin/server
 import { z } from 'zod';
 import { storageDemoClients, STORAGE_DEMO_MOUNTS } from './src/lib/storage-demo.ts';
 import { integrationLab } from './src/lib/integration-lab.ts';
+import { projectRoutes } from './src/lib/plugin-routes.ts';
 
 declare global {
   interface Window {
@@ -312,6 +313,7 @@ export default defineConfig({
 
   // Plugins
   plugins: [
+    projectRoutes,
     runtimeLifecyclePlugin,
     createLoggerPlugin({}),
     createEnvPlugin({
