@@ -544,6 +544,8 @@ export default defineConfig({
 
 Farm checks `Content-Length` when present and also counts the received bytes, so chunked requests cannot bypass `bodySizeLimit`. Oversized requests receive `413 Payload Too Large` before the route or integration handler runs. Server Actions keep their separate, tighter `serverActions.bodySizeLimit` setting.
 
+Body rejection initiates stream cancellation without waiting for producer cleanup. This also applies to cloned requests: an unread original body cannot delay the rejection, and a cleanup failure does not replace the `413` response.
+
 The RSC development bridge applies these limits too. `POST`, `PUT`, `PATCH`, `DELETE`, and `QUERY`
 bodies keep their original bytes, including multipart uploads and binary data. `GET` and `HEAD`
 remain bodyless. Action origin validation runs before buffering an action body.

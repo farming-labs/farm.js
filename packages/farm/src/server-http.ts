@@ -290,7 +290,9 @@ export async function readFarmRequestBody(request: Request, limit: number): Prom
   try {
     validateContentLength(request.headers.get("content-length"), limit);
   } catch (error) {
-    await request.body?.cancel(error).catch(() => {});
+    // A cloned Request is a tee branch: its cancellation may wait for the
+    // untouched branch. Rejection must not wait for producer-owned cleanup.
+    void request.body?.cancel(error).catch(() => {});
     throw error;
   }
   throwIfAborted(request.signal);
@@ -313,8 +315,9 @@ export async function readFarmRequestBody(request: Request, limit: number): Prom
 
       total += value.byteLength;
       if (total > limit) {
-        await reader.cancel("Request body is too large");
-        throw new FarmRequestBodyError("BODY_TOO_LARGE", 413, "Request body is too large");
+        const error = new FarmRequestBodyError("BODY_TOO_LARGE", 413, "Request body is too large");
+        void reader.cancel(error).catch(() => {});
+        throw error;
       }
       chunks.push(value);
     }
