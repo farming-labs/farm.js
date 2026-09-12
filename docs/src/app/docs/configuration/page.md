@@ -544,6 +544,10 @@ export default defineConfig({
 
 Farm checks `Content-Length` when present and also counts the received bytes, so chunked requests cannot bypass `bodySizeLimit`. Oversized requests receive `413 Payload Too Large` before the route or integration handler runs. Server Actions keep their separate, tighter `serverActions.bodySizeLimit` setting.
 
+The RSC development bridge applies these limits too. `POST`, `PUT`, `PATCH`, `DELETE`, and `QUERY`
+bodies keep their original bytes, including multipart uploads and binary data. `GET` and `HEAD`
+remain bodyless. Action origin validation runs before buffering an action body.
+
 `trustProxy` defaults to `false`. Enable it only when the app is behind a trusted reverse proxy that removes client-supplied forwarding headers and writes its own `X-Forwarded-For`, `X-Forwarded-Host`, and `X-Forwarded-Proto` values. Farm uses those headers for the client address and public request URL only when the proxy is trusted. A directly exposed Farm server must leave it disabled so a client cannot spoof the address or authority used by rate limits, redirects, authentication callbacks, logs, or access policy.
 
 Workflow runner secrets are accepted only through `Authorization: Bearer <secret>` or `X-Farm-Workflow-Secret`. Farm does not accept secrets in query strings because URLs are commonly retained in logs, browser history, and referrer data.

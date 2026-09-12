@@ -27,6 +27,7 @@ import { init as initModuleLexer, parse as parseModuleImports } from "es-module-
 import type { FarmRscPluginOptions, EntryContext } from "./types.js";
 import type { FarmServerActionsConfig } from "@farm.js/core/server-action-security";
 import type { FarmAPIConfig } from "@farm.js/core/api";
+import type { FarmServerConfig } from "@farm.js/core/internal/production-runtime";
 import type { FarmLayerEntry, ResolvedFarmLayer } from "@farm.js/core/server";
 import { farmEnvironmentFunctionsPlugin } from "@farm.js/core/environment/vite";
 import { generateRscEntry } from "./entries/rsc.js";
@@ -48,7 +49,11 @@ const require_ = createRequire(import.meta.url);
 const { farmApiPlugin, farmMiddlewarePlugin } = require_(
   "@farm.js/core",
 ) as typeof import("@farm.js/core");
-const { resolveServerActionsConfig } = require_(
+const {
+  resolveServerActionsConfig,
+  validateServerActionRequest,
+  createServerActionRequestErrorResponse,
+} = require_(
   "@farm.js/core/server-action-security",
 ) as typeof import("@farm.js/core/server-action-security");
 const { normalizeFarmDeploymentId } = require_(
@@ -57,9 +62,17 @@ const { normalizeFarmDeploymentId } = require_(
 const { getFarmLayerAliases, getFarmSourceRoots, resolveFarmLayers } = require_(
   "@farm.js/core/server",
 ) as typeof import("@farm.js/core/server");
-const { searchParamsToObject } = require_(
+const {
+  searchParamsToObject,
+  readNodeRequestBody,
+  resolveFarmServerConfig,
+  createFarmRequestBodyErrorResponse,
+} = require_(
   "@farm.js/core/internal/production-runtime",
 ) as typeof import("@farm.js/core/internal/production-runtime");
+const { isFarmAPIPathname } = require_(
+  "@farm.js/core/api/runtime",
+) as typeof import("@farm.js/core/api/runtime");
 const { resolveFarmAPIConfig, resolveFarmAPIServerBasePath } = require_(
   "@farm.js/core/api",
 ) as typeof import("@farm.js/core/api");
@@ -80,6 +93,7 @@ export interface FarmRscConfig {
   outDir?: string;
   basePath?: string;
   api?: FarmAPIConfig;
+  server?: FarmServerConfig;
   port?: number;
   experimental?: {
     /**
@@ -144,6 +158,7 @@ export function defineConfig(config: FarmRscConfig = {}): UserConfig {
 
     // Vite server configuration
     server: {
+      ...config.server,
       port,
       strictPort: false,
     },
@@ -159,7 +174,11 @@ export function defineConfig(config: FarmRscConfig = {}): UserConfig {
 
     plugins: [
       farmMiddlewarePlugin({ srcDir: config.srcDir ?? "src", debug }),
-      farmApiPlugin({ srcDir: config.srcDir ?? "src", debug }),
+      farmApiPlugin({
+        srcDir: config.srcDir ?? "src",
+        debug,
+        bodySizeLimit: config.server?.bodySizeLimit,
+      }),
       farmRsc({
         debug,
         encryptActions: config.encryptActions,
@@ -499,6 +518,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
   let rscEnabled = false;
   let actionsEnabled = false;
   let optimizedBoundaryEnabled = false;
+  let bodySizeLimit = resolveFarmServerConfig(undefined).bodySizeLimit;
 
   // Context passed to entry generators
   let entryContext: EntryContext;
@@ -621,6 +641,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           outDir?: string;
           basePath?: string;
           api?: FarmAPIConfig;
+          server?: UserConfig["server"] & FarmServerConfig;
           root?: string;
           extends?: readonly FarmLayerEntry[];
           layers?: readonly ResolvedFarmLayer[];
@@ -631,6 +652,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
         // Check if user enabled RSC in their config
         rscEnabled = c.experimental?.serverComponents === true;
         actionsEnabled = c.experimental?.serverActions === true;
+        bodySizeLimit = resolveFarmServerConfig(c.server).bodySizeLimit;
         optimizedBoundaryEnabled = c.experimental?.optimizedBoundary === true;
 
         logInfo(`RSC enabled: ${rscEnabled}`);
@@ -1232,19 +1254,37 @@ if (document.readyState === 'loading') {
                 `import("/@react-refresh").then(m=>{m.default.injectIntoGlobalHook(window);window.$RefreshReg$=()=>{};window.$RefreshSig$=()=>type=>type;window.__vite_plugin_react_preamble_installed__=true;return import("/@vite/client");}).then(()=>import(${JSON.stringify(clientEntryUrl)}));`;
 
               const base = `http://${req.headers.host || "localhost:3000"}`;
-              let body: Buffer | undefined;
-              if (method === "POST") {
-                const chunks: Buffer[] = [];
-                for await (const chunk of req) chunks.push(chunk as Buffer);
-                body = Buffer.concat(chunks);
-                // Keep as buffer so request.formData() / request.text() in RSC handler work (multipart must not be UTF-8 decoded)
+              const requestUrl = new URL(url, base);
+              const isAction =
+                actionsEnabled &&
+                method === "POST" &&
+                !isFarmAPIPathname(requestUrl.pathname, entryContext.apiBasePath) &&
+                !isFarmAPIPathname(requestUrl.pathname);
+              if (isAction) {
+                validateServerActionRequest(
+                  new Request(requestUrl, {
+                    method,
+                    headers: req.headers as HeadersInit,
+                  }),
+                  entryContext.serverActions,
+                );
               }
-              const request = new Request(new URL(url, base), {
+              let body: Buffer | undefined;
+              if (method !== "GET" && method !== "HEAD") {
+                body = await readNodeRequestBody(
+                  req,
+                  isAction ? entryContext.serverActions.bodySizeLimit : bodySizeLimit,
+                );
+              }
+              const request = new Request(requestUrl, {
                 method,
                 headers: req.headers as HeadersInit,
                 body:
-                  method === "POST" && body && body.length > 0
-                    ? (body as unknown as BodyInit)
+                  body && body.length > 0
+                    ? (body.buffer.slice(
+                        body.byteOffset,
+                        body.byteOffset + body.byteLength,
+                      ) as ArrayBuffer)
                     : undefined,
               });
 
@@ -1291,6 +1331,13 @@ if (document.readyState === 'loading') {
               logResponse(method, pathname, response.status, duration);
               return;
             } catch (rscError: any) {
+              const rejection =
+                createFarmRequestBodyErrorResponse(rscError) ??
+                createServerActionRequestErrorResponse(rscError);
+              if (rejection && !res.headersSent && !res.writableEnded && !res.destroyed) {
+                await sendRscDevelopmentResponse(res, rejection);
+                return;
+              }
               if (res.headersSent || res.writableEnded || res.destroyed) {
                 console.error("[Farm.js] RSC dev response error:", rscError);
                 if (!res.destroyed)
