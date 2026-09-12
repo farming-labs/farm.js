@@ -117,6 +117,11 @@ async function buildWithProductionNodeEnv(inputConfig: ResolvedFarmConfig, optio
     // by the production pipeline. Otherwise the build can report the returned
     // config while still writing to the original locations.
     config = await pluginManager.runHookSerial("config", config);
+    if (options.universal === false && config.plugins.some((plugin) => plugin.routes)) {
+      throw new Error(
+        "Plugin API routes require the default universal production build. Remove universal: false.",
+      );
+    }
     targets = resolveBuildTargets(config, options, targetBaseline);
     config = {
       ...config,
@@ -168,6 +173,7 @@ async function buildWithProductionNodeEnv(inputConfig: ResolvedFarmConfig, optio
       root,
       srcDir,
       layers: config.layers,
+      plugins: config.plugins,
       extraRoutes: [
         ...(config.openapi?.enabled && config.openapi.route ? [config.openapi.route] : []),
         ...getFarmDocsRouteTypeEntries(config.docs),
@@ -190,6 +196,7 @@ async function buildWithProductionNodeEnv(inputConfig: ResolvedFarmConfig, optio
       projectModuleServer,
       {
         throwOnLoadError: true,
+        plugins: config.plugins,
         i18n: farmApp.getI18nRuntime(),
         bodySizeLimit: config.server.bodySizeLimit,
         basePath: resolveFarmAPIServerBasePath(config.api),

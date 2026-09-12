@@ -1,3 +1,4 @@
+import type { PluginRoutes, PluginRoutesFactory } from "./api/route";
 import type { FarmConfig, FarmRequest, FarmResponse } from "./types";
 import type { ViteDevServer } from "vite";
 import type { FarmClientPlugin } from "./client/plugin";
@@ -471,6 +472,8 @@ export interface FarmPlugin<
   name: string;
   version?: string;
   enforce?: "pre" | "post";
+  /** Declarative API routes, mounted through the normal dev and production API pipeline. */
+  routes?: PluginRoutesFactory;
 
   /** Transform Farm config before the development or production pipeline is created. */
   configure?: (
@@ -1423,6 +1426,7 @@ export function definePlugin<
   TClientState = unknown,
   TClientPublic = undefined,
   TIntegrationInstance = unknown,
+  const TRoutes extends PluginRoutes = PluginRoutes,
 >(
   plugin: FarmPlugin<
     TState,
@@ -1431,8 +1435,10 @@ export function definePlugin<
     TClientPublic,
     TIntegrationInstance,
     false
-  >,
-): FarmPlugin<TState, TRequestContext, TClientState, TClientPublic, TIntegrationInstance, false> {
+  > & { routes?: PluginRoutesFactory<TRoutes> },
+): FarmPlugin<TState, TRequestContext, TClientState, TClientPublic, TIntegrationInstance, false> & {
+  routes?: PluginRoutesFactory<TRoutes>;
+} {
   return plugin;
 }
 

@@ -3642,12 +3642,14 @@ async function buildSSRInMemory(
     path: string;
     filePath: string;
     methods: string[];
+    pluginMethods?: string[];
   }> = [];
   for (const [routePath, route] of apiRouteManager.getRoutes()) {
     apiRoutes.push({
       path: routePath,
       filePath: route.filePath,
       methods: route.methods,
+      pluginMethods: route.pluginMethods,
     });
   }
   const [configuredRedirects, configuredRewrites, configuredHeaderRoutes] = await Promise.all([
@@ -4060,7 +4062,7 @@ function applyConfiguredResponseHeaders(response, pathname) {
 }
 
 function generateVirtualEntryCode(
-  apiRoutes: Array<{ path: string; filePath: string; methods: string[] }>,
+  apiRoutes: Array<{ path: string; filePath: string; methods: string[]; pluginMethods?: string[] }>,
   pageRoutes: UniversalPageRoute[],
   layoutRoutes: Array<{ pattern: string; modulePath: string }>,
   routeSlots: UniversalRouteSlot[],
@@ -4202,6 +4204,7 @@ function generateVirtualEntryCode(
   const apiRegistrations: string[] = [];
 
   apiRoutes.forEach((route, index) => {
+    if (!route.filePath) return;
     const varName = `apiRoute${index}`;
     apiImports.push(
       `import * as ${varName} from ${toVirtualEntryImportSpecifier(route.filePath)};`,
@@ -4209,7 +4212,7 @@ function generateVirtualEntryCode(
     apiRegistrations.push(`
   {
     path: ${JSON.stringify(route.path)},
-    methods: ${JSON.stringify(route.methods)},
+    methods: ${JSON.stringify(route.methods.filter((method) => !route.pluginMethods?.includes(method)))},
     endpoints: ${varName},
   }`);
   });
@@ -4384,7 +4387,7 @@ function generateVirtualEntryCode(
     : "";
   const apiRouteHelpersImport =
     apiRoutes.length > 0
-      ? `import { getAllowedAPIRouteMethods, invokeAPIRouteEndpoint, matchAPIRouteAtBasePath, resolveAPIRouteEndpoint } from "@farm.js/core/api/runtime";`
+      ? `import { mergePluginAPIRoutes, getAllowedAPIRouteMethods, invokeAPIRouteEndpoint, matchAPIRouteAtBasePath, resolveAPIRouteEndpoint } from "@farm.js/core/api/runtime";`
       : "";
   const productionRuntimeImport = `import {
   _runWithAfterRequest,
@@ -4888,8 +4891,8 @@ const farmDocsAPIHandler = ${
   };
 
 // API routes bundled at build time
-const apiRoutes = [${apiRegistrations.join(",")}
-];
+const apiRoutes = ${apiRoutes.length > 0 ? "mergePluginAPIRoutes(" : ""}[${apiRegistrations.join(",")}
+]${apiRoutes.length > 0 ? `, configuredPlugins, ${JSON.stringify(apiRoutes.map(({ path, methods }) => ({ path, methods })))})` : ""};
 const farmLocalAPIBasePath = ${JSON.stringify(resolveFarmAPIServerBasePath(config.api))};
 const farmOpenAPIReference = ${JSON.stringify(openAPIReference)};
 

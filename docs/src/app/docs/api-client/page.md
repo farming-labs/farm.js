@@ -92,6 +92,70 @@ await api.posts.get({ query: { tag: ["react", "vite"] } });
 
 This is the same array representation that API route query schemas receive.
 
+## Scoped dynamic routes
+
+`farm generate`, development startup, and production builds emit `apiRoutes` alongside
+`APIRouter` in `src/lib/api.generated.ts`. Pass that manifest to enable parameter resolution:
+
+```ts
+import { createAPIClient } from "@farm.js/core/client";
+import { apiRoutes, type APIRouter } from "./api.generated";
+
+export const apiClient = createAPIClient<APIRouter>({ routes: apiRoutes });
+```
+
+For `POST /api/projects/[projectId]/uploads/[uploadId]`:
+
+```ts
+const project = apiClient.projects.$params({ projectId: "project-123" });
+
+const result = await project.uploads.post({
+  params: { uploadId: "upload-456" },
+  body: { title: "Design draft" },
+});
+
+if (result.error) throw result.error;
+console.log(result.data?.title);
+```
+
+`$params()` returns a reusable, immutable caller and sends no request. Only the explicit HTTP
+method executes the call. Bound parameters do not have to be repeated and cannot be overwritten
+by a descendant call. You can bind the final parameter as well:
+
+```ts
+const upload = project.uploads.$params({ uploadId: "upload-456" });
+await upload.post({ body: { title: "Updated draft" } });
+```
+
+The generated types describe registered methods, required parameters, validated input, and JSON
+response data. The runtime manifest contains only paths and methods; importing it never imports
+the config, server handlers, validators, or credentials into the browser. Existing static clients
+without a manifest remain supported.
+
+Binding preserves position: `/files/[id]/versions` uses
+`apiClient.files.$params({ id }).versions.get()`, while `/files/versions/[id]` uses
+`apiClient.files.versions.get({ params: { id } })`. Catch-all parameters use arrays:
+`apiClient.docs.$params({ parts: ["guides", "start"] }).get()` for `/api/docs/[...parts]`.
+Optional catch-alls can bind an empty object. Intermediate parameters must be bound before
+accessing their children through the shorthand; existing bracket-pattern access remains available.
+
+The client encodes parameter values, respects the configured API base URL/path, and rejects
+missing/unknown parameters, unsafe values, unregistered methods, and ambiguous calls before
+fetching. A supplied `undefined` ID never falls back to a collection request. Static server
+routes still win: if `/api/uploads/stats` exists, calling `/api/uploads/[id]` with `id: "stats"`
+throws a shadowing error rather than calling the wrong endpoint. Choose non-conflicting IDs or paths.
+
+Resolved URLs participate in caching and invalidation, so different bound IDs remain separate.
+Bind the final parameter before passing a route reference to a hook or invalidation helper when
+you need one concrete resource; collection/detail overloads otherwise describe multiple inputs.
+Plugin paths containing HTTP method names use a literal alias such as
+`apiClient["/projects/get"].get()`. `$params` is reserved for the scope helper.
+
+You can name this client `api` in server-only code and use the same call shape. This is an HTTP
+client there too: provide a trusted absolute `baseURL`, and explicitly forward only the credentials
+the target needs. It does not bypass middleware or call a plugin handler directly. The existing
+`createServerAPIClient()` endpoint/integration helper is unchanged by scoped route callers.
+
 ## Type-safe QUERY requests
 
 A route that exports `QUERY` becomes a `.query()` caller. Its body and response are inferred from
