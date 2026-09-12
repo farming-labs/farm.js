@@ -1,4 +1,5 @@
 import { EventEmitter } from "events";
+import { Readable } from "node:stream";
 import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import { z } from "zod";
 import { definePlugin, PluginManager, type FarmPluginIntegrationContext } from "../plugin";
@@ -178,6 +179,56 @@ describe("integrations runtime", () => {
     expect(requestIntegration).toBe(setupIntegration);
     expect(globalIntegration).toBeUndefined();
   });
+
+  it.each([undefined, "ALL", "all"] as const)(
+    "dispatches integration routes with method %s for every request method",
+    async (method) => {
+      const integration = defineIntegration({
+        category: "custom",
+        type: "methodless-route",
+        instance: {},
+        routes: [
+          {
+            path: "/api/methodless",
+            method,
+            handler: async () => new Response("ok"),
+          },
+        ],
+      });
+
+      const manager = createManager();
+      manager.addPlugins(resolveIntegrationPlugins({ methodless: integration }));
+      await manager.runHookParallel("init");
+      const runtime = getRegisteredIntegrationRuntime("methodless")!;
+
+      for (const method of ["GET", "POST", "PATCH", "DELETE"]) {
+        const match = matchIntegrationRoute(
+          { methodless: integration },
+          { pathname: "/api/methodless", method },
+        );
+        expect(match?.route.methods).toEqual(["ALL"]);
+        const res = createResponse();
+        expect(
+          await manager.runHookParallel(
+            "beforeRequest",
+            Object.assign(Readable.from([]), {
+              url: "/api/methodless",
+              method,
+              headers: { host: "localhost" },
+            }) as any,
+            res as any,
+          ),
+        ).toBe(true);
+        expect(res.body.toString()).toBe("ok");
+        const response = await dispatchIntegrationRequest(
+          runtime,
+          new Request("http://localhost/api/methodless", { method }),
+        );
+        expect(await response?.text()).toBe("ok");
+      }
+      await manager.runHookParallel("shutdown", { reason: "test" });
+    },
+  );
 
   it("keeps static plugin arrays compatible and propagates server ownership", () => {
     const contributedPlugin = {

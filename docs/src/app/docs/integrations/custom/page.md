@@ -69,6 +69,10 @@ A plain object in `routes` or `endpoints` still mounts its handler. Only the typ
 `integrationRoute.*` and `endpoint.*` builders attach the operation metadata Farm needs to infer
 `api` and `apiClient` request and response types.
 
+Plain route objects accept every HTTP method when `method` and `methods` are omitted, or when
+`method: "ALL"` is specified. Use an explicit method list or `integrationRoute.get/post/...`
+to restrict which requests can reach a handler, especially webhooks and mutations.
+
 The three formats below are alternatives. Each example exports an integration named `billing` and
 uses the same registration and caller setup.
 
