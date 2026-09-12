@@ -2,11 +2,11 @@
 
 import React, { useState } from 'react';
 import { Link } from '@farm.js/core/client';
-import { api } from '../../lib/api-client';
+import { apiClient } from '../../lib/api';
 
-type HelloResponse = NonNullable<Awaited<ReturnType<typeof api.hello.get>>['data']>;
-type UsersResponse = NonNullable<Awaited<ReturnType<typeof api.users.get>>['data']>;
-type LoginResponse = NonNullable<Awaited<ReturnType<typeof api.auth.login.post>>['data']>;
+type HelloResponse = NonNullable<Awaited<ReturnType<typeof apiClient.hello.get>>['data']>;
+type UsersResponse = NonNullable<Awaited<ReturnType<typeof apiClient.users.get>>['data']>;
+type LoginResponse = NonNullable<Awaited<ReturnType<typeof apiClient.auth.login.post>>['data']>;
 
 export default function APIClientDemo() {
   const [helloResponse, setHelloResponse] = useState<HelloResponse | null>(null);
@@ -20,7 +20,7 @@ export default function APIClientDemo() {
     setError(null);
 
     try {
-      const result = await api.hello.get({
+      const result = await apiClient.hello.get({
         query: { name: 'something' },
       });
       if (result.error) {
@@ -40,8 +40,8 @@ export default function APIClientDemo() {
     setLoading('users');
     setError(null);
     try {
-      // Nested API call: api.users.get()
-      const result = await api.users.get({
+      // Nested API call: apiClient.users.get()
+      const result = await apiClient.users.get({
         query: { limit: '5' }
       });
       if (result.error) {
@@ -61,7 +61,7 @@ export default function APIClientDemo() {
     setLoading('login');
     setError(null);
     try {
-      const result = await api.auth.login.post({
+      const result = await apiClient.auth.login.post({
         body: {
           hint: "login post",
           email: "test@example.com",
@@ -85,8 +85,8 @@ export default function APIClientDemo() {
     setLoading('create');
     setError(null);
     try {
-      // Nested API call: api.users.post()
-      const result = await api.users.post({
+      // Nested API call: apiClient.users.post()
+      const result = await apiClient.users.post({
         body: {
           email: "test@example.com",
           name: "test user"
@@ -224,14 +224,14 @@ export default function APIClientDemo() {
               <div>
                 <p className="text-gray-500 mb-2">// Import the typed client</p>
                 <pre className="text-gray-300">
-                  {`import { api } from '@/lib/api-client';`}
+                  {`import { apiClient } from '@/lib/api';`}
                 </pre>
               </div>
 
               <div>
                 <p className="text-gray-500 mb-2">// Query input is inferred from the route</p>
                 <pre className="text-gray-300">
-                  {`const result = await api.hello.get({
+                  {`const result = await apiClient.hello.get({
   query: { name: 'World' }
 });`}
                 </pre>
@@ -240,7 +240,7 @@ export default function APIClientDemo() {
               <div>
                 <p className="text-gray-500 mb-2">// Body input and response data are inferred too</p>
                 <pre className="text-yellow-300">
-                  {`const result = await api.auth.login.post({
+                  {`const result = await apiClient.auth.login.post({
   body: {
     email: 'test@example.com',
     password: 'password123'

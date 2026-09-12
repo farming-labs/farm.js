@@ -10,7 +10,7 @@ import {
   useRouter,
 } from '@farm.js/core/client';
 import { getPublicEnv } from '@farm.js/core/env';
-import { api } from '../../lib/api-client';
+import { apiClient } from '../../lib/api';
 import {
   readClientBoundary,
   readRuntimeBoundary,
@@ -27,7 +27,7 @@ export default function FeatureLabClient() {
   const navigation = useNavigation();
   const pageState = usePageState<FeaturePageState>();
   const router = useRouter();
-  const createUser = useFetcher(api.users.post);
+  const createUser = useFetcher(apiClient.users.post);
 
   useBlocker({
     when: dirty,

@@ -58,6 +58,8 @@ import { farmEnvironmentFunctionsPlugin } from "./environment-vite";
 import { FARM_VERSION } from "./version";
 import { createDeferredDataResponse } from "./deferred";
 import { _withAfterNodeMiddleware } from "./after";
+import { _runWithAPIRequestRuntime } from "./api/server-context";
+import type { APIRequestRuntime } from "./api/server-client-bridge";
 import { shouldBypassFarmRouterForDottedPath } from "./dev-static";
 import { findClientServerFnViolation, formatServerFnBoundaryError } from "./server-query-boundary";
 import {
@@ -289,14 +291,17 @@ export { createFarmNodeRequestAbortSignal } from "./server-http";
 /** Exported for tests: the request boundary all Farm dev middlewares share. */
 export function withFarmRequestTracing(
   handler: Parameters<typeof _withAfterNodeMiddleware>[0],
+  apiRuntime?: APIRequestRuntime,
 ): Connect.NextHandleFunction {
   const middleware = _withAfterNodeMiddleware(handler);
   return (req, res, next) => {
     const traceUrl = new URL(`http://${req.headers.host || "localhost:3000"}${req.url || "/"}`);
     const traceRequest = createRequestFromNodeRequest(req, traceUrl);
-    const result = runWithFarmRequestSpan(traceRequest, () => middleware(req, res, next), {
-      getStatusCode: () => res.statusCode || 200,
-    });
+    const run = () =>
+      runWithFarmRequestSpan(traceRequest, () => middleware(req, res, next), {
+        getStatusCode: () => res.statusCode || 200,
+      });
+    const result = apiRuntime ? _runWithAPIRequestRuntime(apiRuntime, run) : run();
     // connect ignores returned promises, so a rejection from the handler
     // becomes an unhandled rejection and kills the dev server process. A
     // throw from one request must cost that request a 500, not an outage.
@@ -1529,8 +1534,19 @@ window.__FARM_MANIFEST__ = ${inlineValue({
       };
 
       // Register middleware directly (not in return function) to ensure it runs early
+      const withAPIRequestTracing = (handler: Parameters<typeof withFarmRequestTracing>[0]) =>
+        withFarmRequestTracing(handler, {
+          basePath: apiServerBasePath,
+          dispatch: async (request) => {
+            // Resolve at call time so HMR never leaves a captured endpoint map.
+            const handler = apiRouteManager.getHandler();
+            return handler
+              ? handler(request)
+              : Response.json({ error: "Not Found" }, { status: 404 });
+          },
+        });
       server.middlewares.use(
-        withFarmRequestTracing(async (req, res, next) => {
+        withAPIRequestTracing(async (req, res, next) => {
           const requestUrl = req.url || "/";
           const requestMethod = req.method || "GET";
           const currentConfig = farmApp?.getConfig() ?? options;
@@ -3168,6 +3184,20 @@ if (import.meta.hot) {
 
       const currentFarmConfig = farmApp?.getConfig();
       const normalizedFile = file.replace(/\\/g, "/");
+      if (
+        currentFarmConfig &&
+        /\/route\.(?:ts|tsx|js|jsx)$/.test(normalizedFile) &&
+        getFarmAppDirectories(currentFarmConfig).some((appDir) =>
+          normalizedFile.startsWith(`${toPosixPath(appDir)}/api/`),
+        )
+      ) {
+        // Vite has not invalidated these modules yet. Refreshing only generated
+        // types leaves both HTTP and direct server calls bound to old handlers.
+        for (const mod of modules) server.moduleGraph.invalidateModule(mod);
+        await refreshRouteDiscovery?.(`updated ${file}`);
+        server.ws.send({ type: "full-reload", path: "*" });
+        return [];
+      }
       const currentSrcRoot = currentFarmConfig
         ? getFarmSourceRoots(currentFarmConfig)
             .map((source) => path.join(source.root, source.srcDir).replace(/\\/g, "/"))

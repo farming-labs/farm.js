@@ -2,7 +2,7 @@
 
 import { useState } from "preact/hooks";
 import { ResourceLinks } from "../components/resource-links";
-import { api } from "../lib/api-client";
+import { apiClient } from "../lib/api";
 
 export default function HomePage() {
   const [message, setMessage] = useState("Call a typed server function");
@@ -13,7 +13,7 @@ export default function HomePage() {
     setPending(true);
     setFailed(false);
     try {
-      const result = await api.greeting.post({
+      const result = await apiClient.greeting.post({
         body: { name: "Preact" },
       });
       if (result.error) throw result.error;

@@ -552,6 +552,7 @@ async function removeRendererIntegrationConflicts(projectPath: string) {
       fs.rm(path.join(projectPath, "src", "components", file), { force: true }),
     ),
     fs.rm(path.join(projectPath, "src", "lib", "api-client.ts"), { force: true }),
+    fs.rm(path.join(projectPath, "src", "lib", "api.ts"), { force: true }),
     fs.rm(path.join(projectPath, "src", "lib", "api.generated.ts"), { force: true }),
   ]);
 

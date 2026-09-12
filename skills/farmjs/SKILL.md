@@ -221,8 +221,14 @@ API routes live under `src/app/api/**/route.ts`. Prefer `createEndpoint` from
 exports remain supported. Endpoint input accepts Zod or standard-schema validators for body, query,
 and headers. Farm also supports typed HTTP `QUERY`, multipart uploads, and streamed JSON results.
 
-Use `createAPIClient` from `@farm.js/core/client` for app routes. Calls such as
-`api.products.get(...)` resolve to `{ data, error }` results for HTTP failures and support caching,
+Use one shared `src/lib/api.ts` with `createApiClients<APIRouter>({ routes: apiRoutes })` from
+`@farm.js/core/client`, returning `{ api, apiClient }`. Import the generated schema-free manifest,
+not server endpoint modules. `api` dispatches locally during Farm server requests; `apiClient`
+uses HTTP. Both call the same route definition and return `{ data, error, key }`. Local calls run
+endpoint validation/middleware, not outer HTTP/plugin lifecycle middleware; put shared
+authorization in endpoint middleware. Server caches are request-local and there is no HTTP
+fallback. The older `createAPIClient` and `createServerAPIClient` factories remain supported.
+Calls such as `apiClient.products.get(...)` resolve to `{ data, error }` results for HTTP failures and support caching,
 invalidation, retries, callbacks, optimistic updates, `useMutation`, and `useFetcher`.
 
 For integration APIs, use `createIntegrations<AppIntegrations>()` and preserve the configured
@@ -430,7 +436,7 @@ run its client generation immediately before type checking or building.
 
 ## Common Pitfalls
 
-- Import `Link`, `createAPIClient`, and `createIntegrations` from current documented client entries.
+- Import `Link`, `createApiClients`, and `createIntegrations` from current documented client entries.
 - Do not put server SDKs or secrets in `"use client"` modules.
 - Keep `AppIntegrations` exported so `createIntegrations<AppIntegrations>()` can infer types.
 - For Supabase/custom route APIs, method calls may be nested, for example `.login.post(...)`, not `.login(...)`.

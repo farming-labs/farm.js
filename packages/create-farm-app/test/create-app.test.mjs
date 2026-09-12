@@ -457,7 +457,7 @@ test("generates a Solid starter while keeping React as the default renderer", as
       path.join(generatedDir, "src/app/api/greeting/route.ts"),
       "utf8",
     );
-    const apiClient = await readFile(path.join(generatedDir, "src/lib/api-client.ts"), "utf8");
+    const apiClient = await readFile(path.join(generatedDir, "src/lib/api.ts"), "utf8");
     const tsconfig = JSON.parse(await readFile(path.join(generatedDir, "tsconfig.json"), "utf8"));
 
     assert.equal(
@@ -470,10 +470,13 @@ test("generates a Solid starter while keeping React as the default renderer", as
     assert.match(config, /renderer: solid\(\)/);
     assert.match(config, /from "@farm\.js\/solid"/);
     assert.match(page, /createSignal/);
-    assert.match(page, /api\.greeting\.post/);
+    assert.match(page, /apiClient\.greeting\.post/);
     assert.match(apiRoute, /createEndpoint/);
     assert.match(apiRoute, /FARMJS server/);
-    assert.match(apiClient, /createAPIClient<APIRouter>/);
+    assert.match(apiClient, /createApiClients<APIRouter>/);
+    assert.match(apiClient, /export const \{ api, apiClient \}/);
+    assert.match(apiClient, /routes: apiRoutes/);
+    assert.doesNotMatch(apiClient, /from ["'].*(?:route|server)["']/);
     assert.equal(tsconfig.compilerOptions.jsx, "preserve");
     assert.equal(tsconfig.compilerOptions.jsxImportSource, "solid-js");
   } finally {
@@ -508,7 +511,7 @@ test("generates a Preact starter with typed server interaction", async () => {
       path.join(generatedDir, "src/app/api/greeting/route.ts"),
       "utf8",
     );
-    const apiClient = await readFile(path.join(generatedDir, "src/lib/api-client.ts"), "utf8");
+    const apiClient = await readFile(path.join(generatedDir, "src/lib/api.ts"), "utf8");
     const tsconfig = JSON.parse(await readFile(path.join(generatedDir, "tsconfig.json"), "utf8"));
     const rendererPackage = JSON.parse(
       await readFile(path.join(packageDir, "..", "farm-preact", "package.json"), "utf8"),
@@ -521,11 +524,14 @@ test("generates a Preact starter with typed server interaction", async () => {
     assert.match(config, /renderer: preact\(\)/);
     assert.match(config, /from "@farm\.js\/preact"/);
     assert.match(page, /useState/);
-    assert.match(page, /api\.greeting\.post/);
+    assert.match(page, /apiClient\.greeting\.post/);
     assert.match(page, /Edit <code>page\.tsx<\/code>/);
     assert.match(apiRoute, /createEndpoint/);
     assert.match(apiRoute, /FARMJS server/);
-    assert.match(apiClient, /createAPIClient<APIRouter>/);
+    assert.match(apiClient, /createApiClients<APIRouter>/);
+    assert.match(apiClient, /export const \{ api, apiClient \}/);
+    assert.match(apiClient, /routes: apiRoutes/);
+    assert.doesNotMatch(apiClient, /from ["'].*(?:route|server)["']/);
     assert.equal(tsconfig.compilerOptions.jsx, "react-jsx");
     assert.equal(tsconfig.compilerOptions.jsxImportSource, "preact");
   } finally {
@@ -570,7 +576,7 @@ test("generates a Vue SFC starter with typed server interaction", async () => {
     assert.match(config, /renderer: vue\(\)/);
     assert.match(config, /from "@farm\.js\/vue"/);
     assert.match(page, /export const hydrate = true/);
-    assert.match(page, /api\.greeting\.post/);
+    assert.match(page, /apiClient\.greeting\.post/);
     assert.match(page, /Edit <code>page\.vue<\/code>/);
     assert.match(layout, /<slot \/>/);
     assert.deepEqual(tsconfig.include, ["src/**/*.ts", "src/**/*.vue", "farm.config.ts"]);
@@ -618,7 +624,7 @@ test("generates a Svelte starter with typed server interaction", async () => {
     assert.match(config, /renderer: svelte\(\)/);
     assert.match(config, /from "@farm\.js\/svelte"/);
     assert.match(page, /export const hydrate = true/);
-    assert.match(page, /api\.greeting\.post/);
+    assert.match(page, /apiClient\.greeting\.post/);
     assert.match(page, /Edit <code>page\.svelte<\/code>/);
     assert.match(page, /let message = \$state/);
     assert.match(layout, /\{@render children\?\.\(\)\}/);

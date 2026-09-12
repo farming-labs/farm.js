@@ -22,6 +22,8 @@ import type { DefinedCacheKey, InferCacheKeyData, RouteDataCacheKey } from "../c
 import { getFarmAPIBaseURL, resolveFarmAPIRequestURL } from "./config";
 import { ClientRouteManifest, type APIRouteManifest, type BoundRouteParams } from "./client-routes";
 import type { RoutePathParams } from "./route";
+import { _resolveCurrentRequest } from "../server/request-bridge";
+import { resolveAPIRequestRuntime, type APIRequestRuntime } from "./server-client-bridge";
 export type { APIRouteManifest } from "./client-routes";
 import {
   isFarmAPIStream,
@@ -444,6 +446,113 @@ export type ServerAPIClient<
   TIntegrations extends Record<string, any> = {},
 > = TEndpoints & IntegrationServerClientRoot<TIntegrations>;
 
+export type ApiClients<
+  TRouter extends Record<string, any>,
+  TIntegrations extends Record<string, any> = {},
+> = {
+  api: RouteAPIClient<TRouter> & IntegrationServerClientRoot<TIntegrations>;
+  apiClient: APIClient<TRouter, TIntegrations>;
+};
+
+/**
+ * Define one shared pair of typed callers. Import only generated route metadata
+ * here, not endpoint modules. `api` dispatches locally during a Farm request;
+ * `apiClient` uses HTTP. Both return the same app-route APIResult shape.
+ */
+export function createApiClients<TRouter extends Record<string, any>>(
+  options: APIClientWithoutIntegrationsOptions,
+): { api: RouteAPIClient<TRouter>; apiClient: RouteAPIClient<TRouter> };
+export function createApiClients<
+  TRouter extends Record<string, any>,
+  TIntegrations extends Record<string, any> = {},
+>(options?: APIClientOptions): ApiClients<TRouter, TIntegrations>;
+export function createApiClients<
+  TRouter extends Record<string, any>,
+  TIntegrations extends Record<string, any> = {},
+>(
+  options: APIClientOptions | APIClientWithoutIntegrationsOptions = {},
+): ApiClients<TRouter, TIntegrations> {
+  // A module-level pair is safe across requests. No cache, credentials, or
+  // dispatcher from one request is retained by another request's caller.
+  const localScopes = new WeakMap<APIRequestRuntime, WeakMap<Request, { request: APICall }>>();
+  const routeMeta = new WeakMap<AnyRouteRef, RouteMeta>();
+  const api = createNestedProxy(
+    [],
+    async (path: string, method: string, input: any, clientOptions?: ClientOptions<any, any>) => {
+      if (typeof window !== "undefined") {
+        throw new Error(
+          "api is server-only. Use apiClient from createApiClients() in the browser.",
+        );
+      }
+      const currentRequest = _resolveCurrentRequest();
+      const runtime = resolveAPIRequestRuntime();
+      if (!currentRequest || !runtime) {
+        throw new Error(
+          "api requires an active Farm server request. Call it from a server page, query, action, or API handler; use apiClient with an absolute baseURL for standalone HTTP calls.",
+        );
+      }
+      let localClients = localScopes.get(runtime);
+      if (!localClients) {
+        localClients = new WeakMap();
+        localScopes.set(runtime, localClients);
+      }
+      let local = localClients.get(currentRequest);
+      if (!local) {
+        const origin = new URL(currentRequest.url).origin;
+        const headers = new Headers();
+        // Only identity/content negotiation headers are inherited. In
+        // particular, never copy the outer request's body or hop-by-hop fields.
+        for (const name of ["cookie", "authorization", "accept-language"]) {
+          const value = currentRequest.headers.get(name);
+          if (value !== null) headers.set(name, value);
+        }
+        new Headers(options.headers).forEach((value, name) => headers.set(name, value));
+        local = createAPIClientRuntime(
+          {
+            ...options,
+            integrations: false,
+            baseURL: new URL(runtime.basePath, origin).toString(),
+            headers: Object.fromEntries(headers),
+          },
+          {
+            cache: new FarmClientDataCache({ subscribeToInvalidation: false }),
+            routeMeta,
+            fetch: (url, init) => {
+              if (new URL(url).origin !== origin) {
+                throw new Error(
+                  "api can only dispatch to this Farm app. Use apiClient for HTTP calls.",
+                );
+              }
+              currentRequest.signal.throwIfAborted();
+              return runtime.dispatch(new Request(url, { ...init, signal: currentRequest.signal }));
+            },
+          },
+        );
+        localClients.set(currentRequest, local);
+      }
+      return local.request(path, method, input, clientOptions);
+    },
+    routeMeta,
+    "/api",
+    true,
+    options.integrations === false
+      ? undefined
+      : {
+          integrations: integrationsServer<TIntegrations>({
+            baseURL: options.baseURL,
+            headers: options.headers,
+            credentials: options.credentials,
+            ...options.integrations,
+          }),
+        },
+    options.routes ? new ClientRouteManifest(options.routes) : undefined,
+  );
+  return {
+    api: api as ApiClients<TRouter, TIntegrations>["api"],
+    apiClient: createAPIClient<TRouter, TIntegrations>(options as APIClientOptions),
+  };
+}
+
 /**
  * Create a typed RPC client for Farm.js API routes
  *
@@ -490,6 +599,27 @@ export function createAPIClient<
 >(
   options: APIClientOptions | APIClientWithoutIntegrationsOptions = {},
 ): RouteAPIClient<TRouter> | APIClient<TRouter, TIntegrations> {
+  return createAPIClientRuntime<TRouter, TIntegrations>(options).client;
+}
+
+type APICall = (
+  path: string,
+  method: string,
+  input?: any,
+  options?: ClientOptions<any, any>,
+) => Promise<APIResult<any, Error>>;
+
+function createAPIClientRuntime<
+  TRouter extends Record<string, any>,
+  TIntegrations extends Record<string, any> = {},
+>(
+  options: APIClientOptions | APIClientWithoutIntegrationsOptions = {},
+  transport?: {
+    fetch(url: string, init: RequestInit): Promise<Response>;
+    cache: FarmClientDataCache;
+    routeMeta: WeakMap<AnyRouteRef, RouteMeta>;
+  },
+): { client: APIClient<TRouter, TIntegrations>; request: APICall } {
   options ??= {};
   const baseURL = options.baseURL || getFarmAPIBaseURL();
   const integrationOptions =
@@ -508,10 +638,11 @@ export function createAPIClient<
           integrations: integrationsClient<TIntegrations>(integrationOptions),
         };
 
-  const sharedCacheState = getFarmClientDataCache();
+  const sharedCacheState = transport?.cache ?? getFarmClientDataCache();
+  const localCaches = transport ? new Set([sharedCacheState]) : undefined;
   const sharedInflightState = new Map<string, InflightEntry>();
   let scopedRequestState: ScopedRequestState | undefined;
-  const routeMeta = new WeakMap<AnyRouteRef, RouteMeta>();
+  const routeMeta = transport?.routeMeta ?? new WeakMap<AnyRouteRef, RouteMeta>();
   let requestCounter = 0;
 
   const applyOptimisticLayer = (
@@ -660,10 +791,17 @@ export function createAPIClient<
       }
     }
 
-    const response = await fetch(url.toString(), fetchOptions);
-    applyFarmCacheInvalidations(
-      decodeFarmCacheInvalidations(response.headers?.get?.(FARM_CACHE_INVALIDATION_HEADER)),
+    const response = await (transport?.fetch ?? fetch)(url.toString(), fetchOptions);
+    const invalidations = decodeFarmCacheInvalidations(
+      response.headers?.get?.(FARM_CACHE_INVALIDATION_HEADER),
     );
+    if (transport) {
+      for (const cache of localCaches!) {
+        for (const key of invalidations) cache.invalidate(key);
+      }
+    } else {
+      applyFarmCacheInvalidations(invalidations);
+    }
     let data: unknown;
     try {
       data = await readAPIResponseData(response, method);
@@ -742,12 +880,13 @@ export function createAPIClient<
       }
       scopedRequestState ??= {
         context: requestCacheContext,
-        cache: new FarmClientDataCache(),
+        cache: new FarmClientDataCache({ subscribeToInvalidation: !transport }),
         inflight: new Map(),
         retired: false,
       };
       requestScopedState = scopedRequestState;
       cacheState = requestScopedState.cache;
+      localCaches?.add(cacheState);
       inflightState = requestScopedState.inflight;
     }
     const optimisticState = getOptimisticState(cacheState);
@@ -770,6 +909,7 @@ export function createAPIClient<
           targetInput,
           baseURL,
           options.headers,
+          transport ? baseURL : undefined,
         );
         if (!targetKey) continue;
 
@@ -1019,7 +1159,14 @@ export function createAPIClient<
           };
 
       for (const target of invalidateOptions.targets) {
-        const targetKey = resolveTargetKey(routeMeta, target, undefined, baseURL, options.headers);
+        const targetKey = resolveTargetKey(
+          routeMeta,
+          target,
+          undefined,
+          baseURL,
+          options.headers,
+          transport ? baseURL : undefined,
+        );
         if (!targetKey) continue;
 
         const existing = cacheState.get(targetKey);
@@ -1074,7 +1221,7 @@ export function createAPIClient<
   };
 
   // Return nested proxy (starts with empty path, user adds to it)
-  return createNestedProxy(
+  const client = createNestedProxy(
     [],
     request,
     routeMeta,
@@ -1083,6 +1230,7 @@ export function createAPIClient<
     rootAliases,
     options.routes ? new ClientRouteManifest(options.routes) : undefined,
   ) as APIClient<TRouter, TIntegrations>;
+  return { client, request };
 }
 
 async function readAPIResponseData(response: Response, method: string): Promise<unknown> {
@@ -1567,6 +1715,7 @@ function resolveTargetKey(
   input?: unknown,
   baseURL = "http://localhost:3000",
   defaultHeaders?: Record<string, string>,
+  localBaseURL?: string,
 ): string | null {
   if (!target) return null;
 
@@ -1577,13 +1726,19 @@ function resolveTargetKey(
     if (!meta) return null;
 
     const { method, routePath } = resolveRouteMeta(meta, input);
-    return buildCacheKey(method, routePath, input ?? {}, meta.baseURL, defaultHeaders);
+    return buildCacheKey(
+      method,
+      routePath,
+      input ?? {},
+      localBaseURL ?? meta.baseURL,
+      defaultHeaders,
+    );
   }
 
   if (Array.isArray(target)) {
     const [route, routeInput] = target;
     if (typeof route === "function") {
-      return resolveTargetKey(routeMeta, route, routeInput, baseURL, defaultHeaders);
+      return resolveTargetKey(routeMeta, route, routeInput, baseURL, defaultHeaders, localBaseURL);
     }
     return normalizeFarmClientCacheKey(target);
   }

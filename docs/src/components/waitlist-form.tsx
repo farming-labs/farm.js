@@ -1,10 +1,10 @@
 "use client";
 
 import { type FormEvent, useEffect, useRef, useState } from "react";
-import { api } from "../lib/api-client";
+import { apiClient } from "../lib/api";
 import { DitherShader } from "./ui/dither-shader";
 
-type WaitlistResult = NonNullable<Awaited<ReturnType<typeof api.waitlist.post>>["data"]>;
+type WaitlistResult = NonNullable<Awaited<ReturnType<typeof apiClient.waitlist.post>>["data"]>;
 
 function EdgePlus({ className }: { className: string }) {
   return (
@@ -119,7 +119,7 @@ export function WaitlistForm() {
     setResult(null);
 
     try {
-      const { data, error } = await api.waitlist.post({
+      const { data, error } = await apiClient.waitlist.post({
         body: {
           email,
           description,

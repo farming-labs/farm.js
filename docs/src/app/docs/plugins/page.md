@@ -187,6 +187,10 @@ Both hooks receive Farm's plugin context. `setup` additionally receives the reso
 
 Runtime hooks apply to page, API, server-action, integration, docs, asset, and general requests. Use the event's `kind` and `route` values when behavior should apply only to part of the application.
 
+Direct `api` calls from [`createApiClients()`](/docs/api-client#server-callers) invoke an endpoint
+inside the current request; they do not create another plugin request lifecycle. Endpoint
+`middleware` still runs. Use endpoint middleware for authorization needed by both direct and HTTP callers.
+
 ### Runtime event values
 
 | Value         | Available in                  | Meaning                                                                     |

@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import ts from "typescript";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { build } from "../build";
 import { loadConfig, resolveConfig } from "../config";
 import { startDevServer } from "../server/create-server";
@@ -22,19 +22,45 @@ describe("published plugin routes", () => {
       await fs.mkdir(path.join(root, "src", "app", "api", "shared"), { recursive: true });
       await fs.writeFile(path.join(root, "package.json"), '{"type":"module"}');
       await fs.writeFile(path.join(root, "src", "app", "globals.css"), "");
+      await fs.mkdir(path.join(root, "src", "lib"), { recursive: true });
+      await fs.writeFile(
+        path.join(root, "src", "lib", "api.ts"),
+        `
+import { createApiClients } from "@farm.js/core/client";
+import { apiRoutes, type APIRouter } from "./api.generated";
+export const { api, apiClient } = createApiClients<APIRouter>({ routes: apiRoutes });
+`,
+      );
       await fs.writeFile(
         path.join(root, "src", "app", "page.tsx"),
         `"use client";
-import { createAPIClient } from "@farm.js/core/client";
-import { apiRoutes, type APIRouter } from "../lib/api.generated";
-const api = createAPIClient<APIRouter>({ routes: apiRoutes });
+import { apiClient } from "../lib/api";
 export default function Page() {
-  return <button onClick={() => api.projects.$params({ projectId: "p1" }).uploads.post({ params: { uploadId: "u1" }, body: { title: "Hello" }, headers: { "x-token": "valid" } })}>Plugin routes</button>;
+  return <button onClick={() => apiClient.projects.$params({ projectId: "p1" }).uploads.post({ params: { uploadId: "u1" }, body: { title: "Hello" }, headers: { "x-token": "valid" } })}>Plugin routes</button>;
 }`,
       );
       await fs.writeFile(
         path.join(root, "src", "app", "api", "shared", "route.ts"),
-        'export function GET() { return Response.json({ source: "file" }); }',
+        `import { api } from "../../../lib/api";
+export async function GET(request: Request) {
+  const query = new URL(request.url).searchParams;
+  const result = await api.projects.$params({ projectId: "p1" }).uploads.post({
+    params: { uploadId: "u1" }, body: { title: query.get("title") ?? " Local " },
+    headers: { "x-token": query.get("token") ?? "valid" },
+  });
+  return Response.json({ source: "file", data: result.data, error: result.error?.status ?? null });
+}`,
+      );
+      await fs.mkdir(path.join(root, "src", "app", "server"), { recursive: true });
+      await fs.writeFile(
+        path.join(root, "src", "app", "server", "page.tsx"),
+        `
+import { api } from "../../lib/api";
+export default async function Page() {
+  const result = await api.shared.get();
+  if (result.error) throw result.error;
+  return <pre>{JSON.stringify(result.data)}</pre>;
+}`,
       );
       await fs.writeFile(
         path.join(root, "farm.config.ts"),
@@ -43,6 +69,7 @@ import { defineConfig, definePlugin } from "@farm.js/core";
 import { z } from "zod";
 export default defineConfig({
   telemetry: false,
+  api: { basePath: "/backend/v2" },
   vite: { server: { host: "127.0.0.1", strictPort: false } },
   plugins: [definePlugin({
     name: "test:published-routes",
@@ -83,7 +110,7 @@ export default defineConfig({
           throw new Error("Dev server did not bind a TCP port");
         expect(address.address).toBe("127.0.0.1");
         const response = await fetch(
-          `http://127.0.0.1:${address.port}/api/projects/p1/uploads/u1`,
+          `http://127.0.0.1:${address.port}/backend/v2/projects/p1/uploads/u1`,
           {
             method: "POST",
             headers: { "content-type": "application/json", "x-token": "valid" },
@@ -93,6 +120,32 @@ export default defineConfig({
         expect(response.status).toBe(200);
         expect(response.headers.get("x-plugin-route")).toBe("yes");
         expect(await response.json()).toEqual({ id: "p1/u1", title: "Dev" });
+        const local = await fetch(`http://127.0.0.1:${address.port}/backend/v2/shared`);
+        expect(await local.json()).toEqual({
+          source: "file",
+          data: { id: "p1/u1", title: "Local" },
+          error: null,
+        });
+        const denied = await fetch(
+          `http://127.0.0.1:${address.port}/backend/v2/shared?token=invalid`,
+        );
+        expect((await denied.json()).error).toBe(401);
+        const page = await fetch(`http://127.0.0.1:${address.port}/server`);
+        expect(page.status).toBe(200);
+        expect(await page.text()).toContain("p1/u1");
+        const sharedFile = path.join(root, "src", "app", "api", "shared", "route.ts");
+        const before = await fs.readFile(sharedFile, "utf8");
+        await fs.writeFile(sharedFile, before.replace('source: "file"', 'source: "hmr-local"'));
+        await expect
+          .poll(
+            async () => {
+              const updated = await fetch(`http://127.0.0.1:${address.port}/server`);
+              return updated.text();
+            },
+            { timeout: 10_000 },
+          )
+          .toContain("hmr-local");
+        await fs.writeFile(sharedFile, before);
       } finally {
         await dev.close();
       }
@@ -102,9 +155,7 @@ export default defineConfig({
       await fs.writeFile(
         caller,
         `
-import { createAPIClient } from "@farm.js/core/client";
-import { apiRoutes, type APIRouter } from "./lib/api.generated";
-const api = createAPIClient<APIRouter>({ routes: apiRoutes });
+import { api, apiClient } from "./lib/api";
 const project = api.projects.$params({ projectId: "p1" });
 async function check() {
   const result = await project.uploads.post({ params: { uploadId: "u1" }, body: { title: "Hello" }, headers: { "x-token": "valid" } });
@@ -117,6 +168,12 @@ async function check() {
   project.uploads.get({ params: { uploadId: "u1" } });
   // @ts-expect-error params bind at their declared location.
   api.projects.$params({ uploadId: "u1" });
+  const clientResult = await apiClient.projects.$params({ projectId: "p1" }).uploads.post({ params: { uploadId: "u1" }, body: { title: "Hello" }, headers: { "x-token": "valid" } });
+  const clientId: string | undefined = clientResult.data?.id;
+  // @ts-expect-error browser callers retain required input too.
+  apiClient.projects.$params({ projectId: "p1" }).uploads.post({ params: { uploadId: "u1" } });
+  // @ts-expect-error client output cannot become any.
+  clientResult.data?.missing;
   return id;
 }
 void check;
@@ -161,7 +218,7 @@ void check;
       const server = await import(pathToFileURL(entry).href);
       const call = (title: string, token = "valid") =>
         server.default.fetch(
-          new Request("http://farm.test/api/projects/p1/uploads/u1", {
+          new Request("http://farm.test/backend/v2/projects/p1/uploads/u1", {
             method: "POST",
             headers: { "content-type": "application/json", "x-token": token },
             body: JSON.stringify({ title }),
@@ -173,10 +230,39 @@ void check;
       expect(await response.json()).toEqual({ id: "p1/u1", title: "Hello" });
       expect((await call("blocked")).status).toBe(400);
       expect((await call("Hello", "invalid")).status).toBe(401);
-      const shared = await server.default.fetch(new Request("http://farm.test/api/shared"));
-      expect(await shared.json()).toEqual({ source: "file" });
+      const network = vi
+        .spyOn(globalThis, "fetch")
+        .mockRejectedValue(new Error("Local api must not fetch"));
+      try {
+        const page = await server.default.fetch(new Request("http://farm.test/server"));
+        expect(page.status).toBe(200);
+        expect(await page.text()).toContain("p1/u1");
+        const shared = await server.default.fetch(
+          new Request("http://farm.test/backend/v2/shared"),
+        );
+        expect(await shared.json()).toEqual({
+          source: "file",
+          data: { id: "p1/u1", title: "Local" },
+          error: null,
+        });
+        const denied = await server.default.fetch(
+          new Request("http://farm.test/backend/v2/shared?token=invalid"),
+        );
+        expect((await denied.json()).error).toBe(401);
+        const invalid = await server.default.fetch(
+          new Request("http://farm.test/backend/v2/shared?title=blocked"),
+        );
+        expect((await invalid.json()).error).toBe(400);
+        const failed = await server.default.fetch(
+          new Request("http://farm.test/backend/v2/shared?title=private"),
+        );
+        expect((await failed.json()).error).toBe(500);
+        expect(network).not.toHaveBeenCalled();
+      } finally {
+        network.mockRestore();
+      }
       const sharedPost = await server.default.fetch(
-        new Request("http://farm.test/api/shared", { method: "POST" }),
+        new Request("http://farm.test/backend/v2/shared", { method: "POST" }),
       );
       expect(await sharedPost.json()).toEqual({ source: "plugin" });
     } finally {

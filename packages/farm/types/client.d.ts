@@ -21,6 +21,8 @@ import type { ServerFn } from "@farm.js/core/server-fn";
 import type {
   RouteAPIClient as CoreRouteAPIClient,
   APIClientOptions as CoreAPIClientOptions,
+  ApiClients as CoreApiClients,
+  APIClientWithoutIntegrationsOptions as CoreAPIClientWithoutIntegrationsOptions,
 } from "../dist/client";
 
 declare global {
@@ -1068,6 +1070,18 @@ declare module "@farm.js/core/client" {
   export function createAPIClient<TRouter extends Record<string, any>>(
     options?: APIClientOptions,
   ): CoreRouteAPIClient<TRouter>;
+
+  export type ApiClients<
+    TRouter extends Record<string, any>,
+    TIntegrations extends Record<string, any> = {},
+  > = CoreApiClients<TRouter, TIntegrations>;
+  export function createApiClients<TRouter extends Record<string, any>>(
+    options: CoreAPIClientWithoutIntegrationsOptions,
+  ): { api: CoreRouteAPIClient<TRouter>; apiClient: CoreRouteAPIClient<TRouter> };
+  export function createApiClients<
+    TRouter extends Record<string, any>,
+    TIntegrations extends Record<string, any> = {},
+  >(options?: APIClientOptions): ApiClients<TRouter, TIntegrations>;
 
   export function createServerAPIClient<TEndpoints extends Record<string, unknown>>(
     endpoints: TEndpoints,

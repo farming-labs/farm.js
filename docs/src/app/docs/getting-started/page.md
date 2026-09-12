@@ -153,6 +153,21 @@ export const POST = createEndpoint(
 );
 ```
 
+Create the two callers once in a shared module. Farm generates the route types and path manifest;
+the endpoint handler is defined only in the route file above.
+
+**src/lib/api.ts**
+
+```ts
+import { createApiClients } from "@farm.js/core/client";
+import { apiRoutes, type APIRouter } from "./api.generated";
+
+export const { api, apiClient } = createApiClients<APIRouter>({ routes: apiRoutes });
+```
+
+Import `api` during server requests for local calls, or `apiClient` in the browser for HTTP calls.
+See [API Client](/docs/api-client#server-callers) for request context and middleware boundaries.
+
 **src/components/hello-button.tsx**
 
 ```tsx

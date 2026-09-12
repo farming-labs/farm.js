@@ -37,6 +37,11 @@ export const POST = createEndpoint(
 );
 ```
 
+Use [`createApiClients()`](/docs/api-client) in one shared `src/lib/api.ts` to return `{ api, apiClient }`
+from the generated router. Both callers reuse this route definition: `api` dispatches locally on
+the server and `apiClient` sends HTTP requests. Endpoint middleware runs for both; outer HTTP
+middleware is not replayed by direct calls. Never import endpoint modules into the shared caller file.
+
 ## Next-style exports
 
 You can also manually export GET, POST, PATCH, and other handlers from the route file. Farm keeps this familiar while layering typed helpers around it.

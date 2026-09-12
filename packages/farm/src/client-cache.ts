@@ -26,8 +26,10 @@ export class FarmClientDataCache {
   private inflight = new Map<string, Promise<unknown>>();
   private unsubscribeInvalidation: (() => void) | undefined;
 
-  constructor() {
-    this.unsubscribeInvalidation = subscribeFarmCacheInvalidation((key) => this.invalidate(key));
+  constructor(options: { subscribeToInvalidation?: boolean } = {}) {
+    if (options.subscribeToInvalidation !== false) {
+      this.unsubscribeInvalidation = subscribeFarmCacheInvalidation((key) => this.invalidate(key));
+    }
   }
 
   get size(): number {
