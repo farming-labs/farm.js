@@ -12,6 +12,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:net";
+import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -555,6 +556,45 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
         });
 
         const origin = `http://127.0.0.1:${port}`;
+        if (name === "default") {
+          for (const uploadCase of [
+            {
+              path: "/api/echo",
+              headers: { "content-length": "10000001", "content-type": "application/octet-stream" },
+              body: Buffer.from("abc"),
+            },
+            {
+              path: "/",
+              headers: { "x-farm-action-id": "unresolved-action", "content-type": "text/plain" },
+              body: Buffer.alloc(1_000_001, 120),
+            },
+          ]) {
+            const uploadResult = await new Promise<{ status: number; outcome: string }>(
+              (resolve) => {
+                const upload = httpRequest(
+                  origin + uploadCase.path,
+                  { method: "POST", headers: { ...uploadCase.headers, origin } },
+                  (response) => {
+                    response.resume();
+                    resolve({ status: response.statusCode || 0, outcome: "response" });
+                    upload.destroy();
+                  },
+                );
+                upload.on("error", (error) => resolve({ status: 0, outcome: error.message }));
+                upload.setTimeout(10_000, () => {
+                  resolve({ status: 0, outcome: "timed out without response" });
+                  upload.destroy();
+                });
+                upload.write(uploadCase.body);
+                // Leave the upload open: either the declared or streamed limit is exceeded.
+              },
+            );
+            expect(
+              uploadResult,
+              `Oversized upload to ${uploadCase.path} should receive 413 before the client finishes sending`,
+            ).toEqual({ status: 413, outcome: "response" });
+          }
+        }
         if (name === "default" || name === "custom") {
           for (const route of ["broken", "layout-failure", "sync-failure", "middleware-failure"]) {
             const error = await fetch(origin + "/" + route + "?tag=a&tag=b", {

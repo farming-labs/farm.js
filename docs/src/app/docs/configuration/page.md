@@ -601,6 +601,8 @@ Do not use `allowedOrigins` as a replacement for CORS or as a public API allowli
 
 `bodySizeLimit` accepts bytes or strings such as `"500kb"`, `"2mb"`, and `"2MiB"`. Farm checks `Content-Length` when present and also counts streamed bytes, so chunked requests cannot bypass the limit.
 
+When streamed action input exceeds the limit, Farm cancels it without awaiting producer cleanup or another branch of a cloned request. Cleanup errors do not replace the action's `413` rejection.
+
 Rejected requests use generic, non-cacheable responses: `403` for origin failures, `413` for oversized bodies, and `415` for unsupported content types. Detailed parsing or execution errors stay in server logs.
 
 ## Next-style route exports
