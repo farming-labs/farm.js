@@ -88,6 +88,9 @@ function debug(...args) {
 }
 
 function applyActionResponseHeaders(headers, request) {
+  // The same page URL serves HTML or Flight depending on Accept.
+  const vary = (headers.get('vary') || '').split(',').map(value => value.trim().toLowerCase());
+  if (!vary.includes('*') && !vary.includes('accept')) headers.append('vary', 'Accept');
   headers.set('x-farm-deployment-id', farmDeploymentId);
   const accept = request.headers.get('accept') || '';
   if (request.method === 'GET' && !accept.includes('text/x-component')) {

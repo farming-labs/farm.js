@@ -16,6 +16,11 @@ Svelte conventions and the features that remain React-specific.
 
 ## Rendering options
 
+RSC page URLs return HTML for document visits and a Flight payload for requests accepting
+`text/x-component`. Both representations include `Vary: Accept`. When you enable shared caching,
+configure the CDN or reverse proxy to honor `Vary`; do not cache these responses by URL alone.
+Farm preserves existing `Vary` fields, including `Origin` and Nitro's `Accept-Encoding`.
+
 | Mode    | How to opt in                                  | Best for                                |
 | ------- | ---------------------------------------------- | --------------------------------------- |
 | Dynamic | Default for request-bound pages                | Dashboards and personalized UI.         |
