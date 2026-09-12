@@ -298,6 +298,14 @@ export class APITypeGenerator {
     const routeManifest = [...manifest]
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([path, methods]) => ({ path, methods: [...methods].sort() }));
+    const manifestSource = routeManifest.length
+      ? `[\n${routeManifest
+          .map(
+            ({ path, methods }) =>
+              `  {\n    path: ${JSON.stringify(path)},\n    methods: [${methods.map((method) => JSON.stringify(method)).join(", ")}],\n  },`,
+          )
+          .join("\n")}\n]`
+      : "[]";
 
     return `/**
  * Auto-generated API router types
@@ -314,7 +322,7 @@ ${typeExports}
 };
 
 // Pass this schema-free manifest to createAPIClient({ routes: apiRoutes }).
-export const apiRoutes = ${JSON.stringify(routeManifest, null, 2)} as const;
+export const apiRoutes = ${manifestSource} as const;
 `;
   }
 

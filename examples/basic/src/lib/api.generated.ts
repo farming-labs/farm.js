@@ -6,7 +6,8 @@
  */
 
 import type { PluginAPIRouter } from "@farm.js/core/api";
-import type FarmPluginConfig0 from "../../farm.config";
+import type FarmPluginConfig0 from "../../layers/framework-features/farm.config";
+import type FarmPluginConfig1 from "../../farm.config";
 import type { GET as GET_auth_login } from "../app/api/auth/login/route";
 import type { POST as POST_auth_login } from "../app/api/auth/login/route";
 import type { GET as GET_hello } from "../app/api/hello/route";
@@ -25,7 +26,7 @@ import type { DELETE as DELETE_users } from "../app/api/users/route";
 import type { PATCH as PATCH_users } from "../app/api/users/route";
 
 // Type-only representation of your API routes
-export type APIRouter = PluginAPIRouter<typeof FarmPluginConfig0> & {
+export type APIRouter = PluginAPIRouter<typeof FarmPluginConfig0> & PluginAPIRouter<typeof FarmPluginConfig1> & {
   auth: {
     login: {
       get: typeof GET_auth_login;
@@ -71,70 +72,43 @@ export type APIRouter = PluginAPIRouter<typeof FarmPluginConfig0> & {
 // Pass this schema-free manifest to createAPIClient({ routes: apiRoutes }).
 export const apiRoutes = [
   {
-    "path": "/api/auth/login",
-    "methods": [
-      "GET",
-      "POST"
-    ]
+    path: "/api/auth/login",
+    methods: ["GET", "POST"],
   },
   {
-    "path": "/api/hello",
-    "methods": [
-      "GET",
-      "POST"
-    ]
+    path: "/api/hello",
+    methods: ["GET", "POST"],
   },
   {
-    "path": "/api/integration-lab/server",
-    "methods": [
-      "GET"
-    ]
+    path: "/api/integration-lab/server",
+    methods: ["GET"],
   },
   {
-    "path": "/api/maintenance/cleanup",
-    "methods": [
-      "GET"
-    ]
+    path: "/api/maintenance/cleanup",
+    methods: ["GET"],
   },
   {
-    "path": "/api/projects/[projectId]/uploads/[uploadId]",
-    "methods": [
-      "GET"
-    ]
+    path: "/api/projects/[projectId]/uploads/[uploadId]",
+    methods: ["GET"],
   },
   {
-    "path": "/api/slow",
-    "methods": [
-      "GET"
-    ]
+    path: "/api/slow",
+    methods: ["GET"],
   },
   {
-    "path": "/api/storage-demo",
-    "methods": [
-      "DELETE",
-      "GET",
-      "POST"
-    ]
+    path: "/api/storage-demo",
+    methods: ["DELETE", "GET", "POST"],
   },
   {
-    "path": "/api/test",
-    "methods": [
-      "GET"
-    ]
+    path: "/api/test",
+    methods: ["GET"],
   },
   {
-    "path": "/api/transport-lab",
-    "methods": [
-      "POST"
-    ]
+    path: "/api/transport-lab",
+    methods: ["POST"],
   },
   {
-    "path": "/api/users",
-    "methods": [
-      "DELETE",
-      "GET",
-      "PATCH",
-      "POST"
-    ]
-  }
+    path: "/api/users",
+    methods: ["DELETE", "GET", "PATCH", "POST"],
+  },
 ] as const;

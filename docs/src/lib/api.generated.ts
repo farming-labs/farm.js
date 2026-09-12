@@ -35,27 +35,19 @@ export type APIRouter = {
 // Pass this schema-free manifest to createAPIClient({ routes: apiRoutes }).
 export const apiRoutes = [
   {
-    "path": "/api/telemetry/dashboard/session",
-    "methods": [
-      "POST"
-    ]
+    path: "/api/telemetry/dashboard/session",
+    methods: ["POST"],
   },
   {
-    "path": "/api/telemetry/v1/events",
-    "methods": [
-      "POST"
-    ]
+    path: "/api/telemetry/v1/events",
+    methods: ["POST"],
   },
   {
-    "path": "/api/telemetry/v1/sites",
-    "methods": [
-      "POST"
-    ]
+    path: "/api/telemetry/v1/sites",
+    methods: ["POST"],
   },
   {
-    "path": "/api/waitlist",
-    "methods": [
-      "POST"
-    ]
-  }
+    path: "/api/waitlist",
+    methods: ["POST"],
+  },
 ] as const;
