@@ -168,13 +168,10 @@ export function readJSONStream<TItem>(response: Response): FarmAPIStream<TItem> 
     } catch (error) {
       completed = true;
       buffer = "";
-      try {
-        await reader.cancel(error);
-      } catch {
-        // Preserve the decode error even if the underlying stream also fails cleanup.
-      } finally {
-        releaseReader();
-      }
+      // A tee branch can wait for an unread sibling during cancellation. The
+      // parse failure is already known and must not wait for producer cleanup.
+      void reader.cancel(error).catch(() => {});
+      releaseReader();
       throw error;
     }
   };
