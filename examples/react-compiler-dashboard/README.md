@@ -152,7 +152,7 @@ DOM identity, mapped value, exact row count, fresh suffix, and zero compiled own
 
 Mapped rolling-window chains have a separate gate so the single-window result cannot hide a chain
 regression. The 10,000-row workload runs one structured, fully returning `switch` map with safe
-local `const` aliases between two queued 50-row rolls. Its control uses
+local `const` aliases and two grouped case labels between two queued 50-row rolls. Its control uses
 unsupported block-bodied rolling setters, so it performs the same native work without retaining
 compiler lineage. Both compiler modes must remain at least 2x faster than React and 1.25x faster
 than that control, and the compiler report must contain both mapped rolling-chain steps. Every

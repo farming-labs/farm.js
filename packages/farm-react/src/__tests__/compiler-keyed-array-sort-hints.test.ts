@@ -337,9 +337,8 @@ describe("React AOT keyed-array sort hints", () => {
             .map((row) => {
               switch (row.id) {
                 case firstId:
-                  return { ...row, rank: 4 };
                 case secondId:
-                  return { ...row, rank: 3 };
+                  return { ...row, rank: 4 };
                 default:
                   return row;
               }
