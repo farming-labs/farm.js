@@ -69,11 +69,12 @@ row-binding reads, which is the deterministic guard against returning to a full 
 performance, scalability, or persistence gate writes the JSON report and exits with a nonzero
 status.
 
-Keyed array appends have a separate persistence gate. A concise functional append is measured
-against bracketed React and an equivalent block-bodied compiled snapshot control. Both compiler
-modes must remain at least 4x faster than React at 10,000 and up to 20,000 rows, and at least 1.25x
-faster than the compiled control. The report must contain a nonzero `keyedArrayAppendHints` count;
-deterministic package tests separately require work to equal only the appended suffix.
+Keyed array appends have a separate persistence gate. A single-return block-bodied functional
+append is measured against bracketed React and a compiled snapshot control whose updater block has
+an extra local declaration. Both compiler modes must remain at least 4x faster than React at 10,000
+and up to 20,000 rows, and at least 1.25x faster than the compiled control. The report must contain a
+nonzero `keyedArrayAppendHints` count; deterministic package tests separately require work to equal
+only the appended suffix.
 
 Queued structural appends have an independent 10,000-row comparison. One concise setter removes a
 row with `filter()` and the immediately adjacent setter appends one fresh row, while the
@@ -104,12 +105,13 @@ through the intervening map instead of returning to complete keyed reconciliatio
 modes must remain at least 2x faster than React and 1.25x faster than the matching block-bodied
 control.
 
-Keyed array prepends have the same independent comparison. A concise functional prepend is
-measured against bracketed React and an equivalent block-bodied compiled snapshot control. Both
-compiler modes must remain at least 3x faster than React at 10,000 and 20,000 existing rows, and at
-least 1.25x faster than the compiled control at 10,000 rows. The report must contain a nonzero
-`keyedArrayPrependHints` count; deterministic package tests separately require key, descriptor, and
-binding work to equal only the new prefix while preserving every existing DOM row.
+Keyed array prepends have the same independent comparison. A single-return block-bodied functional
+prepend is measured against bracketed React and a compiled snapshot control whose updater block has
+an extra local declaration. Both compiler modes must remain at least 3x faster than React at 10,000
+and 20,000 existing rows, and at least 1.25x faster than the compiled control at 10,000 rows. The
+report must contain a nonzero `keyedArrayPrependHints` count; deterministic package tests separately
+require key, descriptor, and binding work to equal only the new prefix while preserving every
+existing DOM row.
 
 Queued structural prepends have a separate 10,000-row gate. One concise setter drops the oldest row
 with a bounded `slice()` and the adjacent setter prepends one fresh row; a block-bodied pair
@@ -408,7 +410,7 @@ The default JSON report is `/tmp/farm-react-dashboard-benchmark.json`; change it
   the application's immutable collection copy, while the hinted path avoids the runtime's second
   complete entry scan.
 - The append snapshot control creates the same 1,000 array items and DOM rows but intentionally uses
-  an unsupported block-bodied updater, isolating the saved full key-and-binding scan.
+  an updater block with an extra local declaration, isolating the saved full key-and-binding scan.
 - The queued structural-append control removes one keyed row and appends one fresh row across
   adjacent setters. Its block-bodied pair performs the same native array and DOM-visible work
   through complete reconciliation; the hinted path reuses survivor positions and reads only the
@@ -423,8 +425,9 @@ The default JSON report is `/tmp/farm-react-dashboard-benchmark.json`; change it
 - The filter-map-append control maps one retained row before adding the new suffix. Its block-bodied
   control performs the same native operations through complete reconciliation; the hinted path
   carries the changed survivor back to its committed row, then removes and appends atomically.
-- The prepend snapshot control does the same work at the beginning of the array. It isolates the
-  saved suffix scan while the hinted path still creates and inserts every required new DOM row.
+- The prepend snapshot control does the same work at the beginning of the array through an updater
+  block with an extra local declaration. It isolates the saved suffix scan while the hinted path
+  still creates and inserts every required new DOM row.
 - The slice snapshot control retains the same 9,000-row suffix through an unsupported block-bodied
   updater. It isolates the saved survivor scan while both paths remove the same 1,000 DOM rows.
 - The exact-position controls pass event-local runtime position and delete-count variables to concise native

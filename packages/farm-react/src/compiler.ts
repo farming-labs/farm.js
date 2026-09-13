@@ -1517,12 +1517,18 @@ function rewriteKeyedArrayAppendHints(
         updater.async ||
         updater.generator ||
         updater.params.length !== 1 ||
-        !t.isIdentifier(updater.params[0]) ||
-        !t.isArrayExpression(updater.body) ||
-        updater.body.elements.length < 2 ||
-        updater.body.elements.some((element) => element === null) ||
-        !t.isSpreadElement(updater.body.elements[0]) ||
-        !t.isIdentifier(updater.body.elements[0].argument, {
+        !t.isIdentifier(updater.params[0])
+      ) {
+        return;
+      }
+      const updateExpression = returnedExpression(updater);
+      if (
+        (t.isBlockStatement(updater.body) && updater.body.directives.length > 0) ||
+        !t.isArrayExpression(updateExpression) ||
+        updateExpression.elements.length < 2 ||
+        updateExpression.elements.some((element) => element === null) ||
+        !t.isSpreadElement(updateExpression.elements[0]) ||
+        !t.isIdentifier(updateExpression.elements[0].argument, {
           name: updater.params[0].name,
         })
       ) {
@@ -1552,7 +1558,7 @@ function rewriteKeyedArrayAppendHints(
         return validateDerivedExpression(value, safeGlobals) === undefined;
       };
       if (
-        updater.body.elements.slice(1).some((element) => {
+        updateExpression.elements.slice(1).some((element) => {
           if (!element || t.isJSXNamespacedName(element) || t.isArgumentPlaceholder(element)) {
             return true;
           }
@@ -1568,7 +1574,7 @@ function rewriteKeyedArrayAppendHints(
         [t.cloneNode(previous)],
         t.blockStatement([
           t.variableDeclaration("const", [
-            t.variableDeclarator(t.cloneNode(nextValue), t.cloneNode(updater.body, true)),
+            t.variableDeclarator(t.cloneNode(nextValue), t.cloneNode(updateExpression, true)),
           ]),
           t.returnStatement(
             t.callExpression(t.cloneNode(helperIdentifier), [
@@ -1615,14 +1621,20 @@ function rewriteKeyedArrayPrependHints(
         updater.async ||
         updater.generator ||
         updater.params.length !== 1 ||
-        !t.isIdentifier(updater.params[0]) ||
-        !t.isArrayExpression(updater.body) ||
-        updater.body.elements.length < 2 ||
-        updater.body.elements.some((element) => element === null)
+        !t.isIdentifier(updater.params[0])
       ) {
         return;
       }
-      const suffix = updater.body.elements[updater.body.elements.length - 1];
+      const updateExpression = returnedExpression(updater);
+      if (
+        (t.isBlockStatement(updater.body) && updater.body.directives.length > 0) ||
+        !t.isArrayExpression(updateExpression) ||
+        updateExpression.elements.length < 2 ||
+        updateExpression.elements.some((element) => element === null)
+      ) {
+        return;
+      }
+      const suffix = updateExpression.elements[updateExpression.elements.length - 1];
       if (
         !t.isSpreadElement(suffix) ||
         !t.isIdentifier(suffix.argument, { name: updater.params[0].name })
@@ -1653,7 +1665,7 @@ function rewriteKeyedArrayPrependHints(
         return validateDerivedExpression(value, safeGlobals) === undefined;
       };
       if (
-        updater.body.elements.slice(0, -1).some((element) => {
+        updateExpression.elements.slice(0, -1).some((element) => {
           if (!element || t.isJSXNamespacedName(element) || t.isArgumentPlaceholder(element)) {
             return true;
           }
@@ -1669,7 +1681,7 @@ function rewriteKeyedArrayPrependHints(
         [t.cloneNode(previous)],
         t.blockStatement([
           t.variableDeclaration("const", [
-            t.variableDeclarator(t.cloneNode(nextValue), t.cloneNode(updater.body, true)),
+            t.variableDeclarator(t.cloneNode(nextValue), t.cloneNode(updateExpression, true)),
           ]),
           t.returnStatement(
             t.callExpression(t.cloneNode(helperIdentifier), [

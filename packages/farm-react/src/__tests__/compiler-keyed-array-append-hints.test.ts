@@ -44,6 +44,35 @@ describe("React AOT keyed-array append hints", () => {
     });
   });
 
+  it("records appends returned from a single-return updater block", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Inventory({ additions }) {
+        const [rows, setRows] = useState([{ id: "a", label: "Alpha" }]);
+        return <main>
+          <button onClick={() => setRows((current) => {
+            return [...current, ...additions];
+          })}>Append</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </main>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Inventory"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.optimizations.keyedArrayAppendHints).toBe(1);
+    expect(result.code).toContain("createCompilerKeyedArrayAppend");
+    expect(result.code).toContain("keyedRowsHintedRuntimeFeature");
+    await expect(
+      transformWithEsbuild(result.code, "/app/KeyedArrayAppendHints.tsx", {
+        loader: "tsx",
+        jsx: "automatic",
+      }),
+    ).resolves.toMatchObject({
+      code: expect.stringContaining("createCompilerKeyedArrayAppend"),
+    });
+  });
+
   it("supports the public List primitive without another option", async () => {
     const result = await compile(`
       import { useState } from "react";
@@ -363,9 +392,23 @@ describe("React AOT keyed-array append hints", () => {
       update: "setRows((current) => [...current])",
     },
     {
-      name: "a block-bodied updater",
+      name: "an updater block with a local declaration",
       update:
         'setRows((current) => { const next = [...current, { id: "b", label: "Beta" }]; return next; })',
+    },
+    {
+      name: "an updater block with conditional returns",
+      update:
+        'setRows((current) => { if (current.length > 0) return [...current, { id: "b", label: "Beta" }]; return current; })',
+    },
+    {
+      name: "an updater block without a return",
+      update: 'setRows((current) => { [...current, { id: "b", label: "Beta" }]; })',
+    },
+    {
+      name: "an updater block with a directive",
+      update:
+        'setRows((current) => { "use strict"; return [...current, { id: "b", label: "Beta" }]; })',
     },
     {
       name: "a side-effecting trailing call",

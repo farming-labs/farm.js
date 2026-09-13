@@ -145,7 +145,9 @@ export function StandardTableBenchmark() {
             const nextSeed = seed + 1;
             const additions = buildRows(1_000, nextSeed);
             setSeed(nextSeed);
-            setRows((current) => [...current, ...additions]);
+            setRows((current) => {
+              return [...current, ...additions];
+            });
             setOperation("append 1,000");
             setRevision((value) => value + 1);
           }}
@@ -175,7 +177,9 @@ export function StandardTableBenchmark() {
             const nextSeed = seed + 1;
             const additions = buildRows(1_000, nextSeed);
             setSeed(nextSeed);
-            setRows((current) => [...additions, ...current]);
+            setRows((current) => {
+              return [...additions, ...current];
+            });
             setOperation("prepend 1,000");
             setRevision((value) => value + 1);
           }}

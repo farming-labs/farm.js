@@ -972,12 +972,16 @@ appends:
 ```tsx
 setItems((current) => [...current, nextItem]);
 setItems((current) => [...current, ...nextItems]);
+setItems((current) => {
+  return [...current, ...nextItems];
+});
 ```
 
-At build time, Farm recognizes a concise functional setter whose array literal starts with exactly
-`...current` and has at least one trailing item or spread. The application still creates its normal
-immutable array. Generated metadata connects that result to the last committed array and records
-where its appended suffix begins. Queued functional appends form one validated chain.
+At build time, Farm recognizes a concise functional setter or a setter block containing exactly one
+direct value-returning `return`. Its returned array literal must start with exactly `...current` and
+have at least one trailing item or spread. The application still creates its normal immutable array.
+Generated metadata connects that result to the last committed array and records where its appended
+suffix begins. Queued functional appends form one validated chain.
 
 At update time, existing keyed rows already have the same item, key, and index. Farm therefore
 reads keys, descriptors, and bindings only for the appended suffix, creates only those host rows,
@@ -985,12 +989,13 @@ and inserts them together with a document fragment. It does not rerun the owner 
 the existing row DOM.
 
 The proof is intentionally narrow. Both values must be native arrays. Middle insertion, removal,
-direct replacement, a copy with no appended entries, block-bodied updaters, duplicate
-keys, React-owned or nested host-block rows, row conditionals, and rows whose bindings read the
-collection itself keep complete keyed reconciliation. Keys that read the collection also prevent
-the compiler from emitting the hint. A preceding unhinted update, an unrelated
-dirty dependency, or any failed source/length check also discards the hint. These fallbacks preserve
-normal React behavior; the syntax does not opt the component into a different correctness model.
+direct replacement, a copy with no appended entries, updater blocks with extra statements,
+conditional returns, or no value-returning `return`, duplicate keys, React-owned or nested
+host-block rows, row conditionals, and rows whose bindings read the collection itself keep complete
+keyed reconciliation. Keys that read the collection also prevent the compiler from emitting the
+hint. A preceding unhinted update, an unrelated dirty dependency, or any failed source/length check
+also discards the hint. These fallbacks preserve normal React behavior; the syntax does not opt the
+component into a different correctness model.
 The compiler report exposes emitted sites as `keyedArrayAppendHints`, and the hinted runtime is
 retained only when a module emits at least one append or same-order map hint.
 
@@ -1033,8 +1038,9 @@ row. It then removes only rejected rows, patches only changed survivors, and cre
 its final values. The owner stays mounted, survivor DOM identity is preserved, and the suffix is
 appended once.
 
-Only concise updater results that form one direct chain for the same state array are linked. The row
-and key must be compiler-owned and index-independent. A reorder in the structural-append chain, an
+Only concise updater results and blocks with one direct value-returning `return` that form one
+direct chain for the same state array are linked. The row and key must be compiler-owned and
+index-independent. A reorder in the structural-append chain, an
 unsupported or non-adjacent map, an unhinted update to that state, another dirty row dependency,
 collection-reading binding, custom, sparse, or subclassed array, nested or React-owned row,
 duplicate final key, or reuse of any committed key in the appended suffix keeps complete React
@@ -1051,6 +1057,9 @@ at the beginning:
 ```tsx
 setItems((current) => [nextItem, ...current]);
 setItems((current) => [...nextItems, ...current]);
+setItems((current) => {
+  return [...nextItems, ...current];
+});
 
 setItems((current) => current.filter((item) => item.id !== expiredId));
 setItems((current) => [nextItem, ...current]);
@@ -1071,11 +1080,11 @@ setItems((current) =>
 setItems((current) => [nextItem, ...current]);
 ```
 
-At build time, Farm recognizes a concise functional setter whose array literal ends with exactly
-`...current` and has at least one leading item or spread. The application still creates its normal
-immutable array. Generated metadata connects the result to the last committed array and records
-the prefix length. Multiple hinted prepends queued before one compiler flush form one validated
-chain.
+At build time, Farm recognizes a concise functional setter or a setter block containing exactly one
+direct value-returning `return`. Its returned array literal must end with exactly `...current` and
+have at least one leading item or spread. The application still creates its normal immutable array.
+Generated metadata connects the result to the last committed array and records the prefix length.
+Multiple hinted prepends queued before one compiler flush form one validated chain.
 
 At update time, Farm verifies native arrays, source identity, lengths, and every existing suffix
 item before changing the DOM. It reads keys, descriptors, and bindings only for the new prefix,
@@ -1097,8 +1106,9 @@ mapped values. The component owner stays mounted and surviving DOM identity is p
 
 This proof requires compiler-owned host rows whose render callback and key do not read the row
 index. Index-aware rows, collection-derived keys, collection-reading bindings, React-owned or
-nested host-block rows, row conditionals, middle insertion, direct replacement, block-bodied
-updaters, a reordered structural chain, an unsupported or non-adjacent map, duplicate final keys,
+nested host-block rows, row conditionals, middle insertion, direct replacement, updater blocks with
+extra statements, conditional returns, or no value-returning `return`, a reordered structural chain,
+an unsupported or non-adjacent map, duplicate final keys,
 reuse of any committed key in the prefix, custom, sparse, or subclassed arrays, an unrelated dirty
 dependency, or any failed runtime check keeps complete keyed reconciliation before a DOM write. A
 mapped survivor whose key changes and a prepend queued after an unhinted update also fall back.
