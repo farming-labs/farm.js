@@ -104,6 +104,44 @@ the browser, and the resolver runs wherever its caller runs. Do not put provider
 private environment values here. Read request-specific values inside the resolver or a
 request-scoped server module, never by mutating a shared singleton with one user's credentials.
 
+## Cancellation and deadlines
+
+Set `timeoutMs` on `createApiClients` for a default deadline, or override it per call:
+
+```ts
+export const { api, apiClient } = createApiClients<APIRouter>({
+  routes: apiRoutes,
+  timeoutMs: 10_000,
+});
+
+const controller = new AbortController();
+const pending = apiClient.hello.get({}, { signal: controller.signal, timeoutMs: 2_000 });
+controller.abort();
+const result = await pending;
+// result.error.code is "aborted" (or "timeout" when Farm's deadline expires).
+```
+
+The budget starts at call time and includes asynchronous header resolution, transport,
+response decoding, and retry waits. `0` disables the deadline (also the default); accepted
+values are integers from `0` to `2147483647`. A per-call `0` disables an instance deadline.
+Keep `signal` per call, not on a shared long-lived instance.
+
+Cancellation returns `{ data: undefined, error, key }` with status `0`, stops retries, skips
+cached results when already aborted, and rolls back pending optimistic updates even when
+`rollbackOnError` is false. Calls with a signal or deadline do not participate in in-flight
+deduplication, so one caller cannot cancel another. Completed results can still use the cache.
+Background revalidation retains its call budget until it finishes. A returned stream is handed
+to the caller: the deadline ends at that handoff, not at the end of stream consumption; the
+caller's signal still reaches the underlying HTTP request.
+
+Local `api` dispatch combines the call signal with the incoming request signal. Handlers can
+pass `request.signal` to cancellable work. Farm stops waiting when cancelled, but a handler or
+custom transport that ignores the signal may continue running. Cancellation cannot undo
+completed writes or external side effects.
+
+These defaults also reach integration callers; `integrations.timeoutMs` overrides the shared
+deadline. See [integration cancellation](/docs/integrations#cancellation-and-deadlines).
+
 ## Call a route
 
 **Browser usage**

@@ -226,6 +226,13 @@ modules. See `docs/src/app/docs/api-client/page.md#header-defaults` and the inte
 
 ## Typed APIs and Server Data
 
+Caller instances accept `timeoutMs` (0 disables it); individual calls accept `signal` and a
+deadline override. The budget includes header resolution, dispatch, decoding, and retry waits.
+Cancelled app routes return `aborted`/`timeout` errors without retries or optimistic commits;
+cancellable requests do not share in-flight work. Server dispatch combines the incoming and
+per-call signals. Handlers must cooperate: abort cannot undo external side effects. Streams/raw
+responses end the deadline at handoff, while the caller signal still reaches HTTP body reads.
+
 API routes live under `src/app/api/**/route.ts`. Prefer `createEndpoint` from
 `@farm.js/core/api` when input validation and generated caller types matter; plain HTTP method
 exports remain supported. Endpoint input accepts Zod or standard-schema validators for body, query,
