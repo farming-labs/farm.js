@@ -490,10 +490,7 @@ async function loadRegisteredScript(
     }
   }
   if (entry.promise) return entry.promise;
-  if (entry.definition.consent && getConsent(store, entry.definition.consent) !== "granted") {
-    setEntryState(store, entry, "blocked");
-    throw new ScriptConsentRequiredError(name, entry.definition.consent);
-  }
+  assertScriptConsent(store, entry);
   if (entry.definition.preconnect) addPreconnect(store, entry.definition);
   if (stack.includes(name)) {
     throw new Error(
@@ -503,6 +500,7 @@ async function loadRegisteredScript(
 
   const promise = (async () => {
     for (const dependency of entry.definition.dependsOn) {
+      assertScriptConsent(store, entry);
       try {
         await loadRegisteredScript(store, dependency, [...stack, name]);
       } catch (error) {
@@ -518,6 +516,9 @@ async function loadRegisteredScript(
     for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
       entry.attempt = attempt;
       notify(store, entry);
+      // Dependencies, retry delays, and status listeners can change consent.
+      // A blocked load must not be treated as a retryable network failure.
+      assertScriptConsent(store, entry);
       try {
         const value = await loadElement(store, entry.definition);
         setEntryState(store, entry, "ready");
@@ -538,6 +539,14 @@ async function loadRegisteredScript(
     return await promise;
   } finally {
     if (entry.promise === promise && entry.status !== "loading") entry.promise = undefined;
+  }
+}
+
+function assertScriptConsent(store: ScriptStore, entry: ScriptEntry): void {
+  const category = entry.definition.consent;
+  if (category && getConsent(store, category) !== "granted") {
+    setEntryState(store, entry, "blocked");
+    throw new ScriptConsentRequiredError(entry.definition.name, category);
   }
 }
 

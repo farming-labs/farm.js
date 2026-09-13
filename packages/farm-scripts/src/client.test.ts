@@ -99,6 +99,140 @@ describe("Farm Scripts browser runtime", () => {
     expect(analytics.status).toBe("ready");
   });
 
+  it.each(["denied", "unknown"] as const)(
+    "blocks a dependency-delayed script when consent becomes %s and resumes after a new grant",
+    async (consent) => {
+      vi.useFakeTimers();
+      const vendor = defineScript({ name: "vendor", src: "/vendor.js", load: "manual" });
+      const extension = defineScript({
+        name: "extension",
+        src: "/extension.js",
+        load: "manual",
+        consent: "analytics",
+        dependsOn: [vendor],
+      });
+      const runtime = startScriptRuntime([vendor.definition, extension.definition], window);
+      grantScriptConsent("analytics");
+      const loading = extension.load().catch((error) => error);
+      expect(script("vendor")).not.toBeNull();
+      expect(script("extension")).toBeNull();
+
+      setScriptConsent("analytics", consent);
+      script("vendor")!.dispatchEvent(new Event("load"));
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(script("extension")).toBeNull();
+      expect(await loading).toBeInstanceOf(ScriptConsentRequiredError);
+      expect(extension.status).toBe("blocked");
+
+      grantScriptConsent("analytics");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(script("extension")).not.toBeNull();
+      script("extension")!.dispatchEvent(new Event("load"));
+      await expect(extension.load()).resolves.toBeUndefined();
+      expect(extension.status).toBe("ready");
+      runtime.close();
+    },
+  );
+
+  it("does not retry a script after consent is withdrawn during the retry delay", async () => {
+    vi.useFakeTimers();
+    const analytics = defineScript({
+      name: "analytics",
+      src: "/analytics.js",
+      load: "manual",
+      consent: "analytics",
+      retries: 1,
+      retryDelay: 250,
+    });
+    const runtime = register(analytics);
+    grantScriptConsent("analytics");
+    const loading = analytics.load().catch((error) => error);
+    script("analytics")!.dispatchEvent(new Event("error"));
+    await vi.advanceTimersByTimeAsync(0);
+    setScriptConsent("analytics", "denied");
+    await vi.advanceTimersByTimeAsync(250);
+
+    expect(script("analytics")).toBeNull();
+    expect(await loading).toBeInstanceOf(ScriptConsentRequiredError);
+    expect(analytics.status).toBe("blocked");
+
+    grantScriptConsent("analytics");
+    expect(script("analytics")).not.toBeNull();
+    script("analytics")!.dispatchEvent(new Event("load"));
+    await expect(analytics.load()).resolves.toBeUndefined();
+    runtime.close();
+  });
+
+  it("does not start another dependency after the parent script loses consent", async () => {
+    vi.useFakeTimers();
+    const first = defineScript({ name: "first", src: "/first.js", load: "manual" });
+    const second = defineScript({ name: "second", src: "/second.js", load: "manual" });
+    const analytics = defineScript({
+      name: "analytics",
+      src: "/analytics.js",
+      load: "manual",
+      consent: "analytics",
+      dependsOn: [first, second],
+    });
+    const runtime = startScriptRuntime(
+      [first.definition, second.definition, analytics.definition],
+      window,
+    );
+    grantScriptConsent("analytics");
+    const loading = analytics.load().catch((error) => error);
+    setScriptConsent("analytics", "denied");
+    script("first")!.dispatchEvent(new Event("load"));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(script("second")).toBeNull();
+    expect(script("analytics")).toBeNull();
+    expect(await loading).toBeInstanceOf(ScriptConsentRequiredError);
+    expect(analytics.status).toBe("blocked");
+    runtime.close();
+  });
+
+  it("rechecks consent after a loading status listener withdraws it", async () => {
+    const analytics = defineScript({
+      name: "analytics",
+      src: "/analytics.js",
+      load: "manual",
+      consent: "analytics",
+      retries: 1,
+    });
+    const runtime = register(analytics);
+    grantScriptConsent("analytics");
+    const unsubscribe = analytics.subscribe(({ status, attempt }) => {
+      if (status === "loading" && attempt === 1) setScriptConsent("analytics", "denied");
+    });
+    const loading = analytics.load().catch((error) => error);
+    expect(script("analytics")).toBeNull();
+    expect(await loading).toBeInstanceOf(ScriptConsentRequiredError);
+    expect(analytics.status).toBe("blocked");
+    unsubscribe();
+    runtime.close();
+  });
+
+  it("does not unload an already ready script when consent is withdrawn", async () => {
+    const analytics = defineScript({
+      name: "analytics",
+      src: "/analytics.js",
+      load: "manual",
+      consent: "analytics",
+    });
+    const runtime = register(analytics);
+    grantScriptConsent("analytics");
+    const loading = analytics.load();
+    const element = script("analytics")!;
+    element.dispatchEvent(new Event("load"));
+    await loading;
+    setScriptConsent("analytics", "denied");
+    await expect(analytics.load()).resolves.toBeUndefined();
+    expect(script("analytics")).toBe(element);
+    expect(analytics.status).toBe("ready");
+    runtime.close();
+  });
+
   it("supports hydration, interaction, and side-effect-only loading strategies", async () => {
     const hydrated = defineScript({
       name: "hydrated",
