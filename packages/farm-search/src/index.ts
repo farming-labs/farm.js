@@ -23,6 +23,7 @@ export type {
 export function search(options: SearchOptions = {}) {
   const resolved = resolveSearchOptions(options);
   let configuredBasePath = "/";
+  let htmlBasePath = "/";
   let generated = false;
   const publicConfig: FarmSearchPublicConfig = {
     available: false,
@@ -42,6 +43,14 @@ export function search(options: SearchOptions = {}) {
         throw new Error("[farm:search] Configure search in one search() plugin instance");
       }
       configuredBasePath = normalizeBasePath(config.basePath);
+      // RouteManager emits ordinary SSG paths relative to the app, while its
+      // localized SSG paths already include basePath. Do not infer this from
+      // folder names: an application route can have the same name as basePath.
+      const i18n = config.i18n;
+      htmlBasePath =
+        i18n && typeof i18n === "object" && "enabled" in i18n && i18n.enabled
+          ? configuredBasePath
+          : "/";
       publicConfig.bundlePath = `${withBasePath(`/${resolved.output}`, configuredBasePath)}/`;
     },
 
@@ -60,6 +69,7 @@ export function search(options: SearchOptions = {}) {
             publicDir: nitroConfig.output?.publicDir,
             preset: nitroConfig.preset ?? "node-server",
             basePath: configuredBasePath,
+            htmlBasePath,
             options: resolved,
           });
           generated = true;
@@ -88,6 +98,7 @@ export function search(options: SearchOptions = {}) {
           outputDir: result.outputDir ?? `${result.root}/.farm/.output`,
           preset: result.preset,
           basePath: configuredBasePath,
+          htmlBasePath,
           options: resolved,
         });
         generated = true;
