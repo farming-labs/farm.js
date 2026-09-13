@@ -232,6 +232,8 @@ once; intermediate arrays never receive DOM work. Every user `map()` remains O(n
 keyed runtime's second full key-and-binding scan. Queued hints compose. The source method lookup,
 native result, callback order, and thrown errors are preserved.
 
+The setter may be concise or use a block containing exactly one value-returning `return`. Extra
+updater statements, conditional returns, and missing returns keep complete keyed reconciliation.
 Each stage requires an inline synchronous conditional mapper that returns the original item on at
 least one path and an object-spread replacement on another. The callback may be a concise expression
 or a structured block containing fully returning `if` or `switch` branches and proven local `const`
@@ -578,10 +580,11 @@ partial or dangling fallthrough is rejected. Mutable or destructured declaration
 initializers, other intermediate statements, and ambiguous leaves use complete keyed
 reconciliation. A runtime key change also falls back before any DOM write.
 
-Farm executes every native map and reorder call normally. For consecutive accepted maps, it checks
-each native call but compares only the input and final result of that map segment, avoiding a full
-lineage scan for every intermediate array. It verifies the committed token, dense-array shape, a
-one-to-one source-item match, and every final replacement key before touching the DOM, then runs one
+The functional setter may be concise or a block containing exactly one direct value-returning
+`return`. Farm executes every native map and reorder call normally. For consecutive accepted maps,
+it checks each native call but compares only the input and final result of that map segment, avoiding
+a full lineage scan for every intermediate array. It verifies the committed token, dense-array
+shape, a one-to-one source-item match, and every final replacement key before touching the DOM, then runs one
 LIS and patches each changed row once. Unchanged rows need no second key or binding read. Queued
 supported map-and-reorder setters compose against the same committed rows. Every accepted map
 requires an inline synchronous conditional mapper whose leaves return either the original item or
@@ -612,7 +615,7 @@ sort remains an ambiguous permutation, so Farm performs one validated source loo
 Safe maps on both sides of a reorder flatten their replacements back to the same committed rows.
 
 Safe maps may also run before, between, or after index-independent `filter` or `slice` steps in one
-concise functional setter. A final native reorder is optional:
+concise functional setter or one block with a single direct `return`. A final native reorder is optional:
 
 ```tsx
 setItems((current) =>

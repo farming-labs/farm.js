@@ -326,8 +326,8 @@ export function StandardTableBenchmark() {
             const trimCount = 50;
             setSeed(secondSeed);
             setRows((current) => [...current.slice(trimCount), ...firstAdditions]);
-            setRows((current) =>
-              current.map((row) => {
+            setRows((current) => {
+              return current.map((row) => {
                 const target = row.id;
                 switch (target) {
                   case reviewedId:
@@ -340,8 +340,8 @@ export function StandardTableBenchmark() {
                   default:
                     return row;
                 }
-              }),
-            );
+              });
+            });
             setRows((current) => [...current.slice(trimCount), ...secondAdditions]);
             setOperation("map through two queued rolling windows");
             setRevision((value) => value + 1);
