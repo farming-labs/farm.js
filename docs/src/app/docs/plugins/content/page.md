@@ -94,6 +94,12 @@ collection({
 });
 ```
 
+URL-encode filename characters such as `#`, `?`, and `%`: `[Guide](./guide%23v1.pdf)` refers to
+`guide#v1.pdf`. Farm gives these assets a safe generated filename before passing them through Vite's
+normal asset pipeline. Their original metadata names, URL query strings, fragments, and development
+reload behavior are preserved. The generated copies live under `.farm/content/assets` and are
+recreated when the app's generated `.farm` directory is cleared.
+
 Farm recognizes inline and reference-style Markdown images and file links:
 
 ```md

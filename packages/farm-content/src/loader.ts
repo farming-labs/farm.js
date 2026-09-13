@@ -1,4 +1,5 @@
-import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { lstat, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 import fg from "fast-glob";
 import matter from "gray-matter";
@@ -59,14 +60,19 @@ export async function writeContentServerModule(
   const imports = [...assetImports.values()].sort((left, right) =>
     left.token.localeCompare(right.token),
   );
-  const importSource = imports
-    .map(
-      (asset, index) =>
-        `import farmContentAsset${index} from ${JSON.stringify(
-          `${toViteImportSpecifier(actualOutputDirectory, asset.filePath)}?url`,
-        )};`,
-    )
-    .join("\n");
+  const importLines: string[] = [];
+  for (const [index, asset] of imports.entries()) {
+    const relativePath = toViteImportSpecifier(actualOutputDirectory, asset.filePath);
+    // Vite treats these characters as URL syntax, even in resolved filesystem IDs.
+    // Only stage affected assets; ordinary files keep their direct ?url imports.
+    const importPath = /[?#%]/.test(relativePath)
+      ? await stageContentAsset(actualOutputDirectory, asset.filePath)
+      : relativePath;
+    importLines.push(
+      `import farmContentAsset${index} from ${JSON.stringify(`${importPath}?url`)};`,
+    );
+  }
+  const importSource = importLines.join("\n");
   const assetUrls = imports.length
     ? `, { ${imports
         .map((asset, index) => `${JSON.stringify(asset.token)}: farmContentAsset${index}`)
@@ -83,6 +89,30 @@ export const getEntry = runtime.getEntry;
 export const getEntryOrThrow = runtime.getEntryOrThrow;
 `;
   await writeFileIfChanged(outputFile, source);
+}
+
+async function stageContentAsset(outputDirectory: string, filePath: string): Promise<string> {
+  const bytes = await readFile(filePath);
+  const digest = createHash("sha256").update(bytes).digest("hex");
+  const extension = path.extname(filePath);
+  const filename = `${digest}${/^\.[a-z\d]+$/i.test(extension) ? extension : ".bin"}`;
+  const directory = path.join(outputDirectory, "assets");
+  await mkdir(directory, { recursive: true });
+  if ((await realpath(directory)) !== directory) {
+    throw new Error("[farm:content] Generated asset directory cannot be a symlink");
+  }
+  const target = path.join(directory, filename);
+  try {
+    // Never overwrite an existing file or follow a pre-existing destination symlink.
+    await writeFile(target, bytes, { flag: "wx" });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    if (!(await lstat(target)).isFile() || !(await readFile(target)).equals(bytes)) {
+      throw new Error(`[farm:content] Generated asset ${filename} is not a matching regular file`);
+    }
+  }
+  // Content-addressing changes the import on edits, avoiding stale Vite module URLs.
+  return `./assets/${filename}`;
 }
 
 async function loadCollection(
