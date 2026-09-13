@@ -1,4 +1,5 @@
 import path from "node:path";
+import { lstat, realpath } from "node:fs/promises";
 import { definePlugin } from "@farm.js/core/plugin";
 import fg from "fast-glob";
 import { asset } from "./assets.js";
@@ -79,6 +80,7 @@ export function content<const TCollections extends ContentCollections>(
   async function rebuild(): Promise<void> {
     const attemptedSourceFiles = new Set<string>();
     try {
+      await assertGeneratedOutputInsideRoot(root, generatedFile);
       const loaded = await loadContentCollections(root, options.collections, attemptedSourceFiles);
       await writeContentServerModule(generatedFile, loaded.collections, loaded.assetImports);
       sourceFiles = new Set(loaded.sourceFiles);
@@ -146,6 +148,47 @@ export function content<const TCollections extends ContentCollections>(
   }
 
   return plugin;
+}
+
+async function assertGeneratedOutputInsideRoot(root: string, outputFile: string): Promise<void> {
+  const actualRoot = await realpath(root);
+  const missingSegments: string[] = [];
+  let existingAncestor = outputFile;
+  const unsafeOutput = () =>
+    new Error(
+      "[farm:content] Generated content output must stay inside the Farm project root, including through symlinks",
+    );
+
+  // Check the prospective destination before mkdir or writeFile can follow a link.
+  while (true) {
+    let actualAncestor: string;
+    try {
+      actualAncestor = await realpath(existingAncestor);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      const entry = await lstat(existingAncestor).catch((statError: NodeJS.ErrnoException) => {
+        if (statError.code !== "ENOENT") throw statError;
+        return undefined;
+      });
+      if (entry) throw unsafeOutput(); // A dangling symlink is not a missing directory.
+      const parent = path.dirname(existingAncestor);
+      if (parent === existingAncestor) throw error;
+      missingSegments.unshift(path.basename(existingAncestor));
+      existingAncestor = parent;
+      continue;
+    }
+    const destination = path.join(actualAncestor, ...missingSegments);
+    const relative = path.relative(actualRoot, destination);
+    if (
+      !relative ||
+      relative === ".." ||
+      relative.startsWith(`..${path.sep}`) ||
+      path.isAbsolute(relative)
+    ) {
+      throw unsafeOutput();
+    }
+    return;
+  }
 }
 
 interface ContentViteDevServer {
