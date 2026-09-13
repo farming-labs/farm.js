@@ -33,10 +33,18 @@ export async function loadContentCollections(
 ): Promise<LoadedContent> {
   const loaded: Record<string, readonly ContentEntry<any>[]> = Object.create(null);
   const assetImports = new Map<string, ContentAssetImport>();
+  const actualRoot = await realpath(root);
 
   for (const [name, definition] of Object.entries(collections)) {
     validateCollectionName(name);
-    const entries = await loadCollection(root, name, definition, sourceFiles, assetImports);
+    const entries = await loadCollection(
+      root,
+      actualRoot,
+      name,
+      definition,
+      sourceFiles,
+      assetImports,
+    );
     loaded[name] = Object.freeze(entries);
   }
 
@@ -87,6 +95,7 @@ export const getEntryOrThrow = runtime.getEntryOrThrow;
 
 async function loadCollection(
   root: string,
+  actualRoot: string,
   name: string,
   definition: ContentCollection<any>,
   sourceFiles: Set<string>,
@@ -121,7 +130,20 @@ async function loadCollection(
     ids.set(id, relativeFile);
     sourceFiles.add(absoluteFile);
 
-    const parsed = await parseContentFile(absoluteFile, relativeFile);
+    const actualFile = await realpath(absoluteFile);
+    const relativeToRoot = path.relative(actualRoot, actualFile);
+    if (
+      relativeToRoot === ".." ||
+      relativeToRoot.startsWith(`..${path.sep}`) ||
+      path.isAbsolute(relativeToRoot)
+    ) {
+      throw new Error(
+        `[farm:content] Collection "${name}" source ${relativeFile} cannot leave the Farm project root`,
+      );
+    }
+    sourceFiles.add(actualFile);
+
+    const parsed = await parseContentFile(actualFile, relativeFile);
     const assetContext = {
       root,
       collectionName: name,
