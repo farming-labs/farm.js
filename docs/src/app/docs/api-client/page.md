@@ -562,6 +562,11 @@ Set `cache.dedupeMs` to join identical requests started within that window. If a
 still running after the window expires, the newer request becomes the cache owner; the older result
 still returns to its original caller but cannot replace the newer cached value.
 
+Invalidation also protects against reads already in flight: their results still return to their
+callers, but cannot become fresh cache entries after that key is invalidated. The next read can
+fetch current data, even when invalidation and request startup happen in the same millisecond.
+Unrelated cache keys are unaffected.
+
 ## Optimistic cache updates
 
 Farm's cache lifecycle is intentionally familiar to React Query and TanStack Query users, but it is

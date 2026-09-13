@@ -1055,6 +1055,7 @@ function createAPIClientRuntime<
 
       const executeNetwork = async (opts?: { isBackground?: boolean; callCallbacks?: boolean }) => {
         const release = cancellation.hold();
+        let unsubscribeInvalidation: (() => void) | undefined;
         try {
           const dedupeMs = cacheOptions?.dedupeMs ?? 0;
           const inflight = inflightState.get(cacheKey);
@@ -1086,6 +1087,14 @@ function createAPIClientRuntime<
             return result;
           }
 
+          // Observe ordering, not wall-clock timestamps: invalidation can happen in the
+          // same millisecond, or be cleared by another client's newer cache write.
+          let invalidatedDuringRequest = false;
+          if (isCacheEnabled) {
+            unsubscribeInvalidation = cacheState.subscribe(cacheKey, (event) => {
+              if (event === "invalidate") invalidatedDuringRequest = true;
+            });
+          }
           emitStatus(opts?.isBackground ? "revalidating" : "pending", {
             isBackground: opts?.isBackground,
           });
@@ -1210,6 +1219,7 @@ function createAPIClientRuntime<
 
             if (
               inflightState.get(cacheKey) === inflightEntry &&
+              !invalidatedDuringRequest &&
               !result.error &&
               isCacheEnabled &&
               !isFarmAPIStream(result.data)
@@ -1251,6 +1261,7 @@ function createAPIClientRuntime<
             }
           }
         } finally {
+          unsubscribeInvalidation?.();
           release();
         }
       };

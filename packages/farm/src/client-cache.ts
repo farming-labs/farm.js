@@ -16,7 +16,7 @@ export type FarmClientCacheEntry<TData = unknown> = {
   fetching?: boolean;
 };
 
-type FarmClientCacheListener = () => void;
+type FarmClientCacheListener = (event?: "invalidate") => void;
 
 export class FarmClientDataCache {
   private entries = new Map<string, FarmClientCacheEntry>();
@@ -120,7 +120,7 @@ export class FarmClientDataCache {
       });
     }
 
-    this.emit(resolved);
+    this.emit(resolved, "invalidate");
   }
 
   alias(alias: string, key: string): void {
@@ -168,7 +168,7 @@ export class FarmClientDataCache {
     this.inflight.delete(alias);
     this.aliases.set(alias, resolved);
     this.emit(alias);
-    this.emit(resolved);
+    this.emit(resolved, this.invalidatedAt.has(resolved) ? "invalidate" : undefined);
   }
 
   subscribe(key: string, listener: FarmClientCacheListener): () => void {
@@ -197,18 +197,18 @@ export class FarmClientDataCache {
     this.inflight.delete(this.resolveKey(key));
   }
 
-  private emit(key: string): void {
-    this.notifyListeners(key);
+  private emit(key: string, event?: "invalidate"): void {
+    this.notifyListeners(key, event);
     for (const [alias, target] of this.aliases) {
       if (this.resolveKey(target) === key) {
-        this.notifyListeners(alias);
+        this.notifyListeners(alias, event);
       }
     }
   }
 
-  private notifyListeners(key: string): void {
+  private notifyListeners(key: string, event?: "invalidate"): void {
     for (const listener of this.listeners.get(key) ?? []) {
-      listener();
+      listener(event);
     }
   }
 }
