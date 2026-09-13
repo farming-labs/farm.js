@@ -9,6 +9,8 @@ export interface PwaBuildInput {
   publicDir?: string;
   preset: string;
   basePath: string;
+  /** Prefix already present in emitted HTML paths (localized Farm SSG output). */
+  htmlBasePath?: string;
   options: ResolvedPwaOptions;
 }
 
@@ -36,6 +38,7 @@ const PRECACHE_EXTENSIONS = new Set([
 export async function writePwaBuildArtifacts(input: PwaBuildInput): Promise<PwaBuildResult> {
   const publicDir = input.publicDir ?? resolvePwaPublicDir(input.outputDir, input.preset);
   const basePath = normalizeBasePath(input.basePath);
+  const htmlBasePath = normalizeBasePath(input.htmlBasePath);
   const workerRelativePath = path.posix.join(basePath.replace(/^\//, ""), "sw.js");
   const workerPath = path.join(publicDir, ...workerRelativePath.split("/"));
   await assertWorkerPathInsidePublicDir(publicDir, workerPath);
@@ -67,7 +70,7 @@ export async function writePwaBuildArtifacts(input: PwaBuildInput): Promise<PwaB
   }
 
   const files = await walkFiles(publicDir);
-  const staticRouteFiles = resolveStaticRouteFiles(files);
+  const staticRouteFiles = resolveStaticRouteFiles(files, htmlBasePath);
   const selectedRoutes = selectStaticRoutes(
     staticRouteFiles,
     input.options.cache.staticRoutes,
@@ -79,8 +82,7 @@ export async function writePwaBuildArtifacts(input: PwaBuildInput): Promise<PwaB
     ? withBasePath(configuredOfflineRoute, basePath)
     : false;
   if (offlineRoute && configuredOfflineRoute) {
-    const emittedOfflineFile =
-      staticRouteFiles[configuredOfflineRoute] ?? staticRouteFiles[offlineRoute];
+    const emittedOfflineFile = staticRouteFiles[configuredOfflineRoute];
     if (!emittedOfflineFile) {
       throw new Error(
         `[farm:pwa] Offline route ${JSON.stringify(input.options.offline)} was not emitted as a static page. ` +
@@ -96,7 +98,10 @@ export async function writePwaBuildArtifacts(input: PwaBuildInput): Promise<PwaB
       PRECACHE_EXTENSIONS.has(path.extname(file).toLowerCase()),
   );
   const precacheFiles = [...new Set([...assetFiles, ...Object.values(selectedRoutes)])].sort();
-  const precacheUrls = precacheFiles.map((file) => toPublicUrl(file, basePath));
+  const htmlFiles = new Set(Object.values(selectedRoutes));
+  const precacheUrls = precacheFiles.map((file) =>
+    toPublicUrl(file, basePath, htmlFiles.has(file) ? htmlBasePath : basePath),
+  );
   const fileHashes = await Promise.all(
     precacheFiles.map(async (file) => {
       const content = await readFile(path.join(publicDir, file));
@@ -107,6 +112,7 @@ export async function writePwaBuildArtifacts(input: PwaBuildInput): Promise<PwaB
     .update(
       JSON.stringify({
         files: fileHashes,
+        urls: precacheUrls,
         routes: selectedRoutes,
         offlineRoute,
         update: input.options.update,
@@ -121,6 +127,7 @@ export async function writePwaBuildArtifacts(input: PwaBuildInput): Promise<PwaB
     workerPath,
     generateServiceWorker({
       basePath,
+      htmlBasePath,
       cacheId,
       precacheUrls,
       staticRoutes: selectedRoutes,
@@ -142,6 +149,7 @@ export async function writePwaBuildArtifacts(input: PwaBuildInput): Promise<PwaB
 
 export interface GenerateServiceWorkerOptions {
   basePath: string;
+  htmlBasePath?: string;
   cacheId: string;
   precacheUrls: string[];
   staticRoutes: Record<string, string>;
@@ -154,7 +162,7 @@ export function generateServiceWorker(options: GenerateServiceWorkerOptions): st
   const routeFiles = Object.fromEntries(
     Object.entries(options.staticRoutes).map(([route, file]) => [
       encodePathname(route),
-      toPublicUrl(file, options.basePath),
+      toPublicUrl(file, options.basePath, options.htmlBasePath ?? "/"),
     ]),
   );
   const offlineFile = options.offlineRoute
@@ -398,9 +406,6 @@ export function withBasePath(route: string, basePath: string): string {
   const normalizedBase = normalizeBasePath(basePath);
   const normalizedRoute = route === "/" ? "/" : `/${route.replace(/^\/+|\/+$/g, "")}`;
   if (normalizedBase === "/") return normalizedRoute;
-  if (normalizedRoute === normalizedBase || normalizedRoute.startsWith(`${normalizedBase}/`)) {
-    return normalizedRoute;
-  }
   return normalizedRoute === "/" ? normalizedBase : `${normalizedBase}${normalizedRoute}`;
 }
 
@@ -420,7 +425,7 @@ async function walkFiles(root: string): Promise<string[]> {
   return files.flat().sort();
 }
 
-function resolveStaticRouteFiles(files: string[]): Record<string, string> {
+function resolveStaticRouteFiles(files: string[], htmlBasePath: string): Record<string, string> {
   const routes: Record<string, string> = {};
   for (const file of files) {
     if (path.extname(file).toLowerCase() !== ".html") continue;
@@ -429,7 +434,7 @@ function resolveStaticRouteFiles(files: string[]): Record<string, string> {
     const route = withoutIndex
       ? `/${withoutIndex.replace(/\.html$/, "").replace(/^\/+|\/+$/g, "")}`
       : "/";
-    routes[route] = normalized;
+    routes[stripBasePath(route, htmlBasePath)] = normalized;
   }
   return routes;
 }
@@ -449,7 +454,7 @@ function selectStaticRoutes(
   const selected: Record<string, string> = {};
   for (const requested of configured) {
     const route = withBasePath(requested, basePath);
-    const emittedFile = emitted[requested] ?? emitted[route];
+    const emittedFile = emitted[requested];
     if (!emittedFile) {
       throw new Error(
         `[farm:pwa] Static route ${JSON.stringify(requested)} was not found in the production output.`,
@@ -460,13 +465,18 @@ function selectStaticRoutes(
   return selected;
 }
 
-function toPublicUrl(file: string, basePath: string): string {
-  const url = `/${file
-    .replace(/\\/g, "/")
-    .split("/")
-    .map((segment) => encodeURIComponent(segment))
-    .join("/")}`;
-  return withBasePath(url, basePath);
+function stripBasePath(route: string, basePath: string): string {
+  const base = normalizeBasePath(basePath);
+  if (base === "/") return route;
+  if (route === base) return "/";
+  return route.startsWith(`${base}/`) ? route.slice(base.length) : route;
+}
+
+function toPublicUrl(file: string, basePath: string, fileBasePath = basePath): string {
+  // Generated assets can already live under basePath. HTML uses the explicit
+  // SSG output prefix instead: a folder named like basePath can be a real route.
+  const route = stripBasePath(`/${file.replace(/\\/g, "/")}`, fileBasePath);
+  return withBasePath(encodePathname(route), basePath);
 }
 
 function encodePathname(pathname: string): string {

@@ -215,6 +215,11 @@ array when the app should not ship a service worker.
 URLs, query strings, fragments, dot segments, backslashes, control characters, and encoded path
 separators are rejected.
 
+Write these paths without the deployment prefix: with `basePath: "/app"`, `"/"` is served at
+`/app` and `"/help"` at `/app/help`. An application route named `"/app"` is distinct from the home
+page and is cached at `/app/app`. Farm handles localized HTML output automatically; include the
+locale in a localized route such as `offline: "/en/offline"`, but do not add the deployment prefix.
+
 ## Production lifecycle
 
 During `farm build`, generated-worker mode:
