@@ -1341,6 +1341,7 @@ declare module "@farm.js/core/client" {
   export type IntegrationClientData = Record<string, unknown>;
 
   export interface IntegrationClientOptions {
+    fetch?: typeof globalThis.fetch;
     timeoutMs?: number;
     baseURL?: string;
     headers?: ClientHeaders;

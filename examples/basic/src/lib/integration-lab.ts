@@ -19,6 +19,7 @@ export interface IntegrationLabResult {
   caller: string;
   requestId: string;
   language?: string | null;
+  transport?: string | null;
   trace: string[];
   lifecycle?: {
     label: string;
@@ -135,6 +136,7 @@ const routeLab = defineIntegration({
           caller: readCaller(context),
           requestId: context.requestId,
           language: request.headers.get('accept-language'),
+          transport: request.headers.get('x-integration-lab-transport'),
           trace: readTrace(context),
           lifecycle: { ...routeLabState },
         } satisfies IntegrationLabResult);

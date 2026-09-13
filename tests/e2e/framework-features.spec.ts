@@ -475,6 +475,7 @@ test.describe("Framework feature integration", () => {
           message: "server-routes",
           caller: "server",
           language: "en",
+          transport: null,
         }),
         endpoints: expect.objectContaining({
           source: "endpoints",
@@ -500,6 +501,9 @@ test.describe("Framework feature integration", () => {
     );
     await expect(page.getByTestId("integration-client-routes")).toContainText('"caller":"browser"');
     await expect(page.getByTestId("integration-client-routes")).toContainText('"language":"fr"');
+    await expect(page.getByTestId("integration-client-routes")).toContainText(
+      '"transport":"custom-fetch"',
+    );
     await page.evaluate(() => {
       document.documentElement.lang = "es";
     });

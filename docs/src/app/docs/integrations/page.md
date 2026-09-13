@@ -366,6 +366,19 @@ effects: handlers must pass the signal to their own work when supported. A handl
 can still finish or write data. For raw `Response` operations the deadline ends when the response
 is returned; use the signal to cancel subsequent HTTP body consumption.
 
+## Custom HTTP transport
+
+`createIntegrations<AppIntegrations>({ fetch: customFetch })` accepts the same fetch-compatible
+function as [`createApiClients`](/docs/api-client#custom-http-transport). Both HTTP callers and
+the server HTTP fallback use it; registered local integration handlers still dispatch directly.
+Farm supplies the resolved URL and `RequestInit`, including the cancellation signal.
+
+The separate server-options argument can replace `fetch` for `api`, and the existing
+integration-only factories accept it too. With combined route/integration callers, shared
+`fetch` is inherited unless `integrations.fetch` overrides it. Keep shared wrappers browser-safe
+and preserve request credentials, headers, and signals. Return a Web `Response`; do not put
+provider SDKs or server credentials in a shared module.
+
 ## Shared data
 
 `createIntegrations({ data })` adds small per-call metadata to integration requests. It is useful for tenant IDs, locale, analytics context, or feature flags.

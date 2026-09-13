@@ -52,6 +52,8 @@ export type APIClientOptions = {
   credentials?: RequestCredentials;
   /** Whole-call deadline in milliseconds. 0 (default) disables it. */
   timeoutMs?: number;
+  /** HTTP transport only; local server dispatch does not use it. */
+  fetch?: typeof globalThis.fetch;
   cacheDefaults?: CacheOptions;
   integrations?: IntegrationClientOptions;
 };
@@ -551,6 +553,7 @@ export function createApiClients<
             headers: options.headers,
             credentials: options.credentials,
             timeoutMs: options.timeoutMs,
+            fetch: options.fetch,
             ...options.integrations,
           }),
         },
@@ -633,6 +636,7 @@ function createAPIClientRuntime<
 ): { client: APIClient<TRouter, TIntegrations>; request: APICall } {
   options ??= {};
   const baseURL = options.baseURL || getFarmAPIBaseURL();
+  const httpFetch = options.fetch;
   const integrationOptions =
     options.integrations === false
       ? false
@@ -641,6 +645,7 @@ function createAPIClientRuntime<
           headers: options.headers,
           credentials: options.credentials,
           timeoutMs: options.timeoutMs,
+          fetch: httpFetch,
           ...(typeof options.integrations === "object" ? options.integrations : {}),
         };
   const rootAliases =
@@ -810,7 +815,7 @@ function createAPIClientRuntime<
     }
 
     cancellation.check();
-    const response = await (transport?.fetch ?? fetch)(url.toString(), fetchOptions);
+    const response = await (transport?.fetch ?? httpFetch ?? fetch)(url.toString(), fetchOptions);
     cancellation.check();
     const invalidations = decodeFarmCacheInvalidations(
       response.headers?.get?.(FARM_CACHE_INVALIDATION_HEADER),
@@ -916,7 +921,9 @@ function createAPIClientRuntime<
           requestCacheContext = getRequestCacheContext(
             { headers: defaultHeaders, credentials: options.credentials },
             input,
-            cacheOptions?.scope,
+            // Custom transports can inject an identity outside visible headers.
+            // Never share their cached data with other client instances.
+            httpFetch ? "client" : cacheOptions?.scope,
           );
         } catch (error) {
           requestCacheContext = `invalid:${requestId}`;
