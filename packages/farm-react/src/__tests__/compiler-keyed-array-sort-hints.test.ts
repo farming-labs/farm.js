@@ -34,6 +34,48 @@ describe("React AOT keyed-array sort hints", () => {
     expect(result.code).toContain("reorderIndexIndependent");
   });
 
+  it.each([
+    {
+      comparator: "(left, right) => left.rank - right.rank",
+      name: "an inline comparator",
+    },
+    { comparator: "", name: "the native default comparator" },
+  ])(
+    "records a direct native sort with $name from an exact updater block",
+    async ({ comparator }) => {
+      const result = await compile(`
+      import { useState } from "react";
+      export function Table() {
+        const [rows, setRows] = useState([
+          { id: "a", rank: 2, label: "Alpha" },
+          { id: "b", rank: 1, label: "Beta" },
+        ]);
+        return <section>
+          <button onClick={() => setRows((current) => {
+            return current.toSorted(${comparator});
+          })}>Sort</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </section>;
+      }
+    `);
+
+      expect(result.compiled).toEqual(["Table"]);
+      expect(result.diagnostics).toEqual([]);
+      expect(result.optimizations.keyedArraySortHints).toBe(1);
+      expect(result.code).toContain("createCompilerKeyedArraySort");
+      expect(result.code).toContain("keyedRowsReorderHintedRuntimeFeature");
+      expect(result.code).toContain("reorderIndexIndependent");
+      await expect(
+        transformWithEsbuild(result.code, "/app/KeyedArraySortHints.tsx", {
+          loader: "tsx",
+          jsx: "automatic",
+        }),
+      ).resolves.toMatchObject({
+        code: expect.stringContaining("createCompilerKeyedArraySort"),
+      });
+    },
+  );
+
   it("supports the native default comparator and shares the reorder runtime with reverse", async () => {
     const result = await compile(`
       import { useState } from "react";
@@ -798,9 +840,26 @@ describe("React AOT keyed-array sort hints", () => {
       update: "current.toSorted((left, right) => left.rank - right.rank)",
     },
     {
-      name: "a block-bodied updater",
+      name: "an updater block with a local declaration",
       row: "row => <li key={row.id}>{row.label}</li>",
-      update: "{ return current.toSorted((left, right) => left.rank - right.rank); }",
+      update:
+        "{ const next = current.toSorted((left, right) => left.rank - right.rank); return next; }",
+    },
+    {
+      name: "an updater block with conditional returns",
+      row: "row => <li key={row.id}>{row.label}</li>",
+      update:
+        "{ if (current.length > 1) return current.toSorted((left, right) => left.rank - right.rank); return current; }",
+    },
+    {
+      name: "an updater block without a return",
+      row: "row => <li key={row.id}>{row.label}</li>",
+      update: "{ current.toSorted((left, right) => left.rank - right.rank); }",
+    },
+    {
+      name: "an updater block with a directive",
+      row: "row => <li key={row.id}>{row.label}</li>",
+      update: '{ "use strict"; return current.toSorted((left, right) => left.rank - right.rank); }',
     },
     {
       name: "a referenced comparator",

@@ -1650,13 +1650,16 @@ A direct native immutable sort can reuse every keyed row while changing only its
 ```tsx
 setItems((current) => current.toSorted((left, right) => left.rank - right.rank));
 setLabels((current) => current.toSorted());
+setItems((current) => {
+  return current.toSorted((left, right) => left.rank - right.rank);
+});
 ```
 
-Farm recognizes a concise functional setter with either no comparator or an inline synchronous
-comparator from the compiler's safe expression subset. It preserves the original method lookup,
-comparator execution, native result, stable-sort behavior, and thrown errors. The native sort still
-does the comparison work; this optimization removes repeated keyed-row work after the result is
-known.
+Farm recognizes a concise functional setter or a setter block containing exactly one direct
+`return`, with either no comparator or an inline synchronous comparator from the compiler's safe
+expression subset. It preserves the original method lookup, comparator execution, native result,
+stable-sort behavior, and thrown errors. The native sort still does the comparison work; this
+optimization removes repeated keyed-row work after the result is known.
 
 At commit time, Farm verifies an ordinary dense array whose reorder chain starts at the committed
 collection, the native `toSorted()` method, equal lengths, and a one-to-one identity match between
@@ -1668,13 +1671,14 @@ and existing elements, handlers, form state, focus, and text selection remain at
 rows.
 
 This proof requires compiler-owned host rows whose render and key do not observe the row index.
-Referenced comparators, block-bodied updaters, computed methods, custom methods, sparse or subclassed
-arrays, duplicate item identities, collection-reading bindings, an unhinted intermediate update,
-structural calls after reordering, React-owned rows, nested host blocks, row conditionals, unrelated
-dirty dependencies, and failed validation keep complete keyed reconciliation. Native sort/reverse
-chains may start with compiler-safe `filter()` and bounded `slice()` calls; other chained calls fall
-back. Reports count each compiled sort step as a `keyedArraySortHints` entry. Sort shares the
-optional reorder runtime, and Farm does not polyfill `Array.prototype.toSorted`.
+Referenced comparators, updater blocks with extra statements, directives, conditional returns, or
+no returned value, computed methods, custom methods, sparse or subclassed arrays, duplicate item
+identities, collection-reading bindings, an unhinted intermediate update, structural calls after
+reordering, React-owned rows, nested host blocks, row conditionals, unrelated dirty dependencies,
+and failed validation keep complete keyed reconciliation. Native sort/reverse chains may start with
+compiler-safe `filter()` and bounded `slice()` calls; other chained calls fall back. Reports count
+each compiled sort step as a `keyedArraySortHints` entry. Sort shares the optional reorder runtime,
+and Farm does not polyfill `Array.prototype.toSorted`.
 
 #### Keyed array filter hints
 

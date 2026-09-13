@@ -3767,17 +3767,24 @@ function rewriteKeyedArraySortHints(
         updater.async ||
         updater.generator ||
         updater.params.length !== 1 ||
-        !t.isIdentifier(updater.params[0]) ||
-        !t.isCallExpression(updater.body) ||
-        updater.body.arguments.length > 1 ||
-        !t.isMemberExpression(updater.body.callee) ||
-        updater.body.callee.computed ||
-        !t.isIdentifier(updater.body.callee.object, { name: updater.params[0].name }) ||
-        !t.isIdentifier(updater.body.callee.property, { name: "toSorted" })
+        !t.isIdentifier(updater.params[0])
       ) {
         return;
       }
-      const comparator = updater.body.arguments[0];
+      const returned = returnedExpression(updater);
+      if (
+        (t.isBlockStatement(updater.body) && updater.body.directives.length > 0) ||
+        !returned ||
+        !t.isCallExpression(returned) ||
+        returned.arguments.length > 1 ||
+        !t.isMemberExpression(returned.callee) ||
+        returned.callee.computed ||
+        !t.isIdentifier(returned.callee.object, { name: updater.params[0].name }) ||
+        !t.isIdentifier(returned.callee.property, { name: "toSorted" })
+      ) {
+        return;
+      }
+      const comparator = returned.arguments[0];
       if (
         comparator &&
         !t.isArrowFunctionExpression(comparator) &&

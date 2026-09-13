@@ -362,12 +362,13 @@ and connections. Package tests compare one to four reversals across 2,000 determ
 run another 2,000 separately queued reverse/map/reverse updates against normal React, and cover
 changed-key and subclass fallback, Strict Mode hydration, and cleanup.
 
-Native keyed-array sorting has its own 10,000-row comparison. Concise `toSorted()` is measured
-against bracketed React and an equivalent block-bodied compiled control. Both compiler modes must
-remain at least 4x faster than React and 1.25x faster than the compiled control. The report must
-contain a nonzero `keyedArraySortHints` count; package tests separately require the minimum
-`n - LIS` DOM moves, zero key/descriptor/binding reads, native method semantics, randomized
-differential correctness, focus and selection preservation, hydration, and cleanup.
+Native keyed-array sorting has its own 10,000-row comparison. A single-return block-bodied
+`toSorted()` setter is measured against bracketed React and a compiled snapshot control whose
+updater block has an extra local declaration. Both compiler modes must remain at least 4x faster
+than React and 1.25x faster than the compiled control. The report must contain a nonzero
+`keyedArraySortHints` count; package tests separately require the minimum `n - LIS` DOM moves, zero
+key/descriptor/binding reads, native method semantics, randomized differential correctness, focus
+and selection preservation, hydration, and cleanup.
 
 Set membership has a separate operation and persistence gate. The table alternates two marked row
 keys with `markedIds.has(row.id)` at 1,000 and 20,000 rows. Both compiler modes must remain at least

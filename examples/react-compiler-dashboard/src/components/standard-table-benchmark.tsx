@@ -1791,9 +1791,11 @@ export function StandardTableBenchmark() {
           data-action="table-sort"
           type="button"
           onClick={() => {
-            setRows((current) =>
-              current.toSorted((left, right) => left.amount - right.amount || left.id - right.id),
-            );
+            setRows((current) => {
+              return current.toSorted(
+                (left, right) => left.amount - right.amount || left.id - right.id,
+              );
+            });
             setOperation("sort rows");
             setRevision((value) => value + 1);
           }}
@@ -1805,9 +1807,10 @@ export function StandardTableBenchmark() {
           type="button"
           onClick={() => {
             setRows((current) => {
-              return current.toSorted(
+              const sorted = current.toSorted(
                 (left, right) => left.amount - right.amount || left.id - right.id,
               );
+              return sorted;
             });
             setOperation("sort rows (snapshot control)");
             setRevision((value) => value + 1);
