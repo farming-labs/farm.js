@@ -67,7 +67,11 @@ export function useServerQuery<TInput, TData>(
   );
 
   useEffect(() => {
-    if (options.enabled === false) return;
+    if (options.enabled === false) {
+      // Re-enabling is a new read, even when the query/input key is unchanged.
+      mountedKeyRef.current = undefined;
+      return;
+    }
 
     const firstReadForKey = mountedKeyRef.current !== key;
     if (firstReadForKey) mountedKeyRef.current = key;

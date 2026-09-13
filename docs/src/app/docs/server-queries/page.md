@@ -113,6 +113,13 @@ export function ProductPrice({ id }: { id: string }) {
 ```
 
 The hook returns `data`, `error`, `status`, `pending`, `fetching`, `stale`, and `refetch`. Stale data remains visible while Farm refreshes it in the background. Stale queries also refresh on window focus and reconnect unless those options are disabled.
+
+Set `enabled: false` to pause automatic reads, invalidation refetches, and focus/reconnect refresh.
+An already-running read is not cancelled. Switching back to `enabled: true` checks the cache again:
+missing or stale data refreshes, fresh data is reused, and pending work is deduplicated. This does
+not add polling or continuously refetch when `staleTime` is zero. Explicit `refetch()` remains
+available while automatic reads are disabled.
+
 `refetch()` always starts fresh work. If an older request finishes afterward, its result is returned
 to its original caller but cannot replace the newer cached value.
 
