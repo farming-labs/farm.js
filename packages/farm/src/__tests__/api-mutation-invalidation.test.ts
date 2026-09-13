@@ -54,7 +54,7 @@ it.each(["private", "shared", "server"] as const)(
         await started.promise;
         const result = await client.item.post(
           {},
-          { invalidate: [explicit ? "mutation:item" : client.item.get] },
+          { invalidate: [explicit ? "mutation:item" : [client.item.get]] },
         );
         expect(result.error).toBeNull();
         first.resolve(Response.json({ value: "old" }));
