@@ -175,7 +175,6 @@ export function useMutation<TTarget extends AnyMutationTarget>(
             return {
               ...current,
               pendingCount,
-              status: pendingCount > 0 ? "pending" : current.status,
             };
           }
 
@@ -205,7 +204,6 @@ export function useMutation<TTarget extends AnyMutationTarget>(
             return {
               ...current,
               pendingCount,
-              status: pendingCount > 0 ? "pending" : current.status,
             };
           }
 

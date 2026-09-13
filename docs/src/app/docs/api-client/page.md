@@ -447,6 +447,11 @@ existing API-client cache, retry, invalidation, and optimistic options through `
 `optimistic` state on `useMutation` is separate from an API cache update: it controls
 `mutation.data`, while `request.optimistic` updates shared cached queries.
 
+For overlapping submissions, `status`, `data`, and `error` describe the latest submission.
+Older completions do not replace its result or run completion callbacks. `pending` separately
+tracks whether any submission is still running, so it can remain `true` after the latest one
+succeeds or fails. `useFetcher` follows the same rules.
+
 `reset()` clears the displayed mutation state; it does not cancel the underlying work. Calls
 started before reset still settle their own promises, but cannot change the new state or run its
 completion callbacks. If you submit again, `pending` counts only calls started after reset.
