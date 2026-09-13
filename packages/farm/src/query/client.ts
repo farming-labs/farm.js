@@ -44,7 +44,15 @@ export interface Options {
 }
 
 const getCurrentSearchParams = (): URLSearchParams => {
-  if (typeof window !== "undefined") return new URLSearchParams(window.location.search);
+  if (typeof window !== "undefined") {
+    let params = new URLSearchParams(window.location.search);
+    // Draft values belong to the existing throttle queue, not to a parser's
+    // identity. Inline parsers and newly mounted consumers see the same draft.
+    for (const pending of throttleTimers.values()) {
+      if (pending.href === window.location.href) params = applyChange(params, pending.updates);
+    }
+    return params;
+  }
 
   // Server rendering used to see an empty query string here, so a hook read one
   // value on the server and another in the browser. React reports that as a
@@ -63,7 +71,14 @@ const readSearchParam = (searchParams: URLSearchParams, key: string): string => 
   return values.length > 1 ? values.join(",") : (values[0] ?? "");
 };
 
-const throttleTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const throttleTimers = new Map<
+  string,
+  {
+    timer: ReturnType<typeof setTimeout>;
+    updates: Record<string, string | null>;
+    href: string;
+  }
+>();
 
 function getUpdateKey(updates: Record<string, unknown>): string {
   return JSON.stringify(Object.keys(updates).sort());
@@ -178,8 +193,12 @@ const commitURLUpdate = (
   }
 
   if (emitUpdate) {
-    const actualSearchParams = new URLSearchParams(window.location.search);
-    emitter.emitUpdate(actualSearchParams);
+    // Composing one queued key must not discard drafts for other keys. Only
+    // carry drafts forward across this write, never across unrelated navigation.
+    for (const pending of throttleTimers.values()) {
+      if (pending.href === url.href) pending.href = window.location.href;
+    }
+    emitter.emitUpdate(getCurrentSearchParams());
   }
 
   if (shallow) notifyHistoryChange("url-search");
@@ -205,7 +224,7 @@ const updateURL = (
   const throttleKey = getUpdateKey(updates);
   const existingTimeout = throttleTimers.get(throttleKey);
   if (existingTimeout) {
-    clearTimeout(existingTimeout);
+    clearTimeout(existingTimeout.timer);
     throttleTimers.delete(throttleKey);
   }
 
@@ -214,15 +233,15 @@ const updateURL = (
   if (nextSearch === currentUrl.searchParams.toString()) return;
 
   const timeout = setTimeout(() => {
-    if (throttleTimers.get(throttleKey) === timeout) {
+    if (throttleTimers.get(throttleKey)?.timer === timeout) {
       throttleTimers.delete(throttleKey);
     }
     commitURLUpdate(updates, options, emitUpdate);
   }, throttleMs);
 
-  throttleTimers.set(throttleKey, timeout);
+  throttleTimers.set(throttleKey, { timer: timeout, updates, href: currentUrl.href });
   return () => {
-    if (throttleTimers.get(throttleKey) !== timeout) return;
+    if (throttleTimers.get(throttleKey)?.timer !== timeout) return;
     clearTimeout(timeout);
     throttleTimers.delete(throttleKey);
   };
