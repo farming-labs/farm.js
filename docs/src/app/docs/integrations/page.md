@@ -202,6 +202,38 @@ callers are needed. For separate modules, set `integrations: false` on the app-r
 `createApiClients()` setup and keep `createIntegrations()` for the integration callers. This
 does not change integration registration in `farm.config.ts`.
 
+Existing caller options can also be a reason to keep `createIntegrations()`. The factories do
+not have interchangeable option signatures:
+
+| Need                                                                                         | `createIntegrations()`                    | `createApiClients()`                                                                              |
+| -------------------------------------------------------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Shared `baseURL`, `headers`, `credentials`, or `data` defaults                               | Pass them in `clientOptions`.             | Pass them under `integrations`. These options alone do not require a separate factory.            |
+| Setup-level `request`, `forwardHeaders`, or separate server defaults                         | Pass a separate `serverOptions` argument. | No separate server-options argument; server integration calls support per-call overrides instead. |
+| Explicit integration definitions or API contracts, for example in isolated packages or tests | Use the source-map overload.              | Uses the configured integration registry.                                                         |
+
+For example, a request-scoped server helper can bind a request and its forwarding policy once:
+
+**src/lib/api.server.ts**
+
+```ts
+import { createIntegrations } from "@farm.js/core/client";
+import type { AppIntegrations } from "./integrations";
+
+export function createRequestIntegrationApi(request: Request) {
+  const { api } = createIntegrations<AppIntegrations>(
+    { data: { appName: "farm-dashboard" } },
+    { request, forwardHeaders: ["cookie", "authorization"] },
+  );
+
+  return api;
+}
+```
+
+Keep this helper in server-only code and call it per request; do not cache a request-bound
+caller globally or import it into browser code. A `serverOptions` argument is not a bundler
+security boundary: private headers, tokens, and requests must stay out of shared client modules.
+Forward credentials only to trusted destinations.
+
 The examples below use this integration-only setup and therefore omit `.integrations`. In an app using the
 shared factory above, reuse that pair and add `.integrations` to these integration call paths
 instead of creating another pair. Integration defaults such as `data` go inside its

@@ -257,6 +257,13 @@ that caller namespace, not the configured integration or its HTTP routes.
 The separate factory exposes `api.billing` / `apiClient.billing` directly. Do not mix
 its call paths with the paired route factory's reserved `.integrations` namespace.
 
+Keep `createIntegrations()` when explicit source maps or separate setup-level server options
+(`request`, `forwardHeaders`, or server defaults) are needed. Shared `baseURL`, `headers`,
+`credentials`, and `data` defaults alone do not require it; the paired factory accepts those
+under `integrations` and supports server integration overrides per call. Keep request-bound
+callers inside server request scope. A separate server-options argument does not make an import
+server-only or protect secrets placed in a browser-reachable module.
+
 Use `createServerFn` for typed mutations/actions and `createServerQuery` for typed reads,
 deduplication, prefetch, stale-while-revalidate, focus/reconnect refresh, and structured invalidation.
 Browser server query/action references require Farm's documented server-function transform. Without

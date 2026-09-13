@@ -592,6 +592,14 @@ integration defaults into the `integrations` option; it is not a drop-in rename.
 The paired factory discovers configured integrations; it does not accept the integration-only
 factory's explicit source map or separate server-options argument.
 
+Options are another reason to choose the separate factory. Shared `baseURL`, `headers`,
+`credentials`, and `data` defaults work with either setup: put them under `integrations` when
+using `createApiClients()`. Keep `createIntegrations()` when you want setup-level `request` or
+`forwardHeaders`, separate server defaults, or explicit source maps. The paired factory's
+server integration calls still accept per-call overrides. See the [options comparison and
+request-scoped example](/docs/integrations#integration-only-setup). Keep request-bound callers
+and private server options in server-only code, not in the shared browser module.
+
 For deliberately separate modules, use `createApiClients<APIRouter>({ routes: apiRoutes,
 integrations: false })` for app routes and `createIntegrations<AppIntegrations>()` for integration
 callers. Disabling the paired factory's namespace does not unregister integrations or their
