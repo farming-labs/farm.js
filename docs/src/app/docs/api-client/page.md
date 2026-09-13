@@ -543,6 +543,13 @@ changing explicit headers or credentials clears that private cache. This prevent
 reusing a response produced under an earlier cookie identity without placing credential values in a
 public cache key. Invalidate session-specific reads when the same client logs in or out.
 
+Private caches follow the lifetime of their caller: on runtimes with `WeakRef`, the shared
+invalidation channel does not keep an abandoned cache alive. Cleanup occurs during finalization
+or a later invalidation, not on a guaranteed schedule. Keep reusable callers at module scope;
+`gcTime` controls lazy expiration of individual entries, not caller disposal. Older runtimes
+without `WeakRef` retain the existing strong subscription, so avoid repeatedly creating callers
+there. Request-local server caches do not subscribe to the global invalidation channel.
+
 Use `scope: "shared"` only for public data requested with `credentials: "omit"` and no custom
 headers that intentionally shares a structured key with route data or another API client:
 
