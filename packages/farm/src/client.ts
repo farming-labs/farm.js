@@ -16,6 +16,7 @@ export type {
   ServerAPIClientWithoutIntegrationsOptions,
 } from "./api/client";
 export type { FarmAPIStream } from "./api/transport";
+export type { ClientHeaders } from "./client-headers";
 export { useMutation } from "./mutation-client";
 export type {
   AnyMutationTarget,

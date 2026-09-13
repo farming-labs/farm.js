@@ -23,6 +23,7 @@ import { getFarmAPIBaseURL, resolveFarmAPIRequestURL } from "./config";
 import { ClientRouteManifest, type APIRouteManifest, type BoundRouteParams } from "./client-routes";
 import type { RoutePathParams } from "./route";
 import { _resolveCurrentRequest } from "../server/request-bridge";
+import { resolveClientHeaders, type ClientHeaders } from "../client-headers";
 import { resolveAPIRequestRuntime, type APIRequestRuntime } from "./server-client-bridge";
 export type { APIRouteManifest } from "./client-routes";
 import {
@@ -46,7 +47,7 @@ export type APIClientOptions = {
   /** Generated path/method metadata required for dynamic shorthand and $params scopes. */
   routes?: APIRouteManifest;
   baseURL?: string;
-  headers?: Record<string, string>;
+  headers?: ClientHeaders;
   credentials?: RequestCredentials;
   cacheDefaults?: CacheOptions;
   integrations?: IntegrationClientOptions;
@@ -506,15 +507,14 @@ export function createApiClients<
           const value = currentRequest.headers.get(name);
           if (value !== null) headers.set(name, value);
         }
-        new Headers(options.headers).forEach((value, name) => headers.set(name, value));
         local = createAPIClientRuntime(
           {
             ...options,
             integrations: false,
             baseURL: new URL(runtime.basePath, origin).toString(),
-            headers: Object.fromEntries(headers),
           },
           {
+            headers,
             cache: new FarmClientDataCache({ subscribeToInvalidation: false }),
             routeMeta,
             fetch: (url, init) => {
@@ -615,6 +615,7 @@ function createAPIClientRuntime<
 >(
   options: APIClientOptions | APIClientWithoutIntegrationsOptions = {},
   transport?: {
+    headers?: HeadersInit;
     fetch(url: string, init: RequestInit): Promise<Response>;
     cache: FarmClientDataCache;
     routeMeta: WeakMap<AnyRouteRef, RouteMeta>;
@@ -752,7 +753,7 @@ function createAPIClientRuntime<
   };
 
   // Create a simple fetch-based client (browser compatible)
-  const fetchClient = async (path: string, requestOptions: any = {}) => {
+  const fetchClient = async (path: string, requestOptions: any, defaultHeaders: Headers) => {
     const url = resolveFarmAPIRequestURL(path, baseURL);
     const method = String(requestOptions.method || "GET").toUpperCase();
 
@@ -769,7 +770,7 @@ function createAPIClientRuntime<
     }
 
     // Prepare fetch options
-    const headers = new Headers(options.headers);
+    const headers = new Headers(defaultHeaders);
     new Headers(requestOptions.headers).forEach((value, key) => headers.set(key, value));
     const fetchOptions: RequestInit = {
       method,
@@ -822,6 +823,15 @@ function createAPIClientRuntime<
   ): Promise<APIResult<any, Error>> => {
     const methodUpper = method.toUpperCase() as StatusEvent["method"];
     const requestId = `${Date.now()}-${++requestCounter}`;
+    const defaultHeaders = new Headers(transport?.headers);
+    let requestContextError: Error | undefined;
+    try {
+      const resolved = resolveClientHeaders(options.headers);
+      const headers = resolved instanceof Headers ? resolved : await resolved;
+      headers.forEach((value, name) => defaultHeaders.set(name, value));
+    } catch (error) {
+      requestContextError = normalizeError(error);
+    }
     const cacheOptions = clientOptions?.cache
       ? {
           ...options.cacheDefaults,
@@ -830,7 +840,7 @@ function createAPIClientRuntime<
       : undefined;
     const configuredCacheKey = clientOptions?.key ?? cacheOptions?.key;
     const cacheKey = normalizeFarmClientCacheKey(
-      configuredCacheKey ?? buildCacheKey(methodUpper, path, input, baseURL, options.headers),
+      configuredCacheKey ?? buildCacheKey(methodUpper, path, input, baseURL, defaultHeaders),
     ) as CacheKey<any>;
     const now = Date.now();
 
@@ -858,11 +868,14 @@ function createAPIClientRuntime<
       isCacheEnabled ||
       Boolean(clientOptions?.optimistic?.update?.length) ||
       Boolean(clientOptions?.invalidate);
-    let requestCacheContext: string | undefined;
-    let requestContextError: Error | undefined;
-    if (needsCacheState) {
+    let requestCacheContext = requestContextError ? `invalid:${requestId}` : undefined;
+    if (needsCacheState && !requestContextError) {
       try {
-        requestCacheContext = getRequestCacheContext(options, input, cacheOptions?.scope);
+        requestCacheContext = getRequestCacheContext(
+          { headers: defaultHeaders, credentials: options.credentials },
+          input,
+          cacheOptions?.scope,
+        );
       } catch (error) {
         requestCacheContext = `invalid:${requestId}`;
         requestContextError = normalizeError(error);
@@ -908,7 +921,7 @@ function createAPIClientRuntime<
           target,
           targetInput,
           baseURL,
-          options.headers,
+          defaultHeaders,
           transport ? baseURL : undefined,
         );
         if (!targetKey) continue;
@@ -1030,10 +1043,14 @@ function createAPIClientRuntime<
 
           try {
             if (requestContextError) throw requestContextError;
-            const { response, data, decodeError } = await fetchClient(path, {
-              ...input,
-              method: methodUpper,
-            });
+            const { response, data, decodeError } = await fetchClient(
+              path,
+              {
+                ...input,
+                method: methodUpper,
+              },
+              defaultHeaders,
+            );
 
             const error = response.ok ? null : createResponseError(response, data, decodeError);
 
@@ -1164,7 +1181,7 @@ function createAPIClientRuntime<
           target,
           undefined,
           baseURL,
-          options.headers,
+          defaultHeaders,
           transport ? baseURL : undefined,
         );
         if (!targetKey) continue;
@@ -1188,7 +1205,7 @@ function createAPIClientRuntime<
       }
     };
 
-    const optimisticSnapshots = applyOptimisticUpdates();
+    const optimisticSnapshots = requestContextError ? [] : applyOptimisticUpdates();
 
     if (isCacheEnabled) {
       if (entry && !isStale && policy !== "network-only") {
@@ -1606,7 +1623,7 @@ function buildCacheKey(
   path: string,
   input: any,
   baseURL: string,
-  defaultHeaders?: Record<string, string>,
+  defaultHeaders?: HeadersInit,
 ): string {
   const keyInput =
     input && typeof input === "object"
@@ -1660,7 +1677,7 @@ function getHeader(headers: unknown, name: string): string | undefined {
 }
 
 function getRequestCacheContext(
-  options: Pick<APIClientOptions, "headers" | "credentials">,
+  options: { headers?: HeadersInit; credentials?: RequestCredentials },
   input: unknown,
   scope: CacheScope | undefined,
 ): string | undefined {
@@ -1714,7 +1731,7 @@ function resolveTargetKey(
   target: InvalidateTarget | AnyRouteRef,
   input?: unknown,
   baseURL = "http://localhost:3000",
-  defaultHeaders?: Record<string, string>,
+  defaultHeaders?: HeadersInit,
   localBaseURL?: string,
 ): string | null {
   if (!target) return null;

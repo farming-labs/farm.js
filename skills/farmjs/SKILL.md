@@ -214,6 +214,16 @@ image URLs, and generated `lang`, `dir`, and `hreflang` markup. API routes stay 
 normal `/api/**` paths and can call the same server APIs. Read
 `docs/src/app/docs/internationalization/page.md` and `examples/i18n` before changing this feature.
 
+## Caller header defaults
+
+`createApiClients`, `createAPIClient`, `createIntegrations`, and integration-only factories accept
+`headers` as a string-valued object or a sync/async function returning one. Resolve once per call
+before cache lookup/dispatch; retries reuse the snapshot. Per-call headers stay objects and
+override defaults case-insensitively. Integration operation headers override instance defaults;
+`integrations.headers` and separate integration server header options replace shared defaults.
+Resolvers are not a server-only boundary: keep secrets and provider imports out of shared caller
+modules. See `docs/src/app/docs/api-client/page.md#header-defaults` and the integrations guide.
+
 ## Typed APIs and Server Data
 
 API routes live under `src/app/api/**/route.ts`. Prefer `createEndpoint` from

@@ -5,6 +5,7 @@ import type {
 } from "./integration-api";
 import type { FarmIntegration as FarmIntegrationDefinition } from "./integrations";
 import { resolveFarmAPIRequestURL } from "./api/config";
+import { resolveClientHeaders, type ClientHeaders } from "./client-headers";
 
 /**
  * Small per-call integration metadata. When sent from a browser, values are
@@ -14,7 +15,7 @@ export type IntegrationClientData = Record<string, unknown>;
 
 export type IntegrationClientOptions = {
   baseURL?: string;
-  headers?: Record<string, string>;
+  headers?: ClientHeaders;
   credentials?: RequestCredentials;
   data?: IntegrationClientData;
   isServer?: false | undefined;
@@ -725,12 +726,11 @@ async function executeClientOperation(
     const url = resolveFarmAPIRequestURL(operation.path, baseURL);
     appendQuery(url, input.query as Record<string, unknown> | undefined);
 
-    const headers = new Headers({
-      "x-farm-integration-client": "1",
-      ...options.headers,
-      ...operation.headers,
-      ...requestOptions?.headers,
-    });
+    const resolved = resolveClientHeaders(options.headers);
+    const headers = resolved instanceof Headers ? resolved : await resolved;
+    appendHeaders(headers, operation.headers);
+    appendHeaders(headers, requestOptions?.headers);
+    headers.set("x-farm-integration-client", "1");
 
     if (operation.responseFormat !== "response") {
       headers.set("accept", "application/json");
@@ -827,7 +827,8 @@ async function executeServerOperation(
         serverRequestOptions?.forwardHeaders ?? options.forwardHeaders,
       ),
     );
-    appendHeaders(headers, options.headers);
+    const resolved = resolveClientHeaders(options.headers);
+    appendHeaders(headers, resolved instanceof Headers ? resolved : await resolved);
     appendHeaders(headers, operation.headers);
     appendHeaders(headers, requestOptions?.headers);
     headers.set("x-farm-integration-client", "1");

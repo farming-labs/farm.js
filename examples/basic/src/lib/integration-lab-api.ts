@@ -4,4 +4,9 @@ import type { integrationLab } from './integration-lab.ts';
 export const {
   api: integrationApi,
   apiClient: integrationApiClient,
-} = createIntegrations<typeof integrationLab>();
+} = createIntegrations<typeof integrationLab>({
+  headers: async () => ({
+    'Accept-Language':
+      typeof document === 'undefined' ? 'en' : document.documentElement.lang || 'en',
+  }),
+});

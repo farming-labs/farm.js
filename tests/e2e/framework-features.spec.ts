@@ -474,6 +474,7 @@ test.describe("Framework feature integration", () => {
           source: "routes",
           message: "server-routes",
           caller: "server",
+          language: "en",
         }),
         endpoints: expect.objectContaining({
           source: "endpoints",
@@ -489,12 +490,21 @@ test.describe("Framework feature integration", () => {
     );
 
     await page.goto("/feature-lab/integrations");
+    await page.evaluate(() => {
+      document.documentElement.lang = "fr";
+    });
 
     await page.getByTestId("call-integration-routes").click();
     await expect(page.getByTestId("integration-client-routes")).toContainText(
       '"message":"browser-routes"',
     );
     await expect(page.getByTestId("integration-client-routes")).toContainText('"caller":"browser"');
+    await expect(page.getByTestId("integration-client-routes")).toContainText('"language":"fr"');
+    await page.evaluate(() => {
+      document.documentElement.lang = "es";
+    });
+    await page.getByTestId("call-integration-routes").click();
+    await expect(page.getByTestId("integration-client-routes")).toContainText('"language":"es"');
 
     await page.getByTestId("call-integration-endpoints").click();
     await expect(page.getByTestId("integration-client-endpoints")).toContainText(

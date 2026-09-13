@@ -58,6 +58,52 @@ export const { api, apiClient } = createApiClients<APIRouter>({
 Farm forwards `credentials` to every route request from that client. The API must also allow the
 calling origin and credentialed requests through its CORS policy.
 
+## Header defaults
+
+Instance `headers` accepts a string-valued object or a function returning one. The function can
+be synchronous or asynchronous; Farm calls it when an operation is called, not when the client
+is created.
+
+```ts
+import { createApiClients } from "@farm.js/core/client";
+import { apiRoutes, type APIRouter } from "./api.generated";
+
+export const { api, apiClient } = createApiClients<APIRouter>({
+  routes: apiRoutes,
+  headers: () => ({
+    "Accept-Language":
+      typeof document === "undefined" ? "en" : document.documentElement.lang || "en",
+  }),
+});
+
+// This call overrides the instance language without changing later calls.
+await apiClient.hello.get({ headers: { "accept-language": "fr" } });
+```
+
+Use `headers: async () => ({ ... })` when obtaining defaults requires asynchronous work.
+The exported `ClientHeaders` type describes all three forms. Static objects remain supported;
+per-call `headers` remain objects, not resolver functions.
+
+Header names are case-insensitive. App routes merge forwarded server request headers first,
+then instance defaults, then per-call headers. Thus the example explicitly chooses English on
+the server; omit its `Accept-Language` default when you want `api` to preserve the incoming
+request's language. The existing server forwarding allowlist is unchanged.
+
+Farm snapshots the resolved defaults once per operation call, before cache lookup or dispatch.
+Cache hits still resolve headers; changed effective headers isolate the route client's cache
+and in-flight deduplication. Retries reuse the same snapshot. A thrown error, rejected promise,
+or invalid header produces the normal error result without fetching or returning cached data.
+
+These defaults also apply to `api.integrations` and `apiClient.integrations` when enabled.
+Providing `integrations.headers` replaces the shared header defaults for integration calls only;
+it does not merge the two resolvers. See [integration header defaults](/docs/integrations#header-defaults)
+for integration-specific precedence and separate server defaults.
+
+A resolver is not a server-only boundary. Anything imported into this shared module may reach
+the browser, and the resolver runs wherever its caller runs. Do not put provider credentials or
+private environment values here. Read request-specific values inside the resolver or a
+request-scoped server module, never by mutating a shared singleton with one user's credentials.
+
 ## Call a route
 
 **Browser usage**
