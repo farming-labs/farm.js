@@ -97,6 +97,10 @@ Route names are preserved even when they repeat the mount path. With `basePath: 
 `/app/app`; it does not select the home page. Custom `output` directories are also relative to
 `basePath`, so `output: "app/search"` produces `/app/app/search/`.
 
+Search result URLs encode emitted filename segments, so a page named `guide#intro` links to
+`/guide%23intro` instead of a fragment on `/guide`. Spaces, Unicode, and literal percent signs are
+encoded too. Route filters still use the logical page names before URL encoding and `basePath`.
+
 Only emitted HTML can enter the index. Dynamic routes, API routes, server functions, and runtime
 responses are not crawled. An authenticated page should remain dynamic and must never be made
 static merely to make it searchable.

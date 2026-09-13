@@ -1,4 +1,14 @@
-import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
+import { gunzipSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -74,6 +84,56 @@ describe.sequential("writeSearchIndex", () => {
       }),
     ).rejects.toThrow("No static HTML pages matched");
   });
+
+  it.each(["/", "/app"])(
+    "encodes emitted filename segments with HTML prefix %s",
+    async (htmlBasePath) => {
+      const { outputDir, publicDir } = await createOutput();
+      const routes = [
+        "guide#intro",
+        "100%done",
+        "already%23encoded",
+        "café/space name",
+        "private#draft",
+      ];
+      if (process.platform !== "win32") routes.push("guide?intro");
+      for (const route of routes) {
+        await mkdir(path.join(publicDir, htmlBasePath.slice(1), route), { recursive: true });
+        await writeFile(
+          path.join(publicDir, htmlBasePath.slice(1), route, "index.html"),
+          page(route, "Searchable guide"),
+        );
+      }
+      const result = await writeSearchIndex({
+        outputDir,
+        publicDir,
+        preset: "node-server",
+        basePath: "/app",
+        htmlBasePath,
+        options: resolveSearchOptions({ exclude: ["/private#draft"] }),
+      });
+      const expected = routes
+        .filter((route) => !route.startsWith("private"))
+        .map((route) => "/app/" + route.split("/").map(encodeURIComponent).join("/"));
+      expect(result.indexedRoutes.sort()).toEqual(expected.sort());
+      expect(result.skippedRoutes).toEqual(["/app/private%23draft"]);
+      const fragments = await readdir(path.join(result.outputPath, "fragment"));
+      const emittedUrls = await Promise.all(
+        fragments.map(async (file) => {
+          const fragment = gunzipSync(
+            await readFile(path.join(result.outputPath, "fragment", file)),
+          ).toString("utf8");
+          return JSON.parse(fragment.slice("pagefind_dcd".length)).url;
+        }),
+      );
+      expect(emittedUrls.sort()).toEqual(expected.sort());
+      for (const route of result.indexedRoutes) {
+        const url = new URL(route, "https://example.test");
+        expect(url.search).toBe("");
+        expect(url.hash).toBe("");
+      }
+    },
+  );
 
   it("applies wildcard prefixes to includes and excludes in a real Pagefind build", async () => {
     const { outputDir, publicDir } = await createOutput();
