@@ -17,7 +17,7 @@ export function searchParamsToObject(
     // The API route helper (entriesToObject in api/runtime.ts) already skips
     // these names; keep both representations consistent.
     if (key === "__proto__" || key === "constructor" || key === "prototype") return;
-    const existing = output[key];
+    const existing = Object.prototype.hasOwnProperty.call(output, key) ? output[key] : undefined;
     if (existing !== undefined) {
       if (Array.isArray(existing)) {
         existing.push(value);
