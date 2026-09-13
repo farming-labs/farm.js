@@ -8,6 +8,8 @@ export interface SearchBuildInput {
   publicDir?: string;
   preset: string;
   basePath: string;
+  /** Prefix already present in emitted HTML paths (localized Farm SSG output). */
+  htmlBasePath?: string;
   options: ResolvedSearchOptions;
 }
 
@@ -30,7 +32,10 @@ export async function writeSearchIndex(input: SearchBuildInput): Promise<SearchB
   const routes = htmlFiles
     .map((file) => ({
       file,
-      logicalRoute: stripBasePath(routeFromHtmlFile(path.relative(publicDir, file)), basePath),
+      logicalRoute: stripBasePath(
+        routeFromHtmlFile(path.relative(publicDir, file)),
+        input.htmlBasePath ?? "/",
+      ),
     }))
     .sort((left, right) => left.logicalRoute.localeCompare(right.logicalRoute));
   const selected = routes.filter(({ logicalRoute }) =>
@@ -116,9 +121,6 @@ export function withBasePath(route: string, basePath: string): string {
   const normalizedBase = normalizeBasePath(basePath);
   const normalizedRoute = route === "/" ? "/" : `/${route.replace(/^\/+|\/+$/g, "")}`;
   if (normalizedBase === "/") return normalizedRoute;
-  if (normalizedRoute === normalizedBase || normalizedRoute.startsWith(`${normalizedBase}/`)) {
-    return normalizedRoute;
-  }
   return normalizedRoute === "/" ? normalizedBase : `${normalizedBase}${normalizedRoute}`;
 }
 

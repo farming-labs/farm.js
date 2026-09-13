@@ -75,6 +75,79 @@ describe.sequential("writeSearchIndex", () => {
     ).rejects.toThrow("No static HTML pages matched");
   });
 
+  it("keeps application routes that repeat basePath distinct and filters before prefixing", async () => {
+    const { outputDir, publicDir } = await createOutput();
+    for (const route of ["", "app", "app/app", "app/private"]) {
+      await mkdir(path.join(publicDir, route), { recursive: true });
+      await writeFile(
+        path.join(publicDir, route, "index.html"),
+        page(route || "Home", "Searchable content"),
+      );
+    }
+    const input = { outputDir, publicDir, preset: "node-server", basePath: "/app" };
+    const result = await writeSearchIndex({
+      ...input,
+      options: resolveSearchOptions({ exclude: ["/app/private"] }),
+    });
+    expect(result.indexedRoutes).toEqual(["/app", "/app/app", "/app/app/app"]);
+    expect(result.skippedRoutes).toEqual(["/app/app/private"]);
+
+    const rootOnly = await writeSearchIndex({
+      ...input,
+      options: resolveSearchOptions({ include: ["/"] }),
+    });
+    expect(rootOnly.indexedRoutes).toEqual(["/app"]);
+    expect(rootOnly.skippedRoutes).toEqual(["/app/app", "/app/app/app", "/app/app/private"]);
+  }, 30_000);
+
+  it("does not guess the HTML path prefix from a matching directory without a home page", async () => {
+    const { outputDir, publicDir } = await createOutput();
+    await mkdir(path.join(publicDir, "app"), { recursive: true });
+    await writeFile(path.join(publicDir, "app", "index.html"), page("App", "Searchable app"));
+    const result = await writeSearchIndex({
+      outputDir,
+      publicDir,
+      preset: "node-server",
+      basePath: "/app",
+      options: resolveSearchOptions({ include: ["/app"] }),
+    });
+    expect(result.indexedRoutes).toEqual(["/app/app"]);
+  }, 30_000);
+
+  it("strips only the explicit HTML base path for already-prefixed output", async () => {
+    const { outputDir, publicDir } = await createOutput();
+    for (const route of ["app", "app/app", "app/app/private"]) {
+      await mkdir(path.join(publicDir, route), { recursive: true });
+      await writeFile(path.join(publicDir, route, "index.html"), page(route, "Searchable content"));
+    }
+    const result = await writeSearchIndex({
+      outputDir,
+      publicDir,
+      preset: "vercel",
+      basePath: "/app",
+      htmlBasePath: "/app",
+      options: resolveSearchOptions({ exclude: ["/app/private"] }),
+    });
+    expect(result.indexedRoutes).toEqual(["/app", "/app/app"]);
+    expect(result.skippedRoutes).toEqual(["/app/app/private"]);
+  }, 30_000);
+
+  it("mounts a custom bundle directory beneath basePath even when its name repeats it", async () => {
+    const { outputDir, publicDir } = await createOutput();
+    await writeFile(path.join(publicDir, "index.html"), page("Home", "Searchable home"));
+    const result = await writeSearchIndex({
+      outputDir,
+      publicDir,
+      preset: "node-server",
+      basePath: "/app",
+      options: resolveSearchOptions({ output: "app/search" }),
+    });
+    expect(result.bundlePath).toBe("/app/app/search/");
+    await expect(
+      access(path.join(publicDir, "app", "app", "search", "pagefind.js")),
+    ).resolves.toBeUndefined();
+  }, 30_000);
+
   it("does not delete or write outside publicDir through a symlinked output parent", async () => {
     const { root, outputDir, publicDir } = await createOutput();
     const externalDir = path.join(root, "external");

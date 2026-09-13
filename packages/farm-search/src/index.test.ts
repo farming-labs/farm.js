@@ -114,4 +114,47 @@ describe("search plugin", () => {
       first.configure?.({ root: "/app", plugins: [first, second] }, {} as never),
     ).toThrow("one search() plugin instance");
   });
+
+  it("passes the resolved localized HTML prefix to both build paths", async () => {
+    const plugin = search({ output: "app/search" });
+    await plugin.configure?.(
+      { root: "/project", basePath: "/app", i18n: { enabled: true }, plugins: [plugin] },
+      {} as never,
+    );
+    expect(plugin.client?.public).toMatchObject({ bundlePath: "/app/app/search/" });
+    const configured = await plugin.build?.configure?.(
+      { preset: "node-server", output: { dir: "/output" } },
+      {} as never,
+    );
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    try {
+      await configured.hooks["prerender:done"]({ prerenderedRoutes: [] });
+      expect(writeSearchIndex).toHaveBeenLastCalledWith(
+        expect.objectContaining({ htmlBasePath: "/app", basePath: "/app" }),
+      );
+      await plugin.build?.before?.({} as never, {} as never);
+      await plugin.build?.after?.(
+        { root: "/project", preset: "vercel", outputDir: "/output", success: true } as never,
+        {} as never,
+      );
+      expect(writeSearchIndex).toHaveBeenLastCalledWith(
+        expect.objectContaining({ htmlBasePath: "/app" }),
+      );
+
+      await plugin.build?.before?.({} as never, {} as never);
+      await plugin.configure?.(
+        { root: "/project", basePath: "/app", i18n: { enabled: false }, plugins: [plugin] },
+        {} as never,
+      );
+      await plugin.build?.after?.(
+        { root: "/project", preset: "node-server", outputDir: "/output", success: true } as never,
+        {} as never,
+      );
+      expect(writeSearchIndex).toHaveBeenLastCalledWith(
+        expect.objectContaining({ htmlBasePath: "/" }),
+      );
+    } finally {
+      info.mockRestore();
+    }
+  });
 });

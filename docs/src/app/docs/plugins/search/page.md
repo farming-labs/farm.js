@@ -90,6 +90,11 @@ search({
 `*` matches within one URL segment, `**` matches descendants, and `?` matches one non-slash
 character. A pattern such as `/docs/**` includes both `/docs` and its descendants.
 
+Route names are preserved even when they repeat the mount path. With `basePath: "/app"`,
+`include: ["/app/**"]` selects the application's `/app` pages and produces result URLs beneath
+`/app/app`; it does not select the home page. Custom `output` directories are also relative to
+`basePath`, so `output: "app/search"` produces `/app/app/search/`.
+
 Only emitted HTML can enter the index. Dynamic routes, API routes, server functions, and runtime
 responses are not crawled. An authenticated page should remain dynamic and must never be made
 static merely to make it searchable.
