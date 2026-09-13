@@ -99,6 +99,14 @@ safe maps. The filter's recorded survivor positions let the commit avoid a secon
 scan while still validating the complete native result before mutation. Both compiler modes must
 remain at least 2x faster than React and 1.25x faster than the block-bodied compiled control.
 
+Direct keyed filters have an independent removal comparison. A single-return block-bodied filter
+removes the selected middle row and is measured against bracketed React and a compiled snapshot
+control whose updater block has a local target declaration. Both compiler modes must remain at least
+3x faster than React at 1,000 and 20,000 rows, and at least 1.25x faster than the compiled control at
+1,000 rows. The report must contain a nonzero `keyedArrayFilterHints` count; deterministic package
+tests separately cover queued and randomized removals, delegated event indexes, native method and
+predicate errors, hydration, Strict Mode, and unmount cleanup.
+
 The mapped-append comparison uses the other common order: filter one row, update a surviving row,
 then append a fresh row. It verifies that the compiler retains the original survivor identity
 through the intervening map instead of returning to complete keyed reconciliation. Both compiler

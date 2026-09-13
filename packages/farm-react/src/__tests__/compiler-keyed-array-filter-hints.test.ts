@@ -62,6 +62,36 @@ describe("React AOT keyed-array filter hints", () => {
     expect(result.code).toContain("filterIndexIndependent={true}");
   });
 
+  it("records a filter returned from a single-return updater block", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Inventory({ removedId }) {
+        const [rows, setRows] = useState([{ id: "a", label: "Alpha" }]);
+        return <main>
+          <button onClick={() => setRows((current) => {
+            return current.filter((row) => row.id !== removedId);
+          })}>Remove</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </main>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Inventory"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.optimizations.keyedArrayFilterHints).toBe(1);
+    expect(result.code).toContain("createCompilerKeyedArrayFilter");
+    expect(result.code).toContain("filterIndexIndependent={true}");
+    expect(result.code).toContain("keyedRowsFilterHintedRuntimeFeature");
+    await expect(
+      transformWithEsbuild(result.code, "/app/KeyedArrayFilterHints.tsx", {
+        loader: "tsx",
+        jsx: "automatic",
+      }),
+    ).resolves.toMatchObject({
+      code: expect.stringContaining("createCompilerKeyedArrayFilter"),
+    });
+  });
+
   it.each([
     {
       name: "an index-sensitive row",
@@ -74,10 +104,27 @@ describe("React AOT keyed-array filter hints", () => {
       update: "setRows((current) => current.filter((row) => row.id !== 'a'))",
     },
     {
-      name: "a block-bodied updater",
+      name: "an updater block with a local declaration",
       row: "(row) => <li key={row.id}>{row.label}</li>",
       update:
         "setRows((current) => { const next = current.filter((row) => row.id !== 'a'); return next; })",
+    },
+    {
+      name: "an updater block with conditional returns",
+      row: "(row) => <li key={row.id}>{row.label}</li>",
+      update:
+        "setRows((current) => { if (current.length > 1) return current.filter((row) => row.id !== 'a'); return current; })",
+    },
+    {
+      name: "an updater block without a return",
+      row: "(row) => <li key={row.id}>{row.label}</li>",
+      update: "setRows((current) => { current.filter((row) => row.id !== 'a'); })",
+    },
+    {
+      name: "an updater block with a directive",
+      row: "(row) => <li key={row.id}>{row.label}</li>",
+      update:
+        "setRows((current) => { \"use strict\"; return current.filter((row) => row.id !== 'a'); })",
     },
     {
       name: "a block-bodied predicate",

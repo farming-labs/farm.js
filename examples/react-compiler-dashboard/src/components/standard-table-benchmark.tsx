@@ -1035,7 +1035,8 @@ export function StandardTableBenchmark() {
               status: "review" as const,
             };
             setRows((current) => {
-              return current.filter((row) => row.id % 10_000 !== 7_001);
+              const retained = current.filter((row) => row.id % 10_000 !== 7_001);
+              return retained;
             });
             setRows((current) => {
               return [...current, incoming];
@@ -1268,7 +1269,8 @@ export function StandardTableBenchmark() {
               status: "review" as const,
             };
             setRows((current) => {
-              return current.filter((row) => row.id % 10_000 !== 7_001);
+              const retained = current.filter((row) => row.id % 10_000 !== 7_001);
+              return retained;
             });
             setRows((current) => {
               return [...current, incoming];
@@ -1331,7 +1333,8 @@ export function StandardTableBenchmark() {
               status: "review" as const,
             };
             setRows((current) => {
-              return current.filter((row) => row.id % 10_000 !== 7_001);
+              const retained = current.filter((row) => row.id % 10_000 !== 7_001);
+              return retained;
             });
             setRows((current) => {
               return current.map((row) =>
@@ -1374,7 +1377,8 @@ export function StandardTableBenchmark() {
           type="button"
           onClick={() => {
             setRows((current) => {
-              return current.filter((row) => row.id % 10_000 !== 7_001);
+              const retained = current.filter((row) => row.id % 10_000 !== 7_001);
+              return retained;
             });
             setRows((current) => {
               return current.map((row) =>
@@ -2139,7 +2143,9 @@ export function StandardTableBenchmark() {
                     data-row-id={row.id}
                     type="button"
                     onClick={() => {
-                      setRows((current) => current.filter((item) => item.id !== row.id));
+                      setRows((current) => {
+                        return current.filter((item) => item.id !== row.id);
+                      });
                       setOperation("remove row");
                       setRevision((value) => value + 1);
                     }}
