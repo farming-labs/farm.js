@@ -135,8 +135,26 @@ export type AppIntegrations = typeof appIntegrations;
 ```
 
 Here `billing` is the integration defined in the [custom integration guide](/docs/integrations/custom#choose-the-http-surface).
-Pass `appIntegrations` as `integrations` in `farm.config.ts`. Keep provider instances and
-credentials in that server-only registry, not in the shared caller module.
+`appIntegrations` is the real server-side object containing it. `AppIntegrations` is only a
+TypeScript description of that object: `typeof` does not create another integration, and
+`as const` preserves its literal types rather than freezing it at runtime.
+
+Register that object with Farm once:
+
+**farm.config.ts**
+
+```ts
+import { defineConfig } from "@farm.js/core";
+import { appIntegrations } from "./src/lib/integrations";
+
+export default defineConfig({
+  integrations: appIntegrations,
+});
+```
+
+This is where Farm registers the integrations and their routes. Keep provider instances and
+credentials in the server-only registry. Next, create callers for those already-configured
+services in the shared module; this does not create new provider instances:
 
 **src/lib/api.ts**
 
@@ -152,6 +170,18 @@ export const { api, apiClient } = createApiClients<APIRouter, AppIntegrations>({
   },
 });
 ```
+
+The inputs have different jobs:
+
+| Input             | What it supplies                                                                      | Present in browser JavaScript?                              |
+| ----------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `APIRouter`       | Generated types for file and plugin routes.                                           | No; it is a type.                                           |
+| `AppIntegrations` | Types for the configured integration operations.                                      | No; `import type` is erased.                                |
+| `apiRoutes`       | Generated paths and methods used to resolve app-route URLs, including dynamic params. | Yes; it is schema-free route metadata, not server handlers. |
+
+The `integrations.data` option above is optional request metadata, not another integration
+registration. You can omit it. The factory returns `api` for server calls and `apiClient` for
+browser calls; both are exported from this one module.
 
 App routes use paths such as `apiClient.hello.get(...)`; integration calls use
 `apiClient.integrations.billing.checkout.post(...)` or `api.integrations.billing.checkout.post(...)`.
