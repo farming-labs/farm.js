@@ -25,6 +25,7 @@ import type { RoutePathParams } from "./route";
 import { _resolveCurrentRequest } from "../server/request-bridge";
 import { resolveClientHeaders, type ClientHeaders } from "../client-headers";
 import { createClientCancellation } from "../client-cancellation";
+import { notifyClientObserver, type ClientLifecycleHooks } from "../client-observers";
 import { resolveAPIRequestRuntime, type APIRequestRuntime } from "./server-client-bridge";
 export type { APIRouteManifest } from "./client-routes";
 import {
@@ -44,7 +45,7 @@ export type APIRouteRefMetadata = {
   sameOrigin: boolean;
 };
 
-export type APIClientOptions = {
+export type APIClientOptions = ClientLifecycleHooks & {
   /** Generated path/method metadata required for dynamic shorthand and $params scopes. */
   routes?: APIRouteManifest;
   baseURL?: string;
@@ -554,6 +555,9 @@ export function createApiClients<
             credentials: options.credentials,
             timeoutMs: options.timeoutMs,
             fetch: options.fetch,
+            onRequest: options.onRequest,
+            onResponse: options.onResponse,
+            onError: options.onError,
             ...options.integrations,
           }),
         },
@@ -646,6 +650,9 @@ function createAPIClientRuntime<
           credentials: options.credentials,
           timeoutMs: options.timeoutMs,
           fetch: httpFetch,
+          onRequest: options.onRequest,
+          onResponse: options.onResponse,
+          onError: options.onError,
           ...(typeof options.integrations === "object" ? options.integrations : {}),
         };
   const rootAliases =
@@ -1065,6 +1072,7 @@ function createAPIClientRuntime<
 
             if (result.error) {
               emitStatus("error", { error: result.error, isBackground: opts?.isBackground });
+              notifyClientObserver(options.onError, [result.error]);
               if (opts?.callCallbacks !== false) {
                 clientOptions?.onError?.(result.error);
               }
@@ -1088,15 +1096,19 @@ function createAPIClientRuntime<
 
             // eslint-disable-next-line no-constant-condition
             while (true) {
-              clientOptions?.onRequest?.({
-                requestId,
-                method: methodUpper,
-                key: cacheKey,
-                path,
-                input,
-                attempt,
-                timestamp: Date.now(),
-              });
+              if (options.onRequest || clientOptions?.onRequest) {
+                const requestEvent: RequestEvent = {
+                  requestId,
+                  method: methodUpper,
+                  key: cacheKey,
+                  path,
+                  input,
+                  attempt,
+                  timestamp: Date.now(),
+                };
+                notifyClientObserver(options.onRequest, [requestEvent]);
+                clientOptions?.onRequest?.(requestEvent);
+              }
 
               try {
                 if (requestContextError) throw requestContextError;
@@ -1129,6 +1141,11 @@ function createAPIClientRuntime<
                   status: response.status,
                 };
 
+                notifyClientObserver(options.onResponse, [
+                  response.ok ? data : undefined,
+                  error,
+                  responseEvent,
+                ]);
                 notifyResponseObserver(
                   clientOptions?.onResponse,
                   response.ok ? data : undefined,
@@ -1137,7 +1154,6 @@ function createAPIClientRuntime<
                 );
 
                 if (!error) {
-                  cancellation.check();
                   return { data, error: null, key: cacheKey } as APIResult<any, Error>;
                 }
 
@@ -1158,6 +1174,7 @@ function createAPIClientRuntime<
                   ok: false,
                 };
 
+                notifyClientObserver(options.onResponse, [undefined, error, responseEvent]);
                 notifyResponseObserver(clientOptions?.onResponse, undefined, error, responseEvent);
 
                 if (attempt >= maxRetries || requestContextError || cancellation.signal?.aborted) {
@@ -1209,6 +1226,7 @@ function createAPIClientRuntime<
 
             if (result.error) {
               emitStatus("error", { error: result.error, isBackground: opts?.isBackground });
+              notifyClientObserver(options.onError, [result.error]);
               if (opts?.callCallbacks !== false) {
                 clientOptions?.onError?.(result.error);
               }
@@ -1897,34 +1915,7 @@ function notifyResponseObserver(
   error: unknown,
   event: ResponseEvent<any, any>,
 ): void {
-  if (!observer) return;
-
-  try {
-    const result = observer(data, error, event) as unknown;
-    if (result && typeof (result as PromiseLike<unknown>).then === "function") {
-      void Promise.resolve(result).catch(reportResponseObserverError);
-    }
-  } catch (observerError) {
-    reportResponseObserverError(observerError);
-  }
-}
-
-function reportResponseObserverError(error: unknown): void {
-  const reportError = (globalThis as typeof globalThis & { reportError?: (error: unknown) => void })
-    .reportError;
-  if (typeof reportError === "function") {
-    try {
-      reportError.call(globalThis, error);
-      return;
-    } catch {
-      // Fall through to the console when the platform reporter itself fails.
-    }
-  }
-  try {
-    console.error("[Farm.js] API client onResponse callback failed:", error);
-  } catch {
-    // Observers and their reporting fallbacks must never affect the request.
-  }
+  notifyClientObserver(observer, [data, error, event], "API client onResponse");
 }
 
 function isFormData(value: unknown): value is FormData {

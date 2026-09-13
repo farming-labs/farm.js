@@ -7,6 +7,12 @@ import type { FarmIntegration as FarmIntegrationDefinition } from "./integration
 import { resolveFarmAPIRequestURL } from "./api/config";
 import { resolveClientHeaders, type ClientHeaders } from "./client-headers";
 import { createClientCancellation } from "./client-cancellation";
+import {
+  notifyClientObserver,
+  type ClientLifecycleHooks,
+  type ClientRequestEvent,
+  type ClientResponseEvent,
+} from "./client-observers";
 
 /**
  * Small per-call integration metadata. When sent from a browser, values are
@@ -14,7 +20,7 @@ import { createClientCancellation } from "./client-cancellation";
  */
 export type IntegrationClientData = Record<string, unknown>;
 
-export type IntegrationClientOptions = {
+export type IntegrationClientOptions = ClientLifecycleHooks & {
   baseURL?: string;
   headers?: ClientHeaders;
   credentials?: RequestCredentials;
@@ -26,7 +32,7 @@ export type IntegrationClientOptions = {
   isServer?: false | undefined;
 };
 
-type IntegrationRequestOptionsBase = {
+type IntegrationRequestOptionsBase<TData = unknown> = ClientLifecycleHooks<TData> & {
   headers?: Record<string, string>;
   signal?: AbortSignal;
   timeoutMs?: number;
@@ -34,7 +40,7 @@ type IntegrationRequestOptionsBase = {
   data?: IntegrationClientData;
 };
 
-export type IntegrationClientRequestOptions = IntegrationRequestOptionsBase;
+export type IntegrationClientRequestOptions<TData = unknown> = IntegrationRequestOptionsBase<TData>;
 
 export type IntegrationServerRequestLike =
   | Request
@@ -49,11 +55,12 @@ export type IntegrationServerClientOptions = Omit<IntegrationClientOptions, "isS
   forwardHeaders?: boolean | readonly string[];
 };
 
-export type IntegrationServerClientRequestOptions = IntegrationRequestOptionsBase & {
-  baseURL?: string;
-  request?: IntegrationServerRequestLike;
-  forwardHeaders?: boolean | readonly string[];
-};
+export type IntegrationServerClientRequestOptions<TData = unknown> =
+  IntegrationRequestOptionsBase<TData> & {
+    baseURL?: string;
+    request?: IntegrationServerRequestLike;
+    forwardHeaders?: boolean | readonly string[];
+  };
 
 export class IntegrationClientError<TData = unknown> extends Error {
   readonly status: number;
@@ -112,12 +119,12 @@ type OperationInput<T> =
 
 type ClientOperation<T> = (
   options?: OperationInput<T>,
-  requestOptions?: IntegrationClientRequestOptions,
+  requestOptions?: IntegrationClientRequestOptions<ExtractOperationResponse<T>>,
 ) => Promise<IntegrationOperationResult<ExtractOperationResponse<T>>>;
 
 type ServerOperation<T> = (
   options?: OperationInput<T>,
-  requestOptions?: IntegrationServerClientRequestOptions,
+  requestOptions?: IntegrationServerClientRequestOptions<ExtractOperationResponse<T>>,
 ) => Promise<IntegrationOperationResult<ExtractOperationResponse<T>>>;
 
 type IsUnion<T, U = T> = T extends any ? ([U] extends [T] ? false : true) : never;
@@ -710,21 +717,78 @@ async function finalizeOperationResponse(
   };
 }
 
+let integrationRequestCounter = 0;
+const noIntegrationObservers = {
+  response(_response: Response) {},
+  finish<T extends IntegrationOperationResult>(result: T): T {
+    return result;
+  },
+};
+
+function createIntegrationObservers(
+  operation: FarmIntegrationAPIOperation<any, any, any>,
+  options: ClientLifecycleHooks,
+  requestOptions?: ClientLifecycleHooks,
+) {
+  if (
+    !options.onRequest &&
+    !options.onResponse &&
+    !options.onError &&
+    !requestOptions?.onRequest &&
+    !requestOptions?.onResponse &&
+    !requestOptions?.onError
+  ) {
+    return noIntegrationObservers;
+  }
+  const requestEvent: ClientRequestEvent = {
+    requestId: `integration-${Date.now()}-${++integrationRequestCounter}`,
+    method: operation.method,
+    path: operation.path ?? "",
+    attempt: 0,
+    timestamp: Date.now(),
+  };
+  let response: Response | undefined;
+  notifyClientObserver(options.onRequest, [requestEvent]);
+  notifyClientObserver(requestOptions?.onRequest, [requestEvent]);
+  return {
+    response(value: Response) {
+      response = value;
+    },
+    finish<T extends IntegrationOperationResult>(result: T): T {
+      const data = result.error ? undefined : result.data;
+      const event: ClientResponseEvent = {
+        ...requestEvent,
+        timestamp: Date.now(),
+        response,
+        data,
+        error: result.error ?? undefined,
+        ok: !result.error,
+        status: response?.status,
+      };
+      notifyClientObserver(options.onResponse, [data, result.error, event]);
+      notifyClientObserver(requestOptions?.onResponse, [data, result.error, event]);
+      if (result.error) {
+        notifyClientObserver(options.onError, [result.error]);
+        notifyClientObserver(requestOptions?.onError, [result.error]);
+      }
+      return result;
+    },
+  };
+}
+
 async function executeClientOperation(
   operation: FarmIntegrationAPIOperation<any, any, any>,
   input: Record<string, unknown>,
-  options: Pick<
-    IntegrationClientOptions,
-    "baseURL" | "headers" | "credentials" | "data" | "timeoutMs" | "fetch"
-  >,
+  options: IntegrationClientOptions,
   requestOptions?: IntegrationClientRequestOptions,
 ) {
   const cancellation = createClientCancellation(
     requestOptions?.signal,
     requestOptions?.timeoutMs ?? options.timeoutMs,
   );
+  const observers = createIntegrationObservers(operation, options, requestOptions);
   try {
-    return await cancellation.run(async () => {
+    const result = await cancellation.run(async () => {
       if (!operation.path) {
         return {
           data: null,
@@ -767,6 +831,7 @@ async function executeClientOperation(
       });
       cancellation.check();
 
+      observers.response(response);
       if (!response.ok) {
         const errorData = await safeParseResponseData(response);
         return {
@@ -787,11 +852,12 @@ async function executeClientOperation(
         error: null,
       };
     });
+    return observers.finish(result);
   } catch (error) {
-    return {
+    return observers.finish({
       data: null,
       error: normalizeExecutionError(error),
-    };
+    });
   } finally {
     cancellation.dispose();
   }
@@ -800,17 +866,7 @@ async function executeClientOperation(
 async function executeServerOperation(
   operation: FarmIntegrationAPIOperation<any, any, any>,
   input: Record<string, unknown>,
-  options: Pick<
-    IntegrationServerClientOptions,
-    | "baseURL"
-    | "headers"
-    | "credentials"
-    | "data"
-    | "request"
-    | "forwardHeaders"
-    | "timeoutMs"
-    | "fetch"
-  >,
+  options: Omit<IntegrationServerClientOptions, "isServer">,
   requestOptions?: IntegrationServerClientRequestOptions,
   integrationKey?: string,
   source?: FarmIntegrationDefinition | FarmIntegrationAPI,
@@ -827,8 +883,9 @@ async function executeServerOperation(
     requestOptions?.timeoutMs ?? options.timeoutMs,
     currentRequest?.signal,
   );
+  const observers = createIntegrationObservers(operation, options, requestOptions);
   try {
-    return await cancellation.run(async () => {
+    const result = await cancellation.run(async () => {
       if (!operation.path) {
         return {
           data: null,
@@ -911,6 +968,7 @@ async function executeServerOperation(
           cancellation.check();
 
           if (directResponse) {
+            observers.response(directResponse);
             return await finalizeOperationResponse(operation, directResponse);
           }
         }
@@ -929,13 +987,15 @@ async function executeServerOperation(
       });
       cancellation.check();
 
+      observers.response(response);
       return await finalizeOperationResponse(operation, response);
     });
+    return observers.finish(result);
   } catch (error) {
-    return {
+    return observers.finish({
       data: null,
       error: normalizeExecutionError(error),
-    };
+    });
   } finally {
     cancellation.dispose();
   }
@@ -1179,6 +1239,9 @@ function isIntegrationClientOptionsInput(value: unknown): value is IntegrationCl
       "credentials" in value ||
       "timeoutMs" in value ||
       "fetch" in value ||
+      "onRequest" in value ||
+      "onResponse" in value ||
+      "onError" in value ||
       "data" in value ||
       "isServer" in value)
   );
@@ -1196,6 +1259,9 @@ function resolveIntegrationServerOptions(
     credentials: clientOptions.credentials,
     timeoutMs: clientOptions.timeoutMs,
     fetch: clientOptions.fetch,
+    onRequest: clientOptions.onRequest,
+    onResponse: clientOptions.onResponse,
+    onError: clientOptions.onError,
     ...serverOptions,
     ...(data ? { data } : {}),
   };

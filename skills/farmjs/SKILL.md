@@ -226,6 +226,13 @@ modules. See `docs/src/app/docs/api-client/page.md#header-defaults` and the inte
 
 ## Typed APIs and Server Data
 
+Caller instances support `onRequest`, `onResponse`, and `onError` observers. Shared hooks are
+invoked before per-call hooks; their return values are ignored and failures are reported without
+breaking calls. Attempt hooks skip cache hits and deduplicated transports; final error hooks run
+per logical call, including background failures. Integration/server overrides replace the
+corresponding default hook, not per-call composition. Shared data is unknown; per-call data stays
+typed. Do not use non-awaited observers for required work or import server secrets into them.
+
 Caller `fetch` options replace HTTP only, including integration server fallback. Local route and
 registered integration dispatch remain local. Forward the supplied RequestInit/signal and return
 a Web Response. Custom-transport route caches are instance-private even with shared scope;

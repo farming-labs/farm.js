@@ -379,6 +379,28 @@ integration-only factories accept it too. With combined route/integration caller
 and preserve request credentials, headers, and signals. Return a Web `Response`; do not put
 provider SDKs or server credentials in a shared module.
 
+## Shared lifecycle hooks
+
+Integration callers accept the same [`onRequest`, `onResponse`, and `onError`
+observers](/docs/api-client#shared-lifecycle-hooks) on the instance and in the second, per-call
+argument. Shared hooks run before per-call hooks; neither replaces the other. Per-call
+`onResponse` data is inferred from the operation's response type, while instance data is `unknown`.
+On failure the observer receives `undefined` data; the operation result still uses `{ data: null, error }`.
+
+Hooks cover browser HTTP, server HTTP fallback, and registered local dispatch. Response events
+include the path, method, request ID, timestamp, and available response/status. Integrations
+have one attempt (`attempt: 0`); these hooks do not introduce automatic retries. Resolver and
+cancellation failures are reported too, even when no HTTP request was sent.
+
+`onError` runs on final failure. Hook return values are ignored; throwing or rejecting hooks are
+reported without changing the result, and promises are not awaited. Do not rely on observer
+completion for authorization, transactions, or required background work.
+
+The separate server-options argument replaces the corresponding instance hook for `api`;
+`createApiClients`'s `integrations` options can override shared defaults in the same way.
+Per-call hooks still compose after the effective instance hook. Shared observer modules must
+remain browser-safe and should log only intentional, non-sensitive metadata.
+
 ## Shared data
 
 `createIntegrations({ data })` adds small per-call metadata to integration requests. It is useful for tenant IDs, locale, analytics context, or feature flags.

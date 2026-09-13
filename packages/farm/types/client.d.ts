@@ -22,6 +22,9 @@ import type {
   RouteAPIClient as CoreRouteAPIClient,
   APIClientOptions as CoreAPIClientOptions,
   ClientHeaders as CoreClientHeaders,
+  ClientLifecycleHooks as CoreClientLifecycleHooks,
+  ClientRequestEvent as CoreClientRequestEvent,
+  ClientResponseEvent as CoreClientResponseEvent,
   ApiClients as CoreApiClients,
   APIClientWithoutIntegrationsOptions as CoreAPIClientWithoutIntegrationsOptions,
 } from "../dist/client";
@@ -562,6 +565,9 @@ declare module "@farm.js/core/client" {
   export function installChunkErrorRecovery(options?: FarmChunkRecoveryOptions): () => void;
 
   export type ClientHeaders = CoreClientHeaders;
+  export type ClientLifecycleHooks<TData = unknown> = CoreClientLifecycleHooks<TData>;
+  export type ClientRequestEvent = CoreClientRequestEvent;
+  export type ClientResponseEvent<TData = unknown> = CoreClientResponseEvent<TData>;
 
   export interface APIClientOptions extends CoreAPIClientOptions {
     baseURL?: string;
@@ -1340,7 +1346,7 @@ declare module "@farm.js/core/client" {
    */
   export type IntegrationClientData = Record<string, unknown>;
 
-  export interface IntegrationClientOptions {
+  export interface IntegrationClientOptions extends ClientLifecycleHooks {
     fetch?: typeof globalThis.fetch;
     timeoutMs?: number;
     baseURL?: string;
@@ -1350,7 +1356,7 @@ declare module "@farm.js/core/client" {
     isServer?: false | undefined;
   }
 
-  interface IntegrationRequestOptionsBase {
+  interface IntegrationRequestOptionsBase<TData = unknown> extends ClientLifecycleHooks<TData> {
     timeoutMs?: number;
     headers?: Record<string, string>;
     signal?: AbortSignal;
@@ -1358,7 +1364,9 @@ declare module "@farm.js/core/client" {
     data?: IntegrationClientData;
   }
 
-  export interface IntegrationClientRequestOptions extends IntegrationRequestOptionsBase {}
+  export interface IntegrationClientRequestOptions<
+    TData = unknown,
+  > extends IntegrationRequestOptionsBase<TData> {}
 
   export type IntegrationServerRequestLike =
     | Request
@@ -1376,7 +1384,9 @@ declare module "@farm.js/core/client" {
     forwardHeaders?: boolean | readonly string[];
   }
 
-  export interface IntegrationServerClientRequestOptions extends IntegrationRequestOptionsBase {
+  export interface IntegrationServerClientRequestOptions<
+    TData = unknown,
+  > extends IntegrationRequestOptionsBase<TData> {
     baseURL?: string;
     request?: IntegrationServerRequestLike;
     forwardHeaders?: boolean | readonly string[];
@@ -1434,7 +1444,7 @@ declare module "@farm.js/core/client" {
 
   type IntegrationOperationMethod<T> = (
     options?: IntegrationOperationInput<T>,
-    requestOptions?: IntegrationClientRequestOptions,
+    requestOptions?: IntegrationClientRequestOptions<ExtractIntegrationOperationResponse<T>>,
   ) => Promise<IntegrationOperationResult<ExtractIntegrationOperationResponse<T>>>;
 
   type IsUnion<T, U = T> = T extends any ? ([U] extends [T] ? false : true) : never;
@@ -1507,7 +1517,7 @@ declare module "@farm.js/core/client" {
 
   type IntegrationServerOperationMethod<T> = (
     options?: IntegrationOperationInput<T>,
-    requestOptions?: IntegrationServerClientRequestOptions,
+    requestOptions?: IntegrationServerClientRequestOptions<ExtractIntegrationOperationResponse<T>>,
   ) => Promise<IntegrationOperationResult<ExtractIntegrationOperationResponse<T>>>;
 
   type ServerOperationKeys<TAPI> = {

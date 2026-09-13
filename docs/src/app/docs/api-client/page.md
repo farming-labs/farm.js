@@ -172,6 +172,55 @@ App-route caches stay private to instances with a custom transport, even with
 see. If a wrapper changes users internally, also reflect that identity in the caller's
 header resolver or create a new instance; Farm cannot detect hidden identity changes.
 
+## Shared lifecycle hooks
+
+Set `onRequest`, `onResponse`, or `onError` on the caller instance for shared logging or error
+reporting. These are ordinary callbacks, not React hooks:
+
+```ts
+export const { api, apiClient } = createApiClients<APIRouter>({
+  routes: apiRoutes,
+  onRequest(event) {
+    console.debug(event.method, event.path);
+  },
+  onResponse(_data, _error, event) {
+    console.debug("Status:", event.status);
+  },
+  onError(error) {
+    console.error(error.message);
+  },
+});
+
+await apiClient.hello.get(
+  {},
+  {
+    onError(error) {
+      // Handle this call's error in the UI as well as shared reporting.
+      console.debug("Could not load greeting:", error.message);
+    },
+  },
+);
+```
+
+Shared hooks run first, then the corresponding per-call hook. Per-call route response types
+remain inferred. Shared hooks use `unknown` data because one instance covers many routes;
+`ClientLifecycleHooks`, `ClientRequestEvent`, and `ClientResponseEvent` are exported for reusable
+observers. Return values are ignored. Promises are not awaited, and thrown/rejected shared
+hooks are reported through `globalThis.reportError` (or console) without failing the call.
+Asynchronous work may finish out of order even though callbacks are invoked shared-first.
+
+`onRequest`/`onResponse` observe execution attempts, including retries and background refreshes,
+not cache hits. Deduplicated requests share attempt events. `onError` runs once on final failure
+for each logical call, including background failures; it does not run for each failed retry.
+An attempt can fail before HTTP dispatch, such as header resolution or cancellation. A response
+event observes a completed attempt; aborting inside it cannot retroactively cancel that result.
+These hooks do not add retries or replace existing per-call success, settlement, or status hooks.
+
+Shared defaults apply to integration callers too. `integrations.onRequest`, `onResponse`, and
+`onError` replace the corresponding shared default for integrations; per-call hooks still compose.
+Local server calls run their hooks on the server; HTTP callers run them where invoked. Keep
+shared observers browser-safe and avoid logging credentials, request bodies, or personal data.
+
 ## Call a route
 
 **Browser usage**
