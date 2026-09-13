@@ -254,6 +254,14 @@ export const { api, apiClient } = createIntegrations<AppIntegrations>({
 
 `apiClient` is the browser caller. `api` is the server caller. Both preserve the same integration namespace so a route like `/api/billing/checkout` can become `api.billing.checkout.post(...)`, and a single-method endpoint can be called directly when there is only one method.
 
+HTTP calls use the same API-root rules on both sides. For example, `baseURL:
+"https://example.com/backend/v2"` maps `/api/billing/status` to
+`https://example.com/backend/v2/billing/status` for browser calls and server HTTP fallback.
+A root-relative base such as `/backend/v2` uses the browser origin or the server request's origin.
+Server-specific and per-call `baseURL` overrides follow the same rules. Registered local handlers
+still dispatch at their canonical route path without an HTTP round trip; a gateway prefix does
+not remount them. Only forward credentials to trusted HTTP destinations.
+
 ## Integration surface
 
 An integration can contribute any of these pieces. The three HTTP fields are alternatives for
