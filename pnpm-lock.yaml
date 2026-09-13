@@ -2154,6 +2154,9 @@ importers:
       typescript:
         specifier: ^5.3.3
         version: 5.9.3
+      vite:
+        specifier: 5.4.20
+        version: 5.4.20(@types/node@20.19.21)
       vitest:
         specifier: ^3.2.7
         version: 3.2.7(@types/node@20.19.21)(jsdom@25.0.1)(supports-color@10.2.2)
