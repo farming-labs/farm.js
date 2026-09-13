@@ -1,0 +1,27 @@
+{
+  "name": "farm-wasm-demo",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "wasm:build": "node scripts/build-wasm.mjs",
+    "dev": "pnpm wasm:build && farm dev",
+    "build": "pnpm wasm:build && farm build --preset node-server",
+    "preview": "node .farm/.output/server/index.mjs",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@farm.js/core": "workspace:*",
+    "@farm.js/wasm": "workspace:*",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@farm.js/cli": "workspace:*",
+    "@types/react": "^18.2.45",
+    "@types/react-dom": "^18.2.18",
+    "typescript": "^5.5.3",
+    "vite": "^5.0.10",
+    "wabt": "^1.0.39"
+  }
+}

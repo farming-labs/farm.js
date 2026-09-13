@@ -1,0 +1,54 @@
+{
+  "name": "@farm.js/wasm",
+  "version": "0.1.0-beta.0",
+  "description": "WebAssembly imports and browser workers for Farm.js applications",
+  "keywords": [
+    "farm.js",
+    "vite",
+    "wasm",
+    "webassembly",
+    "worker"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/farming-labs/farm.js",
+    "directory": "packages/farm-wasm"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "type-check": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@farm.js/core": "workspace:*",
+    "vite-plugin-wasm": "^3.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.10",
+    "vitest": "^3.2.7",
+    "wabt": "^1.0.39"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}
