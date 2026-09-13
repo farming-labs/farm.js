@@ -80,7 +80,8 @@ function collectCandidates(tree: MarkdownNode): MarkdownAssetCandidate[] {
 
   visit(tree, (node) => {
     if (node.type === "definition" && node.identifier) {
-      definitions.set(node.identifier, node);
+      // CommonMark resolves duplicate reference labels to their first definition.
+      if (!definitions.has(node.identifier)) definitions.set(node.identifier, node);
       return;
     }
     if (node.type === "imageReference" && node.identifier) {
