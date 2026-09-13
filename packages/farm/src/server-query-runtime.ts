@@ -1,7 +1,7 @@
 "use client";
 
 import { createFarmCacheKey } from "./cache";
-import { getFarmClientDataCache } from "./client-cache";
+import { getFarmClientDataCache, trackFarmClientCacheInvalidations } from "./client-cache";
 import type { ServerQuery } from "./server-query";
 import { isFarmServerQueryResult, type FarmServerQueryResult } from "./server-query-protocol";
 
@@ -25,6 +25,8 @@ type ActiveServerQueryInvocation = {
   provisionalKey: string;
   owner: object;
 };
+
+type ServerQueryOwner = { invalidations: ReturnType<typeof trackFarmClientCacheInvalidations> };
 
 type ServerQueryClientState = {
   functionIds: WeakMap<Function, number>;
@@ -98,12 +100,16 @@ export function completeFarmServerQueryAction<TData>(
   if (invocation.provisionalKey) {
     cache.alias(invocation.provisionalKey, metadata.key);
   }
+  const invalidated = (invocation.owner as ServerQueryOwner | undefined)?.invalidations?.has(
+    metadata.key,
+  );
 
   cache.set(metadata.key, {
     data: value.data,
     updatedAt: metadata.updatedAt,
-    staleAt:
-      metadata.staleTime === false
+    staleAt: invalidated
+      ? 0
+      : metadata.staleTime === false
         ? Number.POSITIVE_INFINITY
         : metadata.updatedAt + metadata.staleTime,
     status: "success",
@@ -181,7 +187,7 @@ async function executeServerQuery<TInput, TData>(
   const inflight = cache.getInflight<TData>(provisionalKey);
   if (inflight && !options.force) return inflight;
 
-  const owner = {};
+  const owner: ServerQueryOwner = { invalidations: trackFarmClientCacheInvalidations(cache) };
   serverQueryClientState.latestOwners.set(provisionalKey, owner);
 
   const previous = cache.get<TData>(provisionalKey);
@@ -220,8 +226,9 @@ async function executeServerQuery<TInput, TData>(
         cache.set(provisionalKey, {
           data,
           updatedAt,
-          staleAt:
-            options.staleTime === false
+          staleAt: owner.invalidations.has(provisionalKey)
+            ? 0
+            : options.staleTime === false
               ? Number.POSITIVE_INFINITY
               : updatedAt + (options.staleTime ?? 0),
           status: "success",
@@ -247,12 +254,19 @@ async function executeServerQuery<TInput, TData>(
       }
       throw error;
     } finally {
+      const invalidated =
+        serverQueryClientState.latestOwners.get(provisionalKey) === owner &&
+        owner.invalidations.has(provisionalKey);
+      owner.invalidations.dispose();
       if (cache.getInflight(provisionalKey) === promise) {
         cache.deleteInflight(provisionalKey);
       }
       if (serverQueryClientState.latestOwners.get(provisionalKey) === owner) {
         serverQueryClientState.latestOwners.delete(provisionalKey);
       }
+      // Notify only after retiring old work: mounted consumers must start a new
+      // read, not rejoin the promise whose result has just been invalidated.
+      if (invalidated) cache.invalidate(provisionalKey);
     }
   })();
 
