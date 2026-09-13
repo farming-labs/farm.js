@@ -106,6 +106,10 @@ Farm recognizes inline and reference-style Markdown images and file links:
 [release-diagram]: ./release-diagram.svg
 ```
 
+Reference labels follow Markdown's case-insensitive matching. If a label is defined more than
+once, the first definition wins; later duplicates are left unchanged and do not add asset imports
+or missing-file errors.
+
 Relative image destinations are checked as real images with intrinsic dimensions. Relative file
 links are managed when their destination has a file extension; extensionless links and links to
 `.md` or `.mdx` remain content navigation. Remote URLs, root-relative URLs, fragments, data URLs,

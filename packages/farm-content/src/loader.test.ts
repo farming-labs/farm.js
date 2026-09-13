@@ -298,6 +298,89 @@ describe("content collection loading", () => {
     expect(generated).toContain("decodeContentValue(");
   });
 
+  it.each(["md", "mdx"])(
+    "uses the first duplicate Markdown asset definition in %s",
+    async (extension) => {
+      const root = await fixtureRoot();
+      const directory = path.join(root, "content", "posts");
+      await writeFile(path.join(directory, "first.pdf"), "%PDF first\n");
+      await writeFile(path.join(directory, "second.pdf"), "%PDF second\n");
+      const source = `content/posts/references.${extension}`;
+      await writeFile(
+        path.join(root, source),
+        [
+          "---",
+          "title: References",
+          "publishedAt: 2026-09-09",
+          "---",
+          "[Download][GUIDE]",
+          "",
+          "[Guide]: ./first.pdf",
+          "[guide]: ./second.pdf",
+          "",
+        ].join("\n"),
+      );
+
+      const loaded = await loadContentCollections(root, {
+        posts: collection({ source: files(source), schema: postSchema, assets: true }),
+      });
+      const entry = loaded.collections.posts[0];
+      expect(entry.bodyAssets).toMatchObject([{ kind: "file", source: "./first.pdf" }]);
+      expect(entry.bodyAssets).toHaveLength(1);
+      expect(entry.body).toContain("[Guide]: __FARM_CONTENT_ASSET_");
+      expect(entry.body).toContain("[guide]: ./second.pdf");
+      expect(loaded.sourceFiles).not.toContain(path.join(directory, "second.pdf"));
+      const output = path.join(root, ".farm", "content", "server.mjs");
+      await writeContentServerModule(output, loaded.collections, loaded.assetImports);
+      const generated = await readFile(output, "utf8");
+      expect(generated).toContain('from "../../content/posts/first.pdf?url"');
+      expect(generated).not.toContain("second.pdf?url");
+    },
+  );
+
+  it("ignores missing shadowed image definitions but still validates the first definition", async () => {
+    const root = await fixtureRoot();
+    const directory = path.join(root, "content", "posts");
+    await writeFile(
+      path.join(directory, "hero.svg"),
+      '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="24"/>',
+    );
+    const source = "content/posts/references.md";
+    const body = "![Hero][hero]\n\n[hero]: ./hero.svg\n[HERO]: ./missing.svg\n";
+    await writeFile(path.join(root, source), `---\ntitle: Images\n---\n${body}`);
+    const collections = {
+      posts: collection({ source: files(source), schema: postSchema, assets: true }),
+    };
+    const loaded = await loadContentCollections(root, collections);
+    expect(loaded.collections.posts[0].bodyAssets).toMatchObject([
+      { kind: "image", source: "./hero.svg", width: 32, height: 24 },
+    ]);
+    expect(loaded.collections.posts[0].body).toContain("[HERO]: ./missing.svg");
+    expect(loaded.sourceFiles).not.toContain(path.join(directory, "missing.svg"));
+
+    await writeFile(
+      path.join(root, source),
+      "---\ntitle: Images\n---\n![Hero][hero]\n\n[hero]: ./missing.svg\n[HERO]: ./hero.svg\n",
+    );
+    await expect(loadContentCollections(root, collections)).rejects.toThrow(
+      'Asset "./missing.svg" does not exist',
+    );
+  });
+
+  it("leaves a remote first definition unchanged even when a later duplicate is local", async () => {
+    const root = await fixtureRoot();
+    const source = "content/posts/references.md";
+    const body =
+      "[Guide][guide]\n\n[guide]: https://example.com/guide.pdf\n[guide]: ./missing.pdf\n";
+    await writeFile(path.join(root, source), `---\ntitle: Remote\n---\n${body}`);
+    const loaded = await loadContentCollections(root, {
+      posts: collection({ source: files(source), schema: postSchema, assets: true }),
+    });
+    expect(loaded.collections.posts[0].body).toBe(body);
+    expect(loaded.collections.posts[0].bodyAssets).toEqual([]);
+    expect(loaded.assetImports.size).toBe(0);
+  });
+
   it("supports optional, defaulted, and nested frontmatter asset declarations", async () => {
     const root = await fixtureRoot();
     await writeFile(path.join(root, "content", "posts", "guide.pdf"), "%PDF guide\n");
