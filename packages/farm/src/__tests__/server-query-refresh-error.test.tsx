@@ -36,24 +36,27 @@ it.each(["refetch", "focus", "online", "invalidate", "re-enable"])(
     vi.spyOn(Date, "now").mockImplementation(() => now);
     const reads: ReturnType<typeof deferred>[] = [];
     let calls = 0;
-    const query = (async () => {
-      const invocation = beginFarmServerQueryAction("refresh-error", []);
-      calls++;
-      let data = "initial";
-      if (calls > 1) {
-        const read = deferred();
-        reads.push(read);
-        data = await read.promise;
-      }
-      return completeFarmServerQueryAction(
-        invocation,
-        createFarmServerQueryResult(data, {
-          key: "refresh-error",
-          staleTime: 60_000,
-          updatedAt: now,
-        }),
-      );
-    }) as ServerQuery<undefined, string>;
+    const query: ServerQuery<undefined, string> = Object.assign(
+      async () => {
+        const invocation = beginFarmServerQueryAction("refresh-error", []);
+        calls++;
+        let data = "initial";
+        if (calls > 1) {
+          const read = deferred();
+          reads.push(read);
+          data = await read.promise;
+        }
+        return completeFarmServerQueryAction(
+          invocation,
+          createFarmServerQueryResult(data, {
+            key: "refresh-error",
+            staleTime: 60_000,
+            updatedAt: now,
+          }),
+        );
+      },
+      { __farmServerQuery: true as const },
+    );
     let result!: UseServerQueryResult<string>;
     function View({ enabled }: { enabled: boolean }) {
       result = useServerQuery(query, undefined, { enabled });
