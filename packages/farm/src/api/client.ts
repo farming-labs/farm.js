@@ -682,6 +682,7 @@ function createAPIClientRuntime<
       staleAt: entry?.staleAt ?? layer.staleAt,
       gcAt: entry?.gcAt ?? layer.gcAt,
       invalidatedAt: entry?.invalidatedAt,
+      [API_CACHE_REFETCH]: entry?.[API_CACHE_REFETCH],
     };
   };
 
@@ -1225,13 +1226,24 @@ function createAPIClientRuntime<
               !isFarmAPIStream(result.data)
             ) {
               const updatedAt = Date.now();
-              cacheState.set(cacheKey, {
+              const cached: CacheEntry = {
                 data: result.data,
                 updatedAt,
                 staleAt: updatedAt + staleTime,
                 gcAt: getGcAt(updatedAt, cacheOptions?.gcTime),
                 invalidatedAt: undefined,
-              });
+                [API_CACHE_REFETCH]: createCacheRefetch(
+                  request,
+                  path,
+                  method,
+                  input,
+                  cacheKey,
+                  cacheOptions!,
+                  clientOptions,
+                  options.onError,
+                ),
+              };
+              cacheState.set(cacheKey, cached);
             }
 
             if (result.error) {
@@ -1276,6 +1288,7 @@ function createAPIClientRuntime<
               refetch: clientOptions.invalidate.refetch ?? false,
             };
 
+        const refetches = new Set<() => void>();
         for (const target of invalidateOptions.targets) {
           const targetKey = resolveTargetKey(
             routeMeta,
@@ -1300,10 +1313,13 @@ function createAPIClientRuntime<
 
           emitStatus("invalidated", { key: targetKey });
 
-          if (invalidateOptions.refetch && existing && targetKey === cacheKey) {
-            void executeNetwork({ isBackground: true, callCallbacks: false });
+          const refetch = (existing as CacheEntry | undefined)?.[API_CACHE_REFETCH];
+          if (invalidateOptions.refetch && refetch) {
+            refetches.add(refetch);
           }
         }
+        // Invalidate every alias before starting work; never replay this mutation.
+        for (const refetch of refetches) refetch();
       };
 
       const optimisticSnapshots = requestContextError ? [] : applyOptimisticUpdates();
@@ -1673,7 +1689,36 @@ export function createServerAPIClient<
   return endpoints as ServerAPIClient<TEndpoints, TIntegrations>;
 }
 
-type CacheEntry = FarmClientCacheEntry<any>;
+const API_CACHE_REFETCH = Symbol.for("farm.api.cache-refetch");
+type CacheEntry = FarmClientCacheEntry<any> & {
+  [API_CACHE_REFETCH]?: () => void;
+};
+
+// Keep the read recipe on its cache entry, so deletion/GC also releases it.
+// This separate closure must not retain the original request's entry or signal.
+function createCacheRefetch(
+  request: APICall,
+  path: string,
+  method: string,
+  input: unknown,
+  key: string,
+  cache: CacheOptions,
+  options: ClientOptions<any, any> | undefined,
+  onError: APIClientOptions["onError"],
+): () => void {
+  const readOptions: ClientOptions<any, any> = {
+    cache: { ...cache, key, policy: "network-only", dedupeMs: 0 },
+    retry: options?.retry,
+    timeoutMs: options?.timeoutMs,
+  };
+  return () => {
+    // A new call resolves current defaults and owns a fresh deadline. Do not
+    // retain prior signals, mutation options, or per-call completion callbacks.
+    void request(path, method, input, readOptions).catch((error) => {
+      notifyClientObserver(onError, [normalizeError(error)]);
+    });
+  };
+}
 
 type InflightEntry = {
   cancellable?: boolean;

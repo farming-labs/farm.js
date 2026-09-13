@@ -574,6 +574,18 @@ callers, but cannot become fresh cache entries after that key is invalidated. Th
 fetch current data, even when invalidation and request startup happen in the same millisecond.
 Unrelated cache keys are unaffected.
 
+Use `invalidate: { targets: [[apiClient.products.get, input]], refetch: true }` to
+refresh a previously cached API read in the background after a successful mutation. Farm reuses
+that read's resolved route, input, key, cache policy settings, retry settings, and deadline, forcing
+a fresh read instead of replaying the mutation. Duplicate targets refresh once. Explicit cache
+keys work too; expired/missing entries or keys populated outside the API client are only invalidated
+because they have no retained API read to replay.
+
+Background refetch resolves current header defaults, does not reuse the old caller's abort signal
+or per-call callbacks, and never repeats optimistic updates or mutation invalidations. Shared
+lifecycle hooks still observe it. A failed refetch leaves the entry stale and does not fail the
+already successful mutation. Read recipes expire or are removed with their cache entries.
+
 ## Optimistic cache updates
 
 Farm's cache lifecycle is intentionally familiar to React Query and TanStack Query users, but it is
