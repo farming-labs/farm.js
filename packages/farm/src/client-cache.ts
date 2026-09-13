@@ -1,3 +1,4 @@
+/// <reference lib="es2021.weakref" />
 import { createRouteDataCacheKey, type RouteDataCacheKey } from "./cache";
 import { subscribeFarmCacheInvalidation } from "./cache-invalidation";
 
@@ -18,6 +19,25 @@ export type FarmClientCacheEntry<TData = unknown> = {
 
 type FarmClientCacheListener = () => void;
 
+const cacheFinalizer =
+  typeof FinalizationRegistry === "function"
+    ? new FinalizationRegistry<() => void>((unsubscribe) => unsubscribe())
+    : undefined;
+
+// This closure must only capture a weak reference, never the cache itself.
+function subscribeWeakCache(reference: WeakRef<FarmClientDataCache>): () => void {
+  const unsubscribe = subscribeFarmCacheInvalidation((key) => {
+    const cache = reference.deref();
+    if (cache) cache.invalidate(key);
+    else dispose();
+  });
+  function dispose() {
+    unsubscribe();
+    cacheFinalizer?.unregister(reference);
+  }
+  return dispose;
+}
+
 export class FarmClientDataCache {
   private entries = new Map<string, FarmClientCacheEntry>();
   private aliases = new Map<string, string>();
@@ -28,7 +48,17 @@ export class FarmClientDataCache {
 
   constructor(options: { subscribeToInvalidation?: boolean } = {}) {
     if (options.subscribeToInvalidation !== false) {
-      this.unsubscribeInvalidation = subscribeFarmCacheInvalidation((key) => this.invalidate(key));
+      if (typeof WeakRef === "function") {
+        const reference = new WeakRef(this);
+        const unsubscribe = subscribeWeakCache(reference);
+        cacheFinalizer?.register(this, unsubscribe, reference);
+        this.unsubscribeInvalidation = unsubscribe;
+      } else {
+        // Keep invalidation working on older runtimes without weak references.
+        this.unsubscribeInvalidation = subscribeFarmCacheInvalidation((key) =>
+          this.invalidate(key),
+        );
+      }
     }
   }
 
