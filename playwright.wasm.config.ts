@@ -1,6 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const development = "http://127.0.0.1:4198";
+// Vite binds to localhost, which can resolve to ::1 on Linux. Probe the same
+// hostname instead of assuming that the development listener is IPv4-only.
+const development = "http://localhost:4198";
 const production = "http://127.0.0.1:4199/lab/";
 
 export default defineConfig({
@@ -21,6 +23,7 @@ export default defineConfig({
       url: development,
       reuseExistingServer: false,
       timeout: 30_000,
+      stdout: "pipe",
       env: { FARM_TELEMETRY_DISABLED: "1" },
     },
     {
