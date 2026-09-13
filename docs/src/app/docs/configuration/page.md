@@ -335,7 +335,9 @@ application's API routes for it. `basePath` rejects backslashes, control charact
 must begin with one slash; network-path references such as `//api.example.com` are rejected so the
 server mount and browser URL cannot resolve to different origins or paths.
 
-The option configures `createAPIClient()` automatically. An explicit per-client `baseURL` still
+The option configures the HTTP `apiClient` returned by `createApiClients()` automatically
+(and the existing `createAPIClient()` factory). The paired server `api` always uses the local app's
+registered routes and server mount, never an external browser API origin. An explicit per-client `baseURL` still
 takes precedence.
 
 This also applies to RSC builds and their Nitro servers, including apps configured with

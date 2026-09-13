@@ -11,6 +11,7 @@ export {
 } from "../server-http";
 export { createFarmProductionLifecycle } from "../production-lifecycle";
 export { _runWithCurrentRequest, getCurrentRequest } from "../server/request";
+export { _runWithAPIRequestRuntime } from "../api/server-context";
 export {
   configureFarmCache,
   createFarmCacheKey,

@@ -69,7 +69,7 @@ export type APIRouter = PluginAPIRouter<typeof FarmPluginConfig0> & PluginAPIRou
   };
 };
 
-// Pass this schema-free manifest to createAPIClient({ routes: apiRoutes }).
+// Pass this schema-free manifest to createApiClients({ routes: apiRoutes }).
 export const apiRoutes = [
   {
     path: "/api/auth/login",

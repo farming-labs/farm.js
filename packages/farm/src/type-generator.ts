@@ -321,7 +321,7 @@ export type APIRouter = ${pluginTypes.length ? `${pluginTypes.join(" & ")} & ` :
 ${typeExports}
 };
 
-// Pass this schema-free manifest to createAPIClient({ routes: apiRoutes }).
+// Pass this schema-free manifest to createApiClients({ routes: apiRoutes }).
 export const apiRoutes = ${manifestSource} as const;
 `;
   }

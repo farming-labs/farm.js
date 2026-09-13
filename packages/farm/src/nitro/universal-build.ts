@@ -4392,6 +4392,7 @@ function generateVirtualEntryCode(
   const productionRuntimeImport = `import {
   _runWithAfterRequest,
   _runWithCurrentRequest,
+  _runWithAPIRequestRuntime,
   _runWithMiddlewareContext,
   _runWithMiddlewareData,
   _setDefaultFarmThemeConfig,
@@ -7503,6 +7504,14 @@ async function applyFarmPreloadBudget(response, pathname) {
 
 // Export as Web Standard fetch API
 export async function fetch(request, context) {
+  return _runWithAPIRequestRuntime({
+    basePath: farmLocalAPIBasePath,
+    dispatch: async (localRequest) =>
+      (await handleAPIRequest(localRequest)) ?? Response.json({ error: "Not Found" }, { status: 404 }),
+  }, () => handleFarmFetch(request, context));
+}
+
+async function handleFarmFetch(request, context) {
   const healthResponse = await farmProductionLifecycle.handleHealthRequest(request);
   if (healthResponse) return healthResponse;
 

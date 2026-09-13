@@ -148,13 +148,13 @@ After hydration, normal client-side handlers run in the browser and API calls go
 ```tsx
 "use client";
 
-import { api } from "../lib/api-client";
+import { apiClient } from "../lib/api";
 
 export default function Demo() {
   return (
     <button
       onClick={async () => {
-        const result = await api.hello.get({
+        const result = await apiClient.hello.get({
           query: { name: "preview" },
         });
         console.log(result.data);

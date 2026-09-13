@@ -1,25 +1,32 @@
 ---
 title: "API Client"
-description: "Call app API routes with api.hello.get style inference, cache policies, invalidation, retries, callbacks, and optimistic updates."
+description: "Call app API routes with apiClient.hello.get style inference, cache policies, invalidation, retries, callbacks, and optimistic updates."
 section: "Data and APIs"
 ---
 
 # API Client
 
-Call app API routes with api.hello.get style inference, cache policies, invalidation, retries, callbacks, and optimistic updates.
+Call app API routes with apiClient.hello.get style inference, cache policies, invalidation, retries, callbacks, and optimistic updates.
 
-## Create the client
+## Create both callers once
 
-**src/lib/api-client.ts**
+**src/lib/api.ts**
 
 ```ts
-import { createAPIClient } from "@farm.js/core/client";
-import type { APIRouter } from "./api.generated";
+import { createApiClients } from "@farm.js/core/client";
+import { apiRoutes, type APIRouter } from "./api.generated";
 
-export const api = createAPIClient<APIRouter>();
+export const { api, apiClient } = createApiClients<APIRouter>({ routes: apiRoutes });
 ```
 
-The client uses the current origin and `/api` by default. To point every default client at another
+Define each endpoint once in a file route or plugin. This shared module imports only generated
+paths/methods and types, never server handlers or credentials. Import `api` in server code and
+`apiClient` in browser code; do not create another caller in either component.
+
+Both app-route callers return `{ data, error, key }` and preserve the same input, output, method,
+and dynamic-parameter inference. Keep secrets out of this shared module, including its options.
+
+The HTTP client uses the current origin and `/api` by default. To point every default client at another
 API, configure it once in `farm.config.ts`:
 
 ```ts
@@ -42,7 +49,7 @@ For a cross-origin API that uses cookies or HTTP authentication, pass the browse
 mode when creating the client:
 
 ```ts
-export const api = createAPIClient<APIRouter>({
+export const { api, apiClient } = createApiClients<APIRouter>({
   baseURL: "https://api.example.com/v1",
   credentials: "include",
 });
@@ -56,7 +63,7 @@ calling origin and credentialed requests through its CORS policy.
 **Browser usage**
 
 ```ts
-const result = await api.hello.post({
+const result = await apiClient.hello.post({
   body: { name: "Ada" },
 });
 
@@ -73,12 +80,12 @@ alias so the two cannot be confused:
 
 ```ts
 // Both src/app/api/users/route.ts and src/app/api/users/get/route.ts export GET.
-const result = await api["/users/get"].get();
+const result = await apiClient["/users/get"].get();
 ```
 
 The leading slash marks the whole key as a literal API path. This also works when the method-named
 segment is in the middle of a colliding route, for example
-`api["/users/get/profile"].post(...)`. Non-conflicting paths keep their ordinary nested form.
+`apiClient["/users/get/profile"].post(...)`. Non-conflicting paths keep their ordinary nested form.
 
 A typed `HEAD` route is called with `.head()`. Its result keeps the same `{ data, error, key }`
 shape, with `data` set to `undefined` because HTTP HEAD responses do not have a body.
@@ -86,7 +93,7 @@ shape, with `data` set to `undefined` because HTTP HEAD responses do not have a 
 Array-valued query inputs use repeated URL parameters. For example,
 
 ```ts
-await api.posts.get({ query: { tag: ["react", "vite"] } });
+await apiClient.posts.get({ query: { tag: ["react", "vite"] } });
 // GET /api/posts?tag=react&tag=vite
 ```
 
@@ -98,10 +105,10 @@ This is the same array representation that API route query schemas receive.
 `APIRouter` in `src/lib/api.generated.ts`. Pass that manifest to enable parameter resolution:
 
 ```ts
-import { createAPIClient } from "@farm.js/core/client";
+import { createApiClients } from "@farm.js/core/client";
 import { apiRoutes, type APIRouter } from "./api.generated";
 
-export const apiClient = createAPIClient<APIRouter>({ routes: apiRoutes });
+export const { api, apiClient } = createApiClients<APIRouter>({ routes: apiRoutes });
 ```
 
 For `POST /api/projects/[projectId]/uploads/[uploadId]`:
@@ -162,7 +169,7 @@ A route that exports `QUERY` becomes a `.query()` caller. Its body and response 
 the endpoint, just like the existing `.get()` and `.post()` callers:
 
 ```ts
-const result = await api.products.search.query(
+const result = await apiClient.products.search.query(
   {
     body: {
       filters: [{ field: "category", value: "tools" }],
@@ -202,7 +209,7 @@ iterable:
 ```ts
 import { toFormData } from "@farm.js/core/api";
 
-const result = await api.imports.post({
+const result = await apiClient.imports.post({
   body: toFormData({
     title: "Quarterly report",
     file,
@@ -237,12 +244,12 @@ into React Server Actions.
 "use client";
 
 import { useMutation } from "@farm.js/core/client";
-import { api } from "@/lib/api-client";
+import { apiClient } from "@/lib/api";
 
 export function CreateProductButton() {
-  const createProduct = useMutation(api.products.post, {
+  const createProduct = useMutation(apiClient.products.post, {
     request: {
-      invalidate: [[api.products.get]],
+      invalidate: [[apiClient.products.get]],
     },
   });
 
@@ -283,12 +290,12 @@ It accepts generated API methods, Farm server functions, and ordinary async func
 "use client";
 
 import { useFetcher } from "@farm.js/core/client";
-import { api } from "@/lib/api-client";
+import { apiClient } from "@/lib/api";
 
 export function CreateProductForm() {
-  const createProduct = useFetcher(api.products.post, {
+  const createProduct = useFetcher(apiClient.products.post, {
     request: {
-      invalidate: [[api.products.get]],
+      invalidate: [[apiClient.products.get]],
     },
   });
 
@@ -316,7 +323,7 @@ Generated API forms map fields to `{ body: ... }` by default, or `{ query: ... }
 Use `mapFormData` when the validated input needs coercion or a different shape:
 
 ```tsx
-const quantity = useFetcher(api.cart.post, {
+const quantity = useFetcher(apiClient.cart.post, {
   mapFormData(formData) {
     return {
       body: {
@@ -349,7 +356,7 @@ changing the completed API result.
 Use a structured cache key when an API response intentionally shares data with route data or a [`createServerQuery`](/docs/server-queries):
 
 ```ts
-const publicApi = createAPIClient<APIRouter>({ credentials: "omit" });
+const { apiClient: publicApi } = createApiClients<APIRouter>({ credentials: "omit" });
 
 const product = await publicApi.products.get(
   { query: { id } },
@@ -396,7 +403,7 @@ implemented by Farm's own typed API client and shared cache. A mutation can upda
 query result immediately, roll it back after an error, and invalidate it after the server responds.
 
 ```ts
-const products = await api.products.get(
+const products = await apiClient.products.get(
   { query: { category } },
   {
     cache: {
@@ -407,7 +414,7 @@ const products = await api.products.get(
   },
 );
 
-const createProduct = api.products.post(
+const createProduct = apiClient.products.post(
   {
     body: {
       name,
@@ -435,8 +442,8 @@ await createProduct;
 ```
 
 The updater runs synchronously before the POST finishes. `products.key` preserves the cached
-response type, so `current` is inferred from `api.products.get`. You can also target a generated
-route directly with `[api.products.get, { query: { category } }, updater]`.
+response type, so `current` is inferred from `apiClient.products.get`. You can also target a generated
+route directly with `[apiClient.products.get, { query: { category } }, updater]`.
 
 With `rollbackOnError: true`, Farm restores the exact previous cache entry when the mutation fails.
 After a successful mutation, invalidation marks the key stale so mounted consumers or the next read
@@ -449,7 +456,7 @@ read loads canonical data.
 API and integration callers return a consistent result object:
 
 ```ts
-const result = await api.hello.post({
+const result = await apiClient.hello.post({
   body: {
     name: "Ada",
   },
@@ -469,24 +476,55 @@ If an HTTP error body is malformed, Farm still returns an `http_error` with the 
 
 ## Server callers
 
-Use server callers when the operation needs cookies, request headers, server-only credentials, or internal integration dispatch.
+Import `api` from the same shared module. No endpoint imports, second factory, or request-bound
+instance are needed:
 
-```ts
-import { createServerAPIClient } from "@farm.js/core/client";
-import type { APIRouter } from "./api.generated";
+```tsx
+import { api } from "@/lib/api";
 
-export async function loader(request: Request) {
-  const api = createServerAPIClient<APIRouter>({
-    request,
-  });
-
-  return await api.hello.post({
-    body: {
-      name: "Ada",
-    },
-  });
+export default async function Page() {
+  const result = await api.hello.post({ body: { name: "Ada" } });
+  if (result.error) throw result.error;
+  return <p>{result.data?.message}</p>;
 }
 ```
+
+`api` resolves the current request and that app's registered routes at call time. It works in Farm
+server pages, queries, actions, and API handlers in development and the default universal
+production runtime. Constructing the pair at module scope is safe. Calling `api` in the browser
+or outside an active Farm request throws an actionable error; it never silently falls back to HTTP.
+
+The local caller uses the app's server API mount, including custom base paths. A public
+`baseURL` pointing at another origin affects `apiClient`, not local dispatch. The current
+request's `Cookie`, `Authorization`, and `Accept-Language` headers are inherited; shared options
+and per-call headers can override them. Other headers are not implicitly forwarded. Do not place
+private tokens in the shared module: read them in server code and pass them per call where needed.
+
+Local calls use the same route matching, params, input/output validation, endpoint middleware,
+body limits, and response decoding as HTTP routes. They still serialize request/response data;
+they avoid a network round trip, not all serialization. Request cancellation is inherited.
+Opt-in caches and in-flight requests are isolated by request and credentials, never shared between
+users. Dynamic `$params()` scopes work identically for both callers.
+
+### Direct-call boundaries
+
+`api` is a direct endpoint caller, **not a replay of the full HTTP request pipeline**. It does not
+run path-level HTTP middleware, redirects/rewrites, plugin request/response lifecycle hooks, or
+deployment-layer checks. Put authorization and other rules required for both transports in the
+endpoint's `middleware`. Use `apiClient` when an operation must go through HTTP middleware.
+
+Response cookies and headers from a local endpoint do not automatically become headers on the
+outer page response. Post-response work scheduled by an endpoint uses the enclosing request's
+lifecycle. Integrations remain available under `api.integrations` and `apiClient.integrations`,
+using their existing integration-dispatch semantics.
+
+### Existing factories
+
+`createAPIClient()` remains supported for an HTTP-only caller, including standalone scripts with
+an absolute `baseURL`. `createServerAPIClient({ hello: { get: GET } })` remains supported for
+explicit endpoint-function maps in server-only modules. It returns the supplied functions and
+their raw results; passing only `{ request }` does **not** discover routes. Prefer the paired
+factory for a shared module and a consistent `{ data, error, key }` app-route result.
 
 ## Integration callers
 

@@ -27,6 +27,7 @@ import { matchAPIRouteAtBasePath } from "./runtime";
 import { sendWebResponse } from "../server/response";
 import { isFarmAPIRouteFileName } from "./route-files";
 import { _withAfterNodeMiddleware } from "../after";
+import { _runWithAPIRequestRuntime } from "./server-context";
 import { isProgrammaticRoutesFileName } from "../routes-shared";
 import { findProgrammaticRouteFilesInDir } from "../routes.server";
 import { toPosixPath, toViteModuleId } from "../utils";
@@ -443,96 +444,106 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
 
       // Add middleware to handle API requests
       return () => {
-        server.middlewares.use(
-          _withAfterNodeMiddleware(async (req, res, next) => {
-            const url = req.url || "/";
-            const pathname = url.split("?")[0];
-            const method = req.method || "GET";
+        const apiMiddleware = _withAfterNodeMiddleware(async (req, res, next) => {
+          const url = req.url || "/";
+          const pathname = url.split("?")[0];
+          const method = req.method || "GET";
 
-            if (discoveryPromise) await waitForDiscovery();
+          if (discoveryPromise) await waitForDiscovery();
 
-            if (!matchAPIRouteAtBasePath(apiRoutesCache, pathname, basePath)) {
-              return next();
-            }
+          if (!matchAPIRouteAtBasePath(apiRoutesCache, pathname, basePath)) {
+            return next();
+          }
 
-            if (!apiRouterHandler) {
-              return next();
-            }
+          if (!apiRouterHandler) {
+            return next();
+          }
 
-            const startTime = Date.now();
+          const startTime = Date.now();
 
-            try {
-              // Execute middleware if available
-              const farmMiddleware = (server as any).__farmMiddleware__;
-              if (farmMiddleware) {
-                await farmMiddleware.waitForDiscovery?.();
-                const middlewareData = new Map<string, any>();
-                const handled = await farmMiddleware.execute(req, res, pathname, middlewareData);
-                if (handled) {
-                  const duration = Date.now() - startTime;
-                  logResponse(method, pathname, res.statusCode || 200, duration);
-                  return;
-                }
-              }
-
-              // ctx.rewrite() mutates req.url; dispatch from the current
-              // value so dev matches production, where the rewritten request
-              // reaches the API router.
-              const currentUrl = req.url || url;
-              const currentPathname = currentUrl.split("?")[0];
-              if (
-                currentPathname !== pathname &&
-                !matchAPIRouteAtBasePath(apiRoutesCache, currentPathname, basePath)
-              ) {
-                // Rewritten off the API surface; let the page pipeline serve it.
-                return next();
-              }
-
-              // Convert Node request to Web Request
-              const fullUrl = `http://${req.headers.host || "localhost:3000"}${currentUrl}`;
-              const headers = new Headers();
-              for (const [key, value] of Object.entries(req.headers)) {
-                if (value) {
-                  headers.set(key, Array.isArray(value) ? value.join(", ") : value);
-                }
-              }
-
-              let body: Buffer | undefined;
-              if (method !== "GET" && method !== "HEAD") {
-                body = await readNodeRequestBody(req as any, bodySizeLimit);
-              }
-
-              const request = new Request(fullUrl, {
-                method,
-                headers,
-                body: body
-                  ? (body.buffer.slice(
-                      body.byteOffset,
-                      body.byteOffset + body.byteLength,
-                    ) as ArrayBuffer)
-                  : undefined,
-              });
-
-              const response = await apiRouterHandler(request);
-
-              const duration = Date.now() - startTime;
-              logResponse(method, currentPathname, response.status, duration);
-
-              await sendWebResponse(res, response);
-            } catch (error: any) {
-              const bodyErrorResponse = createFarmRequestBodyErrorResponse(error);
-              if (bodyErrorResponse) {
-                await sendWebResponse(res, bodyErrorResponse);
+          try {
+            // Execute middleware if available
+            const farmMiddleware = (server as any).__farmMiddleware__;
+            if (farmMiddleware) {
+              await farmMiddleware.waitForDiscovery?.();
+              const middlewareData = new Map<string, any>();
+              const handled = await farmMiddleware.execute(req, res, pathname, middlewareData);
+              if (handled) {
+                const duration = Date.now() - startTime;
+                logResponse(method, pathname, res.statusCode || 200, duration);
                 return;
               }
-              const duration = Date.now() - startTime;
-              logResponse(method, pathname, 500, duration);
-              console.error("[FARM] API error:", error);
-              res.statusCode = 500;
-              res.setHeader("Content-Type", "application/json");
-              res.end(JSON.stringify({ error: "Internal server error" }));
             }
-          }),
+
+            // ctx.rewrite() mutates req.url; dispatch from the current
+            // value so dev matches production, where the rewritten request
+            // reaches the API router.
+            const currentUrl = req.url || url;
+            const currentPathname = currentUrl.split("?")[0];
+            if (
+              currentPathname !== pathname &&
+              !matchAPIRouteAtBasePath(apiRoutesCache, currentPathname, basePath)
+            ) {
+              // Rewritten off the API surface; let the page pipeline serve it.
+              return next();
+            }
+
+            // Convert Node request to Web Request
+            const fullUrl = `http://${req.headers.host || "localhost:3000"}${currentUrl}`;
+            const headers = new Headers();
+            for (const [key, value] of Object.entries(req.headers)) {
+              if (value) {
+                headers.set(key, Array.isArray(value) ? value.join(", ") : value);
+              }
+            }
+
+            let body: Buffer | undefined;
+            if (method !== "GET" && method !== "HEAD") {
+              body = await readNodeRequestBody(req as any, bodySizeLimit);
+            }
+
+            const request = new Request(fullUrl, {
+              method,
+              headers,
+              body: body
+                ? (body.buffer.slice(
+                    body.byteOffset,
+                    body.byteOffset + body.byteLength,
+                  ) as ArrayBuffer)
+                : undefined,
+            });
+
+            const response = await apiRouterHandler(request);
+
+            const duration = Date.now() - startTime;
+            logResponse(method, currentPathname, response.status, duration);
+
+            await sendWebResponse(res, response);
+          } catch (error: any) {
+            const bodyErrorResponse = createFarmRequestBodyErrorResponse(error);
+            if (bodyErrorResponse) {
+              await sendWebResponse(res, bodyErrorResponse);
+              return;
+            }
+            const duration = Date.now() - startTime;
+            logResponse(method, pathname, 500, duration);
+            console.error("[FARM] API error:", error);
+            res.statusCode = 500;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: "Internal server error" }));
+          }
+        });
+        server.middlewares.use((req, res, next) =>
+          _runWithAPIRequestRuntime(
+            {
+              basePath: basePath ?? "/api",
+              dispatch: async (request) =>
+                apiRouterHandler
+                  ? apiRouterHandler(request)
+                  : Response.json({ error: "Not Found" }, { status: 404 }),
+            },
+            () => apiMiddleware(req, res, next),
+          ),
         );
       };
     },

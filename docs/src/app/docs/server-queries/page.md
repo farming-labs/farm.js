@@ -21,7 +21,7 @@ generated server references; it does not install or wrap TanStack Query.
 > rendering: importing a query module from `"use client"` code would bundle the server handler into
 > the browser, and Farm fails the build with a boundary error instead. In apps without the
 > transform, call queries from server components, or expose an API route and use
-> [`createAPIClient`](/docs/api-client) from client components.
+> [`apiClient` from `createApiClients()`](/docs/api-client) from client components.
 
 ## Declare a query
 

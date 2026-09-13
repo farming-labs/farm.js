@@ -62,7 +62,7 @@ import {
   matchAPIRouteAtBasePath,
 } from '@farm.js/core/api/runtime';
 import { _runWithAfterRequest } from '@farm.js/core/after';
-import { _runWithCurrentRequest, searchParamsToObject } from '@farm.js/core/internal/production-runtime';
+import { _runWithAPIRequestRuntime, _runWithCurrentRequest, searchParamsToObject } from '@farm.js/core/internal/production-runtime';
 import { getFarmRedirectError, isFarmNotFoundError } from '@farm.js/core/internal/production-runtime';
 import {
   parseRoutePath,
@@ -934,9 +934,13 @@ async function handleFarmRequest(request) {
 }
 
 async function handler(request, context) {
-  return _runWithCurrentRequest(request, () =>
+  return _runWithAPIRequestRuntime({
+    basePath: farmApiBasePath,
+    dispatch: async (localRequest) =>
+      (await handleAPIRequest(localRequest)) ?? Response.json({ error: 'Not Found' }, { status: 404 }),
+  }, () => _runWithCurrentRequest(request, () =>
     _runWithAfterRequest(request, () => handleFarmRequest(request), context)
-  );
+  ));
 }
 
 export default { fetch: handler };

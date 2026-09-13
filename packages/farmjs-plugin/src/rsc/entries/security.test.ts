@@ -1,5 +1,11 @@
 import { registerAPIRouteShape } from "@farm.js/core/api/runtime";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { createApiClients } from "@farm.js/core/client";
+import {
+  _runWithAPIRequestRuntime,
+  _runWithCurrentRequest,
+  _runWithAfterRequest,
+} from "@farm.js/core/internal/production-runtime";
 import { transformWithEsbuild } from "vite";
 import {
   getAllowedAPIRouteMethods,
@@ -116,6 +122,42 @@ describe("generated server action security", () => {
     expect(entry).toContain("_runWithMiddlewareData(middlewareResult.data");
     expect(entry).toContain("_runWithMiddlewareContext(middlewareContext");
     expect(entry).toContain("middlewareHeaders.set('cache-control', 'private, no-store')");
+  });
+
+  it("binds paired local callers to the RSC request's route runtime", async () => {
+    const entry = generateRscEntry(context);
+    const start = entry.indexOf("async function handler(request, context)");
+    const end = entry.indexOf("export default", start);
+    const { api } = createApiClients<{
+      hello: {
+        get: { __types: { body: never; query: never; response: { cookie: string | null } } };
+      };
+    }>();
+    const dispatch = vi.fn(async (request: Request) => {
+      expect(new URL(request.url).pathname).toBe("/backend/hello");
+      return Response.json({ cookie: request.headers.get("cookie") });
+    });
+    const handle = new Function(
+      "_runWithAPIRequestRuntime",
+      "_runWithCurrentRequest",
+      "_runWithAfterRequest",
+      "handleAPIRequest",
+      "handleFarmRequest",
+      "farmApiBasePath",
+      `${entry.slice(start, end)}; return handler;`,
+    )(
+      _runWithAPIRequestRuntime,
+      _runWithCurrentRequest,
+      _runWithAfterRequest,
+      dispatch,
+      async () => Response.json(await api.hello.get()),
+      "/backend",
+    );
+    const response = await handle(
+      new Request("https://farm.test/page", { headers: { cookie: "session=rsc" } }),
+    );
+    expect((await response.json()).data).toEqual({ cookie: "session=rsc" });
+    expect(dispatch).toHaveBeenCalledOnce();
   });
 
   it("bundles production API routes and dispatches them outside the server-action pipeline", () => {

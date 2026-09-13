@@ -1,10 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createAPIClient } from "@farm.js/core/client";
-import type { APIRouter } from "../lib/api.generated";
-
-const api = createAPIClient<APIRouter>();
+import { apiClient } from "../lib/api";
 
 type Entry = { id: number; name: string; message: string; at: string };
 
@@ -14,7 +11,7 @@ export function Guestbook() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api.guestbook.get().then((result) => {
+    apiClient.guestbook.get().then((result) => {
       if (result.data) setEntries(result.data.entries);
     });
   }, []);
@@ -26,7 +23,7 @@ export function Guestbook() {
     setPending(true);
     setError(null);
 
-    const result = await api.guestbook.post({
+    const result = await apiClient.guestbook.post({
       body: {
         name: String(formData.get("name") ?? ""),
         message: String(formData.get("message") ?? ""),
