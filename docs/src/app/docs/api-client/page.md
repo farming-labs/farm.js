@@ -447,6 +447,11 @@ existing API-client cache, retry, invalidation, and optimistic options through `
 `optimistic` state on `useMutation` is separate from an API cache update: it controls
 `mutation.data`, while `request.optimistic` updates shared cached queries.
 
+`reset()` clears the displayed mutation state; it does not cancel the underlying work. Calls
+started before reset still settle their own promises, but cannot change the new state or run its
+completion callbacks. If you submit again, `pending` counts only calls started after reset.
+`useFetcher.reset()` follows the same rule.
+
 ## Submit without navigation
 
 Use `useFetcher` when a button or form should run an operation without changing the current route.
