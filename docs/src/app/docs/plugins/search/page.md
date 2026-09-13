@@ -89,6 +89,8 @@ search({
 
 `*` matches within one URL segment, `**` matches descendants, and `?` matches one non-slash
 character. A pattern such as `/docs/**` includes both `/docs` and its descendants.
+Wildcards can be combined: `/docs/*/**` matches `/docs/en` and `/docs/en/getting-started`, while
+`exclude: ["/docs/*/internal/**"]` excludes each matching section's internal page and descendants.
 
 Route names are preserved even when they repeat the mount path. With `basePath: "/app"`,
 `include: ["/app/**"]` selects the application's `/app` pages and produces result URLs beneath

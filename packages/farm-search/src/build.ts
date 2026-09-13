@@ -139,14 +139,12 @@ export function routeFromHtmlFile(file: string): string {
 }
 
 export function matchesRoutePattern(route: string, pattern: string): boolean {
-  if (pattern.endsWith("/**")) {
-    const parent = pattern.slice(0, -3) || "/";
-    return route === parent || route.startsWith(parent === "/" ? "/" : `${parent}/`);
-  }
+  const descendants = pattern.endsWith("/**");
+  const parentPattern = descendants ? pattern.slice(0, -3) : pattern;
   let source = "";
-  for (let index = 0; index < pattern.length; index++) {
-    const character = pattern[index]!;
-    if (character === "*" && pattern[index + 1] === "*") {
+  for (let index = 0; index < parentPattern.length; index++) {
+    const character = parentPattern[index]!;
+    if (character === "*" && parentPattern[index + 1] === "*") {
       source += ".*";
       index++;
     } else if (character === "*") {
@@ -157,6 +155,8 @@ export function matchesRoutePattern(route: string, pattern: string): boolean {
       source += character.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
     }
   }
+  // Compile the parent too: a terminal /** must not turn earlier wildcards into literals.
+  if (descendants) source += parentPattern ? "(?:/.*)?" : "/.*";
   return new RegExp(`^${source}/?$`).test(route);
 }
 

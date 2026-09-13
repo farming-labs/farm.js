@@ -75,6 +75,44 @@ describe.sequential("writeSearchIndex", () => {
     ).rejects.toThrow("No static HTML pages matched");
   });
 
+  it("applies wildcard prefixes to includes and excludes in a real Pagefind build", async () => {
+    const { outputDir, publicDir } = await createOutput();
+    for (const route of [
+      "docs",
+      "docs/en",
+      "docs/en/start",
+      "docs/fr/start",
+      "docs/en/internal",
+      "docs/fr/internal/secrets",
+      "blog/en",
+    ]) {
+      await mkdir(path.join(publicDir, route), { recursive: true });
+      await writeFile(path.join(publicDir, route, "index.html"), page(route, "Searchable content"));
+    }
+    const result = await writeSearchIndex({
+      outputDir,
+      publicDir,
+      preset: "node-server",
+      basePath: "/app",
+      options: resolveSearchOptions({
+        include: ["/docs/*/**"],
+        exclude: ["/docs/*/internal/**"],
+      }),
+    });
+    expect(result.indexedRoutes).toEqual([
+      "/app/docs/en",
+      "/app/docs/en/start",
+      "/app/docs/fr/start",
+    ]);
+    expect(result.skippedRoutes).toEqual([
+      "/app/blog/en",
+      "/app/docs",
+      "/app/docs/en/internal",
+      "/app/docs/fr/internal/secrets",
+    ]);
+    await expect(access(path.join(result.outputPath, "pagefind.js"))).resolves.toBeUndefined();
+  }, 30_000);
+
   it("keeps application routes that repeat basePath distinct and filters before prefixing", async () => {
     const { outputDir, publicDir } = await createOutput();
     for (const route of ["", "app", "app/app", "app/private"]) {
@@ -193,6 +231,25 @@ describe.sequential("writeSearchIndex", () => {
 });
 
 describe("search route matching", () => {
+  it.each([
+    ["/docs/en", "/docs/*/**", true],
+    ["/docs/en/", "/docs/*/**", true],
+    ["/docs/en/start/deep", "/docs/*/**", true],
+    ["/docs", "/docs/*/**", false],
+    ["/docs-old/en", "/docs/*/**", false],
+    ["/v1/docs", "/v?/docs/**", true],
+    ["/v2/docs/start", "/v?/docs/**", true],
+    ["/v12/docs/start", "/v?/docs/**", false],
+    ["/docs/en/api/guide/start", "/docs/**/guide/**", true],
+    ["/docs/v1.0+/en", "/docs/v1.0+/*/**", true],
+    ["/docs/v1000/en", "/docs/v1.0+/*/**", false],
+    ["/", "/**", true],
+    ["/docs/start", "/**", true],
+    ["/docs-old", "/docs/**", false],
+  ])("matches %s against %s as %s", (route, pattern, expected) => {
+    expect(matchesRoutePattern(route, pattern)).toBe(expected);
+  });
+
   it("maps static output files to clean routes", () => {
     expect(routeFromHtmlFile("index.html")).toBe("/");
     expect(routeFromHtmlFile("docs/index.html")).toBe("/docs");
