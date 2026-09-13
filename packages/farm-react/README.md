@@ -775,21 +775,25 @@ failed checks keep complete keyed reconciliation. A compiler-safe filter/slice p
 Reports count each compiled sort step as a `keyedArraySortHints` entry; sort shares the optional
 reorder runtime, and Farm does not polyfill `Array.prototype.toSorted`.
 
-Concise immutable filters on a direct keyed array can carry removal positions into the same
-optional runtime:
+Concise or single-return block-bodied immutable filters on a direct keyed array can carry removal
+positions into the same optional runtime:
 
 ```tsx
 setItems((current) => current.filter((item) => item.id !== removedId));
+setItems((current) => {
+  return current.filter((item) => item.id !== removedId);
+});
 ```
 
 For compiler-owned host rows whose render and key do not observe the row index, Farm validates the
 native filter chain, every surviving item identity, and every surviving key before removing only
 the rejected DOM rows. It does not recreate descriptors or reread bindings for unchanged rows,
-and queued filters compose before one compiler flush. Index-aware rows or predicates,
-block-bodied updates, custom filter methods, sparse or subclassed arrays, collection-reading
-bindings or keys, React-owned row structures, mixed dirty dependencies, and failed validation use
-complete keyed reconciliation. No option or new component is required. The compiler report exposes
-the emitted-site count as `keyedArrayFilterHints`.
+and queued filters compose before one compiler flush. Index-aware rows or predicates, updater blocks
+with extra statements, directives, conditional returns, or no value-returning `return`, block-bodied
+predicates, custom filter methods, sparse or subclassed arrays, collection-reading bindings or keys,
+React-owned row structures, mixed dirty dependencies, and failed validation use complete keyed
+reconciliation. No option or new component is required. The compiler report exposes the emitted-site
+count as `keyedArrayFilterHints`.
 
 An otherwise eligible host row may also contain an inline synchronous React event:
 

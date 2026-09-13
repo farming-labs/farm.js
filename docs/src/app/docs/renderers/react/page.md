@@ -399,9 +399,10 @@ executed keys to the runtime.
 report its changed row indexes while one or more consecutive immutable `map()` stages run. The same
 counts appear per module.
 `keyedArrayAppendHints` counts setter sites where the compiler proved a direct keyed array append
-and can hand the appended suffix to the runtime. `keyedArrayFilterHints` counts concise keyed-array
-filter sites that can report removed positions. `keyedArrayPrependHints` counts setter sites where
-the compiler proved a direct keyed array prepend and can hand the new prefix to the runtime.
+and can hand the appended suffix to the runtime. `keyedArrayFilterHints` counts concise or
+single-return block-bodied keyed-array filter sites that can report removed positions.
+`keyedArrayPrependHints` counts setter sites where the compiler proved a direct keyed array prepend
+and can hand the new prefix to the runtime.
 `keyedArraySliceHints` counts direct keyed-array slices whose compiler-safe bounds identify one
 exact retained interval after runtime validation.
 `keyedArrayPositionHints` counts compiler-proven native keyed-array insertions, single or
@@ -1674,17 +1675,21 @@ optional reorder runtime, and Farm does not polyfill `Array.prototype.toSorted`.
 
 #### Keyed array filter hints
 
-A concise immutable filter on a direct keyed `useState` array can remove rows without rebuilding
-every surviving row:
+A concise or single-return block-bodied immutable filter on a direct keyed `useState` array can
+remove rows without rebuilding every surviving row:
 
 ```tsx
 setItems((current) => current.filter((item) => item.id !== removedId));
+setItems((current) => {
+  return current.filter((item) => item.id !== removedId);
+});
 ```
 
-At build time, Farm recognizes the direct functional setter and a synchronous, one-parameter,
-expression-bodied predicate from the compiler's safe expression subset. The native `filter()`
-still runs normally. Its generated wrapper records rejected positions and links queued filters to
-the last committed array.
+At build time, Farm recognizes a concise functional setter or a setter block containing exactly one
+direct value-returning `return`. The returned expression must directly call native `filter()` with
+a synchronous, one-parameter, expression-bodied predicate from the compiler's safe expression
+subset. The native `filter()` still runs normally. Its generated wrapper records rejected positions
+and links queued filters to the last committed array.
 
 At update time, Farm validates the native-array chain, result lengths, surviving item identities,
 and surviving keys before changing the DOM. It then removes only rejected row elements, updates
@@ -1692,13 +1697,14 @@ the stored positions used by delegated row events, and keeps all surviving eleme
 descriptors and bindings are not recreated or reread, and the owner component does not rerun.
 
 The proof applies only to compiler-owned host rows whose render callback and key do not observe the
-row index. An index-aware row or predicate, collection-derived key, block-bodied updater or
-predicate, custom filter method, sparse or subclassed array, binding that reads the collection,
-React-owned row structure, nested host block, row conditional, unrelated dirty dependency, or
-failed runtime validation keeps complete keyed reconciliation. A filter queued after an unhinted
-update also falls back. These checks make the hint an internal optimization rather than a new
-behavior contract. Reports expose emitted sites as `keyedArrayFilterHints`; the optional hinted
-runtime is retained only when a module emits a supported update hint.
+row index. An index-aware row or predicate, collection-derived key, updater block with extra
+statements, directives, conditional returns, or no value-returning `return`, block-bodied predicate,
+custom filter method, sparse or subclassed array, binding that reads the collection, React-owned row
+structure, nested host block, row conditional, unrelated dirty dependency, or failed runtime
+validation keeps complete keyed reconciliation. A filter queued after an unhinted update also falls
+back. These checks make the hint an internal optimization rather than a new behavior contract.
+Reports expose emitted sites as `keyedArrayFilterHints`; the optional hinted runtime is retained only
+when a module emits a supported update hint.
 
 #### Interactive host rows
 

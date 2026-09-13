@@ -3923,19 +3923,25 @@ function rewriteKeyedArrayFilterHints(
         updater.async ||
         updater.generator ||
         updater.params.length !== 1 ||
-        !t.isIdentifier(updater.params[0]) ||
-        !t.isCallExpression(updater.body) ||
-        updater.body.arguments.length !== 1 ||
-        !t.isMemberExpression(updater.body.callee) ||
-        updater.body.callee.computed ||
-        !t.isIdentifier(updater.body.callee.object, {
-          name: updater.params[0].name,
-        }) ||
-        !t.isIdentifier(updater.body.callee.property, { name: "filter" })
+        !t.isIdentifier(updater.params[0])
       ) {
         return;
       }
-      const predicate = updater.body.arguments[0];
+      const updateExpression = returnedExpression(updater);
+      if (
+        (t.isBlockStatement(updater.body) && updater.body.directives.length > 0) ||
+        !t.isCallExpression(updateExpression) ||
+        updateExpression.arguments.length !== 1 ||
+        !t.isMemberExpression(updateExpression.callee) ||
+        updateExpression.callee.computed ||
+        !t.isIdentifier(updateExpression.callee.object, {
+          name: updater.params[0].name,
+        }) ||
+        !t.isIdentifier(updateExpression.callee.property, { name: "filter" })
+      ) {
+        return;
+      }
+      const predicate = updateExpression.arguments[0];
       if (
         !t.isArrowFunctionExpression(predicate) ||
         predicate.async ||
