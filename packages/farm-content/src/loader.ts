@@ -218,7 +218,17 @@ async function parseContentFile(
   const extension = path.extname(relativeFile).toLowerCase();
   try {
     if (extension === ".md" || extension === ".mdx") {
-      const parsed = matter(source);
+      // Check the same delimiter/language that gray-matter will parse, before
+      // its default engines can evaluate executable frontmatter.
+      const normalizedSource = source.replace(/^\uFEFF/, "");
+      if (normalizedSource.startsWith("---") && normalizedSource[3] !== "-") {
+        const language = matter.language(normalizedSource).name.toLowerCase();
+        if (language && language !== "yaml" && language !== "yml" && language !== "json") {
+          throw new Error("Only YAML and JSON frontmatter are supported");
+        }
+      }
+      // Explicit options also avoid gray-matter's process-global parsed cache.
+      const parsed = matter(source, {});
       return { data: parsed.data, body: parsed.content };
     }
     if (extension === ".json") {
