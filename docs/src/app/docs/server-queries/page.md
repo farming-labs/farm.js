@@ -154,6 +154,11 @@ During a browser server-action call, Farm carries structured invalidations back 
 If invalidation arrives while a query is still resolving its canonical server key, the invalidation
 follows that key and the older response cannot make the entry fresh again.
 
+If an automatic refresh fails, `useServerQuery` keeps the previous data stale and exposes the
+error without repeatedly retrying the same invalidation. Call `refetch()` to retry, or let a new
+invalidation, focus/reconnect event, or re-enabled query trigger another read. Concurrent mounted
+consumers continue to share that read.
+
 ## Share keys with routes and APIs
 
 Server queries use the existing route-data cache namespace and tag. They do not create a separate server cache.

@@ -47,22 +47,34 @@ export function useServerQuery<TInput, TData>(
   const inputRef = useRef(input);
   const optionsRef = useRef(options);
   const mountedKeyRef = useRef<string | undefined>(undefined);
+  const pendingInvalidationRef = useRef(false);
   inputRef.current = input;
   optionsRef.current = options;
 
   const subscribe = useCallback(
-    (listener: () => void) => cache.subscribe(key, listener),
+    (listener: () => void) =>
+      cache.subscribe(key, (event) => {
+        if (event === "invalidate") pendingInvalidationRef.current = true;
+        else if (cache.get(key)?.fetching) {
+          // A shared read consumes this invalidation for every subscriber, even
+          // when React batches its pending and error snapshots into one render.
+          pendingInvalidationRef.current = false;
+        }
+        listener();
+      }),
     [cache, key],
   );
   const getSnapshot = useCallback(() => cache.get<TData>(key), [cache, key]);
   const entry = useSyncExternalStore(subscribe, getSnapshot, () => undefined);
 
   const run = useCallback(
-    (force = false) =>
-      fetchServerQuery(query, inputRef.current, {
+    (force = false) => {
+      pendingInvalidationRef.current = false;
+      return fetchServerQuery(query, inputRef.current, {
         ...optionsRef.current,
         force,
-      }),
+      });
+    },
     [query],
   );
 
@@ -77,7 +89,7 @@ export function useServerQuery<TInput, TData>(
     if (firstReadForKey) mountedKeyRef.current = key;
     if (
       (firstReadForKey && (!entry || cache.isStale(key))) ||
-      (entry?.invalidatedAt !== undefined && !entry.fetching)
+      (pendingInvalidationRef.current && entry?.invalidatedAt !== undefined && !entry.fetching)
     ) {
       void run().catch(() => undefined);
     }
