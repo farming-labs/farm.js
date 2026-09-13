@@ -114,6 +114,11 @@ Image requests with an `Authorization` header and responses marked `Cache-Contro
 `no-store`, or `no-cache` are never stored. Only use this option for public images because Cache
 Storage survives sign-out in the same browser profile.
 
+Runtime image caching is best-effort. If browser storage is unavailable or full, a successful
+network response still loads normally. If the network fails, an available cached image remains the
+fallback; without one, the network error is preserved. Install-time precaching still requires all
+selected assets to be cached successfully.
+
 Customize the storage bounds with short names:
 
 ```ts

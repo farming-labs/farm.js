@@ -250,8 +250,15 @@ function staleWhileRevalidateImage(request) {
   const response = (async () => {
     if (request.headers.has("authorization")) return fetch(request);
 
-    const cache = await caches.open(IMAGE_CACHE);
-    const cached = await cache.match(request);
+    let cache;
+    let cached;
+    try {
+      cache = await caches.open(IMAGE_CACHE);
+      cached = await cache.match(request);
+    } catch {
+      // Runtime caching is optional when browser storage is unavailable.
+      return fetch(request);
+    }
     const cachedAt = Number(cached?.headers.get("x-farm-pwa-cached-at") || 0);
     const fresh = cached && Date.now() - cachedAt <= IMAGE_OPTIONS.ttlMs;
     update = fetchAndCacheImage(request, cache);
@@ -281,15 +288,22 @@ async function fetchAndCacheImage(request, cache) {
   const response = await fetch(request);
   if (!isPublicCacheableImage(response)) return response;
 
-  const headers = new Headers(response.headers);
-  headers.set("x-farm-pwa-cached-at", String(Date.now()));
-  const stored = new Response(response.clone().body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
-  });
-  await cache.put(request, stored);
-  await trimImageCache(cache, IMAGE_OPTIONS.limit);
+  let stored;
+  try {
+    const headers = new Headers(response.headers);
+    headers.set("x-farm-pwa-cached-at", String(Date.now()));
+    stored = new Response(response.clone().body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
+    await cache.put(request, stored);
+    await trimImageCache(cache, IMAGE_OPTIONS.limit);
+  } catch {
+    // Quota and storage failures must not discard a successful network response.
+    // Do not wait for tee cancellation, which can depend on the response consumer.
+    if (stored?.body) void stored.body.cancel().catch(() => undefined);
+  }
   return response;
 }
 
