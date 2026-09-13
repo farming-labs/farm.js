@@ -142,6 +142,36 @@ completed writes or external side effects.
 These defaults also reach integration callers; `integrations.timeoutMs` overrides the shared
 deadline. See [integration cancellation](/docs/integrations#cancellation-and-deadlines).
 
+## Custom HTTP transport
+
+Pass a fetch-compatible function when a caller needs an HTTP wrapper for testing or tracing:
+
+```ts
+export const { api, apiClient } = createApiClients<APIRouter>({
+  routes: apiRoutes,
+  fetch: async (url, init) => {
+    const response = await globalThis.fetch(url, init);
+    return response;
+  },
+});
+```
+
+The function has the same type as `globalThis.fetch` and receives Farm's resolved URL and
+`RequestInit`, including headers, credentials, body, and cancellation signal. Return a normal
+`Response` and forward the signal in wrappers. Farm still handles decoding, errors, retries,
+and deadlines. Without this option, Farm uses global fetch as before. Supply a bound function
+if your implementation requires a particular `this` value.
+
+This replaces HTTP only: `apiClient` uses it, but server `api` still dispatches app routes
+locally. Integration HTTP calls (including server HTTP fallback) inherit it;
+`integrations.fetch` overrides it for integrations. Registered local integration handlers
+do not use HTTP and are unchanged.
+
+App-route caches stay private to instances with a custom transport, even with
+`cache.scope: "shared"` or `credentials: "omit"`: wrappers can add identity that Farm cannot
+see. If a wrapper changes users internally, also reflect that identity in the caller's
+header resolver or create a new instance; Farm cannot detect hidden identity changes.
+
 ## Call a route
 
 **Browser usage**

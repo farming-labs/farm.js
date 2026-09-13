@@ -226,6 +226,11 @@ modules. See `docs/src/app/docs/api-client/page.md#header-defaults` and the inte
 
 ## Typed APIs and Server Data
 
+Caller `fetch` options replace HTTP only, including integration server fallback. Local route and
+registered integration dispatch remain local. Forward the supplied RequestInit/signal and return
+a Web Response. Custom-transport route caches are instance-private even with shared scope;
+reflect hidden identity changes in header defaults or create a new caller instance.
+
 Caller instances accept `timeoutMs` (0 disables it); individual calls accept `signal` and a
 deadline override. The budget includes header resolution, dispatch, decoding, and retry waits.
 Cancelled app routes return `aborted`/`timeout` errors without retries or optimistic commits;

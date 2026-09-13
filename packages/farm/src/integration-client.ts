@@ -20,6 +20,8 @@ export type IntegrationClientOptions = {
   credentials?: RequestCredentials;
   /** Whole-call deadline in milliseconds; 0 disables it. */
   timeoutMs?: number;
+  /** HTTP transport, including server fallback; never replaces local dispatch. */
+  fetch?: typeof globalThis.fetch;
   data?: IntegrationClientData;
   isServer?: false | undefined;
 };
@@ -713,7 +715,7 @@ async function executeClientOperation(
   input: Record<string, unknown>,
   options: Pick<
     IntegrationClientOptions,
-    "baseURL" | "headers" | "credentials" | "data" | "timeoutMs"
+    "baseURL" | "headers" | "credentials" | "data" | "timeoutMs" | "fetch"
   >,
   requestOptions?: IntegrationClientRequestOptions,
 ) {
@@ -755,7 +757,7 @@ async function executeClientOperation(
       );
 
       const body = createOperationBody(operation, input.body, headers);
-      const response = await fetch(url.toString(), {
+      const response = await (options.fetch ?? fetch)(url.toString(), {
         method: operation.method,
         headers,
         body,
@@ -800,7 +802,14 @@ async function executeServerOperation(
   input: Record<string, unknown>,
   options: Pick<
     IntegrationServerClientOptions,
-    "baseURL" | "headers" | "credentials" | "data" | "request" | "forwardHeaders" | "timeoutMs"
+    | "baseURL"
+    | "headers"
+    | "credentials"
+    | "data"
+    | "request"
+    | "forwardHeaders"
+    | "timeoutMs"
+    | "fetch"
   >,
   requestOptions?: IntegrationServerClientRequestOptions,
   integrationKey?: string,
@@ -910,7 +919,7 @@ async function executeServerOperation(
       appendIntegrationClientDataHeader(headers, data);
 
       const body = createOperationBody(operation, input.body, headers);
-      const response = await fetch(url.toString(), {
+      const response = await (options.fetch ?? fetch)(url.toString(), {
         method: operation.method,
         headers,
         body,
@@ -1169,6 +1178,7 @@ function isIntegrationClientOptionsInput(value: unknown): value is IntegrationCl
       "headers" in value ||
       "credentials" in value ||
       "timeoutMs" in value ||
+      "fetch" in value ||
       "data" in value ||
       "isServer" in value)
   );
@@ -1185,6 +1195,7 @@ function resolveIntegrationServerOptions(
     headers: clientOptions.headers,
     credentials: clientOptions.credentials,
     timeoutMs: clientOptions.timeoutMs,
+    fetch: clientOptions.fetch,
     ...serverOptions,
     ...(data ? { data } : {}),
   };
