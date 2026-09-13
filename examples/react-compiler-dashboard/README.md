@@ -255,12 +255,13 @@ overlapping fresh-key commits, mixed same-key/fresh-key commits, atomic preparat
 existing-key-move fallback, events, controlled-input selection, Strict Mode hydration, cleanup,
 and 1,000 differential overlapping updates.
 
-Native keyed-array reversal has a separate 10,000-row comparison. Concise `toReversed()` is
-measured against bracketed React and an equivalent block-bodied compiled control. Both compiler
-modes must remain at least 8x faster than React and 1.25x faster than the compiled control. The
-report must contain a nonzero `keyedArrayReorderHints` count; package tests separately require the
-minimum `n - 1` connected DOM moves, zero key/descriptor/binding reads, randomized differential
-correctness, hydration, and cleanup.
+Native keyed-array reversal has a separate 10,000-row comparison. A single-return block-bodied
+`toReversed()` setter is measured against bracketed React and a compiled snapshot control whose
+updater block has an extra local declaration. Both compiler modes must remain at least 8x faster
+than React and 1.25x faster than the compiled control. The report must contain a nonzero
+`keyedArrayReorderHints` count; package tests separately require the minimum `n - 1` connected DOM
+moves, zero key/descriptor/binding reads, randomized differential correctness, hydration, and
+cleanup.
 
 Queued native reorders have another independent 10,000-row comparison. One event queues two
 concise `toReversed()` setters, so the final order equals the committed order. Farm must validate

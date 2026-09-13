@@ -2073,13 +2073,20 @@ function rewriteKeyedArrayReorderHints(
         updater.async ||
         updater.generator ||
         updater.params.length !== 1 ||
-        !t.isIdentifier(updater.params[0]) ||
-        !t.isCallExpression(updater.body) ||
-        updater.body.arguments.length !== 0 ||
-        !t.isMemberExpression(updater.body.callee) ||
-        updater.body.callee.computed ||
-        !t.isIdentifier(updater.body.callee.object, { name: updater.params[0].name }) ||
-        !t.isIdentifier(updater.body.callee.property, { name: "toReversed" })
+        !t.isIdentifier(updater.params[0])
+      ) {
+        return;
+      }
+      const returned = returnedExpression(updater);
+      if (
+        (t.isBlockStatement(updater.body) && updater.body.directives.length > 0) ||
+        !returned ||
+        !t.isCallExpression(returned) ||
+        returned.arguments.length !== 0 ||
+        !t.isMemberExpression(returned.callee) ||
+        returned.callee.computed ||
+        !t.isIdentifier(returned.callee.object, { name: updater.params[0].name }) ||
+        !t.isIdentifier(returned.callee.property, { name: "toReversed" })
       ) {
         return;
       }
