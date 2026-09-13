@@ -123,6 +123,12 @@ available while automatic reads are disabled.
 `refetch()` always starts fresh work. If an older request finishes afterward, its result is returned
 to its original caller but cannot replace the newer cached value.
 
+Invalidating a query while its read is pending keeps that response stale, even if the response
+timestamp is newer than the invalidation or its canonical key is learned only on arrival.
+The original caller still receives its result. Enabled mounted consumers refresh after the old
+work settles; an imperative read with `swr: false` waits for fresh data on the next call.
+Unrelated invalidations and invalidations before a read starts do not invalidate that read.
+
 Use `fetchServerQuery(productQuery, input)` for an imperative browser read that should participate in deduplication and SWR. Calling the generated `productQuery(input)` reference directly still returns plain typed data, but the fetch helper supplies the browser cache lifecycle.
 
 ## Invalidate after a mutation

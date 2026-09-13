@@ -19,6 +19,33 @@ export type FarmClientCacheEntry<TData = unknown> = {
 
 type FarmClientCacheListener = (event?: "invalidate") => void;
 
+const invalidationTrackers = new WeakMap<FarmClientDataCache, Set<Set<string>>>();
+
+/** Internal request-lifetime tracking, including keys learned only from a response. */
+export function trackFarmClientCacheInvalidations(cache: FarmClientDataCache) {
+  let trackers = invalidationTrackers.get(cache);
+  if (!trackers) {
+    trackers = new Set();
+    invalidationTrackers.set(cache, trackers);
+  }
+  const keys = new Set<string>();
+  trackers.add(keys);
+  return {
+    has(key: string) {
+      const resolved = cache.resolveKey(key);
+      for (const invalidated of keys) {
+        if (cache.resolveKey(invalidated) === resolved) return true;
+      }
+      return false;
+    },
+    dispose() {
+      if (!trackers.delete(keys)) return;
+      keys.clear();
+      if (trackers.size === 0) invalidationTrackers.delete(cache);
+    },
+  };
+}
+
 const cacheFinalizer =
   typeof FinalizationRegistry === "function"
     ? new FinalizationRegistry<() => void>((unsubscribe) => unsubscribe())
@@ -139,6 +166,7 @@ export class FarmClientDataCache {
 
   invalidate(key: string, now = Date.now()): void {
     const resolved = this.resolveKey(key);
+    for (const keys of invalidationTrackers.get(this) ?? []) keys.add(resolved);
     this.invalidatedAt.set(resolved, now);
 
     const entry = this.entries.get(resolved);
