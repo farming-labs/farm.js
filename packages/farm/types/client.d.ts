@@ -21,6 +21,7 @@ import type { ServerFn } from "@farm.js/core/server-fn";
 import type {
   RouteAPIClient as CoreRouteAPIClient,
   APIClientOptions as CoreAPIClientOptions,
+  ClientHeaders as CoreClientHeaders,
   ApiClients as CoreApiClients,
   APIClientWithoutIntegrationsOptions as CoreAPIClientWithoutIntegrationsOptions,
 } from "../dist/client";
@@ -560,9 +561,11 @@ declare module "@farm.js/core/client" {
   export function isChunkLoadError(errorLike: unknown): boolean;
   export function installChunkErrorRecovery(options?: FarmChunkRecoveryOptions): () => void;
 
+  export type ClientHeaders = CoreClientHeaders;
+
   export interface APIClientOptions extends CoreAPIClientOptions {
     baseURL?: string;
-    headers?: Record<string, string>;
+    headers?: ClientHeaders;
     cacheDefaults?: CacheOptions;
   }
 
@@ -1336,7 +1339,7 @@ declare module "@farm.js/core/client" {
 
   export interface IntegrationClientOptions {
     baseURL?: string;
-    headers?: Record<string, string>;
+    headers?: ClientHeaders;
     credentials?: RequestCredentials;
     data?: IntegrationClientData;
     isServer?: false | undefined;

@@ -302,6 +302,42 @@ export default defineConfig({
 
 Same-origin routing is not an authorization boundary. Authenticate agent HTTP and WebSocket requests in application middleware or provider routing hooks, and authorize every sensitive tool or callable method on the server.
 
+## Header defaults
+
+`createIntegrations` supports static headers and sync or async header resolvers, just like
+[`createApiClients`](/docs/api-client#header-defaults). Use a resolver when defaults must be read
+at call time rather than captured when the module loads:
+
+```ts
+import { createIntegrations } from "@farm.js/core/client";
+import type { AppIntegrations } from "./integrations";
+
+export const { api, apiClient } = createIntegrations<AppIntegrations>({
+  headers: () => ({
+    "Accept-Language":
+      typeof document === "undefined" ? "en" : document.documentElement.lang || "en",
+  }),
+});
+```
+
+`headers: async () => ({ ... })` is also supported. Each operation resolves its instance headers
+once, for both browser HTTP calls and server dispatch (including the server HTTP fallback).
+The existing separate factories and explicit-source overloads accept the same option.
+
+Custom header precedence, lowest to highest, is: forwarded server request headers, instance
+defaults, operation-definition headers, then per-call `headers`. Overrides are case-insensitive;
+per-call headers remain plain objects. Farm still controls protocol/body headers, such as its
+integration marker and JSON/form encoding. Resolver failures return `{ data: null, error }`
+without dispatching or fetching.
+
+The second, server-options argument to `createIntegrations` can provide a different `headers`
+resolver for `api`; it replaces the first argument's header defaults rather than merging them.
+Keep any server-only version in a server-only module. A function or the server-options argument
+does not itself hide secrets from a browser bundle. For ordinary session cookies, retain Farm's
+existing request forwarding and browser credential behavior instead of copying secrets into
+shared defaults. The example's English server default overrides a forwarded language; omit that
+default if the incoming request should decide it.
+
 ## Shared data
 
 `createIntegrations({ data })` adds small per-call metadata to integration requests. It is useful for tenant IDs, locale, analytics context, or feature flags.
