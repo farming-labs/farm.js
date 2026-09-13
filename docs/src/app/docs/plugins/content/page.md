@@ -63,6 +63,10 @@ The schema validates frontmatter for Markdown and MDX. For JSON and YAML, it val
 file value. `transform` runs after validation and can add or replace fields. Its output becomes the
 inferred type returned to the application.
 
+Markdown and MDX frontmatter is data only: use YAML (the default, or `---yaml` / `---yml`) or JSON
+(`---json`). Executable formats such as `---js` and `---javascript` are rejected before parsing or
+schema validation, including empty frontmatter blocks. Put computed metadata in `transform` instead.
+
 Asset declarations are separate from `schema`. A schema string remains a string; Farm never changes
 its output into image metadata behind the validator's back.
 
