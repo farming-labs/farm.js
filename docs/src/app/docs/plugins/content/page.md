@@ -116,6 +116,12 @@ links are managed when their destination has a file extension; extensionless lin
 and dynamic MDX expressions are left unchanged. Static `src` or `href` attributes inside JSX and
 HTML are not interpreted in this first API; use Markdown syntax or a normal module import there.
 
+For `.mdx` files, JavaScript strings, comments, imports/exports, and JSX attributes are not scanned
+for Markdown assets. For example, `{"![Example](./missing.png)"}` stays literal code and does not
+require that image to exist. Actual Markdown images and links nested inside JSX are still managed.
+Farm parses MDX syntax without executing expressions or importing modules; invalid syntax reports
+the content filename. Ordinary `.md` files keep Markdown parsing rules.
+
 The body keeps its original Markdown except for managed destinations, which become content-hashed
 public URLs. `entry.bodyAssets` contains the corresponding image or file metadata for a custom
 Markdown component mapping. Missing assets report the content file plus the Markdown line and

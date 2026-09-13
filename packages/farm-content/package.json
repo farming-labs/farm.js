@@ -51,6 +51,8 @@
     "gray-matter": "^4.0.3",
     "image-size": "^2.0.2",
     "mdast-util-from-markdown": "^2.0.2",
+    "mdast-util-mdx": "^3.0.0",
+    "micromark-extension-mdxjs": "^3.0.0",
     "yaml": "^2.8.0"
   },
   "devDependencies": {

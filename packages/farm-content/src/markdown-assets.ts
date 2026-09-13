@@ -38,7 +38,19 @@ export async function resolveMarkdownAssets(
 
   let tree: MarkdownNode;
   try {
-    tree = fromMarkdown(body) as MarkdownNode;
+    if (context.sourceFile.toLowerCase().endsWith(".mdx")) {
+      // Parse MDX without evaluating it. Only Markdown children own assets.
+      const [{ mdxFromMarkdown }, { mdxjs }] = await Promise.all([
+        import("mdast-util-mdx"),
+        import("micromark-extension-mdxjs"),
+      ]);
+      tree = fromMarkdown(body, {
+        extensions: [mdxjs()],
+        mdastExtensions: [mdxFromMarkdown()],
+      }) as MarkdownNode;
+    } else {
+      tree = fromMarkdown(body) as MarkdownNode;
+    }
   } catch (error) {
     throw new Error(
       `[farm:content] Could not inspect Markdown assets in ${context.sourceFile}: ${errorMessage(error)}`,
