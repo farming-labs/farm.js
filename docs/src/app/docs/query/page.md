@@ -51,8 +51,11 @@ export function SearchControls() {
 
 `throttleMs` coalesces rapid writes to the same query key. Updates to different keys are
 composed against the latest URL, and returning a value to the current URL cancels its queued write.
+Hook values update immediately while the URL write is queued. Inline parsers, inline parser maps,
+parent rerenders, and other consumers of the same keys preserve those pending values; memoizing
+parsers is not required. Each queued key keeps its draft when another key commits.
 If a component changes the key or parser it passes to the hook, the returned value is immediately
-re-read from the current URL. A queued write is cancelled when its owning hook changes keys or
+re-parsed from the current URL plus active queued values for that URL. A queued write is cancelled when its owning hook changes keys or
 unmounts, preventing an old component from modifying the URL of a later page.
 
 Repeated keys have the same meaning during server rendering and in client hooks. For example,
