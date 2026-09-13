@@ -106,6 +106,7 @@ export function useMutation<TTarget extends AnyMutationTarget>(
   const optionsRef = useRef(options);
   const targetRef = useRef(target);
   const requestIdRef = useRef(0);
+  const lastResetIdRef = useRef(0);
   const initialState: MutationState<TVariables, TData, TError> = {
     pendingCount: 0,
     status: "idle",
@@ -168,6 +169,7 @@ export function useMutation<TTarget extends AnyMutationTarget>(
         const isLatestRequest = requestId === requestIdRef.current;
 
         setMutationState((current) => {
+          if (requestId < lastResetIdRef.current) return current;
           const pendingCount = Math.max(0, current.pendingCount - 1);
           if (!isLatestRequest) {
             return {
@@ -197,6 +199,7 @@ export function useMutation<TTarget extends AnyMutationTarget>(
         const isLatestRequest = requestId === requestIdRef.current;
 
         setMutationState((current) => {
+          if (requestId < lastResetIdRef.current) return current;
           const pendingCount = Math.max(0, current.pendingCount - 1);
           if (!isLatestRequest) {
             return {
@@ -239,7 +242,8 @@ export function useMutation<TTarget extends AnyMutationTarget>(
   ) as MutationTrigger<TTarget>;
 
   const reset = useCallback(() => {
-    requestIdRef.current += 1;
+    // Pre-reset requests no longer own any of the current pending count.
+    lastResetIdRef.current = ++requestIdRef.current;
     setMutationState({
       pendingCount: 0,
       status: "idle",
