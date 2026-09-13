@@ -414,6 +414,8 @@ HTML as untrusted unless the source is controlled and the chosen renderer saniti
   validation message.
 - Production serializes only validated values into a private `.farm/content/server.mjs` build input.
   Nitro bundles that module, so the deployed server does not read project source files per request.
+  Generated output must stay inside the app root. Outside or dangling output symlinks fail before
+  Farm creates directories or writes files; output-directory links within the app remain supported.
 - Dates and bigints keep their runtime types. Plain objects, arrays, `undefined`, and primitives are
   preserved. Functions, symbols, class instances, circular structures, invalid dates, and
   non-finite numbers fail the build instead of being silently changed.
