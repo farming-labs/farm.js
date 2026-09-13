@@ -211,6 +211,36 @@ jobs:
       - name: Build examples
         run: pnpm build:examples -- ${{ matrix.build_args }}
 
+  wasm-e2e:
+    name: WebAssembly E2E (${{ matrix.builder }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        builder: [rolldown, rollup]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22.13"
+      - uses: pnpm/action-setup@v6
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:e2e:wasm
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+          FARM_VITE_BUILDER: ${{ matrix.builder }}
+      - name: Upload browser failure artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: wasm-e2e-${{ matrix.builder }}
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+
   framework-e2e:
     name: Framework E2E
     runs-on: ubuntu-latest

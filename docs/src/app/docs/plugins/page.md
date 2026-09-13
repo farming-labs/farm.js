@@ -25,6 +25,7 @@ Use an [integration](/docs/integrations) for a product or service such as authen
 | [Scripts](/docs/plugins/scripts)       | Load external browser SDKs with typed handles, timing, consent, dependencies, and retries.       |
 | [Sentry](/docs/plugins/sentry)         | Report server errors with Farm event and route context, trace requests, and flush on shutdown.   |
 | [StyleX](/docs/plugins/stylex)         | Compile StyleX with pre-paint development styles, CSS HMR, and extracted production CSS.         |
+| [WebAssembly](/docs/plugins/wasm)      | Import prebuilt Wasm modules in browser code and module workers.                                 |
 | [WebMCP](/docs/plugins/webmcp)         | Expose explicit, typed browser tools to agents through the experimental WebMCP API.              |
 
 Each published plugin has its own setup page in this section. Use [Create a Plugin](/docs/plugins/create-plugin) when the behavior is specific to your application or package.

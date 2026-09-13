@@ -93,6 +93,7 @@ Plugin system and lifecycle hooks.
 - [Scripts Plugin](/docs/plugins/scripts): Load external browser SDKs with typed handles, deliberate timing, consent gates, dependencies, and retries.
 - [Sentry Plugin](/docs/plugins/sentry): Report server errors with route context and trace Farm requests with `@sentry/node`.
 - [StyleX Plugin](/docs/plugins/stylex): Compile StyleX with pre-paint development styles, CSS HMR, and extracted production CSS.
+- [WebAssembly Plugin](/docs/plugins/wasm): Import prebuilt Wasm modules in browser code and module workers.
 - [WebMCP Plugin](/docs/plugins/webmcp): Expose a small, explicit, typed browser tool surface to agents using the experimental WebMCP API.
 - [Create a Plugin](/docs/plugins/create-plugin): Build a plugin with definePlugin when app behavior belongs in reusable framework lifecycle hooks.
 - [Client Plugin API](/docs/plugins/client): Attach typed hydration, navigation, error, performance, and cleanup hooks to a plugin through a browser-safe module.

@@ -1,0 +1,136 @@
+:root {
+  color-scheme: dark;
+  font-family: system-ui, sans-serif;
+  color: #ededeb;
+  background: #141615;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+main {
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 64px 24px;
+}
+.eyebrow,
+code,
+input,
+.result {
+  font-family: ui-monospace, monospace;
+}
+.eyebrow {
+  color: #a8c5a0;
+  font-size: 13px;
+}
+h1 {
+  font-size: clamp(36px, 6vw, 58px);
+  line-height: 1.08;
+  letter-spacing: -0.045em;
+  margin: 24px 0;
+}
+.intro,
+section p {
+  max-width: 620px;
+  color: #aeb5af;
+  line-height: 1.7;
+}
+.inputs {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 20px;
+  align-items: end;
+  margin: 36px 0 24px;
+}
+.inputs > span {
+  padding-bottom: 14px;
+}
+label {
+  display: grid;
+  gap: 10px;
+  font-size: 13px;
+  color: #bec5be;
+}
+input {
+  min-width: 0;
+  width: 100%;
+  font-size: 24px;
+  padding: 12px;
+  color: inherit;
+  background: #1d201e;
+  border: 1px solid #3c423c;
+  border-radius: 4px;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+button {
+  min-height: 44px;
+  padding: 10px 16px;
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  background: #d7ebd1;
+  color: #1c2918;
+  border: 1px solid transparent;
+  border-radius: 4px;
+}
+button.quiet {
+  background: transparent;
+  color: #bdc4be;
+  border-color: #3c423c;
+}
+button:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+button:active:not(:disabled) {
+  filter: brightness(0.95);
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+:focus-visible {
+  outline: 2px solid #b7dca7;
+  outline-offset: 4px;
+}
+.result {
+  min-height: 80px;
+  padding: 24px 0;
+  color: #c7e4bc;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.result[data-error="true"] {
+  color: #ffb3ad;
+}
+section {
+  border-top: 1px solid #333a34;
+  padding-top: 24px;
+}
+h2 {
+  font-size: 17px;
+  font-weight: 500;
+}
+pre {
+  overflow-x: auto;
+  padding: 20px;
+  background: #1d201e;
+  border-radius: 4px;
+  line-height: 1.6;
+}
+@media (max-width: 480px) {
+  main {
+    padding-top: 32px;
+  }
+  .inputs {
+    gap: 12px;
+  }
+  .actions button {
+    flex: 1 1 auto;
+  }
+}
