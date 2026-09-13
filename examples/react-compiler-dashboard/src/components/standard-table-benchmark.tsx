@@ -207,7 +207,9 @@ export function StandardTableBenchmark() {
           type="button"
           onClick={() => {
             const trimCount = 1_000;
-            setRows((current) => current.slice(trimCount));
+            setRows((current) => {
+              return current.slice(trimCount);
+            });
             setOperation("drop runtime-count prefix");
             setRevision((value) => value + 1);
           }}
@@ -220,7 +222,8 @@ export function StandardTableBenchmark() {
           onClick={() => {
             const trimCount = 1_000;
             setRows((current) => {
-              return current.slice(trimCount);
+              const next = current.slice(trimCount);
+              return next;
             });
             setOperation("drop runtime-count prefix (snapshot control)");
             setRevision((value) => value + 1);
@@ -1074,7 +1077,8 @@ export function StandardTableBenchmark() {
               status: "review" as const,
             };
             setRows((current) => {
-              return current.slice(1);
+              const retained = current.slice(1);
+              return retained;
             });
             setRows((current) => {
               return [incoming, ...current];
@@ -1128,7 +1132,8 @@ export function StandardTableBenchmark() {
               status: "review" as const,
             };
             setRows((current) => {
-              return current.slice(1);
+              const retained = current.slice(1);
+              return retained;
             });
             setRows((current) => {
               return [incoming, ...current];
@@ -1194,7 +1199,8 @@ export function StandardTableBenchmark() {
               status: "review" as const,
             };
             setRows((current) => {
-              return current.slice(1);
+              const retained = current.slice(1);
+              return retained;
             });
             setRows((current) => {
               return [...current, incoming];

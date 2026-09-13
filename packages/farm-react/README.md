@@ -381,6 +381,9 @@ setItems((current) => current.slice(0, -1_000));
 setItems((current) => current.slice(2, 8));
 setItems((current) => current.slice(trimCount));
 setItems((current) => current.slice(visible.start, visible.end));
+setItems((current) => {
+  return current.slice(visible.start, visible.end);
+});
 ```
 
 For compiler-owned host rows whose render and key do not read the row index, Farm validates the
@@ -388,12 +391,14 @@ committed source and queued slice chain, preserves every surviving DOM row, and 
 outside the retained interval. A slice-only chain does not reread surviving keys, descriptors, or
 bindings. One or two safe-integer literals or compiler-safe runtime expressions are required.
 Identifiers, property reads, side-effect-free arithmetic and conditionals, and safe `Math` calls
-are supported. Farm preserves native method lookup, argument evaluation, coercion, results, and
-errors, then records metadata only when the evaluated bounds are already safe integers. Calls,
-assignments, updates, unsafe evaluated bounds, block-bodied or chained updates, custom slice
-methods, sparse or subclassed arrays, index-aware or collection-reading rows, React-owned
-structures, and failed validation keep complete keyed reconciliation. No option or component is
-added. The compiler report exposes the emitted-site count as `keyedArraySliceHints`.
+are supported. The setter may be concise or use a block containing exactly one direct
+value-returning `return`. Farm preserves native method lookup, argument evaluation, coercion,
+results, and errors, then records metadata only when the evaluated bounds are already safe integers.
+Calls, assignments, updates, unsafe evaluated bounds, updater blocks with extra statements,
+directives, conditional returns, or no value-returning `return`, chained updates, custom slice
+methods, sparse or subclassed arrays, index-aware or collection-reading rows, React-owned structures,
+and failed validation keep complete keyed reconciliation. No option or component is added. The
+compiler report exposes the emitted-site count as `keyedArraySliceHints`.
 
 A fixed-size feed can combine that retained tail with a new keyed suffix:
 

@@ -127,14 +127,14 @@ modes must remain at least 2x faster than React and 1.25x faster than that contr
 checks survivor identity and order, the changed survivor value, the final mapped prefix, and cleanup
 of the removed row.
 
-Keyed array slices have an independent retained-window comparison. A concise
-`slice(trimCount)` uses an event-local runtime bound and is measured against bracketed React and an
-equivalent block-bodied compiled snapshot control. Both compiler modes must remain at least 3x
-faster than React while trimming 10,000- and 21,000-row arrays, and at least 1.25x faster than the
-compiled control at 10,000 rows. The report must contain a nonzero `keyedArraySliceHints` count;
-deterministic package tests separately require zero surviving key, descriptor, and binding reads,
-preserve surviving DOM identity, and cover safe and effectful bound expressions plus unsafe
-evaluated-bound fallback.
+Keyed array slices have an independent retained-window comparison. A single-return block-bodied
+`slice(trimCount)` uses an event-local runtime bound and is measured against bracketed React and a
+compiled snapshot control whose updater block has an extra local declaration. Both compiler modes
+must remain at least 3x faster than React while trimming 10,000- and 21,000-row arrays, and at least
+1.25x faster than the compiled control at 10,000 rows. The report must contain a nonzero
+`keyedArraySliceHints` count; deterministic package tests separately require zero surviving key,
+descriptor, and binding reads, preserve surviving DOM identity, and cover safe and effectful bound
+expressions plus unsafe evaluated-bound fallback.
 
 Rolling windows have separate single-update and queued 10,000-row persistence gates. A concise
 `[...current.slice(trimCount), ...incoming]` update uses an event-local runtime bound; the queued
@@ -428,8 +428,9 @@ The default JSON report is `/tmp/farm-react-dashboard-benchmark.json`; change it
 - The prepend snapshot control does the same work at the beginning of the array through an updater
   block with an extra local declaration. It isolates the saved suffix scan while the hinted path
   still creates and inserts every required new DOM row.
-- The slice snapshot control retains the same 9,000-row suffix through an unsupported block-bodied
-  updater. It isolates the saved survivor scan while both paths remove the same 1,000 DOM rows.
+- The slice snapshot control retains the same 9,000-row suffix through an updater block with an
+  extra local declaration. It isolates the saved survivor scan while both paths remove the same
+  1,000 DOM rows.
 - The exact-position controls pass event-local runtime position and delete-count variables to concise native
   `toSpliced()` updates and compare them with equivalent block-bodied compiled controls. Package
   tests cover the equivalent `with()` replacement path too.
