@@ -65,6 +65,35 @@ describe("React AOT keyed-array slice hints", () => {
     expect(result.code).not.toContain("keyedRowsFilterPrependHintedRuntimeFeature");
   });
 
+  it("records a slice returned from a single-return updater block", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Feed({ start, end }) {
+        const [rows, setRows] = useState([{ id: "a", label: "Alpha" }]);
+        return <main>
+          <button onClick={() => setRows((current) => {
+            return current.slice(start, end);
+          })}>Keep window</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </main>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Feed"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.optimizations.keyedArraySliceHints).toBe(1);
+    expect(result.code).toContain("createCompilerKeyedArraySlice");
+    expect(result.code).toContain("keyedRowsFilterHintedRuntimeFeature");
+    await expect(
+      transformWithEsbuild(result.code, "/app/KeyedArraySliceHints.tsx", {
+        loader: "tsx",
+        jsx: "automatic",
+      }),
+    ).resolves.toMatchObject({
+      code: expect.stringContaining("createCompilerKeyedArraySlice"),
+    });
+  });
+
   it("records compiler-safe runtime slice bounds", async () => {
     const result = await compile(`
       import { useState } from "react";
@@ -99,9 +128,24 @@ describe("React AOT keyed-array slice hints", () => {
       update: "current.slice(1)",
     },
     {
-      name: "a block-bodied updater",
+      name: "an updater block with a local declaration",
       row: "(row) => <li key={row.id}>{row.label}</li>",
-      update: "{ return current.slice(1); }",
+      update: "{ const next = current.slice(1); return next; }",
+    },
+    {
+      name: "an updater block with conditional returns",
+      row: "(row) => <li key={row.id}>{row.label}</li>",
+      update: "{ if (current.length > 1) return current.slice(1); return current; }",
+    },
+    {
+      name: "an updater block without a return",
+      row: "(row) => <li key={row.id}>{row.label}</li>",
+      update: "{ current.slice(1); }",
+    },
+    {
+      name: "an updater block with a directive",
+      row: "(row) => <li key={row.id}>{row.label}</li>",
+      update: '{ "use strict"; return current.slice(1); }',
     },
     {
       name: "a fractional start",
