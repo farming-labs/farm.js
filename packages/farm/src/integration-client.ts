@@ -909,7 +909,9 @@ async function executeServerOperation(
         serverRequestOptions?.baseURL ?? options.baseURL,
         request,
       );
-      const url = new URL(operation.path, baseURL);
+      const origin = resolveServerBaseURL(undefined, request);
+      // Registered handlers use their canonical path, not an HTTP gateway prefix.
+      const url = new URL(operation.path, new URL(baseURL, origin));
       appendQuery(url, input.query as Record<string, unknown> | undefined);
 
       const headers = new Headers();
@@ -977,7 +979,9 @@ async function executeServerOperation(
       appendIntegrationClientDataHeader(headers, data);
 
       const body = createOperationBody(operation, input.body, headers);
-      const response = await (options.fetch ?? fetch)(url.toString(), {
+      const httpURL = resolveFarmAPIRequestURL(operation.path, baseURL, origin);
+      appendQuery(httpURL, input.query as Record<string, unknown> | undefined);
+      const response = await (options.fetch ?? fetch)(httpURL.toString(), {
         method: operation.method,
         headers,
         body,
