@@ -574,6 +574,11 @@ Set `cache.dedupeMs` to join identical requests started within that window. If a
 still running after the window expires, the newer request becomes the cache owner; the older result
 still returns to its original caller but cannot replace the newer cached value.
 
+The same ownership rule applies across different caller instances using a shared cache key.
+The newest network read owns that entry even if it fails or is cancelled; an older pending
+response cannot restore superseded data. Transport deduplication remains per caller, and private,
+credentialed, custom-transport, and request-local server caches remain isolated.
+
 Invalidation also protects against reads already in flight: their results still return to their
 callers, but cannot become fresh cache entries after that key is invalidated. The next read can
 fetch current data, even when invalidation and request startup happen in the same millisecond.

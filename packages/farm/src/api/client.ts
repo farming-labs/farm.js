@@ -1057,6 +1057,9 @@ function createAPIClientRuntime<
       const executeNetwork = async (opts?: { isBackground?: boolean; callCallbacks?: boolean }) => {
         const release = cancellation.hold();
         let unsubscribeInvalidation: (() => void) | undefined;
+        let readOwners: Map<string, object> | undefined;
+        let readOwner: object | undefined;
+        const resolvedCacheKey = cacheState.resolveKey(cacheKey);
         try {
           const dedupeMs = cacheOptions?.dedupeMs ?? 0;
           const inflight = inflightState.get(cacheKey);
@@ -1092,6 +1095,11 @@ function createAPIClientRuntime<
           // same millisecond, or be cleared by another client's newer cache write.
           let invalidatedDuringRequest = false;
           if (isCacheEnabled) {
+            // Transport deduplication is caller-local, but cache ownership must
+            // span every caller writing to the same cache instance.
+            readOwners = getCacheReadOwners(cacheState);
+            readOwner = {};
+            readOwners.set(resolvedCacheKey, readOwner);
             unsubscribeInvalidation = cacheState.subscribe(cacheKey, (event) => {
               if (event === "invalidate") invalidatedDuringRequest = true;
             });
@@ -1220,6 +1228,7 @@ function createAPIClientRuntime<
 
             if (
               inflightState.get(cacheKey) === inflightEntry &&
+              readOwners?.get(resolvedCacheKey) === readOwner &&
               !invalidatedDuringRequest &&
               !result.error &&
               isCacheEnabled &&
@@ -1273,6 +1282,9 @@ function createAPIClientRuntime<
             }
           }
         } finally {
+          if (readOwner && readOwners?.get(resolvedCacheKey) === readOwner) {
+            readOwners.delete(resolvedCacheKey);
+          }
           unsubscribeInvalidation?.();
           release();
         }
@@ -1764,6 +1776,16 @@ type OptimisticLayer = {
 };
 
 const optimisticStates = new WeakMap<FarmClientDataCache, Map<string, OptimisticStack>>();
+const cacheReadOwners = new WeakMap<FarmClientDataCache, Map<string, object>>();
+
+function getCacheReadOwners(cache: FarmClientDataCache): Map<string, object> {
+  let owners = cacheReadOwners.get(cache);
+  if (!owners) {
+    owners = new Map();
+    cacheReadOwners.set(cache, owners);
+  }
+  return owners;
+}
 
 function getOptimisticState(cache: FarmClientDataCache): Map<string, OptimisticStack> {
   let state = optimisticStates.get(cache);
