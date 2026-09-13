@@ -43,7 +43,7 @@ export async function writeSearchIndex(input: SearchBuildInput): Promise<SearchB
   );
   const skippedRoutes = routes
     .filter(({ logicalRoute }) => !shouldIndexRoute(logicalRoute, input.options))
-    .map(({ logicalRoute }) => withBasePath(logicalRoute, basePath));
+    .map(({ logicalRoute }) => toResultUrl(logicalRoute, basePath));
 
   if (selected.length === 0) {
     throw new Error(
@@ -74,7 +74,7 @@ export async function writeSearchIndex(input: SearchBuildInput): Promise<SearchB
   const indexedRoutes: string[] = [];
   try {
     for (const { file, logicalRoute } of selected) {
-      const route = withBasePath(logicalRoute, basePath);
+      const route = toResultUrl(logicalRoute, basePath);
       const result = await index.addHTMLFile({
         url: route,
         content: await readFile(file, "utf8"),
@@ -136,6 +136,16 @@ export function routeFromHtmlFile(file: string): string {
   const withoutIndex = normalized.replace(/(?:^|\/)index\.html$/i, "");
   const route = withoutIndex ? withoutIndex.replace(/\.html$/i, "").replace(/^\/+|\/+$/g, "") : "";
   return route ? `/${route}` : "/";
+}
+
+function toResultUrl(route: string, basePath: string): string {
+  // Routes came from decoded filesystem names. Encode each segment once, after
+  // filtering and removing any explicit HTML prefix; basePath is already a URL path.
+  const pathname = route
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+  return withBasePath(pathname, basePath);
 }
 
 export function matchesRoutePattern(route: string, pattern: string): boolean {
