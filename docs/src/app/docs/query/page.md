@@ -10,6 +10,12 @@ Parse search params and route params with typed helpers on the server and synchr
 
 ## Server parsing
 
+Page `search` / `searchParams` values are strings for single keys and ordered arrays for repeated
+keys, including empty values. Names such as `toString` and `hasOwnProperty` are ordinary query
+data, not inherited JavaScript methods. Farm omits `__proto__`, `constructor`, and `prototype`
+when converting request search parameters to objects. This representation is shared by
+development rendering, production SSR, page-data navigation, and hydration.
+
 **src/app/search/page.tsx**
 
 ```tsx

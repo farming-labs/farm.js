@@ -186,6 +186,26 @@ describe("searchParamsToObject", () => {
 });
 
 describe("searchParamsToObject hardening", () => {
+  it.each([
+    "toString",
+    "toLocaleString",
+    "valueOf",
+    "hasOwnProperty",
+    "isPrototypeOf",
+    "propertyIsEnumerable",
+    "__defineGetter__",
+    "__defineSetter__",
+    "__lookupGetter__",
+    "__lookupSetter__",
+  ])("treats %s as query data rather than an inherited property", (key) => {
+    const single = searchParamsToObject(new URLSearchParams(`${key}=one`));
+    expect(single[key]).toBe("one");
+    expect(Object.getPrototypeOf(single)).toBe(Object.prototype);
+    const repeated = searchParamsToObject(new URLSearchParams(`${key}=&${key}=two&${key}=three`));
+    expect(repeated[key]).toEqual(["", "two", "three"]);
+    expect(JSON.parse(JSON.stringify(repeated))).toEqual({ [key]: ["", "two", "three"] });
+  });
+
   it("drops prototype-poisoning keys and keeps the prototype intact", () => {
     // Repeated __proto__ keys previously rewrote the returned object's
     // prototype via the read-then-assign flow.
