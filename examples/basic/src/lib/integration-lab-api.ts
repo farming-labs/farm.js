@@ -6,6 +6,16 @@ export const {
   apiClient: integrationApiClient,
 } = createIntegrations<typeof integrationLab>({
   timeoutMs: 30_000,
+  onRequest({ method, path }) {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('integration-lab:request', { detail: { method, path } }));
+    }
+  },
+  onResponse(_data, _error, { method, path, status }) {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('integration-lab:response', { detail: { method, path, status } }));
+    }
+  },
   fetch: (url, init) => {
     const headers = new Headers(init?.headers);
     headers.set('x-integration-lab-transport', 'custom-fetch');

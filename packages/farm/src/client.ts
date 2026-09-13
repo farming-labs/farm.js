@@ -17,6 +17,11 @@ export type {
 } from "./api/client";
 export type { FarmAPIStream } from "./api/transport";
 export type { ClientHeaders } from "./client-headers";
+export type {
+  ClientLifecycleHooks,
+  ClientRequestEvent,
+  ClientResponseEvent,
+} from "./client-observers";
 export { useMutation } from "./mutation-client";
 export type {
   AnyMutationTarget,
