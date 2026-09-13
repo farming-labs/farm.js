@@ -59,6 +59,10 @@ export default defineConfig({
 Adding `content()` enables the plugin. Remove it from `plugins` to disable content processing. There
 is no separate `enabled` flag.
 
+Content source files must resolve inside the app root, including when a glob's directory contains a
+symlink. Links to files elsewhere in the app keep their logical entry IDs and are watched for changes;
+links that resolve outside the app are rejected before the file is read.
+
 The schema validates frontmatter for Markdown and MDX. For JSON and YAML, it validates the complete
 file value. `transform` runs after validation and can add or replace fields. Its output becomes the
 inferred type returned to the application.
