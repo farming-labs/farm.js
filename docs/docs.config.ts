@@ -331,6 +331,7 @@ const sidebar = [
           { label: "Analyzer", slug: "plugins/analyzer", icon: "gauge" },
           { label: "Content", slug: "plugins/content", icon: "file" },
           { label: "Federation", slug: "plugins/federation", icon: "plug" },
+          { label: "Health", slug: "plugins/health", icon: "activity" },
           { label: "Hints", slug: "plugins/hints", icon: "activity" },
           { label: "MSW", slug: "plugins/msw", icon: "activity" },
           { label: "Partytown", slug: "plugins/partytown", icon: "zap" },

@@ -270,6 +270,35 @@ export const observabilityDefaults = definePlugin({
 
 Keep config transforms deterministic. Use `enforce: "pre"` or `enforce: "post"` only when another plugin's output is part of your contract.
 
+## Own an exact endpoint
+
+Use `runtime.endpoints` when a plugin owns a small HTTP surface such as a health probe or provider
+callback. Paths are application-relative and Farm applies `basePath` automatically.
+
+```ts
+export const statusPlugin = definePlugin({
+  name: "acme:status",
+
+  runtime: {
+    endpoints: [
+      {
+        path: "/status",
+        handler({ request }) {
+          if (request.method !== "GET") {
+            return new Response(null, { status: 405 });
+          }
+          return Response.json({ status: "ok" });
+        },
+      },
+    ],
+  },
+});
+```
+
+Endpoint paths are exact and cannot contain parameters, wildcards, query strings, or hashes. They
+run before ordinary request context and routing, so keep endpoint-specific authorization in the
+handler. Responses still pass through `runtime.after`, and failures reach `runtime.error`.
+
 ## Short-circuit a request
 
 Return a `Response` from `runtime.before` to skip Farm's route handler. The response still passes through every `runtime.after` hook.

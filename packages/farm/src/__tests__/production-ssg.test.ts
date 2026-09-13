@@ -296,6 +296,56 @@ export default {
   return root;
 }
 
+async function createRuntimeEndpointFixture(): Promise<string> {
+  const root = await fs.mkdtemp(path.join(packageRoot, ".tmp-production-ssg-endpoint-"));
+  await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
+  await fs.symlink(packageRoot, path.join(root, "node_modules", "@farm.js", "core"), "junction");
+  await fs.mkdir(path.join(root, "src", "app", "static"), { recursive: true });
+  await fs.writeFile(
+    path.join(root, "package.json"),
+    JSON.stringify({ private: true, type: "module" }, null, 2),
+  );
+  await fs.writeFile(path.join(root, "src", "app", "globals.css"), "");
+  await fs.writeFile(
+    path.join(root, "src", "app", "layout.tsx"),
+    `export default function Layout({ children }) { return <html><body>{children}</body></html>; }`,
+  );
+  await fs.writeFile(
+    path.join(root, "src", "app", "static", "page.tsx"),
+    `
+export const ssg = true;
+export default function StaticPage() {
+  return <main>endpoint-plugin-static-page</main>;
+}
+`.trim(),
+  );
+  await fs.writeFile(
+    path.join(root, "farm.config.ts"),
+    `
+export default {
+  srcDir: "src",
+  images: { provider: "none" },
+  plugins: [{
+    name: "runtime-endpoint-test",
+    setup() {
+      return { status: "ok" };
+    },
+    runtime: {
+      endpoints: [{
+        path: "/health/ready",
+        handler({ state }) {
+          return Response.json(state, { headers: { "cache-control": "no-store" } });
+        },
+      }],
+      close() {},
+    },
+  }],
+};
+`.trim(),
+  );
+  return root;
+}
+
 async function loadFixtureConfig(root: string) {
   const userConfig = await loadConfig(root, undefined, "production");
   return resolveConfig({ ...userConfig, root }, "production");
@@ -664,6 +714,35 @@ describe("production SSG output", () => {
       }
     }
   }, 180_000);
+
+  it("serves plugin endpoints without making unrelated SSG routes dynamic", async () => {
+    const root = await createRuntimeEndpointFixture();
+    let production: Awaited<ReturnType<typeof startProductionServer>> | undefined;
+
+    try {
+      const config = await loadFixtureConfig(root);
+      await build(config, { root, preset: "node-server" });
+      await expect(
+        fs.readFile(path.join(root, ".farm", ".output", "public", "static", "index.html"), "utf8"),
+      ).resolves.toContain("endpoint-plugin-static-page");
+
+      production = await startProductionServer(
+        path.join(root, ".farm", ".output", "server"),
+        "/health/ready",
+      );
+      const health = await fetch(`${production.origin}/health/ready`);
+      expect(health.status).toBe(200);
+      expect(health.headers.get("cache-control")).toBe("no-store");
+      await expect(health.json()).resolves.toEqual({ status: "ok" });
+
+      const staticPage = await fetch(`${production.origin}/static`);
+      expect(staticPage.headers.get("cache-control")).toBe("public, max-age=0, must-revalidate");
+      await expect(staticPage.text()).resolves.toContain("endpoint-plugin-static-page");
+    } finally {
+      await production?.stop();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
 
   it("keeps an explicitly static route that reads the request server-handled", async () => {
     const root = await createRuntimeSensitiveFixture("route");

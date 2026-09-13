@@ -87,6 +87,7 @@ Plugin system and lifecycle hooks.
 - [Hints Plugin](/docs/plugins/hints): Find accessibility, Web Vitals, HTML, and third-party script problems on the route you are developing.
 - [Content Plugin](/docs/plugins/content): Validate local Markdown, MDX, JSON, and YAML as typed server collections without a second config file.
 - [Federation Plugin](/docs/plugins/federation): Publish and load independently deployed browser modules while Farm keeps server code and credentials isolated.
+- [Health Plugin](/docs/plugins/health): Expose dependency-aware liveness, readiness, and startup probes to hosting platforms.
 - [Partytown Plugin](/docs/plugins/partytown): Move explicitly opted-in analytics and tag-manager scripts into a web worker with typed callers.
 - [PWA Plugin](/docs/plugins/pwa): Generate a route-aware service worker with offline navigation, update prompts, and concise SWR image caching.
 - [Search Plugin](/docs/plugins/search): Build a chunked index from static pages and query it through a typed, renderer-neutral browser client.
