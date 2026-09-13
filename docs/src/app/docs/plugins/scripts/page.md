@@ -145,8 +145,10 @@ compliance. Your application or consent platform owns those decisions. Grant con
 page load after restoring the user's saved choice. Granting a category starts any script whose load
 trigger already fired.
 
-Denying or clearing consent prevents future loading. Browsers cannot reliably undo code that has
-already executed, so changing consent after a script is ready does not unload it.
+Denying or clearing consent prevents new loads, including scripts waiting for dependencies or a
+retry delay. A blocked `load()` rejects with `ScriptConsentRequiredError`; granting consent again
+resumes triggered scripts. Browsers cannot reliably undo requests already started or code that has
+already executed, so changing consent after insertion does not cancel or unload that script.
 
 ## Dependencies
 
