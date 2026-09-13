@@ -250,8 +250,11 @@ no-fallback guarantees above do not apply to integrations. Keep the registry val
 SDKs server-only; import only `AppIntegrations` into the shared module. Shared integration
 defaults belong under the factory's `integrations` option and must be browser-safe.
 
-`createIntegrations<AppIntegrations>()` remains supported for integration-only callers and
-existing apps. That factory exposes `api.billing` / `apiClient.billing` directly. Do not mix
+`createIntegrations<AppIntegrations>()` remains supported and is not deprecated. No migration is
+required. Use it for integration-only callers or deliberately separate modules; in the latter
+case, set `integrations: false` on the app-route `createApiClients()` setup. This only disables
+that caller namespace, not the configured integration or its HTTP routes.
+The separate factory exposes `api.billing` / `apiClient.billing` directly. Do not mix
 its call paths with the paired route factory's reserved `.integrations` namespace.
 
 Use `createServerFn` for typed mutations/actions and `createServerQuery` for typed reads,

@@ -581,14 +581,21 @@ never fall back to HTTP. Operations marked `isServer: true` remain available onl
 
 ### Integration-only callers
 
-`createIntegrations<AppIntegrations>()` remains supported when only integration callers are
-needed. It returns integration namespaces directly: `apiClient.billing.checkout.post(...)` and
-`api.billing.checkout.post(...)`. With `createApiClients`, those same calls need the
+`createIntegrations<AppIntegrations>()` remains supported and is not deprecated. Existing apps
+do not need to migrate. Use it when only integration callers are needed, or when you prefer to
+keep them separate from app-route callers. It returns integration namespaces directly:
+`apiClient.billing.checkout.post(...)` and `api.billing.checkout.post(...)`.
+With `createApiClients`, those same calls need the
 `.integrations` segment. Choose one setup for the shared module; do not create both pairs for
 the same integrations. Switching factories requires updating the namespace and moving shared
 integration defaults into the `integrations` option; it is not a drop-in rename.
 The paired factory discovers configured integrations; it does not accept the integration-only
 factory's explicit source map or separate server-options argument.
+
+For deliberately separate modules, use `createApiClients<APIRouter>({ routes: apiRoutes,
+integrations: false })` for app routes and `createIntegrations<AppIntegrations>()` for integration
+callers. Disabling the paired factory's namespace does not unregister integrations or their
+HTTP routes; it only leaves integration access to the separate caller module.
 
 ## Server Function Form Actions
 

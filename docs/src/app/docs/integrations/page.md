@@ -196,8 +196,13 @@ for the full contract.
 
 ### Integration-only setup
 
-If only integration callers are needed, `createIntegrations` remains supported. The examples
-below use this integration-only setup and therefore omit `.integrations`. In an app using the
+`createIntegrations()` remains supported and is not deprecated. There is no required migration:
+keep it when you prefer separate route and integration caller modules, or when only integration
+callers are needed. For separate modules, set `integrations: false` on the app-route
+`createApiClients()` setup and keep `createIntegrations()` for the integration callers. This
+does not change integration registration in `farm.config.ts`.
+
+The examples below use this integration-only setup and therefore omit `.integrations`. In an app using the
 shared factory above, reuse that pair and add `.integrations` to these integration call paths
 instead of creating another pair. Integration defaults such as `data` go inside its
 `integrations` option.
