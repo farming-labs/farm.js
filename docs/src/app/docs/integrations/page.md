@@ -338,6 +338,34 @@ existing request forwarding and browser credential behavior instead of copying s
 shared defaults. The example's English server default overrides a forwarded language; omit that
 default if the incoming request should decide it.
 
+## Cancellation and deadlines
+
+`createIntegrations<AppIntegrations>({ timeoutMs: 10_000 })` sets one whole-call deadline for
+both callers. The separate server-options argument can override it for `api`. The same option
+works in the existing integration-only factories and in `createApiClients`'s `integrations`
+options. A call can pass `{ signal, timeoutMs }` as its second argument:
+
+```ts
+const controller = new AbortController();
+const pending = apiClient.billing.checkout(
+  { body: { priceId: "price_123" } },
+  { signal: controller.signal, timeoutMs: 5_000 },
+);
+controller.abort();
+const { error } = await pending;
+```
+
+The deadline includes header resolution, HTTP or local dispatch, and response decoding.
+`0` disables it; use an integer between `0` and `2147483647`. Cancellation returns the normal
+`{ data: null, error }` result. Farm deadlines produce an error named `TimeoutError`; ordinary
+`controller.abort()` produces `AbortError`. A custom abort reason is normalized to an error.
+
+Direct server handlers receive the combined per-call and incoming request signal on their
+`Request`, just as HTTP calls receive the call signal. Cancellation stops waiting, not side
+effects: handlers must pass the signal to their own work when supported. A handler ignoring it
+can still finish or write data. For raw `Response` operations the deadline ends when the response
+is returned; use the signal to cancel subsequent HTTP body consumption.
+
 ## Shared data
 
 `createIntegrations({ data })` adds small per-call metadata to integration requests. It is useful for tenant IDs, locale, analytics context, or feature flags.

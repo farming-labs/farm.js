@@ -6,6 +6,7 @@ import type {
 import type { FarmIntegration as FarmIntegrationDefinition } from "./integrations";
 import { resolveFarmAPIRequestURL } from "./api/config";
 import { resolveClientHeaders, type ClientHeaders } from "./client-headers";
+import { createClientCancellation } from "./client-cancellation";
 
 /**
  * Small per-call integration metadata. When sent from a browser, values are
@@ -17,6 +18,8 @@ export type IntegrationClientOptions = {
   baseURL?: string;
   headers?: ClientHeaders;
   credentials?: RequestCredentials;
+  /** Whole-call deadline in milliseconds; 0 disables it. */
+  timeoutMs?: number;
   data?: IntegrationClientData;
   isServer?: false | undefined;
 };
@@ -24,6 +27,7 @@ export type IntegrationClientOptions = {
 type IntegrationRequestOptionsBase = {
   headers?: Record<string, string>;
   signal?: AbortSignal;
+  timeoutMs?: number;
   credentials?: RequestCredentials;
   data?: IntegrationClientData;
 };
@@ -707,74 +711,87 @@ async function finalizeOperationResponse(
 async function executeClientOperation(
   operation: FarmIntegrationAPIOperation<any, any, any>,
   input: Record<string, unknown>,
-  options: Pick<IntegrationClientOptions, "baseURL" | "headers" | "credentials" | "data">,
+  options: Pick<
+    IntegrationClientOptions,
+    "baseURL" | "headers" | "credentials" | "data" | "timeoutMs"
+  >,
   requestOptions?: IntegrationClientRequestOptions,
 ) {
+  const cancellation = createClientCancellation(
+    requestOptions?.signal,
+    requestOptions?.timeoutMs ?? options.timeoutMs,
+  );
   try {
-    if (!operation.path) {
+    return await cancellation.run(async () => {
+      if (!operation.path) {
+        return {
+          data: null,
+          error: new Error(
+            "Integration API operation path is missing. Pass a path to api.get/post/... or wrap pathless methods with api.route(path, { ... }).",
+          ),
+        };
+      }
+
+      const baseURL =
+        options.baseURL ||
+        (typeof window !== "undefined" ? window.location.origin : "http://localhost:3000");
+      const url = resolveFarmAPIRequestURL(operation.path, baseURL);
+      appendQuery(url, input.query as Record<string, unknown> | undefined);
+
+      const resolved = resolveClientHeaders(options.headers);
+      const headers = resolved instanceof Headers ? resolved : await resolved;
+      cancellation.check();
+      appendHeaders(headers, operation.headers);
+      appendHeaders(headers, requestOptions?.headers);
+      headers.set("x-farm-integration-client", "1");
+
+      if (operation.responseFormat !== "response") {
+        headers.set("accept", "application/json");
+      }
+
+      appendIntegrationClientDataHeader(
+        headers,
+        mergeIntegrationClientData(options.data, requestOptions?.data),
+      );
+
+      const body = createOperationBody(operation, input.body, headers);
+      const response = await fetch(url.toString(), {
+        method: operation.method,
+        headers,
+        body,
+        credentials:
+          requestOptions?.credentials ?? operation.credentials ?? options.credentials ?? "include",
+        signal: cancellation.signal,
+      });
+      cancellation.check();
+
+      if (!response.ok) {
+        const errorData = await safeParseResponseData(response);
+        return {
+          data: null,
+          error: createResponseError(response, errorData),
+        };
+      }
+
+      if (operation.responseFormat === "response") {
+        return {
+          data: response,
+          error: null,
+        };
+      }
+
       return {
-        data: null,
-        error: new Error(
-          "Integration API operation path is missing. Pass a path to api.get/post/... or wrap pathless methods with api.route(path, { ... }).",
-        ),
-      };
-    }
-
-    const baseURL =
-      options.baseURL ||
-      (typeof window !== "undefined" ? window.location.origin : "http://localhost:3000");
-    const url = resolveFarmAPIRequestURL(operation.path, baseURL);
-    appendQuery(url, input.query as Record<string, unknown> | undefined);
-
-    const resolved = resolveClientHeaders(options.headers);
-    const headers = resolved instanceof Headers ? resolved : await resolved;
-    appendHeaders(headers, operation.headers);
-    appendHeaders(headers, requestOptions?.headers);
-    headers.set("x-farm-integration-client", "1");
-
-    if (operation.responseFormat !== "response") {
-      headers.set("accept", "application/json");
-    }
-
-    appendIntegrationClientDataHeader(
-      headers,
-      mergeIntegrationClientData(options.data, requestOptions?.data),
-    );
-
-    const body = createOperationBody(operation, input.body, headers);
-    const response = await fetch(url.toString(), {
-      method: operation.method,
-      headers,
-      body,
-      credentials:
-        requestOptions?.credentials ?? operation.credentials ?? options.credentials ?? "include",
-      signal: requestOptions?.signal,
-    });
-
-    if (!response.ok) {
-      const errorData = await safeParseResponseData(response);
-      return {
-        data: null,
-        error: createResponseError(response, errorData),
-      };
-    }
-
-    if (operation.responseFormat === "response") {
-      return {
-        data: response,
+        data: (await parseResponseData(response)) as unknown,
         error: null,
       };
-    }
-
-    return {
-      data: (await parseResponseData(response)) as unknown,
-      error: null,
-    };
+    });
   } catch (error) {
     return {
       data: null,
       error: normalizeExecutionError(error),
     };
+  } finally {
+    cancellation.dispose();
   }
 }
 
@@ -783,117 +800,135 @@ async function executeServerOperation(
   input: Record<string, unknown>,
   options: Pick<
     IntegrationServerClientOptions,
-    "baseURL" | "headers" | "credentials" | "data" | "request" | "forwardHeaders"
+    "baseURL" | "headers" | "credentials" | "data" | "request" | "forwardHeaders" | "timeoutMs"
   >,
   requestOptions?: IntegrationServerClientRequestOptions,
   integrationKey?: string,
   source?: FarmIntegrationDefinition | FarmIntegrationAPI,
 ) {
+  // Capture the request before any asynchronous work (including header resolvers).
+  const currentRequest =
+    requestOptions?.request instanceof Request
+      ? requestOptions.request
+      : options.request instanceof Request
+        ? options.request
+        : resolveCurrentRequestLocal();
+  const cancellation = createClientCancellation(
+    requestOptions?.signal,
+    requestOptions?.timeoutMs ?? options.timeoutMs,
+    currentRequest?.signal,
+  );
   try {
-    if (!operation.path) {
-      return {
-        data: null,
-        error: new Error(
-          "Integration API operation path is missing. Pass a path to api.get/post/... or wrap pathless methods with api.route(path, { ... }).",
-        ),
-      };
-    }
+    return await cancellation.run(async () => {
+      if (!operation.path) {
+        return {
+          data: null,
+          error: new Error(
+            "Integration API operation path is missing. Pass a path to api.get/post/... or wrap pathless methods with api.route(path, { ... }).",
+          ),
+        };
+      }
 
-    const serverRequestOptions =
-      requestOptions &&
-      ("request" in requestOptions ||
-        "baseURL" in requestOptions ||
-        "forwardHeaders" in requestOptions)
-        ? requestOptions
-        : undefined;
-    const currentRequest =
-      serverRequestOptions?.request instanceof Request
-        ? serverRequestOptions.request
-        : options.request instanceof Request
-          ? options.request
-          : resolveCurrentRequestLocal();
-    const request = resolveRequestLike(
-      serverRequestOptions?.request ?? options.request ?? currentRequest,
-    );
-    const baseURL = resolveServerBaseURL(serverRequestOptions?.baseURL ?? options.baseURL, request);
-    const url = new URL(operation.path, baseURL);
-    appendQuery(url, input.query as Record<string, unknown> | undefined);
-
-    const headers = new Headers();
-    appendHeaders(
-      headers,
-      resolveForwardHeaders(
+      const serverRequestOptions =
+        requestOptions &&
+        ("request" in requestOptions ||
+          "baseURL" in requestOptions ||
+          "forwardHeaders" in requestOptions)
+          ? requestOptions
+          : undefined;
+      const request = resolveRequestLike(
+        serverRequestOptions?.request ?? options.request ?? currentRequest,
+      );
+      const baseURL = resolveServerBaseURL(
+        serverRequestOptions?.baseURL ?? options.baseURL,
         request,
-        serverRequestOptions?.forwardHeaders ?? options.forwardHeaders,
-      ),
-    );
-    const resolved = resolveClientHeaders(options.headers);
-    appendHeaders(headers, resolved instanceof Headers ? resolved : await resolved);
-    appendHeaders(headers, operation.headers);
-    appendHeaders(headers, requestOptions?.headers);
-    headers.set("x-farm-integration-client", "1");
+      );
+      const url = new URL(operation.path, baseURL);
+      appendQuery(url, input.query as Record<string, unknown> | undefined);
 
-    if (operation.responseFormat !== "response") {
-      headers.set("accept", "application/json");
-    }
+      const headers = new Headers();
+      appendHeaders(
+        headers,
+        resolveForwardHeaders(
+          request,
+          serverRequestOptions?.forwardHeaders ?? options.forwardHeaders,
+        ),
+      );
+      const resolved = resolveClientHeaders(options.headers);
+      appendHeaders(headers, resolved instanceof Headers ? resolved : await resolved);
+      cancellation.check();
+      appendHeaders(headers, operation.headers);
+      appendHeaders(headers, requestOptions?.headers);
+      headers.set("x-farm-integration-client", "1");
 
-    const data = mergeIntegrationClientData(options.data, requestOptions?.data);
+      if (operation.responseFormat !== "response") {
+        headers.set("accept", "application/json");
+      }
 
-    if (integrationKey) {
-      const runtime =
-        "kind" in (source || {}) &&
-        (source as FarmIntegrationDefinition).kind === "farm-integration"
-          ? getRegisteredIntegrationRuntimeLocal(integrationKey) || {
-              integration: source as FarmIntegrationDefinition,
-              config: {},
-              isDev: process.env.NODE_ENV !== "production",
-              isProd: process.env.NODE_ENV === "production",
-            }
-          : getRegisteredIntegrationRuntimeLocal(integrationKey);
+      const data = mergeIntegrationClientData(options.data, requestOptions?.data);
 
-      if (runtime) {
-        const dispatchIntegrationRequest = resolveIntegrationRequestDispatcherLocal();
-        const body = createOperationBody(operation, input.body, headers);
-        const directResponse = dispatchIntegrationRequest
-          ? await dispatchIntegrationRequest(
-              runtime,
-              new Request(url.toString(), {
-                method: operation.method,
-                headers,
-                body,
-              }),
-              {
-                currentRequest,
-                data,
-                internal: true,
-              },
-            )
-          : null;
+      if (integrationKey) {
+        const runtime =
+          "kind" in (source || {}) &&
+          (source as FarmIntegrationDefinition).kind === "farm-integration"
+            ? getRegisteredIntegrationRuntimeLocal(integrationKey) || {
+                integration: source as FarmIntegrationDefinition,
+                config: {},
+                isDev: process.env.NODE_ENV !== "production",
+                isProd: process.env.NODE_ENV === "production",
+              }
+            : getRegisteredIntegrationRuntimeLocal(integrationKey);
 
-        if (directResponse) {
-          return await finalizeOperationResponse(operation, directResponse);
+        if (runtime) {
+          const dispatchIntegrationRequest = resolveIntegrationRequestDispatcherLocal();
+          const body = createOperationBody(operation, input.body, headers);
+          const directResponse = dispatchIntegrationRequest
+            ? await dispatchIntegrationRequest(
+                runtime,
+                new Request(url.toString(), {
+                  method: operation.method,
+                  headers,
+                  body,
+                  signal: cancellation.signal,
+                }),
+                {
+                  currentRequest,
+                  data,
+                  internal: true,
+                },
+              )
+            : null;
+
+          cancellation.check();
+
+          if (directResponse) {
+            return await finalizeOperationResponse(operation, directResponse);
+          }
         }
       }
-    }
 
-    appendIntegrationClientDataHeader(headers, data);
+      appendIntegrationClientDataHeader(headers, data);
 
-    const body = createOperationBody(operation, input.body, headers);
-    const response = await fetch(url.toString(), {
-      method: operation.method,
-      headers,
-      body,
-      credentials:
-        requestOptions?.credentials ?? operation.credentials ?? options.credentials ?? "include",
-      signal: requestOptions?.signal,
+      const body = createOperationBody(operation, input.body, headers);
+      const response = await fetch(url.toString(), {
+        method: operation.method,
+        headers,
+        body,
+        credentials:
+          requestOptions?.credentials ?? operation.credentials ?? options.credentials ?? "include",
+        signal: cancellation.signal,
+      });
+      cancellation.check();
+
+      return await finalizeOperationResponse(operation, response);
     });
-
-    return await finalizeOperationResponse(operation, response);
   } catch (error) {
     return {
       data: null,
       error: normalizeExecutionError(error),
     };
+  } finally {
+    cancellation.dispose();
   }
 }
 
@@ -1133,6 +1168,7 @@ function isIntegrationClientOptionsInput(value: unknown): value is IntegrationCl
     ("baseURL" in value ||
       "headers" in value ||
       "credentials" in value ||
+      "timeoutMs" in value ||
       "data" in value ||
       "isServer" in value)
   );
@@ -1148,6 +1184,7 @@ function resolveIntegrationServerOptions(
     baseURL: clientOptions.baseURL,
     headers: clientOptions.headers,
     credentials: clientOptions.credentials,
+    timeoutMs: clientOptions.timeoutMs,
     ...serverOptions,
     ...(data ? { data } : {}),
   };

@@ -1,3 +1,5 @@
+// @vitest-environment node
+// Keep native Request and AbortSignal in one realm; browser cases stub window explicitly.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createAPIClient, createServerAPIClient, getAPIRouteRefMetadata } from "../api/client";
 import {

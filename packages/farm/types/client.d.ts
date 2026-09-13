@@ -627,6 +627,7 @@ declare module "@farm.js/core/client" {
 
   export type APIClientSystemError =
     | APIClientError<"http_error", unknown, number>
+    | APIClientError<"aborted" | "timeout", unknown, 0>
     | APIClientError<"network_error", unknown, 0>;
 
   export type RequestEvent = {
@@ -704,6 +705,8 @@ declare module "@farm.js/core/client" {
     TUpdates extends readonly unknown[] = readonly OptimisticUpdate[],
   > = {
     key?: CacheKey<TData> | RouteDataCacheKey;
+    signal?: AbortSignal;
+    timeoutMs?: number;
     cache?: CacheOptions;
     retry?: RetryOptions;
     invalidate?: InvalidateOptions;
@@ -1338,6 +1341,7 @@ declare module "@farm.js/core/client" {
   export type IntegrationClientData = Record<string, unknown>;
 
   export interface IntegrationClientOptions {
+    timeoutMs?: number;
     baseURL?: string;
     headers?: ClientHeaders;
     credentials?: RequestCredentials;
@@ -1346,6 +1350,7 @@ declare module "@farm.js/core/client" {
   }
 
   interface IntegrationRequestOptionsBase {
+    timeoutMs?: number;
     headers?: Record<string, string>;
     signal?: AbortSignal;
     credentials?: RequestCredentials;
