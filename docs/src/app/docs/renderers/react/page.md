@@ -1128,16 +1128,20 @@ setItems((current) => current.slice(-5));
 const trimCount = pageSize * pagesToDiscard;
 setItems((current) => current.slice(trimCount));
 setItems((current) => current.slice(visible.start, visible.end));
+setItems((current) => {
+  return current.slice(visible.start, visible.end);
+});
 ```
 
-At build time, Farm recognizes a concise functional setter that directly calls native `slice()`
-with one or two safe-integer literals or compiler-safe runtime expressions. Identifiers, property
-reads, side-effect-free arithmetic and conditionals, and safe `Math` calls are supported.
-User-defined calls, assignments, update expressions, and other effectful forms are not transformed.
-Farm preserves the original method lookup and argument evaluation order, evaluates each bound once,
-and preserves the native call, coercion, return value, and thrown errors. Generated metadata records
-the normalized retained interval only when every evaluated bound is already a safe integer, and
-links multiple slice or filter updates queued before one compiler flush.
+At build time, Farm recognizes a concise functional setter or a setter block containing exactly one
+direct value-returning `return`. The returned expression must directly call native `slice()` with
+one or two safe-integer literals or compiler-safe runtime expressions. Identifiers, property reads,
+side-effect-free arithmetic and conditionals, and safe `Math` calls are supported. User-defined
+calls, assignments, update expressions, and other effectful forms are not transformed. Farm
+preserves the original method lookup and argument evaluation order, evaluates each bound once, and
+preserves the native call, coercion, return value, and thrown errors. Generated metadata records the
+normalized retained interval only when every evaluated bound is already a safe integer, and links
+multiple slice or filter updates queued before one compiler flush.
 
 At update time, Farm validates the native arrays, committed source, queued lengths, interval, and
 surviving item identities before changing the DOM. It removes only rows outside the interval,
@@ -1147,8 +1151,9 @@ does not rerun.
 
 The proof requires compiler-owned host rows whose render callback and key do not observe the row
 index. Effectful bound expressions, evaluated bounds that are fractional, non-numeric, or otherwise
-not safe integers, `slice()` without a bound, a literal no-op `slice(0)`, block-bodied or chained
-updaters, custom slice methods, sparse or subclassed arrays, collection-derived keys,
+not safe integers, `slice()` without a bound, a literal no-op `slice(0)`, updater blocks with extra
+statements, directives, conditional returns, or no value-returning `return`, chained updaters, custom
+slice methods, sparse or subclassed arrays, collection-derived keys,
 collection-reading bindings, React-owned row structures, nested host blocks, row conditionals,
 unrelated dirty dependencies, and failed runtime validation keep complete keyed reconciliation.
 A runtime bound that evaluates to a no-op still preserves the native result and uses complete

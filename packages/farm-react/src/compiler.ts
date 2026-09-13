@@ -3839,19 +3839,25 @@ function rewriteKeyedArraySliceHints(
         updater.async ||
         updater.generator ||
         updater.params.length !== 1 ||
-        !t.isIdentifier(updater.params[0]) ||
-        !t.isCallExpression(updater.body) ||
-        updater.body.arguments.length < 1 ||
-        updater.body.arguments.length > 2 ||
-        !t.isMemberExpression(updater.body.callee) ||
-        updater.body.callee.computed ||
-        !t.isIdentifier(updater.body.callee.object, { name: updater.params[0].name }) ||
-        !t.isIdentifier(updater.body.callee.property, { name: "slice" })
+        !t.isIdentifier(updater.params[0])
+      ) {
+        return;
+      }
+      const updateExpression = returnedExpression(updater);
+      if (
+        (t.isBlockStatement(updater.body) && updater.body.directives.length > 0) ||
+        !t.isCallExpression(updateExpression) ||
+        updateExpression.arguments.length < 1 ||
+        updateExpression.arguments.length > 2 ||
+        !t.isMemberExpression(updateExpression.callee) ||
+        updateExpression.callee.computed ||
+        !t.isIdentifier(updateExpression.callee.object, { name: updater.params[0].name }) ||
+        !t.isIdentifier(updateExpression.callee.property, { name: "slice" })
       ) {
         return;
       }
       const bounds: t.Expression[] = [];
-      for (const argument of updater.body.arguments) {
+      for (const argument of updateExpression.arguments) {
         if (!t.isExpression(argument)) return;
         if (validateKeyedArrayPositionExpression(argument, safeGlobals) !== undefined) return;
         bounds.push(argument);
