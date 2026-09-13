@@ -19,6 +19,7 @@ import type {
 import type { DefinedCacheKey, InferCacheKeyData, RouteDataCacheKey } from "@farm.js/core/cache";
 import type { ServerFn } from "@farm.js/core/server-fn";
 import type {
+  createAPIClient as coreCreateAPIClient,
   RouteAPIClient as CoreRouteAPIClient,
   APIClientOptions as CoreAPIClientOptions,
   ClientHeaders as CoreClientHeaders,
@@ -1079,9 +1080,8 @@ declare module "@farm.js/core/client" {
         : EndpointMethod<T[K]>;
   };
 
-  export function createAPIClient<TRouter extends Record<string, any>>(
-    options?: APIClientOptions,
-  ): CoreRouteAPIClient<TRouter>;
+  // Keep all overloads and integration inference tied to the implementation.
+  export const createAPIClient: typeof coreCreateAPIClient;
 
   export type ApiClients<
     TRouter extends Record<string, any>,

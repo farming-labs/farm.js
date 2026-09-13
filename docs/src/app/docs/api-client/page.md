@@ -706,6 +706,24 @@ explicit endpoint-function maps in server-only modules. It returns the supplied 
 their raw results; passing only `{ request }` does **not** discover routes. Prefer the paired
 factory for a shared module and a consistent `{ data, error, key }` app-route result.
 
+The HTTP-only factory retains the same route and integration inference:
+
+```ts
+import { createAPIClient } from "@farm.js/core/client";
+import type { APIRouter } from "./api.generated";
+import type { AppIntegrations } from "./integrations";
+
+const http = createAPIClient<APIRouter, AppIntegrations>();
+// Integration callers are under http.integrations.<configured namespace>.
+
+const routesOnly = createAPIClient<APIRouter>({ integrations: false });
+// Only the app's route tree is exposed; no reserved integration caller namespace.
+```
+
+`integrations: false` disables only the caller namespace, not the configured providers or their
+HTTP routes. These overloads are available from the published `@farm.js/core/client` entry;
+there is no need to import framework internals or cast the options.
+
 ## Integration callers
 
 Use the same shared module for file routes, plugin routes, and configured integrations:
