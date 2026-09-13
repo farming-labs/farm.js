@@ -1331,13 +1331,16 @@ A direct native reverse states the complete next order without changing keyed ro
 
 ```tsx
 setItems((current) => current.toReversed());
+setItems((current) => {
+  return current.toReversed();
+});
 ```
 
-Farm recognizes only this concise functional-setter form. It preserves the original method lookup,
-native call, returned array, and thrown errors. Metadata is recorded only when the result is an
-ordinary native array, the executed method is the native `toReversed()` method, and the reorder
-chain starts at the committed collection. A custom or unavailable method therefore keeps its normal
-behavior and never enters the fast path.
+Farm recognizes the concise functional-setter form and a setter block containing exactly one direct
+`return`. It preserves the original method lookup, native call, returned array, and thrown errors.
+Metadata is recorded only when the result is an ordinary native array, the executed method is the
+native `toReversed()` method, and the reorder chain starts at the committed collection. A custom or
+unavailable method therefore keeps its normal behavior and never enters the fast path.
 
 At update time, Farm verifies the committed source token, equal lengths, every source row identity,
 and the exact reversed result before moving the DOM. The runtime leaves one row in place and moves
@@ -1395,13 +1398,13 @@ or slice setter followed by a concise reorder setter in the same batch uses the 
 The first proof requires compiler-owned host rows whose render and key do not observe the index.
 Arguments to `toReversed()`, referenced comparators, computed methods, chains containing a method
 outside the supported `filter()`/`slice()` prefix and `toSorted()`/`toReversed()` suffix,
-block-bodied updaters, subclassed or sparse behavior, collection-reading bindings, custom methods,
-structural calls after reordering, an unhinted intermediate update, React-owned rows, nested host
-blocks, row conditionals, unrelated dirty dependencies, and any identity mismatch use complete
-keyed reconciliation. No option or component is added. Reports count every compiled structural and
-reorder step in its existing hint counter; modules without those steps do not retain their optional
-runtimes. The application runtime must provide `Array.prototype.toReversed`; Farm does not polyfill
-it.
+updater blocks with extra statements, directives, conditional returns, or no returned value,
+subclassed or sparse behavior, collection-reading bindings, custom methods, structural calls after
+reordering, an unhinted intermediate update, React-owned rows, nested host blocks, row conditionals,
+unrelated dirty dependencies, and any identity mismatch use complete keyed reconciliation. No
+option or component is added. Reports count every compiled structural and reorder step in its
+existing hint counter; modules without those steps do not retain their optional runtimes. The
+application runtime must provide `Array.prototype.toReversed`; Farm does not polyfill it.
 
 #### Same-key map and reorder pipelines
 

@@ -516,10 +516,14 @@ A direct native reverse can carry its complete permutation to a separate optiona
 
 ```tsx
 setItems((current) => current.toReversed());
+setItems((current) => {
+  return current.toReversed();
+});
 ```
 
-Farm preserves the method lookup, call result, and errors, then records metadata only for the native
-method on an ordinary array whose chain starts at the committed collection. One direct reverse
+Farm recognizes the concise form and a block containing exactly one direct `return`. It preserves
+the method lookup, call result, and errors, then records metadata only for the native method on an
+ordinary array whose chain starts at the committed collection. One direct reverse
 verifies equal lengths and every reversed item identity before moving the existing keyed elements
 with the minimum `n - 1` connected DOM moves. It does not reread row keys, descriptors, or bindings
 and does not run the generic LIS calculation. Consecutive concise native `toReversed()` and
@@ -537,9 +541,10 @@ setItems((current) => current.toSorted((left, right) => left.rank - right.rank).
 
 Farm evaluates every lookup and call in JavaScript order, carries the same committed token through
 the pipeline, and reconciles only its final result. Index-aware or collection-reading rows,
-arguments to `toReversed()`, referenced comparators, computed methods, block-bodied updaters, custom
-methods, sparse or subclassed behavior, structural calls after reordering, an unhinted intermediate
-update, nested or React-owned rows, and failed checks keep complete keyed reconciliation.
+arguments to `toReversed()`, referenced comparators, computed methods, updater blocks with extra
+statements, directives, conditional returns, or no returned value, custom methods, sparse or
+subclassed behavior, structural calls after reordering, an unhinted intermediate update, nested or
+React-owned rows, and failed checks keep complete keyed reconciliation.
 
 A compiler-safe `filter()` or bounded `slice()` prefix may precede the native reorder suffix:
 

@@ -900,7 +900,9 @@ export function StandardTableBenchmark() {
           data-action="table-reverse"
           type="button"
           onClick={() => {
-            setRows((current) => current.toReversed());
+            setRows((current) => {
+              return current.toReversed();
+            });
             setOperation("reverse rows");
             setRevision((value) => value + 1);
           }}
@@ -912,7 +914,8 @@ export function StandardTableBenchmark() {
           type="button"
           onClick={() => {
             setRows((current) => {
-              return current.toReversed();
+              const reversed = current.toReversed();
+              return reversed;
             });
             setOperation("reverse rows (snapshot control)");
             setRevision((value) => value + 1);
@@ -937,10 +940,12 @@ export function StandardTableBenchmark() {
           type="button"
           onClick={() => {
             setRows((current) => {
-              return current.toReversed();
+              const reversed = current.toReversed();
+              return reversed;
             });
             setRows((current) => {
-              return current.toReversed();
+              const reversed = current.toReversed();
+              return reversed;
             });
             setOperation("reverse rows twice (snapshot control)");
             setRevision((value) => value + 1);
@@ -1388,10 +1393,12 @@ export function StandardTableBenchmark() {
               );
             });
             setRows((current) => {
-              return current.toReversed();
+              const reversed = current.toReversed();
+              return reversed;
             });
             setRows((current) => {
-              return current.toReversed();
+              const reversed = current.toReversed();
+              return reversed;
             });
             setOperation("filter, review, and reorder rows (snapshot control)");
             setRevision((value) => value + 1);
@@ -1581,7 +1588,8 @@ export function StandardTableBenchmark() {
           type="button"
           onClick={() => {
             setRows((current) => {
-              return current.toReversed();
+              const reversed = current.toReversed();
+              return reversed;
             });
             setRows((current) => {
               return current
@@ -1665,7 +1673,8 @@ export function StandardTableBenchmark() {
           type="button"
           onClick={() => {
             setRows((current) => {
-              return current.toReversed();
+              const reversed = current.toReversed();
+              return reversed;
             });
             setRows((current) => {
               return current.map((row) =>
@@ -1719,7 +1728,8 @@ export function StandardTableBenchmark() {
               );
             });
             setRows((current) => {
-              return current.toReversed();
+              const reversed = current.toReversed();
+              return reversed;
             });
             setOperation("queue review and reprice, then reverse rows (snapshot control)");
             setRevision((value) => value + 1);
@@ -1764,10 +1774,12 @@ export function StandardTableBenchmark() {
               );
             });
             setRows((current) => {
-              return current.toReversed();
+              const reversed = current.toReversed();
+              return reversed;
             });
             setRows((current) => {
-              return current.toReversed();
+              const reversed = current.toReversed();
+              return reversed;
             });
             setOperation("queue review, then reverse rows twice (snapshot control)");
             setRevision((value) => value + 1);
