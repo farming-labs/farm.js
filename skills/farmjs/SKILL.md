@@ -48,7 +48,7 @@ Core imports:
 
 ```ts
 import type { PageProps, LayoutProps } from "@farm.js/core";
-import { Link, createIntegrations } from "@farm.js/core/client";
+import { Link, createApiClients } from "@farm.js/core/client";
 ```
 
 Use `"use client"` when a component uses React hooks, browser APIs, or client-only integration calls.
@@ -228,18 +228,31 @@ uses HTTP. Both call the same route definition and return `{ data, error, key }`
 endpoint validation/middleware, not outer HTTP/plugin lifecycle middleware; put shared
 authorization in endpoint middleware. Server caches are request-local and there is no HTTP
 fallback. The older `createAPIClient` and `createServerAPIClient` factories remain supported.
-Calls such as `apiClient.products.get(...)` resolve to `{ data, error }` results for HTTP failures and support caching,
+Calls such as `apiClient.products.get(...)` resolve to `{ data, error, key }` results for HTTP failures and support caching,
 invalidation, retries, callbacks, optimistic updates, `useMutation`, and `useFetcher`.
 
-For integration APIs, use `createIntegrations<AppIntegrations>()` and preserve the configured
-namespace:
+If the app also uses integrations, add the registry type to the same factory instead of creating
+a second pair:
 
 ```ts
-import { createIntegrations } from "@farm.js/core/client";
+import { createApiClients } from "@farm.js/core/client";
+import { apiRoutes, type APIRouter } from "./api.generated";
 import type { AppIntegrations } from "./integrations";
 
-export const { api, apiClient } = createIntegrations<AppIntegrations>();
+export const { api, apiClient } = createApiClients<APIRouter, AppIntegrations>({
+  routes: apiRoutes,
+});
 ```
+
+Integration calls use `api.integrations.billing` / `apiClient.integrations.billing`. They retain
+their existing `{ data, error }` results and server-side HTTP fallback; the app-route cache and
+no-fallback guarantees above do not apply to integrations. Keep the registry value and provider
+SDKs server-only; import only `AppIntegrations` into the shared module. Shared integration
+defaults belong under the factory's `integrations` option and must be browser-safe.
+
+`createIntegrations<AppIntegrations>()` remains supported for integration-only callers and
+existing apps. That factory exposes `api.billing` / `apiClient.billing` directly. Do not mix
+its call paths with the paired route factory's reserved `.integrations` namespace.
 
 Use `createServerFn` for typed mutations/actions and `createServerQuery` for typed reads,
 deduplication, prefetch, stale-while-revalidate, focus/reconnect refresh, and structured invalidation.
@@ -267,7 +280,8 @@ export const appIntegrations = {
 export type AppIntegrations = typeof appIntegrations;
 ```
 
-The object key is the application namespace, so `billing` becomes `api.billing`. An integration
+The object key is the application namespace, so `billing` becomes `api.integrations.billing`
+with `createApiClients`, or `api.billing` with integration-only `createIntegrations`. An integration
 may contribute routes/endpoints, typed callers, middleware, React providers, database schemas,
 validated config, plugins, setup/ready/dispose hooks, and runtime logs. Prefer `integrationRoute.*`
 or `endpoint.*` when the integration owns handlers and should generate caller types. An explicit
@@ -294,7 +308,8 @@ integrations, UI registries, and ORM-backed data.
 
 Provider adapters support two ownership modes: pass credentials so the adapter constructs its
 default SDK, or pass an app-owned vendor client through `instance`. Keep the vendor instance in a
-server-only module. Export the integration registry type so `createIntegrations` can infer callers.
+server-only module. Export the integration registry type so the shared caller factory can infer
+integration operations without importing provider code at runtime.
 
 For ordinary email/password auth, install `@farm.js/auth` and use top-level `auth: true`. Read
 sessions through `auth.session()` or `auth.user()` from `@farm.js/auth/server`, and run
@@ -438,7 +453,7 @@ run its client generation immediately before type checking or building.
 
 - Import `Link`, `createApiClients`, and `createIntegrations` from current documented client entries.
 - Do not put server SDKs or secrets in `"use client"` modules.
-- Keep `AppIntegrations` exported so `createIntegrations<AppIntegrations>()` can infer types.
+- Keep `AppIntegrations` exported so `createApiClients<APIRouter, AppIntegrations>()` can infer integration types.
 - For Supabase/custom route APIs, method calls may be nested, for example `.login.post(...)`, not `.login(...)`.
 - Do not mix renderer component formats, top-level auth with `integrations.auth`, or mismatched Farm package versions.
 - Do not import server query handlers into the browser without the server-function transform.

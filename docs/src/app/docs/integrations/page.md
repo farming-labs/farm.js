@@ -10,6 +10,10 @@ Integrations are the Farm layer for connecting product services to your app. A p
 
 Farm treats every integration as a small server plugin. That means an integration can participate in framework startup and shutdown, own HTTP routes, and still expose a compact typed API to the rest of the app.
 
+A plugin extends framework behavior; an integration owns a configured service capability, such
+as its SDK client, lifecycle, models, or providers. They can share route machinery without being
+the same public contract. Their API routes can be consumed through one [shared API setup](/docs/api-client#integration-callers).
+
 ## Import the dedicated adapter package
 
 New applications should import each Farm adapter from its dedicated package, such as
@@ -56,7 +60,10 @@ export default defineConfig({
 });
 ```
 
-The object key is the application namespace. If you register Stripe as `billing`, the typed caller lives at `api.billing`. If you register it as `stripe`, it lives at `api.stripe`.
+The object key is the application namespace. Registering Stripe as `billing` exposes
+`api.integrations.billing` with `createApiClients`, or `api.billing` with the integration-only
+`createIntegrations` factory. The same distinction applies to `apiClient`; registering it as
+`stripe` changes the `billing` segment to `stripe`.
 
 ## Own the provider instance in application code
 
@@ -112,6 +119,58 @@ still require an adapter update.
 Provider pages show the exact constructor and any integration-owned options that are still required.
 
 ## Create callers
+
+### One setup for app routes and integrations
+
+If the app uses file or plugin routes as well as integrations, use `createApiClients` once in
+`src/lib/api.ts`. Export the configured registry's type from a server-only module:
+
+**src/lib/integrations.ts**
+
+```ts
+import { billing } from "../integrations/billing";
+
+export const appIntegrations = { billing } as const;
+export type AppIntegrations = typeof appIntegrations;
+```
+
+Here `billing` is the integration defined in the [custom integration guide](/docs/integrations/custom#choose-the-http-surface).
+Pass `appIntegrations` as `integrations` in `farm.config.ts`. Keep provider instances and
+credentials in that server-only registry, not in the shared caller module.
+
+**src/lib/api.ts**
+
+```ts
+import { createApiClients } from "@farm.js/core/client";
+import { apiRoutes, type APIRouter } from "./api.generated";
+import type { AppIntegrations } from "./integrations";
+
+export const { api, apiClient } = createApiClients<APIRouter, AppIntegrations>({
+  routes: apiRoutes,
+  integrations: {
+    data: { appName: "farm-dashboard" },
+  },
+});
+```
+
+App routes use paths such as `apiClient.hello.get(...)`; integration calls use
+`apiClient.integrations.billing.checkout.post(...)` or `api.integrations.billing.checkout.post(...)`.
+`farm generate`, development startup, and builds emit the route manifest. Import only the
+integration registry's type; the configured registry supplies integration metadata at runtime.
+No second `createIntegrations()` call is needed.
+
+Shared setup does not unify result or transport behavior: integrations retain `{ data, error }`
+results and server-side HTTP fallback, while app-route `api` calls require a Farm request and
+return `{ data, error, key }` without HTTP fallback. See [Integration callers](/docs/api-client#integration-callers)
+for the full contract.
+
+### Integration-only setup
+
+If only integration callers are needed, `createIntegrations` remains supported. The examples
+below use this integration-only setup and therefore omit `.integrations`. In an app using the
+shared factory above, reuse that pair and add `.integrations` to these integration call paths
+instead of creating another pair. Integration defaults such as `data` go inside its
+`integrations` option.
 
 **src/lib/api.ts**
 
