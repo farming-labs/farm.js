@@ -78,8 +78,14 @@ uses the same registration and caller setup.
 
 ### Shared registration
 
-Register the integration once. The `billing` key becomes the first segment after `api` or
-`apiClient`.
+The examples in this guide use the integration-only `createIntegrations()` factory, so the
+`billing` key becomes the first segment after `api` or `apiClient`. If the app already uses
+`createApiClients()` for file or plugin routes, [add the integration registry type to that same setup](/docs/api-client#integration-callers)
+instead. Import the existing pair from `src/lib/api.ts` and use
+`api.integrations.billing` / `apiClient.integrations.billing` for the calls below; do not create
+a second pair. The integration definitions and registration stay the same.
+
+Register the integration once:
 
 **farm.config.ts**
 

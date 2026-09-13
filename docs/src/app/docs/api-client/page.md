@@ -26,6 +26,9 @@ paths/methods and types, never server handlers or credentials. Import `api` in s
 Both app-route callers return `{ data, error, key }` and preserve the same input, output, method,
 and dynamic-parameter inference. Keep secrets out of this shared module, including its options.
 
+If the app also has integrations, add `AppIntegrations` as the second type argument to this same
+factory. You do not need a second caller setup. See [Integration callers](#integration-callers).
+
 The HTTP client uses the current origin and `/api` by default. To point every default client at another
 API, configure it once in `farm.config.ts`:
 
@@ -158,10 +161,10 @@ you need one concrete resource; collection/detail overloads otherwise describe m
 Plugin paths containing HTTP method names use a literal alias such as
 `apiClient["/projects/get"].get()`. `$params` is reserved for the scope helper.
 
-You can name this client `api` in server-only code and use the same call shape. This is an HTTP
-client there too: provide a trusted absolute `baseURL`, and explicitly forward only the credentials
-the target needs. It does not bypass middleware or call a plugin handler directly. The existing
-`createServerAPIClient()` endpoint/integration helper is unchanged by scoped route callers.
+Both callers returned by `createApiClients()` support these scopes. Use `api` for local calls
+during a Farm server request and `apiClient` for HTTP calls. For standalone HTTP calls from server
+code, give `apiClient` a trusted absolute `baseURL` and explicitly forward only the credentials
+the target needs. See [Server callers](#server-callers) for local-dispatch boundaries.
 
 ## Type-safe QUERY requests
 
@@ -453,7 +456,9 @@ read loads canonical data.
 
 ## Result shape
 
-API and integration callers return a consistent result object:
+App-route and integration callers both expose `data` and `error`, so callers can branch on
+`result.error`. App-route results also include a typed cache `key`; integration results retain
+their own error contract and do not include that cache key.
 
 ```ts
 const result = await apiClient.hello.post({
@@ -471,7 +476,7 @@ console.log(result.data.message);
 ```
 
 This makes client components easier to write because failed responses do not need to be caught with `try/catch` unless you want that behavior.
-If an HTTP error body is malformed, Farm still returns an `http_error` with the real status and
+For app routes, if an HTTP error body is malformed, Farm still returns an `http_error` with the real status and
 `Response`; the decoding failure is available as `error.cause`.
 
 ## Server callers
@@ -528,18 +533,77 @@ factory for a shared module and a consistent `{ data, error, key }` app-route re
 
 ## Integration callers
 
-Integrations use the same ergonomic style:
+Use the same shared module for file routes, plugin routes, and configured integrations:
+
+**src/lib/api.ts**
 
 ```ts
-const checkout = await apiClient.billing.checkout.post({
-  body: {
-    productId: "pro",
-    successPath: "/dashboard",
-  },
+import { createApiClients } from "@farm.js/core/client";
+import { apiRoutes, type APIRouter } from "./api.generated";
+import type { AppIntegrations } from "./integrations";
+
+export const { api, apiClient } = createApiClients<APIRouter, AppIntegrations>({
+  routes: apiRoutes,
 });
 ```
 
-If an integration operation is marked server-only, call it from `api`, not `apiClient`.
+Export `AppIntegrations = typeof appIntegrations` from the server-only module containing the
+registry passed to `farm.config.ts`'s `integrations` field. Import only its type here, not the
+registry value or provider SDKs. The type describes existing integrations; it does not register
+them. Farm supplies their caller metadata at runtime.
+
+File and plugin routes keep their generated paths, such as `apiClient.hello.post(...)`.
+Integrations live under the reserved `.integrations` namespace on both callers. For example, with
+the `billing` integration from the [custom integration guide](/docs/integrations/custom#shared-registration):
+
+```ts
+// Browser code
+const checkout = await apiClient.integrations.billing.checkout.post({
+  body: { priceId: "price_123" },
+});
+
+// Server code
+const serverCheckout = await api.integrations.billing.checkout.post({
+  body: { priceId: "price_123" },
+});
+```
+
+Integration-specific defaults belong in `integrations: { data, headers, ... }` in the shared
+factory options. Only put browser-safe values there. Set `integrations: false` if the app does
+not need the reserved namespace.
+
+The shared factory does not change integration execution semantics. Integration calls return
+`{ data, error }`, not the app-route `{ data, error, key }` cache contract. Server integration
+calls dispatch to a registered handler when possible and can fall back to HTTP when local
+dispatch is unavailable. App-route `api` calls instead require an active Farm server request and
+never fall back to HTTP. Operations marked `isServer: true` remain available only through
+`api.integrations`, not `apiClient.integrations`.
+
+### Integration-only callers
+
+`createIntegrations<AppIntegrations>()` remains supported and is not deprecated. Existing apps
+do not need to migrate. Use it when only integration callers are needed, or when you prefer to
+keep them separate from app-route callers. It returns integration namespaces directly:
+`apiClient.billing.checkout.post(...)` and `api.billing.checkout.post(...)`.
+With `createApiClients`, those same calls need the
+`.integrations` segment. Choose one setup for the shared module; do not create both pairs for
+the same integrations. Switching factories requires updating the namespace and moving shared
+integration defaults into the `integrations` option; it is not a drop-in rename.
+The paired factory discovers configured integrations; it does not accept the integration-only
+factory's explicit source map or separate server-options argument.
+
+Options are another reason to choose the separate factory. Shared `baseURL`, `headers`,
+`credentials`, and `data` defaults work with either setup: put them under `integrations` when
+using `createApiClients()`. Keep `createIntegrations()` when you want setup-level `request` or
+`forwardHeaders`, separate server defaults, or explicit source maps. The paired factory's
+server integration calls still accept per-call overrides. See the [options comparison and
+request-scoped example](/docs/integrations#integration-only-setup). Keep request-bound callers
+and private server options in server-only code, not in the shared browser module.
+
+For deliberately separate modules, use `createApiClients<APIRouter>({ routes: apiRoutes,
+integrations: false })` for app routes and `createIntegrations<AppIntegrations>()` for integration
+callers. Disabling the paired factory's namespace does not unregister integrations or their
+HTTP routes; it only leaves integration access to the separate caller module.
 
 ## Server Function Form Actions
 

@@ -10,6 +10,10 @@ Integrations are the Farm layer for connecting product services to your app. A p
 
 Farm treats every integration as a small server plugin. That means an integration can participate in framework startup and shutdown, own HTTP routes, and still expose a compact typed API to the rest of the app.
 
+A plugin extends framework behavior; an integration owns a configured service capability, such
+as its SDK client, lifecycle, models, or providers. They can share route machinery without being
+the same public contract. Their API routes can be consumed through one [shared API setup](/docs/api-client#integration-callers).
+
 ## Import the dedicated adapter package
 
 New applications should import each Farm adapter from its dedicated package, such as
@@ -56,7 +60,10 @@ export default defineConfig({
 });
 ```
 
-The object key is the application namespace. If you register Stripe as `billing`, the typed caller lives at `api.billing`. If you register it as `stripe`, it lives at `api.stripe`.
+The object key is the application namespace. Registering Stripe as `billing` exposes
+`api.integrations.billing` with `createApiClients`, or `api.billing` with the integration-only
+`createIntegrations` factory. The same distinction applies to `apiClient`; registering it as
+`stripe` changes the `billing` segment to `stripe`.
 
 ## Own the provider instance in application code
 
@@ -112,6 +119,125 @@ still require an adapter update.
 Provider pages show the exact constructor and any integration-owned options that are still required.
 
 ## Create callers
+
+### One setup for app routes and integrations
+
+If the app uses file or plugin routes as well as integrations, use `createApiClients` once in
+`src/lib/api.ts`. Export the configured registry's type from a server-only module:
+
+**src/lib/integrations.ts**
+
+```ts
+import { billing } from "../integrations/billing";
+
+export const appIntegrations = { billing } as const;
+export type AppIntegrations = typeof appIntegrations;
+```
+
+Here `billing` is the integration defined in the [custom integration guide](/docs/integrations/custom#choose-the-http-surface).
+`appIntegrations` is the real server-side object containing it. `AppIntegrations` is only a
+TypeScript description of that object: `typeof` does not create another integration, and
+`as const` preserves its literal types rather than freezing it at runtime.
+
+Register that object with Farm once:
+
+**farm.config.ts**
+
+```ts
+import { defineConfig } from "@farm.js/core";
+import { appIntegrations } from "./src/lib/integrations";
+
+export default defineConfig({
+  integrations: appIntegrations,
+});
+```
+
+This is where Farm registers the integrations and their routes. Keep provider instances and
+credentials in the server-only registry. Next, create callers for those already-configured
+services in the shared module; this does not create new provider instances:
+
+**src/lib/api.ts**
+
+```ts
+import { createApiClients } from "@farm.js/core/client";
+import { apiRoutes, type APIRouter } from "./api.generated";
+import type { AppIntegrations } from "./integrations";
+
+export const { api, apiClient } = createApiClients<APIRouter, AppIntegrations>({
+  routes: apiRoutes,
+  integrations: {
+    data: { appName: "farm-dashboard" },
+  },
+});
+```
+
+The inputs have different jobs:
+
+| Input             | What it supplies                                                                      | Present in browser JavaScript?                              |
+| ----------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `APIRouter`       | Generated types for file and plugin routes.                                           | No; it is a type.                                           |
+| `AppIntegrations` | Types for the configured integration operations.                                      | No; `import type` is erased.                                |
+| `apiRoutes`       | Generated paths and methods used to resolve app-route URLs, including dynamic params. | Yes; it is schema-free route metadata, not server handlers. |
+
+The `integrations.data` option above is optional request metadata, not another integration
+registration. You can omit it. The factory returns `api` for server calls and `apiClient` for
+browser calls; both are exported from this one module.
+
+App routes use paths such as `apiClient.hello.get(...)`; integration calls use
+`apiClient.integrations.billing.checkout.post(...)` or `api.integrations.billing.checkout.post(...)`.
+`farm generate`, development startup, and builds emit the route manifest. Import only the
+integration registry's type; the configured registry supplies integration metadata at runtime.
+No second `createIntegrations()` call is needed.
+
+Shared setup does not unify result or transport behavior: integrations retain `{ data, error }`
+results and server-side HTTP fallback, while app-route `api` calls require a Farm request and
+return `{ data, error, key }` without HTTP fallback. See [Integration callers](/docs/api-client#integration-callers)
+for the full contract.
+
+### Integration-only setup
+
+`createIntegrations()` remains supported and is not deprecated. There is no required migration:
+keep it when you prefer separate route and integration caller modules, or when only integration
+callers are needed. For separate modules, set `integrations: false` on the app-route
+`createApiClients()` setup and keep `createIntegrations()` for the integration callers. This
+does not change integration registration in `farm.config.ts`.
+
+Existing caller options can also be a reason to keep `createIntegrations()`. The factories do
+not have interchangeable option signatures:
+
+| Need                                                                                         | `createIntegrations()`                    | `createApiClients()`                                                                              |
+| -------------------------------------------------------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Shared `baseURL`, `headers`, `credentials`, or `data` defaults                               | Pass them in `clientOptions`.             | Pass them under `integrations`. These options alone do not require a separate factory.            |
+| Setup-level `request`, `forwardHeaders`, or separate server defaults                         | Pass a separate `serverOptions` argument. | No separate server-options argument; server integration calls support per-call overrides instead. |
+| Explicit integration definitions or API contracts, for example in isolated packages or tests | Use the source-map overload.              | Uses the configured integration registry.                                                         |
+
+For example, a request-scoped server helper can bind a request and its forwarding policy once:
+
+**src/lib/api.server.ts**
+
+```ts
+import { createIntegrations } from "@farm.js/core/client";
+import type { AppIntegrations } from "./integrations";
+
+export function createRequestIntegrationApi(request: Request) {
+  const { api } = createIntegrations<AppIntegrations>(
+    { data: { appName: "farm-dashboard" } },
+    { request, forwardHeaders: ["cookie", "authorization"] },
+  );
+
+  return api;
+}
+```
+
+Keep this helper in server-only code and call it per request; do not cache a request-bound
+caller globally or import it into browser code. A `serverOptions` argument is not a bundler
+security boundary: private headers, tokens, and requests must stay out of shared client modules.
+Forward credentials only to trusted destinations.
+
+The examples below use this integration-only setup and therefore omit `.integrations`. In an app using the
+shared factory above, reuse that pair and add `.integrations` to these integration call paths
+instead of creating another pair. Integration defaults such as `data` go inside its
+`integrations` option.
 
 **src/lib/api.ts**
 
