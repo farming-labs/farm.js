@@ -574,6 +574,10 @@ callers, but cannot become fresh cache entries after that key is invalidated. Th
 fetch current data, even when invalidation and request startup happen in the same millisecond.
 Unrelated cache keys are unaffected.
 
+This includes mutation `invalidate` targets whose first read has not populated the cache yet.
+Explicit keys and typed route references receive the same protection in private, shared, and
+request-local server caches. Failed mutations leave those reads unchanged.
+
 ## Optimistic cache updates
 
 Farm's cache lifecycle is intentionally familiar to React Query and TanStack Query users, but it is

@@ -1288,10 +1288,12 @@ function createAPIClientRuntime<
           if (!targetKey) continue;
 
           const existing = cacheState.get(targetKey);
+          const invalidatedAt = Date.now();
+          // The first read may still be in flight with no stored entry yet.
+          // Notify its invalidation listener before it can cache an old result.
+          cacheState.invalidate(targetKey, invalidatedAt);
           if (existing) {
-            const invalidatedAt = Date.now();
             const stack = optimisticState.get(targetKey);
-            cacheState.invalidate(targetKey, invalidatedAt);
             if (stack?.renderedEntry === existing) {
               stack.invalidatedAt = invalidatedAt;
               stack.renderedEntry = cacheState.get(targetKey);
