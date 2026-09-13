@@ -762,23 +762,28 @@ A direct native immutable sort can use the same optional reorder runtime:
 ```tsx
 setItems((current) => current.toSorted((left, right) => left.rank - right.rank));
 setLabels((current) => current.toSorted());
+setItems((current) => {
+  return current.toSorted((left, right) => left.rank - right.rank);
+});
 ```
 
-Farm recognizes a concise functional setter with no comparator or an inline synchronous comparator
-from the compiler-safe expression subset. It preserves the original method lookup, comparator,
-stable native result, and errors. After the native sort runs, the runtime validates an ordinary
-dense array whose reorder chain starts at the committed collection, equal lengths, and a unique
-one-to-one item-identity permutation. It then uses LIS to move only `n - LIS` keyed DOM nodes
-without rereading row keys, descriptors, or bindings. Multiple concise native sorts and reverses
-queued in one flush, or chained in one concise updater, share the original committed token and
-reconcile only their final permutation. The native sorting work itself is unchanged.
+Farm recognizes a concise functional setter or a block containing exactly one direct `return`,
+with no comparator or an inline synchronous comparator from the compiler-safe expression subset.
+It preserves the original method lookup, comparator, stable native result, and errors. After the
+native sort runs, the runtime validates an ordinary dense array whose reorder chain starts at the
+committed collection, equal lengths, and a unique one-to-one item-identity permutation. It then
+uses LIS to move only `n - LIS` keyed DOM nodes without rereading row keys, descriptors, or
+bindings. Multiple concise native sorts and reverses queued in one flush, or chained in one concise
+updater, share the original committed token and reconcile only their final permutation. The native
+sorting work itself is unchanged.
 
-Index-aware or collection-reading rows, referenced comparators, block-bodied updaters, computed or
-unsupported chained calls, custom methods, sparse or subclassed arrays, duplicate item identities,
-unhinted intermediate updates, structural calls after reordering, nested or React-owned rows, and
-failed checks keep complete keyed reconciliation. A compiler-safe filter/slice prefix is supported.
-Reports count each compiled sort step as a `keyedArraySortHints` entry; sort shares the optional
-reorder runtime, and Farm does not polyfill `Array.prototype.toSorted`.
+Index-aware or collection-reading rows, referenced comparators, updater blocks with extra
+statements, directives, conditional returns, or no returned value, computed or unsupported chained
+calls, custom methods, sparse or subclassed arrays, duplicate item identities, unhinted intermediate
+updates, structural calls after reordering, nested or React-owned rows, and failed checks keep
+complete keyed reconciliation. A compiler-safe filter/slice prefix is supported. Reports count each
+compiled sort step as a `keyedArraySortHints` entry; sort shares the optional reorder runtime, and
+Farm does not polyfill `Array.prototype.toSorted`.
 
 Concise or single-return block-bodied immutable filters on a direct keyed array can carry removal
 positions into the same optional runtime:
