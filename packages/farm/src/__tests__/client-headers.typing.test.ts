@@ -4,7 +4,8 @@ import ts from "typescript";
 import { expect, it } from "vitest";
 
 it("exposes header resolvers through the published client declarations", () => {
-  const filename = path.resolve("client-headers.type-test.ts");
+  // TypeScript normalizes compiler filenames to forward slashes, including on Windows.
+  const filename = path.resolve("client-headers.type-test.ts").replace(/\\/g, "/");
   const source = `
 import {
   createAPIClient, createApiClients, createIntegrations, endpoint,
