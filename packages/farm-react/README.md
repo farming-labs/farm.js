@@ -255,15 +255,19 @@ The same optional runtime recognizes conservative immutable appends on a direct 
 ```tsx
 setItems((current) => [...current, nextItem]);
 setItems((current) => [...current, ...nextItems]);
+setItems((current) => {
+  return [...current, ...nextItems];
+});
 ```
 
 Because every existing item keeps its key and index, Farm validates the committed source and the
 queued append chain, reads keys and descriptors only for the appended suffix, and mounts that
-suffix in one fragment. Existing row DOM is left untouched. The concise functional updater and
-native arrays are required; middle insertion, removal, direct replacement, duplicate
-keys, rows that read the collection itself, and failed runtime checks use complete keyed
-reconciliation. A key that reads the collection prevents hint emission entirely. The compiler
-report exposes the emitted-site count as
+suffix in one fragment. Existing row DOM is left untouched. The setter may be concise or use a
+block containing exactly one direct value-returning `return`. Extra statements, conditional
+returns, and missing returns keep complete keyed reconciliation. Native arrays are required;
+middle insertion, removal, direct replacement, duplicate keys, rows that read the collection
+itself, and failed runtime checks use complete keyed reconciliation. A key that reads the
+collection prevents hint emission entirely. The compiler report exposes the emitted-site count as
 `keyedArrayAppendHints`.
 
 Adjacent removal and append setters can share the same committed-row proof:
@@ -305,8 +309,9 @@ row. It then removes only rejected rows, patches only changed survivors, and cre
 its final values. The owner stays mounted, survivor DOM identity is preserved, and the suffix is
 appended once.
 
-Only concise updater results that form one direct chain for the same state array are linked. The row
-and key must be compiler-owned and index-independent. A reorder in the structural-append chain, an
+Only concise updater results and blocks with one direct value-returning `return` that form one
+direct chain for the same state array are linked. The row and key must be compiler-owned and
+index-independent. A reorder in the structural-append chain, an
 unsupported or non-adjacent map, an unhinted update to that state, another dirty row dependency,
 collection-reading binding, custom, sparse, or subclassed array, nested or React-owned row,
 duplicate final key, or reuse of any committed key in the appended suffix keeps complete React
@@ -320,6 +325,9 @@ The mirror-image prepend form is supported when the keyed row and key do not rea
 ```tsx
 setItems((current) => [nextItem, ...current]);
 setItems((current) => [...nextItems, ...current]);
+setItems((current) => {
+  return [...nextItems, ...current];
+});
 
 setItems((current) => current.filter((item) => item.id !== expiredId));
 setItems((current) => [nextItem, ...current]);
@@ -346,6 +354,9 @@ When an adjacent filter or bounded slice runs first, the compiler also carries t
 positions into the prepend. The runtime removes only rejected rows, preserves every surviving DOM
 node, and creates only the final prefix instead of rescanning and rebinding the whole result.
 Multiple adjacent prepends share the same proof.
+
+The setter may be concise or use a block containing exactly one direct value-returning `return`.
+Extra statements, conditional returns, and missing returns keep complete keyed reconciliation.
 
 One or more immediately adjacent safe same-key `map()` setters may run after the prepend or between
 the removal and prepend. A safe map may also run immediately before the removal. Farm carries every

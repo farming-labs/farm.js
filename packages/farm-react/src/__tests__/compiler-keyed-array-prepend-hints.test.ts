@@ -42,6 +42,36 @@ describe("React AOT keyed-array prepend hints", () => {
     });
   });
 
+  it("records prepends returned from a single-return updater block", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Feed({ additions }) {
+        const [rows, setRows] = useState([{ id: "a", label: "Alpha" }]);
+        return <main>
+          <button onClick={() => setRows((current) => {
+            return [...additions, ...current];
+          })}>Prepend</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </main>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Feed"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.optimizations.keyedArrayPrependHints).toBe(1);
+    expect(result.code).toContain("createCompilerKeyedArrayPrepend");
+    expect(result.code).toContain("prependIndexIndependent={true}");
+    expect(result.code).toContain("keyedRowsPrependHintedRuntimeFeature");
+    await expect(
+      transformWithEsbuild(result.code, "/app/KeyedArrayPrependHints.tsx", {
+        loader: "tsx",
+        jsx: "automatic",
+      }),
+    ).resolves.toMatchObject({
+      code: expect.stringContaining("createCompilerKeyedArrayPrepend"),
+    });
+  });
+
   it("supports safe prefix batches and the public List primitive", async () => {
     const result = await compile(`
       import { useState } from "react";
@@ -292,9 +322,27 @@ describe("React AOT keyed-array prepend hints", () => {
       update: 'setRows((current) => [{ id: "b", label: "Beta" }, ...current])',
     },
     {
-      name: "a block-bodied updater",
+      name: "an updater block with a local declaration",
       row: "(row) => <li key={row.id}>{row.label}</li>",
-      update: 'setRows((current) => { return [{ id: "b", label: "Beta" }, ...current]; })',
+      update:
+        'setRows((current) => { const next = [{ id: "b", label: "Beta" }, ...current]; return next; })',
+    },
+    {
+      name: "an updater block with conditional returns",
+      row: "(row) => <li key={row.id}>{row.label}</li>",
+      update:
+        'setRows((current) => { if (current.length > 0) return [{ id: "b", label: "Beta" }, ...current]; return current; })',
+    },
+    {
+      name: "an updater block without a return",
+      row: "(row) => <li key={row.id}>{row.label}</li>",
+      update: 'setRows((current) => { [{ id: "b", label: "Beta" }, ...current]; })',
+    },
+    {
+      name: "an updater block with a directive",
+      row: "(row) => <li key={row.id}>{row.label}</li>",
+      update:
+        'setRows((current) => { "use strict"; return [{ id: "b", label: "Beta" }, ...current]; })',
     },
     {
       name: "an append",
