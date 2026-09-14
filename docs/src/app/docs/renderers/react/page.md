@@ -60,6 +60,43 @@ export function Counter() {
 }
 ```
 
+## Shared client state
+
+`createStore` from `@farm.js/core/client` provides an in-memory React store with typed field
+selectors. String, numeric, and symbol state keys work with `use`, `get`, `set`, `subscribe`,
+and direct field accessors:
+
+```tsx
+"use client";
+
+import { useState } from "react";
+import { createStore } from "@farm.js/core/client";
+
+const selected = Symbol("selected");
+
+export function Selection() {
+  const [store] = useState(() => createStore({ 0: "First item", [selected]: false }));
+  const label = store.use(0);
+  const active = store[selected]();
+
+  return (
+    <button aria-pressed={active} onClick={() => store[selected].set((value) => !value)}>
+      {label}
+    </button>
+  );
+}
+```
+
+Use `store.use([0, selected])` to select multiple fields. Subscriptions only notify for changed
+selected values, including updates through patches, `replace`, or `reset`. Numeric keys follow
+normal object semantics (`0` names the same property as `"0"`); symbols retain their identity,
+even when their descriptions match. State contains own enumerable properties, including symbols.
+String names used by the store API, such as `use` and `set`, remain reserved.
+
+The example creates one store per mounted component; share that instance through context when
+needed. Do not put request-specific server data in a process-global store. This store does not
+persist data or serialize symbol keys across server/client boundaries.
+
 ## Experimental AOT compiler
 
 Farm's experimental React compiler moves a narrow class of local state-update work from React's

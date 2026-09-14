@@ -14,7 +14,7 @@ export type StoreKeysListener<T extends StoreState, K extends keyof T> = (
 ) => void;
 
 type StoreSubscription<T extends StoreState> = {
-  keys: readonly (keyof T)[] | null;
+  keys: readonly PropertyKey[] | null;
   notify: (state: T, previousState: T) => void;
 };
 
@@ -76,11 +76,14 @@ function pickState<T extends StoreState, K extends keyof T>(
   return slice;
 }
 
+function getEnumerableKeys<T extends StoreState>(state: T): (keyof T)[] {
+  return Reflect.ownKeys(state).filter((key) =>
+    Object.prototype.propertyIsEnumerable.call(state, key),
+  ) as (keyof T)[];
+}
+
 function getChangedKeys<T extends StoreState>(state: T, previousState: T): (keyof T)[] {
-  const keys = new Set<keyof T>([
-    ...(Object.keys(state) as (keyof T)[]),
-    ...(Object.keys(previousState) as (keyof T)[]),
-  ]);
+  const keys = new Set<keyof T>([...getEnumerableKeys(state), ...getEnumerableKeys(previousState)]);
 
   return [...keys].filter((key) => !Object.is(state[key], previousState[key]));
 }
@@ -109,7 +112,11 @@ export function createStore<T extends StoreState, TMethods extends Record<string
     keys: readonly (keyof T)[] | null,
     notify: (state: T, previousState: T) => void,
   ) => {
-    const subscription: StoreSubscription<T> = { keys, notify };
+    const subscription: StoreSubscription<T> = {
+      // Object property enumeration returns numeric keys as strings.
+      keys: keys?.map((key) => (typeof key === "number" ? String(key) : key)) ?? null,
+      notify,
+    };
     subscriptions.add(subscription);
     return () => {
       subscriptions.delete(subscription);
@@ -123,7 +130,7 @@ export function createStore<T extends StoreState, TMethods extends Record<string
       return;
     }
 
-    const changedKeySet = new Set(changedKeys);
+    const changedKeySet = new Set<PropertyKey>(changedKeys);
 
     for (const subscription of subscriptions) {
       if (subscription.keys === null || subscription.keys.some((key) => changedKeySet.has(key))) {
@@ -227,7 +234,7 @@ export function createStore<T extends StoreState, TMethods extends Record<string
       );
     }
 
-    if (typeof keyOrKeys === "string") {
+    if (isStoreKey(keyOrKeys)) {
       return useSyncExternalStore(
         (notify) => addSubscription([keyOrKeys], () => notify()),
         () => state[keyOrKeys],
@@ -251,7 +258,7 @@ export function createStore<T extends StoreState, TMethods extends Record<string
     subscribe: subscribeState,
   } as Store<T>;
 
-  for (const key of Object.keys(initialSnapshot) as (keyof T)[]) {
+  for (const key of getEnumerableKeys(initialSnapshot)) {
     if (RESERVED_STORE_KEYS.has(key as ReservedStoreKey)) {
       throw new Error(
         `createStore does not allow the reserved key "${String(key)}" in the initial state.`,
