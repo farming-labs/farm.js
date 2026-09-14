@@ -370,7 +370,9 @@ regardless of header casing.
 
 `toFormData()` retains the endpoint's body shape while sending files as real multipart fields. When
 an endpoint returns `jsonStream()`, the generated client exposes a typed, single-consumer async
-iterable:
+iterable. Concurrent `next()` calls on the same iterator are served in order, including items
+already buffered in a transport chunk. Cancellation interrupts outstanding reads without waiting
+for another chunk; `cancel()` itself still waits for producer cleanup:
 
 ```ts
 import { toFormData } from "@farm.js/core/api";
