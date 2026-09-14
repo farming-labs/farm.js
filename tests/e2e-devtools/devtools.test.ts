@@ -191,11 +191,14 @@ test("real routes, API metadata, highlighted transforms, and snapshot copying", 
   await expect(panel.getByRole("region", { name: "Served JavaScript" })).toContainText("jsx");
   expect(await panel.locator(".sh__token--keyword").count()).toBeGreaterThan(0);
   await panel.getByRole("button", { name: "Copy Source", exact: true }).click();
+  // Clicking dispatches the async handler, but does not await the OS clipboard write.
+  await expect(panel.locator("[data-feedback]")).toHaveText("Copied to clipboard");
   expect(await page.evaluate(() => navigator.clipboard.readText())).toContain(
     "export function Counter()",
   );
   await panel.getByRole("button", { name: "Snapshot", exact: true }).click();
   await panel.getByRole("button", { name: "Copy Runtime JSON" }).click();
+  await expect(panel.locator("[data-feedback]")).toHaveText("Copied to clipboard");
   const snapshot = JSON.parse(await page.evaluate(() => navigator.clipboard.readText()));
   expect(snapshot.apiRoutes.some((route: { path: string }) => route.path === "/api/status")).toBe(
     true,
