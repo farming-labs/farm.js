@@ -2332,12 +2332,22 @@ function rewriteKeyedArrayReorderPipelineHints(
         updater.async ||
         updater.generator ||
         updater.params.length !== 1 ||
-        !t.isIdentifier(updater.params[0]) ||
-        !t.isExpression(updater.body)
+        !t.isIdentifier(updater.params[0])
       ) {
         return;
       }
-      const steps = keyedArrayReorderPipeline(updater.body, updater.params[0].name, safeGlobals);
+      const updateExpression = returnedExpression(updater);
+      if (
+        (t.isBlockStatement(updater.body) && updater.body.directives.length > 0) ||
+        !updateExpression
+      ) {
+        return;
+      }
+      const steps = keyedArrayReorderPipeline(
+        updateExpression,
+        updater.params[0].name,
+        safeGlobals,
+      );
       if (!steps) return;
       const structuralPipeline = steps.some(
         (step) => step.kind === "filter" || step.kind === "slice",

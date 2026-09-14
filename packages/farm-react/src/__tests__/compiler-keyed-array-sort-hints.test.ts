@@ -124,7 +124,7 @@ describe("React AOT keyed-array sort hints", () => {
     expect(result.code).toContain("keyedRowsReorderHintedRuntimeFeature");
   });
 
-  it("lowers every step in one native sort and reverse pipeline", async () => {
+  it("lowers every step returned from an exact updater block", async () => {
     const result = await compile(`
       import { useState } from "react";
       export function Table() {
@@ -133,12 +133,12 @@ describe("React AOT keyed-array sort hints", () => {
           { id: "b", rank: 1, label: "Beta" },
         ]);
         return <section>
-          <button onClick={() => setRows((current) =>
-            current
+          <button onClick={() => setRows((current) => {
+            return current
               .toSorted((left, right) => left.rank - right.rank)
               .toReversed()
-              .toSorted((left, right) => right.rank - left.rank)
-          )}>Reorder</button>
+              .toSorted((left, right) => right.rank - left.rank);
+          })}>Reorder</button>
           <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
         </section>;
       }
@@ -150,6 +150,14 @@ describe("React AOT keyed-array sort hints", () => {
     expect(result.code.match(/createCompilerKeyedArraySort\(/g)).toHaveLength(2);
     expect(result.code.match(/createCompilerKeyedArrayReorder\(/g)).toHaveLength(1);
     expect(result.code).toContain("keyedRowsReorderHintedRuntimeFeature");
+    await expect(
+      transformWithEsbuild(result.code, "/app/KeyedArraySortHints.tsx", {
+        loader: "tsx",
+        jsx: "automatic",
+      }),
+    ).resolves.toMatchObject({
+      code: expect.stringContaining("createCompilerKeyedArraySort"),
+    });
   });
 
   it("supports a reverse-first pipeline and the native default comparator", async () => {
@@ -172,7 +180,7 @@ describe("React AOT keyed-array sort hints", () => {
     expect(result.code.match(/createCompilerKeyedArrayReorder\(/g)).toHaveLength(2);
   });
 
-  it("lowers a structural prefix followed by native reorder steps", async () => {
+  it("lowers a block-bodied structural prefix followed by native reorder steps", async () => {
     const result = await compile(`
       import { useState } from "react";
       export function Table() {
@@ -182,13 +190,13 @@ describe("React AOT keyed-array sort hints", () => {
           { id: "c", rank: 3, visible: true, label: "Gamma" },
         ]);
         return <section>
-          <button onClick={() => setRows((current) =>
-            current
+          <button onClick={() => setRows((current) => {
+            return current
               .filter((row) => row.visible)
               .slice(0, 2)
               .toSorted((left, right) => left.rank - right.rank)
-              .toReversed()
-          )}>Keep and reorder</button>
+              .toReversed();
+          })}>Keep and reorder</button>
           <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
         </section>;
       }
@@ -208,7 +216,7 @@ describe("React AOT keyed-array sort hints", () => {
     expect(result.code).toContain("keyedRowsEveryHintedRuntimeFeature");
   });
 
-  it("lowers a same-key map followed by a native sort as one reorder pipeline", async () => {
+  it("lowers a block-bodied same-key map and native sort as one reorder pipeline", async () => {
     const result = await compile(`
       import { useState } from "react";
       export function Table({ editedId, nextRank }) {
@@ -217,10 +225,11 @@ describe("React AOT keyed-array sort hints", () => {
           { id: "b", label: "Beta", rank: 2 },
         ]);
         return <section>
-          <button onClick={() => setRows((current) => current
-            .map((row) => row.id === editedId ? { ...row, rank: nextRank } : row)
-            .toSorted((left, right) => left.rank - right.rank)
-          )}>Edit and sort</button>
+          <button onClick={() => setRows((current) => {
+            return current
+              .map((row) => row.id === editedId ? { ...row, rank: nextRank } : row)
+              .toSorted((left, right) => left.rank - right.rank);
+          })}>Edit and sort</button>
           <ul>{rows.map((row) => <li key={row.id}>{row.label}: {row.rank}</li>)}</ul>
         </section>;
       }
@@ -461,7 +470,7 @@ describe("React AOT keyed-array sort hints", () => {
     expect(result.code).toContain("keyedRowsMapReorderHintedRuntimeFeature");
   });
 
-  it("preserves an exact reverse when consecutive safe maps are the final steps", async () => {
+  it("preserves an exact reverse through final maps returned from an updater block", async () => {
     const result = await compile(`
       import { useState } from "react";
       export function Table({ editedId, nextLabel, nextRank }) {
@@ -470,11 +479,12 @@ describe("React AOT keyed-array sort hints", () => {
           { id: "b", label: "Beta", rank: 2 },
         ]);
         return <section>
-          <button onClick={() => setRows((current) => current
-            .toReversed()
-            .map((row) => row.id === editedId ? { ...row, label: nextLabel } : row)
-            .map((row) => row.id === editedId ? { ...row, rank: nextRank } : row)
-          )}>Reverse and edit</button>
+          <button onClick={() => setRows((current) => {
+            return current
+              .toReversed()
+              .map((row) => row.id === editedId ? { ...row, label: nextLabel } : row)
+              .map((row) => row.id === editedId ? { ...row, rank: nextRank } : row);
+          })}>Reverse and edit</button>
           <ul>{rows.map((row) => <li key={row.id}>{row.label}: {row.rank}</li>)}</ul>
         </section>;
       }
@@ -832,6 +842,47 @@ describe("React AOT keyed-array sort hints", () => {
       expect(result.code).not.toContain("createCompilerKeyedArrayReorder");
     },
   );
+
+  it.each([
+    {
+      name: "a local declaration",
+      update:
+        "{ const nextRows = current.toSorted((left, right) => left.rank - right.rank).toReversed(); return nextRows; }",
+    },
+    {
+      name: "conditional returns",
+      update:
+        "{ if (current.length > 1) return current.toSorted((left, right) => left.rank - right.rank).toReversed(); return current; }",
+    },
+    {
+      name: "no return",
+      update: "{ current.toSorted((left, right) => left.rank - right.rank).toReversed(); }",
+    },
+    {
+      name: "a directive",
+      update:
+        '{ "use strict"; return current.toSorted((left, right) => left.rank - right.rank).toReversed(); }',
+    },
+  ])("keeps an updater block with $name off the reorder-pipeline fast path", async ({ update }) => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Table() {
+        const [rows, setRows] = useState([
+          { id: "a", rank: 2, label: "Alpha" },
+          { id: "b", rank: 1, label: "Beta" },
+        ]);
+        return <section>
+          <button onClick={() => setRows((current) => ${update})}>Reorder</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </section>;
+      }
+    `);
+
+    expect(result.optimizations.keyedArraySortHints).toBe(0);
+    expect(result.optimizations.keyedArrayReorderHints).toBe(0);
+    expect(result.code).not.toContain("createCompilerKeyedArraySort");
+    expect(result.code).not.toContain("createCompilerKeyedArrayReorder");
+  });
 
   it.each([
     {

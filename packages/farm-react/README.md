@@ -544,11 +544,14 @@ runtime skips intermediate DOM states. When the proven chain contains only rever
 their parity relative to the committed rows: an even count validates exact identity and performs
 no DOM moves, source-item map construction, or LIS; an odd count validates exact reverse and uses
 the same minimum `n - 1` moves as one reverse. A chain containing a sort keeps the general final
-permutation and uses LIS once. A single concise updater may also chain two or more native reorder
-operations:
+permutation and uses LIS once. A concise updater or a block containing exactly one direct
+value-returning `return` may also chain two or more native reorder operations:
 
 ```tsx
 setItems((current) => current.toSorted((left, right) => left.rank - right.rank).toReversed());
+setItems((current) => {
+  return current.toSorted((left, right) => left.rank - right.rank).toReversed();
+});
 ```
 
 Farm evaluates every lookup and call in JavaScript order, carries the same committed token through
@@ -558,7 +561,8 @@ statements, directives, conditional returns, or no returned value, custom method
 subclassed behavior, structural calls after reordering, an unhinted intermediate update, nested or
 React-owned rows, and failed checks keep complete keyed reconciliation.
 
-A compiler-safe `filter()` or bounded `slice()` prefix may precede the native reorder suffix:
+A compiler-safe `filter()` or bounded `slice()` prefix may precede the native reorder suffix in a
+concise updater or exact one-return block:
 
 ```tsx
 setItems((current) =>
@@ -570,11 +574,11 @@ setItems((current) =>
 ```
 
 Farm validates the complete survivor set and final order before the first DOM write, removes only
-rejected rows, and applies LIS once to the survivors. Concise filter/slice and reorder setters also
-compose when queued in that order before one flush. Unsupported calls or a structural call after a
-reorder fall back. Reports count each compiled step in the existing filter, slice, sort, or reverse
-counter, and modules without those operations omit their optional runtimes. Farm does not polyfill
-`Array.prototype.toReversed`.
+rejected rows, and applies LIS once to the survivors. Concise or exact one-return filter/slice and
+reorder setters also compose when queued in that order before one flush. Unsupported calls or a
+structural call after a reorder fall back. Reports count each compiled step in the existing filter,
+slice, sort, or reverse counter, and modules without those operations omit their optional runtimes.
+Farm does not polyfill `Array.prototype.toReversed`.
 
 A compiler-safe same-key map may also appear before or after native reorder steps:
 
