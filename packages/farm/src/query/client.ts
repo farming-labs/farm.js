@@ -84,6 +84,16 @@ function getUpdateKey(updates: Record<string, unknown>): string {
   return JSON.stringify(Object.keys(updates).sort());
 }
 
+function supersedeQueuedKeys(updates: Record<string, string | null>): void {
+  const keys = Object.keys(updates);
+  for (const [queueKey, pending] of throttleTimers) {
+    for (const key of keys) delete pending.updates[key];
+    if (Object.keys(pending.updates).length > 0) continue;
+    clearTimeout(pending.timer);
+    throttleTimers.delete(queueKey);
+  }
+}
+
 const compareStructuredValues = (
   current: unknown,
   next: unknown,
@@ -216,30 +226,33 @@ const updateURL = (
   if (typeof window === "undefined") return;
 
   const { throttleMs } = options;
+  // Latest intent owns each key, including immediate writes and URL no-ops.
+  // Keep unrelated keys in an older batch scheduled with their original owner.
+  supersedeQueuedKeys(updates);
   if (!throttleMs || throttleMs <= 0) {
     commitURLUpdate(updates, options, emitUpdate);
     return;
   }
 
   const throttleKey = getUpdateKey(updates);
-  const existingTimeout = throttleTimers.get(throttleKey);
-  if (existingTimeout) {
-    clearTimeout(existingTimeout.timer);
-    throttleTimers.delete(throttleKey);
-  }
 
   const currentUrl = new URL(window.location.href);
   const nextSearch = applyChange(currentUrl.searchParams, updates).toString();
   if (nextSearch === currentUrl.searchParams.toString()) return;
 
+  const queuedUpdates = { ...updates };
   const timeout = setTimeout(() => {
     if (throttleTimers.get(throttleKey)?.timer === timeout) {
       throttleTimers.delete(throttleKey);
     }
-    commitURLUpdate(updates, options, emitUpdate);
+    commitURLUpdate(queuedUpdates, options, emitUpdate);
   }, throttleMs);
 
-  throttleTimers.set(throttleKey, { timer: timeout, updates, href: currentUrl.href });
+  throttleTimers.set(throttleKey, {
+    timer: timeout,
+    updates: queuedUpdates,
+    href: currentUrl.href,
+  });
   return () => {
     if (throttleTimers.get(throttleKey)?.timer !== timeout) return;
     clearTimeout(timeout);
