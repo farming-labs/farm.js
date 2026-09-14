@@ -462,6 +462,12 @@ Older completions do not replace its result or run completion callbacks. `pendin
 tracks whether any submission is still running, so it can remain `true` after the latest one
 succeeds or fails. `useFetcher` follows the same rules.
 
+Mutation `onSuccess`, `onError`, and `onSettled` callbacks are non-awaited observers. A thrown
+error or rejected promise is reported through `reportError` (or `console.error` as a fallback),
+without changing the target result, rolling back a successful mutation, or decrementing pending
+work again. Use the awaited `mutateAsync` result for required follow-up work. If a callback resets
+the hook or submits again, the older submission does not run a stale `onSettled` callback.
+
 `reset()` clears the displayed mutation state; it does not cancel the underlying work. Calls
 started before reset still settle their own promises, but cannot change the new state or run its
 completion callbacks. If you submit again, `pending` counts only calls started after reset.
