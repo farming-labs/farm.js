@@ -12,7 +12,7 @@ import {
 } from "react";
 import { getAPIRouteRefMetadata, isAPIRouteRef } from "./api/client";
 import {
-  useMutation,
+  useMutationLifecycle,
   type AnyMutationTarget,
   type InferMutationData,
   type InferMutationError,
@@ -23,16 +23,44 @@ import {
 
 export type FetcherState = "idle" | "submitting";
 
+/** Local form conversion failed before the target was called. */
+export class FetcherInputError extends Error {
+  readonly name = "FetcherInputError" as const;
+  readonly code = "input_error" as const;
+  readonly status = 0 as const;
+  readonly data = undefined;
+  readonly cause: unknown;
+
+  constructor(cause: unknown) {
+    super(
+      cause instanceof Error
+        ? cause.message
+        : typeof cause === "string"
+          ? cause
+          : "Could not prepare form input",
+    );
+    this.cause = cause;
+  }
+}
+
 export type FetcherFormDataContext = {
   form: HTMLFormElement | null;
   submitter: HTMLElement | null;
 };
 
-export type UseFetcherOptions<TTarget extends AnyMutationTarget> = UseMutationOptions<
-  InferMutationVariables<TTarget>,
-  InferMutationData<TTarget>,
-  InferMutationError<TTarget>
+export type UseFetcherOptions<TTarget extends AnyMutationTarget> = Omit<
+  UseMutationOptions<
+    InferMutationVariables<TTarget>,
+    InferMutationData<TTarget>,
+    InferMutationError<TTarget> | FetcherInputError
+  >,
+  "request"
 > & {
+  request?: UseMutationOptions<
+    InferMutationVariables<TTarget>,
+    InferMutationData<TTarget>,
+    InferMutationError<TTarget>
+  >["request"];
   /**
    * Convert browser FormData into the target's typed variables.
    *
@@ -72,7 +100,7 @@ export type UseFetcherReturn<TTarget extends AnyMutationTarget> = {
   status: MutationStatus;
   pending: boolean;
   data: InferMutationData<TTarget> | null;
-  error: InferMutationError<TTarget> | null;
+  error: InferMutationError<TTarget> | FetcherInputError | null;
   variables: InferMutationVariables<TTarget> | undefined;
   formData: FormData | null;
   submit: FetcherSubmit<TTarget>;
@@ -97,7 +125,10 @@ export function useFetcher<TTarget extends AnyMutationTarget>(
   const optionsRef = useRef(options);
   const submissionIdRef = useRef(0);
   const [formData, setFormData] = useState<FormData | null>(null);
-  const mutation = useMutation(target, options);
+  const { mutation, mutatePreparedAsync } = useMutationLifecycle<
+    TTarget,
+    InferMutationError<TTarget> | FetcherInputError
+  >(target, options);
 
   targetRef.current = target;
   optionsRef.current = options;
@@ -109,17 +140,24 @@ export function useFetcher<TTarget extends AnyMutationTarget>(
       setFormData(submittedFormData);
 
       try {
-        const variables = submittedFormData
-          ? mapFetcherFormData(targetRef.current, submittedFormData, optionsRef.current)
-          : input;
-        return await mutation.mutateAsync(variables as InferMutationVariables<TTarget>);
+        return await mutatePreparedAsync(() => {
+          try {
+            return (
+              submittedFormData
+                ? mapFetcherFormData(targetRef.current, submittedFormData, optionsRef.current)
+                : input
+            ) as InferMutationVariables<TTarget>;
+          } catch (error) {
+            throw new FetcherInputError(error);
+          }
+        });
       } finally {
         if (submissionId === submissionIdRef.current) {
           setFormData(null);
         }
       }
     },
-    [mutation.mutateAsync],
+    [mutatePreparedAsync],
   ) as FetcherSubmitAsync<TTarget>;
 
   const submit = useCallback(

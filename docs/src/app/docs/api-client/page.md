@@ -524,6 +524,19 @@ progressive-enhancement path before JavaScript loads. Generated GET and POST API
 real endpoint URL as their native fallback; a native fallback navigates to the endpoint response,
 while the hydrated fetcher stays on the page.
 
+If `mapFormData` throws, the target and optimistic callback are not called. The fetcher reports
+`status: "error"`, updates `error`, and runs `onError`/`onSettled` with `variables: undefined`.
+This also applies to `<fetcher.Form>` and fire-and-forget `submit`; `submitAsync` rejects with the
+same error. `formData` is cleared when submission finishes. Older work still contributes to
+`pending`, but cannot overwrite this newer error; `reset()` clears it as usual.
+
+Local mapping failures are wrapped in `FetcherInputError` from `@farm.js/core/client`, with
+`code: "input_error"`, `status: 0` (no HTTP response), and the original thrown value in `cause`.
+Its message preserves an original Error message or thrown string. Fetcher error types and
+callbacks include this case alongside the target's existing errors. Narrow with
+`error instanceof FetcherInputError` before handling provider-specific errors. Request-level
+callbacks under `request` still receive only API-client errors, not local mapping failures.
+
 ## Client options
 
 - cache: choose cache-first, network-only, or stale-while-revalidate.

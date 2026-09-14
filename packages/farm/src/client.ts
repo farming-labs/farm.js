@@ -35,7 +35,7 @@ export type {
   UseMutationOptions,
   UseMutationReturn,
 } from "./mutation-client";
-export { useFetcher } from "./fetcher-client";
+export { useFetcher, FetcherInputError } from "./fetcher-client";
 export type {
   FetcherFormDataContext,
   FetcherFormProps,
