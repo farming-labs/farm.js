@@ -76,7 +76,7 @@ it.each([
         if (fails) await expect(result).rejects.toBe(targetError);
         else await expect(result).resolves.toBe("latest");
       });
-      expect({ status: action.status, pending: action.pending, error: action.error }).toEqual({
+      expect({ result: action.result, pending: action.pending, error: action.error }).toEqual({
         pending: true,
         result: fails ? "draft" : "latest",
         error: fails ? targetError : null,
@@ -144,7 +144,7 @@ it.each([
         if (fails) await expect(action()).rejects.toBe(targetError);
         else await expect(action()).resolves.toBe("old");
       });
-      expect(action).toMatchObject({
+      expect({ status: action.status, pending: action.pending, error: action.error }).toEqual({
         status: operation === "reset" ? "idle" : "pending",
         pending: operation === "submit",
         error: null,
