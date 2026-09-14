@@ -10,6 +10,7 @@ import {
   type FormHTMLAttributes,
 } from "react";
 import type { ServerFn } from "./server-fn";
+import { notifyClientObserver } from "./client-observers";
 
 export type ServerFnActionStatus = "idle" | "pending" | "success" | "error";
 
@@ -159,8 +160,14 @@ export function useServerFn<TInput, TResult, TError extends Error = Error>(
         });
 
         if (isLatestRequest) {
-          callbacksRef.current.onSuccess?.(result);
-          callbacksRef.current.onSettled?.(result, null);
+          notifyClientObserver(callbacksRef.current.onSuccess, [result], "Action onSuccess");
+          if (requestId === requestIdRef.current) {
+            notifyClientObserver(
+              callbacksRef.current.onSettled,
+              [result, null],
+              "Action onSettled",
+            );
+          }
         }
 
         return result;
@@ -194,8 +201,10 @@ export function useServerFn<TInput, TResult, TError extends Error = Error>(
         });
 
         if (isLatestRequest) {
-          callbacksRef.current.onError?.(error);
-          callbacksRef.current.onSettled?.(null, error);
+          notifyClientObserver(callbacksRef.current.onError, [error], "Action onError");
+          if (requestId === requestIdRef.current) {
+            notifyClientObserver(callbacksRef.current.onSettled, [null, error], "Action onSettled");
+          }
         }
 
         throw error;
