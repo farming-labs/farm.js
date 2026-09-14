@@ -10,8 +10,6 @@ checks the page after hydration, after Farm client navigation, and after meaning
 The result appears in a compact overlay beside the application instead of being buried across
 different browser panels.
 
-![Farm Hints showing performance, accessibility, and HTML findings on a development route](/hints-overlay.png)
-
 ## Install
 
 ```bash
