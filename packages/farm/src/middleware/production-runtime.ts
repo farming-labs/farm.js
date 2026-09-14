@@ -818,6 +818,10 @@ export function applyProductionMiddlewareHeaders(
       : [];
   for (const [key, value] of middlewareHeaders) {
     if (key.toLowerCase() === "set-cookie") continue;
+    // A returned Response's headers are authoritative and preserved (matching
+    // the dev runtime, where the Response is applied after ctx.headers). ctx
+    // headers only add keys the Response did not already set.
+    if (headers.has(key)) continue;
     headers.set(key, value);
   }
   for (const cookie of setCookies) {

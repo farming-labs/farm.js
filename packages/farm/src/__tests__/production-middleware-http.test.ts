@@ -47,6 +47,22 @@ describe("production middleware HTTP behavior", () => {
     ]);
   });
 
+  it("preserves a returned Response's headers over ctx.headers, adding only new keys", () => {
+    const middlewareHeaders = new Headers({
+      "cache-control": "private",
+      "x-mw": "1",
+    });
+    const response = applyProductionMiddlewareHeaders(
+      new Response("ok", { headers: { "cache-control": "public, max-age=60" } }),
+      middlewareHeaders,
+    );
+    // The returned Response's header is authoritative (matches the dev runtime,
+    // where the Response is applied after ctx.headers); ctx.headers only add
+    // keys the Response did not already set.
+    expect(response.headers.get("cache-control")).toBe("public, max-age=60");
+    expect(response.headers.get("x-mw")).toBe("1");
+  });
+
   it("serves requests with malformed percent-encoded paths instead of throwing", async () => {
     const seen: Array<Record<string, string>> = [];
     const runner = createProductionMiddlewareRunner({
