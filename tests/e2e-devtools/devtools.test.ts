@@ -78,6 +78,11 @@ test("DevTools launcher matches the Hints pill in both themes and on mobile", as
     ),
   ).toBe(false);
   await launcher.focus();
+  // Programmatic focus after a pointer click need not match :focus-visible.
+  // Re-enter with the keyboard to test the actual keyboard-user focus ring.
+  await page.keyboard.press("Shift+Tab");
+  await page.keyboard.press("Tab");
+  await expect(launcher).toBeFocused();
   await expect(launcher).toHaveCSS("outline-style", "solid");
   await launcher.press("Enter");
   await expect(
