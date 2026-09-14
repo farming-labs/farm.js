@@ -1,4 +1,7 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
+import { transformWithEsbuild } from "vite";
 import { compileReactModule } from "../compiler";
 import { normalizeReactCompilerOptions } from "../index";
 
@@ -26,6 +29,68 @@ describe("React AOT keyed-array rolling-window hints", () => {
     expect(result.optimizations.keyedArraySliceHints).toBe(0);
     expect(result.code).toContain("createCompilerKeyedArrayRollingWindow");
     expect(result.code).toContain("createCompilerKeyedArraySlice");
+  });
+
+  it("records a rolling window returned from an exact updater block", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Feed({ trimCount, incoming }) {
+        const [rows, setRows] = useState([{ id: "a", label: "Alpha" }]);
+        return <section>
+          <button onClick={() => setRows((current) => {
+            return [...current.slice(trimCount), ...incoming];
+          })}>Roll</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </section>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Feed"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.optimizations.keyedArrayRollingWindowHints).toBe(1);
+    expect(result.optimizations.keyedArraySliceHints).toBe(0);
+    expect(result.code).toContain("createCompilerKeyedArrayRollingWindow");
+    expect(result.code).toContain("createCompilerKeyedArraySlice");
+    await expect(
+      transformWithEsbuild(result.code, "/app/KeyedArrayRollingWindowHints.tsx", {
+        loader: "tsx",
+        jsx: "automatic",
+      }),
+    ).resolves.toMatchObject({
+      code: expect.stringContaining("createCompilerKeyedArrayRollingWindow"),
+    });
+  });
+
+  it("retains mapped lineage through exact block-bodied rolling setters", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Feed({ first, second, editedId, nextLabel }) {
+        const [rows, setRows] = useState([{ id: "a", label: "Alpha" }]);
+        return <section>
+          <button onClick={() => {
+            setRows((current) => {
+              return [...current.slice(1), first];
+            });
+            setRows((current) => current.map((row) =>
+              row.id === editedId ? { ...row, label: nextLabel } : row
+            ));
+            setRows((current) => {
+              return [...current.slice(1), second];
+            });
+          }}>Roll twice</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </section>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Feed"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.optimizations.keyedArrayRollingWindowHints).toBe(2);
+    expect(result.optimizations.keyedArrayMappedRollingWindowChainHints).toBe(2);
+    expect(result.optimizations.keyedMapUpdateHints).toBe(1);
+    expect(result.code).toContain("createCompilerKeyedArrayRollingWindowMapPipeline");
+    expect(result.code).toContain("createCompilerKeyedArrayMappedRollingWindow");
+    expect(result.code).toContain("keyedRowsMappedRollingWindowHintedRuntimeFeature");
   });
 
   it("supports a negative retained-tail bound and multiple incoming values", async () => {
@@ -69,7 +134,7 @@ describe("React AOT keyed-array rolling-window hints", () => {
     expect(result.code).toContain("trimCount");
   });
 
-  it("retains same-key maps on both sides of one rolling-window setter", async () => {
+  it("retains same-key maps around one exact block-bodied rolling setter", async () => {
     const result = await compile(`
       import { useState } from "react";
       export function Feed({ next, editedId, nextLabel }) {
@@ -79,7 +144,9 @@ describe("React AOT keyed-array rolling-window hints", () => {
             setRows((current) => current.map((row) =>
               row.id === editedId ? { ...row, label: nextLabel } : row
             ));
-            setRows((current) => [...current.slice(1), next]);
+            setRows((current) => {
+              return [...current.slice(1), next];
+            });
             setRows((current) => current.map((row) =>
               row.id === next.id ? { ...row, selected: true } : row
             ));
@@ -355,9 +422,24 @@ describe("React AOT keyed-array rolling-window hints", () => {
       update: "[...current.slice(1, -1), next]",
     },
     {
-      name: "a block-bodied updater",
+      name: "an updater block with a local declaration",
       row: "row => <li key={row.id}>{row.label}</li>",
-      update: "{ return [...current.slice(1), next]; }",
+      update: "{ const nextRows = [...current.slice(1), next]; return nextRows; }",
+    },
+    {
+      name: "an updater block with conditional returns",
+      row: "row => <li key={row.id}>{row.label}</li>",
+      update: "{ if (offset > 1) return [...current.slice(offset), next]; return current; }",
+    },
+    {
+      name: "an updater block without a return",
+      row: "row => <li key={row.id}>{row.label}</li>",
+      update: "{ [...current.slice(1), next]; }",
+    },
+    {
+      name: "an updater block with a directive",
+      row: "row => <li key={row.id}>{row.label}</li>",
+      update: '{ "use strict"; return [...current.slice(1), next]; }',
     },
     {
       name: "an unsafe incoming call",

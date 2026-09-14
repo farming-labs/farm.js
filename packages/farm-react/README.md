@@ -408,6 +408,9 @@ setItems((current) => [...current.slice(1_000), ...nextItems]);
 
 const trimCount = pageSize * pagesToExpire;
 setItems((current) => [...current.slice(trimCount), ...nextItems]);
+setItems((current) => {
+  return [...current.slice(trimCount), ...nextItems];
+});
 ```
 
 Farm executes the ordinary native slice and array construction, then validates the complete hint
@@ -415,10 +418,11 @@ chain back to the committed source, retained item identities, and final incoming
 rolling setters queued before one compiler flush collapse into one cumulative prefix removal; rows
 introduced by an earlier setter are created only if they remain in the final suffix. Farm removes
 only the expired committed prefix, leaves the retained DOM rows in place, and creates only that
-final incoming suffix. This form supports one
-safe-integer literal or compiler-safe runtime slice bound and compiler-owned, index-independent
-host rows. Identifiers, property reads, side-effect-free arithmetic and conditionals, and safe
-`Math` calls are supported while preserving native lookup, evaluation, results, and errors.
+final incoming suffix. The setter may be concise or use a block containing exactly one direct
+value-returning `return`. This form supports one safe-integer literal or compiler-safe runtime slice
+bound and compiler-owned, index-independent host rows. Identifiers, property reads,
+side-effect-free arithmetic and conditionals, and safe `Math` calls are supported while preserving
+native lookup, evaluation, results, and errors.
 
 Immediately adjacent safe same-key maps may run before, after, or between one or more rolling
 setters in the same synchronous setter segment:
@@ -444,13 +448,14 @@ setter uses the optional structural append/map runtime. Multiple rolling setters
 cumulative retained-window metadata and mapped provenance through an optional runtime dedicated to
 mapped rolling chains. No new public helper, option, or always-loaded browser code is added.
 
-Effectful expressions, reused keys, block-bodied updaters, custom slice behavior,
-collection-reading or index-aware rows, nested or React-owned rows, mixed or unhinted queued chains,
-a statement or unsupported setter inside the segment, changed mapped keys, unsafe or no-op
-evaluated bounds, and failed checks use complete keyed reconciliation. Unmapped rolling modules
-retain the smaller optional all-hint runtime. Reports expose each emitted rolling site as
-`keyedArrayRollingWindowHints`, each rolling step retained across a multi-window mapped chain as
-`keyedArrayMappedRollingWindowChainHints`, and each safe map as `keyedMapUpdateHints`.
+Effectful expressions, reused keys, updater blocks with extra statements, directives, conditional
+returns, or no value-returning `return`, custom slice behavior, collection-reading or index-aware
+rows, nested or React-owned rows, mixed or unhinted queued chains, a statement or unsupported setter
+inside the segment, changed mapped keys, unsafe or no-op evaluated bounds, and failed checks use
+complete keyed reconciliation. Unmapped rolling modules retain the smaller optional all-hint
+runtime. Reports expose each emitted rolling site as `keyedArrayRollingWindowHints`, each rolling
+step retained across a multi-window mapped chain as `keyedArrayMappedRollingWindowChainHints`, and
+each safe map as `keyedMapUpdateHints`.
 
 Native known-position updates can avoid a complete keyed scan too:
 

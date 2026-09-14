@@ -1173,15 +1173,19 @@ setItems((current) => [...current.slice(1_000), ...nextItems]);
 
 const trimCount = pageSize * pagesToExpire;
 setItems((current) => [...current.slice(trimCount), ...nextItems]);
+setItems((current) => {
+  return [...current.slice(trimCount), ...nextItems];
+});
 ```
 
-At build time, Farm recognizes a concise functional setter whose first array entry spreads a
-direct native `current.slice(bound)` and whose remaining entries are compiler-safe incoming values.
-The single bound may be a safe-integer literal or a compiler-safe runtime expression: identifiers,
-property reads, side-effect-free arithmetic and conditionals, and safe `Math` calls are supported.
-The application still performs the same slice and array construction. Farm preserves method lookup
-and argument evaluation order, evaluates the bound once, and records only metadata that connects
-the final array to its committed source and retained interval.
+At build time, Farm recognizes a concise functional setter or a setter block containing exactly one
+direct value-returning `return`. The first array entry must spread a direct native
+`current.slice(bound)`, and the remaining entries must be compiler-safe incoming values. The single
+bound may be a safe-integer literal or a compiler-safe runtime expression: identifiers, property
+reads, side-effect-free arithmetic and conditionals, and safe `Math` calls are supported. The
+application still performs the same slice and array construction. Farm preserves method lookup and
+argument evaluation order, evaluates the bound once, and records only metadata that connects the
+final array to its committed source and retained interval.
 
 At update time, Farm validates native arrays, the complete metadata chain back to the committed
 source token, the exact retained tail, every retained item identity, and every final incoming key
@@ -1220,13 +1224,14 @@ configuration, or always-loaded browser feature.
 
 The proof remains intentionally narrow: one compiler-safe slice bound, compiler-owned host rows,
 and index-independent render and key callbacks. A second slice bound, literal zero, effectful bound
-expressions, block-bodied updates, custom slice behavior, sparse or subclassed arrays, queued
-chains containing a mixed or unhinted intermediate update, collection-reading bindings, index-aware
-rows, React-owned rows, nested host blocks, row conditionals, a statement or unsupported setter
-inside the segment, unrelated dirty dependencies, changed mapped keys, and failed runtime
-validation all keep complete keyed reconciliation. Runtime bounds that evaluate to a fractional,
-non-numeric, unsafe, or no-op value preserve native results and use that fallback. No new component
-or option is required. Reports expose each emitted rolling site as
+expressions, updater blocks with extra statements, directives, conditional returns, or no
+value-returning `return`, custom slice behavior, sparse or subclassed arrays, queued chains
+containing a mixed or unhinted intermediate update, collection-reading bindings, index-aware rows,
+React-owned rows, nested host blocks, row conditionals, a statement or unsupported setter inside
+the segment, unrelated dirty dependencies, changed mapped keys, and failed runtime validation all
+keep complete keyed reconciliation. Runtime bounds that evaluate to a fractional, non-numeric,
+unsafe, or no-op value preserve native results and use that fallback. No new component or option is
+required. Reports expose each emitted rolling site as
 `keyedArrayRollingWindowHints`, each rolling step retained across a multi-window mapped chain as
 `keyedArrayMappedRollingWindowChainHints`, and each safe map as `keyedMapUpdateHints`; unmapped
 rolling modules retain the smaller optional all-hint runtime.

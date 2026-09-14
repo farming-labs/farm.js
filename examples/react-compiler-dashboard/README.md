@@ -144,30 +144,32 @@ must remain at least 3x faster than React while trimming 10,000- and 21,000-row 
 descriptor, and binding reads, preserve surviving DOM identity, and cover safe and effectful bound
 expressions plus unsafe evaluated-bound fallback.
 
-Rolling windows have separate single-update and queued 10,000-row persistence gates. A concise
-`[...current.slice(trimCount), ...incoming]` update uses an event-local runtime bound; the queued
-case applies two 500-row rolls before one commit. Both are measured against bracketed React and
-equivalent block-bodied compiled controls. Both compiler modes must remain at least 2x faster than
-React and 1.25x faster than their compiled controls. The report must contain a nonzero
-`keyedArrayRollingWindowHints` count; package tests separately require retained DOM identity, work
-proportional only to the final incoming suffix, randomized dynamic and queued updates, and complete
-fallback for unsafe evaluated bounds or broken chains.
+Rolling windows have separate single-update and queued 10,000-row persistence gates. A
+single-return block-bodied `[...current.slice(trimCount), ...incoming]` update uses an event-local
+runtime bound; the queued case applies two 500-row rolls before one commit. Both are measured
+against bracketed React and compiled snapshot controls whose updater blocks add a local
+declaration. Both compiler modes must remain at least 2x faster than React and 1.25x faster than
+their compiled controls. The report must contain all six dashboard `keyedArrayRollingWindowHints`
+sites; package tests separately require retained DOM identity, work proportional only to the final
+incoming suffix, randomized dynamic and queued updates, and complete fallback for unsafe evaluated
+bounds or broken chains.
 
 Mapped rolling windows have another independent 10,000-row gate. The workload updates retained
 row data, expires a 1,000-row prefix while appending 1,000 rows, and applies a second same-key map
-before the commit. The concise path is measured against React and an equivalent compiled control
-whose block-bodied rolling setter intentionally breaks lineage. Both compiler modes must remain at
-least 2x faster than React and 1.25x faster than that control. Every sample verifies the retained
-DOM identity, mapped value, exact row count, fresh suffix, and zero compiled owner executions.
+before the commit. Its single-return block-bodied rolling setter is measured against React and a
+compiled snapshot control whose updater block adds a local declaration. Both compiler modes must
+remain at least 2x faster than React and 1.25x faster than that control. Every sample verifies the
+retained DOM identity, mapped value, exact row count, fresh suffix, and zero compiled owner
+executions.
 
 Mapped rolling-window chains have a separate gate so the single-window result cannot hide a chain
 regression. The 10,000-row workload runs one structured, fully returning `switch` map from a
-single-return block-bodied setter, with safe local `const` aliases and two grouped case labels between
-two queued 50-row rolls. Its control uses unsupported block-bodied rolling setters, so it performs
-the same native work without retaining compiler lineage. Both compiler modes must remain at least 2x
-faster than React and 1.25x faster than that control, and the compiler report must contain both mapped
-rolling-chain steps. Every sample verifies both retained identities and mapped values plus the final
-incoming suffix.
+single-return block-bodied setter, with safe local `const` aliases and two grouped case labels
+between two queued single-return block-bodied 50-row rolls. Its rolling controls add local
+declarations, so they perform the same native work without retaining compiler lineage. Both
+compiler modes must remain at least 2x faster than React and 1.25x faster than that control, and the
+compiler report must contain both mapped rolling-chain steps. Every sample verifies both retained
+identities and mapped values plus the final incoming suffix.
 
 Exact-position insertions, removals, and replacements have separate 10,000-row comparisons.
 Single-return block-bodied native `toSpliced(position, 0, item)`,

@@ -239,7 +239,9 @@ export function StandardTableBenchmark() {
             const additions = buildRows(1_000, nextSeed);
             const trimCount = 1_000;
             setSeed(nextSeed);
-            setRows((current) => [...current.slice(trimCount), ...additions]);
+            setRows((current) => {
+              return [...current.slice(trimCount), ...additions];
+            });
             setOperation("roll runtime-count window");
             setRevision((value) => value + 1);
           }}
@@ -255,7 +257,8 @@ export function StandardTableBenchmark() {
             const trimCount = 1_000;
             setSeed(nextSeed);
             setRows((current) => {
-              return [...current.slice(trimCount), ...additions];
+              const nextRows = [...current.slice(trimCount), ...additions];
+              return nextRows;
             });
             setOperation("roll runtime-count window (snapshot control)");
             setRevision((value) => value + 1);
@@ -278,7 +281,9 @@ export function StandardTableBenchmark() {
                   : row,
               ),
             );
-            setRows((current) => [...current.slice(trimCount), ...additions]);
+            setRows((current) => {
+              return [...current.slice(trimCount), ...additions];
+            });
             setRows((current) =>
               current.map((row) =>
                 row.id % 1_000 === 1 ? { ...row, amount: row.amount + 1 } : row,
@@ -306,7 +311,8 @@ export function StandardTableBenchmark() {
               ),
             );
             setRows((current) => {
-              return [...current.slice(trimCount), ...additions];
+              const nextRows = [...current.slice(trimCount), ...additions];
+              return nextRows;
             });
             setRows((current) =>
               current.map((row) =>
@@ -332,7 +338,9 @@ export function StandardTableBenchmark() {
             const secondaryReviewedId = rows[102].id;
             const trimCount = 50;
             setSeed(secondSeed);
-            setRows((current) => [...current.slice(trimCount), ...firstAdditions]);
+            setRows((current) => {
+              return [...current.slice(trimCount), ...firstAdditions];
+            });
             setRows((current) => {
               return current.map((row) => {
                 const target = row.id;
@@ -349,7 +357,9 @@ export function StandardTableBenchmark() {
                 }
               });
             });
-            setRows((current) => [...current.slice(trimCount), ...secondAdditions]);
+            setRows((current) => {
+              return [...current.slice(trimCount), ...secondAdditions];
+            });
             setOperation("map through two queued rolling windows");
             setRevision((value) => value + 1);
           }}
@@ -370,7 +380,8 @@ export function StandardTableBenchmark() {
             const trimCount = 50;
             setSeed(secondSeed);
             setRows((current) => {
-              return [...current.slice(trimCount), ...firstAdditions];
+              const nextRows = [...current.slice(trimCount), ...firstAdditions];
+              return nextRows;
             });
             setRows((current) =>
               current.map((row) =>
@@ -382,7 +393,8 @@ export function StandardTableBenchmark() {
               ),
             );
             setRows((current) => {
-              return [...current.slice(trimCount), ...secondAdditions];
+              const nextRows = [...current.slice(trimCount), ...secondAdditions];
+              return nextRows;
             });
             setOperation("map through two rolling windows (snapshot control)");
             setRevision((value) => value + 1);
@@ -400,8 +412,12 @@ export function StandardTableBenchmark() {
             const secondAdditions = buildRows(500, secondSeed);
             const trimCount = 500;
             setSeed(secondSeed);
-            setRows((current) => [...current.slice(trimCount), ...firstAdditions]);
-            setRows((current) => [...current.slice(trimCount), ...secondAdditions]);
+            setRows((current) => {
+              return [...current.slice(trimCount), ...firstAdditions];
+            });
+            setRows((current) => {
+              return [...current.slice(trimCount), ...secondAdditions];
+            });
             setOperation("roll two queued runtime-count windows");
             setRevision((value) => value + 1);
           }}
@@ -419,10 +435,12 @@ export function StandardTableBenchmark() {
             const trimCount = 500;
             setSeed(secondSeed);
             setRows((current) => {
-              return [...current.slice(trimCount), ...firstAdditions];
+              const nextRows = [...current.slice(trimCount), ...firstAdditions];
+              return nextRows;
             });
             setRows((current) => {
-              return [...current.slice(trimCount), ...secondAdditions];
+              const nextRows = [...current.slice(trimCount), ...secondAdditions];
+              return nextRows;
             });
             setOperation("roll two queued runtime-count windows (snapshot control)");
             setRevision((value) => value + 1);

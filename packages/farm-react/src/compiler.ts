@@ -1731,14 +1731,20 @@ function rewriteKeyedArrayRollingWindowHints(
         updater.async ||
         updater.generator ||
         updater.params.length !== 1 ||
-        !t.isIdentifier(updater.params[0]) ||
-        !t.isArrayExpression(updater.body) ||
-        updater.body.elements.length < 2 ||
-        updater.body.elements.some((element) => element === null)
+        !t.isIdentifier(updater.params[0])
       ) {
         return;
       }
-      const retainedSpread = updater.body.elements[0];
+      const updateExpression = returnedExpression(updater);
+      if (
+        (t.isBlockStatement(updater.body) && updater.body.directives.length > 0) ||
+        !t.isArrayExpression(updateExpression) ||
+        updateExpression.elements.length < 2 ||
+        updateExpression.elements.some((element) => element === null)
+      ) {
+        return;
+      }
+      const retainedSpread = updateExpression.elements[0];
       if (
         !t.isSpreadElement(retainedSpread) ||
         !t.isCallExpression(retainedSpread.argument) ||
@@ -1785,7 +1791,7 @@ function rewriteKeyedArrayRollingWindowHints(
         return validateDerivedExpression(value, safeGlobals) === undefined;
       };
       if (
-        updater.body.elements.slice(1).some((element) => {
+        updateExpression.elements.slice(1).some((element) => {
           if (!element || t.isJSXNamespacedName(element) || t.isArgumentPlaceholder(element)) {
             return true;
           }
@@ -1799,7 +1805,7 @@ function rewriteKeyedArrayRollingWindowHints(
       const sliceMethod = path.scope.generateUidIdentifier("farmSlice");
       const retained = path.scope.generateUidIdentifier("farmRetainedItems");
       const nextValue = path.scope.generateUidIdentifier("farmNextItems");
-      const nextElements = t.cloneNode(updater.body, true).elements;
+      const nextElements = t.cloneNode(updateExpression, true).elements;
       nextElements[0] = t.spreadElement(t.cloneNode(retained));
       path.node.arguments[0] = t.arrowFunctionExpression(
         [t.cloneNode(previous)],
