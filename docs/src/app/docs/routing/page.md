@@ -438,6 +438,13 @@ const publish = useAction(ProductRoute.actions.publish);
 const result = await publish({ id: "p1" });
 ```
 
+For both `useAction` and `useServerFn`, `pending` means at least one submission since the last
+reset is still running. `status`, `result` / `data`, and `error` describe the latest submission.
+If that submission finishes before an older one, its status becomes `success` or `error` while
+`pending` remains `true`. Finishing older work only reduces the pending count; it cannot replace
+the latest result, error, or status. A new submission sets status back to `pending`, and `reset()`
+returns it to `idle`.
+
 The same wrapper supports progressive forms. The form performs a native server action before
 hydration and uses the tracked RPC lifecycle after hydration:
 

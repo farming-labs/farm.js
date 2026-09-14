@@ -146,13 +146,12 @@ export function useServerFn<TInput, TResult, TError extends Error = Error>(
             return {
               ...current,
               pendingCount,
-              status: pendingCount > 0 ? "pending" : current.status,
             };
           }
 
           return {
             pendingCount,
-            status: pendingCount > 0 ? "pending" : "success",
+            status: "success",
             result,
             error: null,
           };
@@ -176,13 +175,12 @@ export function useServerFn<TInput, TResult, TError extends Error = Error>(
             return {
               ...current,
               pendingCount,
-              status: pendingCount > 0 ? "pending" : current.status,
             };
           }
 
           return {
             pendingCount,
-            status: pendingCount > 0 ? "pending" : "error",
+            status: "error",
             result:
               hasOptimisticResult && options.rollbackOnError
                 ? previousResult
