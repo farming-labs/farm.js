@@ -240,19 +240,14 @@ const updateURL = (
   const nextSearch = applyChange(currentUrl.searchParams, updates).toString();
   if (nextSearch === currentUrl.searchParams.toString()) return;
 
-  const queuedUpdates = { ...updates };
   const timeout = setTimeout(() => {
     if (throttleTimers.get(throttleKey)?.timer === timeout) {
       throttleTimers.delete(throttleKey);
     }
-    commitURLUpdate(queuedUpdates, options, emitUpdate);
+    commitURLUpdate(updates, options, emitUpdate);
   }, throttleMs);
 
-  throttleTimers.set(throttleKey, {
-    timer: timeout,
-    updates: queuedUpdates,
-    href: currentUrl.href,
-  });
+  throttleTimers.set(throttleKey, { timer: timeout, updates, href: currentUrl.href });
   return () => {
     if (throttleTimers.get(throttleKey)?.timer !== timeout) return;
     clearTimeout(timeout);
