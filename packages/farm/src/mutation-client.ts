@@ -99,9 +99,24 @@ export function useMutation<TTarget extends AnyMutationTarget>(
     MutationError<TTarget>
   > = {},
 ): UseMutationReturn<TTarget> {
+  return useMutationLifecycle(target, options).mutation;
+}
+
+/** Internal shared lifecycle: fetchers prepare form input before dispatch. */
+export function useMutationLifecycle<
+  TTarget extends AnyMutationTarget,
+  TError = MutationError<TTarget>,
+>(
+  target: TTarget,
+  options: Omit<
+    UseMutationOptions<MutationInput<TTarget>, MutationData<TTarget>, TError>,
+    "request"
+  > & {
+    request?: ClientOptions<MutationData<TTarget>, MutationError<TTarget>>;
+  } = {},
+) {
   type TVariables = MutationInput<TTarget>;
   type TData = MutationData<TTarget>;
-  type TError = MutationError<TTarget>;
 
   const initialData = options.initialData ?? null;
   const optionsRef = useRef(options);
@@ -138,30 +153,45 @@ export function useMutation<TTarget extends AnyMutationTarget>(
     [],
   );
 
-  const mutateAsync = useCallback(
-    async (variables?: TVariables) => {
+  const mutatePreparedAsync = useCallback(
+    async (prepare: () => TVariables | undefined) => {
       const requestId = ++requestIdRef.current;
       const currentOptions = optionsRef.current;
       const previousData = stateRef.current.data;
-      const optimisticData = currentOptions.optimistic?.({
-        variables,
-        current: previousData,
-      });
+      let variables: TVariables | undefined;
+      let preparationFailed = false;
+      let preparationError: unknown;
+      try {
+        variables = prepare();
+      } catch (error) {
+        preparationFailed = true;
+        preparationError = error;
+      }
+      const optimisticData = preparationFailed
+        ? undefined
+        : currentOptions.optimistic?.({ variables, current: previousData });
       const hasOptimisticData = optimisticData !== undefined;
 
-      setMutationState((current) => ({
-        pendingCount: current.pendingCount + 1,
-        status: "pending",
-        data: hasOptimisticData
-          ? optimisticData
-          : currentOptions.resetOnMutate === false
-            ? current.data
-            : null,
-        error: null,
-        variables,
-      }));
+      setMutationState((current) => {
+        // Preparation is app code and may reset or submit again synchronously.
+        if (requestId < lastResetIdRef.current) return current;
+        const pendingCount = current.pendingCount + 1;
+        if (requestId !== requestIdRef.current) return { ...current, pendingCount };
+        return {
+          pendingCount,
+          status: "pending",
+          data: hasOptimisticData
+            ? optimisticData
+            : currentOptions.resetOnMutate === false
+              ? current.data
+              : null,
+          error: null,
+          variables,
+        };
+      });
 
       try {
+        if (preparationFailed) throw preparationError;
         const mutationTarget = targetRef.current;
         const rawResult = isAPIRouteRef(mutationTarget)
           ? await mutationTarget(variables, currentOptions.request)
@@ -243,6 +273,11 @@ export function useMutation<TTarget extends AnyMutationTarget>(
       }
     },
     [setMutationState],
+  );
+
+  const mutateAsync = useCallback(
+    (variables?: TVariables) => mutatePreparedAsync(() => variables),
+    [mutatePreparedAsync],
   ) as MutationAsync<TTarget, TData>;
 
   const mutate = useCallback(
@@ -264,7 +299,7 @@ export function useMutation<TTarget extends AnyMutationTarget>(
     });
   }, [setMutationState]);
 
-  return useMemo(
+  const mutation: UseMutationReturn<TTarget, TData, TError> = useMemo(
     () => ({
       pending: state.pendingCount > 0,
       status: state.status,
@@ -286,6 +321,7 @@ export function useMutation<TTarget extends AnyMutationTarget>(
       state.variables,
     ],
   );
+  return { mutation, mutatePreparedAsync };
 }
 
 function unwrapMutationResult<TData, TError>(result: unknown, apiRoute: boolean): TData {

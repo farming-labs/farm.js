@@ -953,11 +953,13 @@ declare module "@farm.js/core/client" {
     ? TData
     : Awaited<ReturnType<TTarget>>;
 
-  export type InferMutationError<TTarget extends AnyMutationTarget> = TTarget extends (
-    ...args: any[]
-  ) => Promise<APIResult<any, infer TError>>
+  export type InferMutationError<TTarget extends AnyMutationTarget> = TTarget extends {
+    readonly __farmServerFnError: infer TError;
+  }
     ? TError
-    : Error;
+    : TTarget extends (...args: any[]) => Promise<APIResult<any, infer TError>>
+      ? TError
+      : Error;
 
   export type MutationOptimisticContext<TVariables, TData> = {
     variables: TVariables | undefined;
@@ -1017,16 +1019,33 @@ declare module "@farm.js/core/client" {
 
   export type FetcherState = "idle" | "submitting";
 
+  export class FetcherInputError extends Error {
+    readonly name: "FetcherInputError";
+    readonly code: "input_error";
+    readonly status: 0;
+    readonly data: undefined;
+    readonly cause: unknown;
+    constructor(cause: unknown);
+  }
+
   export type FetcherFormDataContext = {
     form: HTMLFormElement | null;
     submitter: HTMLElement | null;
   };
 
-  export type UseFetcherOptions<TTarget extends AnyMutationTarget> = UseMutationOptions<
-    InferMutationVariables<TTarget>,
-    InferMutationData<TTarget>,
-    InferMutationError<TTarget>
+  export type UseFetcherOptions<TTarget extends AnyMutationTarget> = Omit<
+    UseMutationOptions<
+      InferMutationVariables<TTarget>,
+      InferMutationData<TTarget>,
+      InferMutationError<TTarget> | FetcherInputError
+    >,
+    "request"
   > & {
+    request?: UseMutationOptions<
+      InferMutationVariables<TTarget>,
+      InferMutationData<TTarget>,
+      InferMutationError<TTarget>
+    >["request"];
     mapFormData?: (
       formData: FormData,
       context: FetcherFormDataContext,
@@ -1058,7 +1077,7 @@ declare module "@farm.js/core/client" {
     status: MutationStatus;
     pending: boolean;
     data: InferMutationData<TTarget> | null;
-    error: InferMutationError<TTarget> | null;
+    error: InferMutationError<TTarget> | FetcherInputError | null;
     variables: InferMutationVariables<TTarget> | undefined;
     formData: FormData | null;
     submit: FetcherSubmit<TTarget>;
