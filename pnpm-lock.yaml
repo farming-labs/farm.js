@@ -640,6 +640,9 @@ importers:
       '@farm.js/core':
         specifier: workspace:*
         version: link:../../packages/farm
+      '@farm.js/devtools':
+        specifier: workspace:*
+        version: link:../../packages/farm-devtools
       '@farm.js/hints':
         specifier: workspace:*
         version: link:../../packages/farm-hints
@@ -2190,6 +2193,40 @@ importers:
         version: 5.9.3
       vite:
         specifier: 5.4.20
+        version: 5.4.20(@types/node@20.19.21)
+      vitest:
+        specifier: ^3.2.7
+        version: 3.2.7(@types/node@20.19.21)(jsdom@25.0.1)(supports-color@10.2.2)
+
+  packages/farm-devtools:
+    dependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
+      '@fontsource-variable/geist-mono':
+        specifier: 5.3.0
+        version: 5.3.0
+    devDependencies:
+      '@fontsource-variable/geist':
+        specifier: 5.3.0
+        version: 5.3.0
+      '@types/node':
+        specifier: ^20.10.5
+        version: 20.19.21
+      esbuild:
+        specifier: ^0.28.0
+        version: 0.28.1
+      jsdom:
+        specifier: ^25.0.0
+        version: 25.0.1(supports-color@10.2.2)
+      sugar-high:
+        specifier: 0.9.5
+        version: 0.9.5
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+      vite:
+        specifier: ^5.0.10
         version: 5.4.20(@types/node@20.19.21)
       vitest:
         specifier: ^3.2.7
@@ -6146,7 +6183,6 @@ packages:
 
   /@fontsource-variable/geist@5.3.0:
     resolution: {integrity: sha512-j0m+vLQuG5XAYoHtGCVu0spvlGreR3EzpECUVzkFmI1mTVnAO38l/NEPDCFgZ177JxzYJCLSmTQibIiYPilGrA==}
-    dev: false
 
   /@formatjs/fast-memoize@3.1.7:
     resolution: {integrity: sha512-zXfhLpvA6T7+efdt9JLbBwZ00tT7NsBMDVnDu8rpHeNNv8KfRZAMo2gkG0k9lK/Nzc//3kJ9pImsfuJxk3KhUA==}
@@ -19462,7 +19498,6 @@ packages:
 
   /sugar-high@0.9.5:
     resolution: {integrity: sha512-eirwp9p7QcMg6EFCD6zrGh4H30uFx2YtfiMJUavagceP6/YUUjLeiQmis7QuwqKB3nXrWXlLaRumCqOd9AKpSA==}
-    dev: false
 
   /supports-color@10.2.2:
     resolution: {integrity: sha512-SS+jx45GF1QjgEXQx4NJZV9ImqmO2NPz5FNsIHrsDjh2YsHnawpan7SNQ1o8NuhrbHZy9AZhIoCUiCeaW/C80g==}

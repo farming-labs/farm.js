@@ -36,6 +36,10 @@ describe("Farm Hints overlay", () => {
     expect(shadow?.querySelector(".issue-copy strong")?.textContent).toContain("accessible name");
     expect(shadow?.querySelector("style")?.textContent).toContain('"Geist Mono Variable"');
     expect(shadow?.querySelector("style")?.textContent).toContain("letter-spacing: 0");
+    expect(shadow?.querySelector(".brand-name")?.textContent).toBe("FARM.JS");
+    expect(shadow?.querySelector(".brand strong")?.textContent).toBe("Hints");
+    expect(shadow?.querySelector(".brand-logo")?.getAttribute("viewBox")).toBe("125 68 161 152");
+    expect(shadow?.querySelectorAll(".brand-logo path")).toHaveLength(6);
 
     shadow?.querySelector<HTMLButtonElement>("[data-filter=performance]")?.click();
     expect(shadow?.querySelector("[data-empty]")?.textContent).toBe("No hints in this group.");

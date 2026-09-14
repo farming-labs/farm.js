@@ -23,24 +23,20 @@ a {
 
 .shell {
   min-height: 100vh;
-  padding: clamp(32px, 7vw, 92px);
-  background-image:
-    linear-gradient(rgb(23 23 19 / 5%) 1px, transparent 1px),
-    linear-gradient(90deg, rgb(23 23 19 / 5%) 1px, transparent 1px);
-  background-size: 32px 32px;
+  padding: clamp(24px, 5vw, 64px);
 }
 
 .page-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.65fr);
-  gap: clamp(34px, 7vw, 96px);
+  grid-template-columns: minmax(0, 620px);
+  gap: 32px;
   width: min(1100px, 100%);
   margin-inline: auto;
 }
 
 .hero {
   align-self: center;
-  padding-block: clamp(20px, 8vh, 90px);
+  padding-block: 16px;
 }
 
 .eyebrow,
@@ -53,18 +49,20 @@ a {
 }
 
 h1 {
-  max-width: 720px;
-  margin: 16px 0 24px;
-  font-size: clamp(3.4rem, 8vw, 7.8rem);
-  line-height: 0.88;
-  letter-spacing: -0.075em;
+  max-width: 20ch;
+  margin: 12px 0 16px;
+  font-size: clamp(2rem, 3.5vw, 2.75rem);
+  font-weight: 600;
+  line-height: 1.16;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
 }
 
 .intro {
-  max-width: 620px;
+  max-width: 520px;
   margin: 0;
   color: #64645d;
-  font-size: clamp(1rem, 2vw, 1.18rem);
+  font-size: 1rem;
   line-height: 1.65;
 }
 
@@ -160,17 +158,16 @@ h1 {
   line-height: 1.65;
 }
 
-@media (max-width: 800px) {
+@media (min-width: 900px) {
+  /* Keep the desktop demo content clear of the default Hints overlay. */
   .page-grid {
-    grid-template-columns: 1fr;
+    padding-inline-end: 400px;
   }
+}
 
+@media (max-width: 800px) {
   .hero {
-    padding-bottom: 0;
-  }
-
-  h1 {
-    font-size: clamp(3.1rem, 17vw, 6rem);
+    padding-block: 0;
   }
 }
 
@@ -180,10 +177,10 @@ h1 {
     background: #171715;
   }
 
-  .shell {
-    background-image:
-      linear-gradient(rgb(238 238 234 / 6%) 1px, transparent 1px),
-      linear-gradient(90deg, rgb(238 238 234 / 6%) 1px, transparent 1px);
+  .eyebrow,
+  .note > span,
+  .nested-control a {
+    color: #d78e80;
   }
 
   .intro,
