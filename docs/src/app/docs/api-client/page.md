@@ -868,6 +868,14 @@ submissions still resolve or reject, but their completions no longer change hook
 completion callbacks. Requests started after the reset have their own pending count, so older
 work cannot clear their pending state.
 
+The `onSuccess`, `onError`, and `onSettled` options on these hooks are notification callbacks.
+Thrown errors and rejected promises from them are reported through `reportError`, or the console
+when unavailable, without replacing the server result/error or changing the pending count.
+Callbacks are not awaited; put required work in the server function or explicitly await it after
+the call. If `onSuccess` or `onError` synchronously resets the hook or starts another submission,
+the superseded submission's `onSettled` callback is skipped. `throwOnFormError` still controls
+whether `formAction` rethrows the server error, not a notification error.
+
 **src/actions/todos.ts**
 
 ```ts
