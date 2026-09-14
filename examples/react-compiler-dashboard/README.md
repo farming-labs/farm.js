@@ -249,6 +249,12 @@ tests compare 1,000 deterministic queued updates with React and cover disjoint w
 last-update-wins semantics, atomic preparation, overlapping structural fallback, controlled-input selection,
 events, Strict Mode hydration, and cleanup.
 
+Source-level tests also read the actual queued-refresh buttons and require two position hints for
+the optimized handler and none for its snapshot control in both compiler modes. They compare both
+native handlers across repeated 10,000-row updates, including row values and object identity.
+The browser timing includes DOM snapshot preparation and completion checks, not just the update
+itself. Isolated timing diagnostics do not replace the full benchmark or its performance gates.
+
 Queued fresh-key exact-window replacement has a separate 10,000-row gate. One event replaces two
 overlapping 32-row windows with globally new final keys; their 16-row overlap leaves one 48-row
 final union. The benchmark requires the 48 old rows to disconnect, both surrounding anchors to

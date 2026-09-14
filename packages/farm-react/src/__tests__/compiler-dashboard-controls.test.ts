@@ -16,6 +16,8 @@ const filename = fileURLToPath(
 const source = readFileSync(filename, "utf8");
 const optimizedAction = "table-multi-map-update";
 const snapshotAction = `${optimizedAction}-snapshot`;
+const queuedWindowAction = "table-position-window-refresh-queued";
+const queuedWindowSnapshotAction = `${queuedWindowAction}-snapshot`;
 
 // Read the actual benchmark instead of copying a control that could drift from it.
 function isolateAction(action: string) {
@@ -85,6 +87,22 @@ describe("production compiler dashboard controls", () => {
       expect(result.optimizations.keyedMapUpdateHints).toBe(hints);
       expect(result.code.includes("createCompilerKeyedMapUpdate")).toBe(hints > 0);
     });
+
+    it.each([
+      [queuedWindowAction, 2],
+      [queuedWindowSnapshotAction, 0],
+    ] as const)("keeps %s at %i position hints in " + reactivity, async (action, hints) => {
+      const result = await compileReactModule(
+        isolateAction(action).source,
+        filename,
+        normalizeReactCompilerOptions({ reactivity }),
+      );
+
+      expect(result.compiled).toContain("StandardTableBenchmark");
+      expect(result.diagnostics).toEqual([]);
+      expect(result.optimizations.keyedArrayPositionHints).toBe(hints);
+      expect(result.code.includes("createCompilerKeyedArrayWindowReplace")).toBe(hints > 0);
+    });
   }
 
   it.each([0, 1, 10, 11, 10_000])(
@@ -132,4 +150,62 @@ describe("production compiler dashboard controls", () => {
       expect(results[0]).toEqual(results[1]);
     },
   );
+
+  it("keeps queued window handlers equivalent across repeated 10,000-row updates", () => {
+    const rows = Object.freeze(
+      Array.from({ length: 10_000 }, (_, index) =>
+        Object.freeze({ id: index + 1, label: `Row ${index}`, amount: index }),
+      ),
+    );
+    const results = [queuedWindowAction, queuedWindowSnapshotAction].map((action) => {
+      let next = rows;
+      let revision = 0;
+      let setterCalls = 0;
+      const run = new Function(
+        "rows",
+        "setRows",
+        "setOperation",
+        "setRevision",
+        `return (${isolateAction(action).handler})();`,
+      );
+
+      for (let round = 1; round <= 2; round += 1) {
+        const previous = next;
+        run(
+          previous,
+          (update: (current: typeof rows) => typeof rows) => {
+            // Each queued setter receives the preceding setter's result.
+            next = update(next);
+            setterCalls += 1;
+          },
+          () => {},
+          (update: (value: number) => number) => {
+            revision = update(revision);
+          },
+        );
+
+        expect(setterCalls).toBe(round * 2);
+        expect(revision).toBe(round);
+        expect(next).toHaveLength(rows.length);
+        for (let index = 0; index < rows.length; index += 1) {
+          const refreshed = (index >= 2_500 && index < 2_532) || (index >= 7_500 && index < 7_532);
+          const changed = index === 2_516 || index === 7_516;
+          expect(next[index]).toEqual({
+            ...rows[index],
+            label: `${rows[index].label}${" queued".repeat(changed ? round : 0)}`,
+            amount: rows[index].amount + (changed ? round : 0),
+          });
+          if (refreshed) {
+            expect(next[index]).not.toBe(previous[index]);
+          } else {
+            expect(next[index]).toBe(previous[index]);
+          }
+          Object.freeze(next[index]);
+        }
+        Object.freeze(next);
+      }
+      return next;
+    });
+    expect(results[0]).toEqual(results[1]);
+  });
 });
