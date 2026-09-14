@@ -55,8 +55,10 @@ Hook values update immediately while the URL write is queued. Inline parsers, in
 parent rerenders, and other consumers of the same keys preserve those pending values; memoizing
 parsers is not required. Each queued key keeps its draft when another key commits.
 If a component changes the key or parser it passes to the hook, the returned value is immediately
-re-parsed from the current URL plus active queued values for that URL. A queued write is cancelled when its owning hook changes keys or
-unmounts, preventing an old component from modifying the URL of a later page.
+re-parsed from the current URL plus active queued values for that URL. A queued write is cancelled
+when its owning hook changes keys or unmounts. Navigation to a different URL also discards its
+pending edits, including in a persistent layout; returning to the old URL does not restore discarded
+drafts. Writes to different query keys still compose across Farm's own query updates.
 
 Repeated keys have the same meaning during server rendering and in client hooks. For example,
 `?tag=react&tag=vite` is read as both values by `asArrayOf(asString)`.
