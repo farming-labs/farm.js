@@ -99,11 +99,10 @@ export function useServerFn<TInput, TResult, TError extends Error = Error>(
         | ServerFnActionState<TResult, TError>
         | ((current: ServerFnActionState<TResult, TError>) => ServerFnActionState<TResult, TError>),
     ) => {
-      setState((current) => {
-        const next = typeof value === "function" ? value(current) : value;
-        stateRef.current = next;
-        return next;
-      });
+      // Later submissions in the same React batch must see this transition.
+      const next = typeof value === "function" ? value(stateRef.current) : value;
+      stateRef.current = next;
+      setState(next);
     },
     [],
   );
@@ -127,12 +126,18 @@ export function useServerFn<TInput, TResult, TError extends Error = Error>(
       });
       const hasOptimisticResult = optimisticResult !== undefined;
 
-      setActionState((current) => ({
-        pendingCount: current.pendingCount + 1,
-        status: "pending",
-        result: hasOptimisticResult ? optimisticResult : resetOnSubmit ? null : current.result,
-        error: null,
-      }));
+      setActionState((current) => {
+        // Optimistic callbacks are app code and may reset or submit again.
+        if (requestId < lastResetIdRef.current) return current;
+        const pendingCount = current.pendingCount + 1;
+        if (requestId !== requestIdRef.current) return { ...current, pendingCount };
+        return {
+          pendingCount,
+          status: "pending",
+          result: hasOptimisticResult ? optimisticResult : resetOnSubmit ? null : current.result,
+          error: null,
+        };
+      });
 
       try {
         const result = await serverFn(input as TInput | FormData);
