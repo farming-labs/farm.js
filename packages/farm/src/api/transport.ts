@@ -89,6 +89,9 @@ export function jsonStream<TItem>(
   const iterator = toAsyncIterator(source);
   const encoder = new TextEncoder();
   let finished = false;
+  let cleanup: Promise<unknown> | undefined;
+  const closeSource = (reason?: unknown) =>
+    (cleanup ??= Promise.resolve().then(() => iterator.return?.(reason)));
 
   const body = new ReadableStream<Uint8Array>(
     {
@@ -97,6 +100,7 @@ export function jsonStream<TItem>(
 
         try {
           const next = await iterator.next();
+          if (finished) return;
           if (next.done) {
             finished = true;
             controller.close();
@@ -104,9 +108,10 @@ export function jsonStream<TItem>(
           }
           controller.enqueue(encoder.encode(`${JSON.stringify(next.value)}\n`));
         } catch (error) {
+          if (finished) return;
           finished = true;
           try {
-            await iterator.return?.(error);
+            await closeSource(error);
           } catch {
             // Preserve the serialization/source error that failed the response stream.
           }
@@ -115,7 +120,7 @@ export function jsonStream<TItem>(
       },
       async cancel(reason) {
         finished = true;
-        await iterator.return?.(reason);
+        await closeSource(reason);
       },
     },
     {

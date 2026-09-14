@@ -400,6 +400,11 @@ multipart boundary. Do not set `Content-Type` manually. Stream items are decoded
 consumer advances the iterator, and `result.data.cancel()` aborts the response reader when the UI
 no longer needs progress.
 
+`jsonStream()` closes its source iterator at most once when cancelled or when a source/serialization
+error occurs. A pending source read that finishes after cancellation is discarded. Explicit
+cancellation waits for that cleanup and exposes cleanup failures; a source/serialization failure
+keeps its original error even if cleanup also fails.
+
 ## Track mutations in React
 
 `useMutation` gives generated API methods and Farm server functions the same pending, result, and
