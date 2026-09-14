@@ -353,9 +353,11 @@ export function useQueryState<TParser extends Parser<any>>(
         return;
       }
 
-      if (!areParsedValuesEqual(parser, stateRef.current, payload.state)) {
-        setState(payload.state);
-        stateRef.current = payload.state;
+      // Consumers may use different parsers for the same URL key.
+      const parsed = parser.parse(payload.query ?? "");
+      if (!areParsedValuesEqual(parser, stateRef.current, parsed)) {
+        setState(parsed);
+        stateRef.current = parsed;
       }
     };
 
