@@ -838,7 +838,10 @@ declare module "@farm.js/core/client" {
       query: infer TQuery;
     };
   }
-    ? SimplifyEndpointInput<BodyInputProp<InferEndpointBody<T>> & QueryInputProp<TQuery>>
+    ? SimplifyEndpointInput<
+        BodyInputProp<InferEndpointBody<T>> &
+          QueryInputProp<T extends { __types: { inputQuery: infer I } } ? I : TQuery>
+      >
     : {};
 
   type InferEndpointOutput<T> = T extends {
