@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import { isAPIRouteRef, type APIResult, type ClientOptions } from "./api/client";
+import { notifyClientObserver } from "./client-observers";
 
 export type MutationStatus = "idle" | "pending" | "success" | "error";
 
@@ -188,8 +189,14 @@ export function useMutation<TTarget extends AnyMutationTarget>(
         });
 
         if (isLatestRequest) {
-          currentOptions.onSuccess?.(data, variables);
-          currentOptions.onSettled?.(data, null, variables);
+          notifyClientObserver(currentOptions.onSuccess, [data, variables], "Mutation onSuccess");
+          if (requestId === requestIdRef.current) {
+            notifyClientObserver(
+              currentOptions.onSettled,
+              [data, null, variables],
+              "Mutation onSettled",
+            );
+          }
         }
 
         return data;
@@ -222,8 +229,14 @@ export function useMutation<TTarget extends AnyMutationTarget>(
         });
 
         if (isLatestRequest) {
-          currentOptions.onError?.(error, variables);
-          currentOptions.onSettled?.(null, error, variables);
+          notifyClientObserver(currentOptions.onError, [error, variables], "Mutation onError");
+          if (requestId === requestIdRef.current) {
+            notifyClientObserver(
+              currentOptions.onSettled,
+              [null, error, variables],
+              "Mutation onSettled",
+            );
+          }
         }
 
         throw error;
