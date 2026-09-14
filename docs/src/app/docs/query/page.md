@@ -51,6 +51,9 @@ export function SearchControls() {
 
 `throttleMs` coalesces rapid writes to the same query key. Updates to different keys are
 composed against the latest URL, and returning a value to the current URL cancels its queued write.
+The latest edit to each key wins across hook instances and overlapping multi-key updates, even
+with different throttle durations or an immediate writer. Superseding one key keeps unrelated keys
+in an older batch queued. Cancelling the newer edit does not restore an older superseded value.
 Hook values update immediately while the URL write is queued. Inline parsers, inline parser maps,
 parent rerenders, and other consumers of the same keys preserve those pending values; memoizing
 parsers is not required. Each queued key keeps its draft when another key commits.
