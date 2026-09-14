@@ -89,6 +89,7 @@ import { resolveFarmInstrumentationFile } from "../instrumentation";
 import { isReactRenderer, loadFarmRendererVitePlugins, REACT_RENDERER } from "../renderer";
 import { appendMiddlewareRoutePath } from "../middleware/path";
 import type { FarmRenderer } from "../renderer";
+import { farmPluginMayAffectRuntimePath } from "../plugin-runtime-endpoint";
 
 // Type alias for OutputBundle
 type OutputBundle = Rollup.OutputBundle;
@@ -650,6 +651,17 @@ function hasFarmServerRuntimePlugins(config: ResolvedFarmConfig): boolean {
       plugin.transformHTML,
     );
   });
+}
+
+function farmServerRuntimePluginsMayHandlePath(
+  config: ResolvedFarmConfig,
+  pathname: string,
+): boolean {
+  return (config.plugins || []).some(
+    (plugin) =>
+      getFarmIntegrationPluginServerRuntime(plugin) !== false &&
+      farmPluginMayAffectRuntimePath(plugin, pathname),
+  );
 }
 
 export async function discoverMiddlewareRoutes(
@@ -7735,7 +7747,7 @@ function getPhysicalPrerenderBypassReason(options: {
   if (appMiddlewareMayHandlePath(middlewareRoutes, pathname)) return "app middleware";
   if (configMiddlewareMayHandlePath(config.middleware, pathname)) return "configured middleware";
   if (hasCustomFarmRouteContext(config)) return "request context";
-  if (hasFarmServerRuntimePlugins(config)) return "server runtime plugin";
+  if (farmServerRuntimePluginsMayHandlePath(config, pathname)) return "server runtime plugin";
 
   const manifestEntry = getManifestPageEntry(routeRuntimeManifest, pathname);
   if (manifestEntry?.rendering === "dynamic") return "dynamic runtime manifest";
