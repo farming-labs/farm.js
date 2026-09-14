@@ -57,6 +57,9 @@ in an older batch queued. Cancelling the newer edit does not restore an older su
 Hook values update immediately while the URL write is queued. Inline parsers, inline parser maps,
 parent rerenders, and other consumers of the same keys preserve those pending values; memoizing
 parsers is not required. Each queued key keeps its draft when another key commits.
+Consumers sharing a key parse incoming edits with their own parser, including while a URL write
+is queued. Different parser types therefore retain their own output types and defaults; removing
+a key is parsed like an absent URL value.
 If a component changes the key or parser it passes to the hook, the returned value is immediately
 re-parsed from the current URL plus active queued values for that URL. A queued write is cancelled
 when its owning hook changes keys or unmounts. Navigation to a different URL also discards its
