@@ -274,21 +274,21 @@ at least 2x faster than React and 1.25x faster than the equivalent block-bodied 
 Package tests also cover queued sorts, mixed sort/reverse chains, thousands of randomized batches,
 unsafe fallback, focus and selection, hydration, and cleanup.
 
-Native reorder pipelines have a separate 10,000-row comparison. One functional setter evaluates
-`current.toReversed().toReversed()`, so the final order again equals the committed order without
-using two queued React updates. Farm must preserve both native calls, validate exact identity
-without the generic item map or LIS, retain every DOM node, and remain at least 2x faster than React
-and 1.25x faster than the equivalent block-bodied compiled control. Package tests compile mixed
-sort/reverse pipelines and compare 2,000 deterministic two-to-four-step pipelines with normal
-React.
+Native reorder pipelines have a separate 10,000-row comparison. One single-return block-bodied
+setter evaluates `current.toReversed().toReversed()`, so the final order again equals the committed
+order without using two queued React updates. Farm must preserve both native calls, validate exact
+identity without the generic item map or LIS, retain every DOM node, and remain at least 2x faster
+than React and 1.25x faster than the compiled control whose updater block adds a local declaration.
+Package tests compile mixed sort/reverse pipelines and compare 2,000 deterministic two-to-four-step
+pipelines with normal React.
 
-Structural reorder pipelines add an independent 10,000-row comparison. One concise setter filters
-one row and then evaluates two native reversals, while the block-bodied version remains the compiled
-fallback control. Farm must validate membership and final order before touching the DOM, preserve
-all 9,999 surviving row identities, remove only the rejected row, and remain at least 2x faster than
-React and 1.25x faster than the compiled control. Package tests also cover filter/slice/sort/reverse
-composition, queued filter-then-sort updates, 2,000 randomized removals, controlled-input focus and
-selection, hydration, cleanup, and conservative fallback.
+Structural reorder pipelines add an independent 10,000-row comparison. One single-return
+block-bodied setter filters one row and then evaluates two native reversals; its compiled control
+adds a local declaration to the updater block. Farm must validate membership and final order before
+touching the DOM, preserve all 9,999 surviving row identities, remove only the rejected row, and
+remain at least 2x faster than React and 1.25x faster than the compiled control. Package tests also
+cover filter/slice/sort/reverse composition, queued filter-then-sort updates, 2,000 randomized
+removals, controlled-input focus and selection, hydration, cleanup, and conservative fallback.
 
 Consecutive same-order maps have their own 10,000-row comparison. One concise setter updates the
 label and amount of every tenth row in two native `map()` stages. The block-bodied form performs the
@@ -299,32 +299,32 @@ identities. Package tests separately cover one committed-to-final identity compa
 patch per row, changed keys, custom methods, subclassed arrays, native errors, queued updates,
 Strict Mode hydration, and unmount-before-flush cleanup.
 
-Same-key map-and-reorder pipelines have their own 10,000-row comparison. One concise setter
-reprices a single row through `map()` and immediately restores amount order with `toSorted()`; the
-block-bodied form performs the same JavaScript and DOM-visible work through complete compiled
+Same-key map-and-reorder pipelines have their own 10,000-row comparison. One single-return
+block-bodied setter reprices a row through `map()` and immediately restores amount order with
+`toSorted()`; the compiled control adds a local declaration while performing the same JavaScript
+and DOM-visible work through complete reconciliation. Both compiler modes must remain at least 4x
+faster than React and 1.2x faster than that compiled control. The assertion retains all 10,000 row
+elements, moves the edited row to its exact final position, and verifies its text and amount.
+Package tests separately cover queued edits, map/sort/reverse composition, changed-key and
+custom-method fallback, delegated events, controlled-input focus and selection, 2,000 differential
+updates, Strict Mode hydration, and unmount-before-flush cleanup.
+
+Direct mapped reversal has a separate 10,000-row comparison. A single-return block-bodied pipeline
+uses two native maps to change one row before `toReversed()`; its compiled control adds a local
+declaration while performing the same native calls and DOM-visible work through complete
 reconciliation. Both compiler modes must remain at least 4x faster than React and 1.2x faster than
-that compiled control. The assertion retains all 10,000 row elements, moves the edited row to its
-exact final position, and verifies its text and amount. Package tests separately cover queued
-edits, map/sort/reverse composition, changed-key and custom-method fallback, delegated events,
-controlled-input focus and selection, 2,000 differential updates, Strict Mode hydration, and
-unmount-before-flush cleanup.
+the compiled control. The assertion checks the full reversed order, every original DOM identity and
+connection, and the changed row values. The hinted path validates mirrored row lineage and uses the
+minimum `n - 1` moves without a source-item map or LIS pass.
 
-Direct mapped reversal has a separate 10,000-row comparison. Two concise native maps change one
-row's label and amount before `toReversed()`; the block-bodied control performs the same native
-calls and DOM-visible work through complete reconciliation. Both compiler modes must remain at
-least 4x faster than React and 1.2x faster than the compiled control. The assertion checks the full
-reversed order, every original DOM identity and connection, and the changed row values. The hinted
-path validates mirrored row lineage and uses the minimum `n - 1` moves without a source-item map or
-LIS pass.
-
-Reorder-then-map has its own 10,000-row comparison. The concise setter calls `toReversed()` first
-and then changes one row through two safe native maps. Its block-bodied control performs the same
-native work through complete keyed reconciliation. Both compiler modes must remain at least 4x
-faster than React and 1.2x faster than the compiled control. The assertion checks the complete
-reversed order, every existing DOM identity and connection, and the changed row values. Package
-tests also cover sort-before-map permutation reconciliation, maps on both sides of a reorder,
-changed-key and custom-method fallback, React 18/19, Strict Mode hydration, cleanup, and 2,000
-differential updates.
+Reorder-then-map has its own 10,000-row comparison. A single-return block-bodied setter calls
+`toReversed()` first and then changes one row through two safe native maps. Its compiled control adds
+a local declaration and performs the same native work through complete keyed reconciliation. Both
+compiler modes must remain at least 4x faster than React and 1.2x faster than the compiled control.
+The assertion checks the complete reversed order, every existing DOM identity and connection, and
+the changed row values. Package tests also cover sort-before-map permutation reconciliation, maps
+on both sides of a reorder, changed-key and custom-method fallback, React 18/19, Strict Mode
+hydration, cleanup, and 2,000 differential updates.
 
 Queued reorder-then-map has a separate 10,000-row comparison. One concise setter reverses the
 rows, and two immediately adjacent setters change one row's label and amount through native maps.
@@ -354,16 +354,16 @@ custom-method fallback; Strict Mode hydration; cleanup; and separate 2,000-row d
 The benchmark lifecycle rebuilds `@farm.js/react` first and then verifies the emitted hint counts,
 so local source changes cannot be silently measured through stale package output.
 
-Mapped reverse parity has an independent 10,000-row comparison. Two safe native maps update one
-row, then two native reversals restore committed order. Farm must patch the changed row without
-moving any DOM row or constructing the generic source-item map/LIS sequence. Both compiler modes
-must remain at least 8x faster than React and 1.5x faster than the equivalent block-bodied compiled
-control. A second operation splits the same proof across queued setters: one setter reverses the
-rows, then another applies two safe maps and reverses again. It has the same independent 8x React
-and 1.5x compiled-control floors. Both assertions check all final values, positions, identities,
-and connections. Package tests compare one to four reversals across 2,000 deterministic updates,
-run another 2,000 separately queued reverse/map/reverse updates against normal React, and cover
-changed-key and subclass fallback, Strict Mode hydration, and cleanup.
+Mapped reverse parity has an independent 10,000-row comparison. One single-return block-bodied
+pipeline applies two safe native maps and then two native reversals to restore committed order. Farm
+must patch the changed row without moving any DOM row or constructing the generic source-item
+map/LIS sequence. Its compiled control adds a local declaration. A second operation splits the same
+proof across queued setters: one setter reverses the rows, then another single-return block applies
+two safe maps and reverses again. Both compiler modes must remain at least 8x faster than React and
+1.5x faster than their compiled controls. Both assertions check all final values, positions,
+identities, and connections. Package tests compare one to four reversals across 2,000 deterministic
+updates, run another 2,000 separately queued reverse/map/reverse updates against normal React, and
+cover changed-key and subclass fallback, Strict Mode hydration, and cleanup.
 
 Native keyed-array sorting has its own 10,000-row comparison. A single-return block-bodied
 `toSorted()` setter is measured against bracketed React and a compiled snapshot control whose
@@ -463,26 +463,28 @@ The default JSON report is `/tmp/farm-react-dashboard-benchmark.json`; change it
 - The queued-reverse control executes two native reversals in one commit. Both controls end at the
   same original order; the hinted path validates one final identity permutation and avoids the
   complete keyed scan without exposing either intermediate order to the DOM.
-- The reorder-pipeline control executes two native reversals inside one functional setter. Its
-  block-bodied equivalent stays on complete reconciliation, isolating the build-time lowering of
-  native sort/reverse-only call chains.
-- The map-reorder control changes one item identity and then sorts the same keyed rows. Its
-  block-bodied equivalent rereads the complete keyed snapshot; the hinted path isolates the saved
-  descriptor and unchanged-binding work while both paths run the same native map, sort, and LIS
-  movement.
+- The reorder-pipeline control executes two native reversals inside one single-return block-bodied
+  setter. Its pair with a local declaration stays on complete reconciliation, isolating the
+  build-time lowering of native sort/reverse-only call chains.
+- The map-reorder control changes one item identity and then sorts the same keyed rows through a
+  single-return block-bodied setter. Its pair with a local declaration rereads the complete keyed
+  snapshot; the hinted path isolates the saved descriptor and unchanged-binding work while both
+  paths run the same native map, sort, and LIS movement.
 - The multi-map update control changes every tenth row in two same-order native maps. Its
   block-bodied equivalent rereads all 10,000 keys and bindings; the hinted path compares the
   committed and final arrays once and patches each final changed row once.
 - The multi-map reorder control changes one row's label and amount in two consecutive native maps,
-  then sorts the same keyed rows. Its block-bodied equivalent keeps complete reconciliation, while
-  the hinted path checks each native call, scans only the committed and final arrays for lineage,
-  and patches the final row once.
+  then sorts the same keyed rows through a single-return block-bodied setter. Its pair with a local
+  declaration keeps complete reconciliation, while the hinted path checks each native call, scans
+  only the committed and final arrays for lineage, and patches the final row once.
 - The multi-map reverse control changes the same row through two native maps and then reverses all
-  rows. Its block-bodied equivalent performs the same maps and connected DOM moves, while the
-  hinted path validates mirrored lineage directly and skips the temporary source map and LIS pass.
-- The reorder-then-map control reverses all rows before changing one row through two native maps.
-  Its block-bodied equivalent loses the reorder proof; the hinted path retains exact reverse order,
-  patches one row, and skips the generic source map and LIS pass.
+  rows in a single-return block-bodied setter. Its pair with a local declaration performs the same
+  maps and connected DOM moves, while the hinted path validates mirrored lineage directly and skips
+  the temporary source map and LIS pass.
+- The reorder-then-map control reverses all rows before changing one row through two native maps in
+  a single-return block-bodied setter. Its pair with a local declaration loses the reorder proof;
+  the hinted path retains exact reverse order, patches one row, and skips the generic source map and
+  LIS pass.
 - The queued reorder-then-map control performs the same reverse and two maps in three adjacent
   setter calls. Its block-bodied equivalent keeps complete reconciliation; the hinted path carries
   one committed reorder token through both queued maps and patches only the changed row.
@@ -494,9 +496,9 @@ The default JSON report is `/tmp/farm-react-dashboard-benchmark.json`; change it
   carries one committed replacement proof through both reversals, patches the changed row, and
   moves no DOM row when the reversals cancel.
 - The multi-map reverse-parity control changes the same row through two native maps and then
-  reverses twice. Its block-bodied equivalent keeps complete reconciliation; the hinted path
-  validates exact committed order, patches the row once, and performs no generic item-map, LIS, or
-  DOM-movement work.
+  reverses twice in a single-return block-bodied setter. Its pair with a local declaration keeps
+  complete reconciliation; the hinted path validates exact committed order, patches the row once,
+  and performs no generic item-map, LIS, or DOM-movement work.
 - The sort control compares concise native `toSorted()` with an equivalent block-bodied compiled
   update. Both paths run the same native sort and move the same keyed DOM rows; the hint isolates
   the saved key, descriptor, and binding work while retaining only the required LIS moves.

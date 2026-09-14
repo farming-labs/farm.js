@@ -1415,10 +1415,13 @@ uses the specialized minimum `n - 1` move path. Any sort makes the final order a
 permutation, so that path still uses LIS.
 
 The same proof also works when two or more native reorder operations are chained inside one concise
-functional setter:
+functional setter or a setter block containing exactly one direct value-returning `return`:
 
 ```tsx
 setItems((current) => current.toSorted((left, right) => left.rank - right.rank).toReversed());
+setItems((current) => {
+  return current.toSorted((left, right) => left.rank - right.rank).toReversed();
+});
 ```
 
 Farm prepares this pipeline at build time and evaluates each property lookup, inline comparator,
@@ -1428,7 +1431,7 @@ The runtime validates only the final order against the committed collection. A c
 sort/reverse pipelines apply one LIS-based reconciliation.
 
 A compiler-safe `filter()` or bounded `slice()` prefix may run before one or more native reorder
-steps in the same concise setter:
+steps in the same concise setter or exact one-return block:
 
 ```tsx
 setItems((current) =>
@@ -1442,8 +1445,8 @@ setItems((current) =>
 Farm executes every native method normally, carries the structural survivor proof into the final
 reorder result, and validates the complete operation before touching the DOM. It removes only
 rejected rows, uses LIS once for the surviving final order, and preserves every surviving element,
-handler, and form control without recreating descriptors or rereading bindings. A concise filter
-or slice setter followed by a concise reorder setter in the same batch uses the same proof.
+handler, and form control without recreating descriptors or rereading bindings. Concise or exact
+one-return filter/slice and reorder setters in the same batch use the same proof.
 
 The first proof requires compiler-owned host rows whose render and key do not observe the index.
 Arguments to `toReversed()`, referenced comparators, computed methods, chains containing a method

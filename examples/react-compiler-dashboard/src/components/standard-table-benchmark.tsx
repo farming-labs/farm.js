@@ -1016,7 +1016,9 @@ export function StandardTableBenchmark() {
           data-action="table-reverse-pipeline"
           type="button"
           onClick={() => {
-            setRows((current) => current.toReversed().toReversed());
+            setRows((current) => {
+              return current.toReversed().toReversed();
+            });
             setOperation("reverse rows twice in one setter");
             setRevision((value) => value + 1);
           }}
@@ -1028,7 +1030,8 @@ export function StandardTableBenchmark() {
           type="button"
           onClick={() => {
             setRows((current) => {
-              return current.toReversed().toReversed();
+              const nextRows = current.toReversed().toReversed();
+              return nextRows;
             });
             setOperation("reverse rows twice in one setter (snapshot control)");
             setRevision((value) => value + 1);
@@ -1040,12 +1043,12 @@ export function StandardTableBenchmark() {
           data-action="table-filter-reorder-pipeline"
           type="button"
           onClick={() => {
-            setRows((current) =>
-              current
+            setRows((current) => {
+              return current
                 .filter((item) => item.id % 10_000 !== 5_001)
                 .toReversed()
-                .toReversed(),
-            );
+                .toReversed();
+            });
             setOperation("filter and reorder rows in one setter");
             setRevision((value) => value + 1);
           }}
@@ -1057,10 +1060,11 @@ export function StandardTableBenchmark() {
           type="button"
           onClick={() => {
             setRows((current) => {
-              return current
+              const nextRows = current
                 .filter((item) => item.id % 10_000 !== 5_001)
                 .toReversed()
                 .toReversed();
+              return nextRows;
             });
             setOperation("filter and reorder rows (snapshot control)");
             setRevision((value) => value + 1);
@@ -1469,15 +1473,15 @@ export function StandardTableBenchmark() {
           data-action="table-map-reorder-pipeline"
           type="button"
           onClick={() => {
-            setRows((current) =>
-              current
+            setRows((current) => {
+              return current
                 .map((row) =>
                   row.id % 10_000 === 5_001
                     ? { ...row, amount: -1, label: `${row.label} repriced` }
                     : row,
                 )
-                .toSorted((left, right) => left.amount - right.amount || left.id - right.id),
-            );
+                .toSorted((left, right) => left.amount - right.amount || left.id - right.id);
+            });
             setOperation("reprice and sort one row");
             setRevision((value) => value + 1);
           }}
@@ -1489,13 +1493,14 @@ export function StandardTableBenchmark() {
           type="button"
           onClick={() => {
             setRows((current) => {
-              return current
+              const nextRows = current
                 .map((row) =>
                   row.id % 10_000 === 5_001
                     ? { ...row, amount: -1, label: `${row.label} repriced` }
                     : row,
                 )
                 .toSorted((left, right) => left.amount - right.amount || left.id - right.id);
+              return nextRows;
             });
             setOperation("reprice and sort one row (snapshot control)");
             setRevision((value) => value + 1);
@@ -1507,14 +1512,14 @@ export function StandardTableBenchmark() {
           data-action="table-multi-map-reorder-pipeline"
           type="button"
           onClick={() => {
-            setRows((current) =>
-              current
+            setRows((current) => {
+              return current
                 .map((row) =>
                   row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
                 )
                 .map((row) => (row.id % 10_000 === 5_001 ? { ...row, amount: -2 } : row))
-                .toSorted((left, right) => left.amount - right.amount || left.id - right.id),
-            );
+                .toSorted((left, right) => left.amount - right.amount || left.id - right.id);
+            });
             setOperation("review, reprice, and sort one row");
             setRevision((value) => value + 1);
           }}
@@ -1526,12 +1531,13 @@ export function StandardTableBenchmark() {
           type="button"
           onClick={() => {
             setRows((current) => {
-              return current
+              const nextRows = current
                 .map((row) =>
                   row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
                 )
                 .map((row) => (row.id % 10_000 === 5_001 ? { ...row, amount: -2 } : row))
                 .toSorted((left, right) => left.amount - right.amount || left.id - right.id);
+              return nextRows;
             });
             setOperation("review, reprice, and sort one row (snapshot control)");
             setRevision((value) => value + 1);
@@ -1543,16 +1549,16 @@ export function StandardTableBenchmark() {
           data-action="table-multi-map-reverse-pipeline"
           type="button"
           onClick={() => {
-            setRows((current) =>
-              current
+            setRows((current) => {
+              return current
                 .map((row) =>
                   row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
                 )
                 .map((row) =>
                   row.id % 10_000 === 5_001 ? { ...row, amount: row.amount + 1 } : row,
                 )
-                .toReversed(),
-            );
+                .toReversed();
+            });
             setOperation("review, reprice, and reverse rows");
             setRevision((value) => value + 1);
           }}
@@ -1564,7 +1570,7 @@ export function StandardTableBenchmark() {
           type="button"
           onClick={() => {
             setRows((current) => {
-              return current
+              const nextRows = current
                 .map((row) =>
                   row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
                 )
@@ -1572,6 +1578,7 @@ export function StandardTableBenchmark() {
                   row.id % 10_000 === 5_001 ? { ...row, amount: row.amount + 1 } : row,
                 )
                 .toReversed();
+              return nextRows;
             });
             setOperation("review, reprice, and reverse rows (snapshot control)");
             setRevision((value) => value + 1);
@@ -1581,27 +1588,6 @@ export function StandardTableBenchmark() {
         </button>
         <button
           data-action="table-multi-map-reverse-parity"
-          type="button"
-          onClick={() => {
-            setRows((current) =>
-              current
-                .map((row) =>
-                  row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
-                )
-                .map((row) =>
-                  row.id % 10_000 === 5_001 ? { ...row, amount: row.amount + 1 } : row,
-                )
-                .toReversed()
-                .toReversed(),
-            );
-            setOperation("review, reprice, and preserve row order through reverse parity");
-            setRevision((value) => value + 1);
-          }}
-        >
-          Review + reprice + reverse twice
-        </button>
-        <button
-          data-action="table-multi-map-reverse-parity-snapshot"
           type="button"
           onClick={() => {
             setRows((current) => {
@@ -1614,6 +1600,28 @@ export function StandardTableBenchmark() {
                 )
                 .toReversed()
                 .toReversed();
+            });
+            setOperation("review, reprice, and preserve row order through reverse parity");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Review + reprice + reverse twice
+        </button>
+        <button
+          data-action="table-multi-map-reverse-parity-snapshot"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              const nextRows = current
+                .map((row) =>
+                  row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
+                )
+                .map((row) =>
+                  row.id % 10_000 === 5_001 ? { ...row, amount: row.amount + 1 } : row,
+                )
+                .toReversed()
+                .toReversed();
+              return nextRows;
             });
             setOperation("review, reprice, and reverse twice (snapshot control)");
             setRevision((value) => value + 1);
@@ -1626,16 +1634,16 @@ export function StandardTableBenchmark() {
           type="button"
           onClick={() => {
             setRows((current) => current.toReversed());
-            setRows((current) =>
-              current
+            setRows((current) => {
+              return current
                 .map((row) =>
                   row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
                 )
                 .map((row) =>
                   row.id % 10_000 === 5_001 ? { ...row, amount: row.amount + 1 } : row,
                 )
-                .toReversed(),
-            );
+                .toReversed();
+            });
             setOperation("queue reverse, review, reprice, and restore row order");
             setRevision((value) => value + 1);
           }}
@@ -1651,7 +1659,7 @@ export function StandardTableBenchmark() {
               return reversed;
             });
             setRows((current) => {
-              return current
+              const nextRows = current
                 .map((row) =>
                   row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
                 )
@@ -1659,6 +1667,7 @@ export function StandardTableBenchmark() {
                   row.id % 10_000 === 5_001 ? { ...row, amount: row.amount + 1 } : row,
                 )
                 .toReversed();
+              return nextRows;
             });
             setOperation("queue reverse, review, reprice, and restore row order (snapshot control)");
             setRevision((value) => value + 1);
@@ -1670,16 +1679,16 @@ export function StandardTableBenchmark() {
           data-action="table-reorder-then-map-pipeline"
           type="button"
           onClick={() => {
-            setRows((current) =>
-              current
+            setRows((current) => {
+              return current
                 .toReversed()
                 .map((row) =>
                   row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
                 )
                 .map((row) =>
                   row.id % 10_000 === 5_001 ? { ...row, amount: row.amount + 1 } : row,
-                ),
-            );
+                );
+            });
             setOperation("reverse rows, then review and reprice one row");
             setRevision((value) => value + 1);
           }}
@@ -1691,7 +1700,7 @@ export function StandardTableBenchmark() {
           type="button"
           onClick={() => {
             setRows((current) => {
-              return current
+              const nextRows = current
                 .toReversed()
                 .map((row) =>
                   row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
@@ -1699,6 +1708,7 @@ export function StandardTableBenchmark() {
                 .map((row) =>
                   row.id % 10_000 === 5_001 ? { ...row, amount: row.amount + 1 } : row,
                 );
+              return nextRows;
             });
             setOperation("reverse rows, then review and reprice one row (snapshot control)");
             setRevision((value) => value + 1);
