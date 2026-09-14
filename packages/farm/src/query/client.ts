@@ -45,6 +45,7 @@ export interface Options {
 
 const getCurrentSearchParams = (): URLSearchParams => {
   if (typeof window !== "undefined") {
+    discardDepartedURLUpdates();
     let params = new URLSearchParams(window.location.search);
     // Draft values belong to the existing throttle queue, not to a parser's
     // identity. Inline parsers and newly mounted consumers see the same draft.
@@ -79,6 +80,14 @@ const throttleTimers = new Map<
     href: string;
   }
 >();
+
+function discardDepartedURLUpdates(): void {
+  for (const [key, pending] of throttleTimers) {
+    if (pending.href === window.location.href) continue;
+    clearTimeout(pending.timer);
+    throttleTimers.delete(key);
+  }
+}
 
 function getUpdateKey(updates: Record<string, unknown>): string {
   return JSON.stringify(Object.keys(updates).sort());
@@ -215,6 +224,8 @@ const updateURL = (
 ): (() => void) | undefined => {
   if (typeof window === "undefined") return;
 
+  discardDepartedURLUpdates();
+
   const { throttleMs } = options;
   if (!throttleMs || throttleMs <= 0) {
     commitURLUpdate(updates, options, emitUpdate);
@@ -233,9 +244,10 @@ const updateURL = (
   if (nextSearch === currentUrl.searchParams.toString()) return;
 
   const timeout = setTimeout(() => {
-    if (throttleTimers.get(throttleKey)?.timer === timeout) {
-      throttleTimers.delete(throttleKey);
-    }
+    const pending = throttleTimers.get(throttleKey);
+    if (pending?.timer !== timeout) return;
+    throttleTimers.delete(throttleKey);
+    if (pending.href !== window.location.href) return;
     commitURLUpdate(updates, options, emitUpdate);
   }, throttleMs);
 
