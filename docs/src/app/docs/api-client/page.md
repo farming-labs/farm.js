@@ -511,7 +511,17 @@ The fetcher exposes `state` (`idle` or `submitting`), `status`, `pending`, `data
 optimistic updates, rollback, callbacks, typed errors, and API-client request options as
 `useMutation`.
 
-Generated API forms map fields to `{ body: ... }` by default, or `{ query: ... }` for GET routes.
+Generated API forms map text fields to a JSON `{ body: ... }` by default, or `{ query: ... }`
+for GET/HEAD routes. For body methods, `<fetcher.Form encType="multipart/form-data">` preserves
+the FormData body, including repeated fields and files. A submit button's `formEncType` can
+override the form encoding. Imperative `submit(formData)` / `submitAsync(formData)` also preserve
+multipart data when it contains a File or Blob; text-only imperative input keeps the JSON default.
+For a text-only multipart endpoint, pass `{ body: toFormData(values) }` directly or use a mapper
+that returns `{ body: formData }`. Unsafe field names are filtered without mutating the original
+FormData. `mapFormData` overrides these defaults, and server functions still receive FormData
+directly. Native file-upload forms should declare `encType="multipart/form-data"` so their
+pre-hydration fallback also transmits files.
+
 Use `mapFormData` when the validated input needs coercion or a different shape:
 
 ```tsx
