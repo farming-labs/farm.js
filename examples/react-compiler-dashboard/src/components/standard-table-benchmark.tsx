@@ -1045,7 +1045,9 @@ export function StandardTableBenchmark() {
           onClick={() => {
             setRows((current) => {
               return current
-                .filter((item) => item.id % 10_000 !== 5_001)
+                .filter((item) => {
+                  return item.id % 10_000 !== 5_001;
+                })
                 .toReversed()
                 .toReversed();
             });
@@ -1061,7 +1063,9 @@ export function StandardTableBenchmark() {
           onClick={() => {
             setRows((current) => {
               const nextRows = current
-                .filter((item) => item.id % 10_000 !== 5_001)
+                .filter((item) => {
+                  return item.id % 10_000 !== 5_001;
+                })
                 .toReversed()
                 .toReversed();
               return nextRows;
@@ -1083,7 +1087,11 @@ export function StandardTableBenchmark() {
               region: "AMR" as const,
               status: "review" as const,
             };
-            setRows((current) => current.filter((row) => row.id % 10_000 !== 7_001));
+            setRows((current) =>
+              current.filter((row) => {
+                return row.id % 10_000 !== 7_001;
+              }),
+            );
             setRows((current) => [...current, incoming]);
             setOperation("remove and append across queued setters");
             setRevision((value) => value + 1);
@@ -1103,7 +1111,9 @@ export function StandardTableBenchmark() {
               status: "review" as const,
             };
             setRows((current) => {
-              const retained = current.filter((row) => row.id % 10_000 !== 7_001);
+              const retained = current.filter((row) => {
+                return row.id % 10_000 !== 7_001;
+              });
               return retained;
             });
             setRows((current) => {
@@ -1303,7 +1313,11 @@ export function StandardTableBenchmark() {
               region: "AMR" as const,
               status: "review" as const,
             };
-            setRows((current) => current.filter((row) => row.id % 10_000 !== 7_001));
+            setRows((current) =>
+              current.filter((row) => {
+                return row.id % 10_000 !== 7_001;
+              }),
+            );
             setRows((current) => [...current, incoming]);
             setRows((current) =>
               current.map((row) =>
@@ -1337,7 +1351,9 @@ export function StandardTableBenchmark() {
               status: "review" as const,
             };
             setRows((current) => {
-              const retained = current.filter((row) => row.id % 10_000 !== 7_001);
+              const retained = current.filter((row) => {
+                return row.id % 10_000 !== 7_001;
+              });
               return retained;
             });
             setRows((current) => {
@@ -1374,7 +1390,11 @@ export function StandardTableBenchmark() {
               region: "AMR" as const,
               status: "review" as const,
             };
-            setRows((current) => current.filter((row) => row.id % 10_000 !== 7_001));
+            setRows((current) =>
+              current.filter((row) => {
+                return row.id % 10_000 !== 7_001;
+              }),
+            );
             setRows((current) =>
               current.map((row) =>
                 row.id % 10_000 === 5_001
@@ -1401,7 +1421,9 @@ export function StandardTableBenchmark() {
               status: "review" as const,
             };
             setRows((current) => {
-              const retained = current.filter((row) => row.id % 10_000 !== 7_001);
+              const retained = current.filter((row) => {
+                return row.id % 10_000 !== 7_001;
+              });
               return retained;
             });
             setRows((current) => {
@@ -1424,7 +1446,11 @@ export function StandardTableBenchmark() {
           data-action="table-map-structural-reorder-pipeline"
           type="button"
           onClick={() => {
-            setRows((current) => current.filter((row) => row.id % 10_000 !== 7_001));
+            setRows((current) =>
+              current.filter((row) => {
+                return row.id % 10_000 !== 7_001;
+              }),
+            );
             setRows((current) =>
               current.map((row) =>
                 row.id % 10_000 === 5_001
@@ -1445,7 +1471,9 @@ export function StandardTableBenchmark() {
           type="button"
           onClick={() => {
             setRows((current) => {
-              const retained = current.filter((row) => row.id % 10_000 !== 7_001);
+              const retained = current.filter((row) => {
+                return row.id % 10_000 !== 7_001;
+              });
               return retained;
             });
             setRows((current) => {
@@ -1911,7 +1939,11 @@ export function StandardTableBenchmark() {
           onClick={() => {
             setRows((current) => {
               const target = current[Math.floor(current.length / 2)];
-              return target ? current.filter((item) => item.id !== target.id) : current;
+              return target
+                ? current.filter((item) => {
+                    return item.id !== target.id;
+                  })
+                : current;
             });
             setOperation("remove row (snapshot control)");
             setRevision((value) => value + 1);
@@ -2228,7 +2260,9 @@ export function StandardTableBenchmark() {
                     type="button"
                     onClick={() => {
                       setRows((current) => {
-                        return current.filter((item) => item.id !== row.id);
+                        return current.filter((item) => {
+                          return item.id !== row.id;
+                        });
                       });
                       setOperation("remove row");
                       setRevision((value) => value + 1);

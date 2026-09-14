@@ -6,6 +6,7 @@ import { compileReactModule } from "../compiler";
 import { normalizeReactCompilerOptions } from "../index";
 
 const infer = normalizeReactCompilerOptions(true, "/app");
+const staticInfer = normalizeReactCompilerOptions({ reactivity: "static" });
 
 async function compile(source: string) {
   return compileReactModule(source, "/app/KeyedArraySortHints.tsx", infer);
@@ -180,8 +181,14 @@ describe("React AOT keyed-array sort hints", () => {
     expect(result.code.match(/createCompilerKeyedArrayReorder\(/g)).toHaveLength(2);
   });
 
-  it("lowers a block-bodied structural prefix followed by native reorder steps", async () => {
-    const result = await compile(`
+  it.each([
+    ["hybrid", infer],
+    ["static", staticInfer],
+  ] as const)(
+    "lowers a block-bodied structural prefix followed by native reorder steps in %s mode",
+    async (_mode, options) => {
+      const result = await compileReactModule(
+        `
       import { useState } from "react";
       export function Table() {
         const [rows, setRows] = useState([
@@ -192,7 +199,9 @@ describe("React AOT keyed-array sort hints", () => {
         return <section>
           <button onClick={() => setRows((current) => {
             return current
-              .filter((row) => row.visible)
+              .filter((row) => {
+                return row.visible;
+              })
               .slice(0, 2)
               .toSorted((left, right) => left.rank - right.rank)
               .toReversed();
@@ -200,21 +209,25 @@ describe("React AOT keyed-array sort hints", () => {
           <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
         </section>;
       }
-    `);
+    `,
+        "/app/KeyedArraySortHints.tsx",
+        options,
+      );
 
-    expect(result.compiled).toEqual(["Table"]);
-    expect(result.optimizations.keyedArrayFilterHints).toBe(1);
-    expect(result.optimizations.keyedArraySliceHints).toBe(1);
-    expect(result.optimizations.keyedArraySortHints).toBe(1);
-    expect(result.optimizations.keyedArrayReorderHints).toBe(1);
-    expect(result.code.match(/createCompilerKeyedArrayFilter\(/g)).toHaveLength(1);
-    expect(result.code.match(/createCompilerKeyedArraySlice\(/g)).toHaveLength(1);
-    expect(result.code.match(/createCompilerKeyedArrayStructuralSort\(/g)).toHaveLength(1);
-    expect(result.code.match(/createCompilerKeyedArrayStructuralReorder\(/g)).toHaveLength(1);
-    expect(result.code).not.toContain("createCompilerKeyedArraySort");
-    expect(result.code).not.toContain("createCompilerKeyedArrayReorder");
-    expect(result.code).toContain("keyedRowsEveryHintedRuntimeFeature");
-  });
+      expect(result.compiled).toEqual(["Table"]);
+      expect(result.optimizations.keyedArrayFilterHints).toBe(1);
+      expect(result.optimizations.keyedArraySliceHints).toBe(1);
+      expect(result.optimizations.keyedArraySortHints).toBe(1);
+      expect(result.optimizations.keyedArrayReorderHints).toBe(1);
+      expect(result.code.match(/createCompilerKeyedArrayFilter\(/g)).toHaveLength(1);
+      expect(result.code.match(/createCompilerKeyedArraySlice\(/g)).toHaveLength(1);
+      expect(result.code.match(/createCompilerKeyedArrayStructuralSort\(/g)).toHaveLength(1);
+      expect(result.code.match(/createCompilerKeyedArrayStructuralReorder\(/g)).toHaveLength(1);
+      expect(result.code).not.toContain("createCompilerKeyedArraySort");
+      expect(result.code).not.toContain("createCompilerKeyedArrayReorder");
+      expect(result.code).toContain("keyedRowsEveryHintedRuntimeFeature");
+    },
+  );
 
   it("lowers a block-bodied same-key map and native sort as one reorder pipeline", async () => {
     const result = await compile(`
@@ -816,6 +829,20 @@ describe("React AOT keyed-array sort hints", () => {
       name: "a referenced filter predicate",
       declaration: "const visible = (row) => row.visible;",
       update: "current.filter(visible).toReversed()",
+    },
+    {
+      name: "a filter predicate block with an extra statement",
+      update:
+        "current.filter((row) => { const visible = row.visible; return visible; }).toReversed()",
+    },
+    {
+      name: "a filter predicate block with conditional returns",
+      update:
+        "current.filter((row) => { if (row.visible) return true; return false; }).toReversed()",
+    },
+    {
+      name: "a filter predicate block with a directive",
+      update: "current.filter((row) => { 'use strict'; return row.visible; }).toReversed()",
     },
     {
       name: "an invalid reverse argument",
