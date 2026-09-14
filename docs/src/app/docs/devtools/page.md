@@ -16,7 +16,14 @@ Start the application:
 farm dev
 ```
 
-Press `Ctrl + Shift + .` on Windows or Linux, or `Command + Shift + .` on macOS. Farm opens DevTools over the current page, so the application stays visible behind the inspector. Press the shortcut again, press `Escape`, click outside the window, or use the close button to return to the app.
+Click the **DevTools** pill in the bottom-left corner, or press `Ctrl + Shift + .` on Windows or Linux / `Command + Shift + .` on macOS. Farm opens DevTools over the current page, so the application stays visible behind the inspector. Press the shortcut again, press `Escape`, click outside the window, or use the close button to return to the app.
+
+The trigger uses the same compact visual treatment as [Hints](/docs/plugins/hints), on the opposite
+side from Hints' default bottom-right position. It follows the system light/dark preference, has a
+keyboard focus indicator, and returns focus after closing. The pill remains available with
+`shortcut: false`; `devtools: false` disables it along with the inspector. It adds no production UI.
+Hints' transparent mobile container does not intercept clicks outside its visible trigger or panel,
+so the DevTools trigger and app controls remain reachable.
 
 You can also use the DevTools launcher URL:
 

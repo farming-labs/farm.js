@@ -380,7 +380,9 @@ const styles = String.raw`
     color: var(--text);
     font: 13px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     text-rendering: geometricPrecision;
+    pointer-events: none;
   }
+  .launcher, .panel { pointer-events: auto; }
   .root[data-position="bottom-left"] { right: auto; left: 18px; }
   .panel {
     width: min(390px, calc(100vw - 24px));

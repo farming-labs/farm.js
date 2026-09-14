@@ -44,6 +44,53 @@ export function generateFarmDevtoolsClientRuntime(config: ResolvedFarmDevtoolsCo
   }
 
   const shortcut = config.shortcut ? parseShortcut(config.shortcut) : null;
+  // Match the Hints launcher without depending on the optional hints plugin.
+  const launcherStyles = `
+    :host {
+      all: initial;
+      position: fixed;
+      left: max(18px, env(safe-area-inset-left));
+      bottom: max(18px, env(safe-area-inset-bottom));
+      z-index: 2147483645;
+      color-scheme: light dark;
+    }
+    :host([hidden]) { display: none; }
+    button {
+      --bg: #fbfbfa;
+      --surface: #f3f3f0;
+      --line: #d9d9d3;
+      --text: #1b1b19;
+      box-sizing: border-box;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      min-height: 42px;
+      padding: 0 14px 0 12px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--bg);
+      color: var(--text);
+      box-shadow: 0 10px 32px rgb(0 0 0 / 16%);
+      font: 620 11px/1.45 "Geist Mono Variable", "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: 0;
+      text-transform: uppercase;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    button:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
+    button:active { background: var(--surface); }
+    .mark { display: grid; gap: 2px; width: 13px; }
+    .mark i { display: block; height: 2px; background: currentColor; }
+    .mark i:nth-child(2) { width: 9px; }
+    .mark i:nth-child(3) { width: 5px; }
+    @media (hover: hover) { button:hover { background: var(--surface); } }
+    @media (prefers-color-scheme: dark) {
+      button { --bg: #181817; --surface: #222220; --line: #353531; --text: #f0f0eb; }
+    }
+    @media (max-width: 520px) {
+      :host { left: max(8px, env(safe-area-inset-left)); bottom: max(8px, env(safe-area-inset-bottom)); }
+    }
+  `;
   const overlayStyles = `
     #__farm_devtools_overlay__ {
       position: fixed;
@@ -94,6 +141,7 @@ export function generateFarmDevtoolsClientRuntime(config: ResolvedFarmDevtoolsCo
   return `
 (() => {
   const overlayId = "__farm_devtools_overlay__";
+  const launcherId = "__farm_devtools_launcher__";
   const styleId = "__farm_devtools_overlay_styles__";
   const runtimeKey = "__FARM_DEVTOOLS_RUNTIME__";
   const launchParam = ${JSON.stringify(FARM_DEVTOOLS_LAUNCH_PARAM)};
@@ -102,6 +150,8 @@ export function generateFarmDevtoolsClientRuntime(config: ResolvedFarmDevtoolsCo
   const shortcut = ${JSON.stringify(shortcut)};
   const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
   let returnFocus = null;
+  let closeTimer;
+  let disposed = false;
 
   const matchesShortcut = (event) => {
     if (!shortcut || event.repeat) return false;
@@ -130,20 +180,25 @@ export function generateFarmDevtoolsClientRuntime(config: ResolvedFarmDevtoolsCo
 
   const close = () => {
     const overlay = document.getElementById(overlayId);
-    if (!overlay) return;
+    if (!overlay || overlay.dataset.open === "false") return;
     const focusTarget = returnFocus;
     returnFocus = null;
     overlay.dataset.open = "false";
-    window.setTimeout(() => {
+    window.clearTimeout(closeTimer);
+    closeTimer = window.setTimeout(() => {
       overlay.remove();
+      const launcher = document.getElementById(launcherId);
+      if (launcher) launcher.hidden = false;
       focusTarget?.focus?.();
     }, 160);
   };
 
   const open = (view = "overview") => {
-    if (document.getElementById(overlayId)) return;
+    if (disposed || document.getElementById(overlayId)) return;
     ensureStyles();
-    returnFocus = document.activeElement;
+    returnFocus = document.activeElement?.shadowRoot?.activeElement || document.activeElement;
+    const launcher = document.getElementById(launcherId);
+    if (launcher) launcher.hidden = true;
     const overlay = document.createElement("div");
     overlay.id = overlayId;
     overlay.setAttribute("aria-label", "Farm.js DevTools overlay");
@@ -158,7 +213,9 @@ export function generateFarmDevtoolsClientRuntime(config: ResolvedFarmDevtoolsCo
     });
     document.body.appendChild(overlay);
     requestAnimationFrame(() => {
-      overlay.dataset.open = "true";
+      if (!disposed && overlay.isConnected && overlay.dataset.open !== "false") {
+        overlay.dataset.open = "true";
+      }
     });
   };
 
@@ -187,22 +244,55 @@ export function generateFarmDevtoolsClientRuntime(config: ResolvedFarmDevtoolsCo
     if (event.data?.type === "farm:devtools:keydown" && matchesShortcut(event.data.event || {})) close();
   };
 
+  const attachLauncher = () => {
+    if (disposed || document.getElementById(launcherId)) return;
+    const host = document.createElement("farm-devtools");
+    host.id = launcherId;
+    host.hidden = Boolean(document.getElementById(overlayId));
+    const shadow = host.attachShadow({ mode: "open" });
+    const style = document.createElement("style");
+    style.textContent = ${JSON.stringify(launcherStyles)};
+    const button = document.createElement("button");
+    button.type = "button";
+    button.setAttribute("aria-label", "Open Farm DevTools");
+    button.setAttribute("aria-haspopup", "dialog");
+    button.innerHTML = '<span class="mark" aria-hidden="true"><i></i><i></i><i></i></span><span>DevTools</span>';
+    button.addEventListener("click", () => open());
+    shadow.append(style, button);
+    document.body.appendChild(host);
+  };
+
+  const launch = () => requestAnimationFrame(() => {
+    if (!disposed) open(launchView);
+  });
   window[runtimeKey]?.dispose?.();
   window.addEventListener("keydown", onKeydown, true);
   window.addEventListener("message", onMessage);
   window[runtimeKey] = {
     dispose() {
+      disposed = true;
+      window.clearTimeout(closeTimer);
+      document.removeEventListener("DOMContentLoaded", attachLauncher);
+      document.removeEventListener("DOMContentLoaded", launch);
       window.removeEventListener("keydown", onKeydown, true);
       window.removeEventListener("message", onMessage);
+      document.getElementById(launcherId)?.remove();
+      document.getElementById(overlayId)?.remove();
     },
   };
   window.__FARM_DEVTOOLS__ = { open, close, toggle };
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", attachLauncher, { once: true });
+  } else {
+    attachLauncher();
+  }
 
   const launchUrl = new URL(location.href);
   const launchRequest = launchUrl.searchParams.get(launchParam);
+  let launchView = "overview";
   if (launchRequest !== null) {
     const hashView = launchUrl.hash.slice(1);
-    const launchView = validViews.has(launchRequest)
+    launchView = validViews.has(launchRequest)
       ? launchRequest
       : validViews.has(hashView)
         ? hashView
@@ -214,7 +304,6 @@ export function generateFarmDevtoolsClientRuntime(config: ResolvedFarmDevtoolsCo
       "",
       launchUrl.pathname + launchUrl.search + launchUrl.hash,
     );
-    const launch = () => requestAnimationFrame(() => open(launchView));
     if (document.readyState === "loading") {
       document.addEventListener("DOMContentLoaded", launch, { once: true });
     } else {

@@ -58,6 +58,11 @@ describe("Farm Hints overlay", () => {
     const shadow = document.querySelector("farm-hints")?.shadowRoot;
     expect(shadow?.querySelector<HTMLElement>(".panel")?.hidden).toBe(true);
     expect(shadow?.querySelector<HTMLButtonElement>(".launcher")?.hidden).toBe(false);
+    // The mobile root spans the viewport. Only visible controls should intercept clicks,
+    // leaving the app and the DevTools launcher reachable on the other side.
+    const styles = shadow?.querySelector("style")?.textContent;
+    expect(styles).toMatch(/\.root\s*\{[^}]*pointer-events:\s*none/);
+    expect(styles).toContain(".launcher, .panel { pointer-events: auto; }");
     overlay.destroy();
   });
 });
