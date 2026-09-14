@@ -37,6 +37,26 @@ describe("Farm client data cache", () => {
     unsubscribe();
   });
 
+  it("keeps a resubscribed listener notified after a stale unsubscribe fires again", () => {
+    const cache = new FarmClientDataCache();
+    const first = vi.fn();
+    const second = vi.fn();
+
+    const unsubscribeFirst = cache.subscribe("k", first);
+    unsubscribeFirst(); // drains {first} and removes the "k" entry
+    cache.subscribe("k", second); // creates a fresh listener set for "k"
+    unsubscribeFirst(); // stale/duplicate: must not evict second's live set
+
+    cache.set("k", {
+      data: { id: "k" },
+      updatedAt: 1,
+      staleAt: Number.POSITIVE_INFINITY,
+    });
+
+    expect(second).toHaveBeenCalledTimes(1);
+    expect(first).not.toHaveBeenCalled();
+  });
+
   it("unsubscribes disposed cache instances from shared invalidations", () => {
     const cache = new FarmClientDataCache();
     cache.dispose();

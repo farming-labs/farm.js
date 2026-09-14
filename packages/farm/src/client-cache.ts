@@ -239,7 +239,12 @@ export class FarmClientDataCache {
     listeners.add(listener);
     return () => {
       listeners!.delete(listener);
-      if (listeners!.size === 0) this.listeners.delete(key);
+      // Only drop the map entry if it still holds this exact set. A repeated or
+      // stale unsubscribe (called after the key was drained and resubscribed)
+      // must not evict a newer subscriber's live listener set.
+      if (listeners!.size === 0 && this.listeners.get(key) === listeners) {
+        this.listeners.delete(key);
+      }
     };
   }
 
