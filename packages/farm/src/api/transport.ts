@@ -159,6 +159,7 @@ export function readJSONStream<TItem>(response: Response): FarmAPIStream<TItem> 
   const decoder = new TextDecoder();
   let buffer = "";
   let completed = false;
+  let cancelled = false;
   let claimed = false;
   let released = false;
 
@@ -181,41 +182,56 @@ export function readJSONStream<TItem>(response: Response): FarmAPIStream<TItem> 
     }
   };
 
-  const iterator: AsyncIterator<TItem> = {
-    async next() {
-      while (true) {
-        const lineEnd = buffer.indexOf("\n");
-        if (lineEnd >= 0) {
-          const line = buffer.slice(0, lineEnd).trim();
-          buffer = buffer.slice(lineEnd + 1);
-          if (!line) continue;
-          return { done: false, value: await parseLine(line) };
-        }
-
-        if (completed) {
-          const line = buffer.trim();
-          buffer = "";
-          if (!line) {
-            releaseReader();
-            return { done: true, value: undefined };
-          }
-          return { done: false, value: await parseLine(line) };
-        }
-
-        let chunk: ReadableStreamReadResult<Uint8Array>;
-        try {
-          chunk = await reader.read();
-        } catch (error) {
-          completed = true;
-          buffer = "";
-          releaseReader();
-          throw error;
-        }
-        completed = chunk.done;
-        buffer += decoder.decode(chunk.value, { stream: !chunk.done });
+  const readNext = async (): Promise<IteratorResult<TItem>> => {
+    while (true) {
+      if (cancelled) return { done: true, value: undefined };
+      const lineEnd = buffer.indexOf("\n");
+      if (lineEnd >= 0) {
+        const line = buffer.slice(0, lineEnd).trim();
+        buffer = buffer.slice(lineEnd + 1);
+        if (!line) continue;
+        return { done: false, value: await parseLine(line) };
       }
+
+      if (completed) {
+        const line = buffer.trim();
+        buffer = "";
+        if (!line) {
+          releaseReader();
+          return { done: true, value: undefined };
+        }
+        return { done: false, value: await parseLine(line) };
+      }
+
+      let chunk: ReadableStreamReadResult<Uint8Array>;
+      try {
+        chunk = await reader.read();
+      } catch (error) {
+        if (cancelled) return { done: true, value: undefined };
+        completed = true;
+        buffer = "";
+        releaseReader();
+        throw error;
+      }
+      if (cancelled) return { done: true, value: undefined };
+      completed = chunk.done;
+      buffer += decoder.decode(chunk.value, { stream: !chunk.done });
+    }
+  };
+
+  let readQueue = Promise.resolve();
+  const iterator: AsyncIterator<TItem> = {
+    next() {
+      const result = readQueue.then(readNext);
+      // A failed read must not poison subsequent operations on this iterator.
+      readQueue = result.then(
+        () => {},
+        () => {},
+      );
+      return result;
     },
     async return() {
+      cancelled = true;
       completed = true;
       buffer = "";
       if (!released) {
@@ -232,6 +248,8 @@ export function readJSONStream<TItem>(response: Response): FarmAPIStream<TItem> 
   return {
     response,
     async cancel(reason) {
+      // Cancellation must interrupt the active reader, not wait in its queue.
+      cancelled = true;
       completed = true;
       buffer = "";
       if (!released) {
