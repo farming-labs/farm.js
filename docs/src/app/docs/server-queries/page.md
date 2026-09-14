@@ -23,6 +23,10 @@ generated server references; it does not install or wrap TanStack Query.
 > transform, call queries from server components, or expose an API route and use
 > [`apiClient` from `createApiClients()`](/docs/api-client) from client components.
 
+Code examples inside Markdown/MDX fenced blocks or inline code are displayed content and do not
+require the server-function transform. Executable MDX imports, declarations, and expressions
+still follow the same server/client boundary rules as application modules.
+
 ## Declare a query
 
 **src/features/products/queries.ts**

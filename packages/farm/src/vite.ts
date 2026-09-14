@@ -61,7 +61,11 @@ import { _withAfterNodeMiddleware } from "./after";
 import { _runWithAPIRequestRuntime } from "./api/server-context";
 import type { APIRequestRuntime } from "./api/server-client-bridge";
 import { shouldBypassFarmRouterForDottedPath } from "./dev-static";
-import { findClientServerFnViolation, formatServerFnBoundaryError } from "./server-query-boundary";
+import {
+  findClientServerFnViolation,
+  findMarkdownServerFnViolation,
+  formatServerFnBoundaryError,
+} from "./server-query-boundary";
 import {
   createFarmDeploymentMismatchResponse,
   FARM_DEPLOYMENT_ID_HEADER,
@@ -2870,7 +2874,9 @@ export const manifest = getManifest();
           // executes the server handler there. Fail with an actionable
           // boundary error instead of Vite's Node-builtin externalization
           // failure at runtime.
-          const violation = findClientServerFnViolation(code, id);
+          const violation = /\.mdx?$/i.test(id.split("?", 1)[0])
+            ? await findMarkdownServerFnViolation(code, id)
+            : findClientServerFnViolation(code, id);
           if (violation) {
             this.error(formatServerFnBoundaryError(violation, id));
           }

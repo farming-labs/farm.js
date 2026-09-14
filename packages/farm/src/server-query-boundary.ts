@@ -37,6 +37,47 @@ export function findClientServerFnViolation(
   return null;
 }
 
+/** Markdown examples are content; ESM declarations and MDX expressions are not. */
+export async function findMarkdownServerFnViolation(
+  code: string,
+  id: string,
+): Promise<ServerFnBoundaryViolation | null> {
+  const violation = findClientServerFnViolation(code, id);
+  if (!violation) return null;
+
+  // Reuse the Markdown compiler's parser only for a potential violation. Normal
+  // JS/TS transforms and Markdown without server-function examples stay cheap.
+  const { createProcessor } = await import("@mdx-js/mdx");
+  let tree;
+  try {
+    tree = createProcessor().parse(code);
+  } catch {
+    // Unsupported/invalid syntax must not silently disable a boundary check.
+    return violation;
+  }
+
+  type Node = {
+    type: string;
+    position?: { start: { offset?: number }; end: { offset?: number } };
+    children?: Node[];
+  };
+  const ranges: [number, number][] = [];
+  const visit = (node: Node) => {
+    if (node.type === "code" || node.type === "inlineCode") {
+      const start = node.position?.start.offset;
+      const end = node.position?.end.offset;
+      if (start !== undefined && end !== undefined) ranges.push([start, end]);
+      return;
+    }
+    node.children?.forEach(visit);
+  };
+  visit(tree);
+  for (const [start, end] of ranges.reverse()) {
+    code = code.slice(0, start) + code.slice(start, end).replace(/[^\r\n]/g, " ") + code.slice(end);
+  }
+  return findClientServerFnViolation(code, id);
+}
+
 export function formatServerFnBoundaryError(
   violation: ServerFnBoundaryViolation,
   id: string,
