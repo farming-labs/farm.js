@@ -21,14 +21,32 @@ const missingPluginPages = officialPluginSlugs.filter(
   (slug) => !visiblePages.has(slug) && !hiddenPages.has(slug),
 );
 const missingPluginNavigation = officialPluginSlugs.filter((slug) => !navigation.has(slug));
+const pluginIcons = new Map();
+const duplicatePluginIcons = [];
+const sidebarSource = readFileSync(configPath, "utf8");
+for (const slug of officialPluginSlugs) {
+  const entry = sidebarSource.match(new RegExp(`\\{[^{}]*slug:\\s*["']${slug}["'][^{}]*\\}`))?.[0];
+  const icon = entry?.match(/\bicon:\s*["']([^"']+)["']/)?.[1];
+  if (!icon) {
+    duplicatePluginIcons.push(`${slug}: missing icon`);
+  } else if (pluginIcons.has(icon)) {
+    duplicatePluginIcons.push(`${slug} and ${pluginIcons.get(icon)} reuse ${icon}`);
+  } else {
+    pluginIcons.set(icon, slug);
+  }
+}
 
 if (
   missing.length ||
   unknown.length ||
   missingPluginPages.length ||
-  missingPluginNavigation.length
+  missingPluginNavigation.length ||
+  duplicatePluginIcons.length
 ) {
   const messages = ["Farm docs navigation coverage failed."];
+  if (duplicatePluginIcons.length) {
+    messages.push("", "Official plugins need distinct sidebar icons:", ...duplicatePluginIcons);
+  }
   if (missing.length) {
     messages.push(
       "",

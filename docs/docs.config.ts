@@ -3,17 +3,30 @@ import { pixelBorder } from "@farming-labs/theme-production/pixel-border";
 import type { FarmDocsSidebarItem, FarmDocsSocialImageConfig } from "@farm.js/core";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import {
+  Bot,
+  FlaskConical,
+  Lightbulb,
+  Network,
+  Palette,
+  PartyPopper,
+  type LucideIcon,
+} from "lucide-react";
 import {
   siCloudflare,
   siNextdotjs,
   siNuxt,
   siPreact,
+  siPwa,
   siReact,
   siSentry,
   siSolid,
   siSvelte,
   siTanstack,
   siVuedotjs,
+  siWebassembly,
 } from "simple-icons";
 
 type FarmDocsSerializableConfig = Parameters<typeof defineDocs>[0] & {
@@ -30,6 +43,10 @@ const brandPath = (path: string, viewBox = "0 0 24 24") =>
 
 const brandSvg = (content: string, viewBox = "0 0 24 24") =>
   `<svg viewBox="${viewBox}" focusable="false">${content}</svg>`;
+
+// Serialize named icons on the config/server side; no icon library is shipped to the sidebar.
+const outlineIcon = (Icon: LucideIcon) =>
+  renderToStaticMarkup(createElement(Icon, { size: 24, strokeWidth: 1.8, "aria-hidden": true }));
 
 const resolveGeistFontsDirectory = () => {
   const candidates = [
@@ -48,6 +65,14 @@ const embeddedWoff2 = (...segments: string[]) =>
   `data:font/woff2;base64,${readFileSync(path.join(geistFontsDirectory, ...segments)).toString("base64")}`;
 
 const icons = {
+  bot: outlineIcon(Bot),
+  flask: outlineIcon(FlaskConical),
+  lightbulb: outlineIcon(Lightbulb),
+  network: outlineIcon(Network),
+  palette: outlineIcon(Palette),
+  party: outlineIcon(PartyPopper),
+  "brand-pwa": brandPath(siPwa.path),
+  "brand-webassembly": brandPath(siWebassembly.path),
   activity: '<path d="M22 12h-4l-3 7L9 5l-3 7H2"></path>',
   "brand-auth0": brandPath(
     "M21.98 7.448L19.62 0H4.347L2.02 7.448c-1.352 4.312.03 9.206 3.815 12.015L12.007 24l6.157-4.552c3.755-2.81 5.182-7.688 3.815-12.015l-6.16 4.58 2.343 7.45-6.157-4.597-6.158 4.58 2.358-7.433-6.188-4.55 7.63-.045L12.008 0l2.356 7.404 7.615.044z",
@@ -330,17 +355,17 @@ const sidebar = [
         children: [
           { label: "Analyzer", slug: "plugins/analyzer", icon: "gauge" },
           { label: "Content", slug: "plugins/content", icon: "file" },
-          { label: "Federation", slug: "plugins/federation", icon: "plug" },
-          { label: "Hints", slug: "plugins/hints", icon: "activity" },
-          { label: "MSW", slug: "plugins/msw", icon: "activity" },
-          { label: "Partytown", slug: "plugins/partytown", icon: "zap" },
-          { label: "PWA", slug: "plugins/pwa", icon: "monitor" },
+          { label: "Federation", slug: "plugins/federation", icon: "network" },
+          { label: "Hints", slug: "plugins/hints", icon: "lightbulb" },
+          { label: "MSW", slug: "plugins/msw", icon: "flask" },
+          { label: "Partytown", slug: "plugins/partytown", icon: "party" },
+          { label: "PWA", slug: "plugins/pwa", icon: "brand-pwa" },
           { label: "Search", slug: "plugins/search", icon: "search" },
           { label: "Scripts", slug: "plugins/scripts", icon: "code" },
           { label: "Sentry", slug: "plugins/sentry", icon: "brand-sentry" },
-          { label: "StyleX", slug: "plugins/stylex", icon: "braces" },
-          { label: "WebAssembly", slug: "plugins/wasm", icon: "box" },
-          { label: "WebMCP", slug: "plugins/webmcp", icon: "sparkles" },
+          { label: "StyleX", slug: "plugins/stylex", icon: "palette" },
+          { label: "WebAssembly", slug: "plugins/wasm", icon: "brand-webassembly" },
+          { label: "WebMCP", slug: "plugins/webmcp", icon: "bot" },
         ],
       },
       {
@@ -454,6 +479,7 @@ const config = {
 export default {
   ...defineDocs(config),
   favicon: config.favicon,
+  icons: config.icons,
   navigation: config.navigation,
   socialImage: config.socialImage,
 } satisfies FarmDocsSerializableConfig;
