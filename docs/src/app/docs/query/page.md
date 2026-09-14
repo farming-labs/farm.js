@@ -81,6 +81,13 @@ traversal without inserting a duplicate entry.
 Use `useQueryStates` when several controls should update together. This keeps the browser URL as the source of shareable state for filters, pagination, and tabs.
 Changing the parser map replaces the returned object with exactly the newly declared keys.
 
+`useQueryStates` receives drafts from both `useQueryState` and other `useQueryStates` instances
+immediately, before a throttled URL write. Each changed key is parsed with the receiving map's
+parser; unrelated local drafts are preserved, and the writer does not parse its own draft echo.
+Changing the parser map replaces its keyed subscriptions, and unmounting removes them. Receiving
+a peer's draft does not take ownership of its URL timer, so unmounting a reader does not cancel
+the writer's queued update.
+
 **src/components/product-filters.tsx**
 
 ```tsx
