@@ -1914,18 +1914,25 @@ function rewriteKeyedArrayPositionHints(
         updater.async ||
         updater.generator ||
         updater.params.length !== 1 ||
-        !t.isIdentifier(updater.params[0]) ||
-        !t.isCallExpression(updater.body) ||
-        !t.isMemberExpression(updater.body.callee) ||
-        updater.body.callee.computed ||
-        !t.isIdentifier(updater.body.callee.object, { name: updater.params[0].name }) ||
-        !t.isIdentifier(updater.body.callee.property)
+        !t.isIdentifier(updater.params[0])
+      ) {
+        return;
+      }
+      const returned = returnedExpression(updater);
+      if (
+        (t.isBlockStatement(updater.body) && updater.body.directives.length > 0) ||
+        !returned ||
+        !t.isCallExpression(returned) ||
+        !t.isMemberExpression(returned.callee) ||
+        returned.callee.computed ||
+        !t.isIdentifier(returned.callee.object, { name: updater.params[0].name }) ||
+        !t.isIdentifier(returned.callee.property)
       ) {
         return;
       }
 
-      const methodName = updater.body.callee.property.name;
-      const args = updater.body.arguments;
+      const methodName = returned.callee.property.name;
+      const args = returned.arguments;
       const deleteCountExpression =
         methodName === "toSpliced" && args.length >= 2 && t.isExpression(args[1])
           ? args[1]

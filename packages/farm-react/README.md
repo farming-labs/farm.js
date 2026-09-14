@@ -463,18 +463,24 @@ setItems((current) => current.toSpliced(selectedIndex, 25));
 setItems((current) => current.toSpliced(selectedIndex, 1, replacement));
 setItems((current) => current.toSpliced(selectedIndex, 25, ...replacements));
 setItems((current) => current.with(selectedIndex, replacement));
+setItems((current) => {
+  return current.toSpliced(selectedIndex, 0, nextItem);
+});
+setItems((current) => {
+  return current.with(selectedIndex, replacement);
+});
 
 // Two same-key windows may be queued before one compiler flush.
 setItems((current) => current.toSpliced(firstIndex, 25, ...firstRefresh));
 setItems((current) => current.toSpliced(secondIndex, 25, ...secondRefresh));
 ```
 
-The compiler recognizes only a concise functional setter and either a safe-integer literal or a
-compiler-safe runtime position expression, such as an identifier, property read, arithmetic,
-conditional, or safe `Math` call. The update must insert one or more compiler-safe items with zero
-removals, remove one item or a fixed positive safe-integer literal range, replace one item through
-either `toSpliced()` or `with()`, or replace a fixed positive safe-integer literal window with
-compiler-safe explicit items or a safe spread. Farm preserves method lookup,
+The compiler recognizes a concise functional setter or a setter block containing exactly one direct
+`return`. Its position must be either a safe-integer literal or a compiler-safe runtime expression,
+such as an identifier, property read, arithmetic, conditional, or safe `Math` call. The update must insert
+one or more compiler-safe items with zero removals, remove one item or a fixed positive safe-integer
+literal range, replace one item through either `toSpliced()` or `with()`, or replace a fixed positive
+safe-integer literal window with compiler-safe explicit items or a safe spread. Farm preserves method lookup,
 evaluates the position and remaining arguments once in their original order, executes the ordinary
 native call, and records metadata only after validating the committed native source, result, and
 actual safe-integer position and clamped removal count. A batch requires at least two evaluated
@@ -504,10 +510,11 @@ removes only the known row or range, or patches/replaces one row at that positio
 every existing key, descriptor, and binding. Surviving rows keep their DOM identity. Index-aware or
 collection-reading rows, custom methods, position expressions with user calls or mutations,
 runtime positions that are not safe integers, dynamic, zero, negative, or fractional removal
-counts, other `toSpliced()` forms, block-bodied updaters, unsafe incoming expressions, queued
-chains containing a structural window or unhinted intermediate update, existing keys moved from
-outside the removed interval, duplicate final keys, nested or React-owned rows, and failed checks
-use complete keyed reconciliation before the fast path mutates the DOM.
+counts, other `toSpliced()` forms, updater blocks with extra statements, directives, conditional
+returns, or no value-returning `return`, unsafe incoming expressions, queued chains containing a
+structural window or unhinted intermediate update, existing keys moved from outside the removed
+interval, duplicate final keys, nested or React-owned rows, and failed checks use complete keyed
+reconciliation before the fast path mutates the DOM.
 Reports expose the site count as `keyedArrayPositionHints`. Batch insertion and exact-window
 replacement use progressively separate optional runtime capabilities, so existing single-position
 and batch-only bundles do not retain window validation or replacement code.

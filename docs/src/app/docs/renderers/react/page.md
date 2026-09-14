@@ -1244,6 +1244,12 @@ setItems((current) => current.toSpliced(selectedIndex, 25));
 setItems((current) => current.toSpliced(selectedIndex, 1, replacement));
 setItems((current) => current.toSpliced(selectedIndex, 25, ...replacements));
 setItems((current) => current.with(selectedIndex, replacement));
+setItems((current) => {
+  return current.toSpliced(selectedIndex, 0, nextItem);
+});
+setItems((current) => {
+  return current.with(selectedIndex, replacement);
+});
 
 const deleteCount = visibleRows.length;
 setItems((current) => current.toSpliced(selectedIndex, deleteCount, ...replacements));
@@ -1253,8 +1259,9 @@ setItems((current) => current.toSpliced(firstIndex, 25, ...firstRefresh));
 setItems((current) => current.toSpliced(secondIndex, 25, ...secondRefresh));
 ```
 
-At build time, Farm recognizes only concise functional setters whose position—and, for
-`toSpliced()`, delete count—is a safe-integer literal or compiler-safe runtime expression.
+At build time, Farm recognizes concise functional setters or setter blocks containing exactly one
+direct `return`. The position—and, for `toSpliced()`, delete count—must be a safe-integer literal or
+compiler-safe runtime expression.
 Identifiers, property reads,
 side-effect-free arithmetic and conditionals, and safe `Math` calls are supported. User-defined
 calls, assignments, update expressions, and other effectful forms are not transformed.
@@ -1313,8 +1320,9 @@ and bindings are not reread.
 The proof requires compiler-owned host rows whose render and key do not observe the row index.
 Effectful position or delete-count expressions, runtime positions that are fractional or otherwise
 not safe integers, runtime delete counts that are zero, negative, fractional, non-numeric, or
-otherwise not positive safe integers, other `toSpliced()` shapes, block-bodied updaters, unsafe
-incoming expressions, custom methods, overlapping queued structural windows,
+otherwise not positive safe integers, other `toSpliced()` shapes, updater blocks with extra
+statements, directives, conditional returns, or no value-returning `return`, unsafe incoming
+expressions, custom methods, overlapping queued structural windows,
 unhinted intermediate updates, an existing key moved from outside its local removed interval or
 between queued windows, duplicate final keys, collection-reading bindings, React-owned rows,
 nested host blocks, row conditionals, unrelated dirty dependencies, and failed runtime checks keep

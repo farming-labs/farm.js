@@ -1,4 +1,7 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
+import { transformWithEsbuild } from "vite";
 import { compileReactModule } from "../compiler";
 import { normalizeReactCompilerOptions } from "../index";
 
@@ -30,6 +33,72 @@ describe("React AOT keyed-array position hints", () => {
     expect(result.code).toContain("createCompilerKeyedArrayPositionUpdate");
     expect(result.code).toContain("keyedRowsPositionHintedRuntimeFeature");
   });
+
+  it.each([
+    {
+      expression: "current.with(0, next)",
+      helper: "createCompilerKeyedArrayPositionUpdate",
+      name: "a native replacement",
+      runtimeFeature: "keyedRowsPositionHintedRuntimeFeature",
+    },
+    {
+      expression: "current.toSpliced(1, 0, next)",
+      helper: "createCompilerKeyedArrayPositionUpdate",
+      name: "a single insertion",
+      runtimeFeature: "keyedRowsPositionHintedRuntimeFeature",
+    },
+    {
+      expression: "current.toSpliced(0, 2)",
+      helper: "createCompilerKeyedArrayPositionUpdate",
+      name: "a range removal",
+      runtimeFeature: "keyedRowsPositionHintedRuntimeFeature",
+    },
+    {
+      expression: "current.toSpliced(0, 0, next, second)",
+      helper: "createCompilerKeyedArrayBatchInsert",
+      name: "a batch insertion",
+      runtimeFeature: "keyedRowsBatchPositionHintedRuntimeFeature",
+    },
+    {
+      expression: "current.toSpliced(0, 2, next, second)",
+      helper: "createCompilerKeyedArrayWindowReplace",
+      name: "an exact-window replacement",
+      runtimeFeature: "keyedRowsWindowPositionHintedRuntimeFeature",
+    },
+  ])(
+    "records $name from an exact updater block",
+    async ({ expression, helper, runtimeFeature }) => {
+      const result = await compile(`
+        import { useState } from "react";
+        export function Table({ next, second }) {
+          const [rows, setRows] = useState([
+            { id: "a", label: "Alpha" },
+            { id: "b", label: "Beta" },
+          ]);
+          return <section>
+            <button onClick={() => setRows((current) => {
+              return ${expression};
+            })}>Change</button>
+            <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+          </section>;
+        }
+      `);
+
+      expect(result.compiled).toEqual(["Table"]);
+      expect(result.diagnostics).toEqual([]);
+      expect(result.optimizations.keyedArrayPositionHints).toBe(1);
+      expect(result.code).toContain(helper);
+      expect(result.code).toContain(runtimeFeature);
+      await expect(
+        transformWithEsbuild(result.code, "/app/KeyedArrayPositionHints.tsx", {
+          loader: "tsx",
+          jsx: "automatic",
+        }),
+      ).resolves.toMatchObject({
+        code: expect.stringContaining(helper),
+      });
+    },
+  );
 
   it("supports safe static negative positions", async () => {
     const result = await compile(`
@@ -170,14 +239,24 @@ describe("React AOT keyed-array position hints", () => {
       update: "current.with(0, next)",
     },
     {
-      name: "a block-bodied updater",
+      name: "an updater block with a local declaration",
       row: "row => <li key={row.id}>{row.label}</li>",
-      update: "{ return current.with(0, next); }",
+      update: "{ const value = current.with(0, next); return value; }",
     },
     {
-      name: "a block-bodied removal updater",
+      name: "an updater block with conditional returns",
       row: "row => <li key={row.id}>{row.label}</li>",
-      update: "{ return current.toSpliced(0, 2); }",
+      update: "{ if (offset > 0) return current.toSpliced(0, 2); return current; }",
+    },
+    {
+      name: "an updater block without a return",
+      row: "row => <li key={row.id}>{row.label}</li>",
+      update: "{ current.toSpliced(0, 2); }",
+    },
+    {
+      name: "an updater block with a directive",
+      row: "row => <li key={row.id}>{row.label}</li>",
+      update: '{ "use strict"; return current.with(0, next); }',
     },
     {
       name: "an unsafe incoming call",

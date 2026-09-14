@@ -169,13 +169,13 @@ faster than React and 1.25x faster than that control, and the compiler report mu
 rolling-chain steps. Every sample verifies both retained identities and mapped values plus the final
 incoming suffix.
 
-Exact-position insertions, removals, and replacements have separate 10,000-row comparisons. Concise
-native `toSpliced(position, 0, item)`, `toSpliced(position, 0, ...items)`, `toSpliced(position, 1)`,
-`toSpliced(position, 64)`, `toSpliced(position, 1, replacement)`, and
-`toSpliced(position, runtimeCount, ...replacements)` and `with(position, replacement)` updates use
-event-local runtime position and count variables and are measured against bracketed React and
-equivalent block-bodied compiled controls. The compiler report must contain every dashboard
-`keyedArrayPositionHints` site;
+Exact-position insertions, removals, and replacements have separate 10,000-row comparisons.
+Single-return block-bodied native `toSpliced(position, 0, item)`,
+`toSpliced(position, 0, ...items)`, `toSpliced(position, 1)`, `toSpliced(position, 64)`,
+`toSpliced(position, 1, replacement)`, `toSpliced(position, runtimeCount, ...replacements)`, and
+`with(position, replacement)` updates use event-local runtime position and count variables. They
+are measured against bracketed React and compiled snapshot controls whose updater blocks add a
+local declaration. The compiler report must contain every dashboard `keyedArrayPositionHints` site;
 package tests separately require zero
 surviving key/descriptor/binding reads for removal, surrounding DOM identity, randomized
 differential correctness, runtime-position and count fallback, hydration, and cleanup. Both the
@@ -184,15 +184,16 @@ their compiled controls.
 
 The batch insertion case mounts 64 new rows at the middle of a 10,000-row table. It must preserve
 both surrounding DOM nodes, add no owner executions, remain at least 4x faster than React, and stay
-at least 1.5x faster than the equivalent block-bodied compiled control. This gate is independent of
-the older single-row position gates, so a batch regression cannot hide inside their aggregate.
+at least 1.5x faster than the compiled snapshot control with an extra local declaration. This gate
+is independent of the older single-row position gates, so a batch regression cannot hide inside
+their aggregate.
 
 The exact-window replacement case derives its delete count from the 64-row replacement array and
 swaps that window in the middle of a 10,000-row table. It must
 preserve both retained boundary nodes, disconnect both removed boundaries, add no owner
-executions, remain at least 4x faster than React, and stay at least 1.5x faster than the equivalent
-block-bodied compiled control. Package tests require work proportional only to the 64 incoming
-rows and cover empty spreads, negative positions, clamped counts, reused and duplicate keys,
+executions, remain at least 4x faster than React, and stay at least 1.5x faster than the compiled
+snapshot control with an extra local declaration. Package tests require work proportional only to
+the 64 incoming rows and cover empty spreads, negative positions, clamped counts, reused and duplicate keys,
 native custom-method behavior, queued fallback, controlled-input focus and selection, delegated
 events, compiler-safe and effectful count expressions, unsafe evaluated-count fallback, 1,000
 differential replacements, hydration, Strict Mode, and unmount cleanup.
@@ -202,45 +203,45 @@ keys from inside one 64-row removed interval, changes their visible data, and ad
 keys. All 48 reused DOM rows must move with their keys and retain identity, the 16 retired rows
 must disconnect, the 16 fresh rows must be new, and both surrounding anchors must remain attached.
 Static and hybrid modes must remain at least 4x faster than React and 1.5x faster than the
-equivalent block-bodied compiled control. Package tests independently require window-local key and
-binding work, descriptors only for fresh rows, exact local LIS moves, preparation before the first
-DOM write, controlled-input focus and selection, current delegated event data, hydration, Strict
-Mode, cleanup, and 1,000 randomized differential updates.
+compiled snapshot control with an extra local declaration. Package tests independently require
+window-local key and binding work, descriptors only for fresh rows, exact local LIS moves,
+preparation before the first DOM write, controlled-input focus and selection, current delegated
+event data, hydration, Strict Mode, cleanup, and 1,000 randomized differential updates.
 
 Variable-length local-key reuse has a separate 10,000-row gate. It grows one 64-row interval to 80
 rows while reversing and refreshing 48 retained keys and adding 32 fresh keys. The benchmark
 requires every retained DOM row to keep its identity, every retired row to disconnect, every fresh
 row to be globally new, and both surrounding anchors to remain attached after the untouched suffix
 shifts. Static and hybrid modes must remain at least 4x faster than React and 1.5x faster than the
-equivalent block-bodied compiled control. Package tests additionally cover shrinking windows,
-exact local LIS moves, atomic preparation, delegated event indexes, focused-input selection,
-Strict Mode hydration, and 1,000 randomized grow/shrink differential updates.
+compiled snapshot control with an extra local declaration. Package tests additionally cover
+shrinking windows, exact local LIS moves, atomic preparation, delegated event indexes, focused-input
+selection, Strict Mode hydration, and 1,000 randomized grow/shrink differential updates.
 
 Queued variable-length windows have their own 10,000-row gate. One event grows an early 64-row
 interval to 80 rows and then shrinks a later 64-row interval to 48 rows using the position after
 the first length change. The benchmark requires every locally retained row to keep its identity,
 every retired row to disconnect, every fresh row to be globally new, and all four surrounding
 anchors to remain attached. Static and hybrid modes must remain at least 4x faster than React and
-1.5x faster than the equivalent block-bodied compiled control. Package tests additionally cover
-both source orders, adjacent and empty intervals, exact local LIS moves, atomic preparation,
-delegated event indexes, controlled-input selection, Strict Mode hydration and cleanup, overlap
-and cross-window key-move fallback, and 1,000 randomized queued differential updates.
+1.5x faster than the compiled snapshot control with an extra local declaration. Package tests
+additionally cover both source orders, adjacent and empty intervals, exact local LIS moves, atomic
+preparation, delegated event indexes, controlled-input selection, Strict Mode hydration and cleanup,
+overlap and cross-window key-move fallback, and 1,000 randomized queued differential updates.
 
 Same-key exact-window refresh has a separate 10,000-row gate. The benchmark replaces a 64-row
 snapshot with 64 new objects carrying the same keys in the same order and changes one visible row,
 which isolates the avoided full-list key scan without hiding the required binding update. All 64
 DOM rows must keep their identity and the changed label and amount must reach the DOM. Static and
-hybrid modes must remain at least 4x faster than React and 1.5x faster than the block-bodied
-compiled control. Package tests also require zero descriptors for a 64-row refresh, latest event
-data, focused-input selection, atomic preparation before mutation, hydration, Strict Mode, and
-mixed/reordered/duplicate-key fallback.
+hybrid modes must remain at least 4x faster than React and 1.5x faster than the compiled snapshot
+control with an extra local declaration. Package tests also require zero descriptors for a 64-row
+refresh, latest event data, focused-input selection, atomic preparation before mutation, hydration,
+Strict Mode, and mixed/reordered/duplicate-key fallback.
 
 Queued same-key exact-window refresh has its own 10,000-row gate. One event queues two separate
 32-row refreshes before the compiler flushes, and the benchmark requires all 64 DOM rows to retain
 identity while both changed labels and amounts reach the DOM. Static and hybrid modes must remain
-at least 4x faster than React and 1.5x faster than the equivalent block-bodied compiled control.
-That workload contributes two of the dashboard `keyedArrayPositionHints`. Package tests compare
-1,000 deterministic queued updates with React and cover disjoint windows, overlap with
+at least 4x faster than React and 1.5x faster than the compiled snapshot control with an extra local
+declaration. That workload contributes two of the dashboard `keyedArrayPositionHints`. Package
+tests compare 1,000 deterministic queued updates with React and cover disjoint windows, overlap with
 last-update-wins semantics, atomic preparation, overlapping structural fallback, controlled-input selection,
 events, Strict Mode hydration, and cleanup.
 
@@ -248,9 +249,9 @@ Queued fresh-key exact-window replacement has a separate 10,000-row gate. One ev
 overlapping 32-row windows with globally new final keys; their 16-row overlap leaves one 48-row
 final union. The benchmark requires the 48 old rows to disconnect, both surrounding anchors to
 retain identity, both final labels to reach the DOM, and zero compiled owner executions. Static and
-hybrid modes must remain at least 4x faster than React and 1.5x faster than the equivalent
-block-bodied compiled control. Together with the existing position workloads, the compiler report
-must contain all fifteen dashboard `keyedArrayPositionHints`. Package tests also cover disjoint and
+hybrid modes must remain at least 4x faster than React and 1.5x faster than the compiled snapshot
+control with an extra local declaration. Together with the existing position workloads, the
+compiler report must contain all fifteen dashboard `keyedArrayPositionHints`. Package tests also cover disjoint and
 overlapping fresh-key commits, mixed same-key/fresh-key commits, atomic preparation,
 existing-key-move fallback, events, controlled-input selection, Strict Mode hydration, cleanup,
 and 1,000 differential overlapping updates.
@@ -441,17 +442,19 @@ The default JSON report is `/tmp/farm-react-dashboard-benchmark.json`; change it
 - The slice snapshot control retains the same 9,000-row suffix through an updater block with an
   extra local declaration. It isolates the saved survivor scan while both paths remove the same
   1,000 DOM rows.
-- The exact-position controls pass event-local runtime position and delete-count variables to concise native
-  `toSpliced()` updates and compare them with equivalent block-bodied compiled controls. Package
-  tests cover the equivalent `with()` replacement path too.
+- The exact-position controls pass event-local runtime position and delete-count variables to
+  single-return block-bodied native `toSpliced()` updates and compare them with compiled snapshot
+  controls whose updater blocks add a local declaration. Package tests cover the equivalent
+  `with()` replacement path too.
   They verify surrounding DOM identity and isolate the saved full keyed scan for one insertion,
   one replacement, or a single/contiguous-range removal.
-- The queued same-key control issues two concise native window replacements before one flush. Its
-  block-bodied pair performs the same array and DOM-visible work through complete reconciliation,
-  isolating the benefit of combining both validated windows into one targeted refresh.
-- The queued fresh-key control replaces two distant windows before one flush. Its block-bodied pair
-  creates the same 64 rows through complete reconciliation, isolating the saved untouched key,
-  descriptor, binding, and generic keyed-diff work.
+- The queued same-key control issues two single-return block-bodied native window replacements
+  before one flush. Its pair with extra local declarations performs the same array and DOM-visible
+  work through complete reconciliation, isolating the benefit of combining both validated windows
+  into one targeted refresh.
+- The queued fresh-key control replaces two distant windows before one flush. Its pair with extra
+  local declarations creates the same 64 rows through complete reconciliation, isolating the saved
+  untouched key, descriptor, binding, and generic keyed-diff work.
 - The reverse control compares concise native `toReversed()` with an equivalent block-bodied
   compiled update. Both paths move the same keyed DOM rows; the hint isolates the saved key,
   descriptor, binding, and generic LIS work.
