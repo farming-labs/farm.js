@@ -1008,6 +1008,15 @@ export function TodoForm() {
 
 The optimistic callback receives the raw input, `formData` for form submissions, and the current result. Return `undefined` when a submission should not change the optimistic result. Use `rollbackOnError` for reversible UI state; keep authorization and validation on the server function itself.
 
+For `useServerFn` and `useAction`, `current` includes earlier optimistic transitions from the same
+React batch. Three submissions that each return `(current ?? 0) + 1` from an initial result of `0`
+therefore show `3`, even before React rerenders. The callback runs once per submission, including
+in Strict Mode. A failed latest submission with `rollbackOnError` restores the result immediately
+before that submission, including a previous optimistic value; a same-batch `reset()` restores
+the initial snapshot for subsequent submissions. If an optimistic callback itself resets or starts
+new work, the older transition cannot replace the reset or newer result. Reset still does not
+cancel execution of an already-started submission.
+
 When the function is called from the browser, `request` is the underlying Web `Request` and `signal` aborts with that request. A direct call made while rendering can inherit the current render request; a background or direct call outside request scope has no `request` and receives a stable, non-aborted signal. The same values are available to middleware. Pass `signal` to database or network clients that support cancellation.
 
 Farm validates action origin metadata, accepted form/RSC content types, action ID shape, and request size before decoding an action. Browser calls use same-origin credentials and refuse redirects. Unexpected thrown values are logged on the server but become a generic `ServerActionError` in the browser, so secrets and stack traces are not serialized.
