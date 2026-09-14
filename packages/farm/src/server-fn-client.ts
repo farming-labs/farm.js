@@ -83,6 +83,7 @@ export function useServerFn<TInput, TResult, TError extends Error = Error>(
   const { initialResult = null, resetOnSubmit = true } = options;
   const callbacksRef = useRef<ServerFnActionCallbacks<TResult, TError>>({});
   const requestIdRef = useRef(0);
+  const lastResetIdRef = useRef(0);
   const initialState: ServerFnActionState<TResult, TError> = {
     pendingCount: 0,
     status: "idle",
@@ -137,6 +138,8 @@ export function useServerFn<TInput, TResult, TError extends Error = Error>(
         const isLatestRequest = requestId === requestIdRef.current;
 
         setActionState((current) => {
+          // Reset starts a new pending-count generation, not just a new result.
+          if (requestId < lastResetIdRef.current) return current;
           const pendingCount = Math.max(0, current.pendingCount - 1);
 
           if (!isLatestRequest) {
@@ -166,6 +169,7 @@ export function useServerFn<TInput, TResult, TError extends Error = Error>(
         const isLatestRequest = requestId === requestIdRef.current;
 
         setActionState((current) => {
+          if (requestId < lastResetIdRef.current) return current;
           const pendingCount = Math.max(0, current.pendingCount - 1);
 
           if (!isLatestRequest) {
@@ -214,7 +218,7 @@ export function useServerFn<TInput, TResult, TError extends Error = Error>(
   );
 
   const reset = useCallback(() => {
-    requestIdRef.current += 1;
+    lastResetIdRef.current = ++requestIdRef.current;
     setActionState({
       pendingCount: 0,
       status: "idle",

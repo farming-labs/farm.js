@@ -862,6 +862,12 @@ HTTP routes; it only leaves integration access to the separate caller module.
 
 `createServerFn` pairs with `useServerFn` when a mutation is naturally a form action. Use `optimistic` to show the next UI state immediately, then let the server result replace it when the action completes.
 
+For both `useServerFn` and `useAction`, `reset()` restores `initialResult` (or `null`), clears
+the error, and returns the hook to idle. It does not cancel server work: promises from earlier
+submissions still resolve or reject, but their completions no longer change hook state or invoke
+completion callbacks. Requests started after the reset have their own pending count, so older
+work cannot clear their pending state.
+
 **src/actions/todos.ts**
 
 ```ts
