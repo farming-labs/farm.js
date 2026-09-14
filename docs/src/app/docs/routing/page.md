@@ -458,6 +458,11 @@ Route action entries must be imported identifiers such as `{ update }` or
 the server boundary Farm uses to generate safe browser references. When provided, `defaultAction`
 must be a string literal matching one of those entries.
 
+`useAction` keeps `Form`'s component identity stable across renders, including when you pass
+inline `optimistic` callbacks or change the target action. Existing fields retain their DOM
+identity, unsaved input, focus, and selection. Submissions use the latest action and options;
+React's normal form reset after a successful function action still applies.
+
 ## Deferred route data
 
 Use `defer()` for secondary data that should not delay the route shell. Farm returns the value from `data.main` as soon as its directly awaited work finishes, then streams explicitly deferred fields into nested React Suspense boundaries.
