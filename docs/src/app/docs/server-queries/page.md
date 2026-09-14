@@ -131,6 +131,11 @@ Unrelated invalidations and invalidations before a read starts do not invalidate
 
 Use `fetchServerQuery(productQuery, input)` for an imperative browser read that should participate in deduplication and SWR. Calling the generated `productQuery(input)` reference directly still returns plain typed data, but the fetch helper supplies the browser cache lifecycle.
 
+With SWR enabled (the default), every imperative reader receives the existing stale value
+immediately while one shared refresh runs, including readers arriving after that refresh starts.
+An initial read without cached data still waits. Set `swr: false` to wait for the in-flight
+result, or `force: true` to start and await a new request instead of joining it.
+
 ## Invalidate after a mutation
 
 ```ts
