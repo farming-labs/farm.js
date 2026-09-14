@@ -414,7 +414,7 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
         const parser = parsers[key];
         if (parser) {
           const serialized = value === null ? null : parser.serialize(value);
-          emitter.emitKey(key, { state: value, query: serialized });
+          emitter.emitKey(key, { state: value, query: serialized, source: stateRef });
         }
       });
 
@@ -477,10 +477,25 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
     applyChange(getCurrentSearchParams());
     const unsubscribeHistory = subscribeHistoryChange(onPopState);
     emitter.on("update", onEmitterUpdate);
+    const unsubscribeKeys = Object.entries(parsers).map(([key, parser]) => {
+      const onKeyUpdate = (payload: KeyUpdate) => {
+        if (payload.source === stateRef) return;
+        const parsed = parser.parse(payload.query ?? "");
+        if (areParsedValuesEqual(parser, stateRef.current[key as keyof T], parsed)) return;
+
+        // Update only this key, preserving local drafts for the other fields.
+        const next = { ...stateRef.current, [key]: parsed };
+        stateRef.current = next;
+        setState(next);
+      };
+      emitter.onKey(key, onKeyUpdate);
+      return () => emitter.offKey(key, onKeyUpdate);
+    });
 
     return () => {
       unsubscribeHistory();
       emitter.off("update", onEmitterUpdate);
+      for (const unsubscribe of unsubscribeKeys) unsubscribe();
     };
   }, [watchKeys, parsers]);
 
