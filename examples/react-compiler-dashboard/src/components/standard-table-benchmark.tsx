@@ -1991,13 +1991,14 @@ export function StandardTableBenchmark() {
           type="button"
           onClick={() => {
             setRows((current) => {
-              return current
+              const next = current
                 .map((row, index) =>
                   index % 10 === 0 ? { ...row, label: `${row.label} reviewed` } : row,
                 )
                 .map((row, index) =>
                   index % 10 === 0 ? { ...row, amount: row.amount + 1 } : row,
                 );
+              return next;
             });
             setOperation("review and reprice every 10th (snapshot control)");
             setRevision((value) => value + 1);
