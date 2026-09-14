@@ -8,6 +8,10 @@ section: "Runtime"
 
 Farm exposes one operational view of the application in development. The browser dashboard is useful while working on the app, while `farm doctor` brings the same runtime diagnostics to the terminal and CI.
 
+For the expanded workspace UI, a floating launcher, and syntax-highlighted browser module
+inspection, add the [DevTools plugin](/docs/plugins/devtools). It reuses this runtime snapshot;
+the existing dashboard and configuration below continue to work without the plugin.
+
 ## Open DevTools
 
 Start the application:

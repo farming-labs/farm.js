@@ -42,8 +42,8 @@ This enables the useful defaults:
 
 Select a finding to see its explanation and source snippet. When the finding has a selector, Hints
 scrolls the matching element into view and outlines it briefly. Category filters keep a busy page
-manageable. The overlay follows light and dark system color schemes and starts collapsed on clean
-routes.
+manageable. The overlay uses the Farm.js logo and header with neutral light and dark backgrounds,
+follows the system color scheme, and starts collapsed on clean routes.
 
 ## Tune the checks
 

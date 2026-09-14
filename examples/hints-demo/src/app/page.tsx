@@ -1,3 +1,5 @@
+import { Counter } from "./counter";
+
 export default function Page() {
   return (
     <main className="shell">
@@ -43,6 +45,8 @@ export default function Page() {
             Open Farm Hints in the bottom corner, expand a finding, then select its row to reveal
             the matching element on this page.
           </p>
+          <p>Open DevTools to inspect routes and compare the counter source with Vite's browser output.</p>
+          <Counter />
         </aside>
       </div>
     </main>

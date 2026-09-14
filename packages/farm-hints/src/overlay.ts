@@ -1,6 +1,7 @@
 "use client";
 
 import "@fontsource-variable/geist-mono/wght.css";
+import { farmLogo } from "./logo.js";
 import type { HintsOverlayOpen, HintsOverlayPosition } from "./config.js";
 import type { HintCategory, HintIssue, HintMetric, HintsSnapshot } from "./types.js";
 
@@ -333,8 +334,10 @@ function template(): string {
     <aside class="panel" role="region" aria-label="Farm Hints" hidden>
       <header class="header">
         <div class="brand">
-          <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
-          <div><span class="eyebrow">Farm.js</span><strong>Hints</strong></div>
+          ${farmLogo}
+          <span class="brand-name">FARM.JS</span>
+          <span class="brand-divider" aria-hidden="true">/</span>
+          <strong>Hints</strong>
         </div>
         <div class="header-actions">
           <button type="button" data-action="rescan" aria-label="Scan this route again" title="Scan again">↻</button>
@@ -363,9 +366,9 @@ const styles = String.raw`
   button, a { -webkit-tap-highlight-color: transparent; }
   button { font: inherit; }
   .root {
-    --bg: #fbfbfa;
-    --surface: #f3f3f0;
-    --surface-strong: #e8e8e3;
+    --bg: #ffffff;
+    --surface: #fafafa;
+    --surface-strong: #eeeeee;
     --line: #d9d9d3;
     --text: #1b1b19;
     --muted: #74746d;
@@ -377,22 +380,24 @@ const styles = String.raw`
     position: fixed;
     inset: auto 18px 18px auto;
     z-index: 2147483646;
+    pointer-events: none;
     color: var(--text);
     font: 13px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     text-rendering: geometricPrecision;
   }
   .root[data-position="bottom-left"] { right: auto; left: 18px; }
   .panel {
+    pointer-events: auto;
     width: min(390px, calc(100vw - 24px));
     max-height: min(690px, calc(100vh - 36px));
     overflow: hidden;
     border: 1px solid var(--line);
     border-radius: 14px;
-    background: color-mix(in srgb, var(--bg) 96%, transparent);
+    background: var(--bg);
     box-shadow: 0 22px 70px rgb(0 0 0 / 18%), 0 2px 8px rgb(0 0 0 / 8%);
-    backdrop-filter: blur(18px);
   }
   .launcher {
+    pointer-events: auto;
     display: flex;
     align-items: center;
     gap: 9px;
@@ -406,11 +411,11 @@ const styles = String.raw`
     cursor: pointer;
   }
   .launcher:hover { background: var(--surface); }
-  .launcher-mark, .brand-mark { display: grid; gap: 2px; width: 13px; }
-  .launcher-mark i, .brand-mark i { display: block; height: 2px; background: currentColor; }
-  .launcher-mark i:nth-child(2), .brand-mark i:nth-child(2) { width: 9px; }
-  .launcher-mark i:nth-child(3), .brand-mark i:nth-child(3) { width: 5px; }
-  .launcher-label, .launcher-count, .eyebrow, .route-row span, .route-row strong,
+  .launcher-mark { display: grid; gap: 2px; width: 13px; }
+  .launcher-mark i { display: block; height: 2px; background: currentColor; }
+  .launcher-mark i:nth-child(2) { width: 9px; }
+  .launcher-mark i:nth-child(3) { width: 5px; }
+  .launcher-label, .launcher-count, .route-row span, .route-row strong,
   .filter, .metric-label, .issue-meta, .group-heading, footer {
     font-family: "Geist Mono Variable", "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
     font-variation-settings: "wght" 620;
@@ -434,15 +439,15 @@ const styles = String.raw`
     display: flex;
     align-items: center;
     justify-content: space-between;
-    min-height: 66px;
-    padding: 0 14px 0 17px;
+    min-height: 57px;
+    padding: 10px 14px 10px 17px;
     border-bottom: 1px solid var(--line);
   }
-  .brand { display: flex; align-items: center; gap: 12px; }
-  .brand-mark { color: var(--serious); }
-  .brand > div { display: grid; gap: 1px; }
-  .brand strong { font-size: 15px; letter-spacing: -0.015em; }
-  .eyebrow { color: var(--muted); font-size: 9px; }
+  .brand { display: flex; align-items: center; gap: 8px; }
+  .brand-logo { width: 16px; height: 16px; flex-shrink: 0; filter: brightness(0.25); }
+  .brand-name { font: 500 12px/1.4 "Geist Mono Variable", "Geist Mono", monospace; letter-spacing: -0.5px; }
+  .brand-divider { color: var(--muted); font-size: 11px; }
+  .brand strong { font-size: 11px; font-weight: 400; }
   .header-actions { display: flex; gap: 4px; }
   .header-actions button {
     display: grid;
@@ -571,9 +576,9 @@ const styles = String.raw`
   @keyframes pulse { to { opacity: .22; transform: translateY(-2px); } }
   @media (prefers-color-scheme: dark) {
     .root {
-      --bg: #181817;
-      --surface: #222220;
-      --surface-strong: #2c2c29;
+      --bg: #101010;
+      --surface: #141414;
+      --surface-strong: #262626;
       --line: #353531;
       --text: #f0f0eb;
       --muted: #999991;
@@ -583,6 +588,7 @@ const styles = String.raw`
       --info: #78a8ed;
       --good: #64b889;
     }
+    .brand-logo { filter: none; }
   }
   @media (max-width: 520px) {
     .root, .root[data-position="bottom-left"] { right: 8px; bottom: 8px; left: 8px; }

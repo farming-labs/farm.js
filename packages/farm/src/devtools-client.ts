@@ -51,23 +51,26 @@ export function generateFarmDevtoolsClientRuntime(config: ResolvedFarmDevtoolsCo
       z-index: 2147483646;
       display: grid;
       place-items: center;
+      box-sizing: border-box;
       padding: 20px;
       background: rgb(0 0 0 / 0);
-      backdrop-filter: blur(0);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      overscroll-behavior: none;
+      isolation: isolate;
       opacity: 0;
       pointer-events: none;
-      transition: background-color 150ms ease-out, backdrop-filter 150ms ease-out, opacity 150ms ease-out;
+      transition: opacity 150ms ease-out;
     }
     #__farm_devtools_overlay__[data-open="true"] {
-      background: rgb(0 0 0 / 0.12);
-      backdrop-filter: blur(1px);
+      background: rgb(0 0 0 / 0.32);
       opacity: 1;
       pointer-events: auto;
     }
     #__farm_devtools_overlay__ > iframe {
       display: block;
-      width: min(960px, calc(100vw - 40px));
-      height: min(560px, calc(100dvh - 40px));
+      width: min(1100px, calc(100vw - 48px));
+      height: min(720px, calc(100dvh - 48px));
       border: 0;
       border-radius: 12px;
       background: transparent;
@@ -83,7 +86,7 @@ export function generateFarmDevtoolsClientRuntime(config: ResolvedFarmDevtoolsCo
       #__farm_devtools_overlay__ > iframe {
         width: calc(100vw - 16px);
         height: calc(100dvh - 16px);
-        border-radius: 10px;
+        border-radius: 12px;
       }
     }
     @media (prefers-reduced-motion: reduce) {
@@ -98,10 +101,32 @@ export function generateFarmDevtoolsClientRuntime(config: ResolvedFarmDevtoolsCo
   const runtimeKey = "__FARM_DEVTOOLS_RUNTIME__";
   const launchParam = ${JSON.stringify(FARM_DEVTOOLS_LAUNCH_PARAM)};
   const devtoolsPath = ${JSON.stringify(FARM_DEVTOOLS_PATH)};
-  const validViews = new Set(["overview", "routes", "api", "systems", "runtime", "raw"]);
+  const validViews = new Set(["overview", "routes", "api", "systems", "runtime", "raw", "inspect", "diagnostics"]);
   const shortcut = ${JSON.stringify(shortcut)};
   const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
   let returnFocus = null;
+  let restorePage = null;
+  let closeTimer = null;
+
+  const lockPage = () => {
+    const styles = [];
+    for (const element of [document.documentElement, document.body]) {
+      for (const [property, value] of [["overflow-x", "hidden"], ["overflow-y", "hidden"], ["overscroll-behavior", "none"]]) {
+        const previous = element.style.getPropertyValue(property);
+        const priority = element.style.getPropertyPriority(property);
+        element.style.setProperty(property, value, "important");
+        styles.push({ element, property, value, previous, priority });
+      }
+    }
+    return () => {
+      for (const { element, property, value, previous, priority } of styles) {
+        // Do not overwrite a newer style set by the application while the panel was open.
+        if (element.style.getPropertyValue(property) !== value || element.style.getPropertyPriority(property) !== "important") continue;
+        if (previous) element.style.setProperty(property, previous, priority);
+        else element.style.removeProperty(property);
+      }
+    };
+  };
 
   const matchesShortcut = (event) => {
     if (!shortcut || event.repeat) return false;
@@ -128,24 +153,35 @@ export function generateFarmDevtoolsClientRuntime(config: ResolvedFarmDevtoolsCo
     document.head.appendChild(style);
   };
 
-  const close = () => {
+  const finishClose = () => {
+    if (closeTimer !== null) window.clearTimeout(closeTimer);
+    closeTimer = null;
     const overlay = document.getElementById(overlayId);
-    if (!overlay) return;
+    overlay?.remove();
+    restorePage?.();
+    restorePage = null;
     const focusTarget = returnFocus;
     returnFocus = null;
+    focusTarget?.focus?.({ preventScroll: true });
+  };
+
+  const close = () => {
+    const overlay = document.getElementById(overlayId);
+    if (!overlay || closeTimer !== null) return;
     overlay.dataset.open = "false";
-    window.setTimeout(() => {
-      overlay.remove();
-      focusTarget?.focus?.();
-    }, 160);
+    closeTimer = window.setTimeout(finishClose, 160);
   };
 
   const open = (view = "overview") => {
+    if (closeTimer !== null) finishClose();
     if (document.getElementById(overlayId)) return;
     ensureStyles();
     returnFocus = document.activeElement;
+    restorePage = lockPage();
     const overlay = document.createElement("div");
     overlay.id = overlayId;
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-modal", "true");
     overlay.setAttribute("aria-label", "Farm.js DevTools overlay");
     const frame = document.createElement("iframe");
     const resolvedView = validViews.has(view) ? view : "overview";
@@ -156,9 +192,11 @@ export function generateFarmDevtoolsClientRuntime(config: ResolvedFarmDevtoolsCo
     overlay.addEventListener("pointerdown", (event) => {
       if (event.target === overlay) close();
     });
+    overlay.addEventListener("wheel", (event) => event.preventDefault(), { passive: false });
+    overlay.addEventListener("touchmove", (event) => event.preventDefault(), { passive: false });
     document.body.appendChild(overlay);
     requestAnimationFrame(() => {
-      overlay.dataset.open = "true";
+      if (overlay.isConnected && closeTimer === null) overlay.dataset.open = "true";
     });
   };
 
@@ -192,6 +230,7 @@ export function generateFarmDevtoolsClientRuntime(config: ResolvedFarmDevtoolsCo
   window.addEventListener("message", onMessage);
   window[runtimeKey] = {
     dispose() {
+      finishClose();
       window.removeEventListener("keydown", onKeydown, true);
       window.removeEventListener("message", onMessage);
     },

@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@farm.js/core": "workspace:*",
+    "@farm.js/devtools": "workspace:*",
     "@farm.js/hints": "workspace:*",
     "react": "19.2.8",
     "react-dom": "19.2.8"
