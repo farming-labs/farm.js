@@ -4,7 +4,8 @@
  */
 
 type Listener = (searchParams: URLSearchParams) => void;
-type KeyListener = (payload: { state: any; query: string | null }) => void;
+export type KeyUpdate = { state: any; query: string | null; source?: object };
+type KeyListener = (payload: KeyUpdate) => void;
 
 class Emitter {
   private listeners: Map<string, Set<Listener>> = new Map();
@@ -21,7 +22,7 @@ class Emitter {
   /**
    * Emit a key-specific update (for cross-hook sync)
    */
-  emitKey(key: string, payload: { state: any; query: string | null }): void {
+  emitKey(key: string, payload: KeyUpdate): void {
     const listeners = this.keyListeners.get(key) || new Set();
     listeners.forEach((listener) => listener(payload));
   }

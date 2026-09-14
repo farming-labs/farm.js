@@ -60,6 +60,9 @@ parsers is not required. Each queued key keeps its draft when another key commit
 Consumers sharing a key parse incoming edits with their own parser, including while a URL write
 is queued. Different parser types therefore retain their own output types and defaults; removing
 a key is parsed like an absent URL value.
+Multiple `useQueryState` writers receive each other's edits immediately, even when both write
+in the same event before a throttled URL commit. A writer ignores only its own draft notification;
+there is no time window during which peer edits are dropped.
 If a component changes the key or parser it passes to the hook, the returned value is immediately
 re-parsed from the current URL plus active queued values for that URL. A queued write is cancelled
 when its owning hook changes keys or unmounts. Navigation to a different URL also discards its

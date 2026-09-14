@@ -13,7 +13,7 @@ import {
   writeFarmURLSearchHistory,
 } from "../client/history-sync";
 import { _resolveCurrentRequest } from "../server/request-bridge";
-import { emitter } from "./sync";
+import { emitter, type KeyUpdate } from "./sync";
 export { parseRouteParams, loadRouteParams, type RouteParamsInput } from "./params";
 
 import { asString as asStringClient, asInteger as asIntegerClient, type Parser } from "./parsers";
@@ -297,27 +297,20 @@ export function useQueryState<TParser extends Parser<any>>(
 
   const stateRef = useRef(state);
   const stateKeyRef = useRef(key);
-  const isInternalUpdateRef = useRef(false);
   const cancelPendingUpdateRef = useRef<(() => void) | undefined>(undefined);
   stateRef.current = state;
 
   const setValue = useCallback(
     (value: T | null) => {
-      isInternalUpdateRef.current = true;
-
       setState(value);
       stateRef.current = value;
 
       const serialized = value === null ? null : parser.serialize(value);
 
-      emitter.emitKey(key, { state: value, query: serialized });
+      emitter.emitKey(key, { state: value, query: serialized, source: stateRef });
 
       cancelPendingUpdateRef.current?.();
       cancelPendingUpdateRef.current = updateURL({ [key]: serialized }, options, true);
-
-      setTimeout(() => {
-        isInternalUpdateRef.current = false;
-      }, 10);
     },
     [key, parser, options],
   );
@@ -337,10 +330,6 @@ export function useQueryState<TParser extends Parser<any>>(
     };
 
     const onEmitterUpdate = (searchParams: URLSearchParams) => {
-      if (isInternalUpdateRef.current) {
-        return;
-      }
-
       const parsed = parser.parse(readSearchParam(searchParams, key));
       if (!areParsedValuesEqual(parser, stateRef.current, parsed)) {
         setState(parsed);
@@ -348,8 +337,10 @@ export function useQueryState<TParser extends Parser<any>>(
       }
     };
 
-    const onKeyUpdate = (payload: { state: any; query: string | null }) => {
-      if (isInternalUpdateRef.current) {
+    const onKeyUpdate = (payload: KeyUpdate) => {
+      // Skip only this hook's synchronous echo, never a peer's newer edit.
+      // The ref identity is stable across renders and is not serialized.
+      if (payload.source === stateRef) {
         return;
       }
 
