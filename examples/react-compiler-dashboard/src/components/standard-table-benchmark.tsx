@@ -438,7 +438,9 @@ export function StandardTableBenchmark() {
             const addition = buildRows(1, nextSeed)[0];
             const position = 9_000;
             setSeed(nextSeed);
-            setRows((current) => current.toSpliced(position, 0, addition));
+            setRows((current) => {
+              return current.toSpliced(position, 0, addition);
+            });
             setOperation("insert at runtime position");
             setRevision((value) => value + 1);
           }}
@@ -454,7 +456,8 @@ export function StandardTableBenchmark() {
             const position = 9_000;
             setSeed(nextSeed);
             setRows((current) => {
-              return current.toSpliced(position, 0, addition);
+              const nextRows = current.toSpliced(position, 0, addition);
+              return nextRows;
             });
             setOperation("insert at runtime position (snapshot control)");
             setRevision((value) => value + 1);
@@ -470,7 +473,9 @@ export function StandardTableBenchmark() {
             const additions = buildRows(64, nextSeed);
             const position = 5_000;
             setSeed(nextSeed);
-            setRows((current) => current.toSpliced(position, 0, ...additions));
+            setRows((current) => {
+              return current.toSpliced(position, 0, ...additions);
+            });
             setOperation("insert batch at runtime position");
             setRevision((value) => value + 1);
           }}
@@ -486,7 +491,8 @@ export function StandardTableBenchmark() {
             const position = 5_000;
             setSeed(nextSeed);
             setRows((current) => {
-              return current.toSpliced(position, 0, ...additions);
+              const nextRows = current.toSpliced(position, 0, ...additions);
+              return nextRows;
             });
             setOperation("insert batch at runtime position (snapshot control)");
             setRevision((value) => value + 1);
@@ -503,7 +509,9 @@ export function StandardTableBenchmark() {
             const position = 5_000;
             const deleteCount = replacements.length;
             setSeed(nextSeed);
-            setRows((current) => current.toSpliced(position, deleteCount, ...replacements));
+            setRows((current) => {
+              return current.toSpliced(position, deleteCount, ...replacements);
+            });
             setOperation("replace dynamic-count runtime window");
             setRevision((value) => value + 1);
           }}
@@ -520,7 +528,8 @@ export function StandardTableBenchmark() {
             const deleteCount = replacements.length;
             setSeed(nextSeed);
             setRows((current) => {
-              return current.toSpliced(position, deleteCount, ...replacements);
+              const nextRows = current.toSpliced(position, deleteCount, ...replacements);
+              return nextRows;
             });
             setOperation("replace dynamic-count runtime window (snapshot control)");
             setRevision((value) => value + 1);
@@ -541,7 +550,9 @@ export function StandardTableBenchmark() {
             const additions = buildRows(16, nextSeed);
             const replacements = [...retained, ...additions];
             setSeed(nextSeed);
-            setRows((current) => current.toSpliced(position, 64, ...replacements));
+            setRows((current) => {
+              return current.toSpliced(position, 64, ...replacements);
+            });
             setOperation("reuse and reorder a 64-row runtime window");
             setRevision((value) => value + 1);
           }}
@@ -562,7 +573,8 @@ export function StandardTableBenchmark() {
             const replacements = [...retained, ...additions];
             setSeed(nextSeed);
             setRows((current) => {
-              return current.toSpliced(position, 64, ...replacements);
+              const nextRows = current.toSpliced(position, 64, ...replacements);
+              return nextRows;
             });
             setOperation("reuse and reorder a 64-row runtime window (snapshot control)");
             setRevision((value) => value + 1);
@@ -583,7 +595,9 @@ export function StandardTableBenchmark() {
             const additions = buildRows(32, nextSeed);
             const replacements = [...retained, ...additions];
             setSeed(nextSeed);
-            setRows((current) => current.toSpliced(position, 64, ...replacements));
+            setRows((current) => {
+              return current.toSpliced(position, 64, ...replacements);
+            });
             setOperation("grow and reuse a runtime window");
             setRevision((value) => value + 1);
           }}
@@ -604,7 +618,8 @@ export function StandardTableBenchmark() {
             const replacements = [...retained, ...additions];
             setSeed(nextSeed);
             setRows((current) => {
-              return current.toSpliced(position, 64, ...replacements);
+              const nextRows = current.toSpliced(position, 64, ...replacements);
+              return nextRows;
             });
             setOperation("grow and reuse a runtime window (snapshot control)");
             setRevision((value) => value + 1);
@@ -632,12 +647,12 @@ export function StandardTableBenchmark() {
               .map((row) => ({ ...row, label: `${row.label} queued shrink` }));
             const secondReplacements = [...secondRetained, ...buildRows(16, secondSeed)];
             setSeed(secondSeed);
-            setRows((current) =>
-              current.toSpliced(firstPosition, 64, ...firstReplacements),
-            );
-            setRows((current) =>
-              current.toSpliced(secondPosition, 64, ...secondReplacements),
-            );
+            setRows((current) => {
+              return current.toSpliced(firstPosition, 64, ...firstReplacements);
+            });
+            setRows((current) => {
+              return current.toSpliced(secondPosition, 64, ...secondReplacements);
+            });
             setOperation("queue disjoint grow and shrink windows");
             setRevision((value) => value + 1);
           }}
@@ -665,10 +680,12 @@ export function StandardTableBenchmark() {
             const secondReplacements = [...secondRetained, ...buildRows(16, secondSeed)];
             setSeed(secondSeed);
             setRows((current) => {
-              return current.toSpliced(firstPosition, 64, ...firstReplacements);
+              const nextRows = current.toSpliced(firstPosition, 64, ...firstReplacements);
+              return nextRows;
             });
             setRows((current) => {
-              return current.toSpliced(secondPosition, 64, ...secondReplacements);
+              const nextRows = current.toSpliced(secondPosition, 64, ...secondReplacements);
+              return nextRows;
             });
             setOperation("queue disjoint grow and shrink windows (snapshot control)");
             setRevision((value) => value + 1);
@@ -686,7 +703,9 @@ export function StandardTableBenchmark() {
                 ? { ...row, amount: row.amount + 1, label: `${row.label} refreshed` }
                 : { ...row },
             );
-            setRows((current) => current.toSpliced(position, 64, ...replacements));
+            setRows((current) => {
+              return current.toSpliced(position, 64, ...replacements);
+            });
             setOperation("refresh 64-row same-key window");
             setRevision((value) => value + 1);
           }}
@@ -704,7 +723,8 @@ export function StandardTableBenchmark() {
                 : { ...row },
             );
             setRows((current) => {
-              return current.toSpliced(position, 64, ...replacements);
+              const nextRows = current.toSpliced(position, 64, ...replacements);
+              return nextRows;
             });
             setOperation("refresh 64-row same-key window (snapshot control)");
             setRevision((value) => value + 1);
@@ -728,8 +748,12 @@ export function StandardTableBenchmark() {
                 ? { ...row, amount: row.amount + 1, label: `${row.label} queued` }
                 : { ...row },
             );
-            setRows((current) => current.toSpliced(firstPosition, 32, ...first));
-            setRows((current) => current.toSpliced(secondPosition, 32, ...second));
+            setRows((current) => {
+              return current.toSpliced(firstPosition, 32, ...first);
+            });
+            setRows((current) => {
+              return current.toSpliced(secondPosition, 32, ...second);
+            });
             setOperation("refresh two queued same-key windows");
             setRevision((value) => value + 1);
           }}
@@ -753,10 +777,12 @@ export function StandardTableBenchmark() {
                 : { ...row },
             );
             setRows((current) => {
-              return current.toSpliced(firstPosition, 32, ...first);
+              const nextRows = current.toSpliced(firstPosition, 32, ...first);
+              return nextRows;
             });
             setRows((current) => {
-              return current.toSpliced(secondPosition, 32, ...second);
+              const nextRows = current.toSpliced(secondPosition, 32, ...second);
+              return nextRows;
             });
             setOperation("refresh two queued same-key windows (snapshot control)");
             setRevision((value) => value + 1);
@@ -779,8 +805,12 @@ export function StandardTableBenchmark() {
               offset === 16 ? { ...row, label: `${row.label} queued replacement` } : row,
             );
             setSeed(secondSeed);
-            setRows((current) => current.toSpliced(firstPosition, 32, ...first));
-            setRows((current) => current.toSpliced(secondPosition, 32, ...second));
+            setRows((current) => {
+              return current.toSpliced(firstPosition, 32, ...first);
+            });
+            setRows((current) => {
+              return current.toSpliced(secondPosition, 32, ...second);
+            });
             setOperation("replace two overlapping queued fresh-key windows");
             setRevision((value) => value + 1);
           }}
@@ -803,10 +833,12 @@ export function StandardTableBenchmark() {
             );
             setSeed(secondSeed);
             setRows((current) => {
-              return current.toSpliced(firstPosition, 32, ...first);
+              const nextRows = current.toSpliced(firstPosition, 32, ...first);
+              return nextRows;
             });
             setRows((current) => {
-              return current.toSpliced(secondPosition, 32, ...second);
+              const nextRows = current.toSpliced(secondPosition, 32, ...second);
+              return nextRows;
             });
             setOperation("replace two overlapping queued fresh-key windows (snapshot control)");
             setRevision((value) => value + 1);
@@ -819,7 +851,9 @@ export function StandardTableBenchmark() {
           type="button"
           onClick={() => {
             const position = 9_000;
-            setRows((current) => current.toSpliced(position, 1));
+            setRows((current) => {
+              return current.toSpliced(position, 1);
+            });
             setOperation("remove at runtime position");
             setRevision((value) => value + 1);
           }}
@@ -832,7 +866,8 @@ export function StandardTableBenchmark() {
           onClick={() => {
             const position = 9_000;
             setRows((current) => {
-              return current.toSpliced(position, 1);
+              const nextRows = current.toSpliced(position, 1);
+              return nextRows;
             });
             setOperation("remove at runtime position (snapshot control)");
             setRevision((value) => value + 1);
@@ -845,7 +880,9 @@ export function StandardTableBenchmark() {
           type="button"
           onClick={() => {
             const position = 8_000;
-            setRows((current) => current.toSpliced(position, 64));
+            setRows((current) => {
+              return current.toSpliced(position, 64);
+            });
             setOperation("remove range at runtime position");
             setRevision((value) => value + 1);
           }}
@@ -858,7 +895,8 @@ export function StandardTableBenchmark() {
           onClick={() => {
             const position = 8_000;
             setRows((current) => {
-              return current.toSpliced(position, 64);
+              const nextRows = current.toSpliced(position, 64);
+              return nextRows;
             });
             setOperation("remove range at runtime position (snapshot control)");
             setRevision((value) => value + 1);
@@ -873,7 +911,9 @@ export function StandardTableBenchmark() {
             const position = 100;
             const current = rows[position];
             const replacement = { ...current, label: `${current.label} @` };
-            setRows((items) => items.toSpliced(position, 1, replacement));
+            setRows((items) => {
+              return items.toSpliced(position, 1, replacement);
+            });
             setOperation("replace at runtime position");
             setRevision((value) => value + 1);
           }}
@@ -888,7 +928,8 @@ export function StandardTableBenchmark() {
             const current = rows[position];
             const replacement = { ...current, label: `${current.label} @` };
             setRows((items) => {
-              return items.toSpliced(position, 1, replacement);
+              const nextRows = items.toSpliced(position, 1, replacement);
+              return nextRows;
             });
             setOperation("replace at runtime position (snapshot control)");
             setRevision((value) => value + 1);
