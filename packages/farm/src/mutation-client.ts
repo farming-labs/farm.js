@@ -128,11 +128,11 @@ export function useMutation<TTarget extends AnyMutationTarget>(
             current: MutationState<TVariables, TData, TError>,
           ) => MutationState<TVariables, TData, TError>),
     ) => {
-      setState((current) => {
-        const next = typeof value === "function" ? value(current) : value;
-        stateRef.current = next;
-        return next;
-      });
+      // Advance the authoritative snapshot before React processes its queue.
+      // A second submission in this batch must see the preceding transition.
+      const next = typeof value === "function" ? value(stateRef.current) : value;
+      stateRef.current = next;
+      setState(next);
     },
     [],
   );

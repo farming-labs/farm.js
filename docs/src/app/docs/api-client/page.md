@@ -453,6 +453,9 @@ The return value includes `data`, `error`, `variables`, `status`, `pending`, and
 existing API-client cache, retry, invalidation, and optimistic options through `request`. Local
 `optimistic` state on `useMutation` is separate from an API cache update: it controls
 `mutation.data`, while `request.optimistic` updates shared cached queries.
+Each local optimistic callback receives the latest scheduled mutation data, even when multiple
+submissions occur before React rerenders. With `rollbackOnError: true`, a failed latest submission
+restores the snapshot captured immediately before that submission's optimistic update.
 
 For overlapping submissions, `status`, `data`, and `error` describe the latest submission.
 Older completions do not replace its result or run completion callbacks. `pending` separately
