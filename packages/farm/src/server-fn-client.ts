@@ -255,17 +255,22 @@ export function useAction<TInput, TResult, TError extends Error = Error>(
 ): UseActionReturn<TInput, TResult, TError> {
   const serverFn = resolveServerFnTarget(target);
   const action = useServerFn(serverFn, options);
+  const formActionRef = useRef(action.formAction);
+  formActionRef.current = action.formAction;
 
   const Form = useMemo(() => {
+    // Keep both the component and its action stable, even when a parent caches
+    // the form element. Resolve the latest target/options at submission time.
+    const submitForm = (formData: FormData) => formActionRef.current(formData);
     const ActionForm = (props: UseActionFormProps) =>
       createElement("form", {
         ...props,
-        action: action.formAction,
+        action: submitForm,
       });
 
     ActionForm.displayName = "FarmActionForm";
     return ActionForm;
-  }, [action.formAction]);
+  }, []);
 
   return useMemo(() => {
     const call = ((input?: TInput | FormData) =>
