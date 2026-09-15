@@ -63,8 +63,30 @@ describe("production middleware runtime", () => {
       const vercelOutputConfig = JSON.parse(
         await fs.readFile(path.join(root, ".vercel", "output", "config.json"), "utf8"),
       );
-      expect(vercelOutputConfig.routes[0]).toEqual(createFarmVercelImmutableAssetRoute());
-      expect(vercelOutputConfig.routes[1]).toEqual({ handle: "filesystem" });
+      // Farm's immutable asset route is the last source route before the
+      // filesystem handler. The preset's redirect/header routes — including the
+      // per-prerendered-route cache headers this fixture injects (PPR + ISR
+      // pages) — are now preserved ahead of it instead of being discarded, so
+      // the immutable route is no longer necessarily at index 0.
+      const filesystemIndex = vercelOutputConfig.routes.findIndex(
+        (route: { handle?: string }) => route.handle === "filesystem",
+      );
+      expect(filesystemIndex).toBeGreaterThan(0);
+      expect(vercelOutputConfig.routes[filesystemIndex - 1]).toEqual(
+        createFarmVercelImmutableAssetRoute(),
+      );
+      expect(vercelOutputConfig.routes[filesystemIndex]).toEqual({ handle: "filesystem" });
+      // At least one preset source route (a redirect or header route) is
+      // preserved ahead of the immutable route; the old wholesale rebuild
+      // dropped every one of them on Vercel.
+      const preservedSourceRoutes = vercelOutputConfig.routes.slice(0, filesystemIndex - 1);
+      expect(preservedSourceRoutes.length).toBeGreaterThan(0);
+      expect(
+        preservedSourceRoutes.every(
+          (route: { handle?: string; continue?: boolean }) =>
+            route.handle === undefined && route.continue !== true,
+        ),
+      ).toBe(true);
 
       const staticAssetsDir = path.join(root, ".vercel", "output", "static", "assets");
       // The client build emits this image under more than one hashed name, and readdir
