@@ -889,6 +889,15 @@ export function unstable_cache<Args extends unknown[], Result>(
   };
 }
 
+/**
+ * Invalidate every cache entry carrying `tag`.
+ *
+ * Observability note: the `count` on the emitted `cache.revalidateTag` event is
+ * derived from Farm's process-local entry tracking. With a shared `cache.adapter`
+ * configured, entries live in the adapter rather than in local memory, so the
+ * count can read as `0` even though the invalidation is still propagated to the
+ * adapter and applied. Treat it as a best-effort signal, not a distributed count.
+ */
 export function revalidateTag(_tag: string, _profile?: RevalidateTagProfile): void | Promise<void> {
   const cache = getFarmDataCache();
   if (cache.hasAdapter) {
@@ -917,6 +926,16 @@ export function updateTag(tag: string): void | Promise<void> {
   cache.revalidateTag(tag, { source: "updateTag" });
 }
 
+/**
+ * Invalidate cached data for a route path (and its PPR shell, if any).
+ *
+ * Observability note: the `count` on the emitted `cache.revalidatePath` event and
+ * the `ppr.shell.invalidated` event are derived from process-local entry tracking.
+ * With a shared `cache.adapter`, PPR shells live in the adapter rather than in
+ * local memory, so the count can read as `0` and `ppr.shell.invalidated` may not
+ * be emitted even though the invalidation is still propagated to the adapter and
+ * applied.
+ */
 export function revalidatePath(routePath: string): void | Promise<void> {
   const cache = getFarmDataCache();
   if (cache.hasAdapter) {

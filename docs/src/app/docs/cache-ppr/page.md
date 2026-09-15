@@ -116,6 +116,16 @@ revalidatePath("/pricing");
 `revalidatePath()` accepts a pathname or an HTTP(S) URL. Query strings and fragments do not change
 the cache path and are removed during normalization.
 
+### Invalidation counts under a shared adapter
+
+The `count` reported on invalidation events (`cache.revalidateTag`, `cache.revalidatePath`) and the
+`ppr.shell.invalidated` event are derived from Farm's process-local entry tracking. When a shared
+`cache.adapter` is configured, entries and PPR shells live in the adapter rather than in local
+memory, so these counts reflect only what the current process has tracked — they can read as `0`,
+and `ppr.shell.invalidated` may not be emitted, even though the invalidation is still propagated to
+the adapter and applied. Treat these counts and events as best-effort observability signals rather
+than a confirmation of how many entries or shells were affected across a distributed deployment.
+
 ## PPR shell
 
 Partial Prerendering is experimental and disabled by default. Enable it once in
