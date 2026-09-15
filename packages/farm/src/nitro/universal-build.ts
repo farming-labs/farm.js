@@ -72,7 +72,7 @@ import {
 } from "../route-runtime-manifest";
 import type { FarmRouteRuntimeManifest, FarmRouteRuntimeManifestEntry } from "../route-runtime";
 import { createFarmVercelRouteRuntimeFunctions } from "./vercel-route-runtime";
-import { createFarmVercelImmutableAssetRoute } from "./vercel-assets";
+import { buildFarmVercelRoutes } from "./vercel-assets";
 import { createFarmNodeServerEntry } from "./node-server-entry";
 import { resolveFarmNotFoundComponentPath } from "../not-found";
 import { readFarmI18nCatalogs } from "../i18n/catalog";
@@ -8553,38 +8553,14 @@ async function postProcessVercelOutput(
     fs,
   );
 
-  // Update routes to use the correct function path
-  vercelConfig.routes = [
-    // Apply the header before the filesystem handler. `continue` lets Vercel
-    // serve the matching file while preserving the immutable cache policy.
-    // Hashed client assets ship at the root regardless of basePath, so the
-    // route is deliberately not basePath-scoped.
-    createFarmVercelImmutableAssetRoute(),
-    // Serve static files first
-    {
-      handle: "filesystem",
-    },
-    ...runtimeRoutes,
-    // API routes
-    ...(resolveFarmAPIServerBasePath(config.api) === "/"
-      ? []
-      : [
-          {
-            src: `${resolveFarmAPIServerBasePath(config.api)}/(.*)`,
-            dest: "/__nitro",
-            headers: {
-              "Access-Control-Allow-Origin": "*",
-              "Access-Control-Allow-Methods": "*",
-              "Access-Control-Allow-Headers": "*",
-            },
-          },
-        ]),
-    // All other routes go to the serverless function
-    {
-      src: "/(.*)",
-      dest: "/__nitro",
-    },
-  ];
+  // Rebuild the routes around Farm's `__nitro` function while preserving the
+  // preset's redirect and header routes (previously discarded). See
+  // buildFarmVercelRoutes for the full merge contract.
+  vercelConfig.routes = buildFarmVercelRoutes({
+    presetRoutes: Array.isArray(vercelConfig.routes) ? vercelConfig.routes : [],
+    runtimeRoutes,
+    apiBasePath: resolveFarmAPIServerBasePath(config.api),
+  });
 
   const vercelConfigWithWorkflowCrons = applyFarmWorkflowVercelCrons(
     vercelConfig,
