@@ -696,6 +696,17 @@ declare module "@farm.js/core/client" {
         refetch?: boolean;
       };
 
+  export const FARM_CACHE_INVALIDATION_CHANNEL: "farm:cache-invalidation";
+
+  export type CrossTabCacheInvalidationOptions = {
+    /** Override the BroadcastChannel name, e.g. to isolate multiple apps on one origin. */
+    channelName?: string;
+  };
+
+  export function enableCrossTabCacheInvalidation(
+    options?: CrossTabCacheInvalidationOptions,
+  ): () => void;
+
   export type OptimisticUpdate =
     | [CallableRouteRef<any>, unknown, (prev: any) => any]
     | [CacheKey<any> | DefinedCacheKey<any> | string, (prev: any) => any];
