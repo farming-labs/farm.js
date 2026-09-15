@@ -283,7 +283,20 @@ export function recordFarmEventTrace(event: FarmEvent): FarmTraceContext | undef
     }
 
     const error = event.type === "request.error" ? undefined : getEventError(event);
-    if (error !== undefined) recordSpanError(activeSpan, error);
+    if (error !== undefined) {
+      // A recoverable render error (caught by an error boundary) still fires
+      // React's onError while the request returns a valid response, so record
+      // the exception for visibility but let the actual response status
+      // (setResponseStatus) decide the span status instead of forcing the whole
+      // request trace to ERROR. A genuinely fatal render error surfaces through
+      // the request outcome (a thrown handler or a >= 500 status) and is marked
+      // there.
+      if (event.type === "render.error") {
+        recordSpanException(activeSpan, error);
+      } else {
+        recordSpanError(activeSpan, error);
+      }
+    }
   }
 
   const completedTraceContext = recordCompletedEventSpan(event, activeContext);
@@ -422,9 +435,14 @@ function getEventError(event: FarmEvent): unknown {
   return "error" in event ? event.error : undefined;
 }
 
-function recordSpanError(span: Span, error: unknown): void {
+function recordSpanException(span: Span, error: unknown): Error {
   const normalized = error instanceof Error ? error : new Error(String(error));
   span.recordException(normalized);
+  return normalized;
+}
+
+function recordSpanError(span: Span, error: unknown): void {
+  const normalized = recordSpanException(span, error);
   span.setStatus({ code: SpanStatusCode.ERROR, message: normalized.message });
 }
 
