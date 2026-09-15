@@ -767,6 +767,76 @@ function getStaticImportBindings(content: string | null): Map<string, string[]> 
   return bindings;
 }
 
+/**
+ * Elements whose content model the HTML parser enforces. A boundary marker
+ * emitted inside one of these is relocated or ignored before any script runs:
+ * in a table the marker and its row are foster-parented out of the table, in a
+ * select the options stop being direct children and the control renders empty,
+ * and inside svg the marker is created in the SVG namespace as an unknown
+ * element whose children never render. RFC 0001 requires these to take the
+ * route-wide fallback.
+ */
+const PARSER_SENSITIVE_JSX_CONTAINERS = new Set([
+  "table",
+  "thead",
+  "tbody",
+  "tfoot",
+  "tr",
+  "select",
+  "optgroup",
+  "svg",
+]);
+
+/**
+ * Names a parser-sensitive element that encloses a use of one of the bindings,
+ * or undefined when every use is in ordinary flow content.
+ *
+ * Ambiguity resolves toward reporting a container: the caller turns a hit into
+ * the complete route-wide fallback, which is always correct, while a miss would
+ * leave the silent DOM corruption in place.
+ */
+function findParserSensitiveJsxContainer(
+  content: string | null,
+  localBindings: string[],
+): string | undefined {
+  if (!content || localBindings.length === 0) return undefined;
+  const names = new Set(localBindings);
+  const tokens = tokenizeModuleSource(content);
+  const openDepth = new Map<string, number>();
+
+  const isSelfClosing = (openingIndex: number): boolean => {
+    for (let index = openingIndex; index < tokens.length; index++) {
+      if (tokens[index].value === ">") return tokens[index - 1]?.value === "/";
+    }
+    return false;
+  };
+
+  for (let index = 0; index < tokens.length - 1; index++) {
+    if (tokens[index].value !== "<") continue;
+
+    if (tokens[index + 1].value === "/") {
+      const closing = tokens[index + 2]?.value;
+      if (closing && openDepth.has(closing)) {
+        openDepth.set(closing, Math.max(0, (openDepth.get(closing) ?? 0) - 1));
+      }
+      continue;
+    }
+
+    const tag = tokens[index + 1].value;
+    if (names.has(tag)) {
+      for (const [container, depth] of openDepth) {
+        if (depth > 0) return container;
+      }
+      continue;
+    }
+    if (PARSER_SENSITIVE_JSX_CONTAINERS.has(tag) && !isSelfClosing(index)) {
+      openDepth.set(tag, (openDepth.get(tag) ?? 0) + 1);
+    }
+  }
+
+  return undefined;
+}
+
 function countStaticJsxUses(content: string | null, localBindings: string[]): number {
   if (!content || localBindings.length === 0) return 0;
   const names = new Set(localBindings);
@@ -1028,6 +1098,13 @@ function collectIsolatedClientBoundaries(
       if (fallbackReason || importedBoundaryCount === 0) continue;
       const localBindings = importedBindings.get(specifier) ?? [];
       const staticUses = countStaticJsxUses(content, localBindings);
+      if (staticUses > 0) {
+        const container = findParserSensitiveJsxContainer(content, localBindings);
+        if (container) {
+          fallbackReason = `the client boundary imported from ${specifier} renders inside <${container}>, where the HTML parser relocates its hydration marker`;
+          return 0;
+        }
+      }
       if (staticUses > 0 && hasDynamicJsxCardinality(content, localBindings)) {
         fallbackReason = `the client boundary count imported from ${specifier} is data-dependent`;
         costGuardExceeded = true;

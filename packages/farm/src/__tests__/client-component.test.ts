@@ -252,6 +252,59 @@ describe("client component path resolution", () => {
     });
   });
 
+  it("keeps boundaries inside parser-sensitive containers route-wide", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-isolated-parser-context-"));
+    tempDirs.push(root);
+    const pageFile = path.join(root, "src", "app", "page.tsx");
+    const componentsDirectory = path.join(root, "src", "components");
+    fs.mkdirSync(path.dirname(pageFile), { recursive: true });
+    fs.mkdirSync(componentsDirectory, { recursive: true });
+    fs.writeFileSync(
+      path.join(componentsDirectory, "widget.tsx"),
+      `'use client';\nexport default function Widget() { return <button>go</button>; }\n`,
+    );
+
+    const writePage = (body: string) => {
+      fs.writeFileSync(
+        pageFile,
+        `import Widget from "../components/widget";\nexport default function Page() { return ${body}; }\n`,
+      );
+    };
+
+    // Each of these renders the marker where the parser would relocate or drop it.
+    // The outermost enclosing container is reported, which is the one the
+    // author needs to restructure.
+    for (const [container, body] of [
+      ["table", "<table><tbody><Widget /></tbody></table>"],
+      ["table", "<table><tbody><tr><Widget /></tr></tbody></table>"],
+      ["tbody", "<tbody><Widget /></tbody>"],
+      ["select", "<select><Widget /></select>"],
+      ["svg", '<svg viewBox="0 0 10 10"><Widget /></svg>'],
+    ] as const) {
+      writePage(body);
+      expect(getClientModuleHydrationPlan(pageFile, root, "enabled")).toMatchObject({
+        shouldHydrate: true,
+        hasIsolatedClientBoundaries: false,
+        isolatedBoundaries: [],
+        fallbackReason: `the client boundary imported from ../components/widget renders inside <${container}>, where the HTML parser relocates its hydration marker`,
+      });
+    }
+
+    // Ordinary flow content still isolates, including after a closed container
+    // and after a self-closing icon, which must not leave the scan armed.
+    for (const body of [
+      "<div><Widget /></div>",
+      "<><table><tbody><tr><td>cell</td></tr></tbody></table><Widget /></>",
+      '<><svg viewBox="0 0 10 10" /><Widget /></>',
+    ]) {
+      writePage(body);
+      expect(getClientModuleHydrationPlan(pageFile, root, "enabled")).toMatchObject({
+        shouldHydrate: false,
+        hasIsolatedClientBoundaries: true,
+      });
+    }
+  });
+
   it("keeps client graphs above the measured isolated-root limit route-wide", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-isolated-client-cost-"));
     tempDirs.push(root);

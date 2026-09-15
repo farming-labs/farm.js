@@ -14,13 +14,22 @@ import "@farm.js/core/css";
  */
 export type RoutePath =
   | "/"
-  | "/about";
+  | "/about"
+  | "/select"
+  | "/svg"
+  | "/table";
 export type RoutePattern =
   | "/"
-  | "/about";
+  | "/about"
+  | "/select"
+  | "/svg"
+  | "/table";
 export type RouteModulePattern =
   | "/"
-  | "/about";
+  | "/about"
+  | "/select"
+  | "/svg"
+  | "/table";
 declare module "@farm.js/core/client" {
   interface LinkDefaultRoute {
     _: import("./farm").RoutePath;
