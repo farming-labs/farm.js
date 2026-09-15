@@ -26,13 +26,17 @@ type ActiveServerQueryInvocation = {
   owner: object;
 };
 
-type ServerQueryOwner = { invalidations: ReturnType<typeof trackFarmClientCacheInvalidations> };
+type ServerQueryOwner = {
+  invalidations: ReturnType<typeof trackFarmClientCacheInvalidations>;
+  supersededKeys: Set<string>;
+};
 
 type ServerQueryClientState = {
   functionIds: WeakMap<Function, number>;
   nextFunctionId: number;
   active: ActiveServerQueryInvocation[];
   latestOwners: Map<string, object>;
+  owners: Set<ServerQueryOwner>;
 };
 
 const FARM_SERVER_QUERY_CLIENT_STATE = Symbol.for("farm.serverQueryClientState");
@@ -46,8 +50,32 @@ const serverQueryClientState: ServerQueryClientState = (serverQueryClientGlobal[
   nextFunctionId: 0,
   active: [],
   latestOwners: new Map(),
+  owners: new Set(),
 });
 serverQueryClientState.latestOwners ??= new Map();
+serverQueryClientState.owners ??= new Set();
+
+function isServerQueryOwnerSuperseded(owner: ServerQueryOwner, key: string): boolean {
+  const cache = getFarmClientDataCache();
+  const resolved = cache.resolveKey(key);
+  for (const superseded of owner.supersededKeys ?? []) {
+    if (cache.resolveKey(superseded) === resolved) return true;
+  }
+  return false;
+}
+
+function claimServerQueryKey(owner: ServerQueryOwner, key: string): boolean {
+  if (isServerQueryOwnerSuperseded(owner, key)) return false;
+  const resolved = getFarmClientDataCache().resolveKey(key);
+  // Set iteration follows request start order, not response timestamps. Record
+  // the claim on older live requests so it survives this owner's completion,
+  // even when an older reference only learns its canonical key afterward.
+  for (const older of serverQueryClientState.owners) {
+    if (older === owner) break;
+    older.supersededKeys.add(resolved);
+  }
+  return true;
+}
 
 // Global symbol registry key set on raw server query implementations by
 // createServerQuery. Referenced via Symbol.for instead of importing
@@ -100,6 +128,14 @@ export function completeFarmServerQueryAction<TData>(
   if (invocation.provisionalKey) {
     cache.alias(invocation.provisionalKey, metadata.key);
   }
+  const owner = invocation.owner as ServerQueryOwner | undefined;
+  if (
+    owner &&
+    serverQueryClientState.owners.has(owner) &&
+    !claimServerQueryKey(owner, metadata.key)
+  ) {
+    return value.data as TData;
+  }
   const invalidated = (invocation.owner as ServerQueryOwner | undefined)?.invalidations?.has(
     metadata.key,
   );
@@ -125,7 +161,14 @@ export function shouldApplyFarmServerQueryActionResult(
   invocation: FarmServerQueryActionInvocation,
 ): boolean {
   if (!invocation.provisionalKey || !invocation.owner) return true;
-  return serverQueryClientState.latestOwners.get(invocation.provisionalKey) === invocation.owner;
+  return isCurrentServerQueryOwner(invocation.provisionalKey, invocation.owner);
+}
+
+function isCurrentServerQueryOwner(provisionalKey: string, owner: object): boolean {
+  return (
+    serverQueryClientState.latestOwners.get(provisionalKey) === owner &&
+    !isServerQueryOwnerSuperseded(owner as ServerQueryOwner, provisionalKey)
+  );
 }
 
 export function createServerQueryCallKey<TInput, TData>(
@@ -188,8 +231,13 @@ async function executeServerQuery<TInput, TData>(
   const inflight = cache.getInflight<TData>(provisionalKey);
   if (inflight && !options.force) return inflight;
 
-  const owner: ServerQueryOwner = { invalidations: trackFarmClientCacheInvalidations(cache) };
+  const owner: ServerQueryOwner = {
+    invalidations: trackFarmClientCacheInvalidations(cache),
+    supersededKeys: new Set(),
+  };
   serverQueryClientState.latestOwners.set(provisionalKey, owner);
+  serverQueryClientState.owners.add(owner);
+  claimServerQueryKey(owner, provisionalKey);
 
   const previous = cache.get<TData>(provisionalKey);
   cache.set(provisionalKey, {
@@ -220,7 +268,7 @@ async function executeServerQuery<TInput, TData>(
       const data = await pending;
       const transported = cache.get<TData>(provisionalKey);
       if (
-        serverQueryClientState.latestOwners.get(provisionalKey) === owner &&
+        isCurrentServerQueryOwner(provisionalKey, owner) &&
         (!transported || transported.fetching)
       ) {
         const updatedAt = Date.now();
@@ -240,7 +288,7 @@ async function executeServerQuery<TInput, TData>(
       return data;
     } catch (cause) {
       const error = normalizeServerQueryError(cause);
-      if (serverQueryClientState.latestOwners.get(provisionalKey) === owner) {
+      if (isCurrentServerQueryOwner(provisionalKey, owner)) {
         const current = cache.get<TData>(provisionalKey);
         cache.set(provisionalKey, {
           data: current?.data as TData,
@@ -256,9 +304,10 @@ async function executeServerQuery<TInput, TData>(
       throw error;
     } finally {
       const invalidated =
-        serverQueryClientState.latestOwners.get(provisionalKey) === owner &&
-        owner.invalidations.has(provisionalKey);
+        isCurrentServerQueryOwner(provisionalKey, owner) && owner.invalidations.has(provisionalKey);
       owner.invalidations.dispose();
+      serverQueryClientState.owners.delete(owner);
+      owner.supersededKeys.clear();
       if (cache.getInflight(provisionalKey) === promise) {
         cache.deleteInflight(provisionalKey);
       }
