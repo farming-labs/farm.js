@@ -10,7 +10,6 @@ import {
   type Context,
   type Span,
 } from "@opentelemetry/api";
-import { createHash } from "node:crypto";
 import type { FarmEvent } from "./observability";
 
 export const FARM_TRACER_NAME = "@farm.js/core";
@@ -390,6 +389,19 @@ function getCompletedSpanDescriptor(
   }
 }
 
+// A runtime-agnostic, non-cryptographic digest (FNV-1a). This module is bundled
+// into browser and edge runtimes, so it must not import node:crypto; the digest
+// only needs to redact the raw cache key while keeping cache events correlatable,
+// which does not require a cryptographic hash.
+function hashFarmCacheKey(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index++) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
 function toEventAttributes(event: FarmEvent): Attributes {
   const attributes: Attributes = {};
   // A cache event's `key` embeds the serialized arguments of the cached call
@@ -411,7 +423,7 @@ function toEventAttributes(event: FarmEvent): Attributes {
       continue;
     }
     if (redactKey && key === "key" && typeof value === "string") {
-      attributes["farm.key_hash"] = createHash("sha256").update(value).digest("hex").slice(0, 16);
+      attributes["farm.key_hash"] = hashFarmCacheKey(value);
       continue;
     }
     if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
