@@ -450,8 +450,10 @@ const product = await createProduct.mutateAsync({
 ```
 
 The return value includes `data`, `error`, `variables`, `status`, `pending`, and `reset`. Pass the
-existing API-client cache, retry, invalidation, and optimistic options through `request`. Local
-`optimistic` state on `useMutation` is separate from an API cache update: it controls
+existing API-client cache, retry, invalidation, and optimistic options through `request`. For a
+server-function target, `request.retry` applies with the same shape and a default of no retries;
+the remaining `request` options describe API-route transport and continue to apply to API routes
+only. Local `optimistic` state on `useMutation` is separate from an API cache update: it controls
 `mutation.data`, while `request.optimistic` updates shared cached queries.
 Each local optimistic callback receives the latest scheduled mutation data, even when multiple
 submissions occur before React rerenders. With `rollbackOnError: true`, a failed latest submission
@@ -889,6 +891,12 @@ HTTP routes; it only leaves integration access to the separate caller module.
 ## Server Function Form Actions
 
 `createServerFn` pairs with `useServerFn` when a mutation is naturally a form action. Use `optimistic` to show the next UI state immediately, then let the server result replace it when the action completes.
+
+Both hooks accept `retry` with the API client's shape, `{ count, delay }`, where `delay` is a
+fixed wait or an `(attempt) => ms` backoff starting at attempt `1`. The default remains a single
+attempt. Retries rerun the whole submission against the server function, so keep retried handlers
+idempotent. `reset()` stops a waiting retry: the submission rejects with its last error and no
+further attempts start.
 
 For both `useServerFn` and `useAction`, `reset()` restores `initialResult` (or `null`), clears
 the error, and returns the hook to idle. It does not cancel server work: promises from earlier

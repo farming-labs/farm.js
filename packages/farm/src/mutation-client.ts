@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { isAPIRouteRef, type APIResult, type ClientOptions } from "./api/client";
 import { notifyClientObserver } from "./client-observers";
+import { invokeMutationWithRetry } from "./mutation-retry";
 
 export type MutationStatus = "idle" | "pending" | "success" | "error";
 
@@ -37,7 +38,8 @@ export type UseMutationOptions<TVariables, TData, TError = Error> = {
   rollbackOnError?: boolean;
   /**
    * Options forwarded to generated `api.route.method` clients.
-   * Server functions ignore this field.
+   * Server-function targets honor `request.retry`; the remaining request
+   * options apply to API routes only.
    */
   request?: ClientOptions<TData, TError>;
   onSuccess?: (data: TData, variables: TVariables | undefined) => void;
@@ -195,7 +197,12 @@ export function useMutationLifecycle<
         const mutationTarget = targetRef.current;
         const rawResult = isAPIRouteRef(mutationTarget)
           ? await mutationTarget(variables, currentOptions.request)
-          : await mutationTarget(variables);
+          : await invokeMutationWithRetry(
+              () => targetRef.current(variables),
+              currentOptions.request?.retry,
+              // A reset disowns this submission; stop scheduling retries then.
+              () => requestId >= lastResetIdRef.current,
+            );
         const data = unwrapMutationResult<TData, TError>(rawResult, isAPIRouteRef(mutationTarget));
         const isLatestRequest = requestId === requestIdRef.current;
 
