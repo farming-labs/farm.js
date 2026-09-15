@@ -224,7 +224,13 @@ export interface FarmConfig {
   observability?: FarmObservabilityUserConfig;
   /** Farm product telemetry for deployed server runtimes. Set to false to disable. */
   telemetry?: boolean;
-  /** Development-only runtime inspector. Enabled by default during `farm dev`. */
+  /**
+   * Development-only runtime inspector. Enabled by default during `farm dev`.
+   *
+   * @deprecated The built-in dashboard is deprecated. Install `@farm.js/devtools` and add
+   * `devtools()` to `plugins` instead; it reuses this runtime and owns the maintained UI.
+   * `devtools: false` and `shortcut` remain supported for the transition.
+   */
   devtools?: FarmDevtoolsUserConfig;
   /** Development-only browser feedback for build and HMR activity. */
   devIndicators?: FarmDevIndicatorsConfig;
