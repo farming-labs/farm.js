@@ -2124,6 +2124,14 @@ export class ServerRenderer {
       );
       res.statusCode = options.statusCode;
       res.setHeader("Content-Type", "text/html; charset=utf-8");
+      // A PPR shell failure leaves the "miss" caching headers (s-maxage,
+      // stale-while-revalidate, X-Farm-PPR) on res. Error responses must not be
+      // cached by shared/CDN caches, so clear them here, matching renderError.
+      res.setHeader("Cache-Control", "private, no-store");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      if (typeof res.removeHeader === "function") {
+        res.removeHeader("X-Farm-PPR");
+      }
       res.write(this.createFullHTML(html, false, options.pathname));
       res.end();
       return true;
