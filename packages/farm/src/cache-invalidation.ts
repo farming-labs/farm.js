@@ -34,7 +34,9 @@ export function notifyFarmCacheInvalidation(key: string): void {
     try {
       listener(key);
     } catch (error) {
-      console.warn(`[farm:cache] invalidation listener failed: ${formatFarmCacheListenerError(error)}`);
+      console.warn(
+        `[farm:cache] invalidation listener failed: ${formatFarmCacheListenerError(error)}`,
+      );
     }
   }
 }
@@ -44,7 +46,9 @@ export function notifyFarmCacheTask(task: Promise<void>): void {
     try {
       listener(task);
     } catch (error) {
-      console.warn(`[farm:cache] task listener failed: ${formatFarmCacheListenerError(error)}`);
+      console.warn(
+        `[farm:cache] task listener failed: ${formatFarmCacheListenerError(error)}`,
+      );
     }
   }
 }
