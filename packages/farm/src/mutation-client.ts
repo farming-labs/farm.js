@@ -10,6 +10,7 @@ import {
   type ClientOptions,
 } from "./api/client";
 import { notifyFarmCacheInvalidation } from "./cache-invalidation";
+import { isNavigatorOnline, subscribeOnline } from "./client-network-status";
 import { notifyClientObserver } from "./client-observers";
 import { invokeMutationWithRetry } from "./mutation-retry";
 
@@ -39,9 +40,18 @@ export type MutationOptimisticContext<TVariables, TData> = {
   current: TData | null;
 };
 
+export type MutationNetworkMode = "always" | "online";
+
 export type UseMutationOptions<TVariables, TData, TError = Error> = {
   initialData?: TData | null;
   resetOnMutate?: boolean;
+  /**
+   * `"always"` (default) dispatches regardless of connectivity, preserving
+   * existing behavior. `"online"` pauses a submission while the browser is
+   * offline — including one whose dispatch failed while offline — and resumes
+   * it on the `online` event instead of failing it.
+   */
+  networkMode?: MutationNetworkMode;
   optimistic?: (context: MutationOptimisticContext<TVariables, TData>) => TData | null | undefined;
   rollbackOnError?: boolean;
   /**
@@ -78,6 +88,8 @@ export type UseMutationReturn<
   TError = MutationError<TTarget>,
 > = {
   pending: boolean;
+  /** True while a submission is waiting for the browser to come back online. */
+  paused: boolean;
   status: MutationStatus;
   data: TData | null;
   error: TError | null;
@@ -89,6 +101,7 @@ export type UseMutationReturn<
 
 type MutationState<TVariables, TData, TError> = {
   pendingCount: number;
+  pausedCount: number;
   status: MutationStatus;
   data: TData | null;
   error: TError | null;
@@ -136,12 +149,14 @@ export function useMutationLifecycle<
   const lastResetIdRef = useRef(0);
   const initialState: MutationState<TVariables, TData, TError> = {
     pendingCount: 0,
+    pausedCount: 0,
     status: "idle",
     data: initialData,
     error: null,
     variables: undefined,
   };
   const stateRef = useRef(initialState);
+  const resetWakersRef = useRef(new Set<() => void>());
   const [state, setState] = useState<MutationState<TVariables, TData, TError>>(initialState);
 
   optionsRef.current = options;
@@ -162,6 +177,32 @@ export function useMutationLifecycle<
       setState(next);
     },
     [],
+  );
+
+  const waitForReconnect = useCallback(
+    async (requestId: number) => {
+      while (!isNavigatorOnline()) {
+        if (requestId < lastResetIdRef.current) return;
+        setMutationState((current) => ({ ...current, pausedCount: current.pausedCount + 1 }));
+        try {
+          await new Promise<void>((resolve) => {
+            const wake = () => {
+              unsubscribe();
+              resetWakersRef.current.delete(wake);
+              resolve();
+            };
+            const unsubscribe = subscribeOnline(wake);
+            resetWakersRef.current.add(wake);
+          });
+        } finally {
+          setMutationState((current) => ({
+            ...current,
+            pausedCount: Math.max(0, current.pausedCount - 1),
+          }));
+        }
+      }
+    },
+    [setMutationState],
   );
 
   const mutatePreparedAsync = useCallback(
@@ -190,6 +231,7 @@ export function useMutationLifecycle<
         if (requestId !== requestIdRef.current) return { ...current, pendingCount };
         return {
           pendingCount,
+          pausedCount: current.pausedCount,
           status: "pending",
           data: hasOptimisticData
             ? optimisticData
@@ -213,15 +255,38 @@ export function useMutationLifecycle<
 
       try {
         if (preparationFailed) throw preparationError;
-        const rawResult = isAPITarget
-          ? await mutationTarget(variables, currentOptions.request)
-          : await invokeMutationWithRetry(
-              () => targetRef.current(variables),
-              currentOptions.request?.retry,
-              // A reset disowns this submission; stop scheduling retries then.
-              () => requestId >= lastResetIdRef.current,
-            );
-        const data = unwrapMutationResult<TData, TError>(rawResult, isAPITarget);
+        let data!: TData;
+        while (true) {
+          if (currentOptions.networkMode === "online") {
+            await waitForReconnect(requestId);
+            if (requestId < lastResetIdRef.current) {
+              throw new Error("Mutation reset while waiting for reconnection");
+            }
+          }
+          try {
+            const rawResult = isAPITarget
+              ? await mutationTarget(variables, currentOptions.request)
+              : await invokeMutationWithRetry(
+                  () => targetRef.current(variables),
+                  currentOptions.request?.retry,
+                  // A reset disowns this submission; stop scheduling retries then.
+                  () => requestId >= lastResetIdRef.current,
+                );
+            data = unwrapMutationResult<TData, TError>(rawResult, isAPITarget);
+            break;
+          } catch (cause) {
+            // A dispatch that failed while offline pauses and rides the next
+            // reconnect instead of surfacing a connectivity error.
+            if (
+              currentOptions.networkMode === "online" &&
+              !isNavigatorOnline() &&
+              requestId >= lastResetIdRef.current
+            ) {
+              continue;
+            }
+            throw cause;
+          }
+        }
 
         settleServerFnOptimisticUpdates(sharedSnapshots, "commit");
         if (!isAPITarget && currentOptions.request?.invalidate) {
@@ -246,6 +311,7 @@ export function useMutationLifecycle<
 
           return {
             pendingCount,
+            pausedCount: current.pausedCount,
             status: "success",
             data,
             error: null,
@@ -285,6 +351,7 @@ export function useMutationLifecycle<
 
           return {
             pendingCount,
+            pausedCount: current.pausedCount,
             status: "error",
             data:
               hasOptimisticData && currentOptions.rollbackOnError
@@ -311,7 +378,7 @@ export function useMutationLifecycle<
         throw error;
       }
     },
-    [setMutationState],
+    [setMutationState, waitForReconnect],
   );
 
   const mutateAsync = useCallback(
@@ -331,16 +398,22 @@ export function useMutationLifecycle<
     lastResetIdRef.current = ++requestIdRef.current;
     setMutationState({
       pendingCount: 0,
+      pausedCount: 0,
       status: "idle",
       data: optionsRef.current.initialData ?? null,
       error: null,
       variables: undefined,
     });
+    // Wake paused submissions so they reject instead of waiting for `online`.
+    const wakers = Array.from(resetWakersRef.current);
+    resetWakersRef.current.clear();
+    for (const wake of wakers) wake();
   }, [setMutationState]);
 
   const mutation: UseMutationReturn<TTarget, TData, TError> = useMemo(
     () => ({
       pending: state.pendingCount > 0,
+      paused: state.pausedCount > 0,
       status: state.status,
       data: state.data,
       error: state.error,
@@ -355,6 +428,7 @@ export function useMutationLifecycle<
       reset,
       state.data,
       state.error,
+      state.pausedCount,
       state.pendingCount,
       state.status,
       state.variables,
