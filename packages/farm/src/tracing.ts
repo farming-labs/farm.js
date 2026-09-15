@@ -402,8 +402,27 @@ function getCompletedSpanDescriptor(
   }
 }
 
+// A runtime-agnostic, non-cryptographic digest (FNV-1a). This module is bundled
+// into browser and edge runtimes, so it must not import node:crypto; the digest
+// only needs to redact the raw cache key while keeping cache events correlatable,
+// which does not require a cryptographic hash.
+function hashFarmCacheKey(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index++) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
 function toEventAttributes(event: FarmEvent): Attributes {
   const attributes: Attributes = {};
+  // A cache event's `key` embeds the serialized arguments of the cached call
+  // (e.g. `unstable_cache(getUser)(email)` serializes the email into the key),
+  // so it must never be exported verbatim to a tracing backend. Emit a stable
+  // digest under `farm.key_hash` instead, preserving cross-event correlation
+  // without shipping the sensitive payload.
+  const redactKey = typeof event.type === "string" && event.type.startsWith("cache.");
   for (const [key, value] of Object.entries(event)) {
     if (
       key === "timestamp" ||
@@ -414,6 +433,10 @@ function toEventAttributes(event: FarmEvent): Attributes {
       key === "traceSampled" ||
       value === undefined
     ) {
+      continue;
+    }
+    if (redactKey && key === "key" && typeof value === "string") {
+      attributes["farm.key_hash"] = hashFarmCacheKey(value);
       continue;
     }
     if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {

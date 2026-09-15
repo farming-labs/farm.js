@@ -223,4 +223,30 @@ describe("observability", () => {
     expect(event.traceId).toBe(buildSpan?.spanContext().traceId);
     expect(event.spanId).toBe(buildSpan?.spanContext().spanId);
   });
+
+  it("redacts cache keys from exported span events", async () => {
+    configureFarmObservability({ tracing: true });
+    await runWithFarmRequestSpan(new Request("https://farm.test/u"), async () => {
+      emitFarmEvent({
+        type: "cache.hit",
+        key: 'unstable_cache:["getUser",["alice@example.com"]]',
+        tags: [],
+        revalidate: false,
+        stale: false,
+      });
+      return new Response("ok");
+    });
+    await processor.forceFlush();
+
+    const cacheEvent = exporter
+      .getFinishedSpans()
+      .flatMap((span) => span.events)
+      .find((event) => event.name === "cache.hit");
+    expect(cacheEvent).toBeDefined();
+    // The raw key (which contains the email argument) must never be exported.
+    expect(cacheEvent?.attributes).not.toHaveProperty("farm.key");
+    expect(JSON.stringify(cacheEvent?.attributes ?? {})).not.toContain("alice@example.com");
+    // A stable digest is exported instead so traces stay correlatable.
+    expect(typeof cacheEvent?.attributes?.["farm.key_hash"]).toBe("string");
+  });
 });
