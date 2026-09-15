@@ -689,6 +689,32 @@ or per-call callbacks, and never repeats optimistic updates or mutation invalida
 lifecycle hooks still observe it. A failed refetch leaves the entry stale and does not fail the
 already successful mutation. Read recipes expire or are removed with their cache entries.
 
+## Cross-tab invalidation
+
+By default, invalidations stay inside the tab that produced them: a mutation in one tab marks
+keys stale there, while a second tab keeps its cached reads until its own focus or reconnect
+refresh fires. Opt into same-origin cross-tab propagation with
+`enableCrossTabCacheInvalidation`:
+
+```ts
+"use client";
+
+import { enableCrossTabCacheInvalidation } from "@farm.js/core/client";
+
+// Call once during client startup; returns a disposer.
+enableCrossTabCacheInvalidation();
+```
+
+Invalidations from mutations, server functions, and explicit cache invalidation are posted to a
+`BroadcastChannel` and applied in every other tab through the normal invalidation path, so
+mounted stale queries there refetch on their own. Only invalidation keys cross the channel,
+never cached data or responses, which leaves private and credentialed cache scoping untouched.
+Each tab refetches through its own credentials.
+
+The call is idempotent, safe during server rendering, and a no-op in environments without
+`BroadcastChannel`. Pass `channelName` to isolate multiple Farm apps served from one origin;
+enabling two different channel names in the same tab is an error.
+
 ## Result shape
 
 App-route and integration callers both expose `data` and `error`, so callers can branch on
