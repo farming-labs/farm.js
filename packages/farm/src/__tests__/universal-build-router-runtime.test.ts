@@ -8,10 +8,15 @@ import {
 } from "../deployment";
 import {
   generateConfiguredResponseHeadersRuntimeSource,
+  generateRedirectInterpolationSource,
   generateRuntimePathMatcherSource,
   generateUniversalRouterStateRuntime,
   generateUniversalRouterStateProperties,
 } from "../nitro/universal-build";
+import {
+  compileConfigRoutePattern,
+  interpolateConfigRouteDestination,
+} from "../plugins/route-pattern";
 
 describe("generateConfiguredResponseHeadersRuntimeSource", () => {
   it("preserves handler and configured Set-Cookie fields separately", () => {
@@ -487,4 +492,71 @@ describe("generateRuntimePathMatcherSource", () => {
     expect(matchRuntimePathPattern("/café", "/caf%C3%A9")).toEqual({});
     expect(matchRuntimePathPattern("/a%20b", "/a%2520b")).toEqual({});
   });
+});
+
+describe("generateRedirectInterpolationSource", () => {
+  // The production redirect/rewrite interpolator must agree with the development
+  // path (plugins/route-pattern.ts) exactly, including numbered captures like
+  // $1 — the config docs promise they work "in development and production".
+  const prod = new Function(
+    generateRuntimePathMatcherSource() +
+      "\n" +
+      generateRedirectInterpolationSource() +
+      "; return { matchRuntimePathPattern, interpolateRedirectDestination };",
+  )() as {
+    matchRuntimePathPattern: (p: string, path: string) => Record<string, string> | null;
+    interpolateRedirectDestination: (dest: string, params: Record<string, string>) => string;
+  };
+
+  function runProduction(source: string, destination: string, pathname: string): string | null {
+    const params = prod.matchRuntimePathPattern(source, pathname);
+    return params ? prod.interpolateRedirectDestination(destination, params) : null;
+  }
+
+  function runDevelopment(source: string, destination: string, pathname: string): string | null {
+    const compiled = compileConfigRoutePattern(source);
+    const match = pathname.match(compiled.regex);
+    return match ? interpolateConfigRouteDestination(destination, match, compiled.tokens) : null;
+  }
+
+  const cases: Array<{ source: string; destination: string; pathname: string; expected: string }> =
+    [
+      { source: "/old/:id", destination: "/new/$1", pathname: "/old/42", expected: "/new/42" },
+      {
+        source: "/docs/:path*",
+        destination: "/help/$1",
+        pathname: "/docs/a/b/c",
+        expected: "/help/a/b/c",
+      },
+      {
+        source: "/files/*",
+        destination: "/assets/$1",
+        pathname: "/files/x/y",
+        expected: "/assets/x/y",
+      },
+      {
+        source: "/a/:x/:y/*",
+        destination: "/z/$3/$2/$1",
+        pathname: "/a/1/2/w/q",
+        expected: "/z/w/q/2/1",
+      },
+      // Out-of-range numbered captures collapse to "" in both paths.
+      { source: "/only/:id", destination: "/x/$9", pathname: "/only/7", expected: "/x/" },
+      // Named and numbered references can be mixed in one destination.
+      {
+        source: "/e/:name",
+        destination: "/e/:name-$1",
+        pathname: "/e/foo",
+        expected: "/e/foo-foo",
+      },
+    ];
+
+  for (const { source, destination, pathname, expected } of cases) {
+    it(`interpolates ${destination} for ${source} in parity with development`, () => {
+      const production = runProduction(source, destination, pathname);
+      expect(production).toBe(expected);
+      // Production must match what the development redirect plugin produces.
+      expect(production).toBe(runDevelopment(source, destination, pathname));
+    });
+  }
 });
