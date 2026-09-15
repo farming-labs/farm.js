@@ -450,11 +450,36 @@ const product = await createProduct.mutateAsync({
 ```
 
 The return value includes `data`, `error`, `variables`, `status`, `pending`, and `reset`. Pass the
-existing API-client cache, retry, invalidation, and optimistic options through `request`. For a
-server-function target, `request.retry` applies with the same shape and a default of no retries;
-the remaining `request` options describe API-route transport and continue to apply to API routes
-only. Local `optimistic` state on `useMutation` is separate from an API cache update: it controls
-`mutation.data`, while `request.optimistic` updates shared cached queries.
+existing API-client cache, retry, invalidation, and optimistic options through `request`. A
+server-function target honors `request.retry`, `request.optimistic`, and `request.invalidate`
+with the same shapes; the remaining `request` options describe API-route transport and continue
+to apply to API routes only. Local `optimistic` state on `useMutation` is separate from an API
+cache update: it controls `mutation.data`, while `request.optimistic` updates shared cached
+queries.
+
+For a server-function target, optimistic updates and invalidations name explicit structured cache
+keys, since the shared cache is the surface a server function can reach:
+
+```tsx
+const rename = useMutation(renameProduct, {
+  request: {
+    optimistic: {
+      update: [[["product", id], (current) => ({ ...current, name })]],
+      rollbackOnError: true,
+    },
+    invalidate: [["product", id]],
+  },
+});
+```
+
+The updater applies to the shared client cache before the server function runs, so a
+`useServerQuery` watching `["product", id]` renders the new name immediately. On success the
+update commits and the invalidation travels the shared invalidation bus, exactly like a
+server-declared `invalidates`; on failure `rollbackOnError` restores the previous entry, and
+without it the touched entry is marked stale. Route-reference tuples such as
+`[apiClient.products.get]` need an API caller's route identity and are skipped for
+server-function targets; server-side keys the client cannot know about belong in the server
+function's own `invalidates`.
 Each local optimistic callback receives the latest scheduled mutation data, even when multiple
 submissions occur before React rerenders. With `rollbackOnError: true`, a failed latest submission
 restores the snapshot captured immediately before that submission's optimistic update.
