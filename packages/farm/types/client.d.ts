@@ -670,6 +670,8 @@ declare module "@farm.js/core/client" {
     staleTime?: number;
     gcTime?: number;
     dedupeMs?: number;
+    /** Allow the configured client cache persistence adapter to store this read. */
+    persist?: boolean;
   };
 
   export type RetryOptions = {
@@ -706,6 +708,62 @@ declare module "@farm.js/core/client" {
   export function enableCrossTabCacheInvalidation(
     options?: CrossTabCacheInvalidationOptions,
   ): () => void;
+
+  export const FARM_CLIENT_CACHE_PERSIST_VERSION: string;
+
+  export type PersistedEntry = {
+    data: unknown;
+    updatedAt: number;
+    staleAt: number;
+    gcAt?: number;
+    version: string;
+  };
+
+  export type FarmClientCacheAdapter = {
+    keys(): Promise<string[]>;
+    get(key: string): Promise<PersistedEntry | null>;
+    set(key: string, entry: PersistedEntry): Promise<void>;
+    delete(key: string): Promise<void>;
+    clear(): Promise<void>;
+    getMany?(keys: string[]): Promise<Array<PersistedEntry | null>>;
+    setMany?(entries: Array<[string, PersistedEntry]>): Promise<void>;
+  };
+
+  export type FarmClientCacheStorage = {
+    getItem<T = unknown>(key: string): Promise<T | null>;
+    setItem<T = unknown>(key: string, value: T): Promise<unknown>;
+    removeItem(key: string): Promise<unknown>;
+    getKeys?(base?: string): Promise<string[]>;
+    keys?(base?: string): Promise<string[]>;
+    clear?(base?: string): Promise<unknown>;
+  };
+
+  export type ClientCachePersistenceOptions = {
+    version?: string;
+    persistKey?: (key: string) => boolean;
+    flushDelayMs?: number;
+  };
+
+  export function defineClientCacheAdapter(adapter: FarmClientCacheAdapter): FarmClientCacheAdapter;
+
+  export function storageClientCacheAdapter(
+    storage: FarmClientCacheStorage,
+    options?: { base?: string },
+  ): FarmClientCacheAdapter;
+
+  export function clearPersistedCache(): Promise<void>;
+
+  /** @internal Wired by the generated client entry from `cache.client.adapter`. */
+  export function initPersistedClientCache(
+    adapter: FarmClientCacheAdapter,
+    options?: ClientCachePersistenceOptions,
+  ): () => void;
+
+  /** @internal Entry point used by generated client entries. */
+  export function initConfiguredClientCachePersistence(
+    adapterModule: unknown,
+    options?: ClientCachePersistenceOptions,
+  ): void;
 
   export type OptimisticUpdate =
     | [CallableRouteRef<any>, unknown, (prev: any) => any]

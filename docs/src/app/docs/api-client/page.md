@@ -602,7 +602,8 @@ callbacks under `request` still receive only API-client errors, not local mappin
 
 ## Client options
 
-- cache: choose cache-first, network-only, or stale-while-revalidate.
+- cache: choose cache-first, network-only, or stale-while-revalidate; `persist` allows the
+  configured [client cache adapter](#persist-the-client-cache) to store the read.
 - retry: retry transient failures with count and delay.
 - invalidate: mark typed route keys stale after mutations.
 - optimistic: update cached query data before the server response returns.
@@ -770,6 +771,117 @@ Each tab refetches through its own credentials.
 The call is idempotent, safe during server rendering, and a no-op in environments without
 `BroadcastChannel`. Pass `channelName` to isolate multiple Farm apps served from one origin;
 enabling two different channel names in the same tab is an error.
+
+## Persist the client cache
+
+The browser cache is in memory: a reload starts cold. Opt into persistence by pointing
+`cache.client.adapter` at a client module and marking the reads that may be stored:
+
+```ts title="farm.config.ts"
+export default defineConfig({
+  cache: {
+    client: {
+      adapter: "./src/cache-adapter",
+    },
+  },
+});
+```
+
+The path resolves from the project root and the module is bundled into the browser entry — the
+server never imports it. Its default export implements five callbacks over any storage:
+
+```ts title="src/cache-adapter.ts"
+import { defineClientCacheAdapter, type PersistedEntry } from "@farm.js/core/client";
+
+const PREFIX = "farm-cache:";
+
+export default defineClientCacheAdapter({
+  async keys() {
+    return Object.keys(localStorage)
+      .filter((key) => key.startsWith(PREFIX))
+      .map((key) => key.slice(PREFIX.length));
+  },
+  async get(key) {
+    const raw = localStorage.getItem(PREFIX + key);
+    return raw ? (JSON.parse(raw) as PersistedEntry) : null;
+  },
+  async set(key, entry) {
+    localStorage.setItem(PREFIX + key, JSON.stringify(entry));
+  },
+  async delete(key) {
+    localStorage.removeItem(PREFIX + key);
+  },
+  async clear() {
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith(PREFIX)) localStorage.removeItem(key);
+    }
+  },
+});
+```
+
+Farm owns every policy decision — what may be stored, when writes flush, how entries load — and
+the adapter is plain keyed storage. `set` is an upsert; there is no separate create. An adapter
+over IndexedDB, OPFS, or a native bridge has the same shape, and the optional `setMany`/`getMany`
+batch methods let it use one transaction per flush. `storageClientCacheAdapter` wraps any
+Farm/unstorage-style key-value client into this contract, mirroring the server's
+`storageCacheAdapter`, so one KV implementation can serve both caches — against two physically
+separate stores.
+
+### Nothing persists without opting in
+
+Persisted data lives on the device, so persistence is allowlist-only. Mark reads where they are
+declared:
+
+```ts
+export const catalogQuery = createServerQuery({
+  key: () => ["catalog", "featured"],
+  staleTime: "5m",
+  persist: true,
+  async handler() {
+    return loadCatalog();
+  },
+});
+```
+
+```ts
+await apiClient.products.get(
+  { query: { category } },
+  {
+    cache: {
+      key: ["products", category],
+      policy: "stale-while-revalidate",
+      staleTime: 30_000,
+      persist: true,
+    },
+  },
+);
+```
+
+Only successful, `persist`-flagged entries in the shared cache are written, debounced in the
+background. Private and credentialed API caches never reach the adapter regardless of the flag.
+`cache.client` also accepts `version` — a build or deploy id salted into every entry so a deploy
+drops incompatible data — and an optional coarse `persistKey` filter on the engine.
+
+### Lifecycle and limits
+
+On startup, persisted entries load **stale-but-visible**: the data renders immediately and the
+normal stale-while-revalidate path refreshes it on first read, so freshness semantics do not
+change. Expired and version-mismatched entries are dropped during load. Deletes, garbage
+collection, and `clear()` mirror to the adapter. If the adapter fails — quota, private browsing,
+a broken driver — persistence disables itself for the session and the app continues memory-only;
+the cache is disposable by design.
+
+Call `clearPersistedCache()` on logout or any session change so the next visitor on a shared
+device cannot warm-start into another user's data:
+
+```ts
+import { clearPersistedCache } from "@farm.js/core/client";
+
+await clearPersistedCache();
+```
+
+Persistence stores confirmed reads only. Pending optimistic updates and in-flight mutations are
+never written; a reload drops them.
 
 ## Result shape
 
