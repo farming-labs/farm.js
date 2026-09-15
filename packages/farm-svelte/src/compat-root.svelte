@@ -5,6 +5,7 @@
     Suspense,
     createElement,
     getFarmSvelteChildren,
+    getFarmSvelteInnerHtml,
     isFarmSvelteElement,
     normalizeFarmSvelteProps,
   } from "../runtime";
@@ -40,11 +41,16 @@
       </svelte:boundary>
     {:else if typeof type === "string"}
       {@const props = normalizeFarmSvelteProps(value)}
-      <svelte:element this={type} {...props}>
-        {#each childNodes as child}
-          {@render renderNode(child)}
-        {/each}
-      </svelte:element>
+      {@const innerHtml = getFarmSvelteInnerHtml(value)}
+      {#if innerHtml !== undefined}
+        <svelte:element this={type} {...props}>{@html innerHtml}</svelte:element>
+      {:else}
+        <svelte:element this={type} {...props}>
+          {#each childNodes as child}
+            {@render renderNode(child)}
+          {/each}
+        </svelte:element>
+      {/if}
     {:else}
       {@const Component = type}
       {@const props = normalizeFarmSvelteProps(value)}

@@ -39,6 +39,21 @@ describe("Svelte renderer", () => {
     expect(html).toContain("Hello from Svelte");
   });
 
+  it("renders dangerouslySetInnerHTML as element content, not an attribute", async () => {
+    const html = await renderToString(
+      createElement("div", {
+        className: "rich",
+        dangerouslySetInnerHTML: { __html: "<b>bold</b> and <em>italic</em>" },
+      }),
+    );
+
+    expect(html).toContain("<b>bold</b> and <em>italic</em>");
+    expect(html).toContain('class="rich"');
+    // The raw HTML must not leak into an escaped innerhtml="..." attribute.
+    expect(html).not.toMatch(/innerhtml=/i);
+    expect(html).not.toContain("&lt;b&gt;");
+  });
+
   it("does not require a renderer-specific hydration bootstrap", () => {
     expect(generateHydrationScript()).toBe("");
   });
