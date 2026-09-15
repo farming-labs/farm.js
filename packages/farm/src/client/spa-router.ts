@@ -770,8 +770,13 @@ export class SPARouter {
         await this.onNavigate(pageData);
       }
 
-      // Restore scroll position
-      if (this.options.scrollRestoration) {
+      // A fragment in the destination URL is an explicit scroll target and
+      // takes precedence over saved-position restoration, matching forward
+      // navigation and native browser back/forward. Saved positions are keyed
+      // without the hash, so restoreScrollPosition would not cover it.
+      if (window.location.hash) {
+        getHashTargetElement(window.location.hash)?.scrollIntoView();
+      } else if (this.options.scrollRestoration) {
         this.restoreScrollPosition(window.location.pathname + window.location.search);
       }
 
