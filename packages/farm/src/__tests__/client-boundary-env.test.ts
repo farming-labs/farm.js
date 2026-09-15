@@ -42,9 +42,18 @@ describe("analyzeClientBoundary: process.env reads", () => {
     expect(analyze('const url = process.env["DATABASE_URL"];').envKeys).toEqual(["DATABASE_URL"]);
   });
 
-  it("skips NODE_ENV and public keys", () => {
-    const code = "const a = process.env.NODE_ENV; const b = process.env.PUBLIC_API_URL;";
-    expect(analyze(code, new Set(["PUBLIC_API_URL"])).envKeys).toEqual([]);
+  it("skips NODE_ENV entirely", () => {
+    const code = "const mode = process.env.NODE_ENV;";
+    const findings = analyze(code);
+    expect(findings.envKeys).toEqual([]);
+    expect(findings.publicEnvKeys).toEqual([]);
+  });
+
+  it("reports declared-public keys separately from server-only keys", () => {
+    const code = "const a = process.env.SECRET; const b = process.env.PUBLIC_API_URL;";
+    const findings = analyze(code, new Set(["PUBLIC_API_URL"]));
+    expect(findings.envKeys).toEqual(["SECRET"]);
+    expect(findings.publicEnvKeys).toEqual(["PUBLIC_API_URL"]);
   });
 
   it("skips reads inside function bodies", () => {
@@ -126,11 +135,11 @@ import pkg from "some-package";
 
 describe("formatClientBoundaryWarning", () => {
   it("names the module, the keys, and the builtins", () => {
-    const message = formatClientBoundaryWarning(
-      "/app/src/layout.tsx",
-      ["DATABASE_URL"],
-      ["node:fs"],
-    );
+    const message = formatClientBoundaryWarning("/app/src/layout.tsx", {
+      envKeys: ["DATABASE_URL"],
+      publicEnvKeys: [],
+      builtinImports: ["node:fs"],
+    });
     expect(message).toContain("/app/src/layout.tsx");
     expect(message).toContain("process.env.DATABASE_URL");
     expect(message).toContain("undefined in the browser");
@@ -138,10 +147,29 @@ describe("formatClientBoundaryWarning", () => {
     expect(message).toContain("stubbed with an empty object");
   });
 
+  it("points public-key reads at publicEnv", () => {
+    const message = formatClientBoundaryWarning("/app/src/config.ts", {
+      envKeys: [],
+      publicEnvKeys: ["PUBLIC_API_URL"],
+      builtinImports: [],
+    });
+    expect(message).toContain("process.env.PUBLIC_API_URL");
+    expect(message).toContain('publicEnv from "@farm.js/core/env"');
+    expect(message).not.toContain("stubbed");
+  });
+
   it("omits the section that does not apply", () => {
-    const envOnly = formatClientBoundaryWarning("/app/a.ts", ["SECRET"], []);
+    const envOnly = formatClientBoundaryWarning("/app/a.ts", {
+      envKeys: ["SECRET"],
+      publicEnvKeys: [],
+      builtinImports: [],
+    });
     expect(envOnly).not.toContain("stubbed");
-    const builtinOnly = formatClientBoundaryWarning("/app/b.ts", [], ["node:path"]);
+    const builtinOnly = formatClientBoundaryWarning("/app/b.ts", {
+      envKeys: [],
+      publicEnvKeys: [],
+      builtinImports: ["node:path"],
+    });
     expect(builtinOnly).not.toContain("process.env");
   });
 });

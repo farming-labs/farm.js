@@ -24,6 +24,12 @@ export function shouldInspectClientBoundary(id: string, code: string): boolean {
 export interface ClientBoundaryFindings {
   /** Non-public process.env keys read at module scope. */
   envKeys: string[];
+  /**
+   * Declared-public keys read via process.env at module scope. The value is
+   * still undefined in the browser — only publicEnv is populated there — so
+   * these get their own warning pointing at the supported accessor.
+   */
+  publicEnvKeys: string[];
   /** node: builtin specifiers imported into the module. */
   builtinImports: string[];
 }
@@ -42,6 +48,7 @@ export function analyzeClientBoundary(
   publicKeys: ReadonlySet<string>,
 ): ClientBoundaryFindings {
   const envKeys = new Set<string>();
+  const publicEnvKeys = new Set<string>();
   const builtinImports = new Set<string>();
 
   const visit = (node: unknown, inFunction: boolean): void => {
@@ -59,7 +66,9 @@ export function analyzeClientBoundary(
 
       const key = readProcessEnvKey(estree);
       if (key !== undefined) {
-        if (key !== "NODE_ENV" && !publicKeys.has(key)) envKeys.add(key);
+        if (key !== "NODE_ENV") {
+          (publicKeys.has(key) ? publicEnvKeys : envKeys).add(key);
+        }
         return;
       }
     }
@@ -73,7 +82,11 @@ export function analyzeClientBoundary(
   };
 
   visit((program as { body?: unknown }).body, false);
-  return { envKeys: [...envKeys], builtinImports: [...builtinImports] };
+  return {
+    envKeys: [...envKeys],
+    publicEnvKeys: [...publicEnvKeys],
+    builtinImports: [...builtinImports],
+  };
 }
 
 function readNodeBuiltinSource(node: EstreeNode): string | undefined {
@@ -122,15 +135,17 @@ function readProcessEnvKey(node: EstreeNode): string | undefined {
   return undefined;
 }
 
-export function formatClientBoundaryWarning(
-  id: string,
-  envKeys: string[],
-  builtinImports: string[],
-): string {
+export function formatClientBoundaryWarning(id: string, findings: ClientBoundaryFindings): string {
+  const { envKeys, publicEnvKeys, builtinImports } = findings;
   const lines = [`${id} is compiled for the client but uses server-only APIs:`];
   if (envKeys.length > 0) {
     lines.push(
       `- module-scope read of process.env.${envKeys.join(", process.env.")} — undefined in the browser. Move the read behind a server boundary, or expose it through env.public in farm.config.ts.`,
+    );
+  }
+  if (publicEnvKeys.length > 0) {
+    lines.push(
+      `- module-scope read of process.env.${publicEnvKeys.join(", process.env.")} — process.env is not populated in the browser even for public keys. Read it through publicEnv from "@farm.js/core/env".`,
     );
   }
   if (builtinImports.length > 0) {

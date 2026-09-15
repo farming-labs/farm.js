@@ -940,11 +940,17 @@ function warnClientBoundaryOnce(
     return;
   }
   const publicKeys = new Set(Object.keys((config as any).env?.public ?? {}));
-  const { envKeys, builtinImports } = analyzeClientBoundary(program as any, publicKeys);
+  const findings = analyzeClientBoundary(program as any, publicKeys);
 
-  if (envKeys.length === 0 && builtinImports.length === 0) return;
+  if (
+    findings.envKeys.length === 0 &&
+    findings.publicEnvKeys.length === 0 &&
+    findings.builtinImports.length === 0
+  ) {
+    return;
+  }
   warnedClientBoundaryIds.add(id);
-  logger.warn(formatClientBoundaryWarning(id, envKeys, builtinImports));
+  logger.warn(formatClientBoundaryWarning(id, findings));
 }
 
 export function farmPlugin(
