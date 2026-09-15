@@ -907,6 +907,8 @@ declare module "@farm.js/core/client" {
       context: ServerFnOptimisticContext<TInput, TResult>,
     ) => TResult | null | undefined;
     rollbackOnError?: boolean;
+    /** Retry failed submissions with the API client's retry shape. Defaults to no retries. */
+    retry?: RetryOptions;
     onSuccess?: (result: TResult) => void;
     onError?: (error: TError) => void;
     onSettled?: (result: TResult | null, error: TError | null) => void;
