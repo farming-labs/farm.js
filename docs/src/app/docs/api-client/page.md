@@ -585,7 +585,9 @@ public cache key. Invalidate session-specific reads when the same client logs in
 Private caches follow the lifetime of their caller: on runtimes with `WeakRef`, the shared
 invalidation channel does not keep an abandoned cache alive. Cleanup occurs during finalization
 or a later invalidation, not on a guaranteed schedule. Keep reusable callers at module scope;
-`gcTime` controls lazy expiration of individual entries, not caller disposal. Older runtimes
+`gcTime` controls expiration of individual entries, not caller disposal: an expired entry is
+evicted on its next read, and a periodic background sweep also removes expired entries that no
+consumer is watching, so unread keys do not accumulate in long-lived sessions. Older runtimes
 without `WeakRef` retain the existing strong subscription, so avoid repeatedly creating callers
 there. Request-local server caches do not subscribe to the global invalidation channel.
 
