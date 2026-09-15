@@ -21,6 +21,19 @@ describe("Farm DevTools client runtime", () => {
     expect(runtime).toContain('event.code === "Period"');
   });
 
+  it("only accepts the views the DevTools UI renders", () => {
+    const runtime = generateFarmDevtoolsClientRuntime({ enabled: true, shortcut: false });
+
+    // The client's launch/deep-link allowlist must match the six panels the UI
+    // implements. Stale views silently fall back to Overview and strip a
+    // matching application hash (e.g. #inspect) at launch.
+    expect(runtime).toContain(
+      'const validViews = new Set(["overview", "routes", "api", "systems", "runtime", "raw"])',
+    );
+    expect(runtime).not.toContain('"inspect"');
+    expect(runtime).not.toContain('"diagnostics"');
+  });
+
   it("keeps the programmatic launcher without a keyboard shortcut", () => {
     const runtime = generateFarmDevtoolsClientRuntime({
       enabled: true,
