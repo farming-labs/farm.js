@@ -42,6 +42,11 @@ its original caller, but it cannot populate the newly configured cache.
 When a shared adapter is present, Farm uses it as the authoritative cache instead of adding an
 incoherent process-local front cache.
 
+The `cache` option also carries the browser-side counterpart: `cache.client.adapter` points at a
+client module that persists opt-in reads on the device. See
+[persist the client cache](/docs/api-client#persist-the-client-cache); the two adapters configure
+different caches on different machines and never share a store.
+
 ## Cache data
 
 **server data**

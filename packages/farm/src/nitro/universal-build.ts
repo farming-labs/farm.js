@@ -16,6 +16,11 @@ import {
   generateFarmClientPluginEntryCode,
   type FarmClientPluginEntryCode,
 } from "../client-plugin-build";
+import {
+  generateClientCachePersistenceCode,
+  resolveFarmClientCacheAdapterEntry,
+  type ClientCachePersistenceEntryCode,
+} from "../client-cache-persistence-build";
 import type { Rollup } from "vite";
 import os from "os";
 import path from "path";
@@ -1395,6 +1400,7 @@ async function buildClient(
     config.trailingSlash,
     getIntegrationProviders(config.integrations),
     config.basePath,
+    generateClientCachePersistenceCode(resolveFarmClientCacheAdapterEntry(root, config.cache)),
   );
 
   // Write the client entry to a temporary file
@@ -2125,6 +2131,7 @@ function generateClientHydrationEntry(
   trailingSlash = false,
   integrationProviders: ReturnType<typeof getIntegrationProviders> = [],
   basePath = "/",
+  clientCachePersistence: ClientCachePersistenceEntryCode = { imports: "", init: "" },
 ): string {
   const toImportPath = (targetPath: string) => targetPath.replace(/\\/g, "/");
   const clientPluginEntry: FarmClientPluginEntryCode = generateFarmClientPluginEntryCode(
@@ -2242,6 +2249,7 @@ ${layoutImports}
 import { createClientPluginManager, getHashTargetElement, installChunkErrorRecovery, isFarmExternalNavigationURL, reconcileFarmDocumentHead, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
 import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";
 ${clientPluginEntry.imports}
+${clientCachePersistence.imports}
 ${i18nClientRuntime}
 ${docsNavigationRuntime}
 ${docsAdapterRuntime}
@@ -2250,6 +2258,7 @@ ${generateFarmDocsSearchClientRuntime(docsSearchEnabled, docsSearchModuleId)}
 setFarmBasePath(${JSON.stringify(basePath)});
 setFarmTrailingSlashPreference(${JSON.stringify(trailingSlash)});
 installChunkErrorRecovery();
+${clientCachePersistence.init}
 mountFarmDocsSearch();
 
 ${generateUniversalRouterStateRuntime()}
@@ -2620,6 +2629,7 @@ import { createClientPluginManager, getHashTargetElement, installChunkErrorRecov
 import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";
 import { isFarmRouteActive, matchFarmRoute } from "@farm.js/core/router";
 ${clientPluginEntry.imports}
+${clientCachePersistence.imports}
 ${i18nClientRuntime}
 ${docsNavigationRuntime}
 ${docsAdapterRuntime}
@@ -2632,6 +2642,7 @@ ${providerClientCode.runtime}
 setFarmBasePath(${JSON.stringify(basePath)});
 setFarmTrailingSlashPreference(${JSON.stringify(trailingSlash)});
 installChunkErrorRecovery();
+${clientCachePersistence.init}
 
 // Client component routes
 const clientRoutes = [

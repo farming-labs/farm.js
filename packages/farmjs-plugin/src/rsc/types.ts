@@ -98,6 +98,9 @@ export interface EntryContext {
 
   /** True only for the Vite serve command, never for a production build. */
   development?: boolean;
+
+  /** Generated import/init fragments for `cache.client.adapter` persistence. */
+  clientCachePersistence?: { imports: string; init: string };
 }
 
 /**

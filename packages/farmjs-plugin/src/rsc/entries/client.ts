@@ -148,7 +148,9 @@ const setPayloadRef = { current: null };
   }
 
   return `${imports}
+${ctx.clientCachePersistence?.imports ?? ""}
 ${actionSetup}
+${ctx.clientCachePersistence?.init ?? ""}
 const farmDeploymentId = ${JSON.stringify(ctx.deploymentId)};
 
 function reportDeploymentMismatch(response) {

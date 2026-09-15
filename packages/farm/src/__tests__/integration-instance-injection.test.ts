@@ -172,6 +172,89 @@ describe("integration instance injection", () => {
     });
   });
 
+  it("gates Supabase protected routes on getUser, not the unverified session cookie", async () => {
+    // getSession() trusts the cookie contents, so a forged cookie yields a
+    // session object; only getUser() verifies the token with Supabase Auth.
+    const getSession = vi.fn(async () => ({
+      data: {
+        session: { user: { id: "forged-user" }, expires_at: Date.now() / 1000 + 3600 },
+      },
+      error: null,
+    }));
+    const getUser = vi.fn(async () => ({
+      data: { user: null },
+      error: { message: "invalid JWT" },
+    }));
+    const factory = vi.fn(
+      (_context: SupabaseIntegrationInstanceContext) =>
+        ({ auth: { getSession, getUser } }) as unknown as SupabaseIntegrationClient,
+    );
+    const integration = supabase({ instance: factory, protectedRoutes: ["/dashboard(.*)"] });
+    const request = new Request("https://app.example.com/dashboard/settings?tab=billing", {
+      headers: { cookie: "sb-test-auth-token=forged" },
+    });
+
+    const response = await integration.middleware![0].handler(
+      request,
+      createContext(request, "supabase", "/dashboard/settings"),
+    );
+
+    expect(response).toBeInstanceOf(Response);
+    expect(response!.status).toBe(302);
+    const location = response!.headers.get("location") ?? "";
+    expect(location).toContain("/auth/login");
+    expect(location).toContain(encodeURIComponent("/dashboard/settings?tab=billing"));
+    expect(getUser).toHaveBeenCalledTimes(1);
+    expect(getSession).not.toHaveBeenCalled();
+  });
+
+  it("lets a verified Supabase user through protected routes", async () => {
+    const getUser = vi.fn(async () => ({
+      data: { user: { id: "user_verified" } },
+      error: null,
+    }));
+    const factory = vi.fn(
+      (_context: SupabaseIntegrationInstanceContext) =>
+        ({ auth: { getUser } }) as unknown as SupabaseIntegrationClient,
+    );
+    const integration = supabase({ instance: factory, protectedRoutes: ["/dashboard(.*)"] });
+    const request = new Request("https://app.example.com/dashboard");
+
+    const response = await integration.middleware![0].handler(
+      request,
+      createContext(request, "supabase", "/dashboard"),
+    );
+
+    expect(response).toBeUndefined();
+    expect(getUser).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps auth cookie updates from a failed validation on the redirect", async () => {
+    const factory = vi.fn((context: SupabaseIntegrationInstanceContext) => {
+      const getUser = async () => {
+        context.options.cookies!.setAll!([
+          { name: "sb-test-auth-token", value: "", options: { maxAge: 0, path: "/" } },
+        ]);
+        return { data: { user: null }, error: { message: "session expired" } };
+      };
+      return { auth: { getUser } } as unknown as SupabaseIntegrationClient;
+    });
+    const integration = supabase({ instance: factory, protectedRoutes: ["/dashboard(.*)"] });
+    const request = new Request("https://app.example.com/dashboard", {
+      headers: { cookie: "sb-test-auth-token=stale" },
+    });
+
+    const response = await integration.middleware![0].handler(
+      request,
+      createContext(request, "supabase", "/dashboard"),
+    );
+
+    expect(response).toBeInstanceOf(Response);
+    expect(response!.status).toBe(302);
+    expect(response!.headers.get("set-cookie")).toContain("sb-test-auth-token=");
+    expect(response!.headers.get("set-cookie")).toContain("Max-Age=0");
+  });
+
   it("prefers the Unkey instance option for protected routes", async () => {
     const verifyKey = vi.fn(async () => ({
       valid: true,

@@ -65,6 +65,19 @@ export {
 } from "./cache-invalidation-broadcast";
 export type { CrossTabCacheInvalidationOptions } from "./cache-invalidation-broadcast";
 export {
+  clearPersistedCache,
+  defineClientCacheAdapter,
+  FARM_CLIENT_CACHE_PERSIST_VERSION,
+  initPersistedClientCache,
+  storageClientCacheAdapter,
+} from "./client-cache-persistence";
+export type {
+  ClientCachePersistenceOptions,
+  FarmClientCacheAdapter,
+  FarmClientCacheStorage,
+  PersistedEntry,
+} from "./client-cache-persistence";
+export {
   api,
   endpoint,
   defineIntegrationAPI,
