@@ -80,8 +80,12 @@ export const scanQuery = createServerQuery({
 });
 \`\`\`
 `;
-    expect(findClientServerFnViolation(page, "/app/src/app/docs/server-queries/page.md")).toBeNull();
-    expect(findClientServerFnViolation(page, "/app/src/app/docs/server-queries/page.md?import")).toBeNull();
+    expect(
+      findClientServerFnViolation(page, "/app/src/app/docs/server-queries/page.md"),
+    ).toBeNull();
+    expect(
+      findClientServerFnViolation(page, "/app/src/app/docs/server-queries/page.md?import"),
+    ).toBeNull();
     expect(findClientServerFnViolation(page, "/app/src/content/guide.mdx")).toBeNull();
   });
 

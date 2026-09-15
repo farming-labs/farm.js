@@ -115,6 +115,7 @@ export function completeFarmServerQueryAction<TData>(
     status: "success",
     error: null,
     fetching: false,
+    persist: metadata.persist === true ? true : undefined,
   });
 
   return value.data as TData;
