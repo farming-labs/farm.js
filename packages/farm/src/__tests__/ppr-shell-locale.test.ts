@@ -22,6 +22,56 @@ function request(locale: string, pathname: string) {
 
 // The shell cache is a process-wide singleton, so each test uses its own path.
 describe("PPR shell cache and locale", () => {
+  it("does not leave PPR caching headers on a route error-boundary response", async () => {
+    const renderer = createRenderer();
+    renderer.rendererRuntime = {
+      createElement: (component: any, props: any) => ({ component, props }),
+      renderToString: async () => "<div>error</div>",
+    };
+    renderer.routeManager = {
+      loadRouteModule: async () => ({ default: () => null }),
+      loadLayoutModule: async () => ({ default: () => null }),
+    };
+    renderer.wrapWithIntegrationProviders = async (element: any) => element;
+    renderer.createFullHTML = () => "<!doctype html><html><body>error</body></html>";
+
+    const headers = new Map<string, string>();
+    const res: any = {
+      headersSent: false,
+      writableEnded: false,
+      statusCode: 200,
+      setHeader: (key: string, value: string) => headers.set(key.toLowerCase(), value),
+      getHeader: (key: string) => headers.get(key.toLowerCase()),
+      removeHeader: (key: string) => headers.delete(key.toLowerCase()),
+      write: () => {},
+      end: () => {
+        res.writableEnded = true;
+      },
+    };
+    // The PPR "miss" caching headers are set on res before the shell render; a
+    // shell failure then renders the error boundary, which must not inherit them.
+    res.setHeader("Cache-Control", "s-maxage=60, stale-while-revalidate");
+    res.setHeader("X-Farm-PPR", "miss");
+
+    const handled = await renderer.renderRouteErrorBoundary(request("en", "/boom"), res, {
+      pathname: "/boom",
+      params: {},
+      layouts: [],
+      searchParamsObject: {},
+      middlewareMap: new Map(),
+      middlewareContext: new Map(),
+      pluginExposedContext: new Map(),
+      error: new Error("shell render failed"),
+      statusCode: 500,
+      errorModulePath: "/src/app/error.tsx",
+    });
+
+    expect(handled).toBe(true);
+    expect(res.statusCode).toBe(500);
+    expect(headers.get("cache-control")).toBe("private, no-store");
+    expect(headers.has("x-farm-ppr")).toBe(false);
+  });
+
   it("does not serve a shell cached in one locale to another locale", async () => {
     const renderer = createRenderer();
     const french = '<html lang="fr" dir="ltr">bonjour</html>';

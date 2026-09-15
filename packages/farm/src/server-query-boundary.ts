@@ -21,6 +21,10 @@ export function findClientServerFnViolation(
   id: string,
 ): ServerFnBoundaryViolation | null {
   if (id.startsWith("\0") || id.startsWith("virtual:") || id.includes("node_modules")) return null;
+  // Markdown modules never execute import statements: matched text is
+  // documentation (fenced code examples), not code, before and after the
+  // markdown transform (fences compile to string content).
+  if (/\.(md|mdx)(\?|$)/.test(id)) return null;
   if (!code.includes("@farm.js/core")) return null;
 
   for (const match of code.matchAll(FARM_CORE_IMPORT_RE)) {

@@ -69,6 +69,14 @@ describe("client component path resolution", () => {
     expect(stripUseClientDirective(afterBlockComment)).toBe(
       "/* Copyright 2026 Acme */\nexport default function Counter() { return null; }\n",
     );
+    expect(stripUseClientDirective(afterLineComment)).toBe(
+      "// @generated\nexport default function Counter() { return null; }\n",
+    );
+    // Detection and stripping must agree: a preceding "use strict" directive is
+    // kept, and the "use client" directive is removed.
+    expect(stripUseClientDirective(afterUseStrict)).toBe(
+      '"use strict";\nexport default function Counter() { return null; }\n',
+    );
   });
 
   it("ignores use client strings that are not part of the directive prologue", () => {

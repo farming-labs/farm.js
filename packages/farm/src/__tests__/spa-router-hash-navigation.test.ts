@@ -70,4 +70,56 @@ describe("same-page hash navigation", () => {
     router.destroy();
     target.remove();
   });
+
+  it("scrolls to the destination fragment on back/forward (popstate) navigation", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(
+        Response.json({
+          canonicalPath: "/reference",
+          props: {},
+          modulePath: "/src/app/reference/page.tsx",
+          metadata: {},
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          canonicalPath: "/home",
+          props: {},
+          modulePath: "/src/app/home/page.tsx",
+          metadata: {},
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          canonicalPath: "/reference",
+          props: {},
+          modulePath: "/src/app/reference/page.tsx",
+          metadata: {},
+        }),
+      );
+    const router = new SPARouter({ scrollRestoration: false });
+    router.setNavigationHandler(async () => undefined);
+    const target = document.createElement("h2");
+    target.id = "api";
+    target.scrollIntoView = vi.fn();
+    document.body.appendChild(target);
+
+    await router.navigate("/reference#api");
+    await router.navigate("/home");
+    (target.scrollIntoView as ReturnType<typeof vi.fn>).mockClear();
+
+    // Back to /reference#api: the fragment must be scrolled to on popstate, the
+    // same as forward navigation and native back/forward.
+    window.history.back();
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      if ((target.scrollIntoView as ReturnType<typeof vi.fn>).mock.calls.length > 0) break;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    expect(window.location.pathname).toBe("/reference");
+    expect(window.location.hash).toBe("#api");
+    expect(target.scrollIntoView).toHaveBeenCalled();
+    router.destroy();
+    target.remove();
+  });
 });

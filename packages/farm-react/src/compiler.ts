@@ -2154,6 +2154,29 @@ type KeyedArrayReorderPipelineStep =
       readonly kind: "sort";
     };
 
+function normalizeSafeKeyedFilterPredicate(
+  predicate: t.Node | null | undefined,
+  safeGlobals: ReadonlySet<string>,
+): t.ArrowFunctionExpression | undefined {
+  if (
+    !t.isArrowFunctionExpression(predicate) ||
+    predicate.async ||
+    predicate.generator ||
+    predicate.params.length !== 1 ||
+    !t.isIdentifier(predicate.params[0]) ||
+    (t.isBlockStatement(predicate.body) && predicate.body.directives.length > 0)
+  ) {
+    return undefined;
+  }
+  const returned = returnedExpression(predicate);
+  if (!returned || validateDerivedExpression(returned, safeGlobals) !== undefined) {
+    return undefined;
+  }
+  const normalized = t.cloneNode(predicate, true);
+  normalized.body = t.cloneNode(returned, true);
+  return normalized;
+}
+
 function keyedArrayReorderPipeline(
   expression: t.Expression,
   parameterName: string,
@@ -2186,18 +2209,8 @@ function keyedArrayReorderPipeline(
       outerSteps.push({ callback, kind: "map" });
     } else if (methodName === "filter") {
       if (current.arguments.length !== 1) return undefined;
-      const predicate = current.arguments[0];
-      if (
-        !t.isArrowFunctionExpression(predicate) ||
-        predicate.async ||
-        predicate.generator ||
-        predicate.params.length !== 1 ||
-        !t.isIdentifier(predicate.params[0]) ||
-        !t.isExpression(predicate.body) ||
-        validateDerivedExpression(predicate.body, safeGlobals)
-      ) {
-        return undefined;
-      }
+      const predicate = normalizeSafeKeyedFilterPredicate(current.arguments[0], safeGlobals);
+      if (!predicate) return undefined;
       outerSteps.push({ kind: "filter", predicate });
     } else if (methodName === "slice") {
       if (current.arguments.length < 1 || current.arguments.length > 2) return undefined;
@@ -3978,18 +3991,11 @@ function rewriteKeyedArrayFilterHints(
       ) {
         return;
       }
-      const predicate = updateExpression.arguments[0];
-      if (
-        !t.isArrowFunctionExpression(predicate) ||
-        predicate.async ||
-        predicate.generator ||
-        predicate.params.length !== 1 ||
-        !t.isIdentifier(predicate.params[0]) ||
-        !t.isExpression(predicate.body) ||
-        validateDerivedExpression(predicate.body, safeGlobals)
-      ) {
-        return;
-      }
+      const predicate = normalizeSafeKeyedFilterPredicate(
+        updateExpression.arguments[0],
+        safeGlobals,
+      );
+      if (!predicate) return;
 
       const previous = t.cloneNode(updater.params[0]);
       const filterMethod = path.scope.generateUidIdentifier("farmFilter");

@@ -1,9 +1,11 @@
 import { defineConfig } from "@farm.js/core";
+import { devtools } from "@farm.js/devtools";
 import { react } from "@farm.js/react";
 
 const compilerEnabled = process.env.FARM_REACT_COMPILER !== "false";
 
 export default defineConfig({
+  plugins: [devtools()],
   env: {
     public: {
       FARM_REACT_COMPILER_ENABLED: () => compilerEnabled,

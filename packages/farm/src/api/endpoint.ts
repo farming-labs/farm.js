@@ -1,10 +1,10 @@
 import { createEndpoint as betterCallEndpoint } from "better-call";
 import { applyFarmCacheInvalidationTargets, type FarmCacheInvalidationTarget } from "../cache";
 import { isMultipartSchema, type MultipartSchema, type TypedFormData } from "./transport";
+import type { RouteSchema, RouteSchemaInput, RouteSchemaOutput } from "./route-schema";
 
-// Generic schema type that works with both Zod v3 and v4
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AnySchema = { _output?: any; _input?: any; parse?: (data: unknown) => any };
+// Share the route factory's Zod and Standard Schema contract.
+type AnySchema = RouteSchema;
 
 type MaybePromise<T> = T | Promise<T>;
 type Simplify<T> = { [TKey in keyof T]: T[TKey] } & {};
@@ -14,21 +14,19 @@ type UnionToIntersection<T> = (T extends unknown ? (value: T) => void : never) e
   ? TIntersection
   : never;
 
-// Infer output type from schema (works with Zod v3 and v4)
-type InferOutput<T> = T extends { _output: infer O }
-  ? O
-  : T extends { parse: (data: unknown) => infer R }
-    ? R
-    : unknown;
+// Handlers receive parsed output; callers supply the schema input.
+type InferOutput<T> = RouteSchemaOutput<T>;
 
 type InferInput<T> = T extends { _input: infer I }
   ? I
-  : T extends { parse: (data: infer I) => unknown }
-    ? I
-    : unknown;
+  : T extends { "~standard": unknown }
+    ? RouteSchemaInput<T>
+    : T extends { parse: (data: infer I) => unknown }
+      ? I
+      : unknown;
 
 type InferBodyInput<T> =
-  T extends MultipartSchema<AnySchema> ? TypedFormData<InferOutput<T>> : InferOutput<T>;
+  T extends MultipartSchema<AnySchema> ? TypedFormData<InferInput<T>> : InferInput<T>;
 
 type InferHeadersOutput<T> = [T] extends [never]
   ? Record<string, string>
@@ -267,18 +265,20 @@ export type TypedEndpoint<
   THeaders = Record<string, string>,
   TErrors = never,
   TBodyInput = TBody,
+  TQueryInput = TQuery,
 > = {
   __types: {
     body: TBody;
     inputBody: TBodyInput;
     query: TQuery;
+    inputQuery: TQueryInput;
     headers: THeaders;
     response: TResponse;
     errors: TErrors;
   };
   __path?: string;
   __method?: string;
-} & ((options?: { body?: TBody; query?: TQuery }) => Promise<TResponse>);
+} & ((options?: { body?: TBodyInput; query?: TQueryInput }) => Promise<TResponse>);
 
 type CreatedEndpoint<
   TBody extends AnySchema,
@@ -292,7 +292,8 @@ type CreatedEndpoint<
   Awaited<TResponse>,
   InferHeadersOutput<THeaders>,
   EndpointErrorContracts<TErrors>,
-  InferBodyInput<TBody>
+  InferBodyInput<TBody>,
+  InferInput<TQuery>
 >;
 
 type AnyEndpointOptions = EndpointOptions<
@@ -474,6 +475,7 @@ export function createEndpoint(
     body: options.body,
     inputBody: isMultipartSchema(options.body) ? "form-data" : options.body,
     query: options.query,
+    inputQuery: options.query,
     headers: options.headers,
     response: null as any,
     errors,

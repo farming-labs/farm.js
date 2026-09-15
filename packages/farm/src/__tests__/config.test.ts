@@ -330,6 +330,14 @@ describe("resolveConfig", () => {
     });
   });
 
+  it("keeps experimental PPR disabled by default and preserves explicit opt-in", async () => {
+    const defaults = await resolveConfig({}, "production");
+    const configured = await resolveConfig({ experimental: { ppr: true } }, "production");
+
+    expect(defaults.experimental.ppr).toBe(false);
+    expect(configured.experimental.ppr).toBe(true);
+  });
+
   it("keeps isolated client hydration off by default and preserves its rollout mode", async () => {
     const defaults = await resolveConfig({}, "production");
     const configured = await resolveConfig(
@@ -986,6 +994,23 @@ describe("resolveDeployConfig", () => {
 
     expect(deploy.preset).toBe("deno-server");
     expect(deploy.outputDir).toBe(".farm/.output");
+  });
+
+  it("lets a CLI target override displace a configured cross-platform preset", () => {
+    // Symmetric to the preset-override case: with deploy.preset vercel in
+    // config, `farm build --target netlify` must not ship Vercel-shaped output
+    // labeled as a Netlify deploy.
+    const deploy = resolveDeployConfig({ deploy: { preset: "vercel" } }, { target: "netlify" });
+
+    expect(deploy.target).toBe("netlify");
+    expect(deploy.preset).toBe("netlify");
+  });
+
+  it("keeps a same-platform configured preset under a CLI target override", () => {
+    const deploy = resolveDeployConfig({ deploy: { preset: "vercel-edge" } }, { target: "vercel" });
+
+    expect(deploy.target).toBe("vercel");
+    expect(deploy.preset).toBe("vercel-edge");
   });
 
   it("respects an explicitly configured output directory under a preset override", () => {

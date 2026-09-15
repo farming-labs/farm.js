@@ -9,6 +9,7 @@ import {
 } from "./client/spa-router";
 import { subscribeHistoryChange } from "./client/history-sync";
 import { getFarmClientDataCache, type FarmClientCacheStatus } from "./client-cache";
+import { attachRevalidationListeners } from "./client-revalidation";
 import type { ServerFn } from "./server-fn";
 import type { ServerQuery } from "./server-query";
 import {
@@ -303,19 +304,15 @@ export function createRendererQuery<TInput, TData>(
     });
     if (!cache.get(key) || cache.isStale(key)) void run().catch(() => undefined);
 
-    if (typeof window !== "undefined") {
-      const refresh = () => {
+    cleanupBrowser = attachRevalidationListeners(
+      () => {
         if (cache.isStale(key)) void run().catch(() => undefined);
-      };
-      const onFocus = options.refetchOnWindowFocus === false ? undefined : refresh;
-      const onOnline = options.refetchOnReconnect === false ? undefined : refresh;
-      if (onFocus) window.addEventListener("focus", onFocus);
-      if (onOnline) window.addEventListener("online", onOnline);
-      cleanupBrowser = () => {
-        if (onFocus) window.removeEventListener("focus", onFocus);
-        if (onOnline) window.removeEventListener("online", onOnline);
-      };
-    }
+      },
+      {
+        refetchOnWindowFocus: options.refetchOnWindowFocus,
+        refetchOnReconnect: options.refetchOnReconnect,
+      },
+    );
   };
 
   return {

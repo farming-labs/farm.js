@@ -548,10 +548,19 @@ export function resolveDeployConfig(
       }
     }
   }
+  // A CLI --target override governs the preset too: keep a configured preset
+  // only when it targets the same platform, otherwise derive the preset from
+  // the override target. Mirrors how a --preset override recomputes the target
+  // above, so `farm build --target netlify` never ships Vercel-shaped output.
+  const configuredPreset = deploy.preset || config.preset;
+  const overrideTargetPreset =
+    overrideTarget && getDeployTargetForPreset(configuredPreset) !== overrideTarget
+      ? getPresetForDeployTarget(overrideTarget)
+      : undefined;
   const preset =
     overrides.preset ||
-    deploy.preset ||
-    config.preset ||
+    overrideTargetPreset ||
+    configuredPreset ||
     getPresetForDeployTarget(target) ||
     "node-server";
   const resolvedTarget = target || getDeployTargetForPreset(preset);
@@ -999,6 +1008,7 @@ export async function resolveConfig(
       serverComponents: false,
       serverActions: false,
       isolatedClientHydration: "off",
+      ppr: false,
       ...userConfig.experimental,
     },
     plugins: [...resolveIntegrationPlugins(integrations), ...(userConfig.plugins || [])],

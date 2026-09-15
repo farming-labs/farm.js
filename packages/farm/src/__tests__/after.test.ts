@@ -157,6 +157,40 @@ describe("after", () => {
     expect(didRun).toBe(true);
   });
 
+  it("runs after() callbacks when the handler throws with a response-finished hook", async () => {
+    let lifetime!: Promise<void>;
+    let didRun = false;
+    const boom = new Error("handler failed");
+
+    await expect(
+      _runWithAfterRequest(
+        new Request("https://farm.local/events", { method: "POST" }),
+        () => {
+          after(() => {
+            didRun = true;
+          });
+          throw boom;
+        },
+        {
+          // A spec-compliant adapter only fires this once a response finishes;
+          // a thrown handler produced none, so it never fires.
+          onResponseFinished() {},
+          waitUntil(promise) {
+            lifetime = promise;
+          },
+        },
+      ),
+    ).rejects.toBe(boom);
+
+    // The after-lifecycle must still run and settle rather than hang forever.
+    const outcome = await Promise.race([
+      lifetime.then(() => "completed"),
+      new Promise((resolve) => setTimeout(() => resolve("hung"), 250)),
+    ]);
+    expect(outcome).toBe("completed");
+    expect(didRun).toBe(true);
+  });
+
   it("uses Node finish and close events as the response boundary", async () => {
     class MockResponse extends EventEmitter {
       writableEnded = false;

@@ -75,6 +75,14 @@ export interface RouteRenderingConfig {
   directive?: string;
 }
 
+export interface RouteRenderingOptions {
+  /**
+   * Whether `experimental.ppr` is enabled in the app config. Route-level PPR
+   * opt-ins (`ppr`, `experimental_ppr`, `"use ppr"`) are inert without it.
+   */
+  experimentalPPR?: boolean;
+}
+
 export interface StaticRouteCandidateAnalysis {
   candidate: boolean;
   blockers: string[];
@@ -117,10 +125,12 @@ const ROUTE_PROP_LABELS = new Map<string, string>([
 function resolveConfiguredRouteRenderingConfig(
   mod: RouteModule | null | undefined,
   source?: string,
+  options?: RouteRenderingOptions,
 ): RouteRenderingConfig {
+  const pprEnabled = options?.experimentalPPR === true;
   const directiveConfig = parseRouteRenderingDirective(source);
   let ssg = directiveConfig?.ssg ?? false;
-  let ppr = directiveConfig?.ppr ?? false;
+  let requestedPPR = directiveConfig?.ppr ?? false;
   let revalidate = directiveConfig?.revalidate;
   const moduleDynamic = normalizeDynamicMode(mod?.dynamic);
   const dynamic = moduleDynamic ?? directiveConfig?.dynamic;
@@ -133,13 +143,16 @@ function resolveConfiguredRouteRenderingConfig(
   }
 
   if (hasExplicitPPR) {
-    ppr = mod?.ppr === true || mod?.experimental_ppr === true;
+    requestedPPR = mod?.ppr === true || mod?.experimental_ppr === true;
   }
 
   if (typeof mod?.revalidate === "number") {
     if (mod.revalidate > 0) {
       revalidate = mod.revalidate;
-      if (!hasExplicitSsg && !ppr) {
+      // A PPR opt-in keeps the route dynamic even while experimental.ppr is
+      // off: the page expects Suspense holes, so falling back to ISR would
+      // bake request-time content into a shared static artifact.
+      if (!hasExplicitSsg && !requestedPPR) {
         ssg = true;
       }
     } else {
@@ -154,16 +167,18 @@ function resolveConfiguredRouteRenderingConfig(
 
   if (moduleDynamic === "force-static" || moduleDynamic === "error") {
     ssg = true;
-    ppr = false;
+    requestedPPR = false;
   } else if (moduleDynamic === "force-dynamic") {
     ssg = false;
-    ppr = false;
+    requestedPPR = false;
     revalidate = undefined;
   }
 
+  const ppr = pprEnabled && !ssg && requestedPPR;
+
   return {
     ssg,
-    ppr: ssg ? false : ppr,
+    ppr,
     revalidate: ssg || ppr ? revalidate : undefined,
     dynamic,
     directive: directiveConfig?.directive,
@@ -177,8 +192,9 @@ function resolveConfiguredRouteRenderingConfig(
 export function resolveRouteRenderingConfig(
   mod: RouteModule | null | undefined,
   source?: string,
+  options?: RouteRenderingOptions,
 ): RouteRenderingConfig {
-  const rendering = resolveConfiguredRouteRenderingConfig(mod, source);
+  const rendering = resolveConfiguredRouteRenderingConfig(mod, source, options);
   if (!rendering.ssg || !source) {
     return rendering;
   }
@@ -198,9 +214,10 @@ export function resolveRouteRenderingConfig(
 export async function resolveRouteRenderingConfigFromFile(
   mod: RouteModule | null | undefined,
   filePath: string,
+  options?: RouteRenderingOptions,
 ): Promise<RouteRenderingConfig> {
   const source = await readFile(filePath, "utf8").catch(() => undefined);
-  return resolveRouteRenderingConfig(mod, source);
+  return resolveRouteRenderingConfig(mod, source, options);
 }
 
 /**
@@ -895,8 +912,11 @@ export function getRevalidateInterval(mod: RouteModule | null | undefined): numb
 /**
  * Check if a route module has PPR/static-shell caching enabled.
  */
-export function hasPPR(mod: RouteModule | null | undefined): boolean {
-  return resolveRouteRenderingConfig(mod).ppr;
+export function hasPPR(
+  mod: RouteModule | null | undefined,
+  options?: RouteRenderingOptions,
+): boolean {
+  return resolveRouteRenderingConfig(mod, undefined, options).ppr;
 }
 
 /**

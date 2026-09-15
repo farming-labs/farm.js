@@ -6,12 +6,17 @@ section: "Plugin Ecosystem"
 
 # DevTools
 
-`@farm.js/devtools` brings Farm's runtime snapshot into a development-only workspace. Browse
-routes and their runtime settings, inspect configured integrations, and compare application
-source with the JavaScript Vite served. The interface uses the Farm logo, locally bundled Geist
-fonts, light and dark themes, and syntax-highlighted code with copy controls.
+`@farm.js/devtools` is Farm's official DevTools. It brings the runtime snapshot into a
+development-only workspace: browse routes and their runtime settings, inspect configured
+integrations, and compare application source with the JavaScript Vite served. The interface
+uses the Farm logo, locally bundled Geist fonts, light and dark themes, and syntax-highlighted
+code with copy controls. It replaces the deprecated built-in dashboard from
+[DevTools and Doctor](/docs/devtools).
 
 ## Setup
+
+New projects scaffolded with `create @farm.js/app` already include the plugin. For an existing
+app:
 
 ```bash
 pnpm add -D @farm.js/devtools
@@ -93,9 +98,10 @@ devtools({
 All options are optional and typed. `launcher` and `inspect` default to `true`. If `shortcut` is
 omitted, Farm's existing shortcut configuration is preserved. Register one DevTools instance.
 
-The existing top-level `devtools` configuration and core dashboard remain supported without
-this plugin. Remove `devtools: false` or `devtools: { enabled: false }` before adding `devtools()`;
-contradictory settings fail with an actionable configuration error.
+Without this plugin, apps fall back to the deprecated built-in dashboard; the top-level
+`devtools` configuration keeps working during the transition. Remove `devtools: false` or
+`devtools: { enabled: false }` before adding `devtools()`; contradictory settings fail with
+an actionable configuration error.
 
 ## Security and production
 

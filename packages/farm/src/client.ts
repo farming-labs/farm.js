@@ -30,6 +30,7 @@ export type {
   InferMutationVariables,
   MutationAsync,
   MutationOptimisticContext,
+  MutationNetworkMode,
   MutationStatus,
   MutationTrigger,
   UseMutationOptions,
@@ -58,6 +59,11 @@ export type {
   UseServerQueryOptions,
   UseServerQueryResult,
 } from "./server-query-client";
+export {
+  enableCrossTabCacheInvalidation,
+  FARM_CACHE_INVALIDATION_CHANNEL,
+} from "./cache-invalidation-broadcast";
+export type { CrossTabCacheInvalidationOptions } from "./cache-invalidation-broadcast";
 export {
   api,
   endpoint,
