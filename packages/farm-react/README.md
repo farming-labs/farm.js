@@ -562,12 +562,15 @@ subclassed behavior, structural calls after reordering, an unhinted intermediate
 React-owned rows, and failed checks keep complete keyed reconciliation.
 
 A compiler-safe `filter()` or bounded `slice()` prefix may precede the native reorder suffix in a
-concise updater or exact one-return block:
+concise updater or exact one-return block. A filter predicate may be concise or contain exactly one
+direct value-returning `return`:
 
 ```tsx
 setItems((current) =>
   current
-    .filter((item) => item.visible)
+    .filter((item) => {
+      return item.visible;
+    })
     .toSorted((left, right) => left.rank - right.rank)
     .toReversed(),
 );
@@ -809,17 +812,22 @@ setItems((current) => current.filter((item) => item.id !== removedId));
 setItems((current) => {
   return current.filter((item) => item.id !== removedId);
 });
+setItems((current) =>
+  current.filter((item) => {
+    return item.id !== removedId;
+  }),
+);
 ```
 
 For compiler-owned host rows whose render and key do not observe the row index, Farm validates the
 native filter chain, every surviving item identity, and every surviving key before removing only
 the rejected DOM rows. It does not recreate descriptors or reread bindings for unchanged rows,
 and queued filters compose before one compiler flush. Index-aware rows or predicates, updater blocks
-with extra statements, directives, conditional returns, or no value-returning `return`, block-bodied
-predicates, custom filter methods, sparse or subclassed arrays, collection-reading bindings or keys,
-React-owned row structures, mixed dirty dependencies, and failed validation use complete keyed
-reconciliation. No option or new component is required. The compiler report exposes the emitted-site
-count as `keyedArrayFilterHints`.
+with extra statements, directives, conditional returns, or no value-returning `return`, predicate
+blocks with those unsupported shapes, custom filter methods, sparse or subclassed arrays,
+collection-reading bindings or keys, React-owned row structures, mixed dirty dependencies, and
+failed validation use complete keyed reconciliation. No option or new component is required. The
+compiler report exposes the emitted-site count as `keyedArrayFilterHints`.
 
 An otherwise eligible host row may also contain an inline synchronous React event:
 

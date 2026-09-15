@@ -47,6 +47,9 @@ React because their generated UI and provider packages are React-oriented.
 
 Use `--list-templates` to see the same catalog in the terminal. Provider templates include the
 integration wiring, an app-owned UI feature, `.env.example`, and a minimal dark home page.
+Every starter registers the [DevTools plugin](/docs/plugins/devtools) in `farm.config.ts`, so the
+development workspace is available from the first `farm dev`. Remove `devtools()` from `plugins`
+and drop the `@farm.js/devtools` dev dependency if you do not want it.
 
 | Template         | Included capability                     |
 | ---------------- | --------------------------------------- |

@@ -76,11 +76,12 @@ and up to 20,000 rows, and at least 1.25x faster than the compiled control. The 
 nonzero `keyedArrayAppendHints` count; deterministic package tests separately require work to equal
 only the appended suffix.
 
-Queued structural appends have an independent 10,000-row comparison. One concise setter removes a
-row with `filter()` and the immediately adjacent setter appends one fresh row, while the
-block-bodied pair remains the compiled fallback control. Both compiler modes must remain at least
-2x faster than React and 1.25x faster than the compiled control. Every sample verifies the exact
-9,999 survivor identities and order, the disconnected rejected row, and the fresh final row.
+Queued structural appends have an independent 10,000-row comparison. One setter removes a row with
+`filter()` using an exact one-return predicate block, and the immediately adjacent setter appends
+one fresh row, while the paired updater with a local declaration remains the compiled fallback
+control. Both compiler modes must remain at least 2x faster than React and 1.25x faster than the
+compiled control. Every sample verifies the exact 9,999 survivor identities and order, the
+disconnected rejected row, and the fresh final row.
 Package tests also cover bounded slices, multiple later appends, 2,000 randomized transitions,
 controlled-input focus and selection, multi-boundary sharing, hydration, unmount cleanup, and
 pre-mutation fallback.
@@ -99,13 +100,14 @@ safe maps. The filter's recorded survivor positions let the commit avoid a secon
 scan while still validating the complete native result before mutation. Both compiler modes must
 remain at least 2x faster than React and 1.25x faster than the block-bodied compiled control.
 
-Direct keyed filters have an independent removal comparison. A single-return block-bodied filter
-removes the selected middle row and is measured against bracketed React and a compiled snapshot
-control whose updater block has a local target declaration. Both compiler modes must remain at least
-3x faster than React at 1,000 and 20,000 rows, and at least 1.25x faster than the compiled control at
-1,000 rows. The report must contain a nonzero `keyedArrayFilterHints` count; deterministic package
-tests separately cover queued and randomized removals, delegated event indexes, native method and
-predicate errors, hydration, Strict Mode, and unmount cleanup.
+Direct keyed filters have an independent removal comparison. A single-return updater whose filter
+predicate is also an exact one-return block removes the selected middle row and is measured against
+bracketed React and a compiled snapshot control whose updater block has a local target declaration.
+Both compiler modes must remain at least 3x faster than React at 1,000 and 20,000 rows, and at least
+1.25x faster than the compiled control at 1,000 rows. The report must contain a nonzero
+`keyedArrayFilterHints` count; deterministic package tests separately cover queued and randomized
+removals, delegated event indexes, native method and predicate errors, hydration, Strict Mode, and
+unmount cleanup.
 
 The mapped-append comparison uses the other common order: filter one row, update a surviving row,
 then append a fresh row. It verifies that the compiler retains the original survivor identity
@@ -283,12 +285,13 @@ Package tests compile mixed sort/reverse pipelines and compare 2,000 determinist
 pipelines with normal React.
 
 Structural reorder pipelines add an independent 10,000-row comparison. One single-return
-block-bodied setter filters one row and then evaluates two native reversals; its compiled control
-adds a local declaration to the updater block. Farm must validate membership and final order before
-touching the DOM, preserve all 9,999 surviving row identities, remove only the rejected row, and
-remain at least 2x faster than React and 1.25x faster than the compiled control. Package tests also
-cover filter/slice/sort/reverse composition, queued filter-then-sort updates, 2,000 randomized
-removals, controlled-input focus and selection, hydration, cleanup, and conservative fallback.
+block-bodied setter filters one row through an exact one-return predicate block and then evaluates
+two native reversals; its compiled control adds a local declaration to the updater block. Farm must
+validate membership and final order before touching the DOM, preserve all 9,999 surviving row
+identities, remove only the rejected row, and remain at least 2x faster than React and 1.25x faster
+than the compiled control. Package tests also cover filter/slice/sort/reverse composition, queued
+filter-then-sort updates, 2,000 randomized removals, controlled-input focus and selection,
+hydration, cleanup, and conservative fallback.
 
 Consecutive same-order maps have their own 10,000-row comparison. One concise setter updates the
 label and amount of every tenth row in two native `map()` stages. The block-bodied form performs the

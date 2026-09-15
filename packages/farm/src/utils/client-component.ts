@@ -427,7 +427,7 @@ export function stripUseClientDirective(content: string): string {
   // Comments (and other directives) may precede "use client"; keep them and
   // remove only the directive itself.
   return content.replace(
-    /^((?:\s|\/\/[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/)*)(["'])use client\2\s*;?\s*/,
+    /^((?:\s|\/\/[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/|(?:"[^"\n]*"|'[^'\n]*')\s*;?)*)(["'])use client\2\s*;?\s*/,
     "$1",
   );
 }

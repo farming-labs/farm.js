@@ -2,6 +2,11 @@ export const DEFAULT_FARM_DEVTOOLS_SHORTCUT = "mod+shift+.";
 export const FARM_DEVTOOLS_PATH = "/__farm/devtools";
 export const FARM_DEVTOOLS_LAUNCH_PARAM = "__farm_devtools";
 
+/**
+ * Configuration for the built-in DevTools dashboard. The dashboard is deprecated in favor
+ * of the `@farm.js/devtools` plugin, which reuses this configuration for enablement and
+ * the keyboard shortcut. Both options keep working while the built-in UI remains available.
+ */
 export interface FarmDevtoolsConfig {
   /** Enable the development-only DevTools UI and runtime endpoints. */
   enabled?: boolean;

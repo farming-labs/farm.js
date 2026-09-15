@@ -1,8 +1,10 @@
 import { defineConfig } from "@farm.js/core";
+import { devtools } from "@farm.js/devtools";
 import { withDocs } from "@farming-labs/farmjs/config";
 
 export default withDocs(
   defineConfig({
+    plugins: [devtools()],
     async headers() {
       return [
         {

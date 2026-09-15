@@ -212,6 +212,39 @@ describe("createFarmDocsHandler", () => {
     expect(response == null || response.status === 404).toBe(true);
   });
 
+  it("omits headings inside code fences from the on-this-page TOC", async () => {
+    const { root, docs, docsDir } = await createDocsFixture();
+    await fs.mkdir(path.join(docsDir, "fenced"), { recursive: true });
+    await fs.writeFile(
+      path.join(docsDir, "fenced", "page.md"),
+      [
+        "# Fenced",
+        "",
+        "## Real Section",
+        "",
+        "```md",
+        "## Fake Heading In Code",
+        "```",
+        "",
+        "## Another Real",
+      ].join("\n"),
+    );
+
+    const handler = createFarmDocsHandler(docs, { root, srcDir: "src" });
+    const response = await handler(
+      new Request("http://farm.test/docs/fenced", { headers: { accept: "text/html" } }),
+    );
+
+    expect(response?.status).toBe(200);
+    const html = (await response?.text()) || "";
+    // Real headings are in the TOC (anchor id + toc link).
+    expect(html).toContain("real-section");
+    expect(html).toContain("another-real");
+    // The heading inside the code fence is not a real heading (marked renders it
+    // as code, no anchor), so its slug must not leak into the TOC.
+    expect(html).not.toContain("fake-heading-in-code");
+  });
+
   it("serves docs markdown files as HTML", async () => {
     const { root, docs } = await createDocsFixture();
     const handler = createFarmDocsHandler(docs, { root, srcDir: "src" });

@@ -1,9 +1,11 @@
 import { betterAuth } from "@farm.js/better-auth";
 import { defineConfig } from "@farm.js/core/config";
+import { devtools } from "@farm.js/devtools";
 import { solid } from "@farm.js/solid";
 import { auth } from "./src/lib/auth.ts";
 
 export default defineConfig({
+  plugins: [devtools()],
   renderer: solid(),
   theme: {
     default: "dark",

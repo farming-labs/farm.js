@@ -11,7 +11,9 @@ pnpm dev
 ```
 
 The scaffolder installs FARMJS, React by default, TypeScript, and the other starter dependencies
-automatically. The command explicitly selects the minimal Basic starter. Use `pnpm create`, not
+automatically. Every starter also registers the official
+[`@farm.js/devtools`](https://farmjs.dev/docs/plugins/devtools) workspace, available at
+`/__farm/devtools` (or `Command/Ctrl + Shift + .`) during `pnpm dev`. The command explicitly selects the minimal Basic starter. Use `pnpm create`, not
 `pnpm add`; pnpm resolves this initializer command to the published `@farm.js/create-app` package.
 The command scopes `minimumReleaseAge=0` to the initializer so pnpm 11 can resolve a beta published
 within the last 24 hours. Pass `--skip-install` when you only want to generate the project files.

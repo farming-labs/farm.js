@@ -61,19 +61,70 @@ describe("route rendering config", () => {
   });
 
   it("supports PPR and Next-compatible experimental_ppr without forcing SSG", () => {
-    expect(resolveRouteRenderingConfig({ experimental_ppr: true, revalidate: 60 })).toMatchObject({
+    const experimentalPPR = { experimentalPPR: true };
+    expect(
+      resolveRouteRenderingConfig(
+        { experimental_ppr: true, revalidate: 60 },
+        undefined,
+        experimentalPPR,
+      ),
+    ).toMatchObject({
       ssg: false,
       ppr: true,
       revalidate: 60,
     });
-    expect(resolveRouteRenderingConfig({ ppr: true })).toMatchObject({
+    expect(resolveRouteRenderingConfig({ ppr: true }, undefined, experimentalPPR)).toMatchObject({
       ssg: false,
       ppr: true,
     });
-    expect(resolveRouteRenderingConfig({ ppr: true, dynamic: "force-dynamic" })).toMatchObject({
+    expect(
+      resolveRouteRenderingConfig(
+        { ppr: true, dynamic: "force-dynamic" },
+        undefined,
+        experimentalPPR,
+      ),
+    ).toMatchObject({
       ssg: false,
       ppr: false,
       dynamic: "force-dynamic",
+    });
+  });
+
+  it("keeps route PPR opt-ins inert unless experimental.ppr is enabled", () => {
+    // Default (no options) matches a config without the flag.
+    expect(resolveRouteRenderingConfig({ ppr: true })).toMatchObject({
+      ssg: false,
+      ppr: false,
+    });
+    expect(resolveRouteRenderingConfig({ experimental_ppr: true })).toMatchObject({
+      ssg: false,
+      ppr: false,
+    });
+    expect(
+      resolveRouteRenderingConfig({ ppr: true }, undefined, { experimentalPPR: false }),
+    ).toMatchObject({
+      ssg: false,
+      ppr: false,
+    });
+    // A disabled PPR route stays fully dynamic: revalidate must not silently
+    // convert a page with Suspense holes into an ISR artifact.
+    expect(resolveRouteRenderingConfig({ ppr: true, revalidate: 60 })).toMatchObject({
+      ssg: false,
+      ppr: false,
+      revalidate: undefined,
+    });
+    // The "use ppr" directive is gated the same way as the exports.
+    expect(resolveRouteRenderingConfig({}, `"use ppr; 30";`)).toMatchObject({
+      ssg: false,
+      ppr: false,
+      revalidate: undefined,
+    });
+    expect(
+      resolveRouteRenderingConfig({}, `"use ppr; 30";`, { experimentalPPR: true }),
+    ).toMatchObject({
+      ssg: false,
+      ppr: true,
+      revalidate: 30,
     });
   });
 

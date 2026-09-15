@@ -10,7 +10,9 @@ import {
   type FormHTMLAttributes,
 } from "react";
 import type { ServerFn } from "./server-fn";
+import type { RetryOptions } from "./api/client";
 import { notifyClientObserver } from "./client-observers";
+import { invokeMutationWithRetry } from "./mutation-retry";
 
 export type ServerFnActionStatus = "idle" | "pending" | "success" | "error";
 
@@ -30,6 +32,8 @@ export type UseServerFnOptions<TResult, TError extends Error = Error, TInput = u
   throwOnFormError?: boolean;
   optimistic?: (context: ServerFnOptimisticContext<TInput, TResult>) => TResult | null | undefined;
   rollbackOnError?: boolean;
+  /** Retry failed submissions with the API client's retry shape. Defaults to no retries. */
+  retry?: RetryOptions;
   onSuccess?: (result: TResult) => void;
   onError?: (error: TError) => void;
   onSettled?: (result: TResult | null, error: TError | null) => void;
@@ -140,7 +144,12 @@ export function useServerFn<TInput, TResult, TError extends Error = Error>(
       });
 
       try {
-        const result = await serverFn(input as TInput | FormData);
+        const result = await invokeMutationWithRetry(
+          () => serverFn(input as TInput | FormData),
+          options.retry,
+          // A reset disowns this submission; stop scheduling retries then.
+          () => requestId >= lastResetIdRef.current,
+        );
         const isLatestRequest = requestId === requestIdRef.current;
 
         setActionState((current) => {
@@ -213,7 +222,14 @@ export function useServerFn<TInput, TResult, TError extends Error = Error>(
         throw error;
       }
     },
-    [options.optimistic, options.rollbackOnError, resetOnSubmit, serverFn, setActionState],
+    [
+      options.optimistic,
+      options.retry,
+      options.rollbackOnError,
+      resetOnSubmit,
+      serverFn,
+      setActionState,
+    ],
   ) as ServerFnSubmit<TInput, TResult>;
 
   const formAction = useCallback(

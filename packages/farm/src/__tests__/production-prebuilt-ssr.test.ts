@@ -2777,6 +2777,7 @@ export default defineRoutes(() => [
             root,
             srcDir: "src",
             images: { provider: "none" },
+            experimental: { ppr: true },
             generateBuildId: () => "production-boundaries-test",
           },
           "production",

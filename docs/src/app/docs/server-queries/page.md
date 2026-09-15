@@ -260,6 +260,10 @@ This works through the shared Farm client cache; `useServerQuery` does not expos
 optimistic option. Keep the API response and server-query result contracts identical whenever they
 share a key.
 
+Server-function mutations reach the same shared cache through `useMutation`: pass
+key-targeted `request.optimistic` updates and `request.invalidate` targets, as described in
+[Track mutations in React](/docs/api-client#track-mutations-in-react).
+
 ## Cache lifetime
 
 | `staleTime`                         | Server behavior                                                     | Browser behavior                                                   |

@@ -142,6 +142,10 @@ const createEmptyTypeArtifactSelection = (): TypeArtifactSelection => ({
 });
 
 const FARM_I18N_CLIENT_BRIDGE_ID = "\0farm-i18n-client-bridge";
+
+// The @farm.js/devtools plugin serves this path itself; reaching the built-in
+// dashboard render means the app is still on the deprecated core UI.
+let warnedDeprecatedDevtoolsDashboard = false;
 const EMPTY_FARM_DOCS_SEARCH_CLIENT_RUNTIME = `
 function isFarmDocsSearchPage() {
   return false;
@@ -1650,6 +1654,12 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             if (requestPathname.endsWith(".json")) {
               res.end(JSON.stringify(snapshot, null, 2));
             } else {
+              if (!warnedDeprecatedDevtoolsDashboard) {
+                warnedDeprecatedDevtoolsDashboard = true;
+                logger.warn(
+                  "The built-in DevTools dashboard is deprecated. Install @farm.js/devtools and add devtools() to plugins in farm.config.ts.",
+                );
+              }
               const { renderFarmDevtoolsHtml } = await loadFarmDevtoolsUIRuntime();
               res.end(renderFarmDevtoolsHtml(snapshot));
             }
