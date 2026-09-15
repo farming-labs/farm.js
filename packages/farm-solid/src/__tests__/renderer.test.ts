@@ -5,6 +5,7 @@ import {
   defineRendererDescriptorConformance,
   defineRendererServerConformance,
 } from "@farm.js/renderer-tests";
+import { escape, ssr } from "solid-js/web";
 import { describe, expect, it } from "vitest";
 import { solid } from "../index";
 import * as serverRuntime from "../server";
@@ -13,6 +14,7 @@ import {
   generateHydrationScript,
   renderToPipeableStream,
   renderToReadableStream,
+  renderToString,
 } from "../server";
 
 defineRendererDescriptorConformance({
@@ -61,5 +63,24 @@ describe("Solid renderer", () => {
   });
   it("provides Solid's hydration bootstrap for server documents", () => {
     expect(generateHydrationScript()).toContain("window._$HY");
+  });
+
+  it("renders children passed as a prop, as core wraps layouts and slots", async () => {
+    // vite-plugin-solid compiles `<main class="shell"><nav>nav</nav>{props.children}</main>`
+    // to this ssr()/escape() shape. Core wraps every layout as
+    // createElement(Layout, { children: element }), so the child arrives as a
+    // prop rather than positionally.
+    function Layout(props: { children?: unknown }) {
+      return ssr(
+        ['<main class="shell"><nav>nav</nav>', "</main>"] as unknown as TemplateStringsArray,
+        escape(props.children) as string,
+      );
+    }
+
+    const page = createElement("p", null, "page body");
+    const html = await renderToString(createElement(Layout, { children: page }));
+
+    expect(html).toContain("page body");
+    expect(html).not.toContain("undefined");
   });
 });
