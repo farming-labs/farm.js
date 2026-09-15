@@ -17,6 +17,15 @@ import { auth0Client } from "./client.js";
 
 const DEV_SECRET = "farmjs-auth0-development-secret-2026";
 
+// The built server re-evaluates farm.config.ts at runtime to instantiate
+// integrations, and Farm does not force NODE_ENV=production into that process.
+// Treating an absent NODE_ENV as "development" would silently sign production
+// sessions with the public DEV_SECRET, so only an explicit dev/test value may
+// use it. `farm dev` runs through Vite, which sets NODE_ENV="development".
+function isExplicitDevelopmentEnv(): boolean {
+  return process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test";
+}
+
 export interface Auth0Instance {
   middleware(request: Request): Promise<Response | void> | Response | void;
   matcher?: string | string[];
@@ -100,9 +109,7 @@ function resolveEnv(input: Auth0IntegrationInput): ResolvedAuth0Env {
   const clientId = input.clientId ?? process.env.AUTH0_CLIENT_ID ?? "";
   const clientSecret = input.clientSecret ?? process.env.AUTH0_CLIENT_SECRET ?? "";
   const secret =
-    input.secret ??
-    process.env.AUTH0_SECRET ??
-    (process.env.NODE_ENV === "production" ? "" : DEV_SECRET);
+    input.secret ?? process.env.AUTH0_SECRET ?? (isExplicitDevelopmentEnv() ? DEV_SECRET : "");
   const appBaseUrl = input.appBaseUrl ?? process.env.APP_BASE_URL ?? undefined;
 
   if (!domain || !clientId) {
@@ -110,7 +117,11 @@ function resolveEnv(input: Auth0IntegrationInput): ResolvedAuth0Env {
   }
 
   if (!secret) {
-    throw new Error("Auth0 integration requires AUTH0_SECRET in production.");
+    throw new Error(
+      "Auth0 integration requires AUTH0_SECRET. A development-only fallback secret is used " +
+        'only when NODE_ENV is "development" or "test"; set AUTH0_SECRET to a random 32-byte ' +
+        "value in every other environment.",
+    );
   }
 
   return {
