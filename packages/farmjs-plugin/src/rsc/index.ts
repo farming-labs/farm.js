@@ -30,6 +30,11 @@ import type { FarmAPIConfig } from "@farm.js/core/api";
 import type { FarmServerConfig } from "@farm.js/core/internal/production-runtime";
 import type { FarmLayerEntry, ResolvedFarmLayer } from "@farm.js/core/server";
 import { farmEnvironmentFunctionsPlugin } from "@farm.js/core/environment/vite";
+import type { FarmCacheUserConfig } from "@farm.js/core/cache";
+import {
+  generateClientCachePersistenceCode,
+  resolveFarmClientCacheAdapterEntry,
+} from "@farm.js/core/vite";
 import { generateRscEntry } from "./entries/rsc.js";
 import { generateSsrEntry } from "./entries/ssr.js";
 import { generateErrorFallbackEntry } from "./entries/error-fallback.js";
@@ -649,6 +654,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           serverActions?: FarmServerActionsConfig;
           deploymentId?: string;
           generateBuildId?: () => string | Promise<string>;
+          cache?: FarmCacheUserConfig;
         };
         // Check if user enabled RSC in their config
         rscEnabled = c.experimental?.serverComponents === true;
@@ -750,6 +756,9 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           deploymentId,
           debug,
           development: env.command === "serve",
+          clientCachePersistence: generateClientCachePersistenceCode(
+            resolveFarmClientCacheAdapterEntry(root, c.cache),
+          ),
         };
 
         logInfo(`srcDir: ${entryContext.srcDir}, outDir: ${entryContext.outDir}`);

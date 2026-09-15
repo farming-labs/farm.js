@@ -274,6 +274,11 @@ key-targeted `request.optimistic` updates and `request.invalidate` targets, as d
 
 Numbers are milliseconds. Duration strings support `ms`, `s`, `m`, and `h`. Failed handlers and invalid output are never cached.
 
+When the app configures a [client cache adapter](/docs/api-client#persist-the-client-cache),
+declare `persist: true` on a query to allow its results to be stored on the device and rendered
+stale-but-visible on the next cold start. Nothing persists without the flag; treat it as part of
+the query's security review, since persisted results outlive the session.
+
 ## Middleware and cancellation
 
 Queries accept the same composable middleware as server functions:

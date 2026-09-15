@@ -15,6 +15,15 @@ export type FarmClientCacheEntry<TData = unknown> = {
   status?: FarmClientCacheStatus;
   error?: Error | null;
   fetching?: boolean;
+  /** Marks an entry the persistence layer may write to its adapter. */
+  persist?: boolean;
+};
+
+/** @internal Observation seam for the client cache persistence engine. */
+export type FarmClientCachePersistenceSink = {
+  onSet(key: string, entry: FarmClientCacheEntry): void;
+  onDelete(key: string): void;
+  onClear(): void;
 };
 
 type FarmClientCacheListener = (event?: "invalidate") => void;
@@ -76,6 +85,7 @@ export class FarmClientDataCache {
   private unsubscribeInvalidation: (() => void) | undefined;
   private gcTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly gcSweepIntervalMs: number | false;
+  private persistence: FarmClientCachePersistenceSink | undefined;
 
   constructor(
     options: { subscribeToInvalidation?: boolean; gcSweepIntervalMs?: number | false } = {},
@@ -100,6 +110,11 @@ export class FarmClientDataCache {
     return this.entries.size;
   }
 
+  /** @internal Attach or detach the persistence engine's observation sink. */
+  attachPersistence(sink: FarmClientCachePersistenceSink | undefined): void {
+    this.persistence = sink;
+  }
+
   resolveKey(key: string): string {
     let resolved = key;
     const seen = new Set<string>();
@@ -119,6 +134,7 @@ export class FarmClientDataCache {
 
     if (entry.gcAt !== undefined && now >= entry.gcAt) {
       this.entries.delete(resolved);
+      this.persistence?.onDelete(resolved);
       this.emit(resolved);
       return undefined;
     }
@@ -140,6 +156,7 @@ export class FarmClientDataCache {
 
     this.entries.set(resolved, nextEntry);
     if (nextEntry.gcAt !== undefined) this.scheduleGcSweep();
+    this.persistence?.onSet(resolved, nextEntry);
     this.emit(resolved);
     return this;
   }
@@ -148,6 +165,7 @@ export class FarmClientDataCache {
     const resolved = this.resolveKey(key);
     const deleted = this.entries.delete(resolved);
     this.inflight.delete(resolved);
+    if (deleted) this.persistence?.onDelete(resolved);
     this.emit(resolved);
     return deleted;
   }
@@ -158,6 +176,7 @@ export class FarmClientDataCache {
     this.aliases.clear();
     this.invalidatedAt.clear();
     this.inflight.clear();
+    this.persistence?.onClear();
     for (const key of keys) this.emit(key);
   }
 
@@ -202,9 +221,10 @@ export class FarmClientDataCache {
     const resolvedInvalidatedAt = this.invalidatedAt.get(resolved);
     if (aliasEntry && !this.entries.has(resolved)) {
       this.entries.set(resolved, aliasEntry);
+      this.persistence?.onSet(resolved, aliasEntry);
     }
 
-    this.entries.delete(alias);
+    if (this.entries.delete(alias)) this.persistence?.onDelete(alias);
     this.invalidatedAt.delete(alias);
     const invalidatedAt = [aliasInvalidatedAt, resolvedInvalidatedAt].reduce<number | undefined>(
       (latest, value) =>
@@ -297,6 +317,7 @@ export class FarmClientDataCache {
       // Only unwatched entries are swept, so eviction is unobservable: a read
       // of this key would already evict it lazily before returning data.
       this.entries.delete(key);
+      this.persistence?.onDelete(key);
     }
 
     if (remaining) this.scheduleGcSweep();
