@@ -2145,10 +2145,14 @@ function generateClientHydrationEntry(
     : `import React, { createRoot, hydrateRoot } from ${JSON.stringify(renderer.client)};`;
   const providerClientCode = generateFarmIntegrationProviderClientCode(integrationProviders, root);
 
-  // Always import global CSS for Tailwind
+  // Import global CSS (the Tailwind entry) only when the app ships one; an
+  // unconditional import of a missing file fails the client build with
+  // UNRESOLVED_IMPORT. Output validation already treats a missing globals.css
+  // as an intentionally style-free application.
   const globalsCssPath = path.join(root, srcDir, "app", "globals.css");
-  const cssImportPath = toImportPath(globalsCssPath);
-  const cssImport = `import ${JSON.stringify(cssImportPath)};`;
+  const cssImport = existsSync(globalsCssPath)
+    ? `import ${JSON.stringify(toImportPath(globalsCssPath))};`
+    : "";
 
   // Import layouts for wrapping client components
   const layoutImportStatements: string[] = [];
