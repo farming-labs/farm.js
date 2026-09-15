@@ -1339,18 +1339,33 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
             {
               matcher: protectedMatchers,
               async handler(_request: Request, context: FarmIntegrationHandlerContext) {
-                const { supabase } = createSupabaseHandler(context, env, input.instance);
-                const {
-                  data: { session },
-                } = await supabase.auth.getSession();
+                const { supabase, setCookies } = createSupabaseHandler(
+                  context,
+                  env,
+                  input.instance,
+                );
+                // getSession() reads the cookie without verifying the token,
+                // so a forged cookie would pass this gate. getUser() checks
+                // the token against Supabase Auth before the route is served.
+                const { data, error } = await supabase.auth.getUser();
 
-                if (session) {
+                if (!error && data?.user) {
                   return;
                 }
 
-                return redirectToPage(signInViewPath, context, env.appBaseUrl, {
+                const redirect = redirectToPage(signInViewPath, context, env.appBaseUrl, {
                   returnTo: `${context.url.pathname}${context.url.search}`,
                 });
+                if (setCookies.length === 0) {
+                  return redirect;
+                }
+
+                // A failed validation can clear or rotate auth cookies; keep
+                // those directives on the redirect so the browser drops the
+                // stale session instead of replaying it on the next request.
+                const headers = new Headers(redirect.headers);
+                appendSetCookies(headers, setCookies);
+                return new Response(null, { status: redirect.status, headers });
               },
             },
           ]
