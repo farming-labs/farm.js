@@ -349,6 +349,19 @@ describe("Farm ICU catalogs", () => {
     expect(bundle.catalogs.en["valueOf"]).toBe("Value");
   });
 
+  it("does not resolve prototype-named keys to inherited Object members at runtime", () => {
+    const config = resolveFarmI18nConfig({ locales: ["en"], defaultLocale: "en", strict: false });
+    const runtime = new FarmI18nRuntime(config, { en: { greeting: "Hello" } });
+
+    // Keys named after Object.prototype members that are absent from the catalog
+    // must read as missing, not as the inherited prototype value.
+    expect(runtime.hasMessage("en", "toString")).toBe(false);
+    expect(runtime.hasMessage("en", "valueOf")).toBe(false);
+    // Non-strict lookup falls back to the key string instead of throwing an
+    // opaque IntlMessageFormat error from an inherited function value.
+    expect(runtime.translate("en", "toString")).toBe("toString");
+  });
+
   it("still reports prototype-named keys missing from a locale in strict mode", async () => {
     const root = await createCatalogFixture({
       en: { toString: "As text" },
