@@ -161,12 +161,12 @@ export interface GenerateServiceWorkerOptions {
 export function generateServiceWorker(options: GenerateServiceWorkerOptions): string {
   const routeFiles = Object.fromEntries(
     Object.entries(options.staticRoutes).map(([route, file]) => [
-      encodePathname(route),
+      encodeRoutePathname(route),
       toPublicUrl(file, options.basePath, options.htmlBasePath ?? "/"),
     ]),
   );
   const offlineFile = options.offlineRoute
-    ? (routeFiles[encodePathname(options.offlineRoute)] ?? null)
+    ? (routeFiles[encodeRoutePathname(options.offlineRoute)] ?? null)
     : null;
   const cacheScope = createHash("sha256")
     .update(normalizeBasePath(options.basePath))
@@ -477,6 +477,16 @@ function toPublicUrl(file: string, basePath: string, fileBasePath = basePath): s
   // SSG output prefix instead: a folder named like basePath can be a real route.
   const route = stripBasePath(`/${file.replace(/\\/g, "/")}`, fileBasePath);
   return withBasePath(encodePathname(route), basePath);
+}
+
+// Encode a route path the way browsers encode `location.pathname` so the
+// STATIC_ROUTES keys match the pathname a live navigation produces at runtime.
+// encodeURIComponent (used by toPublicUrl for asset URLs) is wrong for the keys:
+// it percent-encodes ordinary path characters such as @ , = + ; $ that browsers
+// leave untouched, so a route like /@alice would be keyed as /%40alice and never
+// match a navigation to /@alice, silently falling through to the offline page.
+function encodeRoutePathname(pathname: string): string {
+  return new URL(pathname, "http://farm.localhost").pathname;
 }
 
 function encodePathname(pathname: string): string {
