@@ -23,6 +23,7 @@
   },
   "devDependencies": {
     "@farm.js/cli": "0.1.0-beta.96",
+    "@farm.js/devtools": "0.1.0-beta.0",
     "@playwright/test": "^1.52.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

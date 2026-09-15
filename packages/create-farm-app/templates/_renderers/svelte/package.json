@@ -20,6 +20,7 @@
   },
   "devDependencies": {
     "@farm.js/cli": "0.1.0-beta.96",
+    "@farm.js/devtools": "0.1.0-beta.0",
     "svelte-check": "4.7.5",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.3.3"
