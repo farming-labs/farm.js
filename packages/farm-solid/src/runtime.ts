@@ -160,6 +160,20 @@ function normalizeProps(element: FarmSolidElement): Record<string, unknown> {
         return materialized.length === 1 ? materialized[0] : materialized;
       },
     });
+  } else if ("children" in props) {
+    // Children can also arrive as a prop rather than positionally: core wraps
+    // every layout as `createElement(Layout, { children: element, ... })`, and
+    // route slots pass their element through a prop too. The spread copied the
+    // raw Farm element(s), which Solid would escape to the string "undefined",
+    // so materialize them the same way as positional children.
+    const rawChildren = props.children;
+    Object.defineProperty(props, "children", {
+      configurable: true,
+      enumerable: true,
+      get() {
+        return materializeSolidElement(rawChildren);
+      },
+    });
   }
 
   return props;
