@@ -2,11 +2,32 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  buildFarmVercelRoutes,
   createFarmVercelImmutableAssetRoute,
   FARM_IMMUTABLE_ASSET_CACHE_CONTROL,
   type FarmVercelImmutableAssetRoute,
+  type FarmVercelRoute,
   isFarmVercelImmutableAssetPath,
 } from "../nitro/vercel-assets";
+
+// The shape Nitro's Vercel builder writes to config.json (generateBuildConfig):
+// redirect + header routes from routeRules, then a blanket immutable
+// public-asset route, then the filesystem handler, then ISR routes, then the
+// preset's own catch-all to /__fallback.
+function nitroPresetRoutes(): FarmVercelRoute[] {
+  return [
+    { src: "/legacy/(.*)", status: 301, headers: { Location: "/new/$1" } },
+    { src: "/secure/(.*)", headers: { "X-Frame-Options": "DENY" } },
+    {
+      src: "/(.*)",
+      headers: { "cache-control": "public,max-age=31536000,immutable" },
+      continue: true,
+    },
+    { handle: "filesystem" },
+    { src: "(?<url>/blog/.*)", dest: "/blog-isr?url=$url" },
+    { src: "/(.*)", dest: "/__fallback" },
+  ];
+}
 
 describe("Vercel immutable Farm assets", () => {
   it("matches content-hashed JavaScript, CSS, font, and image assets", () => {
@@ -66,5 +87,106 @@ describe("Vercel immutable Farm assets", () => {
     expect(route.caseSensitive).toBe(true);
     expect(matcher.test("/assets/module-hab12cd90.wasm")).toBe(true);
     expect(matcher.test("/assets/shell-a1b2c3d4.html")).toBe(false);
+  });
+});
+
+describe("buildFarmVercelRoutes", () => {
+  it("preserves the preset redirect and header routes", () => {
+    const routes = buildFarmVercelRoutes({
+      presetRoutes: nitroPresetRoutes(),
+      runtimeRoutes: [],
+      apiBasePath: "/",
+    });
+
+    expect(routes).toContainEqual({
+      src: "/legacy/(.*)",
+      status: 301,
+      headers: { Location: "/new/$1" },
+    });
+    expect(routes).toContainEqual({
+      src: "/secure/(.*)",
+      headers: { "X-Frame-Options": "DENY" },
+    });
+    // The redirect/header routes must precede the filesystem handler, matching
+    // Vercel's source-route phase ordering.
+    const filesystemIndex = routes.findIndex((route) => route.handle === "filesystem");
+    const headerIndex = routes.findIndex((route) => route.src === "/secure/(.*)");
+    expect(headerIndex).toBeGreaterThanOrEqual(0);
+    expect(headerIndex).toBeLessThan(filesystemIndex);
+  });
+
+  it("replaces the preset blanket immutable asset route with Farm's precise one", () => {
+    const routes = buildFarmVercelRoutes({
+      presetRoutes: nitroPresetRoutes(),
+      runtimeRoutes: [],
+      apiBasePath: "/",
+    });
+
+    // The preset's over-broad `continue` public-asset route is dropped...
+    expect(
+      routes.some(
+        (route) => route.continue === true && route.headers?.["cache-control"] !== undefined,
+      ),
+    ).toBe(false);
+    // ...in favor of Farm's fingerprint-scoped immutable route.
+    expect(routes).toContainEqual(createFarmVercelImmutableAssetRoute());
+  });
+
+  it("routes runtime, API, and catch-all traffic to the __nitro function", () => {
+    const runtimeRoutes: FarmVercelRoute[] = [
+      { src: "/reports/(.*)", dest: "/__nitro", headers: { "x-farm-route": "reports" } },
+    ];
+    const routes = buildFarmVercelRoutes({
+      presetRoutes: nitroPresetRoutes(),
+      runtimeRoutes,
+      apiBasePath: "/api",
+    });
+
+    // Runtime routes come after the filesystem handler and before the catch-all.
+    const filesystemIndex = routes.findIndex((route) => route.handle === "filesystem");
+    const runtimeIndex = routes.findIndex((route) => route.src === "/reports/(.*)");
+    expect(runtimeIndex).toBeGreaterThan(filesystemIndex);
+
+    // The API CORS route is emitted for a non-root API base path.
+    expect(routes).toContainEqual({
+      src: "/api/(.*)",
+      dest: "/__nitro",
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "*",
+        "Access-Control-Allow-Headers": "*",
+      },
+    });
+
+    // The last route is Farm's catch-all to its own function, never the preset's
+    // /__fallback target.
+    expect(routes[routes.length - 1]).toEqual({ src: "/(.*)", dest: "/__nitro" });
+    expect(routes.some((route) => route.dest === "/__fallback")).toBe(false);
+  });
+
+  it("omits the API CORS route when the API is served from the root", () => {
+    const routes = buildFarmVercelRoutes({
+      presetRoutes: nitroPresetRoutes(),
+      runtimeRoutes: [],
+      apiBasePath: "/",
+    });
+
+    expect(routes.some((route) => route.headers?.["Access-Control-Allow-Origin"] === "*")).toBe(
+      false,
+    );
+  });
+
+  it("still produces a valid route set when the preset has no filesystem handler", () => {
+    const routes = buildFarmVercelRoutes({
+      presetRoutes: [{ src: "/only/(.*)", status: 302, headers: { Location: "/elsewhere" } }],
+      runtimeRoutes: [],
+      apiBasePath: "/",
+    });
+
+    // With no filesystem marker, no source routes are preserved (they cannot be
+    // safely placed), but Farm's own routes are still emitted.
+    expect(routes).toContainEqual(createFarmVercelImmutableAssetRoute());
+    expect(routes).toContainEqual({ handle: "filesystem" });
+    expect(routes[routes.length - 1]).toEqual({ src: "/(.*)", dest: "/__nitro" });
   });
 });
