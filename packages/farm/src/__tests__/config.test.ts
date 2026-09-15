@@ -996,6 +996,23 @@ describe("resolveDeployConfig", () => {
     expect(deploy.outputDir).toBe(".farm/.output");
   });
 
+  it("lets a CLI target override displace a configured cross-platform preset", () => {
+    // Symmetric to the preset-override case: with deploy.preset vercel in
+    // config, `farm build --target netlify` must not ship Vercel-shaped output
+    // labeled as a Netlify deploy.
+    const deploy = resolveDeployConfig({ deploy: { preset: "vercel" } }, { target: "netlify" });
+
+    expect(deploy.target).toBe("netlify");
+    expect(deploy.preset).toBe("netlify");
+  });
+
+  it("keeps a same-platform configured preset under a CLI target override", () => {
+    const deploy = resolveDeployConfig({ deploy: { preset: "vercel-edge" } }, { target: "vercel" });
+
+    expect(deploy.target).toBe("vercel");
+    expect(deploy.preset).toBe("vercel-edge");
+  });
+
   it("respects an explicitly configured output directory under a preset override", () => {
     const deploy = resolveDeployConfig(
       { deploy: { target: "vercel", outputDir: "custom-out" } },
