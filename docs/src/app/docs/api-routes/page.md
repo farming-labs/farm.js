@@ -113,6 +113,15 @@ export const GET = createEndpoint(
 ```
 
 Farm parses and validates `body`, `query`, and `headers` before middleware or handler code runs. Header schema keys use the lower-case names exposed by the Fetch `Headers` API. Invalid input returns a `400` response with structured validation issues.
+
+Generated callers use the schema's **input** type for body and query values; middleware and
+handlers receive its parsed **output** type. For example, a field declared as
+`z.string().transform(Number)` is sent as a string and received by the handler as a number.
+Defaulted fields may be omitted by the caller. The same distinction applies to multipart
+`toFormData(...)` inputs, Standard Schema input/output types, and both `api` and `apiClient`
+from `createApiClients()`. Validation still runs on the server; this does not send schemas or
+transforms to the browser. Existing endpoints without transforms retain their input types.
+
 Malformed `application/json` and `application/*+json` bodies also return `400` before endpoint
 middleware or handler code executes, including when the endpoint does not declare a body schema.
 If an upload is aborted while Farm is buffering its body, Farm rejects it before invoking the

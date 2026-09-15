@@ -332,7 +332,7 @@ type InferEndpointInput<T> = T extends {
 }
   ? Simplify<
       BodyInputProp<InferEndpointBody<T>> &
-        QueryInputProp<TQuery> &
+        QueryInputProp<T extends { __types: { inputQuery: infer I } } ? I : TQuery> &
         (T extends { __routeParams: infer P }
           ? keyof P extends never
             ? { params?: never }
