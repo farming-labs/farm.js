@@ -297,6 +297,20 @@ describe("server cache primitives", () => {
     await expect(fromB()).resolves.toEqual({ from: "B" });
   });
 
+  it("separates closures that capture different variables via keyParts", async () => {
+    // Identity is derived from source so it stays stable across processes, which
+    // means closures with identical source but different captured variables share
+    // an identity. Callers disambiguate by listing the captured value in keyParts
+    // (the documented contract); this keeps their entries separate.
+    const makeLoader = (table: string) =>
+      unstable_cache(async (id: number) => ({ table, id }), [table]);
+    const users = makeLoader("users");
+    const posts = makeLoader("posts");
+
+    await expect(users(1)).resolves.toEqual({ table: "users", id: 1 });
+    await expect(posts(1)).resolves.toEqual({ table: "posts", id: 1 });
+  });
+
   it("treats revalidate: 0 as always stale", async () => {
     let calls = 0;
     const getPrices = unstable_cache(

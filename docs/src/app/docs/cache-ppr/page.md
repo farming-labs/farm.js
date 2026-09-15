@@ -62,6 +62,41 @@ const products = await cache.getOrSet(key, () => fetchProducts(), {
 `clear()` invalidates entries and any fills already in progress. Existing callers still receive
 their result, but an older fill cannot repopulate the cache after it has been cleared.
 
+## Memoize a function
+
+`unstable_cache()` wraps an async function so its results are cached and shared across requests,
+processes, and restarts.
+
+```ts
+import { unstable_cache } from "@farm.js/core/cache";
+
+const getProduct = unstable_cache(async (id: string) => fetchProduct(id), ["product"], {
+  tags: ["products"],
+  revalidate: 300,
+});
+```
+
+The cache key is built from the function's identity (its name and a hash of its source), the active
+locale, the `keyParts` array, and the call arguments. Identity comes from the source rather than the
+closure instance so the key stays stable across processes and restarts — which lets a shared adapter
+reuse entries between server instances.
+
+Because of that, **list every variable the function closes over that is not one of its arguments in
+`keyParts`.** Two closures with identical source text but different captured values otherwise share a
+cache entry and return each other's data:
+
+```ts
+// Collides: `table` is captured, not an argument, so it never reaches the key.
+const makeLoader = (table: string) => unstable_cache(async (id: string) => db.get(table, id));
+
+// Correct: the captured value disambiguates the two closures.
+const makeLoader = (table: string) =>
+  unstable_cache(async (id: string) => db.get(table, id), [table]);
+```
+
+Values passed as call arguments already participate in the key, so they do not need to be repeated
+in `keyParts`.
+
 ## Revalidate
 
 **server action or route handler**
