@@ -1683,48 +1683,6 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             }
           }
 
-          const markdownSourceResponse = await createFarmMarkdownSourceResponse({
-            request: new Request(fullUrl, {
-              method: requestMethod,
-              headers: docsHeaders,
-            }),
-            config: farmApp.getConfig().mdx,
-            resolveSource: async (pathname) => {
-              const match = farmApp.getRouteManager().matchRoute(pathname);
-              const sourcePath =
-                match.route?.markdownSourcePath ||
-                (match.route && isFarmMarkdownPageFile(match.route.modulePath)
-                  ? match.route.modulePath
-                  : null);
-              if (!sourcePath) {
-                return null;
-              }
-              return {
-                source: await fs.promises.readFile(sourcePath, "utf8"),
-                filePath: sourcePath,
-              };
-            },
-          });
-          if (markdownSourceResponse) {
-            await sendWebResponse(res, markdownSourceResponse);
-            return;
-          }
-
-          const markdownResponse = await createMarkdownMirrorResponse({
-            request: new Request(fullUrl, {
-              method: requestMethod,
-              headers: docsHeaders,
-            }),
-            config: farmApp.getConfig().md,
-            routeExists: (pathname) =>
-              Boolean(farmApp.getRouteManager().matchRoute(pathname).route),
-            renderPage: async (request) => fetch(request),
-          });
-          if (markdownResponse) {
-            await sendWebResponse(res, markdownResponse);
-            return;
-          }
-
           const markdownPageTarget = resolveMarkdownMirrorTarget(
             farmApp.getConfig().md,
             requestPathname,
@@ -2622,6 +2580,52 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 }
                 return; // Middleware handled the response
               }
+            }
+
+            // Markdown source and mirror representations are alternate views of a
+            // page route, so they run after middleware. Serving them earlier let a
+            // request for the .md variant of a guarded page return the raw source
+            // and bypass the middleware that protects the page itself.
+            const markdownSourceResponse = await createFarmMarkdownSourceResponse({
+              request: new Request(fullUrl, {
+                method: requestMethod,
+                headers: docsHeaders,
+              }),
+              config: farmApp.getConfig().mdx,
+              resolveSource: async (pathname) => {
+                const match = farmApp.getRouteManager().matchRoute(pathname);
+                const sourcePath =
+                  match.route?.markdownSourcePath ||
+                  (match.route && isFarmMarkdownPageFile(match.route.modulePath)
+                    ? match.route.modulePath
+                    : null);
+                if (!sourcePath) {
+                  return null;
+                }
+                return {
+                  source: await fs.promises.readFile(sourcePath, "utf8"),
+                  filePath: sourcePath,
+                };
+              },
+            });
+            if (markdownSourceResponse) {
+              await sendWebResponse(res, markdownSourceResponse);
+              return;
+            }
+
+            const markdownResponse = await createMarkdownMirrorResponse({
+              request: new Request(fullUrl, {
+                method: requestMethod,
+                headers: docsHeaders,
+              }),
+              config: farmApp.getConfig().md,
+              routeExists: (pathname) =>
+                Boolean(farmApp.getRouteManager().matchRoute(pathname).route),
+              renderPage: async (request) => fetch(request),
+            });
+            if (markdownResponse) {
+              await sendWebResponse(res, markdownResponse);
+              return;
             }
 
             // Run beforeRequest hooks

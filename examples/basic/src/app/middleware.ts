@@ -12,6 +12,11 @@ export default middleware()
   })
   .redirect('/old-about', '/about')
   .redirect('/old-contact', '/contact', true)
+  // Guards both the rendered page and its raw markdown source. If the .md source
+  // were served before middleware, this redirect would be bypassed and the raw
+  // source leaked.
+  .redirect('/protected-md', '/protected-md-login')
+  .redirect('/protected-md.md', '/protected-md-login')
   .when((ctx) => ctx.pathname.startsWith('/api'), async (ctx, next) => {
     ctx.headers.set('X-API-Version', '1.0.0');
     await next();

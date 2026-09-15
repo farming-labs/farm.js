@@ -6351,43 +6351,6 @@ async function handleFarmRequestInContext(
   }
 
   ${
-    hasMarkdownPages
-      ? `
-  const markdownSourceResponse = await createFarmMarkdownSourceResponse?.({
-    request: request.clone(),
-    config: farmMdxConfig,
-    resolveSource: (targetPathname) => {
-      const match = matchPageRoute(getFarmRoutePathname(targetPathname));
-      return match?.route?.markdownSource || null;
-    },
-  });
-  if (markdownSourceResponse) {
-    return markdownSourceResponse;
-  }
-  `
-      : ""
-  }
-
-  ${
-    config.md?.enabled
-      ? `
-  if (farmMarkdownConfig?.enabled) {
-    const markdownResponse = await createMarkdownMirrorResponse({
-      request: request.clone(),
-      config: farmMarkdownConfig,
-      routeExists: (targetPathname) =>
-        Boolean(matchPageRoute(getFarmRoutePathname(targetPathname))),
-      renderPage: (targetRequest) => handleFarmRequest(targetRequest),
-    });
-    if (markdownResponse) {
-      return markdownResponse;
-    }
-  }
-  `
-      : ""
-  }
-
-  ${
     hasMiddlewareRuntime
       ? `
   const requestBeforeMiddleware = request;
@@ -6413,6 +6376,43 @@ async function handleFarmRequestInContext(
   const middlewareContext = undefined;
   const middlewareHeaders = undefined;
   `
+  }
+
+  ${
+    hasMarkdownPages
+      ? `
+  const markdownSourceResponse = await createFarmMarkdownSourceResponse?.({
+    request: request.clone(),
+    config: farmMdxConfig,
+    resolveSource: (targetPathname) => {
+      const match = matchPageRoute(getFarmRoutePathname(targetPathname));
+      return match?.route?.markdownSource || null;
+    },
+  });
+  if (markdownSourceResponse) {
+    return applyProductionMiddlewareHeaders(markdownSourceResponse, middlewareHeaders);
+  }
+  `
+      : ""
+  }
+
+  ${
+    config.md?.enabled
+      ? `
+  if (farmMarkdownConfig?.enabled) {
+    const markdownResponse = await createMarkdownMirrorResponse({
+      request: request.clone(),
+      config: farmMarkdownConfig,
+      routeExists: (targetPathname) =>
+        Boolean(matchPageRoute(getFarmRoutePathname(targetPathname))),
+      renderPage: (targetRequest) => handleFarmRequest(targetRequest),
+    });
+    if (markdownResponse) {
+      return applyProductionMiddlewareHeaders(markdownResponse, middlewareHeaders);
+    }
+  }
+  `
+      : ""
   }
 
   ${
