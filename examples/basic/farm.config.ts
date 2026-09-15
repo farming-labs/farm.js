@@ -150,6 +150,8 @@ export default defineConfig({
     // Route-level loading.tsx/error.tsx in this example rely on streamed server rendering.
     serverComponents: true,
     serverActions: true,
+    // Required for the /ppr-demo static-shell route; per-route ppr exports are inert without it.
+    ppr: true,
   },
 
   integrations: integrationLab,

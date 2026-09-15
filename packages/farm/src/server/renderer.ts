@@ -1227,6 +1227,7 @@ export class ServerRenderer {
       const renderingConfig = await resolveRouteRenderingConfigFromFile(
         routeModule,
         route.modulePath,
+        { experimentalPPR: this.config.experimental?.ppr === true },
       );
       const pprBypassReason = renderingConfig.ppr
         ? this.getPPRShellBypassReason(req, middlewareMap, middlewareContext, pluginExposedContext)

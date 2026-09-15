@@ -78,6 +78,22 @@ the cache path and are removed during normalization.
 
 ## PPR shell
 
+Partial Prerendering is experimental and disabled by default. Enable it once in
+`farm.config.ts`, then opt routes in individually. Without the flag, route-level PPR
+declarations are ignored and those routes render fully dynamically.
+
+**farm.config.ts**
+
+```ts
+import { defineConfig } from "@farm.js/core";
+
+export default defineConfig({
+  experimental: {
+    ppr: true,
+  },
+});
+```
+
 **src/app/dashboard/page.tsx**
 
 ```tsx
@@ -88,6 +104,10 @@ export default function DashboardPage() {
   return <main>Static shell with dynamic sections</main>;
 }
 ```
+
+Farm's own `export const ppr = true` and a top-of-file `"use ppr"` (or `"use ppr; 60"`)
+directive are equivalent opt-ins; `experimental_ppr` matches the Next.js export name.
+`farm explain <path>` reports whether a route's PPR declaration is active or ignored.
 
 ## Cache keys and tags
 
@@ -192,7 +212,7 @@ export async function POST(request: Request) {
 
 ## PPR with Suspense holes
 
-PPR works best when the stable page shell is outside Suspense and request-specific or slow data lives inside Suspense.
+PPR works best when the stable page shell is outside Suspense and request-specific or slow data lives inside Suspense. As above, the route export only takes effect with `experimental.ppr` enabled in `farm.config.ts`.
 
 When a production render actually suspends, Farm currently buffers that response for late status
 errors and bypasses the shared PPR shell cache. This preserves fresh request-specific content

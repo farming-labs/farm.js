@@ -999,6 +999,7 @@ export async function resolveConfig(
       serverComponents: false,
       serverActions: false,
       isolatedClientHydration: "off",
+      ppr: false,
       ...userConfig.experimental,
     },
     plugins: [...resolveIntegrationPlugins(integrations), ...(userConfig.plugins || [])],
