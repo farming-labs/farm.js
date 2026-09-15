@@ -64,9 +64,9 @@ export type UseFetcherOptions<TTarget extends AnyMutationTarget> = Omit<
   /**
    * Convert browser FormData into the target's typed variables.
    *
-   * Generated API routes default to `{ body: Object.fromEntries(formData) }`
-   * (or `{ query: ... }` for GET/HEAD). Server functions receive FormData
-   * directly so their input schema remains authoritative.
+   * Generated API routes preserve multipart forms and file values as a FormData
+   * body; text-only submissions default to a JSON object (or query for GET/HEAD).
+   * Server functions receive FormData directly. This mapper overrides defaults.
    */
   mapFormData?: (
     formData: FormData,
@@ -260,11 +260,25 @@ function mapFetcherFormData<TTarget extends AnyMutationTarget>(
     return formData;
   }
 
-  const values = formDataToObject(formData);
   const method = getAPIRouteRefMetadata(target)?.method;
-  return (
-    method === "GET" || method === "HEAD" ? { query: values } : { body: values }
-  ) as InferMutationVariables<TTarget>;
+  const query = method === "GET" || method === "HEAD";
+  const encoding = context.submitter?.getAttribute("formenctype") ?? context.form?.enctype;
+  if (
+    !query &&
+    (encoding?.toLowerCase() === "multipart/form-data" ||
+      Array.from(formData.values()).some((value) => typeof value !== "string"))
+  ) {
+    // Keep files and duplicate fields intact without changing the caller's input
+    // or bypassing the unsafe-key filtering used by the JSON mapping path.
+    const body = new FormData();
+    for (const [key, value] of formData) {
+      if (!isUnsafeFormKey(key)) body.append(key, value);
+    }
+    return { body } as InferMutationVariables<TTarget>;
+  }
+
+  const values = formDataToObject(formData);
+  return (query ? { query: values } : { body: values }) as InferMutationVariables<TTarget>;
 }
 
 function resolveFetcherFormAction(
@@ -282,7 +296,7 @@ function formDataToObject(
 ): Record<string, FormDataEntryValue | FormDataEntryValue[]> {
   const output: Record<string, FormDataEntryValue | FormDataEntryValue[]> = Object.create(null);
   for (const [key, value] of formData.entries()) {
-    if (key === "__proto__" || key === "constructor" || key === "prototype") continue;
+    if (isUnsafeFormKey(key)) continue;
     const current = output[key];
     if (current === undefined) {
       output[key] = value;
@@ -293,6 +307,10 @@ function formDataToObject(
     }
   }
   return output;
+}
+
+function isUnsafeFormKey(key: string): boolean {
+  return key === "__proto__" || key === "constructor" || key === "prototype";
 }
 
 function createSubmitterFormData(form: HTMLFormElement, submitter: HTMLElement | null): FormData {
