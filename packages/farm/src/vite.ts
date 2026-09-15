@@ -74,6 +74,11 @@ import type { APIRequestRuntime } from "./api/server-client-bridge";
 import { shouldBypassFarmRouterForDottedPath } from "./dev-static";
 import { findClientServerFnViolation, formatServerFnBoundaryError } from "./server-query-boundary";
 import {
+  analyzeClientBoundary,
+  formatClientBoundaryWarning,
+  shouldInspectClientBoundary,
+} from "./client-boundary-env";
+import {
   createFarmDeploymentMismatchResponse,
   FARM_DEPLOYMENT_ID_HEADER,
   getFarmDeploymentMismatch,
@@ -909,6 +914,37 @@ function isFarmConfigFile(file: string, root: string): boolean {
     : normalized;
 
   return FARM_CONFIG_FILENAMES.has(relative);
+}
+
+const warnedClientBoundaryIds = new Set<string>();
+
+/**
+ * Warn once per module about server-only access in client-compiled code:
+ * module-scope non-public process.env reads (undefined in the browser, #560)
+ * and node: builtin imports (silently stubbed by farm:browser-external-stub).
+ * Diagnostics only; behavior is unchanged (#1065).
+ */
+function warnClientBoundaryOnce(
+  context: { parse(code: string): unknown },
+  id: string,
+  code: string,
+  config: FarmVitePluginOptions,
+): void {
+  if (warnedClientBoundaryIds.has(id)) return;
+
+  let program: unknown;
+  try {
+    program = context.parse(code);
+  } catch {
+    // Unparseable at this stage; another transform will surface the error.
+    return;
+  }
+  const publicKeys = new Set(Object.keys((config as any).env?.public ?? {}));
+  const { envKeys, builtinImports } = analyzeClientBoundary(program as any, publicKeys);
+
+  if (envKeys.length === 0 && builtinImports.length === 0) return;
+  warnedClientBoundaryIds.add(id);
+  logger.warn(formatClientBoundaryWarning(id, envKeys, builtinImports));
 }
 
 export function farmPlugin(
@@ -2899,6 +2935,10 @@ export const manifest = getManifest();
             this.error(formatServerFnBoundaryError(violation, id));
           }
         }
+      }
+
+      if (!transformOptions?.ssr && shouldInspectClientBoundary(id, code)) {
+        warnClientBoundaryOnce(this, id, code, farmApp?.getConfig() ?? options);
       }
 
       if (typeof imageImports.transform === "function") {
