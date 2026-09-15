@@ -1,7 +1,15 @@
 "use client";
 
 import { useCallback, useMemo, useRef, useState } from "react";
-import { isAPIRouteRef, type APIResult, type ClientOptions } from "./api/client";
+import {
+  applyServerFnOptimisticUpdates,
+  isAPIRouteRef,
+  resolveServerFnInvalidateTargets,
+  settleServerFnOptimisticUpdates,
+  type APIResult,
+  type ClientOptions,
+} from "./api/client";
+import { notifyFarmCacheInvalidation } from "./cache-invalidation";
 import { notifyClientObserver } from "./client-observers";
 import { invokeMutationWithRetry } from "./mutation-retry";
 
@@ -38,8 +46,9 @@ export type UseMutationOptions<TVariables, TData, TError = Error> = {
   rollbackOnError?: boolean;
   /**
    * Options forwarded to generated `api.route.method` clients.
-   * Server-function targets honor `request.retry`; the remaining request
-   * options apply to API routes only.
+   * Server-function targets honor `request.retry`, key-targeted
+   * `request.optimistic` updates, and key-targeted `request.invalidate`;
+   * the remaining request options apply to API routes only.
    */
   request?: ClientOptions<TData, TError>;
   onSuccess?: (data: TData, variables: TVariables | undefined) => void;
@@ -192,10 +201,19 @@ export function useMutationLifecycle<
         };
       });
 
+      const mutationTarget = targetRef.current;
+      const isAPITarget = isAPIRouteRef(mutationTarget);
+      // API routes run their own cache-layered optimistic engine; server
+      // functions apply key-targeted updates to the shared cache here.
+      const sharedOptimistic =
+        !preparationFailed && !isAPITarget ? currentOptions.request?.optimistic : undefined;
+      const sharedSnapshots = sharedOptimistic?.update?.length
+        ? applyServerFnOptimisticUpdates(sharedOptimistic.update)
+        : [];
+
       try {
         if (preparationFailed) throw preparationError;
-        const mutationTarget = targetRef.current;
-        const rawResult = isAPIRouteRef(mutationTarget)
+        const rawResult = isAPITarget
           ? await mutationTarget(variables, currentOptions.request)
           : await invokeMutationWithRetry(
               () => targetRef.current(variables),
@@ -203,7 +221,17 @@ export function useMutationLifecycle<
               // A reset disowns this submission; stop scheduling retries then.
               () => requestId >= lastResetIdRef.current,
             );
-        const data = unwrapMutationResult<TData, TError>(rawResult, isAPIRouteRef(mutationTarget));
+        const data = unwrapMutationResult<TData, TError>(rawResult, isAPITarget);
+
+        settleServerFnOptimisticUpdates(sharedSnapshots, "commit");
+        if (!isAPITarget && currentOptions.request?.invalidate) {
+          // Server-function invalidations travel the shared bus, matching
+          // server-declared `invalidates`, so every subscribed cache observes them.
+          for (const key of resolveServerFnInvalidateTargets(currentOptions.request.invalidate)) {
+            notifyFarmCacheInvalidation(key);
+          }
+        }
+
         const isLatestRequest = requestId === requestIdRef.current;
 
         setMutationState((current) => {
@@ -238,6 +266,10 @@ export function useMutationLifecycle<
 
         return data;
       } catch (cause) {
+        settleServerFnOptimisticUpdates(
+          sharedSnapshots,
+          sharedOptimistic?.rollbackOnError ? "rollback" : "invalidate",
+        );
         const error = normalizeMutationError(cause) as TError;
         const isLatestRequest = requestId === requestIdRef.current;
 
