@@ -1,5 +1,10 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { defineIntegration, integrationRoute, type FarmIntegrationLogger } from "@farm.js/core";
+import {
+  defineIntegration,
+  integrationRoute,
+  resolveIntegrationSessionSecret,
+  type FarmIntegrationLogger,
+} from "@farm.js/core";
 import {
   clearRequestCookie,
   createPathInferredClientApi,
@@ -14,8 +19,6 @@ import {
 } from "@farm.js/integration-utils";
 import type { Auth0ProfileResult, Auth0RedirectQuery, Auth0RedirectResult } from "./client.js";
 import { auth0Client } from "./client.js";
-
-const DEV_SECRET = "farmjs-auth0-development-secret-2026";
 
 export interface Auth0Instance {
   middleware(request: Request): Promise<Response | void> | Response | void;
@@ -99,19 +102,18 @@ function resolveEnv(input: Auth0IntegrationInput): ResolvedAuth0Env {
   const domain = normalizeDomain(input.domain ?? process.env.AUTH0_DOMAIN ?? "");
   const clientId = input.clientId ?? process.env.AUTH0_CLIENT_ID ?? "";
   const clientSecret = input.clientSecret ?? process.env.AUTH0_CLIENT_SECRET ?? "";
-  const secret =
-    input.secret ??
-    process.env.AUTH0_SECRET ??
-    (process.env.NODE_ENV === "production" ? "" : DEV_SECRET);
   const appBaseUrl = input.appBaseUrl ?? process.env.APP_BASE_URL ?? undefined;
 
   if (!domain || !clientId) {
     throw new Error("Auth0 integration requires AUTH0_DOMAIN and AUTH0_CLIENT_ID.");
   }
 
-  if (!secret) {
-    throw new Error("Auth0 integration requires AUTH0_SECRET in production.");
-  }
+  const secret = resolveIntegrationSessionSecret({
+    configured: input.secret,
+    env: process.env.AUTH0_SECRET,
+    integration: "farm-auth0",
+    envVar: "AUTH0_SECRET",
+  });
 
   return {
     domain,

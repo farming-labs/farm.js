@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { validateConfigRouteSource } from "./plugins/route-pattern";
 import type { ComponentType, ReactNode } from "react";
 import { api as integrationApi, defineIntegrationAPIOperation } from "./integration-api";
@@ -3331,4 +3332,74 @@ function normalizeMatcher(matcher: string | readonly string[] | undefined): stri
     return "/(.*)";
   }
   return typeof matcher === "string" ? matcher : matcher.join(", ");
+}
+
+export interface ResolveIntegrationSessionSecretOptions {
+  /** Explicit secret from integration input; highest precedence. */
+  configured?: string;
+  /** Secret from environment variables, tried in order. */
+  env?: string | undefined | ReadonlyArray<string | undefined>;
+  /** Integration name used in warnings and errors, e.g. "farm-auth0". */
+  integration: string;
+  /** Environment variable name surfaced to the developer, e.g. "AUTH0_SECRET". */
+  envVar: string;
+  /**
+   * Whether the runtime is production. Defaults to
+   * `process.env.NODE_ENV === "production"`.
+   */
+  isProduction?: boolean;
+  /** Warning sink; defaults to console.warn. Called at most once per integration. */
+  warn?: (message: string) => void;
+}
+
+// A per-process random development fallback, memoized by integration name so a
+// single process signs and verifies with one stable value. Never persisted and
+// never shared across processes, so it cannot be reused to forge sessions.
+const devFallbackSessionSecrets = new Map<string, string>();
+const warnedSessionSecretIntegrations = new Set<string>();
+
+/**
+ * Resolve the secret used to sign an integration's session cookies.
+ *
+ * Precedence: an explicit `configured` value, then the first non-empty `env`
+ * value. When neither is set, production throws — a real secret is required —
+ * and development falls back to a per-process random secret rather than a value
+ * shipped in this repository, so sessions can never be forged with a known
+ * constant. That fallback is stable for the life of the process but unique to
+ * it, so multi-instance or restart-sensitive deployments must set `envVar`.
+ */
+export function resolveIntegrationSessionSecret(
+  options: ResolveIntegrationSessionSecretOptions,
+): string {
+  const envValues = Array.isArray(options.env) ? options.env : [options.env];
+  const fromEnv = envValues.find(
+    (value): value is string => typeof value === "string" && value.length > 0,
+  );
+  const explicit =
+    typeof options.configured === "string" && options.configured.length > 0
+      ? options.configured
+      : fromEnv;
+  if (explicit) {
+    return explicit;
+  }
+
+  const isProduction = options.isProduction ?? process.env.NODE_ENV === "production";
+  if (isProduction) {
+    throw new Error(`${options.integration} integration requires ${options.envVar} in production.`);
+  }
+
+  let secret = devFallbackSessionSecrets.get(options.integration);
+  if (!secret) {
+    secret = randomBytes(32).toString("hex");
+    devFallbackSessionSecrets.set(options.integration, secret);
+  }
+  if (!warnedSessionSecretIntegrations.has(options.integration)) {
+    warnedSessionSecretIntegrations.add(options.integration);
+    (options.warn ?? console.warn)(
+      `[${options.integration}] ${options.envVar} is not set; using a random per-process ` +
+        `development secret. Set ${options.envVar} to keep sessions valid across restarts and ` +
+        `multiple instances.`,
+    );
+  }
+  return secret;
 }

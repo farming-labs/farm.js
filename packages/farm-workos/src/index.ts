@@ -1,5 +1,10 @@
 import { WorkOS } from "@workos-inc/node";
-import { defineIntegration, integrationRoute, type FarmIntegrationLogger } from "@farm.js/core";
+import {
+  defineIntegration,
+  integrationRoute,
+  resolveIntegrationSessionSecret,
+  type FarmIntegrationLogger,
+} from "@farm.js/core";
 import {
   clearRequestCookie,
   createPathInferredClientApi,
@@ -30,8 +35,6 @@ export interface WorkOSIntegrationInput {
 }
 
 export type WorkOSIntegrationInstance = WorkOS;
-
-const DEV_COOKIE_PASSWORD = "farmjs-workos-cookie-password-development-2026";
 
 interface ResolvedWorkOSConfig {
   clientId: string;
@@ -68,11 +71,6 @@ function createWorkOSApi(input: {
 function resolveEnv(input: WorkOSIntegrationInput): ResolvedWorkOSConfig {
   const clientId = input.instance?.clientId ?? input.clientId ?? process.env.WORKOS_CLIENT_ID ?? "";
   const apiKey = input.apiKey ?? process.env.WORKOS_API_KEY ?? "";
-  const cookiePassword =
-    input.cookiePassword ??
-    process.env.WORKOS_COOKIE_PASSWORD ??
-    process.env.FARM_WORKOS_COOKIE_PASSWORD ??
-    (process.env.NODE_ENV === "production" ? "" : DEV_COOKIE_PASSWORD);
 
   if (!clientId || (!input.instance && !apiKey)) {
     throw new Error(
@@ -80,9 +78,12 @@ function resolveEnv(input: WorkOSIntegrationInput): ResolvedWorkOSConfig {
     );
   }
 
-  if (!cookiePassword) {
-    throw new Error("WorkOS integration requires WORKOS_COOKIE_PASSWORD in production.");
-  }
+  const cookiePassword = resolveIntegrationSessionSecret({
+    configured: input.cookiePassword,
+    env: [process.env.WORKOS_COOKIE_PASSWORD, process.env.FARM_WORKOS_COOKIE_PASSWORD],
+    integration: "farm-workos",
+    envVar: "WORKOS_COOKIE_PASSWORD",
+  });
 
   return {
     clientId,
