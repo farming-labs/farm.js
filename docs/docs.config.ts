@@ -207,6 +207,7 @@ const sidebar = [
       { label: "API Routes", slug: "api-routes", icon: "server" },
       { label: "API Client", slug: "api-client", icon: "terminal" },
       { label: "Server Queries", slug: "server-queries", icon: "database" },
+      { label: "Local-First Patterns", slug: "local-first", icon: "zap" },
       { label: "KV Storage", slug: "storage", icon: "database" },
     ],
   },
