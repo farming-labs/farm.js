@@ -101,7 +101,7 @@ export function generateFarmDevtoolsClientRuntime(config: ResolvedFarmDevtoolsCo
   const runtimeKey = "__FARM_DEVTOOLS_RUNTIME__";
   const launchParam = ${JSON.stringify(FARM_DEVTOOLS_LAUNCH_PARAM)};
   const devtoolsPath = ${JSON.stringify(FARM_DEVTOOLS_PATH)};
-  const validViews = new Set(["overview", "routes", "api", "systems", "runtime", "raw", "inspect", "diagnostics"]);
+  const validViews = new Set(["overview", "routes", "api", "systems", "runtime", "raw"]);
   const shortcut = ${JSON.stringify(shortcut)};
   const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
   let returnFocus = null;
