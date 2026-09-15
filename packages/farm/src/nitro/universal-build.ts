@@ -1756,6 +1756,52 @@ function matchRuntimePathPattern(pattern, pathname) {
 `.trim();
 }
 
+export function generateRedirectInterpolationSource(): string {
+  // Interpolates redirect/rewrite destinations from the params produced by
+  // matchRuntimePathPattern. Must stay in parity with the development path in
+  // packages/farm/src/plugins/route-pattern.ts: named captures (:name, [name],
+  // catch-alls), a positional * for the wildcard param, and numbered captures
+  // ($1-based, in pattern order). Depends on farmCatchAllParamSegments from
+  // generateRuntimePathMatcherSource(), so emit that source alongside this one.
+  return `
+function encodeRuntimePathSegment(value) {
+  return encodeURIComponent(String(value)).replace(
+    /[!'()*]/g,
+    function(character) {
+      return "%" + character.charCodeAt(0).toString(16).toUpperCase();
+    },
+  );
+}
+
+function interpolateRedirectDestination(destination, params) {
+  let result = destination;
+  const catchAllParamSegments = params[farmCatchAllParamSegments] || {};
+  const orderedCaptures = [];
+  for (const [key, value] of Object.entries(params)) {
+    const segments = catchAllParamSegments[key];
+    const encodedValue = Array.isArray(segments)
+      ? segments.map(encodeRuntimePathSegment).join("/")
+      : encodeRuntimePathSegment(value);
+    orderedCaptures.push(encodedValue);
+    result = result.split("[[..." + key + "]]").join(encodedValue);
+    result = result.split("[..." + key + "]").join(encodedValue);
+    result = result.split("[" + key + "]").join(encodedValue);
+    result = result.split(":" + key + "*").join(encodedValue);
+    result = result.split(":" + key).join(encodedValue);
+    if (key === "wildcard") result = result.split("*").join(encodedValue);
+  }
+  // Numbered captures resolve after the named substitutions. Encoded values
+  // never contain "$", so this cannot rewrite an already-injected value. An
+  // out-of-range index resolves to "", matching the development path.
+  result = result.replace(/\\$(\\d+)/g, function(_whole, group) {
+    const captured = orderedCaptures[Number(group) - 1];
+    return captured === undefined ? "" : captured;
+  });
+  return result;
+}
+`.trim();
+}
+
 export function generateUniversalRouterStateProperties(): string {
   return `
   blockers: new Set(),
@@ -5629,32 +5675,7 @@ async function handleApplicationMetadataRouteRequest(request, routePathname) {
   }
 }
 
-function encodeRuntimePathSegment(value) {
-  return encodeURIComponent(String(value)).replace(
-    /[!'()*]/g,
-    function(character) {
-      return "%" + character.charCodeAt(0).toString(16).toUpperCase();
-    },
-  );
-}
-
-function interpolateRedirectDestination(destination, params) {
-  let result = destination;
-  const catchAllParamSegments = params[farmCatchAllParamSegments] || {};
-  for (const [key, value] of Object.entries(params)) {
-    const segments = catchAllParamSegments[key];
-    const encodedValue = Array.isArray(segments)
-      ? segments.map(encodeRuntimePathSegment).join("/")
-      : encodeRuntimePathSegment(value);
-    result = result.split("[[..." + key + "]]").join(encodedValue);
-    result = result.split("[..." + key + "]").join(encodedValue);
-    result = result.split("[" + key + "]").join(encodedValue);
-    result = result.split(":" + key + "*").join(encodedValue);
-    result = result.split(":" + key).join(encodedValue);
-    if (key === "wildcard") result = result.split("*").join(encodedValue);
-  }
-  return result;
-}
+${generateRedirectInterpolationSource()}
 
 function matchRedirectRoute(pathname, locale, search) {
   for (const redirect of redirectRoutes) {
