@@ -1,7 +1,7 @@
 const SERVER_FUNCTION_FACTORY_IMPORT_RE =
   /\bimport\s+(?:type\s+)?(?:[A-Za-z_$][\w$]*\s*,\s*)?(\{[^}]*\})\s+from\s*["']@farm.js\/core(?:\/(?:server-fn|server-query))?["']\s*;?/g;
 const EXPORT_SERVER_FUNCTION_FACTORY_RE =
-  /\bexport\s+(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*([A-Za-z_$][\w$]*)\s*\(/g;
+  /\bexport\s+(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*([A-Za-z_$][\w$]*)\s*(?:<[^<>]*(?:<[^<>]*>[^<>]*)*>)?\s*\(/g;
 const MODULE_EXT_RE = /\.[cm]?[jt]sx?$/;
 const DECLARATION_RE = /(^|\n)\s*["']([^"']+)["']\s*;?/g;
 
