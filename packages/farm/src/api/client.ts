@@ -167,6 +167,8 @@ export type CacheOptions = {
   staleTime?: number;
   gcTime?: number;
   dedupeMs?: number;
+  /** Allow the configured client cache persistence adapter to store this read. */
+  persist?: boolean;
 };
 
 export type RetryOptions = {
@@ -1134,6 +1136,7 @@ function createAPIClientRuntime<
                 staleAt: updatedAt + staleTime,
                 gcAt: getGcAt(updatedAt, cacheOptions?.gcTime),
                 invalidatedAt: undefined,
+                persist: cacheOptions?.persist === true ? true : undefined,
                 [API_CACHE_REFETCH]: createCacheRefetch(
                   request,
                   path,

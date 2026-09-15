@@ -10,6 +10,17 @@ import {
   type PluginManager,
 } from "./plugin";
 import { generateFarmClientPluginEntryCode } from "./client-plugin-build";
+import {
+  generateClientCachePersistenceCode,
+  resolveFarmClientCacheAdapterEntry,
+  type ClientCachePersistenceEntryCode,
+} from "./client-cache-persistence-build";
+
+export {
+  generateClientCachePersistenceCode,
+  resolveFarmClientCacheAdapterEntry,
+} from "./client-cache-persistence-build";
+export type { ClientCachePersistenceEntryCode } from "./client-cache-persistence-build";
 import { APIRouteManager } from "./api/route-manager";
 import { DEFAULT_FARM_API_BASE_PATH } from "./api/config";
 import { resolveFarmAPIServerBasePath } from "./api/server-path";
@@ -2776,6 +2787,9 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           isolatedHydrationMode === "enabled",
           resolvedConfig?.trailingSlash ?? false,
           resolvedConfig?.basePath ?? "/",
+          generateClientCachePersistenceCode(
+            resolveFarmClientCacheAdapterEntry(root, resolvedConfig?.cache),
+          ),
         );
       }
 
@@ -3714,6 +3728,7 @@ function generateClientCode(
   isolatedHydrationEnabled = false,
   trailingSlash = false,
   basePath = "/",
+  clientCachePersistence: ClientCachePersistenceEntryCode = { imports: "", init: "" },
 ): string {
   const providerClientCode = generateFarmIntegrationProviderClientCode(integrationProviders, root);
   const clientPluginEntry = generateFarmClientPluginEntryCode(
@@ -3778,6 +3793,7 @@ import {
 } from '@farm.js/core/deployment'
 ${providerClientCode.imports}
 ${clientPluginEntry.imports}
+${clientCachePersistence.imports}
 ${docsSearchClientRuntime}
 ${devtoolsClientRuntime}
 ${docsAdapterImportBlock}
@@ -3793,6 +3809,7 @@ const integrationDocumentNavigationMatchers = ${JSON.stringify(documentNavigatio
 setFarmBasePath(${JSON.stringify(basePath)});
 setFarmTrailingSlashPreference(${JSON.stringify(trailingSlash)});
 installChunkErrorRecovery();
+${clientCachePersistence.init}
 
 let reactRoot = null;
 ${isolatedHydrationRuntime}

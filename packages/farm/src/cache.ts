@@ -133,11 +133,26 @@ export interface FarmCacheAdapter {
   releaseLease?(key: string, token: string): Promise<void>;
 }
 
+export interface FarmClientCacheUserConfig {
+  /**
+   * Module path, relative to the project root, whose default export is a
+   * client cache adapter (`defineClientCacheAdapter`). The module is bundled
+   * into the browser entry; the server never imports it.
+   */
+  adapter?: string;
+  /** Extra version salt, typically a build or deploy id; entries persisted under another salt are dropped. */
+  version?: string;
+  /** Debounce for persisted write-behind flushes, in milliseconds. */
+  flushDelayMs?: number;
+}
+
 export interface FarmCacheUserConfig {
   /** Shared cache implementation, for example a Redis-backed adapter. */
   adapter?: FarmCacheAdapter;
   /** Prefix isolating applications and deployments sharing one adapter. */
   namespace?: string;
+  /** Browser cache persistence; see the client cache adapter documentation. */
+  client?: FarmClientCacheUserConfig;
   /**
    * Coordinate cache fills across processes when the adapter implements
    * acquireLease/releaseLease. Set false to disable.
