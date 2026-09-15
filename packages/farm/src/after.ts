@@ -235,7 +235,13 @@ export async function _runWithAfterRequest(
     const response = await afterStorage.run(state, handler);
     return hasResponseHook ? response : wrapResponseBody(response, request, state);
   } catch (error) {
-    if (!hasResponseHook) finishSoon(state);
+    // The handler threw, so there is no successful response for a
+    // response-finished hook to fire on. Run the after-lifecycle now regardless
+    // of the hook; otherwise a spec-compliant adapter (whose hook only fires on
+    // a real response) never runs the registered after() callbacks and
+    // waitUntil(state.completion) hangs forever. finishResponse is idempotent,
+    // so a later hook firing (e.g. a Node error response's close) is a no-op.
+    finishSoon(state);
     throw error;
   }
 }
