@@ -65,6 +65,8 @@ function subscribeWeakCache(reference: WeakRef<FarmClientDataCache>): () => void
   return dispose;
 }
 
+const DEFAULT_GC_SWEEP_INTERVAL_MS = 30_000;
+
 export class FarmClientDataCache {
   private entries = new Map<string, FarmClientCacheEntry>();
   private aliases = new Map<string, string>();
@@ -72,8 +74,13 @@ export class FarmClientDataCache {
   private listeners = new Map<string, Set<FarmClientCacheListener>>();
   private inflight = new Map<string, Promise<unknown>>();
   private unsubscribeInvalidation: (() => void) | undefined;
+  private gcTimer: ReturnType<typeof setTimeout> | undefined;
+  private readonly gcSweepIntervalMs: number | false;
 
-  constructor(options: { subscribeToInvalidation?: boolean } = {}) {
+  constructor(
+    options: { subscribeToInvalidation?: boolean; gcSweepIntervalMs?: number | false } = {},
+  ) {
+    this.gcSweepIntervalMs = options.gcSweepIntervalMs ?? DEFAULT_GC_SWEEP_INTERVAL_MS;
     if (options.subscribeToInvalidation !== false) {
       if (typeof WeakRef === "function") {
         const reference = new WeakRef(this);
@@ -132,6 +139,7 @@ export class FarmClientDataCache {
     }
 
     this.entries.set(resolved, nextEntry);
+    if (nextEntry.gcAt !== undefined) this.scheduleGcSweep();
     this.emit(resolved);
     return this;
   }
@@ -156,6 +164,10 @@ export class FarmClientDataCache {
   dispose(): void {
     this.unsubscribeInvalidation?.();
     this.unsubscribeInvalidation = undefined;
+    if (this.gcTimer !== undefined) {
+      clearTimeout(this.gcTimer);
+      this.gcTimer = undefined;
+    }
     this.clear();
   }
 
@@ -258,6 +270,36 @@ export class FarmClientDataCache {
 
   deleteInflight(key: string): void {
     this.inflight.delete(this.resolveKey(key));
+  }
+
+  private scheduleGcSweep(): void {
+    if (this.gcSweepIntervalMs === false || this.gcTimer !== undefined) return;
+    const timer = setTimeout(() => {
+      this.gcTimer = undefined;
+      this.sweepExpiredEntries();
+    }, this.gcSweepIntervalMs);
+    // Cache cleanup must never keep a Node.js process (SSR, tests) alive.
+    (timer as unknown as { unref?: () => void }).unref?.();
+    this.gcTimer = timer;
+  }
+
+  private sweepExpiredEntries(now = Date.now()): void {
+    const watched = new Set<string>();
+    for (const key of this.listeners.keys()) watched.add(this.resolveKey(key));
+
+    let remaining = false;
+    for (const [key, entry] of this.entries) {
+      if (entry.gcAt === undefined) continue;
+      if (now < entry.gcAt || entry.fetching || this.inflight.has(key) || watched.has(key)) {
+        remaining = true;
+        continue;
+      }
+      // Only unwatched entries are swept, so eviction is unobservable: a read
+      // of this key would already evict it lazily before returning data.
+      this.entries.delete(key);
+    }
+
+    if (remaining) this.scheduleGcSweep();
   }
 
   private emit(key: string, event?: "invalidate"): void {
