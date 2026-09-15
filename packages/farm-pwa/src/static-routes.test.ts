@@ -69,6 +69,52 @@ describe("static routes under a base path", () => {
     }
   });
 
+  it("matches a static route with URL-path-safe punctuation offline", async () => {
+    // A browser leaves '@' unencoded in location.pathname, so the STATIC_ROUTES
+    // key must be "/app/@alice" — not the encodeURIComponent form
+    // "/app/%40alice" — or the offline navigation lookup misses and the
+    // precached page is never served.
+    const input = await output({ "index.html": "home", "@alice/index.html": "profile" });
+    const result = await writePwaBuildArtifacts({
+      ...input,
+      options: resolvePwaOptions({ cache: "auto" }),
+    });
+    expect(result.staticRoutes["/app/@alice"]).toBe("@alice/index.html");
+    // Asset URLs stay percent-encoded (unchanged): the precache URL and the
+    // STATIC_ROUTES *value* still use encodeURIComponent segments.
+    expect(result.precacheUrls).toContain("/app/%40alice/index.html");
+
+    const listeners = new Map<string, (event: any) => void>();
+    const cached = new Map([
+      ["/app/index.html", "home"],
+      ["/app/%40alice/index.html", "profile"],
+    ]);
+    runInNewContext(await readFile(result.workerPath, "utf8"), {
+      URL,
+      Set,
+      caches: {
+        match: async (url: string) => (cached.has(url) ? new Response(cached.get(url)) : undefined),
+      },
+      fetch: async () => {
+        throw new Error("offline");
+      },
+      self: {
+        location: { origin: "https://example.com" },
+        addEventListener: (type: string, listener: (event: any) => void) =>
+          listeners.set(type, listener),
+      },
+    });
+
+    let response!: Promise<Response>;
+    listeners.get("fetch")!({
+      request: { method: "GET", mode: "navigate", url: "https://example.com/app/@alice" },
+      respondWith(value: Promise<Response>) {
+        response = value;
+      },
+    });
+    expect(await (await response).text()).toBe("profile");
+  });
+
   it("treats explicit cached routes and the offline fallback as application paths", async () => {
     const input = await output({ "index.html": "home", "app/index.html": "application" });
     const result = await writePwaBuildArtifacts({
