@@ -15,6 +15,9 @@ code with copy controls. It replaces the deprecated built-in dashboard from
 
 ## Setup
 
+New projects scaffolded with `create @farm.js/app` already include the plugin. For an existing
+app:
+
 ```bash
 pnpm add -D @farm.js/devtools
 ```

@@ -26,6 +26,7 @@
   },
   "devDependencies": {
     "@farm.js/cli": "0.1.0-beta.96",
+    "@farm.js/devtools": "0.1.0-beta.0",
     "@types/node": "22.20.1",
     "@types/pg": "8.20.0",
     "@types/react": "^19.0.0",

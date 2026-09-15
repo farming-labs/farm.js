@@ -283,6 +283,13 @@ test("generates a buildable starter application", async () => {
     );
     assert.doesNotMatch(generatedConfig, /srcDir/);
     assert.match(generatedConfig, /theme:\s*\{\s*default: "dark"/s);
+    assert.match(generatedConfig, /import \{ devtools \} from "@farm\.js\/devtools"/);
+    assert.match(generatedConfig, /plugins: \[devtools\(\)\]/);
+    assert.equal(
+      generatedPackage.devDependencies["@farm.js/devtools"],
+      templatePackage.devDependencies["@farm.js/devtools"],
+    );
+    assert.ok(generatedPackage.devDependencies["@farm.js/devtools"]);
 
     const generatedTsconfig = JSON.parse(
       await readFile(path.join(tempDir, "generated-app/tsconfig.json"), "utf8"),
@@ -573,6 +580,8 @@ test("generates a Vue SFC starter with typed server interaction", async () => {
     assert.equal(packageJson.dependencies.react, undefined);
     assert.equal(packageJson.dependencies["react-dom"], undefined);
     assert.equal(packageJson.scripts["type-check"], "vue-tsc --noEmit");
+    assert.ok(packageJson.devDependencies["@farm.js/devtools"]);
+    assert.match(config, /plugins: \[devtools\(\)\]/);
     assert.match(config, /renderer: vue\(\)/);
     assert.match(config, /from "@farm\.js\/vue"/);
     assert.match(page, /export const hydrate = true/);
