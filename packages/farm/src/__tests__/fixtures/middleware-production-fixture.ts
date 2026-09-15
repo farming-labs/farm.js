@@ -42,6 +42,9 @@ export async function createMiddlewareProductionFixture(): Promise<string> {
     `
 export default {
   srcDir: "src",
+  experimental: {
+    ppr: true,
+  },
   deploy: {
     target: "vercel",
   },

@@ -49,6 +49,37 @@ test("explains a dynamic page and its inherited route behavior", async () => {
   }
 });
 
+test("reports a page PPR declaration as ignored when experimental.ppr is disabled", async () => {
+  const root = await createExplainProject();
+
+  try {
+    await writeFile(
+      path.join(root, "farm.config.mjs"),
+      [
+        "export default {",
+        "  deploy: { target: 'vercel', preset: 'vercel' },",
+        "  routeRules: {",
+        "    '/products/**': { swr: 30, runtime: 'node' },",
+        "    '/products/[id]': { runtime: 'edge', regions: ['iad1'] },",
+        "  },",
+        "};",
+        "",
+      ].join("\n"),
+    );
+
+    const explanation = await explainFarmRoute("/products/42", { root });
+
+    assert.equal(explanation.rendering.mode, "dynamic");
+    assert.equal(explanation.rendering.ppr, false);
+    assert.equal(
+      explanation.rendering.reason,
+      "page PPR declaration ignored (experimental.ppr disabled)",
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("keeps malformed percent-encoded route parameters raw", async () => {
   const root = await createExplainProject();
 
@@ -185,6 +216,7 @@ async function createExplainProject() {
     path.join(root, "farm.config.mjs"),
     [
       "export default {",
+      "  experimental: { ppr: true },",
       "  deploy: { target: 'vercel', preset: 'vercel' },",
       "  routeRules: {",
       "    '/products/**': { swr: 30, runtime: 'node' },",

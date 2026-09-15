@@ -1118,17 +1118,38 @@ interface TocItem {
 function extractTocItems(body: string, depth: number): TocItem[] {
   const slug = createSlugger();
   const maxLevel = Math.max(2, Math.min(depth, 6));
+  const items: TocItem[] = [];
+  // Track fenced code blocks so a `##` line inside a fence is not treated as a
+  // heading. marked skips those when rendering, so counting them here would
+  // produce phantom TOC links with no matching anchor. Mirrors the fence
+  // tracking in stripMdxRuntimeSyntax / attachCodeBlockLabels.
+  let fence: { marker: "`" | "~"; length: number } | null = null;
 
-  return body
-    .split(/\r?\n/)
-    .map((line) => line.match(/^(#{2,6})\s+(.+)$/))
-    .filter((match): match is RegExpMatchArray => Boolean(match))
-    .map((match) => ({
-      id: slug(match[2].trim()),
-      title: match[2].trim(),
-      level: match[1].length,
-    }))
-    .filter((item) => item.level <= maxLevel);
+  for (const line of body.split(/\r?\n/)) {
+    const nextFence = getCodeFence(line);
+    if (fence) {
+      if (nextFence && nextFence.marker === fence.marker && isClosingCodeFence(line, fence)) {
+        fence = null;
+      }
+      continue;
+    }
+    if (nextFence) {
+      fence = nextFence;
+      continue;
+    }
+
+    const match = line.match(/^(#{2,6})\s+(.+)$/);
+    if (!match) continue;
+
+    const title = match[2].trim();
+    const id = slug(title);
+    const level = match[1].length;
+    if (level <= maxLevel) {
+      items.push({ id, title, level });
+    }
+  }
+
+  return items;
 }
 
 function getThemeUI(docs: FarmDocsResolvedConfig): Record<string, any> {

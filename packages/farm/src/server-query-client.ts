@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import { getFarmClientDataCache, type FarmClientCacheStatus } from "./client-cache";
+import { attachRevalidationListeners } from "./client-revalidation";
 import type { ServerQuery } from "./server-query";
 import {
   createServerQueryCallKey,
@@ -96,20 +97,17 @@ export function useServerQuery<TInput, TData>(
   }, [cache, entry, key, options.enabled, run]);
 
   useEffect(() => {
-    if (options.enabled === false || typeof window === "undefined") return;
+    if (options.enabled === false) return;
 
-    const refreshIfStale = () => {
-      if (cache.isStale(key)) void run().catch(() => undefined);
-    };
-    const onFocus = options.refetchOnWindowFocus === false ? undefined : refreshIfStale;
-    const onOnline = options.refetchOnReconnect === false ? undefined : refreshIfStale;
-
-    if (onFocus) window.addEventListener("focus", onFocus);
-    if (onOnline) window.addEventListener("online", onOnline);
-    return () => {
-      if (onFocus) window.removeEventListener("focus", onFocus);
-      if (onOnline) window.removeEventListener("online", onOnline);
-    };
+    return attachRevalidationListeners(
+      () => {
+        if (cache.isStale(key)) void run().catch(() => undefined);
+      },
+      {
+        refetchOnWindowFocus: options.refetchOnWindowFocus,
+        refetchOnReconnect: options.refetchOnReconnect,
+      },
+    );
   }, [cache, key, options.enabled, options.refetchOnReconnect, options.refetchOnWindowFocus, run]);
 
   const status = entry?.status ?? (entry ? "success" : "idle");

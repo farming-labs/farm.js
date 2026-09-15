@@ -207,6 +207,7 @@ export class FarmApp {
         serverComponents: config.experimental?.serverComponents ?? false,
         serverActions: config.experimental?.serverActions ?? false,
         isolatedClientHydration: config.experimental?.isolatedClientHydration ?? "off",
+        ppr: config.experimental?.ppr ?? false,
         ...config.experimental,
       },
       vite: config.vite || {},

@@ -231,7 +231,7 @@ const updateURL = (
   updates: Record<string, string | null>,
   options: Options = {},
   emitUpdate = true,
-): (() => void) | undefined => {
+): (() => boolean) | undefined => {
   if (typeof window === "undefined") return;
 
   discardDepartedURLUpdates();
@@ -261,9 +261,10 @@ const updateURL = (
 
   throttleTimers.set(throttleKey, { timer: timeout, updates, href: currentUrl.href });
   return () => {
-    if (throttleTimers.get(throttleKey)?.timer !== timeout) return;
+    if (throttleTimers.get(throttleKey)?.timer !== timeout) return false;
     clearTimeout(timeout);
     throttleTimers.delete(throttleKey);
+    return true;
   };
 };
 
@@ -297,7 +298,7 @@ export function useQueryState<TParser extends Parser<any>>(
 
   const stateRef = useRef(state);
   const stateKeyRef = useRef(key);
-  const cancelPendingUpdateRef = useRef<(() => void) | undefined>(undefined);
+  const cancelPendingUpdateRef = useRef<(() => boolean) | undefined>(undefined);
   stateRef.current = state;
 
   const setValue = useCallback(
@@ -370,8 +371,15 @@ export function useQueryState<TParser extends Parser<any>>(
 
   useEffect(
     () => () => {
-      cancelPendingUpdateRef.current?.();
+      const canceledPendingWrite = cancelPendingUpdateRef.current?.() ?? false;
       cancelPendingUpdateRef.current = undefined;
+      // A throttled write is discarded on unmount, but its value was already
+      // broadcast to peers via emitKey. Peers that adopted the optimistic draft
+      // get no other reconciliation signal (unmount fires no history event), so
+      // tell them to re-read the URL, which no longer carries this draft.
+      if (canceledPendingWrite && typeof window !== "undefined") {
+        emitter.emitUpdate(getCurrentSearchParams());
+      }
     },
     [key],
   );
@@ -401,7 +409,7 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
   });
 
   const stateRef = useRef(state);
-  const pendingUpdatesRef = useRef(new Map<string, () => void>());
+  const pendingUpdatesRef = useRef(new Map<string, () => boolean>());
   stateRef.current = state;
 
   const setValues = useCallback(
@@ -501,10 +509,16 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
 
   useEffect(
     () => () => {
+      let canceledPendingWrite = false;
       for (const cancelPendingUpdate of pendingUpdatesRef.current.values()) {
-        cancelPendingUpdate();
+        if (cancelPendingUpdate()) canceledPendingWrite = true;
       }
       pendingUpdatesRef.current.clear();
+      // Discarded throttled writes were already broadcast to peers via emitKey;
+      // reconcile any peer that adopted a now-cancelled draft (see useQueryState).
+      if (canceledPendingWrite && typeof window !== "undefined") {
+        emitter.emitUpdate(getCurrentSearchParams());
+      }
     },
     [watchKeys],
   );

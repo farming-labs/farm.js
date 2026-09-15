@@ -799,6 +799,7 @@ export function renderFarmDevtoolsHtml(snapshot: FarmDevtoolsSnapshot): string {
     .nav-item .icon { width: 13px; height: 13px; }
     .nav-item small { color: #666; font-size: 9px; font-weight: 400; }
     .topbar-meta { display: flex; flex: 0 0 auto; margin-left: auto; border-left: 1px solid var(--line); }
+    .deprecation-tag { display: inline-flex; align-items: center; padding: 0 10px; border-right: 1px solid var(--line); color: #d9a626; font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; white-space: nowrap; }
     .topbar-status { display: flex; min-width: max-content; align-items: center; gap: 7px; padding: 0 11px; color: var(--muted-strong); font-family: var(--font-mono); font-size: 9px; text-transform: uppercase; }
     .status-dot { width: 5px; height: 5px; background: #fff; box-shadow: 0 0 0 3px rgb(255 255 255 / 0.06); }
     .status-dot-attention { background: #909090; animation: status-pulse 1.8s ease-in-out infinite; }
@@ -1308,6 +1309,7 @@ export function renderFarmDevtoolsHtml(snapshot: FarmDevtoolsSnapshot): string {
           ${renderNavigationItem("raw", "Raw")}
         </nav>
         <div class="topbar-meta">
+          <span class="deprecation-tag" title="The built-in dashboard is deprecated. Install @farm.js/devtools for the maintained workspace.">Deprecated &middot; use @farm.js/devtools</span>
           <span class="project-select">${escapeHtml(snapshot.project.name)} ${icon(
             "chevron",
           )}</span>

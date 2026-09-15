@@ -696,6 +696,17 @@ declare module "@farm.js/core/client" {
         refetch?: boolean;
       };
 
+  export const FARM_CACHE_INVALIDATION_CHANNEL: "farm:cache-invalidation";
+
+  export type CrossTabCacheInvalidationOptions = {
+    /** Override the BroadcastChannel name, e.g. to isolate multiple apps on one origin. */
+    channelName?: string;
+  };
+
+  export function enableCrossTabCacheInvalidation(
+    options?: CrossTabCacheInvalidationOptions,
+  ): () => void;
+
   export type OptimisticUpdate =
     | [CallableRouteRef<any>, unknown, (prev: any) => any]
     | [CacheKey<any> | DefinedCacheKey<any> | string, (prev: any) => any];
@@ -838,7 +849,10 @@ declare module "@farm.js/core/client" {
       query: infer TQuery;
     };
   }
-    ? SimplifyEndpointInput<BodyInputProp<InferEndpointBody<T>> & QueryInputProp<TQuery>>
+    ? SimplifyEndpointInput<
+        BodyInputProp<InferEndpointBody<T>> &
+          QueryInputProp<T extends { __types: { inputQuery: infer I } } ? I : TQuery>
+      >
     : {};
 
   type InferEndpointOutput<T> = T extends {
@@ -907,6 +921,8 @@ declare module "@farm.js/core/client" {
       context: ServerFnOptimisticContext<TInput, TResult>,
     ) => TResult | null | undefined;
     rollbackOnError?: boolean;
+    /** Retry failed submissions with the API client's retry shape. Defaults to no retries. */
+    retry?: RetryOptions;
     onSuccess?: (result: TResult) => void;
     onError?: (error: TError) => void;
     onSettled?: (result: TResult | null, error: TError | null) => void;
@@ -969,6 +985,12 @@ declare module "@farm.js/core/client" {
   export type UseMutationOptions<TVariables, TData, TError = Error> = {
     initialData?: TData | null;
     resetOnMutate?: boolean;
+    /**
+     * `"always"` (default) dispatches regardless of connectivity. `"online"`
+     * pauses a submission while the browser is offline and resumes it on the
+     * `online` event instead of failing it.
+     */
+    networkMode?: MutationNetworkMode;
     optimistic?: (
       context: MutationOptimisticContext<TVariables, TData>,
     ) => TData | null | undefined;
@@ -993,12 +1015,16 @@ declare module "@farm.js/core/client" {
       ? (variables?: InferMutationVariables<TTarget>) => void
       : (variables: InferMutationVariables<TTarget>) => void;
 
+  export type MutationNetworkMode = "always" | "online";
+
   export type UseMutationReturn<
     TTarget extends AnyMutationTarget,
     TData = InferMutationData<TTarget>,
     TError = InferMutationError<TTarget>,
   > = {
     pending: boolean;
+    /** True while a submission is waiting for the browser to come back online. */
+    paused: boolean;
     status: MutationStatus;
     data: TData | null;
     error: TError | null;
@@ -1076,6 +1102,8 @@ declare module "@farm.js/core/client" {
     state: FetcherState;
     status: MutationStatus;
     pending: boolean;
+    /** True while a submission is waiting for the browser to come back online. */
+    paused: boolean;
     data: InferMutationData<TTarget> | null;
     error: InferMutationError<TTarget> | FetcherInputError | null;
     variables: InferMutationVariables<TTarget> | undefined;
