@@ -10,6 +10,7 @@ import {
   type Context,
   type Span,
 } from "@opentelemetry/api";
+import { createHash } from "node:crypto";
 import type { FarmEvent } from "./observability";
 
 export const FARM_TRACER_NAME = "@farm.js/core";
@@ -391,6 +392,12 @@ function getCompletedSpanDescriptor(
 
 function toEventAttributes(event: FarmEvent): Attributes {
   const attributes: Attributes = {};
+  // A cache event's `key` embeds the serialized arguments of the cached call
+  // (e.g. `unstable_cache(getUser)(email)` serializes the email into the key),
+  // so it must never be exported verbatim to a tracing backend. Emit a stable
+  // digest under `farm.key_hash` instead, preserving cross-event correlation
+  // without shipping the sensitive payload.
+  const redactKey = typeof event.type === "string" && event.type.startsWith("cache.");
   for (const [key, value] of Object.entries(event)) {
     if (
       key === "timestamp" ||
@@ -401,6 +408,10 @@ function toEventAttributes(event: FarmEvent): Attributes {
       key === "traceSampled" ||
       value === undefined
     ) {
+      continue;
+    }
+    if (redactKey && key === "key" && typeof value === "string") {
+      attributes["farm.key_hash"] = createHash("sha256").update(value).digest("hex").slice(0, 16);
       continue;
     }
     if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
