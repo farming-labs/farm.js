@@ -822,6 +822,40 @@ export function configureFarmCache(config: FarmCacheUserConfig | undefined): voi
   sharedFarmDataCache.configure(config);
 }
 
+/**
+ * Wrap an async function so its results are cached and shared across requests,
+ * processes, and restarts.
+ *
+ * The cache key is built from the wrapped function's identity (its name and a
+ * hash of its source), the active locale, `keyParts`, and the call arguments.
+ * Deriving identity from the source — rather than the closure instance — is
+ * deliberate: it keeps the key stable across processes and restarts so a
+ * distributed cache adapter can share entries between server instances.
+ *
+ * The consequence is that two closures with **identical source text but
+ * different captured variables** produce the same identity. Pass those captured
+ * values in `keyParts` so they take part in the key; otherwise the closures
+ * share a cache entry and return each other's data:
+ *
+ * ```ts
+ * // Collides: both closures have identical source, and `table` is captured,
+ * // not an argument, so it never reaches the key.
+ * const makeLoader = (table: string) =>
+ *   unstable_cache(async (id: number) => db.get(table, id));
+ *
+ * // Correct: the captured value disambiguates the two closures.
+ * const makeLoader = (table: string) =>
+ *   unstable_cache(async (id: number) => db.get(table, id), [table]);
+ * ```
+ *
+ * Values passed as call arguments already participate in the key and do not
+ * need to be repeated in `keyParts`.
+ *
+ * @param fn The async function to memoize.
+ * @param keyParts Extra values that identify this call site. Include every
+ *   variable the function closes over that is not one of its arguments.
+ * @param options Tags, paths, and revalidation settings for the cached entry.
+ */
 export function unstable_cache<Args extends unknown[], Result>(
   fn: (...args: Args) => Result | Promise<Result>,
   keyParts: readonly unknown[] = [],
