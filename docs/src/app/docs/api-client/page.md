@@ -484,6 +484,33 @@ Each local optimistic callback receives the latest scheduled mutation data, even
 submissions occur before React rerenders. With `rollbackOnError: true`, a failed latest submission
 restores the snapshot captured immediately before that submission's optimistic update.
 
+### Pause offline submissions
+
+By default a mutation dispatches regardless of connectivity and a submission with no network
+fails after its retries. Opt into offline awareness with `networkMode: "online"`:
+
+```tsx
+const createProduct = useMutation(apiClient.products.post, {
+  networkMode: "online",
+});
+
+// createProduct.paused is true while the browser is offline;
+// the submission dispatches automatically on the `online` event.
+```
+
+While the browser reports offline, a new submission waits in a `paused` state instead of
+dispatching, and a dispatch that failed while offline pauses and rides the next reconnect
+instead of surfacing a connectivity error. `pending` stays true and `status` stays `"pending"`
+for a paused submission; the new `paused` flag distinguishes "waiting for connection" from "on
+the wire" so the UI can say so. Paused submissions resume in submission order on the `online`
+event. `reset()` rejects paused submissions immediately rather than leaving them waiting, and a
+disowned submission never dispatches after a later reconnect. Optimistic state applied before
+the pause stays visible while waiting.
+
+The pause window is in-memory: a reload drops paused submissions, so keep them short-lived and
+surface `paused` to the user. `useFetcher` accepts the same option and exposes the same flag.
+The default `networkMode: "always"` preserves existing behavior exactly.
+
 For overlapping submissions, `status`, `data`, and `error` describe the latest submission.
 Older completions do not replace its result or run completion callbacks. `pending` separately
 tracks whether any submission is still running, so it can remain `true` after the latest one
@@ -533,7 +560,7 @@ export function CreateProductForm() {
 }
 ```
 
-The fetcher exposes `state` (`idle` or `submitting`), `status`, `pending`, `data`, `error`,
+The fetcher exposes `state` (`idle` or `submitting`), `status`, `pending`, `paused`, `data`, `error`,
 `variables`, the active `formData`, `submit`, `submitAsync`, `Form`, and `reset`. It uses the same
 optimistic updates, rollback, callbacks, typed errors, and API-client request options as
 `useMutation`.

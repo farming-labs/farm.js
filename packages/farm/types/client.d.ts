@@ -982,6 +982,12 @@ declare module "@farm.js/core/client" {
   export type UseMutationOptions<TVariables, TData, TError = Error> = {
     initialData?: TData | null;
     resetOnMutate?: boolean;
+    /**
+     * `"always"` (default) dispatches regardless of connectivity. `"online"`
+     * pauses a submission while the browser is offline and resumes it on the
+     * `online` event instead of failing it.
+     */
+    networkMode?: MutationNetworkMode;
     optimistic?: (
       context: MutationOptimisticContext<TVariables, TData>,
     ) => TData | null | undefined;
@@ -1006,12 +1012,16 @@ declare module "@farm.js/core/client" {
       ? (variables?: InferMutationVariables<TTarget>) => void
       : (variables: InferMutationVariables<TTarget>) => void;
 
+  export type MutationNetworkMode = "always" | "online";
+
   export type UseMutationReturn<
     TTarget extends AnyMutationTarget,
     TData = InferMutationData<TTarget>,
     TError = InferMutationError<TTarget>,
   > = {
     pending: boolean;
+    /** True while a submission is waiting for the browser to come back online. */
+    paused: boolean;
     status: MutationStatus;
     data: TData | null;
     error: TError | null;
@@ -1089,6 +1099,8 @@ declare module "@farm.js/core/client" {
     state: FetcherState;
     status: MutationStatus;
     pending: boolean;
+    /** True while a submission is waiting for the browser to come back online. */
+    paused: boolean;
     data: InferMutationData<TTarget> | null;
     error: InferMutationError<TTarget> | FetcherInputError | null;
     variables: InferMutationVariables<TTarget> | undefined;

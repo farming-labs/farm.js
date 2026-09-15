@@ -99,6 +99,8 @@ export type UseFetcherReturn<TTarget extends AnyMutationTarget> = {
   state: FetcherState;
   status: MutationStatus;
   pending: boolean;
+  /** True while a submission is waiting for the browser to come back online. */
+  paused: boolean;
   data: InferMutationData<TTarget> | null;
   error: InferMutationError<TTarget> | FetcherInputError | null;
   variables: InferMutationVariables<TTarget> | undefined;
@@ -219,6 +221,7 @@ export function useFetcher<TTarget extends AnyMutationTarget>(
       state: mutation.pending ? "submitting" : "idle",
       status: mutation.status,
       pending: mutation.pending,
+      paused: mutation.paused,
       data: mutation.data,
       error: mutation.error,
       variables: mutation.variables,
@@ -233,6 +236,7 @@ export function useFetcher<TTarget extends AnyMutationTarget>(
       formData,
       mutation.data,
       mutation.error,
+      mutation.paused,
       mutation.pending,
       mutation.status,
       mutation.variables,
