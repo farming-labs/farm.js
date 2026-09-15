@@ -245,33 +245,33 @@ mount, and shortcut together.
 
 ## Important options
 
-| Option        | Use it for                                                                        |
-| ------------- | --------------------------------------------------------------------------------- |
-| extends       | Composing local or package Farm layers with project-first overrides.              |
-| srcDir        | Changing the app source folder from the default src.                              |
-| renderer      | Selecting React (default) or an adapter such as Preact, Svelte, Vue, or Solid.    |
-| api           | Configuring the public root used by Farm's typed browser API client.              |
-| integrations  | Registering built-in or custom integrations.                                      |
-| auth          | Enabling Farm's built-in email/password auth, sessions, helpers, and hooks.       |
-| theme         | Enabling light, dark, and system modes with client and server APIs.               |
-| storage       | Configuring KV drivers/mounts and, in the current beta, an integration DB client. |
-| migrations    | Running one-shot schema/provider commands with `farm migrate`.                    |
-| cron          | Mapping portable UTC schedules to ordinary GET API routes.                        |
-| i18n          | Configuring locale routes, detection, message catalogs, typing, and direction.    |
-| docs          | Serving the built-in docs runtime and docs API.                                   |
-| md            | Restricting or disabling automatic markdown mirrors like /pricing.md.             |
-| mdx           | Rendering `page.md` and `page.mdx` app routes, plus MDX components.               |
-| telemetry     | Controlling automatic production-site reporting to Farm's usage dashboard.        |
-| deploy        | Selecting a target, preset, and output directory.                                 |
-| deploymentId  | Detecting stale browser requests during rolling deployments.                      |
-| trailingSlash | Choosing the canonical URL shape for application page routes and links.           |
-| routeRules    | Applying rendering, cache, redirect, CORS, and header behavior to route patterns. |
-| security      | Applying an app-wide CSP with an enforcing or report-only response header.        |
-| serverActions | Restricting trusted action origins and request body size.                         |
-| images        | Configuring responsive widths, remote allowlists, formats, and optimizer limits.  |
-| performance   | Budgeting image and font preload hints without changing the rendered resources.   |
+| Option        | Use it for                                                                            |
+| ------------- | ------------------------------------------------------------------------------------- |
+| extends       | Composing local or package Farm layers with project-first overrides.                  |
+| srcDir        | Changing the app source folder from the default src.                                  |
+| renderer      | Selecting React (default) or an adapter such as Preact, Svelte, Vue, or Solid.        |
+| api           | Configuring the public root used by Farm's typed browser API client.                  |
+| integrations  | Registering built-in or custom integrations.                                          |
+| auth          | Enabling Farm's built-in email/password auth, sessions, helpers, and hooks.           |
+| theme         | Enabling light, dark, and system modes with client and server APIs.                   |
+| storage       | Configuring KV drivers/mounts and, in the current beta, an integration DB client.     |
+| migrations    | Running one-shot schema/provider commands with `farm migrate`.                        |
+| cron          | Mapping portable UTC schedules to ordinary GET API routes.                            |
+| i18n          | Configuring locale routes, detection, message catalogs, typing, and direction.        |
+| docs          | Serving the built-in docs runtime and docs API.                                       |
+| md            | Restricting or disabling automatic markdown mirrors like /pricing.md.                 |
+| mdx           | Rendering `page.md` and `page.mdx` app routes, plus MDX components.                   |
+| telemetry     | Controlling automatic production-site reporting to Farm's usage dashboard.            |
+| deploy        | Selecting a target, preset, and output directory.                                     |
+| deploymentId  | Detecting stale browser requests during rolling deployments.                          |
+| trailingSlash | Choosing the canonical URL shape for application page routes and links.               |
+| routeRules    | Applying rendering, cache, redirect, CORS, and header behavior to route patterns.     |
+| security      | Applying an app-wide CSP with an enforcing or report-only response header.            |
+| serverActions | Restricting trusted action origins and request body size.                             |
+| images        | Configuring responsive widths, remote allowlists, formats, and optimizer limits.      |
+| performance   | Budgeting image and font preload hints without changing the rendered resources.       |
 | experimental  | Auditing or enabling opt-in rendering experiments such as isolated hydration and PPR. |
-| openapi       | Publishing API reference docs.                                                    |
+| openapi       | Publishing API reference docs.                                                        |
 
 ## Application base path
 
