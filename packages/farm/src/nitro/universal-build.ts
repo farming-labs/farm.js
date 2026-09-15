@@ -6101,9 +6101,10 @@ ${
 }
 
 const pprShellCache = getFarmDataCache();
+const experimentalPPREnabled = ${JSON.stringify(config.experimental?.ppr === true)};
 
 function resolvePPRConfig(routeModule) {
-  if (!routeModule || routeModule.dynamic === "force-dynamic") {
+  if (!experimentalPPREnabled || !routeModule || routeModule.dynamic === "force-dynamic") {
     return { enabled: false };
   }
 

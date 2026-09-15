@@ -270,7 +270,7 @@ mount, and shortcut together.
 | serverActions | Restricting trusted action origins and request body size.                         |
 | images        | Configuring responsive widths, remote allowlists, formats, and optimizer limits.  |
 | performance   | Budgeting image and font preload hints without changing the rendered resources.   |
-| experimental  | Auditing or enabling opt-in rendering experiments such as isolated hydration.     |
+| experimental  | Auditing or enabling opt-in rendering experiments such as isolated hydration and PPR. |
 | openapi       | Publishing API reference docs.                                                    |
 
 ## Application base path
@@ -410,6 +410,26 @@ owner and Farm ignores isolated client hydration. Treat `"enabled"` as an experi
 option and measure the route's client JavaScript and interaction cost before adopting it broadly.
 The maintained benchmark includes equivalent RSC controls rather than assuming the non-RSC path is
 faster.
+
+## Partial Prerendering
+
+Partial Prerendering (static-shell caching) is experimental and disabled by default. Enable it
+app-wide with `experimental.ppr`, then opt individual routes in with `export const ppr = true`,
+the Next-compatible `export const experimental_ppr = true`, or a `"use ppr"` directive. Route
+declarations are inert while the flag is off, and those routes render fully dynamically.
+
+```ts
+import { defineConfig } from "@farm.js/core";
+
+export default defineConfig({
+  experimental: {
+    ppr: true,
+  },
+});
+```
+
+See [Cache and PPR](/docs/cache-ppr) for shell caching, Suspense holes, invalidation, and
+observability events.
 
 ## Images
 

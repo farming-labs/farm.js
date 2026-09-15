@@ -330,6 +330,14 @@ describe("resolveConfig", () => {
     });
   });
 
+  it("keeps experimental PPR disabled by default and preserves explicit opt-in", async () => {
+    const defaults = await resolveConfig({}, "production");
+    const configured = await resolveConfig({ experimental: { ppr: true } }, "production");
+
+    expect(defaults.experimental.ppr).toBe(false);
+    expect(configured.experimental.ppr).toBe(true);
+  });
+
   it("keeps isolated client hydration off by default and preserves its rollout mode", async () => {
     const defaults = await resolveConfig({}, "production");
     const configured = await resolveConfig(

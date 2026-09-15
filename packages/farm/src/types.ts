@@ -237,6 +237,17 @@ export interface FarmConfig {
     serverComponents?: boolean;
     serverActions?: boolean;
     /**
+     * Enables Partial Prerendering (static-shell caching). Routes still opt in
+     * individually with `export const ppr = true`, the Next-compatible
+     * `export const experimental_ppr = true`, or a `"use ppr"` directive;
+     * without this flag those declarations are inert and the route renders
+     * fully dynamically.
+     *
+     * @experimental
+     * @default false
+     */
+    ppr?: boolean;
+    /**
      * Controls non-RSC hydration ownership for server modules that import
      * leaf `"use client"` components.
      *
@@ -494,6 +505,7 @@ export interface RouteModule<TRoute extends FarmRoutePropsTarget = FarmRouteProp
   /**
    * Opt into Partial Prerendering/static-shell caching for this route.
    * Compatible with Farm's `ppr` export and Next.js `experimental_ppr`.
+   * Requires `experimental.ppr` in `farm.config.ts`; inert without it.
    */
   ppr?: boolean;
   experimental_ppr?: boolean;
