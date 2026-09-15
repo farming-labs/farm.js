@@ -20,17 +20,32 @@ function getFarmCacheInvalidationState(): FarmCacheInvalidationState {
   });
 }
 
+function formatFarmCacheListenerError(error: unknown): string {
+  return error instanceof Error ? (error.stack ?? error.message) : String(error);
+}
+
 export function notifyFarmCacheInvalidation(key: string): void {
   if (typeof key !== "string" || key.length === 0) return;
 
   for (const listener of getFarmCacheInvalidationState().listeners) {
-    listener(key);
+    // Isolate listeners: one throwing observer must not abort the remaining
+    // listeners (or the rest of a multi-key batch in applyFarmCacheInvalidations)
+    // and must not surface as a 500 when invalidation runs inside a request.
+    try {
+      listener(key);
+    } catch (error) {
+      console.warn(`[farm:cache] invalidation listener failed: ${formatFarmCacheListenerError(error)}`);
+    }
   }
 }
 
 export function notifyFarmCacheTask(task: Promise<void>): void {
   for (const listener of getFarmCacheInvalidationState().taskListeners) {
-    listener(task);
+    try {
+      listener(task);
+    } catch (error) {
+      console.warn(`[farm:cache] task listener failed: ${formatFarmCacheListenerError(error)}`);
+    }
   }
 }
 
