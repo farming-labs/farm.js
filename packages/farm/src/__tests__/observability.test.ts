@@ -185,6 +185,29 @@ describe("observability", () => {
     expect(requestSpan?.events.map((event) => event.name)).toContain("render.error");
   });
 
+  it("does not fail the request trace for a recovered render error", async () => {
+    configureFarmObservability({ tracing: true });
+
+    await runWithFarmRequestSpan(new Request("https://farm.test/recovered"), async () => {
+      emitFarmEvent({
+        type: "render.error",
+        route: "/recovered",
+        error: new Error("an error boundary recovered this"),
+      });
+      return new Response("ok", { status: 200 });
+    });
+
+    await processor.forceFlush();
+    const span = exporter.getFinishedSpans().find((s) => s.name === "GET /recovered");
+    expect(span).toBeDefined();
+    // A 200 response must not be reported as a failed trace just because a
+    // render error was caught and recovered by an error boundary mid-stream.
+    expect(span?.status.code).not.toBe(SpanStatusCode.ERROR);
+    // The error is still recorded on the span for visibility.
+    expect(span?.events.map((event) => event.name)).toContain("render.error");
+    expect(span?.events.map((event) => event.name)).toContain("exception");
+  });
+
   it("creates completed lifecycle spans outside a request context", async () => {
     configureFarmObservability({ tracing: { spans: ["build"] } });
 
