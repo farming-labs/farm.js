@@ -949,7 +949,28 @@ export class ServerRenderer {
             await this.wrapWithIntegrationProviders(pageElement),
           );
 
-          await this.cacheSSGPage(page, html, { document: false });
+          // Resolve metadata so the regenerated document keeps its title and
+          // meta/OG tags instead of falling back to the framework default
+          // ("Farm.js App"). Without this, a static route served from the ISR
+          // cache loses its metadata after the first revalidation (issue #1018).
+          const mergedMetadata = await this.resolveRouteMetadata({
+            layoutModules,
+            routeModule: mod,
+            pageProps: pageProps as unknown as PageProps,
+            pathname: page.urlPath,
+          });
+          const { title, tags, hasFavicon } = renderMetadataHead(mergedMetadata);
+          const metadataHead = `${
+            hasFavicon ? "" : '<link rel="icon" href="data:,">\n  '
+          }<title>${title}</title>${tags}`;
+          const fullDocument = this.createFullHTML(
+            html,
+            pageMetadata.shouldHydrate === true,
+            page.urlPath,
+            metadataHead,
+          );
+
+          await this.cacheSSGPage(page, fullDocument, { document: true });
 
           logger.info(`ISR: Regenerated ${page.urlPath}`);
         } catch (error) {
@@ -2819,7 +2840,7 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
     content: string,
     isClientComponent = false,
     requestPath = "/",
-    documentTitle = "Farm.js App",
+    metadataHead?: string,
   ): string {
     const i18nSnapshot = getFarmI18nClientSnapshot();
     const clientScript = isClientComponent
@@ -2851,6 +2872,7 @@ ${i18nSnapshot ? `window.__FARM_I18N__ = ${serializeInlineValue(i18nSnapshot)};`
         headAssets: [
           themeDocument.head,
           `<meta name="farm-deployment-id" content="${escapeHtmlAttribute(this.getDeploymentId())}">`,
+          metadataHead,
           alternateLinks,
           fontHead,
           `<link rel="stylesheet" href="/src/app/globals.css" />`,
@@ -2874,8 +2896,7 @@ ${i18nSnapshot ? `window.__FARM_I18N__ = ${serializeInlineValue(i18nSnapshot)};`
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="farm-deployment-id" content="${escapeHtmlAttribute(this.getDeploymentId())}">
-  <link rel="icon" href="data:,">
-  <title>${escapeHtmlAttribute(documentTitle)}</title>${alternateLinks}
+  ${metadataHead ?? '<link rel="icon" href="data:,">\n  <title>Farm.js App</title>'}${alternateLinks}
   ${fontHead}
   <link rel="stylesheet" href="/src/app/globals.css" />${this.collectDevStyleLinks()
     .map((l) => `\n  ${l}`)
