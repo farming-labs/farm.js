@@ -14,9 +14,12 @@ import {
 } from "../workflows";
 
 const originalEnv = { ...process.env };
+const originalRuntimeEnv = (globalThis as { __env__?: unknown }).__env__;
 
 afterEach(() => {
   vi.restoreAllMocks();
+  if (originalRuntimeEnv === undefined) delete (globalThis as { __env__?: unknown }).__env__;
+  else (globalThis as { __env__?: unknown }).__env__ = originalRuntimeEnv;
   for (const key of Object.keys(process.env)) {
     if (!(key in originalEnv)) delete process.env[key];
   }
@@ -27,6 +30,68 @@ afterEach(() => {
 });
 
 describe("Farm workflows", () => {
+  function unsecuredHandler(run: ReturnType<typeof vi.fn>, allowUnsecured?: boolean) {
+    return createFarmWorkflowRequestHandler({
+      workflows: [
+        {
+          id: "sync-users",
+          filePath: "/virtual/sync-users.ts",
+          routePath: "/api/_farm/workflows/sync-users",
+        },
+      ],
+      config: resolveWorkflowsConfig(allowUnsecured ? { allowUnsecured: true } : undefined),
+      loadModule: async () => ({ default: { run } }),
+    });
+  }
+
+  it("rejects unauthenticated workflow requests in production without a secret", async () => {
+    process.env.NODE_ENV = "production";
+    delete process.env.CRON_SECRET;
+    const run = vi.fn(async () => ({ ok: true }));
+    const handler = unsecuredHandler(run);
+
+    // Listing workflows must not be public.
+    const list = await handler(new Request("https://example.com/api/_farm/workflows"));
+    expect(list?.status).toBe(401);
+
+    // Executing a workflow must not be public.
+    const executed = await handler(
+      new Request("https://example.com/api/_farm/workflows/sync-users", { method: "POST" }),
+    );
+    expect(executed?.status).toBe(401);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("serves an unsecured workflow route when explicitly opted in", async () => {
+    process.env.NODE_ENV = "production";
+    delete process.env.CRON_SECRET;
+    const run = vi.fn(async () => ({ ok: true }));
+    const handler = unsecuredHandler(run, true);
+
+    const response = await handler(
+      new Request("https://example.com/api/_farm/workflows/sync-users", { method: "POST" }),
+    );
+    expect(response?.status).toBe(200);
+    expect(run).toHaveBeenCalledOnce();
+  });
+
+  it("reads the workflow secret from runtime bindings", async () => {
+    delete process.env.NODE_ENV;
+    delete process.env.CRON_SECRET;
+    (globalThis as { __env__?: unknown }).__env__ = { CRON_SECRET: "worker-secret" };
+    const run = vi.fn(async () => ({ ok: true }));
+    const handler = unsecuredHandler(run);
+    const url = "https://example.com/api/_farm/workflows/sync-users";
+
+    const unauthorized = await handler(new Request(url, { method: "POST" }));
+    expect(unauthorized?.status).toBe(401);
+
+    const authorized = await handler(
+      new Request(url, { method: "POST", headers: { authorization: "Bearer worker-secret" } }),
+    );
+    expect(authorized?.status).toBe(200);
+  });
+
   it("rejects workflow routes that browsers reinterpret", () => {
     for (const route of [
       "/api/../workflows",

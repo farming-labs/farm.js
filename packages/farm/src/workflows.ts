@@ -6,6 +6,7 @@ import {
   type ResolvedFarmServerConfig,
 } from "./server-http";
 import { searchParamsToObject } from "./search-params";
+import { isFarmDeployedRuntime, readFarmEnvironmentValue } from "./utils/runtime-env";
 import { decodeRouteSegment } from "./utils/decode";
 import { toPosixPath } from "./utils";
 import { validateConfigRouteSource } from "./plugins/route-pattern";
@@ -32,6 +33,12 @@ export interface FarmWorkflowsUserConfig {
   secretEnv?: string;
   /** Inline runner secret. Prefer secretEnv for deployed apps. */
   secret?: string;
+  /**
+   * Serve the workflow route without a secret in a deployed runtime.
+   * Defaults to false: without a secret the route is public, so production
+   * requests are rejected unless this is explicitly enabled.
+   */
+  allowUnsecured?: boolean;
 }
 
 export interface FarmWorkflowsResolvedConfig {
@@ -40,6 +47,7 @@ export interface FarmWorkflowsResolvedConfig {
   route: string;
   secretEnv: string;
   secret?: string;
+  allowUnsecured?: boolean;
 }
 
 export interface FarmWorkflowLogger {
@@ -152,6 +160,7 @@ export function resolveWorkflowsConfig(
     route: normalizeWorkflowRoute(options.route || DEFAULT_FARM_WORKFLOW_ROUTE),
     secretEnv: options.secretEnv || DEFAULT_FARM_WORKFLOW_SECRET_ENV,
     secret: options.secret,
+    allowUnsecured: options.allowUnsecured === true,
   };
 }
 
@@ -767,8 +776,20 @@ function verifyWorkflowSecret(
   request: Request,
   config: FarmWorkflowsResolvedConfig,
 ): Response | null {
-  const secret = config.secret || process.env[config.secretEnv] || "";
-  if (!secret) return null;
+  const secret = config.secret || readFarmEnvironmentValue(config.secretEnv) || "";
+  if (!secret) {
+    // No secret configured. Local development stays convenient, but a deployed
+    // runtime must not expose a route that lists and executes workflows to
+    // anonymous callers. Opt back in explicitly with .
+    if (config.allowUnsecured === true || !isFarmDeployedRuntime()) return null;
+    return Response.json(
+      {
+        error:
+          "Workflow route requires a secret. Set the CRON_SECRET environment variable, configure workflows.secret, or set workflows.allowUnsecured to true.",
+      },
+      { status: 401 },
+    );
+  }
 
   const authorization = request.headers.get("authorization") || "";
   const bearer = authorization.match(/^Bearer\s+(.+)$/i)?.[1] || "";

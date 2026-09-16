@@ -866,7 +866,7 @@ function compilerKeyedArrayWindowReplacements(
   value: unknown,
   sourceToken: object | undefined,
   expectedLength: number,
-): readonly CompilerKeyedArrayWindowReplaceHint[] | undefined {
+): CompilerKeyedArrayWindowReplaceHint[] | undefined {
   const target = compilerObject(value);
   if (!target || !sourceToken || !Array.isArray(value)) return undefined;
   const update = COMPILER_KEYED_ARRAY_WINDOW_REPLACEMENTS.get(target);
@@ -7351,23 +7351,23 @@ function reconcileCompilerKeyedArrayWindowReplace(
       return keyedRowInstancesByKey(nextInstances);
     }
 
-    const touchedIndices = new Set<number>();
-    for (const update of updates) {
-      for (let index = update.position; index < update.position + update.removedCount; index += 1) {
-        touchedIndices.add(index);
-      }
-    }
+    // Length-preserving windows share source positions. Walk their ranges in
+    // row order so overlaps are prepared once, without hashing every row index.
+    // The validated chain is a fresh array; consuming it does not change the hints.
+    updates.sort((left, right) => right.position - left.position);
+    let window = updates.pop();
+    const touchedInstances: CompilerKeyedRowInstance[] = [];
 
     for (let index = 0; index < previousInstances.length; index += 1) {
+      while (window && index >= window.position + window.removedCount) {
+        window = updates.pop();
+      }
       const instance = previousInstances[index];
-      const touched = touchedIndices.has(index);
-      if (
-        !instance ||
-        instance.index !== index ||
-        (touched
-          ? instance.element.parentNode !== root
-          : !Object.is(instance.item, finalValue[index]))
-      ) {
+      if (!instance || instance.index !== index) return undefined;
+      if (window && index >= window.position) {
+        if (instance.element.parentNode !== root) return undefined;
+        touchedInstances.push(instance);
+      } else if (!Object.is(instance.item, finalValue[index])) {
         return undefined;
       }
     }
@@ -7384,8 +7384,8 @@ function reconcileCompilerKeyedArrayWindowReplace(
       ]
     > = [];
     try {
-      for (const index of [...touchedIndices].sort((left, right) => left - right)) {
-        const instance = previousInstances[index];
+      for (const instance of touchedInstances) {
+        const index = instance.index;
         const item = finalValue[index];
         const key = keyedRowIdentity(props.rowKey(item, index));
         if (key !== instance.key) {

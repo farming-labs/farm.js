@@ -15,6 +15,12 @@ export interface FarmImageTransformInput {
   accept: string;
   formats: readonly FarmImageFormat[];
   signal: AbortSignal;
+  /**
+   * Byte ceiling for any source the transformer fetches itself. Supplied by the
+   * image handler; transformers that re-fetch the origin (Cloudflare) must
+   * enforce it, since they bypass the handler's bounded read.
+   */
+  maximumResponseBody?: number;
 }
 
 export interface FarmImageTransformResult {
@@ -132,6 +138,7 @@ export function createFarmImageHandler(
           accept,
           formats: config.formats,
           signal: request.signal,
+          maximumResponseBody: config.maximumResponseBody,
         });
         throwIfAborted(request.signal);
         validateTransformedResult(result, config);
@@ -162,13 +169,22 @@ export function createFarmImageHandler(
   };
 }
 
+/** Mirrors the `images.maximumResponseBody` default ("10mb"). */
+const DEFAULT_IMAGE_TRANSFORM_BODY_LIMIT = 10 * 1024 * 1024;
+
 export function createCloudflareImageTransformer(
   fetcher: typeof globalThis.fetch = globalThis.fetch,
 ): FarmImageTransformer {
-  return async ({ sourceUrl, width, quality, accept, formats, signal }) => {
+  return async ({ sourceUrl, width, quality, accept, formats, signal, maximumResponseBody }) => {
     const format = selectOutputFormat(accept, formats);
+    // Cloudflare resizing works by letting the edge fetch the origin, so this
+    // request cannot reuse the bytes the handler already read. It still must not
+    // be a weaker fetch than the validated one: `redirect: "manual"` keeps it
+    // from silently following a hop the handler never validated, and the body is
+    // read under the same ceiling as the handler's own read.
     const response = await fetcher(sourceUrl, {
       signal,
+      redirect: "manual",
       headers: { accept: "image/*" },
       cf: {
         image: {
@@ -180,6 +196,15 @@ export function createCloudflareImageTransformer(
       },
     } as RequestInit);
 
+    if (response.status >= 300 && response.status < 400) {
+      void cancelResponseBody(response);
+      throw new FarmImageRequestError(
+        "UNSUPPORTED_IMAGE",
+        502,
+        "Source image redirected after validation",
+      );
+    }
+
     if (!response.ok) {
       throw new FarmImageRequestError(
         "UNSUPPORTED_IMAGE",
@@ -188,7 +213,10 @@ export function createCloudflareImageTransformer(
       );
     }
 
-    const body = new Uint8Array(await response.arrayBuffer());
+    const body = await readResponseWithLimit(
+      response,
+      maximumResponseBody ?? DEFAULT_IMAGE_TRANSFORM_BODY_LIMIT,
+    );
     return {
       body,
       contentType:

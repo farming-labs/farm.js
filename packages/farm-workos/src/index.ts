@@ -1,3 +1,4 @@
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { WorkOS } from "@workos-inc/node";
 import { defineIntegration, integrationRoute, type FarmIntegrationLogger } from "@farm.js/core";
 import {
@@ -12,6 +13,11 @@ import {
 } from "@farm.js/integration-utils";
 import type { WorkOSRedirectQuery, WorkOSRedirectResult, WorkOSSessionResult } from "./client.js";
 import { workosClient } from "./client.js";
+
+interface WorkOSStatePayload {
+  state: string;
+  returnTo: string;
+}
 
 export interface WorkOSIntegrationInput {
   /** Existing WorkOS SDK instance. When provided, Farm does not construct its own client. */
@@ -149,21 +155,65 @@ export function workos(input: WorkOSIntegrationInput = {}) {
       clientId,
     });
 
+  // The OAuth `state` must be unguessable and bound to the browser that started
+  // the flow. We keep a random nonce in an HMAC-signed, http-only cookie and
+  // require the callback's state to match it, so an attacker cannot feed a
+  // victim a code/state pair from their own login (login CSRF / code injection).
+  const stateCookieName = "farm_workos_state";
+
+  function signState(payload: WorkOSStatePayload): string {
+    const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+    const signature = createHmac("sha256", cookiePassword).update(encoded).digest("hex");
+    return `${encoded}.${signature}`;
+  }
+
+  function unsignState(signed: string | null): WorkOSStatePayload | null {
+    if (!signed) return null;
+    const separator = signed.lastIndexOf(".");
+    if (separator <= 0) return null;
+    const encoded = signed.slice(0, separator);
+    const signature = signed.slice(separator + 1);
+    const expected = createHmac("sha256", cookiePassword).update(encoded).digest("hex");
+    if (signature.length !== expected.length) return null;
+    if (!timingSafeEqual(Buffer.from(signature, "utf8"), Buffer.from(expected, "utf8"))) {
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+      if (!parsed || typeof parsed !== "object") return null;
+      const { state, returnTo } = parsed as WorkOSStatePayload;
+      if (typeof state !== "string" || typeof returnTo !== "string") return null;
+      return { state, returnTo };
+    } catch {
+      return null;
+    }
+  }
+
   async function redirectToAuth(request: Request, screenHint: "sign-in" | "sign-up") {
     const requestUrl = new URL(request.url);
     const returnTo = getReturnTo(requestUrl.searchParams.get("returnTo"), "/dashboard");
     const callbackUrl = new URL(callbackPath, requestUrl.origin);
+    const state = randomBytes(16).toString("hex");
     const authorizationUrl = workos.userManagement.getAuthorizationUrl({
       provider: "authkit",
       clientId,
       redirectUri: callbackUrl.toString(),
       screenHint,
-      state: JSON.stringify({ returnTo }),
+      state,
     });
 
+    const headers = new Headers();
+    headers.append(
+      "set-cookie",
+      createRequestCookie(stateCookieName, signState({ state, returnTo }), request, {
+        maxAge: 600,
+      }),
+    );
+
     return {
-      redirectTo: authorizationUrl,
-    } satisfies WorkOSRedirectResult;
+      result: { redirectTo: authorizationUrl } satisfies WorkOSRedirectResult,
+      headers,
+    };
   }
 
   return defineIntegration({
@@ -206,13 +256,14 @@ export function workos(input: WorkOSIntegrationInput = {}) {
       integrationRoute.get<typeof loginPath, WorkOSRedirectResult, WorkOSRedirectQuery>(loginPath, {
         responseFormat: "json",
         async handler(request: Request) {
-          const result = await redirectToAuth(request, "sign-in");
+          const { result, headers } = await redirectToAuth(request, "sign-in");
 
           if (request.headers.get("x-farm-integration-client") === "1") {
-            return Response.json(result);
+            return Response.json(result, { headers });
           }
 
-          return Response.redirect(result.redirectTo, 302);
+          headers.set("location", result.redirectTo);
+          return new Response(null, { status: 302, headers });
         },
       }),
       integrationRoute.get<typeof signUpPath, WorkOSRedirectResult, WorkOSRedirectQuery>(
@@ -220,13 +271,14 @@ export function workos(input: WorkOSIntegrationInput = {}) {
         {
           responseFormat: "json",
           async handler(request: Request) {
-            const result = await redirectToAuth(request, "sign-up");
+            const { result, headers } = await redirectToAuth(request, "sign-up");
 
             if (request.headers.get("x-farm-integration-client") === "1") {
-              return Response.json(result);
+              return Response.json(result, { headers });
             }
 
-            return Response.redirect(result.redirectTo, 302);
+            headers.set("location", result.redirectTo);
+            return new Response(null, { status: 302, headers });
           },
         },
       ),
@@ -245,6 +297,14 @@ export function workos(input: WorkOSIntegrationInput = {}) {
             return new Response("Missing WorkOS authorization code.", { status: 400 });
           }
 
+          // Bind the callback to the browser that started the flow. Verify before
+          // the code is exchanged so an injected code is never redeemed.
+          const statePayload = unsignState(getCookieValue(request.headers, stateCookieName));
+          const state = requestUrl.searchParams.get("state");
+          if (!statePayload || !state || statePayload.state !== state) {
+            return new Response("Invalid WorkOS authentication state.", { status: 400 });
+          }
+
           const authentication = await workos.userManagement.authenticateWithCode({
             clientId,
             code,
@@ -258,22 +318,15 @@ export function workos(input: WorkOSIntegrationInput = {}) {
             return new Response("WorkOS did not return a sealed session.", { status: 500 });
           }
 
-          let returnTo = "/dashboard";
-          const rawState = requestUrl.searchParams.get("state");
-          if (rawState) {
-            try {
-              const parsed = JSON.parse(rawState) as { returnTo?: string };
-              returnTo = getReturnTo(parsed.returnTo ?? null, "/dashboard");
-            } catch {
-              returnTo = "/dashboard";
-            }
-          }
+          // Taken from the signed cookie, never from the untrusted query string.
+          const returnTo = getReturnTo(statePayload.returnTo, "/dashboard");
 
           const headers = new Headers();
-          headers.set(
+          headers.append(
             "set-cookie",
             createRequestCookie(cookieName, authentication.sealedSession, request),
           );
+          headers.append("set-cookie", clearRequestCookie(stateCookieName, request));
           headers.set("location", new URL(returnTo, requestUrl.origin).toString());
 
           return new Response(null, {

@@ -334,7 +334,15 @@ export class FarmClientDataCache {
 
   private notifyListeners(key: string, event?: "invalidate"): void {
     for (const listener of this.listeners.get(key) ?? []) {
-      listener(event);
+      // One subscriber must not be able to break the others, or to make an
+      // ordinary cache write or invalidation throw in its caller. This matches
+      // the isolation the global invalidation bus already provides.
+      try {
+        listener(event);
+      } catch (error) {
+        const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
+        console.warn(`[farm:client-cache] cache listener failed: ${detail}`);
+      }
     }
   }
 }
