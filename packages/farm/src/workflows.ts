@@ -328,17 +328,11 @@ export async function prepareFarmWorkflowsForNitro(config: {
   const tasks: PreparedFarmWorkflows["tasks"] = {};
   const scheduledTasks = createScheduledTasks(workflows);
 
-  const wrapperNames = new Map<string, string>();
+  const wrapperNames = resolveWorkflowWrapperFileNames(workflows.map((workflow) => workflow.id));
   for (const workflow of workflows) {
-    const fileName = workflowWrapperFileName(workflow.id);
-    const claimedBy = wrapperNames.get(fileName);
-    if (claimedBy !== undefined) {
-      throw new Error(
-        `Farm workflows ${JSON.stringify(claimedBy)} and ${JSON.stringify(workflow.id)} generate the same wrapper file ${JSON.stringify(`${fileName}.mjs`)}. Rename one of them.`,
-      );
-    }
-    wrapperNames.set(fileName, workflow.id);
-    const wrapperPath = toPosixPath(path.join(generatedDir, `${fileName}.mjs`));
+    const wrapperPath = toPosixPath(
+      path.join(generatedDir, `${wrapperNames.get(workflow.id)}.mjs`),
+    );
     await fs.writeFile(wrapperPath, createNitroTaskWrapper(workflow), "utf8");
     tasks[workflow.id] = {
       handler: wrapperPath,
@@ -796,21 +790,39 @@ function trimSlashes(value: string): string {
 }
 
 /**
- * Wrapper file name for a workflow id.
+ * Wrapper file names for a set of workflow ids.
  *
  * `safeFileName` is not injective: it maps `a/b` and `a-b` onto the same string,
- * and a case-insensitive filesystem (macOS and Windows by default) additionally
- * folds `Daily` onto `daily`. Two distinct workflows would then share one
- * generated wrapper and both run whichever was written last. Ids that survive
- * sanitizing and case-folding unchanged keep their readable file name; anything
- * that was rewritten gets a digest of the exact id appended, so distinct ids
- * always produce distinct files.
+ * and macOS and Windows additionally fold `Daily` onto `daily` on their default
+ * case-insensitive filesystems. Two workflows would then share one generated
+ * wrapper and both run whichever was written last. Only ids that actually
+ * collide are disambiguated, so ordinary ids keep a readable wrapper; every id
+ * in a colliding group gets a digest of the exact id appended, which keeps the
+ * result independent of discovery order.
  */
-function workflowWrapperFileName(id: string): string {
-  const safe = safeFileName(id);
-  const lowered = safe.toLowerCase();
-  if (safe === id && lowered === id) return safe;
-  return `${lowered}-${workflowIdFingerprint(id)}`;
+function resolveWorkflowWrapperFileNames(ids: readonly string[]): Map<string, string> {
+  const groups = new Map<string, number>();
+  for (const id of ids) {
+    const key = safeFileName(id).toLowerCase();
+    groups.set(key, (groups.get(key) ?? 0) + 1);
+  }
+
+  const resolved = new Map<string, string>();
+  const claimed = new Map<string, string>();
+  for (const id of ids) {
+    const base = safeFileName(id);
+    const key = base.toLowerCase();
+    const fileName = (groups.get(key) ?? 0) > 1 ? `${key}-${workflowIdFingerprint(id)}` : base;
+    const claimedBy = claimed.get(fileName.toLowerCase());
+    if (claimedBy !== undefined) {
+      throw new Error(
+        `Farm workflows ${JSON.stringify(claimedBy)} and ${JSON.stringify(id)} generate the same wrapper file ${JSON.stringify(`${fileName}.mjs`)}. Rename one of them.`,
+      );
+    }
+    claimed.set(fileName.toLowerCase(), id);
+    resolved.set(id, fileName);
+  }
+  return resolved;
 }
 
 /**
