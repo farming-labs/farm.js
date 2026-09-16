@@ -6340,69 +6340,6 @@ async function handleFarmRequestInContext(
   }
 
   ${
-    config.docs?.enabled
-      ? `
-  if (farmDocsHandler) {
-    const docsResponse = await farmDocsHandler(request.clone());
-    if (docsResponse) {
-      if (!docsResponse.headers.get("content-type")?.toLowerCase().includes("text/html")) {
-        return docsResponse;
-      }
-      const wrappedDocsResponse = await wrapFarmDocsResponseWithLayouts(
-        request,
-        docsResponse,
-      );
-      const docsHeaders = new Headers(wrappedDocsResponse.headers);
-      docsHeaders.set("x-farm-preload-buffered", "1");
-      return new Response(wrappedDocsResponse.body, {
-        status: wrappedDocsResponse.status,
-        statusText: wrappedDocsResponse.statusText,
-        headers: docsHeaders,
-      });
-    }
-  }
-  `
-      : ""
-  }
-
-  ${
-    hasMarkdownPages
-      ? `
-  const markdownSourceResponse = await createFarmMarkdownSourceResponse?.({
-    request: request.clone(),
-    config: farmMdxConfig,
-    resolveSource: (targetPathname) => {
-      const match = matchPageRoute(getFarmRoutePathname(targetPathname));
-      return match?.route?.markdownSource || null;
-    },
-  });
-  if (markdownSourceResponse) {
-    return markdownSourceResponse;
-  }
-  `
-      : ""
-  }
-
-  ${
-    config.md?.enabled
-      ? `
-  if (farmMarkdownConfig?.enabled) {
-    const markdownResponse = await createMarkdownMirrorResponse({
-      request: request.clone(),
-      config: farmMarkdownConfig,
-      routeExists: (targetPathname) =>
-        Boolean(matchPageRoute(getFarmRoutePathname(targetPathname))),
-      renderPage: (targetRequest) => handleFarmRequest(targetRequest),
-    });
-    if (markdownResponse) {
-      return markdownResponse;
-    }
-  }
-  `
-      : ""
-  }
-
-  ${
     hasMiddlewareRuntime
       ? `
   const requestBeforeMiddleware = request;
@@ -6428,6 +6365,73 @@ async function handleFarmRequestInContext(
   const middlewareContext = undefined;
   const middlewareHeaders = undefined;
   `
+  }
+
+  ${
+    config.docs?.enabled
+      ? `
+  // Docs responses are served after app middleware so route guards and
+  // middleware headers apply to the docs engine like any other page content.
+  if (farmDocsHandler) {
+    const docsResponse = await farmDocsHandler(request.clone());
+    if (docsResponse) {
+      if (!docsResponse.headers.get("content-type")?.toLowerCase().includes("text/html")) {
+        return applyProductionMiddlewareHeaders(docsResponse, middlewareHeaders);
+      }
+      const wrappedDocsResponse = await wrapFarmDocsResponseWithLayouts(
+        request,
+        docsResponse,
+      );
+      const docsHeaders = new Headers(wrappedDocsResponse.headers);
+      docsHeaders.set("x-farm-preload-buffered", "1");
+      return applyProductionMiddlewareHeaders(new Response(wrappedDocsResponse.body, {
+        status: wrappedDocsResponse.status,
+        statusText: wrappedDocsResponse.statusText,
+        headers: docsHeaders,
+      }), middlewareHeaders);
+    }
+  }
+  `
+      : ""
+  }
+
+  ${
+    hasMarkdownPages
+      ? `
+  // The raw markdown source of a page route is the page's content in another
+  // representation; middleware guarding the route must run before serving it.
+  const markdownSourceResponse = await createFarmMarkdownSourceResponse?.({
+    request: request.clone(),
+    config: farmMdxConfig,
+    resolveSource: (targetPathname) => {
+      const match = matchPageRoute(getFarmRoutePathname(targetPathname));
+      return match?.route?.markdownSource || null;
+    },
+  });
+  if (markdownSourceResponse) {
+    return applyProductionMiddlewareHeaders(markdownSourceResponse, middlewareHeaders);
+  }
+  `
+      : ""
+  }
+
+  ${
+    config.md?.enabled
+      ? `
+  if (farmMarkdownConfig?.enabled) {
+    const markdownResponse = await createMarkdownMirrorResponse({
+      request: request.clone(),
+      config: farmMarkdownConfig,
+      routeExists: (targetPathname) =>
+        Boolean(matchPageRoute(getFarmRoutePathname(targetPathname))),
+      renderPage: (targetRequest) => handleFarmRequest(targetRequest),
+    });
+    if (markdownResponse) {
+      return applyProductionMiddlewareHeaders(markdownResponse, middlewareHeaders);
+    }
+  }
+  `
+      : ""
   }
 
   ${

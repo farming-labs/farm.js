@@ -1731,6 +1731,16 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               docsHeaders.set(key, Array.isArray(value) ? value.join(", ") : value);
             }
           }
+          // Docs and raw markdown-source responses expose page content, so app
+          // middleware must pass before they are sent — matching the production
+          // entry, where these handlers run after the middleware runner.
+          const runAppMiddlewareForContentRoute = async (): Promise<boolean> => {
+            if (!middlewareManager?.hasMiddleware()) return false;
+            const middlewareRequest = createRequestFromNodeRequest(req, new URL(fullUrl));
+            return farmApp
+              .getServerRenderer()
+              .runWithRequestContext(middlewareRequest, () => middlewareManager!.execute(req, res));
+          };
           if (farmDocsHandler) {
             const docsRequest = new Request(fullUrl, {
               method: requestMethod,
@@ -1738,6 +1748,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             });
             const docsResponse = await farmDocsHandler(docsRequest.clone());
             if (docsResponse) {
+              if (await runAppMiddlewareForContentRoute()) return;
               await sendWebResponse(
                 res,
                 await wrapFarmDocsResponseWithLayouts(docsRequest, docsResponse),
@@ -1769,6 +1780,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             },
           });
           if (markdownSourceResponse) {
+            if (await runAppMiddlewareForContentRoute()) return;
             await sendWebResponse(res, markdownSourceResponse);
             return;
           }
@@ -1784,6 +1796,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             renderPage: async (request) => fetch(request),
           });
           if (markdownResponse) {
+            if (await runAppMiddlewareForContentRoute()) return;
             await sendWebResponse(res, markdownResponse);
             return;
           }

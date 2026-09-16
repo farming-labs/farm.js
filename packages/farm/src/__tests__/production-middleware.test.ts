@@ -424,6 +424,33 @@ describe("production middleware runtime", () => {
         await expect(pprResponse.text()).resolves.toContain("configured context PPR route");
       }
 
+      // Raw markdown-source routes serve page content, so app middleware must
+      // run first: a guard on the route blocks the .md representation too.
+      const guardedMarkdownResponse = await serverModule.default.fetch(
+        new Request("https://example.test/dashboard/private-notes.md"),
+      );
+      expect(guardedMarkdownResponse.status).toBe(401);
+      expect(guardedMarkdownResponse.headers.get("x-file-response")).toBe("markdown-guard");
+      const guardedMarkdownBody = await guardedMarkdownResponse.text();
+      expect(guardedMarkdownBody).not.toContain("dashboard-private-notes-source");
+
+      // A pass-through middleware match still serves the source and carries
+      // the middleware's response headers.
+      const allowedMarkdownResponse = await serverModule.default.fetch(
+        new Request("https://example.test/dashboard/notes.md"),
+      );
+      expect(allowedMarkdownResponse.status).toBe(200);
+      expect(allowedMarkdownResponse.headers.get("content-type")).toContain("text/markdown");
+      expect(allowedMarkdownResponse.headers.get("x-farm-middleware")).toBe("yes");
+      await expect(allowedMarkdownResponse.text()).resolves.toContain("dashboard-notes-source");
+
+      // Routes outside every matcher keep serving their markdown source.
+      const publicMarkdownResponse = await serverModule.default.fetch(
+        new Request("https://example.test/public-notes.md"),
+      );
+      expect(publicMarkdownResponse.status).toBe(200);
+      await expect(publicMarkdownResponse.text()).resolves.toContain("public-notes-source");
+
       const generatedMetadataResponse = await serverModule.default.fetch(
         new Request("https://example.test/metadata/42?variant=featured"),
       );
