@@ -68,7 +68,7 @@ function rowDescriptor(item: Item): CompilerKeyedRowElement {
   };
 }
 
-function createWindowHarness(initialItems: Item[]) {
+function createWindowHarness(initialItems: Item[], reactivity?: "static" | "hybrid") {
   const counters = { executions: 0, renders: 0, keys: 0, descriptors: 0, bindings: 0 };
   let bindingFailure: string | undefined;
   let descriptorFailure: string | undefined;
@@ -96,6 +96,7 @@ function createWindowHarness(initialItems: Item[]) {
   const Table = createCompiledComponentWithFeatures(
     {
       displayName: "WindowReplaceTable",
+      reactivity,
       initialize: () => [initialItems],
       render(_props: Record<string, never>, state, blocks) {
         counters.executions += 1;
@@ -447,6 +448,103 @@ describe("compiled keyed-array window replacement hints", () => {
       bindings: 64,
     });
   });
+
+  for (const reactivity of ["static", "hybrid"] as const) {
+    it.each(["single", "queued", "overlapping"] as const)(
+      `retains the element index for %s same-key refreshes in ${reactivity}`,
+      async (mode) => {
+        const initialItems = Array.from(
+          { length: 256 },
+          (_, index): Item => ({ id: `row-${index}`, label: `Row ${index}` }),
+        );
+        const harness = createWindowHarness(initialItems, reactivity);
+        const container = document.createElement("div");
+        document.body.append(container);
+        const root = createRoot(container);
+        roots.push(root);
+        await act(async () => root.render(<harness.Table />));
+        const initialRows = [...container.querySelectorAll("li")];
+        let indexWrites = 0;
+        const originalSet = WeakMap.prototype.set;
+        vi.spyOn(WeakMap.prototype, "set").mockImplementation(function (
+          this: WeakMap<object, unknown>,
+          key: object,
+          value: unknown,
+        ) {
+          if (
+            value !== null &&
+            typeof value === "object" &&
+            "element" in value &&
+            value.element === key
+          ) {
+            indexWrites += 1;
+          }
+          return originalSet.call(this, key, value);
+        });
+
+        let expected = initialItems;
+        for (let round = 0; round < 2; round += 1) {
+          indexWrites = 0;
+          harness.counters.keys = 0;
+          harness.counters.descriptors = 0;
+          harness.counters.bindings = 0;
+          const secondPosition = mode === "overlapping" ? 80 : 160;
+          const first = expected.slice(64, 96).map((item) => ({
+            ...item,
+            label: `First ${round}: ${item.id}`,
+          }));
+          const second = expected.slice(secondPosition, secondPosition + 32).map((item) => ({
+            ...item,
+            label: `Second ${round}: ${item.id}`,
+          }));
+          expected = (expected as WindowArray).toSpliced(64, 32, ...first);
+          if (mode !== "single") {
+            expected = (expected as WindowArray).toSpliced(secondPosition, 32, ...second);
+          }
+          await act(async () => {
+            if (mode === "single") harness.replace(64, 32, first);
+            else harness.queueRefreshes(64, first, secondPosition, second);
+            await flushCompilerUpdates();
+          });
+
+          expect(indexWrites).toBe(0);
+          const rows = [...container.querySelectorAll("li")];
+          expect(rows.map((row) => row.textContent)).toEqual(expected.map((item) => item.label));
+          rows.forEach((row, index) => expect(row).toBe(initialRows[index]));
+          const touched = mode === "single" ? 32 : mode === "queued" ? 64 : 48;
+          expect(harness.counters).toEqual({
+            executions: 1,
+            renders: 1,
+            keys: touched,
+            descriptors: 0,
+            bindings: touched,
+          });
+        }
+
+        // Structural replacements still rebuild the index. A later same-key
+        // update must use the new instance and the newly committed collection.
+        indexWrites = 0;
+        await act(async () => {
+          harness.replace(32, 1, [{ id: "fresh", label: "Fresh row" }]);
+          await flushCompilerUpdates();
+        });
+        expect(indexWrites).toBe(initialItems.length);
+        expect(initialRows[32].isConnected).toBe(false);
+        const freshRow = container.querySelector('[data-key="fresh"]');
+        expect(freshRow?.textContent).toBe("Fresh row");
+        indexWrites = 0;
+        harness.counters.keys = 0;
+        await act(async () => {
+          harness.replace(32, 1, [{ id: "fresh", label: "Fresh row updated" }]);
+          await flushCompilerUpdates();
+        });
+        expect(indexWrites).toBe(0);
+        expect(harness.counters.keys).toBe(1);
+        expect(container.querySelector('[data-key="fresh"]')).toBe(freshRow);
+        expect(freshRow?.textContent).toBe("Fresh row updated");
+      },
+    );
+  }
 
   it("collapses overlapping queued refreshes and applies the last value", async () => {
     const initialItems = Array.from(
@@ -1582,6 +1680,7 @@ describe("compiled keyed-array window replacement hints", () => {
     const calls: string[] = [];
     let replace = () => undefined;
     let refresh = () => undefined;
+    let refreshRetained = (_round: number) => undefined;
     let reuse = () => undefined;
     let resize = () => undefined;
     let resizeQueued = () => undefined;
@@ -1602,6 +1701,18 @@ describe("compiled keyed-array window replacement hints", () => {
             state[0].set((previous) =>
               hintedWindowReplace(previous as Item[], 2, 1, [
                 { id: "d", label: "Delta refreshed" },
+              ]),
+            );
+          };
+          refreshRetained = (round) => {
+            state[0].set((previous) =>
+              hintedWindowReplace(previous as Item[], 1, 1, [
+                { id: "f", label: `Phi retained ${round}` },
+              ]),
+            );
+            state[0].set((previous) =>
+              hintedWindowReplace(previous as Item[], 2, 1, [
+                { id: "d", label: `Delta retained ${round}` },
               ]),
             );
           };
@@ -1781,6 +1892,26 @@ describe("compiled keyed-array window replacement hints", () => {
     });
     expect(calls).toEqual(["f:Phi refreshed:1", "d:Delta refreshed:2"]);
     calls.length = 0;
+
+    const phiRow = container.querySelector('[data-key="f"]');
+    for (let round = 1; round <= 2; round += 1) {
+      await act(async () => {
+        refreshRetained(round);
+        await flushCompilerUpdates();
+      });
+      expect(container.querySelector('[data-key="f"]')).toBe(phiRow);
+      expect(container.querySelector('[data-key="d"]')).toBe(deltaRow);
+      expect(container.querySelector('[aria-label="Edit d"]')).toBe(input);
+      expect(input.value).toBe(`Delta retained ${round}`);
+      expect(document.activeElement).toBe(input);
+      expect([input.selectionStart, input.selectionEnd]).toEqual([1, 3]);
+      await act(async () => {
+        (container.querySelector('[data-row-button="f"]') as HTMLButtonElement).click();
+        (container.querySelector('[data-row-button="d"]') as HTMLButtonElement).click();
+      });
+      expect(calls).toEqual([`f:Phi retained ${round}:1`, `d:Delta retained ${round}:2`]);
+      calls.length = 0;
+    }
 
     await act(async () => {
       resize();

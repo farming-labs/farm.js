@@ -9307,11 +9307,15 @@ function createKeyedRowsBlockComponent(
           this.hasReactOwnedRows(),
         );
         if (positionedInstances) {
-          this.instances = new Map(positionedInstances);
-          this.rebuildElementIndex(this.instances);
-          const keys = [...this.instances.keys()];
-          this.pruneEventHandlers(keys);
-          this.pruneConditionalListeners(keys);
+          // Position refreshes return the original map only when row instances,
+          // order, and elements are unchanged; their item/binding data is current.
+          if (positionedInstances !== this.instances) {
+            this.instances = new Map(positionedInstances);
+            this.rebuildElementIndex(this.instances);
+            const keys = [...this.instances.keys()];
+            this.pruneEventHandlers(keys);
+            this.pruneConditionalListeners(keys);
+          }
           this.commitCurrentCollection(dirtyState);
           afterCommit?.();
           return;
