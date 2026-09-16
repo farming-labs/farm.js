@@ -32,6 +32,7 @@ export {
   parsePreviewPublicUrl,
   previewFarm,
   resolvePreviewTarget,
+  runPreviewTunnel,
   type PreviewFarmOptions,
   type PreviewFarmResult,
   type PreviewTarget,

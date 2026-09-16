@@ -111,6 +111,61 @@ describe("client cache persistence engine", () => {
     expect(clear).toHaveBeenCalledTimes(1);
   });
 
+  it("does not hydrate into the cache after disposal", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const entry = persisted({ email: "alice@example.com" });
+    const adapter: FarmClientCacheAdapter = {
+      keys: async () => {
+        await gate;
+        return ["user:profile"];
+      },
+      get: async () => entry,
+      set: async () => {},
+      delete: async () => {},
+      clear: async () => {},
+    };
+
+    initPersistedClientCache(adapter, { flushDelayMs: 0 });
+    // Hydration is parked on the adapter read; dispose before it resumes.
+    disposePersistedClientCache();
+    release();
+    await microtasks();
+
+    expect(getFarmClientDataCache().get("user:profile")).toBeUndefined();
+  });
+
+  it("does not let a disposed engine's hydration reach the next adapter", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const stale = persisted({ email: "alice@example.com" });
+    const first: FarmClientCacheAdapter = {
+      keys: async () => {
+        await gate;
+        return ["user:profile"];
+      },
+      get: async () => stale,
+      set: async () => {},
+      delete: async () => {},
+      clear: async () => {},
+    };
+
+    initPersistedClientCache(first, { flushDelayMs: 0 });
+    // Reconfiguring disposes the first engine while its hydration is parked.
+    const { adapter: second, store } = memoryAdapter();
+    initPersistedClientCache(second, { flushDelayMs: 0 });
+    release();
+    await microtasks();
+    await flushPersistedClientCache();
+
+    expect(getFarmClientDataCache().get("user:profile")).toBeUndefined();
+    expect(store.size).toBe(0);
+  });
+
   it("hydrates persisted entries stale-but-visible", async () => {
     const { adapter } = memoryAdapter({
       catalog: persisted({ items: ["a"] }),

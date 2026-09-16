@@ -125,9 +125,10 @@ export async function prepareFarmCronForNitro(config: {
   await fs.mkdir(generatedDir, { recursive: true });
 
   const tasks: PreparedFarmCron["tasks"] = {};
+  const wrapperNames = resolveCronWrapperFileNames(cron.jobs.map((job) => job.name));
   for (const job of cron.jobs) {
     const taskName = getFarmCronTaskName(job.name);
-    const wrapperPath = toPosixPath(path.join(generatedDir, `${safeFileName(job.name)}.mjs`));
+    const wrapperPath = toPosixPath(path.join(generatedDir, `${wrapperNames.get(job.name)}.mjs`));
     await fs.writeFile(wrapperPath, createNitroCronTaskWrapper(job, cron.secretEnv), "utf8");
     tasks[taskName] = {
       handler: wrapperPath,
@@ -480,6 +481,55 @@ export default defineTask({
   }
 });
 `.trim();
+}
+
+/**
+ * Wrapper file names for a set of cron job names.
+ *
+ * Cron names are case-sensitive and `Daily` and `daily` are both valid, distinct
+ * jobs — but macOS and Windows use case-insensitive filesystems by default, so
+ * their wrappers would overwrite one another and both jobs would run whichever
+ * file was written last. Names are only disambiguated when they actually
+ * collide case-insensitively, so ordinary names such as `dailyCleanup` keep a
+ * readable wrapper; every name in a colliding group gets a digest of the exact
+ * job name appended, which keeps the result independent of configuration order.
+ */
+function resolveCronWrapperFileNames(names: readonly string[]): Map<string, string> {
+  const groups = new Map<string, number>();
+  for (const name of names) {
+    const key = safeFileName(name).toLowerCase();
+    groups.set(key, (groups.get(key) ?? 0) + 1);
+  }
+
+  const resolved = new Map<string, string>();
+  const claimed = new Map<string, string>();
+  for (const name of names) {
+    const base = safeFileName(name);
+    const key = base.toLowerCase();
+    const fileName = (groups.get(key) ?? 0) > 1 ? `${key}-${cronNameFingerprint(name)}` : base;
+    const claimedBy = claimed.get(fileName.toLowerCase());
+    if (claimedBy !== undefined) {
+      throw new Error(
+        `Farm cron jobs ${JSON.stringify(claimedBy)} and ${JSON.stringify(name)} generate the same wrapper file ${JSON.stringify(`${fileName}.mjs`)}. Rename one of them.`,
+      );
+    }
+    claimed.set(fileName.toLowerCase(), name);
+    resolved.set(name, fileName);
+  }
+  return resolved;
+}
+
+/**
+ * FNV-1a. This module is bundled into server runtimes without node:crypto, and
+ * the digest only needs to separate file names.
+ */
+function cronNameFingerprint(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
 function safeFileName(value: string): string {

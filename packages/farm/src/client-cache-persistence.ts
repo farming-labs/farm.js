@@ -343,6 +343,11 @@ export function disposePersistedClientCache(): void {
   const engine = activeEngine;
   if (!engine) return;
   activeEngine = undefined;
+  // Hydration is asynchronous and may already be parked on an adapter read.
+  // Marking the engine disabled makes that in-flight pass stop before it writes,
+  // so a disposed engine cannot repopulate the shared cache after logout — or
+  // push the previous user's entries into whichever adapter is attached next.
+  engine.disabled = true;
   engine.cache.attachPersistence(undefined);
   if (engine.flushTimer !== undefined) {
     clearTimeout(engine.flushTimer);

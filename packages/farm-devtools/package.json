@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/devtools",
-  "version": "0.1.0-beta.0",
+  "version": "0.1.0-beta.1",
   "description": "Development workspace inspector for Farm.js routes, runtime, and browser modules",
   "keywords": [
     "devtools",
@@ -47,10 +47,10 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@farm.js/core": "workspace:*",
     "@fontsource-variable/geist-mono": "5.3.0"
   },
   "devDependencies": {
+    "@farm.js/core": "workspace:*",
     "@fontsource-variable/geist": "5.3.0",
     "@types/node": "^20.10.5",
     "esbuild": "^0.28.0",
@@ -59,6 +59,9 @@
     "typescript": "^5.3.3",
     "vite": "^5.0.10",
     "vitest": "^3.2.7"
+  },
+  "peerDependencies": {
+    "@farm.js/core": ">=0.1.0-beta.96 <0.2.0"
   },
   "engines": {
     "node": ">=22.13.0"
