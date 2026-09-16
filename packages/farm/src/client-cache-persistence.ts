@@ -138,6 +138,7 @@ type PersistenceEngine = {
   flushTimer: ReturnType<typeof setTimeout> | undefined;
   hydrating: boolean;
   disabled: boolean;
+  clearing: boolean;
 };
 
 let activeEngine: PersistenceEngine | undefined;
@@ -265,7 +266,9 @@ function createSink(engine: PersistenceEngine): FarmClientCachePersistenceSink {
       scheduleFlush(engine);
     },
     onClear() {
-      if (engine.disabled) return;
+      // clearPersistedCache awaits the adapter itself; skip the fire-and-forget
+      // clear so one logout does not race two clears (and two error reports).
+      if (engine.disabled || engine.clearing) return;
       engine.pendingSets.clear();
       engine.pendingDeletes.clear();
       void engine.adapter.clear().catch((error) => disableEngine(engine, error));
@@ -298,6 +301,7 @@ export function initPersistedClientCache(
     flushTimer: undefined,
     hydrating: false,
     disabled: false,
+    clearing: false,
   };
 
   activeEngine = engine;
@@ -355,7 +359,23 @@ export function disposePersistedClientCache(): void {
  */
 export async function clearPersistedCache(): Promise<void> {
   const engine = activeEngine;
-  if (!engine) return;
+  if (!engine) {
+    // Persistence is optional, but logout must mean the same thing with or
+    // without an adapter: the previous session's data stops being readable.
+    getFarmClientDataCache().clear();
+    return;
+  }
+  engine.pendingSets.clear();
+  engine.pendingDeletes.clear();
+  // Clearing the persisted copy alone leaves the in-memory cache holding the
+  // signed-out user's data, which a single-page app keeps serving to whoever
+  // uses the tab next. Drop both.
+  engine.clearing = true;
+  try {
+    engine.cache.clear();
+  } finally {
+    engine.clearing = false;
+  }
   engine.pendingSets.clear();
   engine.pendingDeletes.clear();
   try {

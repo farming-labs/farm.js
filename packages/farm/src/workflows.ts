@@ -6,6 +6,7 @@ import {
   type ResolvedFarmServerConfig,
 } from "./server-http";
 import { searchParamsToObject } from "./search-params";
+import { isFarmDeployedRuntime, readFarmEnvironmentValue } from "./utils/runtime-env";
 import { decodeRouteSegment } from "./utils/decode";
 import { toPosixPath } from "./utils";
 import { validateConfigRouteSource } from "./plugins/route-pattern";
@@ -32,6 +33,12 @@ export interface FarmWorkflowsUserConfig {
   secretEnv?: string;
   /** Inline runner secret. Prefer secretEnv for deployed apps. */
   secret?: string;
+  /**
+   * Serve the workflow route without a secret in a deployed runtime.
+   * Defaults to false: without a secret the route is public, so production
+   * requests are rejected unless this is explicitly enabled.
+   */
+  allowUnsecured?: boolean;
 }
 
 export interface FarmWorkflowsResolvedConfig {
@@ -40,6 +47,7 @@ export interface FarmWorkflowsResolvedConfig {
   route: string;
   secretEnv: string;
   secret?: string;
+  allowUnsecured?: boolean;
 }
 
 export interface FarmWorkflowLogger {
@@ -152,6 +160,7 @@ export function resolveWorkflowsConfig(
     route: normalizeWorkflowRoute(options.route || DEFAULT_FARM_WORKFLOW_ROUTE),
     secretEnv: options.secretEnv || DEFAULT_FARM_WORKFLOW_SECRET_ENV,
     secret: options.secret,
+    allowUnsecured: options.allowUnsecured === true,
   };
 }
 
@@ -328,8 +337,11 @@ export async function prepareFarmWorkflowsForNitro(config: {
   const tasks: PreparedFarmWorkflows["tasks"] = {};
   const scheduledTasks = createScheduledTasks(workflows);
 
+  const wrapperNames = resolveWorkflowWrapperFileNames(workflows.map((workflow) => workflow.id));
   for (const workflow of workflows) {
-    const wrapperPath = toPosixPath(path.join(generatedDir, `${safeFileName(workflow.id)}.mjs`));
+    const wrapperPath = toPosixPath(
+      path.join(generatedDir, `${wrapperNames.get(workflow.id)}.mjs`),
+    );
     await fs.writeFile(wrapperPath, createNitroTaskWrapper(workflow), "utf8");
     tasks[workflow.id] = {
       handler: wrapperPath,
@@ -764,8 +776,20 @@ function verifyWorkflowSecret(
   request: Request,
   config: FarmWorkflowsResolvedConfig,
 ): Response | null {
-  const secret = config.secret || process.env[config.secretEnv] || "";
-  if (!secret) return null;
+  const secret = config.secret || readFarmEnvironmentValue(config.secretEnv) || "";
+  if (!secret) {
+    // No secret configured. Local development stays convenient, but a deployed
+    // runtime must not expose a route that lists and executes workflows to
+    // anonymous callers. Opt back in explicitly with .
+    if (config.allowUnsecured === true || !isFarmDeployedRuntime()) return null;
+    return Response.json(
+      {
+        error:
+          "Workflow route requires a secret. Set the CRON_SECRET environment variable, configure workflows.secret, or set workflows.allowUnsecured to true.",
+      },
+      { status: 401 },
+    );
+  }
 
   const authorization = request.headers.get("authorization") || "";
   const bearer = authorization.match(/^Bearer\s+(.+)$/i)?.[1] || "";
@@ -784,6 +808,55 @@ function joinRoute(...parts: string[]): string {
 
 function trimSlashes(value: string): string {
   return value.replace(/^\/+|\/+$/g, "");
+}
+
+/**
+ * Wrapper file names for a set of workflow ids.
+ *
+ * `safeFileName` is not injective: it maps `a/b` and `a-b` onto the same string,
+ * and macOS and Windows additionally fold `Daily` onto `daily` on their default
+ * case-insensitive filesystems. Two workflows would then share one generated
+ * wrapper and both run whichever was written last. Only ids that actually
+ * collide are disambiguated, so ordinary ids keep a readable wrapper; every id
+ * in a colliding group gets a digest of the exact id appended, which keeps the
+ * result independent of discovery order.
+ */
+function resolveWorkflowWrapperFileNames(ids: readonly string[]): Map<string, string> {
+  const groups = new Map<string, number>();
+  for (const id of ids) {
+    const key = safeFileName(id).toLowerCase();
+    groups.set(key, (groups.get(key) ?? 0) + 1);
+  }
+
+  const resolved = new Map<string, string>();
+  const claimed = new Map<string, string>();
+  for (const id of ids) {
+    const base = safeFileName(id);
+    const key = base.toLowerCase();
+    const fileName = (groups.get(key) ?? 0) > 1 ? `${key}-${workflowIdFingerprint(id)}` : base;
+    const claimedBy = claimed.get(fileName.toLowerCase());
+    if (claimedBy !== undefined) {
+      throw new Error(
+        `Farm workflows ${JSON.stringify(claimedBy)} and ${JSON.stringify(id)} generate the same wrapper file ${JSON.stringify(`${fileName}.mjs`)}. Rename one of them.`,
+      );
+    }
+    claimed.set(fileName.toLowerCase(), id);
+    resolved.set(id, fileName);
+  }
+  return resolved;
+}
+
+/**
+ * FNV-1a. This module is bundled into server runtimes that do not provide
+ * node:crypto, and the digest only needs to separate file names.
+ */
+function workflowIdFingerprint(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
 function safeFileName(value: string): string {

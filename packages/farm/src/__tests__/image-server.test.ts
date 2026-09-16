@@ -348,6 +348,38 @@ describe("Farm image optimizer", () => {
   });
 });
 
+describe("image cache keys", () => {
+  it("shares one cache entry across Accept headers that negotiate the same format", async () => {
+    const transform = vi.fn();
+    const fetcher = vi.fn(
+      async () => new Response(PNG, { headers: { "content-type": "image/png" } }),
+    );
+    const handler = createFarmImageHandler(resolveFarmImageConfig(undefined), {
+      fetch: fetcher as typeof fetch,
+      transform: passthroughTransformer(transform),
+    });
+
+    const variants = [
+      "image/webp",
+      "image/webp,*/*;q=0.8",
+      "*/*;q=0.8,image/webp",
+      "image/webp;q=1.0, image/png;q=0.5",
+    ];
+
+    for (const accept of variants) {
+      const response = await handler(
+        new Request(optimizerUrl("/assets/product.png"), { headers: { accept } }),
+      );
+      expect(response.status).toBe(200);
+    }
+
+    // Every variant negotiates to the same output format, so one transform
+    // should serve all of them instead of each header becoming its own key.
+    expect(transform).toHaveBeenCalledTimes(1);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("image runtime adapters", () => {
   it("honors Accept quality values when selecting an output format", () => {
     const formats = ["image/avif", "image/webp"] as const;
@@ -384,6 +416,59 @@ describe("image runtime adapters", () => {
         },
       }),
     );
+  });
+
+  it("does not follow redirects the validated fetch never saw", async () => {
+    const fetcher = vi.fn(
+      async () =>
+        new Response(null, {
+          status: 302,
+          headers: { location: "http://169.254.169.254/latest/meta-data" },
+        }),
+    );
+    const transform = createCloudflareImageTransformer(fetcher as typeof fetch);
+
+    await expect(
+      transform({
+        source: PNG,
+        sourceUrl: new URL("https://images.example.test/photo.png"),
+        sourceType: "image/png",
+        width: 828,
+        quality: 75,
+        accept: "image/webp",
+        formats: ["image/webp"],
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow(/redirected after validation/);
+
+    // The transform request must opt out of automatic redirect following, so a
+    // hop added after Farm validated the source is never fetched.
+    expect(fetcher).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ redirect: "manual" }),
+    );
+  });
+
+  it("enforces the configured body limit on its own fetch", async () => {
+    const oversized = new Uint8Array(2048);
+    const fetcher = vi.fn(
+      async () => new Response(oversized, { headers: { "content-type": "image/webp" } }),
+    );
+    const transform = createCloudflareImageTransformer(fetcher as typeof fetch);
+
+    await expect(
+      transform({
+        source: PNG,
+        sourceUrl: new URL("https://images.example.test/photo.png"),
+        sourceType: "image/png",
+        width: 828,
+        quality: 75,
+        accept: "image/webp",
+        formats: ["image/webp"],
+        signal: new AbortController().signal,
+        maximumResponseBody: 1024,
+      }),
+    ).rejects.toThrow(/too large/i);
   });
 
   it.each([
