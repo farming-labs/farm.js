@@ -496,7 +496,11 @@ through one document fragment. It then removes only the replaced window. When th
 has the same length and the same keys in the same order, Farm prepares every binding read and
 changed DOM target across the complete window first, patches the existing rows in place, and
 updates the stored row objects used by later events. That path creates no descriptors or DOM rows,
-and preserves row identity, focus, and selection. A window may instead grow or shrink while it
+and preserves row identity, focus, and selection. Validated same-key row and window refreshes also
+keep the existing row map and element lookup, and skip redundant cache cleanup instead of
+rebuilding whole-list bookkeeping. Source and key validation still run, and each flush commits the
+new collection token for subsequent updates. Structural changes retain index rebuilding and cache
+cleanup. A window may instead grow or shrink while it
 reorders keys from inside its own removed interval and mixes them with globally fresh keys. Farm
 prepares all reused binding updates, new descriptors, binding snapshots, and detached rows before
 the first DOM write. It removes only retired rows, preserves each reused row, batches adjacent new
