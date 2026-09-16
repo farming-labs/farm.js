@@ -255,6 +255,12 @@ regressions require zero key enumerations for retained refreshes and only the st
 required enumeration for fresh-key or mixed replacements. Repeated updates, overlap, DOM identity,
 and existing keys transferred between windows remain covered; full-chain validation is unchanged.
 
+Length-preserving queued windows also use a sorted range cursor during full-row validation,
+avoiding a touched-position set, a hash lookup per row, and sorting each touched position.
+The complete row snapshot and validation remain; this is not a constant-time update. Static/hybrid
+regressions cover reversed, overlapping, contained, adjacent, and edge ranges, including longer
+chains, and require each final position to be prepared once in row order before any commit.
+
 Source-level tests also read the actual queued-refresh buttons and require two position hints for
 the optimized handler and none for its snapshot control in both compiler modes. They compare both
 native handlers across repeated 10,000-row updates, including row values and object identity.

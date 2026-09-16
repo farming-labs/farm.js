@@ -12,6 +12,34 @@ describe("Farm client data cache", () => {
     getFarmClientDataCache().clear();
   });
 
+  it("isolates a throwing cache listener from the other subscribers", () => {
+    const cache = getFarmClientDataCache();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const seen: Array<string | undefined> = [];
+
+    cache.subscribe("product:1", () => {
+      throw new Error("listener exploded");
+    });
+    cache.subscribe("product:1", (event) => seen.push(event));
+
+    expect(() =>
+      cache.set("product:1", {
+        data: { id: 1 },
+        updatedAt: Date.now(),
+        staleAt: Date.now() + 60_000,
+        status: "success",
+        error: null,
+      }),
+    ).not.toThrow();
+    expect(seen).toHaveLength(1);
+
+    expect(() => cache.invalidate("product:1")).not.toThrow();
+    expect(seen).toHaveLength(2);
+    expect(seen[1]).toBe("invalidate");
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
   it("normalizes structured keys with the route data key contract", () => {
     const key = ["product", "123"] as const;
     expect(normalizeFarmClientCacheKey(key)).toBe(createRouteDataCacheKey(key));

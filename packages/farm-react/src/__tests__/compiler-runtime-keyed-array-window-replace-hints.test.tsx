@@ -245,6 +245,156 @@ function createWindowHarness(initialItems: Item[], reactivity?: "static" | "hybr
 }
 
 describe("compiled keyed-array window replacement hints", () => {
+  for (const reactivity of ["static", "hybrid"] as const) {
+    it.each([false, true])(
+      `prepares nested and overlapping range chains once in ${reactivity} (reverse: %s)`,
+      async (reverse) => {
+        const initialItems = Array.from({ length: 256 }, (_, index) => ({
+          id: `row-${index}`,
+          label: `Row ${index}`,
+        }));
+        const harness = createWindowHarness(initialItems, reactivity);
+        const container = document.createElement("div");
+        document.body.append(container);
+        const root = createRoot(container);
+        roots.push(root);
+        await act(async () => root.render(<harness.Table />));
+        const initialRows = [...container.querySelectorAll("li")];
+        const windows = [
+          [64, 64],
+          [80, 16],
+          [120, 24],
+          [192, 16],
+        ];
+        if (reverse) windows.reverse();
+        let expected = initialItems;
+        const trace: string[] = [];
+        harness.traceBindings(trace);
+        harness.counters.keys = 0;
+        harness.counters.bindings = 0;
+        harness.counters.descriptors = 0;
+        await act(async () => {
+          for (const [position, count] of windows) {
+            const incoming = expected.slice(position, position + count).map((item) => ({
+              ...item,
+              label: `${item.label} at ${position}`,
+            }));
+            expected = (expected as WindowArray).toSpliced(position, count, ...incoming);
+            harness.replace(position, count, incoming);
+          }
+          await flushCompilerUpdates();
+        });
+        const touched = initialItems.flatMap((item, index) =>
+          item !== expected[index] ? [index] : [],
+        );
+        const rows = [...container.querySelectorAll("li")];
+        expect(rows.map((row) => row.textContent)).toEqual(expected.map((item) => item.label));
+        rows.forEach((row, index) => expect(row).toBe(initialRows[index]));
+        expect(trace).toEqual(touched.map((index) => `read:row-${index}`));
+        expect(harness.counters).toEqual({
+          executions: 1,
+          renders: 1,
+          keys: touched.length,
+          descriptors: 0,
+          bindings: touched.length,
+        });
+      },
+    );
+
+    it.each([
+      ["disjoint", 64, 32, 160, 32],
+      ["reverse disjoint", 160, 32, 64, 32],
+      ["overlapping", 64, 32, 80, 32],
+      ["reverse overlapping", 80, 32, 64, 32],
+      ["contained", 64, 64, 80, 16],
+      ["reverse contained", 80, 16, 64, 64],
+      ["same start", 64, 64, 64, 16],
+      ["same start expanded", 64, 16, 64, 64],
+      ["adjacent", 64, 32, 96, 32],
+      ["both edges", 0, 32, 224, 32],
+    ] as const)(
+      `validates %s queued ranges without per-row set lookups in ${reactivity}`,
+      async (_name, firstPosition, firstCount, secondPosition, secondCount) => {
+        const initialItems = Array.from({ length: 256 }, (_, index) => ({
+          id: `row-${index}`,
+          label: `Row ${index}`,
+        }));
+        const harness = createWindowHarness(initialItems, reactivity);
+        const container = document.createElement("div");
+        document.body.append(container);
+        const root = createRoot(container);
+        roots.push(root);
+        await act(async () => root.render(<harness.Table />));
+        const initialRows = [...container.querySelectorAll("li")];
+        const first = initialItems.slice(firstPosition, firstPosition + firstCount).map((item) => ({
+          ...item,
+          label: `First ${item.id}`,
+        }));
+        const second = initialItems
+          .slice(secondPosition, secondPosition + secondCount)
+          .map((item) => ({
+            ...item,
+            label: `Second ${item.id}`,
+          }));
+        const expected = (initialItems as WindowArray).toSpliced(
+          firstPosition,
+          firstCount,
+          ...first,
+        ) as WindowArray;
+        const finalItems = expected.toSpliced(secondPosition, secondCount, ...second);
+        const touched = initialItems.flatMap((_, index) =>
+          (index >= firstPosition && index < firstPosition + firstCount) ||
+          (index >= secondPosition && index < secondPosition + secondCount)
+            ? [index]
+            : [],
+        );
+        // Scope the allocation regression to the numeric touched-index set;
+        // other runtime sets (dirty dependencies and incoming keys) are unrelated.
+        let touchedSetLookups = 0;
+        const nativeHas = Set.prototype.has;
+        const hasSpy = vi.spyOn(Set.prototype, "has").mockImplementation(function (
+          this: Set<unknown>,
+          value: unknown,
+        ) {
+          if (
+            typeof value === "number" &&
+            this.size === touched.length &&
+            nativeHas.call(this, touched[0]) &&
+            nativeHas.call(this, touched[touched.length - 1])
+          ) {
+            touchedSetLookups += 1;
+          }
+          return nativeHas.call(this, value);
+        });
+        const trace: string[] = [];
+        harness.traceBindings(trace);
+        harness.counters.keys = 0;
+        harness.counters.bindings = 0;
+        harness.counters.descriptors = 0;
+        try {
+          await act(async () => {
+            harness.queueRefreshes(firstPosition, first, secondPosition, second);
+            await flushCompilerUpdates();
+          });
+        } finally {
+          hasSpy.mockRestore();
+        }
+        const rows = [...container.querySelectorAll("li")];
+        expect(rows.map((row) => row.textContent)).toEqual(finalItems.map((item) => item.label));
+        rows.forEach((row, index) => expect(row).toBe(initialRows[index]));
+        expect(trace).toEqual(touched.map((index) => `read:row-${index}`));
+        expect(harness.counters).toEqual({
+          executions: 1,
+          renders: 1,
+          keys: touched.length,
+          descriptors: 0,
+          bindings: touched.length,
+        });
+        expect(touchedSetLookups).toBe(0);
+      },
+    );
+  }
+
   it("preserves native method arguments, return values, and errors", () => {
     const source = [
       { id: "a", label: "Alpha" },
