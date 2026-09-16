@@ -7351,16 +7351,19 @@ function reconcileCompilerKeyedArrayWindowReplace(
       return keyedRowInstancesByKey(nextInstances);
     }
 
-    const touchedIndices = new Set<number>();
-    for (const update of updates) {
-      for (let index = update.position; index < update.position + update.removedCount; index += 1) {
-        touchedIndices.add(index);
-      }
-    }
+    // Length-preserving windows share source positions. Walk their ranges in
+    // row order so overlaps are prepared once, without hashing every row index.
+    const windows = [...updates].sort((left, right) => left.position - right.position);
+    let windowIndex = 0;
+    let window: (typeof windows)[number] | undefined = windows[0];
+    const touchedInstances: CompilerKeyedRowInstance[] = [];
 
     for (let index = 0; index < previousInstances.length; index += 1) {
+      while (window && index >= window.position + window.removedCount) {
+        window = windows[++windowIndex];
+      }
       const instance = previousInstances[index];
-      const touched = touchedIndices.has(index);
+      const touched = window !== undefined && index >= window.position;
       if (
         !instance ||
         instance.index !== index ||
@@ -7370,6 +7373,7 @@ function reconcileCompilerKeyedArrayWindowReplace(
       ) {
         return undefined;
       }
+      if (touched) touchedInstances.push(instance);
     }
 
     const incomingKeys = new Set<string>();
@@ -7384,8 +7388,8 @@ function reconcileCompilerKeyedArrayWindowReplace(
       ]
     > = [];
     try {
-      for (const index of [...touchedIndices].sort((left, right) => left - right)) {
-        const instance = previousInstances[index];
+      for (const instance of touchedInstances) {
+        const index = instance.index;
         const item = finalValue[index];
         const key = keyedRowIdentity(props.rowKey(item, index));
         if (key !== instance.key) {

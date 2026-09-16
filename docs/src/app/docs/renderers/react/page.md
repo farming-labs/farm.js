@@ -1348,9 +1348,12 @@ queued windows may mix same-key rows with globally new final keys, and both disj
 overlapping windows are supported. An overlapping position uses the last queued value;
 intermediate identities are never mounted. Farm validates the complete chain and final key set,
 using the committed row map directly for key collisions instead of copying every existing key
-into a temporary set. This removes an allocation, not the full-chain or untouched-row checks. It
-then prepares every touched key, binding value, DOM target, new descriptor, binding snapshot, and
-disconnected DOM row before the first write. It patches same-key positions and swaps only final
+into a temporary set. For length-preserving queued windows, it sorts the window ranges and walks
+them alongside the rows, without building a set of touched positions or sorting those positions.
+Overlapping and contained ranges prepare each final position once, in row order. This removes
+bookkeeping, not the full-chain or untouched-row checks: every row is still validated before
+preparation. It then prepares every touched key, binding value, DOM target, new descriptor, binding
+snapshot, and disconnected DOM row before the first write. It patches same-key positions and swaps only final
 fresh-key positions. Untouched rows retain their identity. Duplicate final keys and keys reused
 from outside a single removed interval take complete reconciliation before fast-path mutation. A
 queued chain may also contain disjoint grow or shrink windows. Farm maps every immediate-source
