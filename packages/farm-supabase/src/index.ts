@@ -4,6 +4,11 @@ import {
   type FarmIntegrationHandlerContext,
   type FarmIntegrationLogger,
 } from "@farm.js/core";
+import {
+  describeIntegrationOriginRejection,
+  resolveIntegrationAllowedOrigins,
+  validateIntegrationRequestOrigin,
+} from "@farm.js/core/integrations";
 import { api as clientApi } from "@farm.js/core/client";
 import {
   createPathInferredClientApi,
@@ -77,6 +82,14 @@ export interface SupabaseIntegrationInput {
   providers?: string[];
   defaultProvider?: string;
   pages?: SupabaseIntegrationPages;
+  /**
+   * Additional origins allowed to submit the sign-in, sign-up, and sign-out
+   * routes, using the same pattern syntax as `serverActions.allowedOrigins`
+   * (`https://app.example.com`, `example.com`, `*.example.com`). The app's own
+   * origin is always trusted; set this only when a different trusted origin
+   * posts these forms.
+   */
+  allowedOrigins?: string[];
   log?: FarmIntegrationLogger;
 }
 
@@ -854,12 +867,44 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
     env.appBaseUrl,
   );
   const callbackPath = callbackSettings.callbackPath;
+  const allowedOrigins = resolveIntegrationAllowedOrigins(
+    input.allowedOrigins,
+    "supabase.allowedOrigins",
+  );
   const api = createSupabaseApi({
     loginPath,
     signupPath,
     logoutPath,
     sessionPath,
   });
+
+  /**
+   * Reject a credential or sign-out request that did not come from this app.
+   * Returns the response to send, or null when the request may proceed.
+   */
+  function rejectForeignOrigin(
+    request: Request,
+    clientRequest: boolean,
+    { requireOriginMetadata }: { requireOriginMetadata: boolean },
+  ): Response | null {
+    const result = validateIntegrationRequestOrigin(request, {
+      allowedOrigins,
+      requireOriginMetadata,
+    });
+
+    if (result.ok) {
+      return null;
+    }
+
+    const message = describeIntegrationOriginRejection(result.reason);
+
+    return clientRequest
+      ? jsonError(message, 403)
+      : new Response(message, {
+          status: 403,
+          headers: { "content-type": "text/plain; charset=utf-8" },
+        });
+  }
 
   return defineIntegration({
     category: "auth",
@@ -912,6 +957,13 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
           const returnTo = getReturnTo(requestUrl.searchParams.get("returnTo"), "/dashboard");
 
           if (request.method === "POST") {
+            const rejected = rejectForeignOrigin(request, clientRequest, {
+              requireOriginMetadata: true,
+            });
+            if (rejected) {
+              return rejected;
+            }
+
             const parsedRequest = await parseEmailPasswordRequest(request);
             if (!parsedRequest.ok) {
               if (clientRequest) {
@@ -1093,6 +1145,13 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
             });
           }
 
+          const rejected = rejectForeignOrigin(request, clientRequest, {
+            requireOriginMetadata: true,
+          });
+          if (rejected) {
+            return rejected;
+          }
+
           const parsedRequest = await parseEmailPasswordRequest(context.request);
           if (!parsedRequest.ok) {
             if (clientRequest) {
@@ -1258,6 +1317,17 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
           const requestUrl = context.url;
           let returnTo = getReturnTo(requestUrl.searchParams.get("returnTo"), "/");
           const clientRequest = isIntegrationClientRequest(request);
+
+          // A POST carries an Origin in every supported browser, so it is held
+          // to the strict check. A GET sign-out is also reachable as a plain
+          // link or bookmark, where no origin metadata exists at all; those
+          // stay allowed and only an explicitly cross-site GET is rejected.
+          const rejected = rejectForeignOrigin(request, clientRequest, {
+            requireOriginMetadata: request.method === "POST",
+          });
+          if (rejected) {
+            return rejected;
+          }
 
           if (request.method === "POST") {
             const contentType = context.request.headers.get("content-type") || "";

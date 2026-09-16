@@ -128,6 +128,46 @@ describe("cross-tab cache invalidation", () => {
     expect(post).not.toHaveBeenCalled();
   });
 
+  it("keeps one bridge when a duplicate copy of the module enables it", async () => {
+    vi.stubGlobal("BroadcastChannel", StubBroadcastChannel);
+
+    // Duplicate module copies happen in the wild: mixed ESM/CJS resolution, a
+    // nested @farm.js/core, or two bundles on one page. The invalidation bus
+    // lives on globalThis, so both copies share it; the bridge guard must too.
+    vi.resetModules();
+    const copyOne = await import("../cache-invalidation-broadcast");
+    vi.resetModules();
+    const copyTwo = await import("../cache-invalidation-broadcast");
+    expect(copyOne).not.toBe(copyTwo);
+
+    const disposeOne = copyOne.enableCrossTabCacheInvalidation({ channelName: "dup" });
+    const disposeTwo = copyTwo.enableCrossTabCacheInvalidation({ channelName: "dup" });
+
+    // Two channels in one tab echo each other's posts forever: each bridge sees
+    // the other's replay as a fresh local invalidation.
+    expect(StubBroadcastChannel.instances).toHaveLength(1);
+
+    // A cap keeps a regression from hanging the run on the echo loop.
+    let notifications = 0;
+    const unsubscribe = subscribeFarmCacheInvalidation(() => {
+      notifications += 1;
+      if (notifications > 20) {
+        disposeOne();
+        disposeTwo();
+      }
+    });
+
+    notifyFarmCacheInvalidation("orders");
+    await microtasks();
+    await microtasks();
+
+    unsubscribe();
+    expect(notifications).toBe(1);
+
+    disposeOne();
+    disposeTwo();
+  });
+
   it("rejects a second bridge on a different channel name", () => {
     vi.stubGlobal("BroadcastChannel", StubBroadcastChannel);
     const dispose = enableCrossTabCacheInvalidation({ channelName: "app-a" });
