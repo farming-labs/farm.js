@@ -49,6 +49,7 @@ export interface PreviewFarmResult {
   session?: PreviewAgentSession | PreviewGatewaySession;
 }
 
+const MAX_TUNNEL_SCAN_CHARS = 64 * 1024;
 const DEFAULT_PREVIEW_PORTS = [3000, 4319, 5173, 4173, 8080];
 const PREVIEW_URL_PATTERN = /https:\/\/[^\s"')\]}]+/g;
 
@@ -287,7 +288,10 @@ export function parsePreviewPublicUrl(
   );
 }
 
-async function runPreviewTunnel(plan: PreviewTunnelPlan, timeoutMs: number): Promise<string> {
+export async function runPreviewTunnel(
+  plan: PreviewTunnelPlan,
+  timeoutMs: number,
+): Promise<string> {
   const child = spawn(plan.command, plan.args, {
     env: {
       ...process.env,
@@ -312,13 +316,24 @@ async function runPreviewTunnel(plan: PreviewTunnelPlan, timeoutMs: number): Pro
   try {
     publicUrl = await new Promise<string>((resolve, reject) => {
       const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
         reject(new Error("Timed out waiting for the preview URL."));
       }, timeoutMs);
 
       const handleChunk = (chunk: Buffer) => {
         const text = chunk.toString();
-        output += text;
         process.stdout.write(text);
+        // The buffer exists only to find the public URL. Once that is known it
+        // has no further use, and until then only a bounded trailing window is
+        // needed - a long-lived or noisy tunnel would otherwise grow one string
+        // for the whole session. The window is far larger than any URL line, so
+        // a URL split across chunks is still matched.
+        if (settled) return;
+        output =
+          output.length + text.length > MAX_TUNNEL_SCAN_CHARS
+            ? (output + text).slice(-MAX_TUNNEL_SCAN_CHARS)
+            : output + text;
         const nextUrl = parsePreviewPublicUrl(output, plan.requestedHostname);
         if (nextUrl && !settled) {
           settled = true;
@@ -354,6 +369,13 @@ async function runPreviewTunnel(plan: PreviewTunnelPlan, timeoutMs: number): Pro
 
     await waitForTunnelExit(child);
     return publicUrl;
+  } catch (error) {
+    // The timeout (and any spawn or early-exit failure) rejects while the child
+    // may still be running. Nothing else terminates it: the SIGINT/SIGTERM
+    // handlers are removed below, so without this the tunnel process outlives
+    // the command that started it.
+    cleanup();
+    throw error;
   } finally {
     process.removeListener("SIGINT", cleanup);
     process.removeListener("SIGTERM", cleanup);
