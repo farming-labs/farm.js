@@ -348,6 +348,45 @@ describe("Farm image optimizer", () => {
   });
 });
 
+describe("image cache keys", () => {
+  it("shares one cache entry across Accept headers that negotiate the same format", async () => {
+    let transforms = 0;
+    const transform: FarmImageTransformer = async ({ source }) => {
+      transforms += 1;
+      return { body: source, contentType: "image/webp" };
+    };
+    const fetcher = vi.fn(
+      async () => new Response(PNG, { headers: { "content-type": "image/png" } }),
+    );
+    const handler = createFarmImageHandler({
+      config: resolveFarmImageConfig({
+        domains: ["images.example.test"],
+        formats: ["image/webp"],
+      }),
+      transform,
+      fetch: fetcher as typeof fetch,
+      fetchRemote: fetcher as typeof fetch,
+    });
+
+    const url =
+      "https://app.example.test/_farm/image?url=https%3A%2F%2Fimages.example.test%2Fphoto.png&w=828&q=75";
+    const variants = [
+      "image/webp",
+      "image/webp,*/*;q=0.8",
+      "*/*;q=0.8,image/webp",
+      "image/webp;q=1.0, image/png;q=0.5",
+    ];
+
+    for (const accept of variants) {
+      const response = await handler(new Request(url, { headers: { accept } }));
+      expect(response.status).toBe(200);
+    }
+
+    // Every variant negotiates to image/webp, so one transform should serve all.
+    expect(transforms).toBe(1);
+  });
+});
+
 describe("image runtime adapters", () => {
   it("honors Accept quality values when selecting an output format", () => {
     const formats = ["image/avif", "image/webp"] as const;
