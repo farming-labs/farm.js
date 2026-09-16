@@ -151,20 +151,24 @@ export async function fetchServerQuery<TInput, TData>(
   const stale = cache.isStale(provisionalKey);
   const inflight = cache.getInflight<TData>(provisionalKey);
 
-  if (inflight && !options.force) return inflight;
-  if (!options.force && entry && !stale && entry.status !== "error") return entry.data;
-
   if (
     !options.force &&
     entry &&
     stale &&
-    entry.status !== "pending" &&
+    (entry.status !== "pending" || entry.updatedAt !== 0) &&
     entry.status !== "error" &&
     (options.swr ?? true)
   ) {
-    void executeServerQuery(query, input, provisionalKey, options).catch(() => undefined);
+    // Every SWR reader can use the previous value, including while another
+    // reader owns the refresh. Initial pending reads still wait below.
+    if (!inflight) {
+      void executeServerQuery(query, input, provisionalKey, options).catch(() => undefined);
+    }
     return entry.data;
   }
+
+  if (inflight && !options.force) return inflight;
+  if (!options.force && entry && !stale && entry.status !== "error") return entry.data;
 
   return executeServerQuery(query, input, provisionalKey, options);
 }
