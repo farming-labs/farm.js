@@ -123,6 +123,29 @@ describe("Farm cron", () => {
     }
   });
 
+  it("gives case-colliding cron names distinct wrappers", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-cron-case-"));
+    const prepared = await prepareFarmCronForNitro({
+      root,
+      cron: {
+        Daily: { schedule: "0 2 * * *", path: "/api/a" },
+        daily: { schedule: "0 3 * * *", path: "/api/b" },
+      },
+    });
+
+    const handlers = Object.values(prepared.tasks).map((task) => task.handler);
+    expect(handlers).toHaveLength(2);
+    // On a case-insensitive filesystem a shared name means both jobs run the
+    // same wrapper, so the paths must differ by more than case.
+    expect(new Set(handlers.map((handler) => handler.toLowerCase())).size).toBe(2);
+
+    // Each wrapper still targets its own job.
+    const first = await fs.readFile(prepared.tasks["farm:cron:Daily"].handler, "utf8");
+    const second = await fs.readFile(prepared.tasks["farm:cron:daily"].handler, "utf8");
+    expect(first).toContain('const path = "/api/a"');
+    expect(second).toContain('const path = "/api/b"');
+  });
+
   it("generates Nitro tasks, grouped schedules, and a portable manifest", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-cron-"));
     const prepared = await prepareFarmCronForNitro({
