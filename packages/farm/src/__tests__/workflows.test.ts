@@ -461,6 +461,25 @@ describe("Farm workflows", () => {
     expect((malformedResponse as Response).status).toBe(400);
   });
 
+  it("gives nested and hyphenated workflow ids distinct wrappers", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-workflow-collide-"));
+    const jobsDir = path.join(root, "src", "jobs");
+    await fs.mkdir(path.join(jobsDir, "a"), { recursive: true });
+    const workflowSource = "export default { async run() { return { ok: true }; } };";
+    // Ids "a/b" and "a-b": safeFileName() maps both onto "a-b".
+    await Promise.all([
+      fs.writeFile(path.join(jobsDir, "a", "b.mjs"), workflowSource),
+      fs.writeFile(path.join(jobsDir, "a-b.mjs"), workflowSource),
+    ]);
+
+    const prepared = await prepareFarmWorkflowsForNitro({ root, workflows: {} });
+    const handlers = Object.values(prepared.tasks).map((task) => task.handler);
+
+    expect(handlers).toHaveLength(2);
+    // Each workflow must own its wrapper, or both tasks execute the same file.
+    expect(new Set(handlers).size).toBe(2);
+  });
+
   it("removes generated wrappers when workflows are removed or disabled", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-workflow-cleanup-"));
     const jobsDir = path.join(root, "src", "jobs");
