@@ -175,13 +175,23 @@ export function scheduleFarmIslandHydration<T>({
         return;
       }
 
+      // Isolated boundary markers render with display:contents, so the
+      // container itself has no box and can never intersect. Observe its
+      // element children instead; with nothing observable, start now.
+      const targets =
+        container.getClientRects().length > 0 ? [container] : Array.from(container.children);
+      if (targets.length === 0) {
+        start();
+        return;
+      }
+
       const observer = new IntersectionObserver(
         (entries) => {
           if (entries.some((entry) => entry.isIntersecting)) start();
         },
         { rootMargin: "200px" },
       );
-      observer.observe(container);
+      for (const target of targets) observer.observe(target);
       triggerCleanups.add(() => observer.disconnect());
       return;
     }

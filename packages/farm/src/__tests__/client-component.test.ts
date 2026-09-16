@@ -252,6 +252,150 @@ describe("client component path resolution", () => {
     });
   });
 
+  it("keeps boundaries inside parser-sensitive containers route-wide", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-isolated-parser-context-"));
+    tempDirs.push(root);
+    const pageFile = path.join(root, "src", "app", "page.tsx");
+    const componentsDirectory = path.join(root, "src", "components");
+    fs.mkdirSync(path.dirname(pageFile), { recursive: true });
+    fs.mkdirSync(componentsDirectory, { recursive: true });
+    fs.writeFileSync(
+      path.join(componentsDirectory, "widget.tsx"),
+      `'use client';\nexport default function Widget() { return <button>go</button>; }\n`,
+    );
+
+    const writePage = (body: string) => {
+      fs.writeFileSync(
+        pageFile,
+        `import Widget from "../components/widget";\nexport default function Page() { return ${body}; }\n`,
+      );
+    };
+
+    // Each of these renders the marker where the parser would relocate or drop it.
+    // The outermost enclosing container is reported, which is the one the
+    // author needs to restructure.
+    for (const [container, body] of [
+      ["table", "<table><tbody><Widget /></tbody></table>"],
+      ["table", "<table><tbody><tr><Widget /></tr></tbody></table>"],
+      ["tbody", "<tbody><Widget /></tbody>"],
+      ["select", "<select><Widget /></select>"],
+      ["svg", '<svg viewBox="0 0 10 10"><Widget /></svg>'],
+    ] as const) {
+      writePage(body);
+      expect(getClientModuleHydrationPlan(pageFile, root, "enabled")).toMatchObject({
+        shouldHydrate: true,
+        hasIsolatedClientBoundaries: false,
+        isolatedBoundaries: [],
+        fallbackReason: `the client boundary imported from ../components/widget renders inside <${container}>, where the HTML parser relocates its hydration marker`,
+      });
+    }
+
+    // Ordinary flow content still isolates, including after a closed container
+    // and after a self-closing icon, which must not leave the scan armed.
+    for (const body of [
+      "<div><Widget /></div>",
+      "<><table><tbody><tr><td>cell</td></tr></tbody></table><Widget /></>",
+      '<><svg viewBox="0 0 10 10" /><Widget /></>',
+    ]) {
+      writePage(body);
+      expect(getClientModuleHydrationPlan(pageFile, root, "enabled")).toMatchObject({
+        shouldHydrate: false,
+        hasIsolatedClientBoundaries: true,
+      });
+    }
+  });
+
+  it("keeps boundaries handed React elements route-wide", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-isolated-element-props-"));
+    tempDirs.push(root);
+    const pageFile = path.join(root, "src", "app", "page.tsx");
+    const componentsDirectory = path.join(root, "src", "components");
+    fs.mkdirSync(path.dirname(pageFile), { recursive: true });
+    fs.mkdirSync(componentsDirectory, { recursive: true });
+    fs.writeFileSync(
+      path.join(componentsDirectory, "shell.tsx"),
+      `'use client';\nexport default function Shell({ children }) { return <section>{children}</section>; }\n`,
+    );
+
+    const writePage = (body: string) => {
+      fs.writeFileSync(
+        pageFile,
+        `import Shell from "../components/shell";\nexport default function Page() { return ${body}; }\n`,
+      );
+    };
+
+    const reason =
+      "the client boundary imported from ../components/shell receives React elements, which cannot cross the boundary as serialized props";
+
+    // An element reaches the boundary as children or through a prop expression.
+    for (const body of [
+      "<Shell><p>server content</p></Shell>",
+      "<Shell>{<span>expression child</span>}</Shell>",
+      "<Shell icon={<svg />} />",
+      "<Shell><Shell><em>nested</em></Shell></Shell>",
+    ]) {
+      writePage(body);
+      expect(getClientModuleHydrationPlan(pageFile, root, "enabled")).toMatchObject({
+        shouldHydrate: true,
+        hasIsolatedClientBoundaries: false,
+        isolatedBoundaries: [],
+        fallbackReason: reason,
+      });
+    }
+
+    // Serializable props and children still isolate: only elements are a problem.
+    for (const body of [
+      "<Shell />",
+      "<Shell></Shell>",
+      '<Shell title="hello" count={3} items={["a"]} />',
+      "<Shell>plain text</Shell>",
+    ]) {
+      writePage(body);
+      expect(getClientModuleHydrationPlan(pageFile, root, "enabled")).toMatchObject({
+        shouldHydrate: false,
+        hasIsolatedClientBoundaries: true,
+      });
+    }
+  });
+
+  it("keeps data-dependent island counts route-wide however the list is built", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-isolated-cardinality-"));
+    tempDirs.push(root);
+    const pageFile = path.join(root, "src", "app", "page.tsx");
+    const componentsDirectory = path.join(root, "src", "components");
+    fs.mkdirSync(path.dirname(pageFile), { recursive: true });
+    fs.mkdirSync(componentsDirectory, { recursive: true });
+    fs.writeFileSync(
+      path.join(componentsDirectory, "row.tsx"),
+      `'use client';\nexport default function Row({ name }) { return <li>{name}</li>; }\n`,
+    );
+
+    const reason = "the client boundary count imported from ../components/row is data-dependent";
+    const writePage = (body: string) => {
+      fs.writeFileSync(pageFile, `import Row from "../components/row";\n${body}\n`);
+    };
+
+    // A bare map, and a for loop inside a helper behind filter(), which is the
+    // same data dependence one indirection removed.
+    for (const body of [
+      `export default function Page() { return <ul>{rows.map((row) => <Row key={row} name={row} />)}</ul>; }`,
+      `function renderRows(names) {
+  const nodes = [];
+  for (const name of names) { nodes.push(<Row key={name} name={name} />); }
+  return nodes;
+}
+export default function Page() { return <ul>{renderRows(rows.filter(Boolean))}</ul>; }`,
+    ]) {
+      writePage(body);
+      expect(getClientModuleHydrationPlan(pageFile, root, "enabled")).toMatchObject({
+        shouldHydrate: true,
+        hasIsolatedClientBoundaries: false,
+        costGuardExceeded: true,
+        fallbackReason: reason,
+      });
+    }
+  });
+
   it("keeps client graphs above the measured isolated-root limit route-wide", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-isolated-client-cost-"));
     tempDirs.push(root);
