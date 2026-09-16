@@ -1332,7 +1332,11 @@ prepared. If the incoming interval has the same length and exactly the same keys
 Farm first evaluates all keys and binding snapshots and resolves every changed target across the
 complete interval. It then patches only changed bindings in place and updates each stored row
 object, so later delegated or cached handlers observe the latest data. No descriptor or DOM row is
-created, and every row keeps its identity, focus, and text selection. A window may instead grow or
+created, and every row keeps its identity, focus, and text selection. Validated same-key row and
+window refreshes also keep the existing row map and element lookup, and skip redundant cache
+cleanup after the bindings are patched. Source and key validation still run, and each flush commits
+the new collection token so subsequent updates use current state.
+Structural changes retain index rebuilding and cache cleanup. A window may instead grow or
 shrink while it reorders keys from inside its own removed interval and mixes them with globally
 fresh keys. Farm prepares all reused binding updates, new descriptors, binding snapshots, and
 detached rows before the first DOM write. It removes only retired rows, preserves each reused row,
