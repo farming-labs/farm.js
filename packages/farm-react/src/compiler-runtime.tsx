@@ -7363,17 +7363,13 @@ function reconcileCompilerKeyedArrayWindowReplace(
         window = updates.pop();
       }
       const instance = previousInstances[index];
-      const touched = window && index >= window.position;
-      if (
-        !instance ||
-        instance.index !== index ||
-        (touched
-          ? instance.element.parentNode !== root
-          : !Object.is(instance.item, finalValue[index]))
-      ) {
+      if (!instance || instance.index !== index) return undefined;
+      if (window && index >= window.position) {
+        if (instance.element.parentNode !== root) return undefined;
+        touchedInstances.push(instance);
+      } else if (!Object.is(instance.item, finalValue[index])) {
         return undefined;
       }
-      if (touched) touchedInstances.push(instance);
     }
 
     const incomingKeys = new Set<string>();
