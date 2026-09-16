@@ -190,6 +190,22 @@ Signed-out requests receive a `307` redirect to `/login` with the original root-
 | `protectedRoutes` | None               | One matcher or a list of matchers.           |
 | `allowedOrigins`  | App origin only    | Extra origins allowed to post sign-out.      |
 
+## OAuth state binding
+
+Sign-in and sign-up issue a random, single-use `state` value and store it in a
+short-lived signed cookie (`wos-session-state`, ten minutes), signed with the
+session cookie password. The callback accepts an authorization code only when
+the browser presents the matching cookie, so a code obtained elsewhere cannot be
+replayed into another visitor's session.
+
+`returnTo` is carried inside that signed cookie rather than read back from the
+`state` query value, so it cannot be tampered with in transit.
+
+A callback that arrives with no cookie, a mismatched state, or a cookie this app
+did not sign is answered with `400` before any session is created. Sign-in flows
+that were already in flight when this version is deployed fail that check once;
+retrying signs in normally.
+
 ## Cross-site request protection
 
 The sign-out route (`POST /logout`) only accepts requests from the app's own origin. A cross-site
