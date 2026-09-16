@@ -139,6 +139,53 @@ describe("Farm client data cache gc sweep", () => {
     };
   }
 
+  it("sweeps alias and invalidation metadata with the entries they describe", () => {
+    vi.useFakeTimers();
+    const cache = new FarmClientDataCache({ subscribeToInvalidation: false });
+    const internals = cache as unknown as {
+      aliases: Map<string, string>;
+      invalidatedAt: Map<string, number>;
+    };
+
+    const now = Date.now();
+    cache.set("product:1", entryWithGc(now, 1_000));
+    // A per-invocation provisional alias, as server queries create.
+    cache.alias("provisional:abc", "product:1");
+    cache.invalidate("product:1");
+    expect(cache.resolveKey("provisional:abc")).toBe("product:1");
+
+    vi.advanceTimersByTime(60_000);
+
+    // The entry is swept...
+    expect(cache.size).toBe(0);
+    // ...and so is the metadata that described it, instead of accumulating for
+    // the lifetime of the page.
+    expect(internals.aliases.size).toBe(0);
+    expect(internals.invalidatedAt.size).toBe(0);
+    expect(cache.resolveKey("provisional:abc")).toBe("provisional:abc");
+    cache.dispose();
+  });
+
+  it("keeps alias metadata that is still addressable", () => {
+    vi.useFakeTimers();
+    const cache = new FarmClientDataCache({ subscribeToInvalidation: false });
+    const internals = cache as unknown as { aliases: Map<string, string> };
+
+    const now = Date.now();
+    cache.set("product:1", entryWithGc(now, 1_000));
+    cache.alias("watched-alias", "product:1");
+    // A live subscriber keeps the key watched, so nothing is swept.
+    const unsubscribe = cache.subscribe("watched-alias", () => {});
+
+    vi.advanceTimersByTime(60_000);
+
+    expect(cache.size).toBe(1);
+    expect(internals.aliases.size).toBe(1);
+    expect(cache.resolveKey("watched-alias")).toBe("product:1");
+    unsubscribe();
+    cache.dispose();
+  });
+
   it("evicts unread expired entries without a read", () => {
     vi.useFakeTimers();
     const cache = new FarmClientDataCache({ subscribeToInvalidation: false });
