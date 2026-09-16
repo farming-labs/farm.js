@@ -358,15 +358,17 @@ describe("image cache keys", () => {
     const fetcher = vi.fn(
       async () => new Response(PNG, { headers: { "content-type": "image/png" } }),
     );
-    const handler = createFarmImageHandler({
-      config: resolveFarmImageConfig({
+    const handler = createFarmImageHandler(
+      resolveFarmImageConfig({
         domains: ["images.example.test"],
         formats: ["image/webp"],
       }),
-      transform,
-      fetch: fetcher as typeof fetch,
-      fetchRemote: fetcher as typeof fetch,
-    });
+      {
+        transform,
+        fetch: fetcher as typeof fetch,
+        fetchRemote: fetcher as typeof fetch,
+      },
+    );
 
     const url =
       "https://app.example.test/_farm/image?url=https%3A%2F%2Fimages.example.test%2Fphoto.png&w=828&q=75";
