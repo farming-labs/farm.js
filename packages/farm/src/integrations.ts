@@ -1,4 +1,17 @@
 import { validateConfigRouteSource } from "./plugins/route-pattern";
+
+// Origin validation for integration auth routes is part of the integration
+// contract, so it is re-exported here alongside defineIntegration rather than
+// only from the package root.
+export {
+  describeIntegrationOriginRejection,
+  resolveIntegrationAllowedOrigins,
+  validateIntegrationRequestOrigin,
+  type IntegrationOriginPolicy,
+  type IntegrationOriginRejection,
+  type IntegrationOriginResult,
+} from "./integration-request-security";
+
 import type { ComponentType, ReactNode } from "react";
 import { api as integrationApi, defineIntegrationAPIOperation } from "./integration-api";
 import type {
