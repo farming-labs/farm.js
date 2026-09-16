@@ -169,6 +169,25 @@ Only root-relative `returnTo` values are accepted. Invalid or external values fa
 | `scopes`                  | `openid profile email` | Requested OAuth scopes.                                                      |
 | `tokenEndpointAuthMethod` | `auto`                 | `client_secret_basic`, `client_secret_post`, `none`, or automatic selection. |
 | `protectedRoutes`         | None                   | One matcher or a list of matchers.                                           |
+| `allowedOrigins`          | App origin only        | Extra origins allowed to drive sign-out.                                     |
+
+## Cross-site request protection
+
+The sign-out route (`GET /auth/logout`) only accepts requests from the app's own origin. A cross-site
+request is answered with `403` before the session is cleared, so another site
+cannot force a visitor to sign out.
+
+List any other trusted origin explicitly. The pattern syntax matches
+`serverActions.allowedOrigins`:
+
+```ts
+auth0({
+  allowedOrigins: ["https://portal.example.com", "*.example.com"],
+});
+```
+
+A sign-out link or bookmark keeps working; only an explicitly cross-site
+navigation is rejected.
 
 ## Production checklist
 
