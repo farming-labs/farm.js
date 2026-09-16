@@ -249,6 +249,12 @@ tests compare 1,000 deterministic queued updates with React and cover disjoint w
 last-update-wins semantics, atomic preparation, overlapping structural fallback, controlled-input selection,
 events, Strict Mode hydration, and cleanup.
 
+Fixed-length queued windows reuse the committed row map for collision checks. They no longer
+copy every existing key into a temporary set before preparing the touched rows. Static and hybrid
+regressions require zero key enumerations for retained refreshes and only the structural commit's
+required enumeration for fresh-key or mixed replacements. Repeated updates, overlap, DOM identity,
+and existing keys transferred between windows remain covered; full-chain validation is unchanged.
+
 Source-level tests also read the actual queued-refresh buttons and require two position hints for
 the optimized handler and none for its snapshot control in both compiler modes. They compare both
 native handlers across repeated 10,000-row updates, including row values and object identity.

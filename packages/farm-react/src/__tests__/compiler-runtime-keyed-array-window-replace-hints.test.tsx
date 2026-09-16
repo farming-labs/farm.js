@@ -465,6 +465,19 @@ describe("compiled keyed-array window replacement hints", () => {
         await act(async () => root.render(<harness.Table />));
         const initialRows = [...container.querySelectorAll("li")];
         let indexWrites = 0;
+        let keyEnumerations = 0;
+        const originalKeys = Map.prototype.keys;
+        vi.spyOn(Map.prototype, "keys").mockImplementation(
+          function (this: Map<string, { element?: Element }>) {
+            if (
+              this.size === initialItems.length &&
+              this.get("row-0")?.element === initialRows[0]
+            ) {
+              keyEnumerations += 1;
+            }
+            return originalKeys.call(this);
+          },
+        );
         const originalSet = WeakMap.prototype.set;
         vi.spyOn(WeakMap.prototype, "set").mockImplementation(function (
           this: WeakMap<object, unknown>,
@@ -485,6 +498,7 @@ describe("compiled keyed-array window replacement hints", () => {
         let expected = initialItems;
         for (let round = 0; round < 2; round += 1) {
           indexWrites = 0;
+          keyEnumerations = 0;
           harness.counters.keys = 0;
           harness.counters.descriptors = 0;
           harness.counters.bindings = 0;
@@ -508,6 +522,7 @@ describe("compiled keyed-array window replacement hints", () => {
           });
 
           expect(indexWrites).toBe(0);
+          expect(keyEnumerations).toBe(0);
           const rows = [...container.querySelectorAll("li")];
           expect(rows.map((row) => row.textContent)).toEqual(expected.map((item) => item.label));
           rows.forEach((row, index) => expect(row).toBe(initialRows[index]));
@@ -524,26 +539,139 @@ describe("compiled keyed-array window replacement hints", () => {
         // Structural replacements still rebuild the index. A later same-key
         // update must use the new instance and the newly committed collection.
         indexWrites = 0;
+        keyEnumerations = 0;
         await act(async () => {
           harness.replace(32, 1, [{ id: "fresh", label: "Fresh row" }]);
           await flushCompilerUpdates();
         });
         expect(indexWrites).toBe(initialItems.length);
+        expect(keyEnumerations).toBe(1);
         expect(initialRows[32].isConnected).toBe(false);
         const freshRow = container.querySelector('[data-key="fresh"]');
         expect(freshRow?.textContent).toBe("Fresh row");
         indexWrites = 0;
+        keyEnumerations = 0;
         harness.counters.keys = 0;
         await act(async () => {
           harness.replace(32, 1, [{ id: "fresh", label: "Fresh row updated" }]);
           await flushCompilerUpdates();
         });
         expect(indexWrites).toBe(0);
+        expect(keyEnumerations).toBe(0);
         expect(harness.counters.keys).toBe(1);
         expect(container.querySelector('[data-key="fresh"]')).toBe(freshRow);
         expect(freshRow?.textContent).toBe("Fresh row updated");
       },
     );
+
+    it.each(["disjoint", "overlapping", "mixed"] as const)(
+      `enumerates only the committed result for %s queued replacements in ${reactivity}`,
+      async (mode) => {
+        const initialItems = Array.from(
+          { length: 256 },
+          (_, index): Item => ({ id: `row-${index}`, label: `Row ${index}` }),
+        );
+        const harness = createWindowHarness(initialItems, reactivity);
+        const container = document.createElement("div");
+        document.body.append(container);
+        const root = createRoot(container);
+        roots.push(root);
+        await act(async () => root.render(<harness.Table />));
+        const initialRows = [...container.querySelectorAll("li")];
+        let keyEnumerations = 0;
+        const originalKeys = Map.prototype.keys;
+        vi.spyOn(Map.prototype, "keys").mockImplementation(
+          function (this: Map<string, { element?: Element }>) {
+            if (
+              this.size === initialItems.length &&
+              this.get("row-0")?.element === initialRows[0]
+            ) {
+              keyEnumerations += 1;
+            }
+            return originalKeys.call(this);
+          },
+        );
+
+        let expected = initialItems;
+        for (let round = 0; round < 2; round += 1) {
+          const beforeRows = [...container.querySelectorAll("li")];
+          const beforeItems = expected;
+          const secondPosition = mode === "overlapping" ? 72 : 160;
+          const replacement = (position: number, window: string) =>
+            expected.slice(position, position + 16).map((item, offset) => ({
+              id: mode === "mixed" && offset % 2 === 0 ? item.id : `${window}-${round}-${offset}`,
+              label: `${window} ${round}: ${offset}`,
+            }));
+          const first = replacement(64, "first");
+          const second = replacement(secondPosition, "second");
+          expected = (expected as WindowArray).toSpliced(64, 16, ...first);
+          expected = (expected as WindowArray).toSpliced(secondPosition, 16, ...second);
+          harness.counters.keys = 0;
+          harness.counters.descriptors = 0;
+          harness.counters.bindings = 0;
+          keyEnumerations = 0;
+          await act(async () => {
+            harness.queueRefreshes(64, first, secondPosition, second);
+            await flushCompilerUpdates();
+          });
+
+          // Structural commits still enumerate the new map for listener pruning.
+          // Preparation must not also copy every old key into a temporary set.
+          expect(keyEnumerations).toBe(1);
+          const rows = [...container.querySelectorAll("li")];
+          expect(rows.map((row) => row.textContent)).toEqual(expected.map((item) => item.label));
+          expect(rows.map((row) => row.getAttribute("data-key"))).toEqual(
+            expected.map((item) => item.id),
+          );
+          rows.forEach((row, index) => {
+            if (beforeItems[index].id === expected[index].id) {
+              expect(row).toBe(beforeRows[index]);
+            } else {
+              expect(row).not.toBe(beforeRows[index]);
+              expect(beforeRows[index].isConnected).toBe(false);
+            }
+          });
+          const touched = mode === "overlapping" ? 24 : 32;
+          expect(harness.counters).toEqual({
+            executions: 1,
+            renders: 1,
+            keys: touched,
+            descriptors: mode === "mixed" ? 16 : touched,
+            bindings: touched,
+          });
+        }
+      },
+    );
+
+    it(`falls back when a queued window reuses a key removed by an earlier window in ${reactivity}`, async () => {
+      const initialItems = [
+        { id: "a", label: "Alpha" },
+        { id: "b", label: "Beta" },
+        { id: "c", label: "Gamma" },
+        { id: "d", label: "Delta" },
+      ];
+      const harness = createWindowHarness(initialItems, reactivity);
+      const container = document.createElement("div");
+      document.body.append(container);
+      const root = createRoot(container);
+      roots.push(root);
+      await act(async () => root.render(<harness.Table />));
+      const rows = [...container.querySelectorAll("li")];
+      harness.counters.keys = 0;
+      await act(async () => {
+        harness.queueRefreshes(0, [{ id: "x", label: "Fresh" }], 2, [
+          { id: "a", label: "Alpha moved" },
+        ]);
+        await flushCompilerUpdates();
+      });
+
+      expect(container.textContent).toBe("FreshBetaAlpha movedDelta");
+      expect(container.querySelector('[data-key="a"]')).toBe(rows[0]);
+      expect(container.querySelector('[data-key="b"]')).toBe(rows[1]);
+      expect(container.querySelector('[data-key="d"]')).toBe(rows[3]);
+      expect(rows[2].isConnected).toBe(false);
+      expect(harness.counters.keys).toBeGreaterThan(2);
+    });
   }
 
   it("collapses overlapping queued refreshes and applies the last value", async () => {
