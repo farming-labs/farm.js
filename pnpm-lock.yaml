@@ -2203,13 +2203,13 @@ importers:
 
   packages/farm-devtools:
     dependencies:
-      '@farm.js/core':
-        specifier: workspace:*
-        version: link:../farm
       '@fontsource-variable/geist-mono':
         specifier: 5.3.0
         version: 5.3.0
     devDependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
       '@fontsource-variable/geist':
         specifier: 5.3.0
         version: 5.3.0
