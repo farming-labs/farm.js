@@ -265,6 +265,25 @@ describe("Storage", () => {
     expect(await getStorage().getItem("root")).toEqual({ ok: true });
   });
 
+  it("clears only the requested base within a namespace", async () => {
+    const dir = await createTempDir("farm-storage-scoped-clear-");
+
+    await initStorage({
+      mounts: {
+        cache: localStorage({ base: dir }),
+      },
+    });
+
+    const cache = getStorage("cache");
+    await cache.setItem("sessions:a", { id: "a" });
+    await cache.setItem("profiles:b", { id: "b" });
+
+    await cache.clear("sessions");
+
+    expect(await cache.getItem("sessions:a")).toBeNull();
+    expect(await cache.getItem("profiles:b")).toEqual({ id: "b" });
+  });
+
   it.skipIf(!supportsNodeSqlite)(
     "supports sqlite storage with a simple path-based config",
     async () => {
