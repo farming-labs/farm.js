@@ -1,6 +1,11 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { defineIntegration, integrationRoute, type FarmIntegrationLogger } from "@farm.js/core";
 import {
+  describeIntegrationOriginRejection,
+  resolveIntegrationAllowedOrigins,
+  validateIntegrationRequestOrigin,
+} from "@farm.js/core/integrations";
+import {
   clearRequestCookie,
   createPathInferredClientApi,
   createDocumentNavigationMatchers,
@@ -45,6 +50,12 @@ export interface Auth0IntegrationInput {
   logoutPath?: string;
   profilePath?: string;
   protectedRoutes?: string | string[];
+  /**
+   * Additional origins allowed to drive the sign-out route, using the same
+   * pattern syntax as `serverActions.allowedOrigins`. The app's own origin is
+   * always trusted.
+   */
+  allowedOrigins?: string[];
   audience?: string;
   scopes?: string[];
   tokenEndpointAuthMethod?: "auto" | "client_secret_basic" | "client_secret_post" | "none";
@@ -335,6 +346,10 @@ export function auth0(input: Auth0IntegrationInput = {}) {
   const logoutPath = input.logoutPath ?? "/auth/logout";
   const profilePath = input.profilePath ?? "/auth/profile";
   const scopes = input.scopes?.length ? input.scopes : ["openid", "profile", "email"];
+  const allowedOrigins = resolveIntegrationAllowedOrigins(
+    input.allowedOrigins,
+    "auth0.allowedOrigins",
+  );
   const stateCookieName = "farm_auth0_state";
   const sessionCookieName = "farm_auth0_session";
   const callbackSettings = resolveCallbackSettings(
@@ -536,6 +551,27 @@ export function auth0(input: Auth0IntegrationInput = {}) {
       integrationRoute.get<typeof logoutPath, Auth0RedirectResult>(logoutPath, {
         responseFormat: "json",
         handler(request: Request) {
+          // Sign-out is a GET, so it is also reachable as a plain link or a
+          // bookmark with no origin metadata at all. Only a request the browser
+          // labelled cross-site is refused.
+          const originResult = validateIntegrationRequestOrigin(request, {
+            allowedOrigins,
+            requireOriginMetadata: false,
+          });
+
+          if (!originResult.ok) {
+            const message = describeIntegrationOriginRejection(originResult.reason);
+
+            if (request.headers.get("x-farm-integration-client") === "1") {
+              return Response.json({ error: message }, { status: 403 });
+            }
+
+            return new Response(message, {
+              status: 403,
+              headers: { "content-type": "text/plain; charset=utf-8" },
+            });
+          }
+
           const origin = getOrigin(request, appBaseUrl);
           const redirectTo = new URL("/v2/logout", `https://${domain}`);
           redirectTo.searchParams.set("client_id", clientId);
