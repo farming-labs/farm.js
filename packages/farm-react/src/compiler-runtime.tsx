@@ -866,7 +866,7 @@ function compilerKeyedArrayWindowReplacements(
   value: unknown,
   sourceToken: object | undefined,
   expectedLength: number,
-): readonly CompilerKeyedArrayWindowReplaceHint[] | undefined {
+): CompilerKeyedArrayWindowReplaceHint[] | undefined {
   const target = compilerObject(value);
   if (!target || !sourceToken || !Array.isArray(value)) return undefined;
   const update = COMPILER_KEYED_ARRAY_WINDOW_REPLACEMENTS.get(target);
@@ -7353,17 +7353,17 @@ function reconcileCompilerKeyedArrayWindowReplace(
 
     // Length-preserving windows share source positions. Walk their ranges in
     // row order so overlaps are prepared once, without hashing every row index.
-    const windows = [...updates].sort((left, right) => left.position - right.position);
-    let windowIndex = 0;
-    let window: (typeof windows)[number] | undefined = windows[0];
+    // The validated chain is a fresh array; consuming it does not change the hints.
+    updates.sort((left, right) => right.position - left.position);
+    let window = updates.pop();
     const touchedInstances: CompilerKeyedRowInstance[] = [];
 
     for (let index = 0; index < previousInstances.length; index += 1) {
       while (window && index >= window.position + window.removedCount) {
-        window = windows[++windowIndex];
+        window = updates.pop();
       }
       const instance = previousInstances[index];
-      const touched = window !== undefined && index >= window.position;
+      const touched = window && index >= window.position;
       if (
         !instance ||
         instance.index !== index ||
