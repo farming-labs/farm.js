@@ -7372,7 +7372,6 @@ function reconcileCompilerKeyedArrayWindowReplace(
       }
     }
 
-    const knownKeys = new Set(instances.keys());
     const incomingKeys = new Set<string>();
     let replacesRows = false;
     const prepared: Array<
@@ -7393,8 +7392,9 @@ function reconcileCompilerKeyedArrayWindowReplace(
           // Fixed-length queued windows never shift positions, and React only
           // commits their final array. Intermediate identities were never
           // mounted, so only the final key must be new to the committed
-          // rows and unique across the prepared replacements.
-          if (knownKeys.has(key) || incomingKeys.has(key)) return undefined;
+          // rows and unique across the prepared replacements. The committed
+          // map stays unchanged throughout preparation, so reuse its lookup.
+          if (instances.has(key) || incomingKeys.has(key)) return undefined;
           incomingKeys.add(key);
           replacesRows = true;
           const descriptor = props.create(item, index);

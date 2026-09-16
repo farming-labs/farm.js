@@ -1347,6 +1347,8 @@ same-key windows queued before one compiler flush compose into one atomic refres
 queued windows may mix same-key rows with globally new final keys, and both disjoint and
 overlapping windows are supported. An overlapping position uses the last queued value;
 intermediate identities are never mounted. Farm validates the complete chain and final key set,
+using the committed row map directly for key collisions instead of copying every existing key
+into a temporary set. This removes an allocation, not the full-chain or untouched-row checks. It
 then prepares every touched key, binding value, DOM target, new descriptor, binding snapshot, and
 disconnected DOM row before the first write. It patches same-key positions and swaps only final
 fresh-key positions. Untouched rows retain their identity. Duplicate final keys and keys reused
