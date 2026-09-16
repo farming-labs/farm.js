@@ -1,4 +1,8 @@
 import { toPosixPath } from "./utils";
+import {
+  getFarmRuntimeBindings,
+  readFarmEnvironmentValue as readEnvironmentValue,
+} from "./utils/runtime-env";
 
 export type FarmCronSchedule = string | string[];
 
@@ -478,20 +482,7 @@ export default defineTask({
 `.trim();
 }
 
-function readEnvironmentValue(name: string): string | undefined {
-  const runtimeValue = getFarmRuntimeBindings()?.[name];
-  if (typeof runtimeValue === "string") return runtimeValue;
-  return typeof process !== "undefined" ? process.env?.[name] : undefined;
-}
 
-function getFarmRuntimeBindings(): Record<string, unknown> | undefined {
-  const runtimeBindings = (
-    globalThis as typeof globalThis & {
-      __env__?: Record<string, unknown>;
-    }
-  ).__env__;
-  return runtimeBindings && typeof runtimeBindings === "object" ? runtimeBindings : undefined;
-}
 
 function safeFileName(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]+/g, "-") || "cron";
