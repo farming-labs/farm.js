@@ -151,6 +151,8 @@ function databaseRecord(event: TelemetryEvent, hash: string) {
   };
 }
 
+import { readTextWithLimit } from "../../../../../lib/request-body";
+
 export async function POST(request: Request): Promise<Response> {
   if (!takeRateLimit("global", GLOBAL_RATE_LIMIT)) {
     return json({ ok: false, error: "rate_limited" }, 429);
@@ -159,18 +161,14 @@ export async function POST(request: Request): Promise<Response> {
   if (!contentType.startsWith("application/json")) {
     return json({ ok: false, error: "content_type" }, 415);
   }
-  const contentLength = Number.parseInt(request.headers.get("content-length") || "0", 10);
-  if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
+  const read = await readTextWithLimit(request, MAX_BODY_BYTES);
+  if (!read.ok) {
     return json({ ok: false, error: "payload_too_large" }, 413);
   }
 
   let body: unknown;
   try {
-    const text = await request.text();
-    if (new TextEncoder().encode(text).byteLength > MAX_BODY_BYTES) {
-      return json({ ok: false, error: "payload_too_large" }, 413);
-    }
-    body = JSON.parse(text);
+    body = JSON.parse(read.text);
   } catch {
     return json({ ok: false, error: "invalid_json" }, 400);
   }
