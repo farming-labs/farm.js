@@ -42,6 +42,7 @@
   },
   "scripts": {
     "build": "tsc && node scripts/build-ui.mjs",
+    "build:runtime": "node scripts/build-runtime.mjs && node scripts/build-ui.mjs",
     "type-check": "tsc --noEmit",
     "test": "vitest run"
   },
