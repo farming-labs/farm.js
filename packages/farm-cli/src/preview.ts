@@ -287,7 +287,10 @@ export function parsePreviewPublicUrl(
   );
 }
 
-async function runPreviewTunnel(plan: PreviewTunnelPlan, timeoutMs: number): Promise<string> {
+export async function runPreviewTunnel(
+  plan: PreviewTunnelPlan,
+  timeoutMs: number,
+): Promise<string> {
   const child = spawn(plan.command, plan.args, {
     env: {
       ...process.env,
@@ -312,6 +315,8 @@ async function runPreviewTunnel(plan: PreviewTunnelPlan, timeoutMs: number): Pro
   try {
     publicUrl = await new Promise<string>((resolve, reject) => {
       const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
         reject(new Error("Timed out waiting for the preview URL."));
       }, timeoutMs);
 
@@ -354,6 +359,13 @@ async function runPreviewTunnel(plan: PreviewTunnelPlan, timeoutMs: number): Pro
 
     await waitForTunnelExit(child);
     return publicUrl;
+  } catch (error) {
+    // The timeout (and any spawn or early-exit failure) rejects while the child
+    // may still be running. Nothing else terminates it: the SIGINT/SIGTERM
+    // handlers are removed below, so without this the tunnel process outlives
+    // the command that started it.
+    cleanup();
+    throw error;
   } finally {
     process.removeListener("SIGINT", cleanup);
     process.removeListener("SIGTERM", cleanup);

@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import fs from "node:fs/promises";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
@@ -18,6 +20,7 @@ const {
   resolvePreviewTarget,
   runNativePreviewTunnel,
   runPreviewGateway,
+  runPreviewTunnel,
 } = require("../dist/index.js");
 const execFileAsync = promisify(execFile);
 const testDir = path.dirname(fileURLToPath(import.meta.url));
@@ -879,3 +882,47 @@ function restoreEnv(key, previous) {
     process.env[key] = previous;
   }
 }
+
+test("terminates the tunnel process when the preview URL times out", async () => {
+  const pidFile = path.join(
+    await fs.mkdtemp(path.join(os.tmpdir(), "farm-preview-timeout-")),
+    "child.pid",
+  );
+  // A tunnel that starts, prints something that is not a URL, and then hangs.
+  const script =
+    "require('node:fs').writeFileSync(process.env.FARM_TEST_PID_FILE, String(process.pid));" +
+    "process.stdout.write('starting tunnel\\n');" +
+    "setInterval(() => {}, 1000);";
+
+  const plan = {
+    command: process.execPath,
+    args: ["-e", script],
+    target: { localUrl: "http://127.0.0.1:3000", host: "127.0.0.1", port: 3000, source: "port" },
+    requestedName: "timeout-preview",
+    requestedHostname: "timeout-preview.preview.farming-labs.dev",
+  };
+
+  const previousPidFile = process.env.FARM_TEST_PID_FILE;
+  process.env.FARM_TEST_PID_FILE = pidFile;
+  try {
+    await assert.rejects(runPreviewTunnel(plan, 300), /Timed out waiting for the preview URL/);
+
+    const pid = Number(await fs.readFile(pidFile, "utf8"));
+    assert.ok(Number.isInteger(pid) && pid > 0, "the tunnel child should have recorded its pid");
+
+    // The child must not outlive the command that spawned it.
+    let alive = true;
+    for (let attempt = 0; attempt < 40 && alive; attempt += 1) {
+      try {
+        process.kill(pid, 0);
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      } catch {
+        alive = false;
+      }
+    }
+    assert.equal(alive, false, "the tunnel process should be terminated after the timeout");
+  } finally {
+    if (previousPidFile === undefined) delete process.env.FARM_TEST_PID_FILE;
+    else process.env.FARM_TEST_PID_FILE = previousPidFile;
+  }
+});
