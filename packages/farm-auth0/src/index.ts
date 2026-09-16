@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { defineIntegration, integrationRoute, type FarmIntegrationLogger } from "@farm.js/core";
 import {
   describeIntegrationOriginRejection,
@@ -16,6 +16,8 @@ import {
   normalizeMatchers,
   parseCookieHeaderMap,
   resolveCallbackSettings,
+  signCookieValue,
+  unsignCookieValue,
 } from "@farm.js/integration-utils";
 import type { Auth0ProfileResult, Auth0RedirectQuery, Auth0RedirectResult } from "./client.js";
 import { auth0Client } from "./client.js";
@@ -152,41 +154,6 @@ function createCodeChallenge(verifier: string): string {
   return createHash("sha256").update(verifier).digest("base64url");
 }
 
-function signValue(value: unknown, secret: string): string {
-  const payload = Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
-  const signature = createHmac("sha256", secret).update(payload).digest("hex");
-  return `${payload}.${signature}`;
-}
-
-function unsignValue<T>(signed: string | undefined, secret: string): T | null {
-  if (!signed) {
-    return null;
-  }
-
-  const separator = signed.lastIndexOf(".");
-  if (separator === -1) {
-    return null;
-  }
-
-  const payload = signed.slice(0, separator);
-  const signature = signed.slice(separator + 1);
-  const expected = createHmac("sha256", secret).update(payload).digest("hex");
-
-  if (signature.length !== expected.length) {
-    return null;
-  }
-
-  if (!timingSafeEqual(Buffer.from(signature, "utf8"), Buffer.from(expected, "utf8"))) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as T;
-  } catch {
-    return null;
-  }
-}
-
 function decodeJwtPayload(token: string | undefined): Record<string, unknown> | null {
   if (!token) {
     return null;
@@ -213,7 +180,7 @@ function getSession(
   secret: string,
 ): Auth0SessionPayload | null {
   const cookies = parseCookieHeaderMap(request.headers.get("cookie"));
-  const session = unsignValue<Auth0SessionPayload>(cookies[cookieName], secret);
+  const session = unsignCookieValue<Auth0SessionPayload>(cookies[cookieName], secret);
 
   if (!session) {
     return null;
@@ -396,7 +363,7 @@ export function auth0(input: Auth0IntegrationInput = {}) {
       "set-cookie",
       createRequestCookie(
         stateCookieName,
-        signValue({ state, returnTo, codeVerifier } satisfies Auth0StatePayload, secret),
+        signCookieValue({ state, returnTo, codeVerifier } satisfies Auth0StatePayload, secret),
         request,
         { maxAge: 600 },
       ),
@@ -500,7 +467,10 @@ export function auth0(input: Auth0IntegrationInput = {}) {
             }
 
             const cookies = parseCookieHeaderMap(request.headers.get("cookie"));
-            const statePayload = unsignValue<Auth0StatePayload>(cookies[stateCookieName], secret);
+            const statePayload = unsignCookieValue<Auth0StatePayload>(
+              cookies[stateCookieName],
+              secret,
+            );
             if (!statePayload || statePayload.state !== state) {
               return new Response("Invalid Auth0 state.", { status: 400 });
             }
@@ -528,7 +498,7 @@ export function auth0(input: Auth0IntegrationInput = {}) {
               "set-cookie",
               createRequestCookie(
                 sessionCookieName,
-                signValue({ user, expiresAt } satisfies Auth0SessionPayload, secret),
+                signCookieValue({ user, expiresAt } satisfies Auth0SessionPayload, secret),
                 request,
                 {
                   maxAge: Math.max((expiresAt - Date.now()) / 1000, 60),

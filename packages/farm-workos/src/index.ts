@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { WorkOS } from "@workos-inc/node";
 import { defineIntegration, integrationRoute, type FarmIntegrationLogger } from "@farm.js/core";
 import {
@@ -15,6 +15,8 @@ import {
   getReturnTo,
   integrationConfig,
   normalizeMatchers,
+  signCookieValue,
+  unsignCookieValue,
 } from "@farm.js/integration-utils";
 import type { WorkOSRedirectQuery, WorkOSRedirectResult, WorkOSSessionResult } from "./client.js";
 import { workosClient } from "./client.js";
@@ -73,40 +75,6 @@ interface WorkOSRedirectResponse extends WorkOSRedirectResult {
 // The OAuth `state` must be unguessable and bound to the browser that started
 // the flow, so it is signed with the session cookie password and stored in a
 // short-lived cookie. Mirrors the signing helpers in @farm.js/auth0.
-function signValue(value: unknown, secret: string): string {
-  const payload = Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
-  const signature = createHmac("sha256", secret).update(payload).digest("hex");
-  return `${payload}.${signature}`;
-}
-
-function unsignValue<T>(signed: string | undefined, secret: string): T | null {
-  if (!signed) {
-    return null;
-  }
-
-  const separator = signed.lastIndexOf(".");
-  if (separator === -1) {
-    return null;
-  }
-
-  const payload = signed.slice(0, separator);
-  const signature = signed.slice(separator + 1);
-  const expected = createHmac("sha256", secret).update(payload).digest("hex");
-
-  if (signature.length !== expected.length) {
-    return null;
-  }
-
-  if (!timingSafeEqual(Buffer.from(signature, "utf8"), Buffer.from(expected, "utf8"))) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as T;
-  } catch {
-    return null;
-  }
-}
 
 function createWorkOSApi(input: {
   loginPath: string;
@@ -264,7 +232,7 @@ export function workos(input: WorkOSIntegrationInput = {}) {
       "set-cookie",
       createRequestCookie(
         stateCookieName,
-        signValue({ state, returnTo } satisfies WorkOSStatePayload, cookiePassword),
+        signCookieValue({ state, returnTo } satisfies WorkOSStatePayload, cookiePassword),
         request,
         { maxAge: 600 },
       ),
@@ -360,7 +328,7 @@ export function workos(input: WorkOSIntegrationInput = {}) {
           // Bind the code to the browser that started the flow. Without this a
           // code obtained elsewhere could be replayed into a victim's session.
           const state = requestUrl.searchParams.get("state");
-          const statePayload = unsignValue<WorkOSStatePayload>(
+          const statePayload = unsignCookieValue<WorkOSStatePayload>(
             getCookieValue(request.headers, stateCookieName) ?? undefined,
             cookiePassword,
           );

@@ -1,3 +1,5 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
+
 export interface ParsedCookie {
   name: string;
   value: string;
@@ -100,4 +102,58 @@ export function clearRequestCookie(
     ...options,
     maxAge: 0,
   });
+}
+
+/**
+ * Sign a value for storage in a cookie.
+ *
+ * Auth integrations put state that the browser must hand back (OAuth `state`,
+ * session payloads) into cookies. Those values are attacker-reachable, so they
+ * carry an HMAC and are rejected on any mismatch. One implementation is shared
+ * so the verification rules cannot drift between integrations.
+ *
+ * This provides integrity, not confidentiality: the payload is encoded, not
+ * encrypted, and is readable by anyone holding the cookie. Do not sign secrets
+ * the browser should not see.
+ */
+export function signCookieValue(value: unknown, secret: string): string {
+  const payload = Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
+  const signature = createHmac("sha256", secret).update(payload).digest("hex");
+  return `${payload}.${signature}`;
+}
+
+/**
+ * Verify and decode a value produced by {@link signCookieValue}. Returns null
+ * for anything missing, malformed, tampered with, or signed by another secret,
+ * so callers can treat a null as "no usable value" without distinguishing the
+ * failure modes to the client.
+ */
+export function unsignCookieValue<T>(signed: string | undefined | null, secret: string): T | null {
+  if (!signed) {
+    return null;
+  }
+
+  const separator = signed.lastIndexOf(".");
+  if (separator === -1) {
+    return null;
+  }
+
+  const payload = signed.slice(0, separator);
+  const signature = signed.slice(separator + 1);
+  const expected = createHmac("sha256", secret).update(payload).digest("hex");
+
+  // timingSafeEqual throws on length mismatch, so compare lengths first.
+  if (signature.length !== expected.length) {
+    return null;
+  }
+
+  if (!timingSafeEqual(Buffer.from(signature, "utf8"), Buffer.from(expected, "utf8"))) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as T;
+  } catch {
+    return null;
+  }
 }

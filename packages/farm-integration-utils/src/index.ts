@@ -12,6 +12,8 @@ export {
   getCookieValue,
   parseCookieHeaderList,
   parseCookieHeaderMap,
+  signCookieValue,
+  unsignCookieValue,
 } from "./cookies.js";
 export {
   getOrigin,
