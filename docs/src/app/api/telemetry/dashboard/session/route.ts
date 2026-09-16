@@ -45,7 +45,7 @@ function redirect(location: string, cookie?: string): Response {
   return new Response(null, { status: 303, headers });
 }
 
-import { readTextWithLimit } from "../../../../lib/request-body";
+import { readTextWithLimit } from "../../../../../lib/request-body";
 
 export async function POST(request: Request): Promise<Response> {
   const contentType = request.headers.get("content-type")?.toLowerCase() || "";
