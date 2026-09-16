@@ -464,6 +464,12 @@ async function runCoalesced(
     created.promise = run(controller.signal).finally(() => {
       if (inflight.get(key) === created) inflight.delete(key);
     });
+    // Every waiter can detach before the shared work settles: an already
+    // aborted request returns early without ever attaching to this promise,
+    // and the last waiter leaving aborts the controller. Keep one no-op
+    // handler so that rejection is never reported as unhandled. Waiters still
+    // observe it, because this does not replace the promise they await.
+    created.promise.catch(() => {});
     inflight.set(key, created);
     entry = created;
   }
