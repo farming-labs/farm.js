@@ -31,6 +31,41 @@ export function isFarmMarkdownPageFile(filePath: string): boolean {
   return /(^|[/\\])page\.mdx?$/i.test(filePath);
 }
 
+/** Content type for Markdown responses, including agent-facing error bodies. */
+export const FARM_MARKDOWN_CONTENT_TYPE = "text/markdown; charset=utf-8";
+
+/**
+ * True when the client asked for Markdown — either via a `.md` path or an
+ * `Accept: text/markdown` header. Used to serve a Markdown error body to agents
+ * that navigate in Markdown, instead of the HTML error shell.
+ */
+export function farmRequestWantsMarkdown(
+  pathname: string,
+  accept: string | null | undefined,
+): boolean {
+  return pathname.toLowerCase().endsWith(".md") || requestAcceptsMarkdown(accept);
+}
+
+/**
+ * A Markdown error document for agents that requested Markdown but hit an error
+ * (typically a 404). Includes a short explanation and a link back to the site so
+ * an agent can recover, satisfying the "Markdown error body" agent-readiness
+ * expectation.
+ */
+export function createFarmMarkdownErrorBody(
+  status: number,
+  pathname: string,
+  homeHref = "/",
+): string {
+  const heading = status === 404 ? "Page not found" : `Request failed (${status})`;
+  return (
+    `# ${heading}\n\n` +
+    `No page is available at \`${pathname}\`. The URL may be incorrect, ` +
+    `or the page has not been published.\n\n` +
+    `Browse [the site homepage](${homeHref}) to find available pages.\n`
+  );
+}
+
 export function normalizeFarmMarkdownRoutePath(pathname: string): string {
   const withoutExtension = pathname.replace(/\.md$/i, "");
   const normalized = withoutExtension.startsWith("/") ? withoutExtension : `/${withoutExtension}`;
