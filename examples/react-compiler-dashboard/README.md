@@ -249,6 +249,12 @@ tests compare 1,000 deterministic queued updates with React and cover disjoint w
 last-update-wins semantics, atomic preparation, overlapping structural fallback, controlled-input selection,
 events, Strict Mode hydration, and cleanup.
 
+Source-level tests also read the actual queued-refresh buttons and require two position hints for
+the optimized handler and none for its snapshot control in both compiler modes. They compare both
+native handlers across repeated 10,000-row updates, including row values and object identity.
+The browser timing includes DOM snapshot preparation and completion checks, not just the update
+itself. Isolated timing diagnostics do not replace the full benchmark or its performance gates.
+
 Queued fresh-key exact-window replacement has a separate 10,000-row gate. One event replaces two
 overlapping 32-row windows with globally new final keys; their 16-row overlap leaves one 48-row
 final union. The benchmark requires the 48 old rows to disconnect, both surrounding anchors to
@@ -474,8 +480,12 @@ The default JSON report is `/tmp/farm-react-dashboard-benchmark.json`; change it
   snapshot; the hinted path isolates the saved descriptor and unchanged-binding work while both
   paths run the same native map, sort, and LIS movement.
 - The multi-map update control changes every tenth row in two same-order native maps. Its
-  block-bodied equivalent rereads all 10,000 keys and bindings; the hinted path compares the
-  committed and final arrays once and patches each final changed row once.
+  snapshot pair assigns the same map result to a local variable before returning it, keeping it
+  on complete reconciliation without adding another array pass. A single-return block alone is
+  also optimized and is not a snapshot control. Package regression tests compile the actual
+  example handlers in static and hybrid modes: the optimized handler must emit two map hints,
+  while the snapshot handler must emit none. Both perform the same native updates; the hinted
+  path compares the committed and final arrays once and patches each final changed row once.
 - The multi-map reorder control changes one row's label and amount in two consecutive native maps,
   then sorts the same keyed rows through a single-return block-bodied setter. Its pair with a local
   declaration keeps complete reconciliation, while the hinted path checks each native call, scans
