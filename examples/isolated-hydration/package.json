@@ -9,6 +9,7 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
+    "@farm-example/ui-kit": "workspace:*",
     "@farm.js/core": "workspace:*",
     "react": "19.2.8",
     "react-dom": "19.2.8"

@@ -358,6 +358,44 @@ describe("client component path resolution", () => {
     }
   });
 
+  it("keeps data-dependent island counts route-wide however the list is built", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-isolated-cardinality-"));
+    tempDirs.push(root);
+    const pageFile = path.join(root, "src", "app", "page.tsx");
+    const componentsDirectory = path.join(root, "src", "components");
+    fs.mkdirSync(path.dirname(pageFile), { recursive: true });
+    fs.mkdirSync(componentsDirectory, { recursive: true });
+    fs.writeFileSync(
+      path.join(componentsDirectory, "row.tsx"),
+      `'use client';\nexport default function Row({ name }) { return <li>{name}</li>; }\n`,
+    );
+
+    const reason = "the client boundary count imported from ../components/row is data-dependent";
+    const writePage = (body: string) => {
+      fs.writeFileSync(pageFile, `import Row from "../components/row";\n${body}\n`);
+    };
+
+    // A bare map, and a for loop inside a helper behind filter(), which is the
+    // same data dependence one indirection removed.
+    for (const body of [
+      `export default function Page() { return <ul>{rows.map((row) => <Row key={row} name={row} />)}</ul>; }`,
+      `function renderRows(names) {
+  const nodes = [];
+  for (const name of names) { nodes.push(<Row key={name} name={name} />); }
+  return nodes;
+}
+export default function Page() { return <ul>{renderRows(rows.filter(Boolean))}</ul>; }`,
+    ]) {
+      writePage(body);
+      expect(getClientModuleHydrationPlan(pageFile, root, "enabled")).toMatchObject({
+        shouldHydrate: true,
+        hasIsolatedClientBoundaries: false,
+        costGuardExceeded: true,
+        fallbackReason: reason,
+      });
+    }
+  });
+
   it("keeps client graphs above the measured isolated-root limit route-wide", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-isolated-client-cost-"));
     tempDirs.push(root);
