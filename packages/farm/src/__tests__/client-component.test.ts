@@ -305,6 +305,59 @@ describe("client component path resolution", () => {
     }
   });
 
+  it("keeps boundaries handed React elements route-wide", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-isolated-element-props-"));
+    tempDirs.push(root);
+    const pageFile = path.join(root, "src", "app", "page.tsx");
+    const componentsDirectory = path.join(root, "src", "components");
+    fs.mkdirSync(path.dirname(pageFile), { recursive: true });
+    fs.mkdirSync(componentsDirectory, { recursive: true });
+    fs.writeFileSync(
+      path.join(componentsDirectory, "shell.tsx"),
+      `'use client';\nexport default function Shell({ children }) { return <section>{children}</section>; }\n`,
+    );
+
+    const writePage = (body: string) => {
+      fs.writeFileSync(
+        pageFile,
+        `import Shell from "../components/shell";\nexport default function Page() { return ${body}; }\n`,
+      );
+    };
+
+    const reason =
+      "the client boundary imported from ../components/shell receives React elements, which cannot cross the boundary as serialized props";
+
+    // An element reaches the boundary as children or through a prop expression.
+    for (const body of [
+      "<Shell><p>server content</p></Shell>",
+      "<Shell>{<span>expression child</span>}</Shell>",
+      "<Shell icon={<svg />} />",
+      "<Shell><Shell><em>nested</em></Shell></Shell>",
+    ]) {
+      writePage(body);
+      expect(getClientModuleHydrationPlan(pageFile, root, "enabled")).toMatchObject({
+        shouldHydrate: true,
+        hasIsolatedClientBoundaries: false,
+        isolatedBoundaries: [],
+        fallbackReason: reason,
+      });
+    }
+
+    // Serializable props and children still isolate: only elements are a problem.
+    for (const body of [
+      "<Shell />",
+      "<Shell></Shell>",
+      '<Shell title="hello" count={3} items={["a"]} />',
+      "<Shell>plain text</Shell>",
+    ]) {
+      writePage(body);
+      expect(getClientModuleHydrationPlan(pageFile, root, "enabled")).toMatchObject({
+        shouldHydrate: false,
+        hasIsolatedClientBoundaries: true,
+      });
+    }
+  });
+
   it("keeps client graphs above the measured isolated-root limit route-wide", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-isolated-client-cost-"));
     tempDirs.push(root);

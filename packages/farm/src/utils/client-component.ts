@@ -984,6 +984,56 @@ function getClientRenderingHelpers(
   return helpers;
 }
 
+/**
+ * True when a boundary is handed a React element, as JSX children or as an
+ * element-valued prop.
+ *
+ * Boundary props cross to the browser as JSON, and an element cannot be
+ * serialized. Without this check the SSR wrapper drops the marker for that
+ * boundary and the component renders as ordinary server markup that nothing
+ * ever hydrates, leaving an interactive-looking widget permanently dead with
+ * no browser-visible diagnostic. String and number children serialize fine and
+ * are deliberately not flagged.
+ */
+function passesElementValuedProps(content: string | null, localBindings: string[]): boolean {
+  if (!content || localBindings.length === 0) return false;
+  const names = new Set(localBindings);
+  const tokens = tokenizeModuleSource(content);
+
+  for (let index = 0; index < tokens.length - 1; index++) {
+    if (tokens[index].value !== "<" || !names.has(tokens[index + 1].value)) continue;
+    const name = tokens[index + 1].value;
+
+    // Walk the opening tag, watching for an element inside an attribute
+    // expression such as icon={<Icon />}.
+    let cursor = index + 2;
+    let braceDepth = 0;
+    let selfClosing = false;
+    for (; cursor < tokens.length; cursor++) {
+      const value = tokens[cursor].value;
+      if (value === "{") braceDepth++;
+      else if (value === "}") braceDepth--;
+      else if (value === "<" && braceDepth > 0) return true;
+      else if (value === ">" && braceDepth === 0) {
+        selfClosing = tokens[cursor - 1]?.value === "/";
+        break;
+      }
+    }
+    if (selfClosing || cursor >= tokens.length) continue;
+
+    // The first tag after the opening one decides it: the boundary's own
+    // closing tag means no element children, anything else is an element child.
+    for (let child = cursor + 1; child < tokens.length; child++) {
+      if (tokens[child].value !== "<") continue;
+      const closesBoundary = tokens[child + 1]?.value === "/" && tokens[child + 2]?.value === name;
+      if (!closesBoundary) return true;
+      break;
+    }
+  }
+
+  return false;
+}
+
 function hasDynamicJsxCardinality(content: string | null, localBindings: string[]): boolean {
   if (!content || localBindings.length === 0) return false;
   const clientBindings = new Set(localBindings);
@@ -1102,6 +1152,10 @@ function collectIsolatedClientBoundaries(
         const container = findParserSensitiveJsxContainer(content, localBindings);
         if (container) {
           fallbackReason = `the client boundary imported from ${specifier} renders inside <${container}>, where the HTML parser relocates its hydration marker`;
+          return 0;
+        }
+        if (passesElementValuedProps(content, localBindings)) {
+          fallbackReason = `the client boundary imported from ${specifier} receives React elements, which cannot cross the boundary as serialized props`;
           return 0;
         }
       }

@@ -15,19 +15,25 @@ import "@farm.js/core/css";
 export type RoutePath =
   | "/"
   | "/about"
+  | "/children"
   | "/select"
+  | "/slots"
   | "/svg"
   | "/table";
 export type RoutePattern =
   | "/"
   | "/about"
+  | "/children"
   | "/select"
+  | "/slots"
   | "/svg"
   | "/table";
 export type RouteModulePattern =
   | "/"
   | "/about"
+  | "/children"
   | "/select"
+  | "/slots"
   | "/svg"
   | "/table";
 declare module "@farm.js/core/client" {
