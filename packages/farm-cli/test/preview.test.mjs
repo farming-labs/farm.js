@@ -926,3 +926,26 @@ test("terminates the tunnel process when the preview URL times out", async () =>
     else process.env.FARM_TEST_PID_FILE = previousPidFile;
   }
 });
+
+test("finds the preview URL after a noisy tunnel prologue", async () => {
+  // The scan buffer is bounded, so a tunnel that prints a lot before announcing
+  // its URL must still be matched - including when the URL lands in a later
+  // chunk than the noise.
+  const script =
+    "for (let i = 0; i < 4000; i += 1) process.stdout.write('warming up the tunnel ' + i + '\\n');" +
+    "setTimeout(() => {" +
+    "  process.stdout.write('tunnel ready at https://noisy-preview.trycloudflare.com\\n');" +
+    "  setInterval(() => {}, 1000).unref();" +
+    "}, 50);";
+
+  const plan = {
+    command: process.execPath,
+    args: ["-e", script],
+    target: { localUrl: "http://127.0.0.1:3000", host: "127.0.0.1", port: 3000, source: "port" },
+    requestedName: "noisy-preview",
+    requestedHostname: "noisy-preview.preview.farming-labs.dev",
+  };
+
+  const publicUrl = await runPreviewTunnel(plan, 10_000);
+  assert.equal(publicUrl, "https://noisy-preview.trycloudflare.com");
+});
