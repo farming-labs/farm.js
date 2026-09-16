@@ -328,8 +328,17 @@ export async function prepareFarmWorkflowsForNitro(config: {
   const tasks: PreparedFarmWorkflows["tasks"] = {};
   const scheduledTasks = createScheduledTasks(workflows);
 
+  const wrapperNames = new Map<string, string>();
   for (const workflow of workflows) {
-    const wrapperPath = toPosixPath(path.join(generatedDir, `${safeFileName(workflow.id)}.mjs`));
+    const fileName = workflowWrapperFileName(workflow.id);
+    const claimedBy = wrapperNames.get(fileName);
+    if (claimedBy !== undefined) {
+      throw new Error(
+        `Farm workflows ${JSON.stringify(claimedBy)} and ${JSON.stringify(workflow.id)} generate the same wrapper file ${JSON.stringify(`${fileName}.mjs`)}. Rename one of them.`,
+      );
+    }
+    wrapperNames.set(fileName, workflow.id);
+    const wrapperPath = toPosixPath(path.join(generatedDir, `${fileName}.mjs`));
     await fs.writeFile(wrapperPath, createNitroTaskWrapper(workflow), "utf8");
     tasks[workflow.id] = {
       handler: wrapperPath,
@@ -784,6 +793,37 @@ function joinRoute(...parts: string[]): string {
 
 function trimSlashes(value: string): string {
   return value.replace(/^\/+|\/+$/g, "");
+}
+
+/**
+ * Wrapper file name for a workflow id.
+ *
+ * `safeFileName` is not injective: it maps `a/b` and `a-b` onto the same string,
+ * and a case-insensitive filesystem (macOS and Windows by default) additionally
+ * folds `Daily` onto `daily`. Two distinct workflows would then share one
+ * generated wrapper and both run whichever was written last. Ids that survive
+ * sanitizing and case-folding unchanged keep their readable file name; anything
+ * that was rewritten gets a digest of the exact id appended, so distinct ids
+ * always produce distinct files.
+ */
+function workflowWrapperFileName(id: string): string {
+  const safe = safeFileName(id);
+  const lowered = safe.toLowerCase();
+  if (safe === id && lowered === id) return safe;
+  return `${lowered}-${workflowIdFingerprint(id)}`;
+}
+
+/**
+ * FNV-1a. This module is bundled into server runtimes that do not provide
+ * node:crypto, and the digest only needs to separate file names.
+ */
+function workflowIdFingerprint(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
 function safeFileName(value: string): string {
