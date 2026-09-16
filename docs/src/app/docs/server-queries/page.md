@@ -224,6 +224,12 @@ const result = await api.products.get(
 
 The route, API caller, and server query now read and invalidate the same canonical key. Default API keys remain isolated by request origin; only an explicit structured key opts into cross-feature sharing.
 
+When overlapping server-query requests use different function references but resolve to the same
+canonical key, a late older response cannot replace a newer request's cached result. Each caller
+still receives its own result. Once both references' keys are known, newer pending and error states
+are protected too. A key cannot be associated with a previously unknown reference until a Farm
+transport returns its cache metadata; plain-data transports remain scoped to the function and input.
+
 ### Share optimistic updates
 
 API mutations can optimistically update data watched by `useServerQuery` when both features use the
