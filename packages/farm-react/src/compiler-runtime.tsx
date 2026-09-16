@@ -7055,15 +7055,17 @@ function reconcileCompilerKeyedArrayBatchInsert(
       return undefined;
     }
   }
-  const knownKeys = new Set(instances.keys());
+  // The committed map stays unchanged until every incoming row is prepared.
+  // Track only the new keys instead of copying the entire committed key set.
+  const incomingKeys = new Set<string>();
   const incoming: CompilerKeyedRowInstance[] = [];
   try {
     for (let offset = 0; offset < insertCount; offset += 1) {
       const index = update.position + offset;
       const item = finalValue[index];
       const key = keyedRowIdentity(props.rowKey(item, index));
-      if (knownKeys.has(key)) return undefined;
-      knownKeys.add(key);
+      if (instances.has(key) || incomingKeys.has(key)) return undefined;
+      incomingKeys.add(key);
       const descriptor = props.create(item, index);
       incoming.push({
         key,
