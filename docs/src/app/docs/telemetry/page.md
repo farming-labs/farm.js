@@ -135,7 +135,9 @@ posted to `https://farmjs.dev/api/telemetry/v1/sites`. Both endpoints accept a s
 schema, reject unknown fields and bodies larger than 8 KiB, and rate-limit traffic. CLI events are
 deduplicated by event ID, while production sites are upserted by their normalized origin.
 Because the public clients contain no ingestion secret, dashboard origins are usage signals rather
-than verified domain-ownership records.
+than verified domain-ownership records. Anyone can post any origin to the public endpoint, so the
+dashboard labels these entries as self-reported and unverified rather than presenting them as a
+confirmed inventory.
 
 Raw telemetry events and inactive production-site records are retained for 90 days by default and
 are pruned by the ingestion service. The verified legacy Vercel preview records are also removed

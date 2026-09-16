@@ -331,10 +331,12 @@ function StatCard({
   label,
   value,
   icon: Icon,
+  note,
 }: {
   label: string;
   value: string;
   icon: typeof Activity;
+  note?: string;
 }) {
   return (
     <article className="border border-white/10 bg-white/[0.025] p-4">
@@ -343,6 +345,11 @@ function StatCard({
         <Icon className="size-4 text-white/45" strokeWidth={1.7} aria-hidden="true" />
       </div>
       <p className="mt-4 text-3xl font-medium tracking-[-0.04em] text-white">{value}</p>
+      {note ? (
+        <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.16em] text-white/30">
+          {note}
+        </p>
+      ) : null}
     </article>
   );
 }
@@ -403,9 +410,14 @@ function ProductionSitesTable({ sites }: { sites: ProductionSite[] }) {
           <h2 className="text-sm font-medium">Production websites</h2>
         </div>
         <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-white/35">
-          automatic detection
+          self-reported · unverified
         </span>
       </header>
+      <p className="border-b border-white/10 px-4 py-2.5 text-xs text-white/45">
+        Entries come from unauthenticated check-ins sent by apps that include Farm. Farm does not
+        verify that a sender controls the website it reports, so treat this list as an indication of
+        usage rather than a confirmed inventory.
+      </p>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[900px] text-left">
           <thead className="bg-white/[0.025] font-mono text-[10px] uppercase tracking-[0.14em] text-white/35">
@@ -601,6 +613,7 @@ export default async function TelemetryPage({ searchParams }: TelemetryPageProps
             label="Production websites"
             value={formatNumber(data.productionSiteCount)}
             icon={Globe2}
+            note="self-reported"
           />
         </section>
 
