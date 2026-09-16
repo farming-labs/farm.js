@@ -1,5 +1,5 @@
 import { createStorage, prefixStorage, builtinDrivers, type BuiltinDriverName } from "unstorage";
-import type { Driver, Storage } from "unstorage";
+import type { Driver, Storage, TransactionOptions } from "unstorage";
 import type { Database } from "db0";
 import memoryDriver from "unstorage/drivers/memory";
 import type {
@@ -570,9 +570,13 @@ export function getStorage(namespace?: string): Storage {
   const namespaced = prefixStorage(globalStorage, base);
   return {
     ...namespaced,
-    async clear() {
-      const keys = await namespaced.getKeys();
-      await Promise.all(keys.map((key) => namespaced.removeItem(key)));
+    // Scope the wipe to the namespace instead of the whole storage, and keep
+    // the caller's base so `clear("sessions")` cannot take unrelated keys with
+    // it. Dropping the argument silently widens a targeted clear into a
+    // namespace-wide delete.
+    async clear(base?: string, opts?: TransactionOptions) {
+      const keys = await namespaced.getKeys(base);
+      await Promise.all(keys.map((key) => namespaced.removeItem(key, opts)));
     },
   } as Storage;
 }

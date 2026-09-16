@@ -308,6 +308,7 @@ export class FarmClientDataCache {
     for (const key of this.listeners.keys()) watched.add(this.resolveKey(key));
 
     let remaining = false;
+    const swept = new Set<string>();
     for (const [key, entry] of this.entries) {
       if (entry.gcAt === undefined) continue;
       if (now < entry.gcAt || entry.fetching || this.inflight.has(key) || watched.has(key)) {
@@ -318,9 +319,32 @@ export class FarmClientDataCache {
       // of this key would already evict it lazily before returning data.
       this.entries.delete(key);
       this.persistence?.onDelete(key);
+      swept.add(key);
     }
 
+    if (swept.size > 0) this.sweepEntryMetadata(swept);
     if (remaining) this.scheduleGcSweep();
+  }
+
+  /**
+   * Entry eviction alone leaves the per-key metadata behind. `invalidatedAt`
+   * marks and provisional aliases are created per query invocation, so with
+   * dynamic keys they accumulate for the lifetime of the page even though the
+   * entries they describe are long gone.
+   */
+  private sweepEntryMetadata(swept: Set<string>): void {
+    for (const key of swept) this.invalidatedAt.delete(key);
+
+    for (const [alias, target] of this.aliases) {
+      // Keep any alias that is still addressable: one that has its own entry,
+      // that something is subscribed to, or whose target is still live.
+      if (this.entries.has(alias) || this.listeners.has(alias)) continue;
+      const resolved = this.resolveKey(target);
+      if (!swept.has(resolved)) continue;
+      if (this.entries.has(resolved) || this.listeners.has(resolved)) continue;
+      this.aliases.delete(alias);
+      this.invalidatedAt.delete(alias);
+    }
   }
 
   private emit(key: string, event?: "invalidate"): void {
@@ -334,7 +358,15 @@ export class FarmClientDataCache {
 
   private notifyListeners(key: string, event?: "invalidate"): void {
     for (const listener of this.listeners.get(key) ?? []) {
-      listener(event);
+      // One subscriber must not be able to break the others, or to make an
+      // ordinary cache write or invalidation throw in its caller. This matches
+      // the isolation the global invalidation bus already provides.
+      try {
+        listener(event);
+      } catch (error) {
+        const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
+        console.warn(`[farm:client-cache] cache listener failed: ${detail}`);
+      }
     }
   }
 }

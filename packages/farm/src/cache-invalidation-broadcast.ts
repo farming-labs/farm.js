@@ -21,7 +21,17 @@ type ActiveBridge = {
 // One bridge per tab regardless of how many callers enable it: a second
 // BroadcastChannel in the same tab would receive this tab's own posts and
 // re-apply every local invalidation as if it were remote.
-let activeBridge: ActiveBridge | undefined;
+//
+// The guard lives on globalThis under the same registry the invalidation bus
+// uses, so duplicate copies of this module share it. A module-local guard only
+// protects the copy that declares it, while the bus underneath is global, so a
+// second copy would build its own bridge and the two would echo one local
+// invalidation between them without end (each bridge's applyingRemote flag is
+// private to its own closure and cannot suppress the other's replay).
+const FARM_CACHE_INVALIDATION_BRIDGE = Symbol.for("farm.cacheInvalidationBridge");
+const bridgeGlobal = globalThis as typeof globalThis & {
+  [FARM_CACHE_INVALIDATION_BRIDGE]?: ActiveBridge;
+};
 
 /**
  * Bridge the cache invalidation bus across tabs of the same origin.
@@ -40,25 +50,33 @@ export function enableCrossTabCacheInvalidation(
   if (typeof BroadcastChannel !== "function") return () => {};
 
   const channelName = options.channelName ?? FARM_CACHE_INVALIDATION_CHANNEL;
-  if (activeBridge) {
-    if (activeBridge.channelName !== channelName) {
+  const existing = bridgeGlobal[FARM_CACHE_INVALIDATION_BRIDGE];
+  let bridge: ActiveBridge;
+  if (existing) {
+    if (existing.channelName !== channelName) {
       throw new Error(
-        `Cross-tab cache invalidation is already enabled on channel "${activeBridge.channelName}".`,
+        `Cross-tab cache invalidation is already enabled on channel "${existing.channelName}".`,
       );
     }
-    activeBridge.refCount += 1;
+    existing.refCount += 1;
+    bridge = existing;
   } else {
-    activeBridge = createBridge(channelName);
+    bridge = createBridge(channelName);
+    bridgeGlobal[FARM_CACHE_INVALIDATION_BRIDGE] = bridge;
   }
 
   let disposed = false;
   return () => {
-    if (disposed || !activeBridge) return;
+    if (disposed) return;
     disposed = true;
-    activeBridge.refCount -= 1;
-    if (activeBridge.refCount === 0) {
-      activeBridge.teardown();
-      activeBridge = undefined;
+    // Release the bridge this caller actually claimed, so a disposer that
+    // outlives a teardown/re-enable cycle cannot decrement a later bridge.
+    bridge.refCount -= 1;
+    if (bridge.refCount === 0) {
+      bridge.teardown();
+      if (bridgeGlobal[FARM_CACHE_INVALIDATION_BRIDGE] === bridge) {
+        bridgeGlobal[FARM_CACHE_INVALIDATION_BRIDGE] = undefined;
+      }
     }
   };
 }

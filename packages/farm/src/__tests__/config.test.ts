@@ -583,6 +583,7 @@ describe("resolveConfig", () => {
       route: "/api/internal/workflows",
       secretEnv: "WORKFLOW_SECRET",
       secret: undefined,
+      allowUnsecured: false,
     });
   });
 

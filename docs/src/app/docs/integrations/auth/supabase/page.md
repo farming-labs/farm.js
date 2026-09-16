@@ -192,19 +192,39 @@ The middleware checks the current Supabase cookie session. Signed-out requests r
 
 ## Options
 
-| Option            | Default                       | Use                                          |
-| ----------------- | ----------------------------- | -------------------------------------------- |
-| `instance`        | None                          | Request-scoped Supabase client factory.      |
-| `url`             | Supabase URL env              | Project URL.                                 |
-| `anonKey`         | Anonymous/publishable key env | Browser-safe project key.                    |
-| `appBaseUrl`      | `APP_BASE_URL`                | Public app origin.                           |
-| `callbackUrl`     | None                          | Absolute callback URL.                       |
-| `callbackPath`    | `/auth/callback`              | Callback route when `callbackUrl` is absent. |
-| `providers`       | `[]`                          | OAuth providers shown by the built-in form.  |
-| `defaultProvider` | None                          | Provider started by a plain login request.   |
-| `pages.signIn`    | Built-in form                 | Custom sign-in page path.                    |
-| `pages.signUp`    | Built-in form                 | Custom sign-up page path.                    |
-| `protectedRoutes` | None                          | One matcher or a list of matchers.           |
+| Option            | Default                       | Use                                            |
+| ----------------- | ----------------------------- | ---------------------------------------------- |
+| `instance`        | None                          | Request-scoped Supabase client factory.        |
+| `url`             | Supabase URL env              | Project URL.                                   |
+| `anonKey`         | Anonymous/publishable key env | Browser-safe project key.                      |
+| `appBaseUrl`      | `APP_BASE_URL`                | Public app origin.                             |
+| `callbackUrl`     | None                          | Absolute callback URL.                         |
+| `callbackPath`    | `/auth/callback`              | Callback route when `callbackUrl` is absent.   |
+| `providers`       | `[]`                          | OAuth providers shown by the built-in form.    |
+| `defaultProvider` | None                          | Provider started by a plain login request.     |
+| `pages.signIn`    | Built-in form                 | Custom sign-in page path.                      |
+| `pages.signUp`    | Built-in form                 | Custom sign-up page path.                      |
+| `protectedRoutes` | None                          | One matcher or a list of matchers.             |
+| `allowedOrigins`  | App origin only               | Extra origins allowed to post the auth routes. |
+
+## Cross-site request protection
+
+`POST /auth/login`, `POST /auth/signup`, and `/auth/logout` only accept requests
+that come from the app's own origin. A cross-site post is answered with `403`
+before any credential is read, so another site cannot sign a visitor into an
+account it controls or force a sign-out.
+
+When a different trusted origin submits these routes, list it explicitly. The
+pattern syntax matches `serverActions.allowedOrigins`:
+
+```ts
+supabase({
+  allowedOrigins: ["https://portal.example.com", "*.example.com"],
+});
+```
+
+A `GET /auth/logout` opened as a plain link or bookmark keeps working; only an
+explicitly cross-site navigation is rejected.
 
 ## Production checklist
 
