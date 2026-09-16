@@ -56,6 +56,61 @@ describe("client cache persistence engine", () => {
     vi.useRealTimers();
   });
 
+  it("clears in-memory entries on logout, not just the persisted copy", async () => {
+    const { adapter, store } = memoryAdapter();
+    initPersistedClientCache(adapter, { flushDelayMs: 0 });
+    await microtasks();
+
+    const cache = getFarmClientDataCache();
+    cache.set("user:profile", {
+      data: { email: "alice@example.com" },
+      updatedAt: Date.now(),
+      staleAt: Date.now() + 60_000,
+      status: "success",
+      error: null,
+      persist: true,
+    });
+    await flushPersistedClientCache();
+    expect(cache.get("user:profile")).toBeTruthy();
+
+    await clearPersistedCache();
+
+    // The persisted copy is gone...
+    expect(store.size).toBe(0);
+    // ...and so is the in-memory copy, so the next user of this tab cannot read
+    // the signed-out user's data.
+    expect(cache.get("user:profile")).toBeUndefined();
+  });
+
+  it("clears in-memory entries on logout when no adapter is configured", async () => {
+    disposePersistedClientCache();
+    const cache = getFarmClientDataCache();
+    cache.set("user:profile", {
+      data: { email: "alice@example.com" },
+      updatedAt: Date.now(),
+      staleAt: Date.now() + 60_000,
+      status: "success",
+      error: null,
+      persist: true,
+    });
+
+    await clearPersistedCache();
+
+    expect(cache.get("user:profile")).toBeUndefined();
+  });
+
+  it("clears the adapter exactly once per logout", async () => {
+    const { adapter } = memoryAdapter();
+    const clear = vi.fn(adapter.clear);
+    initPersistedClientCache({ ...adapter, clear }, { flushDelayMs: 0 });
+    await microtasks();
+
+    await clearPersistedCache();
+    await microtasks();
+
+    expect(clear).toHaveBeenCalledTimes(1);
+  });
+
   it("hydrates persisted entries stale-but-visible", async () => {
     const { adapter } = memoryAdapter({
       catalog: persisted({ items: ["a"] }),
