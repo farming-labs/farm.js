@@ -108,7 +108,14 @@ export function createFarmImageHandler(
         "quality",
       );
       const accept = request.headers.get("accept") ?? "";
-      const cacheKey = `${sourceUrl.href}\n${width}\n${quality}\n${accept}`;
+      // Key on the format the Accept header negotiates to, not the header text.
+      // Both transformers derive their output from `selectOutputFormat(accept,
+      // formats)` alone, so every header that negotiates to the same format
+      // produces byte-identical output. Keying on the raw header let a caller
+      // vary it freely (`image/webp,*/*;q=0.8`, reordered lists, extra params)
+      // and force an uncached fetch and transform each time.
+      const negotiatedFormat = selectOutputFormat(accept, config.formats) ?? "";
+      const cacheKey = `${sourceUrl.href}\n${width}\n${quality}\n${negotiatedFormat}`;
       let optimized = cache.get(cacheKey);
 
       if (!optimized) {
