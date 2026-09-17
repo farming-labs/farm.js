@@ -6,6 +6,7 @@ import {
   type ResolvedFarmServerConfig,
 } from "./server-http";
 import { searchParamsToObject } from "./search-params";
+import { farmSecretsMatch } from "./secret-compare";
 import { isFarmDeployedRuntime, readFarmEnvironmentValue } from "./utils/runtime-env";
 import { decodeRouteSegment } from "./utils/decode";
 import { toPosixPath } from "./utils";
@@ -631,6 +632,7 @@ import { H3 } from "h3";
 import { runTask } from "nitro/runtime";
 import {
   createFarmRequestBodyErrorResponse,
+  farmSecretsMatch,
   readFarmRequestBody,
   searchParamsToObject
 } from "@farm.js/core/internal/production-runtime";
@@ -675,7 +677,7 @@ function verifySecret(event) {
   const authorization = getHeader(event, "authorization") || "";
   const headerSecret = getHeader(event, "x-farm-workflow-secret") || "";
   const bearer = authorization.match(/^Bearer\\s+(.+)$/i)?.[1] || "";
-  if (headerSecret === secret || bearer === secret) return null;
+  if (farmSecretsMatch(headerSecret, secret) || farmSecretsMatch(bearer, secret)) return null;
   return json({ error: "Unauthorized workflow request." }, 401);
 }
 
@@ -799,7 +801,7 @@ function verifyWorkflowSecret(
   const authorization = request.headers.get("authorization") || "";
   const bearer = authorization.match(/^Bearer\s+(.+)$/i)?.[1] || "";
   const headerSecret = request.headers.get("x-farm-workflow-secret") || "";
-  if (bearer === secret || headerSecret === secret) return null;
+  if (farmSecretsMatch(bearer, secret) || farmSecretsMatch(headerSecret, secret)) return null;
 
   return Response.json({ error: "Unauthorized workflow request." }, { status: 401 });
 }

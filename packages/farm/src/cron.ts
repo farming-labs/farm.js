@@ -1,3 +1,4 @@
+import { farmSecretsMatch } from "./secret-compare";
 import { toPosixPath } from "./utils";
 import {
   getFarmRuntimeBindings,
@@ -246,7 +247,10 @@ export function isCronRequestAuthorized(
 
   const authorization = request.headers.get("authorization") || "";
   const bearer = /^Bearer (.*)$/i.exec(authorization)?.[1] || "";
-  return bearer === secret || request.headers.get("x-farm-cron-secret") === secret;
+  const headerSecret = request.headers.get("x-farm-cron-secret") || "";
+  // Both are checked so a caller may use either header; neither short-circuits
+  // on the first differing character.
+  return farmSecretsMatch(bearer, secret) || farmSecretsMatch(headerSecret, secret);
 }
 
 export function cronRoute<TArgs extends unknown[], TResult>(
