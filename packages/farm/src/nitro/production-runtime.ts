@@ -1,4 +1,5 @@
 export { _runWithAfterRequest } from "../after";
+export { farmSecretsMatch } from "../secret-compare";
 export type { FarmServerConfig } from "../server-http";
 export {
   bufferFarmRequestBody,
