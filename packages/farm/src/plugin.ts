@@ -664,7 +664,6 @@ export class PluginManager {
   private runtimeClosed = false;
   private runtimeStartPromise?: Promise<void>;
   private runtimeClosePromise?: Promise<void>;
-  private runtimeShutdownStarted = false;
   private runtimeShutdownHooksRunning = false;
   private runtimeDisposers: Array<() => void | Promise<void>> = [];
   private runtimeRequestContexts = new WeakMap<Request, Readonly<Record<string, unknown>>>();
@@ -678,12 +677,20 @@ export class PluginManager {
           if (typeof dispose !== "function") {
             throw new TypeError("Farm lifecycle.onShutdown requires a cleanup function");
           }
-          // Gate on disposal actually being underway rather than on
-          // closeRuntime having been called. A shutdown requested while startup
-          // is still running now waits for it, and setup finishing inside that
-          // window must still be able to register its cleanup.
-          if (this.runtimeShutdownStarted || this.runtimeClosed) {
-            throw new Error("Farm runtime cleanup cannot be registered after shutdown begins");
+          // Shutdown never waits for startup, because a plugin whose
+          // runtime.start() hangs still has to be able to stop. Setup can
+          // therefore finish after the runtime is already closed, and the only
+          // way not to leak what it just opened is to release it now. This is
+          // what the disposer would have done moments earlier.
+          if (this.runtimeClosed) {
+            void (async () => {
+              try {
+                await dispose();
+              } catch (error) {
+                console.error("Farm runtime cleanup registered after shutdown failed:", error);
+              }
+            })();
+            return () => {};
           }
 
           this.runtimeDisposers.push(dispose);
@@ -1129,16 +1136,7 @@ export class PluginManager {
     if (this.runtimeClosed) return;
 
     this.runtimeClosePromise = (async () => {
-      // Never dispose while startup is still running. The disposer list is
-      // drained once below, so a plugin that registers its cleanup after that
-      // point would leak the resource it owns. Startup failure is not this
-      // method's concern: startRuntime reports it to its own caller.
-      if (this.runtimeStartPromise) {
-        await this.runtimeStartPromise.catch(() => {});
-      }
-
       const errors: unknown[] = [];
-      this.runtimeShutdownStarted = true;
       this.runtimeShutdownHooksRunning = true;
       try {
         await this.runHookParallel("shutdown", { reason });
@@ -1149,12 +1147,19 @@ export class PluginManager {
         this.runtimeShutdownHooksRunning = false;
       }
 
-      const disposers = this.runtimeDisposers.splice(0).reverse();
-      for (const dispose of disposers) {
-        try {
-          await dispose();
-        } catch (error) {
-          errors.push(error);
+      // Shutdown deliberately does not wait for startup: a plugin whose
+      // runtime.start() never resolves still has to be able to stop. Setup can
+      // therefore finish while disposal is already running, so keep draining
+      // until nothing new is registered instead of splicing once and stranding
+      // whatever arrived late.
+      while (this.runtimeDisposers.length > 0) {
+        const batch = this.runtimeDisposers.splice(0).reverse();
+        for (const dispose of batch) {
+          try {
+            await dispose();
+          } catch (error) {
+            errors.push(error);
+          }
         }
       }
 
