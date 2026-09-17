@@ -8,7 +8,7 @@ import {
   isFarmDeploymentMismatchResponse,
 } from "../deployment";
 import { getHashTargetElement } from "./hash-target";
-import { isFarmExternalNavigationURL } from "./navigation-url";
+import { isFarmExternalNavigationURL, resolveFarmNavigationURL } from "./navigation-url";
 import type { FarmClientNavigationSession, FarmClientPluginManager } from "./plugin";
 import { _hydrateFarmI18n, isFarmLocaleChangeHref } from "../i18n/client-runtime";
 import type { FarmI18nClientSnapshot } from "../i18n/types";
@@ -271,8 +271,8 @@ export class SPARouter {
       refresh = false,
     } = options;
 
-    // Parse the URL
-    const url = new URL(href, window.location.origin);
+    // Relative targets resolve against the current document, not the origin.
+    const url = resolveFarmNavigationURL(href, window.location.href);
     const pathname = url.pathname;
     const search = url.search;
     const fullPath = pathname + search;
@@ -403,7 +403,7 @@ export class SPARouter {
    */
   async prefetch(href: string): Promise<void> {
     if (isFarmLocaleChangeHref(href)) return;
-    const url = new URL(href, window.location.origin);
+    const url = resolveFarmNavigationURL(href, window.location.href);
     if (isFarmExternalNavigationURL(url, window.location.origin)) return;
     if (this.options.shouldUseDocumentNavigation(url.pathname)) return;
     const fullPath = url.pathname + url.search;
@@ -532,9 +532,9 @@ export class SPARouter {
     state: unknown;
     url: URL;
   }): Promise<void> {
-    const historyUrl = new URL(
+    const historyUrl = resolveFarmNavigationURL(
       options.pageData.canonicalPath || options.fullPath,
-      window.location.origin,
+      window.location.href,
     );
     historyUrl.hash = options.url.hash;
     const historyPath = historyUrl.pathname + historyUrl.search + historyUrl.hash;
@@ -559,9 +559,8 @@ export class SPARouter {
       window.history.pushState(historyState, "", historyPath);
     }
     this.currentHistoryIndex = nextHistoryIndex;
-    this.currentHistoryPath =
-      new URL(historyPath, window.location.origin).pathname +
-      new URL(historyPath, window.location.origin).search;
+    const resolvedHistoryUrl = resolveFarmNavigationURL(historyPath, window.location.href);
+    this.currentHistoryPath = resolvedHistoryUrl.pathname + resolvedHistoryUrl.search;
     notifyRouterHistoryChange();
 
     this.updateDocumentMetadata(options.pageData.metadata);
@@ -920,7 +919,9 @@ export class SPARouter {
   ): void {
     if (typeof window === "undefined") return;
 
-    const url = href ? new URL(href, window.location.origin).toString() : window.location.href;
+    const url = href
+      ? resolveFarmNavigationURL(href, window.location.href).toString()
+      : window.location.href;
     const parsedUrl = new URL(url);
     const nextPath = parsedUrl.pathname + parsedUrl.search;
     const historyPath = nextPath + parsedUrl.hash;
