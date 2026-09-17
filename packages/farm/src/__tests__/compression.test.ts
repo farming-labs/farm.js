@@ -134,6 +134,37 @@ describe("compression plugin", () => {
     expect(await parameterizedEventStream.text()).toBe("data: still-ready\n\n");
   });
 
+  it.each(["br", "gzip"])("streams %s chunks before the source ends", async (encoding) => {
+    const manager = createManager();
+    let closeSource!: () => void;
+    const source = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("first chunk ".repeat(64)));
+        closeSource = () => controller.close();
+      },
+    });
+    const response = await manager.runRuntimeRequest(
+      new Request("https://farm.test/", { headers: { "accept-encoding": encoding } }),
+      () => new Response(source, { headers: { "content-type": "text/plain" } }),
+    );
+    expect(response.headers.get("content-encoding")).toBe(encoding);
+
+    const reader = response.body!.getReader();
+    // The first chunk has to reach the client while the source is still open.
+    // Without a per-chunk flush the compressor buffers it and this read never
+    // settles, which is what stalls streaming responses.
+    const first = await Promise.race([
+      reader.read(),
+      new Promise<"timed out">((resolve) => setTimeout(() => resolve("timed out"), 1_000)),
+    ]);
+
+    expect(first).not.toBe("timed out");
+    expect((first as ReadableStreamReadResult<Uint8Array>).value?.byteLength).toBeGreaterThan(0);
+
+    closeSource();
+    await reader.cancel();
+  });
+
   it("propagates source stream failures to the compressed response", async () => {
     const manager = createManager();
     const source = new ReadableStream<Uint8Array>({
