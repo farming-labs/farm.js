@@ -1252,6 +1252,79 @@ describe("compiled keyed-array window replacement hints", () => {
     });
   }, 15_000);
 
+  for (const reactivity of ["static", "hybrid"] as const) {
+    it.each([false, true])(
+      `rebuilds row maps without entry arrays after resized windows in ${reactivity} (queued=%s)`,
+      async (queued) => {
+        let expected = Array.from(
+          { length: 256 },
+          (_, index): Item => ({ id: `row-${index}`, label: `Row ${index}` }),
+        );
+        const harness = createWindowHarness(expected, reactivity);
+        const container = document.createElement("div");
+        document.body.append(container);
+        const root = createRoot(container);
+        roots.push(root);
+        await act(async () => root.render(<harness.Table />));
+        const anchor = container.querySelector("li");
+        const originalMap = Array.prototype.map;
+        let entryArrays = 0;
+        vi.spyOn(Array.prototype, "map").mockImplementation(
+          function (this: Array<{ element?: Element }>, callback, thisArg) {
+            // Observe the complete committed-row array, not app-owned item.map()
+            // or the small per-window preparation arrays.
+            if (this.length >= 256 && this[0]?.element === anchor) {
+              entryArrays += this.length;
+            }
+            return originalMap.call(this, callback, thisArg);
+          },
+        );
+
+        for (let round = 0; round < 3; round += 1) {
+          const before = new Map(
+            [...container.querySelectorAll("li")].map((row) => [row.dataset.key, row]),
+          );
+          const first = [
+            { ...expected[65], label: `Retained first ${round}` },
+            { id: `new-${round}-a`, label: `New ${round} A` },
+            { id: `new-${round}-b`, label: `New ${round} B` },
+          ];
+          const second = [{ ...expected[192], label: `Retained second ${round}` }];
+          expected = (expected as WindowArray).toSpliced(64, 2, ...first);
+          if (queued) expected = (expected as WindowArray).toSpliced(193, 2, ...second);
+          entryArrays = 0;
+          harness.counters.keys = 0;
+          harness.counters.descriptors = 0;
+          harness.counters.bindings = 0;
+          await act(async () => {
+            if (queued) harness.queueWindows(64, 2, first, 193, 2, second);
+            else harness.replace(64, 2, first);
+            await flushCompilerUpdates();
+          });
+          const rows = [...container.querySelectorAll("li")];
+          expect(rows.map((row) => row.dataset.key)).toEqual(expected.map((item) => item.id));
+          expect(rows.map((row) => row.textContent)).toEqual(expected.map((item) => item.label));
+          for (const row of rows) {
+            const retained = before.get(row.dataset.key);
+            if (retained) {
+              expect(row).toBe(retained);
+              before.delete(row.dataset.key);
+            }
+          }
+          for (const removed of before.values()) expect(removed.isConnected).toBe(false);
+          expect(harness.counters).toEqual({
+            executions: 1,
+            renders: 1,
+            keys: queued ? 4 : 3,
+            descriptors: 2,
+            bindings: queued ? 4 : 3,
+          });
+          expect(entryArrays).toBe(0);
+        }
+      },
+    );
+  }
+
   it("composes disjoint queued grow and shrink windows with local LIS reuse", async () => {
     const initialItems = Array.from(
       { length: 4_096 },
