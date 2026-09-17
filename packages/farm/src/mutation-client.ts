@@ -275,12 +275,17 @@ export function useMutationLifecycle<
             data = unwrapMutationResult<TData, TError>(rawResult, isAPITarget);
             break;
           } catch (cause) {
-            // A dispatch that failed while offline pauses and rides the next
-            // reconnect instead of surfacing a connectivity error.
+            // A dispatch that failed *because of connectivity* while offline
+            // pauses and rides the next reconnect. An application error (a
+            // typed business failure from a request that reached the server)
+            // must surface instead, or it would be swallowed and the payload
+            // silently re-submitted on reconnect, duplicating a non-idempotent
+            // write.
             if (
               currentOptions.networkMode === "online" &&
               !isNavigatorOnline() &&
-              requestId >= lastResetIdRef.current
+              requestId >= lastResetIdRef.current &&
+              isConnectivityFailure(cause)
             ) {
               continue;
             }
@@ -435,6 +440,20 @@ export function useMutationLifecycle<
     ],
   );
   return { mutation, mutatePreparedAsync };
+}
+
+/**
+ * Whether a thrown value represents a connectivity failure (as opposed to an
+ * application/business error). Only connectivity failures are safe to pause and
+ * retry on reconnect; an application error means the request reached the server
+ * and produced a real result. The client tags transport failures with an
+ * `APIClientError` code of `network_error` or `timeout`; a raw fetch/transport
+ * failure surfaces as a `TypeError`.
+ */
+function isConnectivityFailure(error: unknown): boolean {
+  if (error instanceof TypeError) return true;
+  const code = (error as { code?: unknown } | null | undefined)?.code;
+  return code === "network_error" || code === "timeout";
 }
 
 function unwrapMutationResult<TData, TError>(result: unknown, apiRoute: boolean): TData {

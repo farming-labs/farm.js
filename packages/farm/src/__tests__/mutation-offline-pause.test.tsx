@@ -92,9 +92,10 @@ describe("offline-paused mutations", () => {
     const target = vi.fn(async () => {
       calls += 1;
       if (calls === 1) {
-        // The connection drops while this dispatch is in flight.
+        // The connection drops while this dispatch is in flight. A real fetch
+        // failure surfaces as a TypeError.
         await firstAttemptGate;
-        throw new Error("fetch failed");
+        throw new TypeError("Failed to fetch");
       }
       return "ok";
     });
@@ -126,6 +127,57 @@ describe("offline-paused mutations", () => {
 
     expect(mutation.status).toBe("success");
     expect(calls).toBe(2);
+  });
+
+  it("surfaces an application error thrown while offline instead of pausing", async () => {
+    // The request reaches the server and returns a typed business error, but the
+    // connection flaps to offline before the response resolves. The error must
+    // still reject: pausing would swallow it and re-submit the payload on
+    // reconnect, duplicating a non-idempotent write.
+    let releaseFirstAttempt!: () => void;
+    const firstAttemptGate = new Promise<void>((resolve) => {
+      releaseFirstAttempt = resolve;
+    });
+    let calls = 0;
+    const businessError = Object.assign(new Error("insufficient funds"), { code: "invalid" });
+    const target = vi.fn(async () => {
+      calls += 1;
+      // In flight while the connection drops, then the server's business error
+      // arrives.
+      await firstAttemptGate;
+      throw businessError;
+    });
+    let mutation!: UseMutationReturn<typeof target>;
+    function View() {
+      mutation = useMutation(target, { networkMode: "online" });
+      return null;
+    }
+    await act(async () => root.render(createElement(StrictMode, null, createElement(View))));
+
+    let settled!: Promise<unknown>;
+    await act(async () => {
+      settled = mutation.mutateAsync().then(
+        (value) => ({ ok: value }),
+        (error) => ({ error }),
+      );
+      await Promise.resolve();
+      goOffline();
+      releaseFirstAttempt();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(await settled).toEqual({ error: businessError });
+    expect(calls).toBe(1);
+    expect(mutation.paused).toBe(false);
+    expect(mutation.status).toBe("error");
+
+    // Reconnecting must not silently re-run the mutation.
+    await act(async () => {
+      await goOnline();
+      await Promise.resolve();
+    });
+    expect(calls).toBe(1);
   });
 
   it("rejects a paused submission on reset instead of waiting forever", async () => {
