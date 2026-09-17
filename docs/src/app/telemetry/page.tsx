@@ -1,4 +1,3 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
 import type { Metadata } from "@farm.js/core";
 import { cookies } from "@farm.js/core/headers";
 import {
@@ -13,6 +12,7 @@ import {
 } from "lucide-react";
 import { getPrisma } from "../../lib/prisma";
 import { farmProductionSiteWhere } from "../../lib/telemetry-sites";
+import { DASHBOARD_SESSION_COOKIE, isValidDashboardSession } from "../../lib/dashboard-session";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -94,28 +94,15 @@ function first(value: string | string[] | undefined): string | undefined {
   return candidate?.trim() || undefined;
 }
 
-function safeTokenEqual(received: string | undefined, expected: string): boolean {
-  if (!received) return false;
-  const receivedBytes = Buffer.from(received);
-  const expectedBytes = Buffer.from(expected);
-  return (
-    receivedBytes.length === expectedBytes.length && timingSafeEqual(receivedBytes, expectedBytes)
-  );
-}
-
-function dashboardSessionValue(token: string): string {
-  return createHmac("sha256", token).update("farm.telemetry.dashboard.v1").digest("hex");
-}
-
 function hasDashboardAccess(): boolean {
   const expected = process.env.FARM_TELEMETRY_DASHBOARD_TOKEN?.trim();
-  if (!expected) {
-    return process.env.NODE_ENV !== "production";
-  }
-  return safeTokenEqual(
-    cookies().get("farm_telemetry_dashboard")?.value,
-    dashboardSessionValue(expected),
-  );
+  // Fail closed. Returning access for a missing token meant a typo, a rename, or
+  // an unset variable published the dashboard to anonymous visitors on any
+  // runtime where NODE_ENV was not exactly "production" - and the login route
+  // already fails closed on the same variable, so the two halves of one auth
+  // system disagreed.
+  if (!expected) return false;
+  return isValidDashboardSession(cookies().get(DASHBOARD_SESSION_COOKIE)?.value, expected);
 }
 
 function readLimit(value: string | string[] | undefined): number {

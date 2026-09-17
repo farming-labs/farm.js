@@ -1,7 +1,11 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import {
+  createDashboardSession,
+  DASHBOARD_SESSION_COOKIE,
+  DASHBOARD_SESSION_MAX_AGE_SECONDS as SESSION_MAX_AGE_SECONDS,
+  safeSecretEqual,
+} from "../../../../../lib/dashboard-session";
 
 const MAX_FORM_BYTES = 4 * 1024;
-const SESSION_MAX_AGE_SECONDS = 12 * 60 * 60;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_ATTEMPTS = 20;
 
@@ -17,22 +21,9 @@ function isRateLimited(now = Date.now()): boolean {
   return attempts > RATE_LIMIT_ATTEMPTS;
 }
 
-function safeEqual(received: string | undefined, expected: string): boolean {
-  if (!received) return false;
-  const receivedBytes = Buffer.from(received);
-  const expectedBytes = Buffer.from(expected);
-  return (
-    receivedBytes.length === expectedBytes.length && timingSafeEqual(receivedBytes, expectedBytes)
-  );
-}
-
-function sessionValue(token: string): string {
-  return createHmac("sha256", token).update("farm.telemetry.dashboard.v1").digest("hex");
-}
-
 function sessionCookie(value: string, maxAge: number): string {
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
-  return `farm_telemetry_dashboard=${value}; Path=/telemetry; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secure}`;
+  return `${DASHBOARD_SESSION_COOKIE}=${value}; Path=/telemetry; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secure}`;
 }
 
 function redirect(location: string, cookie?: string): Response {
@@ -58,13 +49,26 @@ export async function POST(request: Request): Promise<Response> {
   }
   const fields = new URLSearchParams(read.text);
   if (fields.get("action") === "logout") {
+    // Only act on a logout for a request that actually carries the session.
+    // SameSite=Strict keeps the cookie off cross-site posts, so this stops a
+    // third-party page from clearing the cookie on the visitor's behalf.
+    if (!request.headers.get("cookie")?.includes(`${DASHBOARD_SESSION_COOKIE}=`)) {
+      return redirect("/telemetry");
+    }
     return redirect("/telemetry", sessionCookie("", 0));
   }
-  if (isRateLimited()) return redirect("/telemetry?error=rate-limited");
 
   const expected = process.env.FARM_TELEMETRY_DASHBOARD_TOKEN?.trim();
-  if (!expected || !safeEqual(fields.get("token")?.trim(), expected)) {
-    return redirect("/telemetry?error=invalid");
+  // Check the credential before consulting the limiter. The counter is a single
+  // process-global, so counting correct submissions let anyone lock the operator
+  // out by burning the window with anonymous requests.
+  if (expected && safeSecretEqual(fields.get("token")?.trim(), expected)) {
+    return redirect(
+      "/telemetry",
+      sessionCookie(createDashboardSession(expected), SESSION_MAX_AGE_SECONDS),
+    );
   }
-  return redirect("/telemetry", sessionCookie(sessionValue(expected), SESSION_MAX_AGE_SECONDS));
+
+  if (isRateLimited()) return redirect("/telemetry?error=rate-limited");
+  return redirect("/telemetry?error=invalid");
 }
