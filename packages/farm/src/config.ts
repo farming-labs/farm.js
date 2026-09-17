@@ -233,6 +233,13 @@ export type I18nConfig = FarmI18nUserConfig;
 export interface OpenAPIConfig {
   enabled?: boolean;
   route?: string;
+  /**
+   * Path where the raw OpenAPI spec is served as JSON, so agents and API tools
+   * can fetch it at a predictable URL. Set to `false` to disable.
+   *
+   * @default "/openapi.json"
+   */
+  specRoute?: string | false;
   title?: string;
   description?: string;
   version?: string;
@@ -974,6 +981,7 @@ export async function resolveConfig(
   const openapi = {
     enabled: false,
     route: "/docs/reference",
+    specRoute: "/openapi.json" as string | false,
     title: "API Documentation",
     description: "Auto-generated API documentation",
     version: "1.0.0",
@@ -981,6 +989,7 @@ export async function resolveConfig(
     ...userConfig.openapi,
   };
   if (openapi.route !== undefined) validateConfigRouteSource(openapi.route, "openapi.route");
+  if (openapi.specRoute) validateConfigRouteSource(openapi.specRoute, "openapi.specRoute");
 
   const resolved: ResolvedFarmConfig = {
     [FARM_RESOLVED_CUSTOM_CONTEXT]: typeof userConfig.context === "function",

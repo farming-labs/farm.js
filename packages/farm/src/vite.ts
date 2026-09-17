@@ -1726,6 +1726,29 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             return;
           }
 
+          // Serve the raw OpenAPI spec as JSON at a predictable URL for agents
+          // and API tooling.
+          if (
+            openAPIManager &&
+            options.openapi?.specRoute &&
+            requestPathname === options.openapi.specRoute
+          ) {
+            if (requestMethod !== "GET" && requestMethod !== "HEAD") {
+              res.statusCode = 405;
+              res.setHeader("Allow", "GET, HEAD");
+              res.setHeader("Content-Type", "text/plain; charset=utf-8");
+              res.end("Method Not Allowed");
+              return;
+            }
+            const spec = await openAPIManager.getSpec();
+            const body = JSON.stringify(spec);
+            res.statusCode = 200;
+            res.setHeader("Content-Type", "application/json; charset=utf-8");
+            res.setHeader("Cache-Control", "no-store");
+            res.end(requestMethod === "HEAD" ? undefined : body);
+            return;
+          }
+
           // Handle OpenAPI docs route
           if (openAPIManager && requestPathname === options.openapi?.route) {
             const docsHandler = openAPIManager.getDocsRouteHandler();
