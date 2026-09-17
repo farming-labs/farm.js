@@ -188,6 +188,22 @@ Signed-out requests receive a `307` redirect to `/login` with the original root-
 | `logoutPath`      | `/logout`          | Logout route.                                |
 | `sessionPath`     | `/auth/session`    | Session JSON route.                          |
 | `protectedRoutes` | None               | One matcher or a list of matchers.           |
+| `allowedOrigins`  | App origin only    | Extra origins allowed to post sign-out.      |
+
+## Cross-site request protection
+
+The sign-out route (`POST /logout`) only accepts requests from the app's own origin. A cross-site
+request is answered with `403` before the session is cleared, so another site
+cannot force a visitor to sign out.
+
+List any other trusted origin explicitly. The pattern syntax matches
+`serverActions.allowedOrigins`:
+
+```ts
+workos({
+  allowedOrigins: ["https://portal.example.com", "*.example.com"],
+});
+```
 
 ## Production checklist
 

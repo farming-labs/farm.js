@@ -2,6 +2,11 @@ import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { WorkOS } from "@workos-inc/node";
 import { defineIntegration, integrationRoute, type FarmIntegrationLogger } from "@farm.js/core";
 import {
+  describeIntegrationOriginRejection,
+  resolveIntegrationAllowedOrigins,
+  validateIntegrationRequestOrigin,
+} from "@farm.js/core/integrations";
+import {
   clearRequestCookie,
   createPathInferredClientApi,
   createDocumentNavigationMatchers,
@@ -32,6 +37,12 @@ export interface WorkOSIntegrationInput {
   logoutPath?: string;
   sessionPath?: string;
   protectedRoutes?: string | string[];
+  /**
+   * Additional origins allowed to post the sign-out route, using the same
+   * pattern syntax as `serverActions.allowedOrigins`. The app's own origin is
+   * always trusted.
+   */
+  allowedOrigins?: string[];
   log?: FarmIntegrationLogger;
 }
 
@@ -148,6 +159,11 @@ export function workos(input: WorkOSIntegrationInput = {}) {
   const logoutPath = input.logoutPath ?? "/logout";
   const sessionPath = input.sessionPath ?? "/auth/session";
 
+  const allowedOrigins = resolveIntegrationAllowedOrigins(
+    input.allowedOrigins,
+    "workos.allowedOrigins",
+  );
+
   const workos =
     input.instance ??
     new WorkOS({
@@ -187,6 +203,32 @@ export function workos(input: WorkOSIntegrationInput = {}) {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Reject a sign-out request that did not come from this app. Returns the
+   * response to send, or null when the request may proceed.
+   */
+  function rejectForeignOrigin(request: Request): Response | null {
+    const result = validateIntegrationRequestOrigin(request, {
+      allowedOrigins,
+      requireOriginMetadata: request.method === "POST",
+    });
+
+    if (result.ok) {
+      return null;
+    }
+
+    const message = describeIntegrationOriginRejection(result.reason);
+
+    if (request.headers.get("x-farm-integration-client") === "1") {
+      return Response.json({ error: message }, { status: 403 });
+    }
+
+    return new Response(message, {
+      status: 403,
+      headers: { "content-type": "text/plain; charset=utf-8" },
+    });
   }
 
   async function redirectToAuth(request: Request, screenHint: "sign-in" | "sign-up") {
@@ -340,6 +382,11 @@ export function workos(input: WorkOSIntegrationInput = {}) {
         {
           responseFormat: "json",
           async handler(request: Request) {
+            const rejected = rejectForeignOrigin(request);
+            if (rejected) {
+              return rejected;
+            }
+
             const requestUrl = new URL(request.url);
             const sessionState = await getSession(workos, request, cookieName, cookiePassword);
             const headers = new Headers();
