@@ -55,7 +55,11 @@ function rowDescriptor(item: Item): CompilerKeyedRowElement {
   };
 }
 
-function createReorderHarness(initialItems: Item[], readsCollection = false) {
+function createReorderHarness(
+  initialItems: Item[],
+  readsCollection = false,
+  reactivity?: "static" | "hybrid",
+) {
   const counters = {
     executions: 0,
     renders: 0,
@@ -70,6 +74,7 @@ function createReorderHarness(initialItems: Item[], readsCollection = false) {
   let customReverse: () => void = () => undefined;
   const Table = createCompiledComponent({
     displayName: "ReorderTable",
+    reactivity,
     initialize: () => [initialItems],
     render(_props: Record<string, never>, state, blocks) {
       counters.executions += 1;
@@ -160,6 +165,69 @@ function itemLabels(container: Element): string[] {
 }
 
 describe("compiled keyed-array reorder hints", () => {
+  for (const reactivity of ["static", "hybrid"] as const) {
+    it.each(["reverse", "queueTwo", "queueThree"] as const)(
+      `adopts the owned row map without copying it after %s in ${reactivity}`,
+      async (action) => {
+        const initialItems = Array.from(
+          { length: 256 },
+          (_, index): Item => ({ id: `row-${index}`, label: `Row ${index}` }),
+        );
+        const harness = createReorderHarness(initialItems, false, reactivity);
+        const container = document.createElement("div");
+        document.body.append(container);
+        const root = createRoot(container);
+        roots.push(root);
+        await act(async () => root.render(<harness.Table />));
+        const initialRows = [...container.querySelectorAll("li")];
+        const list = container.querySelector("ul")!;
+        const insertBefore = vi.spyOn(list, "insertBefore");
+        let rowMapCopies = 0;
+        const originalIterator = Map.prototype[Symbol.iterator];
+        vi.spyOn(Map.prototype, Symbol.iterator).mockImplementation(
+          function (this: Map<string, { element?: Element }>) {
+            if (
+              this.size === initialItems.length &&
+              this.get("row-0")?.element === initialRows[0]
+            ) {
+              rowMapCopies += 1;
+            }
+            return originalIterator.call(this);
+          },
+        );
+
+        let expectedRows = initialRows;
+        let expectedItems = initialItems;
+        for (let commit = 0; commit < 3; commit += 1) {
+          rowMapCopies = 0;
+          harness.counters.keys = 0;
+          harness.counters.descriptors = 0;
+          harness.counters.bindings = 0;
+          insertBefore.mockClear();
+          await act(async () => {
+            harness[action]();
+            await flushCompilerUpdates();
+          });
+          if (action !== "queueTwo") {
+            expectedRows = [...expectedRows].reverse();
+            expectedItems = [...expectedItems].reverse();
+          }
+          expect([...container.querySelectorAll("li")]).toEqual(expectedRows);
+          expect(itemLabels(container)).toEqual(expectedItems.map((item) => item.label));
+          expect(insertBefore).toHaveBeenCalledTimes(action === "queueTwo" ? 0 : 255);
+          expect(harness.counters).toEqual({
+            executions: 1,
+            renders: 1,
+            keys: 0,
+            descriptors: 0,
+            bindings: 0,
+          });
+          expect(rowMapCopies).toBe(0);
+        }
+      },
+    );
+  }
+
   stressIt(
     "reverses 4,096 rows with minimum DOM moves and no key, descriptor, or binding reads",
     async () => {

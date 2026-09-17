@@ -278,6 +278,10 @@ overlapping fresh-key commits, mixed same-key/fresh-key commits, atomic preparat
 existing-key-move fallback, events, controlled-input selection, Strict Mode hydration, cleanup,
 and 1,000 differential overlapping updates.
 
+Validated reorders transfer their runtime-owned row map directly to the block, avoiding a second
+full-map copy. Package tests check this across repeated single, double, and triple reversals in
+static and hybrid modes, alongside DOM identity, native fallbacks, hydration, and cleanup.
+
 Native keyed-array reversal has a separate 10,000-row comparison. A single-return block-bodied
 `toReversed()` setter is measured against bracketed React and a compiled snapshot control whose
 updater block has an extra local declaration. Both compiler modes must remain at least 8x faster

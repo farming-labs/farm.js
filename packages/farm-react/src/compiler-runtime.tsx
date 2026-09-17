@@ -6007,14 +6007,15 @@ interface KeyedUpdateRuntime {
     root: Element,
     reactOwnedRows: boolean,
   ): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined;
+  // Returns a runtime-owned native map, transferred to the block on success.
   reorder?(
     props: CompilerKeyedRowsBlockProps,
     dirtyState: ReadonlySet<number>,
     collectionToken: object | undefined,
-    instances: ReadonlyMap<string, CompilerKeyedRowInstance>,
+    instances: Map<string, CompilerKeyedRowInstance>,
     root: Element,
     reactOwnedRows: boolean,
-  ): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined;
+  ): Map<string, CompilerKeyedRowInstance> | undefined;
   reconcile(
     props: CompilerKeyedRowsBlockProps,
     dirtyState: ReadonlySet<number>,
@@ -6213,11 +6214,11 @@ function reconcileCompilerKeyedArrayMapReorder(
   props: CompilerKeyedRowsBlockProps,
   dirtyState: ReadonlySet<number>,
   collectionToken: object | undefined,
-  instances: ReadonlyMap<string, CompilerKeyedRowInstance>,
+  instances: Map<string, CompilerKeyedRowInstance>,
   root: Element,
   reactOwnedRows: boolean,
   preparedReorder?: CompilerPreparedKeyedArrayReorder,
-): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined {
+): Map<string, CompilerKeyedRowInstance> | undefined {
   if (
     reactOwnedRows ||
     props.hostBlocks ||
@@ -7537,7 +7538,7 @@ function reconcileCompilerKeyedArrayStructuralReorder(
   root: Element,
   reactOwnedRows: boolean,
   preparedReorder?: CompilerPreparedKeyedArrayReorder,
-): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined {
+): Map<string, CompilerKeyedRowInstance> | undefined {
   if (
     reactOwnedRows ||
     props.hostBlocks ||
@@ -7698,11 +7699,11 @@ function reconcileCompilerKeyedArrayReorder(
   props: CompilerKeyedRowsBlockProps,
   dirtyState: ReadonlySet<number>,
   collectionToken: object | undefined,
-  instances: ReadonlyMap<string, CompilerKeyedRowInstance>,
+  instances: Map<string, CompilerKeyedRowInstance>,
   root: Element,
   reactOwnedRows: boolean,
   preparedReorder?: CompilerPreparedKeyedArrayReorder,
-): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined {
+): Map<string, CompilerKeyedRowInstance> | undefined {
   if (
     reactOwnedRows ||
     props.hostBlocks ||
@@ -7823,7 +7824,7 @@ function prepareCompilerKeyedArrayReorder(
 
 function reconcileCompilerKeyedArrayReorderWithMap(
   ...args: Parameters<typeof reconcileCompilerKeyedArrayReorder>
-): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined {
+): Map<string, CompilerKeyedRowInstance> | undefined {
   const prepared = prepareCompilerKeyedArrayReorder(args);
   if (!prepared) return undefined;
   const reconcile = prepared.update?.mapped
@@ -7834,7 +7835,7 @@ function reconcileCompilerKeyedArrayReorderWithMap(
 
 function reconcileCompilerKeyedArrayReorderWithMapAndStructural(
   ...args: Parameters<typeof reconcileCompilerKeyedArrayReorder>
-): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined {
+): Map<string, CompilerKeyedRowInstance> | undefined {
   const prepared = prepareCompilerKeyedArrayReorder(args);
   if (!prepared) return undefined;
   const reconcile = prepared.update?.structuralUpdate
@@ -9330,7 +9331,9 @@ function createKeyedRowsBlockComponent(
         );
         if (reorderedInstances) {
           const removedRows = reorderedInstances.size < this.instances.size;
-          this.instances = new Map(reorderedInstances);
+          // Reorder preparation returns an owned map (or the current one for
+          // unchanged order), just like append and rolling-window updates.
+          this.instances = reorderedInstances;
           this.rebuildElementIndex(this.instances);
           if (removedRows) {
             const keys = [...this.instances.keys()];
