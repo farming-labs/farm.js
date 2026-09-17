@@ -23,6 +23,7 @@ import { resolveFarmAPIRequestURL } from "@farm.js/core/api";
 import { resolveRscBuildOutputPath } from "./build-paths.js";
 import farmRsc, { defineConfig } from "./index.js";
 import { buildRscNitro } from "./nitro-build.js";
+import { linkRscFixtureDependencies } from "./test-fixture-dependencies.js";
 
 const delay = (milliseconds: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
@@ -67,6 +68,7 @@ describe("RSC core runtime bundling", () => {
     async (command) => {
       const root = mkdtempSync(path.join(tmpdir(), "farm-rsc-api-config-"));
       try {
+        linkRscFixtureDependencies(root);
         const plugin = farmRsc().find(
           (candidate) => candidate.name === "@farm.js/plugin/rsc:config",
         );
