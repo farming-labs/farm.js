@@ -454,6 +454,10 @@ run. If writing fails, the previous final report remains unchanged; it belongs t
 run, not the failed attempt. A successful preflight cannot guarantee that disk space will remain
 available throughout the benchmark. Samples, timing boundaries, controls and gates are unchanged.
 
+Each trial attempts to stop its production server even if browser-context setup, page creation
+or context disposal fails. A failed trial still aborts the run; it does not publish an aggregate
+pass or continue with a potentially contaminated comparison.
+
 ## Reading the result
 
 - Dashboard active updates measure the case where the visible chart and metrics really change.
