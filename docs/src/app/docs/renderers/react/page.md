@@ -2650,7 +2650,11 @@ The package and example test suites verify more than generated code:
 - 2,000 deterministic batches of two to four reversals match normal React with zero key reads; a
   4,096-row direct test requires exactly `n - 1` connected DOM moves, while double-reverse and
   fallback tests cover zero-move cancellation, custom or unhinted chains, collection-reading rows,
-  StrictMode hydration, and unmount cleanup;
+  StrictMode hydration, and unmount cleanup; validated reorders reuse the runtime-owned row map
+  instead of copying it again, with repeated single and queued reversals checked in both static
+  and hybrid modes; when every row survives, their element lookup stays valid because the same
+  instances hold the current item and index; structural removals still rebuild the lookup and
+  prune removed-row listeners, with delegated clicks checked after successive commits;
 - 2,000 deterministic batches of two to four randomized sorts match normal React with zero key
   reads; a 4,096-row direct test requires exactly `n - LIS` connected DOM moves, while mixed
   sort/reverse chains, native semantics, focus and selection, fallback cases, StrictMode hydration,
