@@ -285,6 +285,34 @@ describe("production middleware runtime", () => {
         "Sitemap: https://example.test/sitemap.xml",
       );
 
+      // Agents that request Markdown for a missing page get a Markdown 404 body.
+      const markdownExtension404 = await serverModule.default.fetch(
+        new Request("https://example.test/does-not-exist.md"),
+      );
+      expect(markdownExtension404.status).toBe(404);
+      expect(markdownExtension404.headers.get("content-type")).toContain("text/markdown");
+      const markdown404Body = await markdownExtension404.text();
+      expect(markdown404Body).toContain("# Page not found");
+      expect(markdown404Body.length).toBeGreaterThan(20);
+      expect(markdown404Body).not.toContain("<html");
+
+      const markdownAccept404 = await serverModule.default.fetch(
+        new Request("https://example.test/also-missing", {
+          headers: { accept: "text/markdown" },
+        }),
+      );
+      expect(markdownAccept404.status).toBe(404);
+      expect(markdownAccept404.headers.get("content-type")).toContain("text/markdown");
+
+      // A normal browser 404 stays HTML.
+      const html404 = await serverModule.default.fetch(
+        new Request("https://example.test/also-missing", {
+          headers: { accept: "text/html,*/*;q=0.8" },
+        }),
+      );
+      expect(html404.status).toBe(404);
+      expect(html404.headers.get("content-type")).toContain("text/html");
+
       const manifestResponse = await serverModule.default.fetch(
         new Request("https://example.test/manifest.webmanifest"),
       );

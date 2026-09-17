@@ -4536,6 +4536,9 @@ import { fileURLToPath as farmDocsFileURLToPath } from "node:url";`
   const appMarkdownImport = hasMarkdownPages
     ? `import { createFarmMarkdownRouteModule, createFarmMarkdownSourceResponse } from "@farm.js/core/app-markdown";`
     : "const createFarmMarkdownSourceResponse = null;";
+  // Always available: agents can request Markdown on any route, so the
+  // Markdown error body is not gated on the app having Markdown page files.
+  const markdownErrorImport = `import { FARM_MARKDOWN_CONTENT_TYPE, createFarmMarkdownErrorBody, farmRequestWantsMarkdown } from "@farm.js/core/app-markdown";`;
   const mdxComponentsPath =
     typeof config.mdx?.components === "string"
       ? path.isAbsolute(config.mdx.components)
@@ -4710,6 +4713,7 @@ ${docsFontImport}
 ${docsRuntimeImport}
 ${markdownHandlerImport}
 ${appMarkdownImport}
+${markdownErrorImport}
 ${mdxComponentsImport}
 ${integrationImports}
 ${providerServerImports}
@@ -7313,6 +7317,30 @@ async function handleFarmRequestInContext(
 
   // 404 fallback - render proper HTML page
   emitFarmEvent({ type: "route.notFound", pathname });
+
+  // Agents that navigate in Markdown (a \`.md\` URL or \`Accept: text/markdown\`)
+  // get a Markdown error body instead of the HTML not-found shell.
+  if (farmRequestWantsMarkdown(pathname, request.headers.get("accept"))) {
+    emitFarmEvent({
+      type: "render.complete",
+      route: pathname,
+      pathname,
+      status: 404,
+      durationMs: Date.now() - requestStartTime,
+    });
+    return applyProductionMiddlewareHeaders(new Response(
+      createFarmMarkdownErrorBody(404, pathname, applyFarmBasePath("/", farmResolvedRuntimeConfig.basePath)),
+      {
+        status: 404,
+        headers: {
+          "Content-Type": FARM_MARKDOWN_CONTENT_TYPE,
+          "X-Farm-Markdown-Error": "404",
+          "Cache-Control": "no-store",
+        },
+      }
+    ), middlewareHeaders);
+  }
+
   try {
     const defaultNotFoundHomeHref = applyFarmBasePath("/", farmResolvedRuntimeConfig.basePath);
     // Default 404 page component

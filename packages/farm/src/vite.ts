@@ -35,7 +35,14 @@ import {
 } from "./routes-shared";
 import type { FarmDocsAPIHandler } from "./docs";
 import { createMarkdownMirrorResponse, resolveMarkdownMirrorTarget } from "./markdown";
-import { createFarmMarkdownSourceResponse, isFarmMarkdownPageFile } from "./app-markdown";
+import {
+  FARM_MARKDOWN_CONTENT_TYPE,
+  createFarmMarkdownErrorBody,
+  createFarmMarkdownSourceResponse,
+  farmRequestWantsMarkdown,
+  isFarmMarkdownPageFile,
+  normalizeFarmMarkdownRoutePath,
+} from "./app-markdown";
 import { applyWebResponseHeaders, sendWebResponse } from "./server/response";
 import {
   getClientModuleMetadata,
@@ -1799,6 +1806,26 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             if (await runAppMiddlewareForContentRoute()) return;
             await sendWebResponse(res, markdownResponse);
             return;
+          }
+
+          // No Markdown source or mirror matched. When the client explicitly
+          // asked for Markdown (a `.md` URL or `Accept: text/markdown`) and no
+          // page route exists, return a Markdown 404 body rather than letting a
+          // `.md` request fall through to a static-asset 404 or an HTML shell.
+          if (farmRequestWantsMarkdown(requestPathname, req.headers.accept)) {
+            const markdownRoute = farmApp
+              .getRouteManager()
+              .matchRoute(normalizeFarmMarkdownRoutePath(requestPathname));
+            if (!markdownRoute.route) {
+              res.statusCode = 404;
+              res.setHeader("Content-Type", FARM_MARKDOWN_CONTENT_TYPE);
+              res.setHeader("X-Farm-Markdown-Error", "404");
+              res.setHeader("Cache-Control", "no-store");
+              res.end(
+                createFarmMarkdownErrorBody(404, requestPathname, farmConfig.basePath || "/"),
+              );
+              return;
+            }
           }
 
           const markdownPageTarget = resolveMarkdownMirrorTarget(

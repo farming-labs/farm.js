@@ -28,6 +28,11 @@ import {
 import { getRequestContextSnapshot } from "../request-context";
 import { matchSSGPage, resolveRouteRenderingConfigFromFile } from "../ssg";
 import {
+  FARM_MARKDOWN_CONTENT_TYPE,
+  createFarmMarkdownErrorBody,
+  farmRequestWantsMarkdown,
+} from "../app-markdown";
+import {
   getIntegrationProviders,
   getRegisteredIntegrationAPIManifest,
   isFarmIntegrationProviderComponentReference,
@@ -2738,6 +2743,18 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
     const pathname = resolveFarmRequestURL(req, {
       trustProxy: this.config.server?.trustProxy,
     }).pathname;
+
+    // Agents that navigate in Markdown (a `.md` URL or `Accept: text/markdown`)
+    // get a Markdown error body instead of the HTML not-found shell.
+    const acceptHeader = req.headers.accept;
+    const accept = Array.isArray(acceptHeader) ? acceptHeader.join(",") : acceptHeader;
+    if (farmRequestWantsMarkdown(pathname, accept)) {
+      res.setHeader("Content-Type", FARM_MARKDOWN_CONTENT_TYPE);
+      res.setHeader("X-Farm-Markdown-Error", "404");
+      res.setHeader("Cache-Control", "no-store");
+      res.end(createFarmMarkdownErrorBody(404, pathname, this.config.basePath || "/"));
+      return;
+    }
 
     try {
       // Look for custom not-found page
