@@ -4384,11 +4384,10 @@ function generateVirtualEntryCode(
   // load and another after a client navigation.
   const orderedPageRoutes = pageRoutes
     .map((route, index) => ({ route, index }))
-    .sort(
-      (left, right) =>
-        compareRoutePatternSpecificity(left.route.pattern, right.route.pattern) ||
-        left.index - right.index,
-    )
+    .sort((left, right) => {
+      const order = compareRoutePatternSpecificity(left.route.pattern, right.route.pattern);
+      return order || left.index - right.index;
+    })
     .map(({ route }) => route);
 
   orderedPageRoutes.forEach((route, index) => {
