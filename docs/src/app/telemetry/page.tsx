@@ -410,13 +410,13 @@ function ProductionSitesTable({ sites }: { sites: ProductionSite[] }) {
           <h2 className="text-sm font-medium">Production websites</h2>
         </div>
         <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-white/35">
-          self-reported · unverified
+          origin attestation enabled
         </span>
       </header>
       <p className="border-b border-white/10 px-4 py-2.5 text-xs text-white/45">
-        Entries come from unauthenticated check-ins sent by apps that include Farm. Farm does not
-        verify that a sender controls the website it reports, so treat this list as an indication of
-        usage rather than a confirmed inventory.
+        Current check-ins are stored only after Farm retrieves framework metadata from the claimed
+        website itself. Legacy rows created before origin attestation remain unverified until a
+        current deployment attests them or the retention window removes them.
       </p>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[900px] text-left">

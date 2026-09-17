@@ -10,6 +10,7 @@ import {
   farmLegacyVercelPreviewSiteWhere,
   isFarmLegacyVercelPreviewSite,
 } from "../../../../../lib/telemetry-sites";
+import { verifyFarmProductionSiteAttestation } from "../../../../../lib/telemetry-site-attestation";
 import { z } from "zod";
 
 const MAX_BODY_BYTES = 8 * 1024;
@@ -145,21 +146,25 @@ export async function POST(request: Request): Promise<Response> {
       await pruneProductionSites(prisma, now.getTime());
       return json({ ok: true, stored: false, warning: "preview_deployment" }, 202);
     }
+    const attestation = await verifyFarmProductionSiteAttestation(parsed.data.siteUrl);
+    if (!attestation) {
+      return json({ ok: true, stored: false, warning: "site_unverified" }, 202);
+    }
     await prisma.farmProductionSite.upsert({
       where: { url: parsed.data.siteUrl },
       update: {
-        packageName: parsed.data.packageName,
-        packageVersion: parsed.data.packageVersion,
-        renderer: parsed.data.renderer,
-        deployTarget: parsed.data.deployTarget,
+        packageName: attestation.packageName,
+        packageVersion: attestation.packageVersion,
+        renderer: attestation.renderer,
+        deployTarget: attestation.deployTarget,
         lastSeenAt: now,
       },
       create: {
         url: parsed.data.siteUrl,
-        packageName: parsed.data.packageName,
-        packageVersion: parsed.data.packageVersion,
-        renderer: parsed.data.renderer,
-        deployTarget: parsed.data.deployTarget,
+        packageName: attestation.packageName,
+        packageVersion: attestation.packageVersion,
+        renderer: attestation.renderer,
+        deployTarget: attestation.deployTarget,
         firstSeenAt: now,
         lastSeenAt: now,
       },

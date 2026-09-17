@@ -564,6 +564,23 @@ describe("production prebuilt SSR output", () => {
       const clientJavaScript = await readAllClientJavaScript(root);
       expect(serverJavaScript).toContain("production_site_active");
       expect(clientJavaScript).not.toContain("production_site_active");
+
+      await runProductionRequest(
+        serverDir,
+        async (response) => {
+          expect(response.status).toBe(200);
+          expect(response.headers.get("cache-control")).toBe("no-store");
+          expect(await response.json()).toEqual({
+            schemaVersion: 1,
+            eventType: "production_site_attestation",
+            packageName: "@farm.js/core",
+            packageVersion: expect.any(String),
+            renderer: "react",
+            deployTarget: "node",
+          });
+        },
+        "/.well-known/farm-telemetry",
+      );
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
@@ -597,6 +614,7 @@ describe("production prebuilt SSR output", () => {
         "utf8",
       );
       expect(serverJavaScript).not.toContain("production_site_active");
+      expect(serverJavaScript).not.toContain("production_site_attestation");
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }

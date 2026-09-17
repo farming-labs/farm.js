@@ -7616,6 +7616,9 @@ async function handleFarmFetch(request, context) {
   const healthResponse = await farmProductionLifecycle.handleHealthRequest(request);
   if (healthResponse) return healthResponse;
 
+  const productionSiteAttestation = farmProductionSiteTelemetry?.handleAttestation(request);
+  if (productionSiteAttestation) return productionSiteAttestation;
+
   farmProductionSiteTelemetry?.report(
     request.url,
     typeof context?.waitUntil === "function" ? context.waitUntil.bind(context) : undefined,
