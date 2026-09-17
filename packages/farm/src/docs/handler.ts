@@ -23,6 +23,7 @@ import {
 import { marked, Renderer } from "marked";
 import { highlight } from "sugar-high";
 import { FARM_NAVIGATION_HEAD_SELECTOR } from "../client/document-head";
+import { farmAcceptQuality } from "../markdown";
 import type { FarmLayoutFonts } from "../font";
 import { matchesFarmIfNoneMatch } from "../server-http";
 import {
@@ -824,11 +825,21 @@ function escapeHtml(value: string): string {
 
 function shouldReturnMarkdown(request: Request): boolean {
   const url = new URL(request.url);
-  return (
-    url.pathname.endsWith(".md") ||
-    request.headers.get("accept")?.includes("text/markdown") === true ||
-    request.headers.get("accept")?.includes("text/plain") === true
+  if (url.pathname.endsWith(".md")) return true;
+
+  const accept = request.headers.get("accept");
+  // Substring matching cannot see `q=0`, so `text/markdown;q=0` (an explicit
+  // refusal) used to be served Markdown anyway. Only an exact entry counts:
+  // `*/*` means "anything", not "Markdown over HTML".
+  const markdown = Math.max(
+    farmAcceptQuality(accept, "text/markdown"),
+    farmAcceptQuality(accept, "text/plain"),
   );
+  if (markdown <= 0) return false;
+
+  // A client listing text/plain as a low-quality fallback behind text/html
+  // wants the HTML page; serve Markdown only when it is at least as welcome.
+  return markdown >= farmAcceptQuality(accept, "text/html", { wildcards: true });
 }
 
 function escapeAttribute(value: string): string {
