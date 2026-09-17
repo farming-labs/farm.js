@@ -171,10 +171,48 @@ export type CacheOptions = {
   persist?: boolean;
 };
 
+export type RetryAttemptContext = {
+  /** Zero-based index of the attempt that just failed. */
+  attempt: number;
+  /** Upper-case HTTP method of the request. */
+  method: string;
+  /** Response status, or undefined when the request never produced a response. */
+  status?: number;
+  error: Error;
+};
+
 export type RetryOptions = {
   count?: number;
   delay?: number | ((attempt: number) => number);
+  /**
+   * Decide whether a failed attempt should be retried.
+   *
+   * Defaults to transient failures of idempotent requests only: replaying a
+   * POST or PATCH whose response was lost duplicates the write it performed.
+   * Supply this to opt a specific call in or out.
+   */
+  shouldRetry?: (context: RetryAttemptContext) => boolean;
 };
+
+/**
+ * Methods whose replay has the same effect as a single call, so a retry cannot
+ * duplicate work: the idempotent set from RFC 9110, plus QUERY, which Farm
+ * supports as a read that carries a body.
+ */
+const FARM_IDEMPOTENT_METHODS = new Set(["GET", "HEAD", "OPTIONS", "PUT", "DELETE", "QUERY"]);
+
+/** Statuses that represent a transient condition worth another attempt. */
+const FARM_RETRYABLE_STATUSES = new Set([408, 425, 429]);
+
+function isFarmRetryableFailure(context: RetryAttemptContext): boolean {
+  // A non-idempotent request may already have been applied by the server even
+  // when the client never saw the response, so it is never retried by default.
+  if (!FARM_IDEMPOTENT_METHODS.has(context.method)) return false;
+  // No response at all: a transport failure, which is the transient case retries
+  // exist for.
+  if (context.status === undefined) return true;
+  return context.status >= 500 || FARM_RETRYABLE_STATUSES.has(context.status);
+}
 
 export type InvalidateTarget =
   | FarmClientCacheKey
@@ -1005,6 +1043,7 @@ function createAPIClientRuntime<
 
           const promise = (async () => {
             const maxRetries = Math.max(0, clientOptions?.retry?.count ?? 0);
+            const shouldRetryFailure = clientOptions?.retry?.shouldRetry ?? isFarmRetryableFailure;
             let attempt = 0;
 
             // eslint-disable-next-line no-constant-condition
@@ -1070,7 +1109,15 @@ function createAPIClientRuntime<
                   return { data, error: null, key: cacheKey } as APIResult<any, Error>;
                 }
 
-                if (attempt >= maxRetries) {
+                if (
+                  attempt >= maxRetries ||
+                  !shouldRetryFailure({
+                    attempt,
+                    method: methodUpper,
+                    status: response.status,
+                    error,
+                  })
+                ) {
                   return { data: undefined, error, key: cacheKey } as APIResult<any, Error>;
                 }
               } catch (err: any) {
@@ -1090,7 +1137,12 @@ function createAPIClientRuntime<
                 notifyClientObserver(options.onResponse, [undefined, error, responseEvent]);
                 notifyResponseObserver(clientOptions?.onResponse, undefined, error, responseEvent);
 
-                if (attempt >= maxRetries || requestContextError || cancellation.signal?.aborted) {
+                if (
+                  attempt >= maxRetries ||
+                  requestContextError ||
+                  cancellation.signal?.aborted ||
+                  !shouldRetryFailure({ attempt, method: methodUpper, error })
+                ) {
                   return { data: undefined, error, key: cacheKey } as APIResult<any, Error>;
                 }
               }
