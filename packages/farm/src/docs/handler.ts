@@ -1138,13 +1138,19 @@ function extractTocItems(body: string, depth: number): TocItem[] {
       continue;
     }
 
-    const match = line.match(/^(#{2,6})\s+(.+)$/);
+    // Match every heading level, not just the TOC-visible ones. The renderer
+    // slugs every heading (including the page h1), so the slug counter here must
+    // advance identically or a repeated title drifts: `# Configuration` then
+    // `## Configuration` gives the h2 the id `configuration-2` in the rendered
+    // HTML, but a slugger that skipped the h1 would emit `#configuration` and
+    // link to the page title instead of the section.
+    const match = line.match(/^(#{1,6})\s+(.+)$/);
     if (!match) continue;
 
     const title = match[2].trim();
     const id = slug(title);
     const level = match[1].length;
-    if (level <= maxLevel) {
+    if (level >= 2 && level <= maxLevel) {
       items.push({ id, title, level });
     }
   }

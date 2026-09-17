@@ -245,6 +245,29 @@ describe("createFarmDocsHandler", () => {
     expect(html).not.toContain("fake-heading-in-code");
   });
 
+  it("keeps on-this-page links in sync when a section repeats the page title", async () => {
+    const { root, docs, docsDir } = await createDocsFixture();
+    await fs.mkdir(path.join(docsDir, "dup"), { recursive: true });
+    await fs.writeFile(
+      path.join(docsDir, "dup", "page.md"),
+      ["# Configuration", "", "Intro.", "", "## Configuration", "", "Details."].join("\n"),
+    );
+
+    const handler = createFarmDocsHandler(docs, { root, srcDir: "src" });
+    const response = await handler(
+      new Request("http://farm.test/docs/dup", { headers: { accept: "text/html" } }),
+    );
+
+    expect(response?.status).toBe(200);
+    const html = (await response?.text()) || "";
+    // The renderer disambiguates the repeated slug: h1 -> #configuration,
+    // h2 -> #configuration-2. The TOC must link to the h2's real id, not the h1.
+    expect(html).toContain('id="configuration-2"');
+    const tocSection = html.slice(html.indexOf('id="nd-toc"'));
+    expect(tocSection).toContain('href="#configuration-2"');
+    expect(tocSection).not.toContain('href="#configuration"');
+  });
+
   it("serves docs markdown files as HTML", async () => {
     const { root, docs } = await createDocsFixture();
     const handler = createFarmDocsHandler(docs, { root, srcDir: "src" });
