@@ -241,18 +241,19 @@ async function measureTrial(browser, trial, compilerMode, port) {
   });
 
   const origin = `http://127.0.0.1:${port}`;
-  const context = await browser.newContext({
-    reducedMotion: "reduce",
-    viewport: { width: 1440, height: 1000 },
-  });
-  const page = await context.newPage();
-  const browserErrors = [];
-  page.on("console", (message) => {
-    if (message.type() === "error") browserErrors.push(message.text());
-  });
-  page.on("pageerror", (error) => browserErrors.push(error.message));
-
+  let context;
   try {
+    context = await browser.newContext({
+      reducedMotion: "reduce",
+      viewport: { width: 1440, height: 1000 },
+    });
+    const page = await context.newPage();
+    const browserErrors = [];
+    page.on("console", (message) => {
+      if (message.type() === "error") browserErrors.push(message.text());
+    });
+    page.on("pageerror", (error) => browserErrors.push(error.message));
+
     await waitForServer(server, origin, () => serverOutput);
     await page.goto(origin, { waitUntil: "networkidle" });
     await page.waitForTimeout(300);
@@ -2611,8 +2612,12 @@ async function measureTrial(browser, trial, compilerMode, port) {
       trial,
     };
   } finally {
-    await context.close();
-    await stopServer(server);
+    try {
+      await context?.close();
+    } finally {
+      // Context setup or disposal failure must not leave the trial server running.
+      await stopServer(server);
+    }
   }
 }
 
