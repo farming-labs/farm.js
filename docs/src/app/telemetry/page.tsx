@@ -12,10 +12,7 @@ import {
 } from "lucide-react";
 import { getPrisma } from "../../lib/prisma";
 import { farmProductionSiteWhere } from "../../lib/telemetry-sites";
-import {
-  DASHBOARD_SESSION_COOKIE,
-  isValidDashboardSession,
-} from "../../lib/dashboard-session";
+import { DASHBOARD_SESSION_COOKIE, isValidDashboardSession } from "../../lib/dashboard-session";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
