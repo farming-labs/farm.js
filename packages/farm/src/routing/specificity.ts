@@ -62,6 +62,25 @@ export function compareRouteSpecificity(
   return 0;
 }
 
+/**
+ * Order two route patterns from most to least specific.
+ *
+ * This is the single ordering contract for file routes. The development route
+ * manager, the generated client matcher, and the production route table must
+ * all use it: a build whose server ordering disagrees with its client ordering
+ * renders one page on first load and a different one after a client navigation.
+ */
+export function compareRoutePatternSpecificity(
+  left: string,
+  right: string,
+  syntax: RoutePatternSyntax = "page",
+): number {
+  return compareRouteSpecificity(
+    getRoutePatternSpecificity(left, syntax),
+    getRoutePatternSpecificity(right, syntax),
+  );
+}
+
 export type RoutePatternSyntax = "page" | "router" | "api";
 
 const ROUTER_PARAMETER_NAME = "[A-Za-z0-9_$-]+";
