@@ -7,6 +7,7 @@ import {
 } from "./server-http";
 import { searchParamsToObject } from "./search-params";
 import { isFarmDeployedRuntime, readFarmEnvironmentValue } from "./utils/runtime-env";
+import { timingSafeStringEqual } from "./secret-compare";
 import { decodeRouteSegment } from "./utils/decode";
 import { toPosixPath } from "./utils";
 import { validateConfigRouteSource } from "./plugins/route-pattern";
@@ -666,6 +667,17 @@ function getSecret() {
   return inlineSecret || process.env[secretEnv] || "";
 }
 
+// Constant-time secret comparison (pure JS so it works on edge runtimes). Does
+// not short-circuit on the first differing character the way === does.
+function timingSafeSecretEqual(a, b) {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
+}
+
 function verifySecret(event) {
   const secret = getSecret();
   if (!secret) {
@@ -675,7 +687,7 @@ function verifySecret(event) {
   const authorization = getHeader(event, "authorization") || "";
   const headerSecret = getHeader(event, "x-farm-workflow-secret") || "";
   const bearer = authorization.match(/^Bearer\\s+(.+)$/i)?.[1] || "";
-  if (headerSecret === secret || bearer === secret) return null;
+  if (timingSafeSecretEqual(headerSecret, secret) || timingSafeSecretEqual(bearer, secret)) return null;
   return json({ error: "Unauthorized workflow request." }, 401);
 }
 
@@ -799,7 +811,9 @@ function verifyWorkflowSecret(
   const authorization = request.headers.get("authorization") || "";
   const bearer = authorization.match(/^Bearer\s+(.+)$/i)?.[1] || "";
   const headerSecret = request.headers.get("x-farm-workflow-secret") || "";
-  if (bearer === secret || headerSecret === secret) return null;
+  if (timingSafeStringEqual(bearer, secret) || timingSafeStringEqual(headerSecret, secret)) {
+    return null;
+  }
 
   return Response.json({ error: "Unauthorized workflow request." }, { status: 401 });
 }

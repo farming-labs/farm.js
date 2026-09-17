@@ -1,4 +1,5 @@
 import { toPosixPath } from "./utils";
+import { timingSafeStringEqual } from "./secret-compare";
 import {
   getFarmRuntimeBindings,
   readFarmEnvironmentValue as readEnvironmentValue,
@@ -246,7 +247,8 @@ export function isCronRequestAuthorized(
 
   const authorization = request.headers.get("authorization") || "";
   const bearer = /^Bearer (.*)$/i.exec(authorization)?.[1] || "";
-  return bearer === secret || request.headers.get("x-farm-cron-secret") === secret;
+  const headerSecret = request.headers.get("x-farm-cron-secret") || "";
+  return timingSafeStringEqual(bearer, secret) || timingSafeStringEqual(headerSecret, secret);
 }
 
 export function cronRoute<TArgs extends unknown[], TResult>(
