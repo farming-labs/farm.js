@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ViteDevServer } from "vite";
 import { createServer } from "../server/create-server";
+import { getAvailablePort } from "./dev-server-port";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const temporaryRoots = new Set<string>();
@@ -16,7 +17,9 @@ afterEach(async () => {
   await Promise.all([...servers].map((server) => server.close()));
   servers.clear();
   await Promise.all(
-    [...temporaryRoots].map((root) => fs.rm(root, { recursive: true, force: true })),
+    [...temporaryRoots].map((root) =>
+      fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }),
+    ),
   );
   temporaryRoots.clear();
 });
@@ -65,7 +68,7 @@ export default function Layout({ children }) { return <>{children}</>; }`,
 
     const server = await createServer({ root });
     servers.add(server);
-    await server.listen(0);
+    await server.listen(await getAvailablePort());
     const address = server.httpServer?.address();
     if (!address || typeof address === "string") throw new Error("Missing dev server address");
     const origin = `http://localhost:${address.port}`;
