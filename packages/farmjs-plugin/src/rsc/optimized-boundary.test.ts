@@ -5,12 +5,14 @@ import { createElement, type ReactElement } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import farmRsc from "./index.js";
 import { _optimizeBoundary } from "./optimized-boundary.js";
+import { linkRscFixtureDependencies } from "./test-fixture-dependencies.js";
 
 const fixtures: string[] = [];
 
 function createFixture(): string {
   const root = mkdtempSync(path.join(tmpdir(), "farm-rsc-optimized-boundary-"));
   fixtures.push(root);
+  linkRscFixtureDependencies(root);
 
   return root;
 }

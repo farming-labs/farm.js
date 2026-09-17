@@ -4,6 +4,7 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import { expect, it, vi } from "vitest";
 import farmRsc from "./index.js";
+import { linkRscFixtureDependencies } from "./test-fixture-dependencies.js";
 
 const scenarios = [
   ...["POST", "PUT", "PATCH", "DELETE", "QUERY", "GET", "HEAD"].map((method) => ({
@@ -83,6 +84,7 @@ it.each(scenarios)("preserves bytes and enforces policy: $name", async (scenario
   const previousBootstrap = (globalThis as any).__FARM_VITE_RSC_LOAD_BOOTSTRAP__;
   const log = vi.spyOn(console, "log").mockImplementation(() => {});
   try {
+    linkRscFixtureDependencies(root);
     const plugins = farmRsc();
     const configure = plugins.find((plugin) => plugin.name === "@farm.js/plugin/rsc:config")!
       .config as Function;
