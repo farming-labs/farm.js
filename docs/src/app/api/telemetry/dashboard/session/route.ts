@@ -45,21 +45,18 @@ function redirect(location: string, cookie?: string): Response {
   return new Response(null, { status: 303, headers });
 }
 
+import { readTextWithLimit } from "../../../../../lib/request-body";
+
 export async function POST(request: Request): Promise<Response> {
   const contentType = request.headers.get("content-type")?.toLowerCase() || "";
   if (!contentType.startsWith("application/x-www-form-urlencoded")) {
     return new Response("Unsupported content type", { status: 415 });
   }
-  const contentLength = Number.parseInt(request.headers.get("content-length") || "0", 10);
-  if (Number.isFinite(contentLength) && contentLength > MAX_FORM_BYTES) {
+  const read = await readTextWithLimit(request, MAX_FORM_BYTES);
+  if (!read.ok) {
     return new Response("Payload too large", { status: 413 });
   }
-
-  const body = await request.text();
-  if (new TextEncoder().encode(body).byteLength > MAX_FORM_BYTES) {
-    return new Response("Payload too large", { status: 413 });
-  }
-  const fields = new URLSearchParams(body);
+  const fields = new URLSearchParams(read.text);
   if (fields.get("action") === "logout") {
     return redirect("/telemetry", sessionCookie("", 0));
   }

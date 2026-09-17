@@ -62,6 +62,37 @@ describe("production-site telemetry ingestion", () => {
     });
   });
 
+  it("rejects an oversized chunked body without draining it", async () => {
+    delete process.env.DATABASE_URL;
+    let pushed = 0;
+    const chunk = new Uint8Array(1024).fill(0x61);
+    // No content-length: a chunked upload, so the header pre-check cannot help.
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pushed += 1;
+        if (pushed > 4096) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(chunk);
+      },
+    });
+
+    const response = await POST(
+      new Request("https://farmjs.dev/api/telemetry/v1/sites", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+        duplex: "half",
+      } as RequestInit & { duplex: "half" }),
+    );
+
+    expect(response.status).toBe(413);
+    // The read must stop shortly past the 8 KB ceiling rather than buffering
+    // the whole 4 MB an unauthenticated caller offered.
+    expect(pushed).toBeLessThan(64);
+  });
+
   it("rejects request-level URL data", async () => {
     const response = await POST(
       request(sitePayload({ siteUrl: "https://example.com/private?token=secret" })),
