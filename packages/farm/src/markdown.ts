@@ -291,6 +291,48 @@ function normalizeMarkdownRoute(route: string): string {
   return normalized === "" || normalized === "/index" ? "/" : normalized;
 }
 
+/**
+ * Quality value an `Accept` header assigns a media type, or 0 when the client
+ * will not take it.
+ *
+ * `q=0` means "not acceptable" per RFC 9110, so it has to be distinguished from
+ * an absent entry rather than treated as a match. Wildcards are opt-in: a client
+ * sending `*&#47;*` will take anything, which says nothing about whether it would
+ * rather have Markdown than HTML, so callers negotiating between two concrete
+ * types should ask for exact entries only.
+ */
+export function farmAcceptQuality(
+  accept: string | null | undefined,
+  mediaType: string,
+  options: { wildcards?: boolean } = {},
+): number {
+  if (!accept) return 0;
+  const target = mediaType.toLowerCase();
+  const [targetType] = target.split("/");
+  let best = 0;
+
+  for (const entry of accept.split(",")) {
+    const [candidate, ...parameters] = entry
+      .trim()
+      .toLowerCase()
+      .split(";")
+      .map((part) => part.trim());
+    if (!candidate) continue;
+
+    const matches =
+      candidate === target ||
+      (options.wildcards === true && (candidate === "*/*" || candidate === `${targetType}/*`));
+    if (!matches) continue;
+
+    const quality = parameters.find((parameter) => parameter.startsWith("q="));
+    const value = quality === undefined ? 1 : Number(quality.slice(2));
+    if (!Number.isFinite(value) || value <= 0) continue;
+    if (value > best) best = value;
+  }
+
+  return best;
+}
+
 export function requestAcceptsMarkdown(accept: string | null | undefined): boolean {
   if (!accept) {
     return false;
