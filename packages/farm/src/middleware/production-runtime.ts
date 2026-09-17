@@ -15,7 +15,11 @@ import { normalizeMiddlewareModule } from "./module";
 import { stripFarmLocaleFromPathname } from "../i18n/routing";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
 import type { ResolvedFarmServerConfig } from "../server-http";
-import { parseMiddlewareCookieHeader } from "./cookie-header";
+import {
+  parseMiddlewareCookieHeader,
+  serializeMiddlewareCookie as serializeCookie,
+  serializeMiddlewareCookieDeletion,
+} from "./cookie-header";
 
 export interface ProductionMiddlewareModuleEntry {
   path: string;
@@ -104,22 +108,6 @@ class WebResponseHeaderMap extends Map<string, string> {
   }
 }
 
-function serializeCookie(name: string, value: string, options: CookieOptions = {}): string {
-  let cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}`;
-
-  if (options.maxAge != null) cookie += `; Max-Age=${options.maxAge}`;
-  if (options.expires) cookie += `; Expires=${options.expires.toUTCString()}`;
-  cookie += `; Path=${options.path || "/"}`;
-  if (options.domain) cookie += `; Domain=${options.domain}`;
-  if (options.secure) cookie += "; Secure";
-  if (options.httpOnly) cookie += "; HttpOnly";
-  if (options.sameSite) {
-    cookie += `; SameSite=${options.sameSite.charAt(0).toUpperCase()}${options.sameSite.slice(1)}`;
-  }
-
-  return cookie;
-}
-
 class WebCookieJar implements CookieJar {
   private cookies: Record<string, string>;
 
@@ -140,13 +128,11 @@ class WebCookieJar implements CookieJar {
     this.headers.appendSetCookie(cookieString);
   }
 
-  delete(name: string): void {
+  delete(name: string, options: CookieOptions = {}): void {
     delete this.cookies[name];
-    const cookieString = serializeCookie(name, "", {
-      maxAge: 0,
-      expires: new Date(0),
-    });
-    this.headers.appendSetCookie(cookieString);
+    // Path and Domain must match the cookie that was set, or the tombstone
+    // addresses a different cookie and the original survives.
+    this.headers.appendSetCookie(serializeMiddlewareCookieDeletion(name, options));
   }
 
   getAll(): Record<string, string> {
