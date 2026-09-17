@@ -231,6 +231,20 @@ export function mergeScheduledTasks(
   );
 }
 
+/**
+ * Whether the process explicitly declares a development or test environment.
+ *
+ * An absent NODE_ENV is not a development signal. Plenty of container images and
+ * serverless runtimes leave it unset, so treating "not production" as
+ * development leaves an unsecured cron route open wherever the variable simply
+ * was never set. Matches the fail-closed gate the auth0 and workos integrations
+ * use for their development secrets.
+ */
+function isExplicitDevelopmentEnv(): boolean {
+  const nodeEnv = readEnvironmentValue("NODE_ENV");
+  return nodeEnv === "development" || nodeEnv === "test";
+}
+
 export function isCronRequestAuthorized(
   request: Request,
   options: FarmCronRouteOptions = {},
@@ -239,8 +253,7 @@ export function isCronRequestAuthorized(
   const secret = options.secret || readEnvironmentValue(secretEnv);
   if (!secret) {
     return (
-      options.allowUnsecured === true ||
-      (!getFarmRuntimeBindings() && readEnvironmentValue("NODE_ENV") !== "production")
+      options.allowUnsecured === true || (!getFarmRuntimeBindings() && isExplicitDevelopmentEnv())
     );
   }
 

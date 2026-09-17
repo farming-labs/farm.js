@@ -295,6 +295,40 @@ describe("Farm cron", () => {
     expect(response.status).toBe(401);
   });
 
+  it("fails closed when NODE_ENV is unset and no secret is configured", async () => {
+    // Plenty of container images and serverless runtimes never set NODE_ENV.
+    // "Not production" must not be read as "development" for an open endpoint.
+    delete process.env.CRON_SECRET;
+    delete process.env.NODE_ENV;
+    const handler = cronRoute(async () => Response.json({ deleted: 3 }));
+
+    const response = await handler(new Request("https://example.com/api/cleanup"));
+    expect(response.status).toBe(401);
+  });
+
+  it("fails closed for an unrecognized NODE_ENV and stays open in development", async () => {
+    delete process.env.CRON_SECRET;
+    process.env.NODE_ENV = "staging";
+    const handler = cronRoute(async () => Response.json({ deleted: 3 }));
+    expect((await handler(new Request("https://example.com/api/cleanup"))).status).toBe(401);
+
+    // An explicitly declared development environment keeps working without a
+    // secret, which is what `farm dev` relies on.
+    process.env.NODE_ENV = "development";
+    expect((await handler(new Request("https://example.com/api/cleanup"))).status).toBe(200);
+  });
+
+  it("still allows an unsecured cron route when opted in explicitly", async () => {
+    delete process.env.CRON_SECRET;
+    delete process.env.NODE_ENV;
+    const handler = cronRoute(async () => Response.json({ deleted: 3 }), {
+      allowUnsecured: true,
+    });
+
+    const response = await handler(new Request("https://example.com/api/cleanup"));
+    expect(response.status).toBe(200);
+  });
+
   it("authorizes Worker requests from runtime bindings and fails closed without one", async () => {
     delete process.env.CRON_SECRET;
     delete process.env.NODE_ENV;
