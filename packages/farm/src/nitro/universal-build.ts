@@ -3739,7 +3739,12 @@ async function buildSSRInMemory(
     : {};
 
   const appDirs = getFarmAppDirectories(config);
-  let openAPIReference: { route: string; html: string } | null = null;
+  let openAPIReference: {
+    route: string;
+    html: string;
+    spec: unknown;
+    specRoute: string | null;
+  } | null = null;
   if (config.openapi.enabled && config.openapi.route) {
     const { OpenAPIManager, renderOpenAPIReferenceHTML } = await import("../openapi/manager");
     const openAPIManager = new OpenAPIManager(appDirs, config.openapi);
@@ -3750,6 +3755,8 @@ async function buildSSRInMemory(
     openAPIReference = {
       route: config.openapi.route,
       html: renderOpenAPIReferenceHTML(spec, config.openapi),
+      spec,
+      specRoute: config.openapi.specRoute || null,
     };
   }
   const middlewareRoutes = await discoverMiddlewareRoutes(appDirs);
@@ -4134,7 +4141,7 @@ function generateVirtualEntryCode(
   redirectRoutes: ProgrammaticRedirectRoute[],
   configuredRewriteRoutes: RewriteConfig[],
   configuredHeaderRoutes: UniversalConfiguredHeaderRoute[],
-  openAPIReference: { route: string; html: string } | null,
+  openAPIReference: { route: string; html: string; spec: unknown; specRoute: string | null } | null,
   notFoundPath: string | null,
   instrumentationPath: string | null,
   config: ResolvedFarmConfig,
@@ -6447,6 +6454,31 @@ async function handleFarmRequestInContext(
   }
   `
       : ""
+  }
+
+  if (
+    farmOpenAPIReference &&
+    farmOpenAPIReference.specRoute &&
+    normalizeRuntimePath(pathname) === normalizeRuntimePath(farmOpenAPIReference.specRoute)
+  ) {
+    const method = request.method.toUpperCase();
+    const specResponse = method === "GET" || method === "HEAD"
+      ? new Response(method === "HEAD" ? null : JSON.stringify(farmOpenAPIReference.spec), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            "Cache-Control": "public, max-age=0, must-revalidate",
+            "X-Content-Type-Options": "nosniff",
+          },
+        })
+      : new Response("Method Not Allowed", {
+          status: 405,
+          headers: {
+            "Allow": "GET, HEAD",
+            "Content-Type": "text/plain; charset=utf-8",
+          },
+        });
+    return applyProductionMiddlewareHeaders(specResponse, middlewareHeaders);
   }
 
   if (

@@ -338,6 +338,23 @@ describe("resolveConfig", () => {
     expect(configured.experimental.ppr).toBe(true);
   });
 
+  it("defaults the OpenAPI spec route to /openapi.json and allows overrides", async () => {
+    const defaults = await resolveConfig({}, "production");
+    expect((defaults.openapi as any).specRoute).toBe("/openapi.json");
+
+    const custom = await resolveConfig(
+      { openapi: { enabled: true, specRoute: "/api/openapi.json" } },
+      "production",
+    );
+    expect((custom.openapi as any).specRoute).toBe("/api/openapi.json");
+
+    const disabled = await resolveConfig(
+      { openapi: { enabled: true, specRoute: false } },
+      "production",
+    );
+    expect((disabled.openapi as any).specRoute).toBe(false);
+  });
+
   it("resolves the agent config with JSON-LD off by default", async () => {
     const defaults = await resolveConfig({}, "production");
     expect(defaults.agent.jsonLd).toBe(false);

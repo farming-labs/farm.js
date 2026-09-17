@@ -509,6 +509,27 @@ describe("production prebuilt SSR output", () => {
         "/docs/reference",
         { method: "POST" },
       );
+      // The raw spec is fetchable as JSON at the well-known /openapi.json path.
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          expect(response.headers.get("content-type")).toBe("application/json; charset=utf-8");
+          const spec = await response.json();
+          expect(spec.openapi ?? spec.swagger).toBeTruthy();
+          expect(spec.paths["/health"].get.operationId).toBe("get_health");
+        },
+        "/openapi.json",
+      );
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(405);
+          expect(response.headers.get("allow")).toBe("GET, HEAD");
+        },
+        "/openapi.json",
+        { method: "POST" },
+      );
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
