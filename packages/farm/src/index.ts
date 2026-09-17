@@ -1,4 +1,5 @@
 export * from "./types";
+export type { FarmAgentUserConfig, FarmAgentJsonLd } from "./agent-config";
 export { defineRenderer, REACT_RENDERER } from "./renderer";
 export type {
   FarmRenderer,

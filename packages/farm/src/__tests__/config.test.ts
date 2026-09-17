@@ -338,6 +338,20 @@ describe("resolveConfig", () => {
     expect(configured.experimental.ppr).toBe(true);
   });
 
+  it("resolves the agent config with JSON-LD off by default", async () => {
+    const defaults = await resolveConfig({}, "production");
+    expect(defaults.agent.jsonLd).toBe(false);
+
+    const enabled = await resolveConfig({ agent: { jsonLd: true } }, "production");
+    expect(enabled.agent.jsonLd).toEqual({});
+
+    const customized = await resolveConfig(
+      { agent: { jsonLd: { type: "SoftwareApplication", name: "Farm.js" } } },
+      "production",
+    );
+    expect(customized.agent.jsonLd).toEqual({ type: "SoftwareApplication", name: "Farm.js" });
+  });
+
   it("keeps isolated client hydration off by default and preserves its rollout mode", async () => {
     const defaults = await resolveConfig({}, "production");
     const configured = await resolveConfig(

@@ -88,4 +88,54 @@ describe("metadata head rendering", () => {
     // No Open Graph block means no og:type is invented.
     expect(renderMetadataHead({}).tags).not.toContain("og:type");
   });
+
+  it("emits JSON-LD when agent jsonLd is enabled", () => {
+    const tags = renderMetadataHead(
+      {
+        metadataBase: "https://farm.test",
+        description: "A full-stack framework",
+        openGraph: { siteName: "Farm.js" },
+      },
+      { jsonLd: true },
+    ).tags;
+
+    expect(tags).toContain('<script type="application/ld+json">');
+    const json = tags.match(/application\/ld\+json">(.*?)<\/script>/s)?.[1] ?? "";
+    const data = JSON.parse(json);
+    expect(data).toMatchObject({
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      name: "Farm.js",
+      url: "https://farm.test",
+      description: "A full-stack framework",
+    });
+  });
+
+  it("customizes JSON-LD type and fields, escaping the closing tag", () => {
+    const tags = renderMetadataHead(
+      { metadataBase: "https://farm.test" },
+      {
+        jsonLd: {
+          type: "SoftwareApplication",
+          name: "Farm</script><script>alert(1)",
+          sameAs: ["https://github.com/farming-labs/farm.js"],
+        },
+      },
+    ).tags;
+
+    const json = tags.match(/application\/ld\+json">(.*?)<\/script>/s)?.[1] ?? "";
+    // The literal closing tag must be escaped so it cannot break out.
+    expect(json).not.toContain("</script>");
+    expect(json).toContain("\\u003c/script>");
+    const data = JSON.parse(json);
+    expect(data["@type"]).toBe("SoftwareApplication");
+    expect(data.sameAs).toEqual(["https://github.com/farming-labs/farm.js"]);
+  });
+
+  it("emits no JSON-LD when disabled", () => {
+    expect(renderMetadataHead({ metadataBase: "https://farm.test" }).tags).not.toContain("ld+json");
+    expect(
+      renderMetadataHead({ metadataBase: "https://farm.test" }, { jsonLd: false }).tags,
+    ).not.toContain("ld+json");
+  });
 });
