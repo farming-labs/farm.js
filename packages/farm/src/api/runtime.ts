@@ -300,9 +300,21 @@ async function readRequestBody(request: Request): Promise<RequestBodyParseResult
       return { body: JSON.parse(text) };
     }
 
-    // Preserve the previous permissive behavior for callers that omit the
-    // content type but still send JSON.
-    return { body: JSON.parse(text) };
+    // A body is only parsed as JSON when the request says it is JSON, or when it
+    // declares no type at all (the permissive path kept for non-browser callers
+    // that omit the header).
+    //
+    // Parsing a *declared* non-JSON type as JSON removed the barrier that keeps
+    // browsers from reaching this surface cross-origin: `text/plain`,
+    // `application/x-www-form-urlencoded`, and `multipart/form-data` are the
+    // CORS "simple" types that a cross-site page may send with credentials and
+    // without a preflight. Honouring the declared type means such a request no
+    // longer arrives as a parsed JSON object.
+    if (contentType === undefined) {
+      return { body: JSON.parse(text) };
+    }
+
+    return { body: undefined };
   } catch {
     if (contentType === "application/json" || contentType?.endsWith("+json")) {
       return {
