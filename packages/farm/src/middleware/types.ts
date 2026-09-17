@@ -113,7 +113,11 @@ export interface CookieOptions {
 export interface CookieJar {
   get(name: string): string | undefined;
   set(name: string, value: string, options?: CookieOptions): void;
-  delete(name: string): void;
+  /**
+   * Remove a cookie. Pass the `path`/`domain` it was set with; a tombstone only
+   * matches a cookie with the same scope.
+   */
+  delete(name: string, options?: CookieOptions): void;
   getAll(): Record<string, string>;
 }
 
