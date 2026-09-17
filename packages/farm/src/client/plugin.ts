@@ -231,7 +231,12 @@ export class FarmClientPluginManager {
     );
   };
 
-  private readonly handlePageHide = () => {
+  private readonly handlePageHide = (event: PageTransitionEvent) => {
+    // A persisted pagehide means the page is entering the back/forward cache and
+    // may be restored. close() is terminal — start() refuses to run again once
+    // closed — so tearing down here would hand the restored page dead scripts,
+    // PWA, and observability plugins with nothing able to revive them.
+    if (event.persisted) return;
     void this.close("pagehide");
   };
 
@@ -488,9 +493,10 @@ export class FarmClientPluginManager {
       clientWindow.addEventListener("error", this.handleWindowError);
       clientWindow.addEventListener("unhandledrejection", this.handleUnhandledRejection);
     }
-    clientWindow.addEventListener("pagehide", this.handlePageHide, {
-      once: true,
-    });
+    // Not `once`: a persisted pagehide is ignored above, and the page can be
+    // restored and then genuinely unloaded later. close() is idempotent, so
+    // keeping the listener costs nothing and never disposes twice.
+    clientWindow.addEventListener("pagehide", this.handlePageHide);
   }
 
   private installPerformanceObservers(): void {
