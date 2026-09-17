@@ -664,6 +664,7 @@ export class PluginManager {
   private runtimeClosed = false;
   private runtimeStartPromise?: Promise<void>;
   private runtimeClosePromise?: Promise<void>;
+  private runtimeShutdownStarted = false;
   private runtimeShutdownHooksRunning = false;
   private runtimeDisposers: Array<() => void | Promise<void>> = [];
   private runtimeRequestContexts = new WeakMap<Request, Readonly<Record<string, unknown>>>();
@@ -677,7 +678,11 @@ export class PluginManager {
           if (typeof dispose !== "function") {
             throw new TypeError("Farm lifecycle.onShutdown requires a cleanup function");
           }
-          if (this.runtimeClosePromise || this.runtimeClosed) {
+          // Gate on disposal actually being underway rather than on
+          // closeRuntime having been called. A shutdown requested while startup
+          // is still running now waits for it, and setup finishing inside that
+          // window must still be able to register its cleanup.
+          if (this.runtimeShutdownStarted || this.runtimeClosed) {
             throw new Error("Farm runtime cleanup cannot be registered after shutdown begins");
           }
 
@@ -1124,7 +1129,16 @@ export class PluginManager {
     if (this.runtimeClosed) return;
 
     this.runtimeClosePromise = (async () => {
+      // Never dispose while startup is still running. The disposer list is
+      // drained once below, so a plugin that registers its cleanup after that
+      // point would leak the resource it owns. Startup failure is not this
+      // method's concern: startRuntime reports it to its own caller.
+      if (this.runtimeStartPromise) {
+        await this.runtimeStartPromise.catch(() => {});
+      }
+
       const errors: unknown[] = [];
+      this.runtimeShutdownStarted = true;
       this.runtimeShutdownHooksRunning = true;
       try {
         await this.runHookParallel("shutdown", { reason });
