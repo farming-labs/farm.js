@@ -199,14 +199,7 @@ export type RetryOptions = {
  * duplicate work: the idempotent set from RFC 9110, plus QUERY, which Farm
  * supports as a read that carries a body.
  */
-const FARM_IDEMPOTENT_METHODS = new Set([
-  "GET",
-  "HEAD",
-  "OPTIONS",
-  "PUT",
-  "DELETE",
-  "QUERY",
-]);
+const FARM_IDEMPOTENT_METHODS = new Set(["GET", "HEAD", "OPTIONS", "PUT", "DELETE", "QUERY"]);
 
 /** Statuses that represent a transient condition worth another attempt. */
 const FARM_RETRYABLE_STATUSES = new Set([408, 425, 429]);
