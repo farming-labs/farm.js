@@ -432,6 +432,12 @@ FARM_SCALE_CYCLES=3 \
 pnpm --filter farm-react-compiler-dashboard-example benchmark
 ```
 
+Sample counts, updates per sample and scale cycles must be positive safe integers. Warmup
+must be a nonnegative safe integer; `FARM_BENCHMARK_WARMUP=0` disables warmup. Unset or empty
+values keep the defaults above. Invalid values fail before report, browser or production-trial
+build work instead of starting an incomplete measurement. `FARM_DASHBOARD_PORT` defaults to
+4380 and accepts integers from 1 to 65532, reserving four consecutive trial ports.
+
 The default JSON report is `/tmp/farm-react-dashboard-benchmark.json`; change it with
 `FARM_DASHBOARD_REPORT`.
 

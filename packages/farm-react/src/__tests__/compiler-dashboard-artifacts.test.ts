@@ -43,6 +43,13 @@ describe("compiler dashboard benchmark artifacts", () => {
         cwd: directory,
         env: {
           ...process.env,
+          // This case tests report preflight, not shell-provided numeric options.
+          FARM_DASHBOARD_SAMPLES: "",
+          FARM_DASHBOARD_UPDATES: "",
+          FARM_TABLE_SAMPLES: "",
+          FARM_BENCHMARK_WARMUP: "",
+          FARM_SCALE_CYCLES: "",
+          FARM_DASHBOARD_PORT: "",
           FARM_DASHBOARD_REPORT: invalidReport,
           FARM_EXPERIMENT_BROWSER_PATH: path.join(directory, "must-not-launch"),
         },

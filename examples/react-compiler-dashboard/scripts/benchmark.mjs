@@ -7,13 +7,16 @@ import path from "node:path";
 import { gzipSync } from "node:zlib";
 import { chromium } from "@playwright/test";
 import { createBenchmarkArtifacts } from "./benchmark-artifacts.mjs";
+import { readBenchmarkOptions } from "./benchmark-options.mjs";
 
-const dashboardSamples = Number(process.env.FARM_DASHBOARD_SAMPLES || 60);
-const dashboardUpdatesPerSample = Number(process.env.FARM_DASHBOARD_UPDATES || 10);
-const tableSamples = Number(process.env.FARM_TABLE_SAMPLES || 10);
-const warmupSamples = Number(process.env.FARM_BENCHMARK_WARMUP || 5);
-const scaleCycles = Number(process.env.FARM_SCALE_CYCLES || 3);
-const basePort = Number(process.env.FARM_DASHBOARD_PORT || 4380);
+const {
+  dashboardSamples,
+  dashboardUpdatesPerSample,
+  tableSamples,
+  warmupSamples,
+  scaleCycles,
+  basePort,
+} = readBenchmarkOptions();
 const reportPath = process.env.FARM_DASHBOARD_REPORT || "/tmp/farm-react-dashboard-benchmark.json";
 const browserExecutablePath = process.env.FARM_EXPERIMENT_BROWSER_PATH;
 const serverEntry = path.resolve(".farm/.output/server/index.mjs");
