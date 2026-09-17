@@ -111,6 +111,8 @@ export interface FarmWorkflowHTTPHandlerOptions {
 export const DEFAULT_FARM_WORKFLOW_DIRS = ["src/jobs", "src/workflows", "src/cron"];
 export const DEFAULT_FARM_WORKFLOW_ROUTE = "/api/_farm/workflows";
 export const DEFAULT_FARM_WORKFLOW_SECRET_ENV = "CRON_SECRET";
+const MISSING_FARM_WORKFLOW_SECRET_ERROR =
+  "Workflow route requires a secret. Set the CRON_SECRET environment variable, configure workflows.secret, or set workflows.allowUnsecured to true.";
 
 export function defineWorkflow<const TPayload = unknown, TResult = unknown>(
   definition: FarmWorkflowDefinition<TPayload, TResult>,
@@ -636,6 +638,7 @@ import {
 const route = ${JSON.stringify(config.route)};
 const secretEnv = ${JSON.stringify(config.secretEnv)};
 const inlineSecret = ${JSON.stringify(config.secret || "")};
+const allowUnsecured = ${JSON.stringify(config.allowUnsecured === true)};
 const bodySizeLimit = ${JSON.stringify(server.bodySizeLimit)};
 const workflows = ${JSON.stringify(workflows.map(toWorkflowMetadata))};
 const workflowIds = new Set(workflows.map((workflow) => workflow.id));
@@ -665,7 +668,10 @@ function getSecret() {
 
 function verifySecret(event) {
   const secret = getSecret();
-  if (!secret) return null;
+  if (!secret) {
+    if (allowUnsecured) return null;
+    return json({ error: ${JSON.stringify(MISSING_FARM_WORKFLOW_SECRET_ERROR)} }, 401);
+  }
   const authorization = getHeader(event, "authorization") || "";
   const headerSecret = getHeader(event, "x-farm-workflow-secret") || "";
   const bearer = authorization.match(/^Bearer\\s+(.+)$/i)?.[1] || "";
@@ -784,8 +790,7 @@ function verifyWorkflowSecret(
     if (config.allowUnsecured === true || !isFarmDeployedRuntime()) return null;
     return Response.json(
       {
-        error:
-          "Workflow route requires a secret. Set the CRON_SECRET environment variable, configure workflows.secret, or set workflows.allowUnsecured to true.",
+        error: MISSING_FARM_WORKFLOW_SECRET_ERROR,
       },
       { status: 401 },
     );
