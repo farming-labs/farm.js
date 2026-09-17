@@ -75,8 +75,15 @@ function appendVary(headers: Headers, value: string): void {
 }
 
 function compressResponse(response: Response, encoding: SupportedEncoding): Response {
+  // Both compressors must flush per chunk. Without an explicit flush mode brotli
+  // buffers until its 4 MB window fills or the source ends, so a streaming SSR,
+  // RSC, or NDJSON response delivers nothing to the client until it completes -
+  // and `selectEncoding` prefers brotli on every tie, so that is the default
+  // path for an ordinary browser.
   const compressor =
-    encoding === "br" ? createBrotliCompress() : createGzip({ flush: constants.Z_SYNC_FLUSH });
+    encoding === "br"
+      ? createBrotliCompress({ flush: constants.BROTLI_OPERATION_FLUSH })
+      : createGzip({ flush: constants.Z_SYNC_FLUSH });
   const input = Readable.fromWeb(response.body as any);
   const output = pipeline(input, compressor, () => {
     // pipeline forwards source failures to the compressed body and destroys
