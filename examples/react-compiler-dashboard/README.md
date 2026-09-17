@@ -285,6 +285,10 @@ than React and 1.25x faster than the compiled control. The report must contain a
 `keyedArrayReorderHints` count; package tests separately require the minimum `n - 1` connected DOM
 moves, zero key/descriptor/binding reads, randomized differential correctness, hydration, and
 cleanup.
+Source-level tests read the real reversal buttons and require exactly one reorder hint for the
+optimized handler and none for its snapshot control in both compiler modes. They also compare
+three consecutive native reversals for empty, single-row, small, and 10,000-row frozen arrays,
+checking that the source is not mutated and every row object keeps its identity.
 
 Queued native reorders have another independent 10,000-row comparison. One event queues two
 concise `toReversed()` setters, so the final order equals the committed order. Farm must validate
