@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createFarmProductionSiteReporter,
   detectFarmProductionSiteOrigin,
+  FARM_PRODUCTION_SITE_ATTESTATION_PATH,
   normalizeFarmProductionSiteOrigin,
 } from "../product-telemetry";
 import { FARM_VERSION } from "../version";
@@ -64,6 +65,55 @@ describe("production-site origin detection", () => {
 });
 
 describe("production-site telemetry reporting", () => {
+  it("serves origin-owned metadata from a framework well-known endpoint", async () => {
+    const send = vi.fn<typeof fetch>();
+    const reporter = createFarmProductionSiteReporter({
+      renderer: "react",
+      deployTarget: "vercel",
+      fetch: send,
+    });
+
+    const response = reporter.handleAttestation(
+      new Request(`https://example.com${FARM_PRODUCTION_SITE_ATTESTATION_PATH}`),
+    );
+
+    expect(response?.status).toBe(200);
+    expect(response?.headers.get("cache-control")).toBe("no-store");
+    await expect(response?.json()).resolves.toEqual({
+      schemaVersion: 1,
+      eventType: "production_site_attestation",
+      packageName: "@farm.js/core",
+      packageVersion: FARM_VERSION,
+      renderer: "react",
+      deployTarget: "vercel",
+    });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("does not expose an attestation after runtime telemetry opt-out", () => {
+    process.env.FARM_TELEMETRY = "0";
+    const reporter = createFarmProductionSiteReporter({ renderer: "react" });
+
+    expect(
+      reporter.handleAttestation(
+        new Request(`https://example.com${FARM_PRODUCTION_SITE_ATTESTATION_PATH}`),
+      ),
+    ).toBeNull();
+  });
+
+  it("rejects writes to the attestation endpoint", () => {
+    const reporter = createFarmProductionSiteReporter({ renderer: "react" });
+
+    const response = reporter.handleAttestation(
+      new Request(`https://example.com${FARM_PRODUCTION_SITE_ATTESTATION_PATH}`, {
+        method: "POST",
+      }),
+    );
+
+    expect(response?.status).toBe(405);
+    expect(response?.headers.get("allow")).toBe("GET, HEAD");
+  });
+
   it("does not redirect an invalid custom endpoint to the Farm-owned service", async () => {
     const send = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 202 }));
     const deliveries: Promise<unknown>[] = [];

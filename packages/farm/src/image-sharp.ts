@@ -96,7 +96,7 @@ export function createNodeImageUrlValidator(config: ResolvedFarmImageConfig) {
  * left by resolving a hostname before a separate global fetch.
  */
 export function createNodeImageFetcher(
-  config: ResolvedFarmImageConfig,
+  config: Pick<ResolvedFarmImageConfig, "dangerouslyAllowLocalIP">,
   lookup?: NodeImageDnsLookup,
 ): typeof globalThis.fetch {
   if (config.dangerouslyAllowLocalIP) return globalThis.fetch.bind(globalThis);

@@ -8,11 +8,17 @@ const prismaMocks = vi.hoisted(() => ({
   deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
   upsert: vi.fn().mockResolvedValue({}),
 }));
+const attestationMocks = vi.hoisted(() => ({
+  verify: vi.fn(),
+}));
 
 vi.mock("../../../../../lib/prisma", () => ({
   getPrisma: async () => ({
     farmProductionSite: prismaMocks,
   }),
+}));
+vi.mock("../../../../../lib/telemetry-site-attestation", () => ({
+  verifyFarmProductionSiteAttestation: attestationMocks.verify,
 }));
 
 const originalDatabaseUrl = process.env.DATABASE_URL;
@@ -20,6 +26,14 @@ const originalDatabaseUrl = process.env.DATABASE_URL;
 beforeEach(() => {
   prismaMocks.deleteMany.mockClear();
   prismaMocks.upsert.mockClear();
+  attestationMocks.verify.mockReset().mockResolvedValue({
+    schemaVersion: 1,
+    eventType: "production_site_attestation",
+    packageName: "@farm.js/core",
+    packageVersion: "1.0.0",
+    renderer: "react",
+    deployTarget: "vercel",
+  });
 });
 
 afterEach(() => {
@@ -143,6 +157,21 @@ describe("production-site telemetry ingestion", () => {
     });
   });
 
+  it("does not store a site whose origin does not attest Farm", async () => {
+    process.env.DATABASE_URL = "postgresql://telemetry.invalid/farmjs";
+    attestationMocks.verify.mockResolvedValueOnce(undefined);
+
+    const response = await POST(request(sitePayload()));
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      stored: false,
+      warning: "site_unverified",
+    });
+    expect(prismaMocks.upsert).not.toHaveBeenCalled();
+  });
+
   it("removes a previously stored Vercel branch-preview alias", async () => {
     process.env.DATABASE_URL = "postgresql://telemetry.invalid/farmjs";
     const siteUrl = "https://docs-git-fix-query-array-round-trip-kinfe123s-projects.vercel.app";
@@ -160,5 +189,47 @@ describe("production-site telemetry ingestion", () => {
     expect(prismaMocks.deleteMany).toHaveBeenCalledWith({
       where: farmLegacyVercelPreviewSiteWhere,
     });
+  });
+
+  it("stores metadata returned by the attested origin instead of claimed metadata", async () => {
+    process.env.DATABASE_URL = "postgresql://telemetry.invalid/farmjs";
+    attestationMocks.verify.mockResolvedValueOnce({
+      schemaVersion: 1,
+      eventType: "production_site_attestation",
+      packageName: "@farm.js/core",
+      packageVersion: "2.0.0",
+      renderer: "solid",
+      deployTarget: "cloudflare",
+    });
+
+    const response = await POST(
+      request(
+        sitePayload({
+          packageVersion: "999.0.0",
+          renderer: "fake",
+          deployTarget: "fake",
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({ ok: true, stored: true });
+    expect(attestationMocks.verify).toHaveBeenCalledWith("https://example.com");
+    expect(prismaMocks.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({
+          packageName: "@farm.js/core",
+          packageVersion: "2.0.0",
+          renderer: "solid",
+          deployTarget: "cloudflare",
+        }),
+        create: expect.objectContaining({
+          packageName: "@farm.js/core",
+          packageVersion: "2.0.0",
+          renderer: "solid",
+          deployTarget: "cloudflare",
+        }),
+      }),
+    );
   });
 });
