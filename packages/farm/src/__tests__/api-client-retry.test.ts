@@ -16,9 +16,9 @@ it("does not replay a POST whose response was lost", async () => {
     throw new TypeError("network error");
   });
   vi.stubGlobal("fetch", fetch);
-  const api = createAPIClient<Router>({ retry: { count: 3 } });
+  const api = createAPIClient<Router>({});
 
-  const result = await api.orders.post({});
+  const result = await api.orders.post({}, { retry: { count: 3 } });
 
   expect(result.error).toBeTruthy();
   // The server may already have committed the order; replaying it would create
@@ -34,9 +34,9 @@ it("retries a transient failure of an idempotent request", async () => {
     return Response.json({ ok: true });
   });
   vi.stubGlobal("fetch", fetch);
-  const api = createAPIClient<Router>({ retry: { count: 3 } });
+  const api = createAPIClient<Router>({});
 
-  const result = await api.orders.delete({});
+  const result = await api.orders.delete({}, { retry: { count: 3 } });
 
   expect(result.error).toBeNull();
   expect(fetch).toHaveBeenCalledTimes(2);
@@ -45,9 +45,9 @@ it("retries a transient failure of an idempotent request", async () => {
 it("does not retry a client error that cannot succeed", async () => {
   const fetch = vi.fn(async () => Response.json({ message: "invalid" }, { status: 422 }));
   vi.stubGlobal("fetch", fetch);
-  const api = createAPIClient<Router>({ retry: { count: 3 } });
+  const api = createAPIClient<Router>({});
 
-  const result = await api.orders.delete({});
+  const result = await api.orders.delete({}, { retry: { count: 3 } });
 
   expect(result.error).toBeTruthy();
   expect(fetch).toHaveBeenCalledOnce();
@@ -56,9 +56,9 @@ it("does not retry a client error that cannot succeed", async () => {
 it("retries a server error on an idempotent request", async () => {
   const fetch = vi.fn(async () => Response.json({ message: "down" }, { status: 503 }));
   vi.stubGlobal("fetch", fetch);
-  const api = createAPIClient<Router>({ retry: { count: 1 } });
+  const api = createAPIClient<Router>({});
 
-  await api.orders.delete({});
+  await api.orders.delete({}, { retry: { count: 1 } });
 
   expect(fetch).toHaveBeenCalledTimes(2);
 });
@@ -68,9 +68,9 @@ it("lets an explicit shouldRetry opt a POST back in", async () => {
     throw new TypeError("network error");
   });
   vi.stubGlobal("fetch", fetch);
-  const api = createAPIClient<Router>({ retry: { count: 1, shouldRetry: () => true } });
+  const api = createAPIClient<Router>({});
 
-  await api.orders.post({});
+  await api.orders.post({}, { retry: { count: 1, shouldRetry: () => true } });
 
   expect(fetch).toHaveBeenCalledTimes(2);
 });
