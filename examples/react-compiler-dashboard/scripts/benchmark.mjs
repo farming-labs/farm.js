@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { readFile, readdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
 import { chromium } from "@playwright/test";
+import { createBenchmarkArtifacts } from "./benchmark-artifacts.mjs";
 
 const dashboardSamples = Number(process.env.FARM_DASHBOARD_SAMPLES || 60);
 const dashboardUpdatesPerSample = Number(process.env.FARM_DASHBOARD_UPDATES || 10);
@@ -2656,12 +2657,27 @@ async function measureIsolatedTrial(trial, compilerMode, port) {
   }
 }
 
-const isolatedTrials = [
-  await measureIsolatedTrial("baseline-a", "off", basePort),
-  await measureIsolatedTrial("static", "static", basePort + 1),
-  await measureIsolatedTrial("hybrid", "hybrid", basePort + 2),
-  await measureIsolatedTrial("baseline-b", "off", basePort + 3),
-];
+const artifacts = await createBenchmarkArtifacts(reportPath, {
+  startedAt: new Date().toISOString(),
+  dashboardSamples,
+  dashboardUpdatesPerSample,
+  tableSamples,
+  warmupSamples,
+  scaleCycles,
+  node: process.version,
+});
+console.log(`[dashboard] diagnostic trial artifacts: ${artifacts.directory}`);
+const isolatedTrials = [];
+for (const [trial, compilerMode, port] of [
+  ["baseline-a", "off", basePort],
+  ["static", "static", basePort + 1],
+  ["hybrid", "hybrid", basePort + 2],
+  ["baseline-b", "off", basePort + 3],
+]) {
+  const result = await measureIsolatedTrial(trial, compilerMode, port);
+  await artifacts.saveTrial(result);
+  isolatedTrials.push(result);
+}
 const browserVersion = isolatedTrials[0].browserVersion;
 assert(isolatedTrials.every((trial) => trial.browserVersion === browserVersion));
 const trials = isolatedTrials.map((trial) => trial.result);
@@ -4386,6 +4402,6 @@ const report = {
   screenshots: trials.map((trial) => trial.screenshot),
 };
 
-await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`);
+await artifacts.complete(report);
 console.log(JSON.stringify({ ...report, reportPath }, null, 2));
 if (!passed) process.exitCode = 1;

@@ -435,6 +435,19 @@ pnpm --filter farm-react-compiler-dashboard-example benchmark
 The default JSON report is `/tmp/farm-react-dashboard-benchmark.json`; change it with
 `FARM_DASHBOARD_REPORT`.
 
+Before starting the production trials, the runner checks that it can write beside the report.
+Use an existing parent directory and a regular report file, not a symlink or directory.
+It prints a unique `farm-dashboard-run-*` directory and saves each completed trial's JSON summary
+there, outside the timed work. These files always say `INCOMPLETE`: they are diagnostic evidence, not a benchmark
+pass, and the runner does not resume or combine interrupted runs. A `.pending` file may be
+truncated and must not be treated as a completed checkpoint. Run directories are kept for
+inspection; you can remove them when their diagnostic results are no longer needed.
+
+The final report is replaced atomically only after all four trials and the existing gates have
+run. If writing fails, the previous final report remains unchanged; it belongs to the previous
+run, not the failed attempt. A successful preflight cannot guarantee that disk space will remain
+available throughout the benchmark. Samples, timing boundaries, controls and gates are unchanged.
+
 ## Reading the result
 
 - Dashboard active updates measure the case where the visible chart and metrics really change.
