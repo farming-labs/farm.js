@@ -389,6 +389,7 @@ describe("Farm workflows", () => {
     const handlerSource = await fs.readFile(prepared.handlerPath!, "utf8");
 
     expect(handlerSource).toContain("const bodySizeLimit = 1234");
+    expect(handlerSource).toContain("const allowUnsecured = false");
     expect(handlerSource).toContain('getHeader(event, "x-farm-workflow-secret")');
     expect(handlerSource).toContain("authorization.match(/^Bearer");
     expect(handlerSource).not.toContain('searchParams.get("secret")');
@@ -459,6 +460,58 @@ describe("Farm workflows", () => {
     );
     expect(malformedResponse).toBeInstanceOf(Response);
     expect((malformedResponse as Response).status).toBe(400);
+  });
+
+  it("fails generated Nitro workflow routes closed unless explicitly opted in", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-workflow-unsecured-nitro-"));
+    await fs.mkdir(path.join(root, "src", "jobs"), { recursive: true });
+    await fs.writeFile(
+      path.join(root, "src", "jobs", "sync.mjs"),
+      "export default { async run() { return { ok: true }; } };",
+    );
+
+    const secured = await prepareFarmWorkflowsForNitro({
+      root,
+      workflows: {},
+    });
+    const securedSource = await fs.readFile(secured.handlerPath!, "utf8");
+    expect(securedSource).toContain("const allowUnsecured = false");
+
+    delete process.env.CRON_SECRET;
+    let verifySecretStart = securedSource.indexOf("const secretEnv =");
+    let verifySecretEnd = securedSource.indexOf(
+      "\n\nasync function readPayload",
+      verifySecretStart,
+    );
+    let generatedVerifySecret = Function(
+      `${securedSource.slice(verifySecretStart, verifySecretEnd)}; return verifySecret;`,
+    )() as (event: { req: Request }) => Response | null;
+    const missingSecret = generatedVerifySecret({
+      req: new Request("https://example.com/api/_farm/workflows/sync"),
+    });
+    expect(missingSecret?.status).toBe(401);
+    await expect(missingSecret?.json()).resolves.toEqual({
+      error:
+        "Workflow route requires a secret. Set the CRON_SECRET environment variable, configure workflows.secret, or set workflows.allowUnsecured to true.",
+    });
+
+    const unsecured = await prepareFarmWorkflowsForNitro({
+      root,
+      workflows: { allowUnsecured: true },
+    });
+    const unsecuredSource = await fs.readFile(unsecured.handlerPath!, "utf8");
+    expect(unsecuredSource).toContain("const allowUnsecured = true");
+
+    verifySecretStart = unsecuredSource.indexOf("const secretEnv =");
+    verifySecretEnd = unsecuredSource.indexOf("\n\nasync function readPayload", verifySecretStart);
+    generatedVerifySecret = Function(
+      `${unsecuredSource.slice(verifySecretStart, verifySecretEnd)}; return verifySecret;`,
+    )() as (event: { req: Request }) => Response | null;
+    expect(
+      generatedVerifySecret({
+        req: new Request("https://example.com/api/_farm/workflows/sync"),
+      }),
+    ).toBeNull();
   });
 
   it("gives nested and hyphenated workflow ids distinct wrappers", async () => {
