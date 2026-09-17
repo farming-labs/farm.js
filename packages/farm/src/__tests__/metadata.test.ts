@@ -55,4 +55,37 @@ describe("metadata head rendering", () => {
     expect(rendered.hasFavicon).toBe(false);
     expect(rendered.tags).toContain('<link rel="apple-touch-icon" href="/apple-touch-icon.png">');
   });
+
+  it("defaults a canonical link to the request path when the route sets none", () => {
+    expect(renderMetadataHead({}, { pathname: "/about" }).tags).toContain(
+      '<link rel="canonical" href="/about">',
+    );
+    // With a metadataBase configured the canonical is absolute.
+    expect(
+      renderMetadataHead({ metadataBase: "https://farm.test" }, { pathname: "/about" }).tags,
+    ).toContain('<link rel="canonical" href="https://farm.test/about">');
+    // No pathname and no explicit canonical means no canonical link.
+    expect(renderMetadataHead({}).tags).not.toContain('rel="canonical"');
+  });
+
+  it("keeps an explicit canonical over the request-path default", () => {
+    const tags = renderMetadataHead(
+      { alternates: { canonical: "https://farm.test/canonical" } },
+      { pathname: "/about" },
+    ).tags;
+    expect(tags).toContain('<link rel="canonical" href="https://farm.test/canonical">');
+    expect(tags).not.toContain('href="/about"');
+  });
+
+  it("defaults og:type to website when Open Graph data omits it", () => {
+    expect(renderMetadataHead({ openGraph: { title: "Farm" } }).tags).toContain(
+      '<meta property="og:type" content="website">',
+    );
+    // An explicit type is preserved.
+    expect(renderMetadataHead({ openGraph: { title: "Farm", type: "article" } }).tags).toContain(
+      '<meta property="og:type" content="article">',
+    );
+    // No Open Graph block means no og:type is invented.
+    expect(renderMetadataHead({}).tags).not.toContain("og:type");
+  });
 });

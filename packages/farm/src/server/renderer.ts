@@ -257,6 +257,18 @@ function hasRequestHeader(req: FarmRequest, name: string): boolean {
   return Array.isArray(value) ? value.length > 0 : Boolean(value);
 }
 
+/**
+ * The request pathname (without query/hash) used as the default canonical URL.
+ * Prefers the resolved route path recorded on the request, falling back to the
+ * raw request URL.
+ */
+function getFarmMetadataPathname(req: FarmRequest): string | undefined {
+  const raw = (req as any).__FARM_ROUTE__ || req.url;
+  if (typeof raw !== "string" || raw.length === 0) return undefined;
+  const boundary = raw.search(/[?#]/);
+  return boundary === -1 ? raw : raw.slice(0, boundary);
+}
+
 function serializeInlineValue(value: unknown): string {
   return JSON.stringify(value)
     .replace(/</g, "\\u003c")
@@ -2286,7 +2298,9 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
         tags: metaTags,
         hasFavicon,
         hasExplicitTitle,
-      } = renderMetadataHead((req as any).__FARM_METADATA__);
+      } = renderMetadataHead((req as any).__FARM_METADATA__, {
+        pathname: getFarmMetadataPathname(req),
+      });
       // A renderer-emitted <title> (e.g. <svelte:head>) must take effect: the
       // first <title> in a document wins, so the fallback framework title is
       // suppressed when the renderer supplies one. Explicit metadata titles
@@ -2540,7 +2554,9 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
         title,
         tags: metaTags,
         hasFavicon,
-      } = renderMetadataHead((req as any).__FARM_METADATA__);
+      } = renderMetadataHead((req as any).__FARM_METADATA__, {
+        pathname: getFarmMetadataPathname(req),
+      });
       const i18nSnapshot = getFarmI18nClientSnapshot();
       const i18nAlternateTags = i18nSnapshot
         ? renderI18nAlternateLinks((req as any).__FARM_ROUTE__ || req.url || "/", i18nSnapshot)
