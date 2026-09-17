@@ -6007,7 +6007,8 @@ interface KeyedUpdateRuntime {
     root: Element,
     reactOwnedRows: boolean,
   ): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined;
-  // Returns a runtime-owned native map, transferred to the block on success.
+  // Returns a runtime-owned native map containing only retained row instances:
+  // reorders may remove rows, but never create or replace their root elements.
   reorder?(
     props: CompilerKeyedRowsBlockProps,
     dirtyState: ReadonlySet<number>,
@@ -9334,8 +9335,10 @@ function createKeyedRowsBlockComponent(
           // Reorder preparation returns an owned map (or the current one for
           // unchanged order), just like append and rolling-window updates.
           this.instances = reorderedInstances;
-          this.rebuildElementIndex(this.instances);
           if (removedRows) {
+            // Pure reorders keep the same element -> instance associations;
+            // those instances already hold their current item and index.
+            this.rebuildElementIndex(this.instances);
             const keys = [...this.instances.keys()];
             this.pruneEventHandlers(keys);
             this.pruneConditionalListeners(keys);
