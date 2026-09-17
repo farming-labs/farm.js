@@ -237,6 +237,13 @@ additionally cover both source orders, adjacent and empty intervals, exact local
 preparation, delegated event indexes, controlled-input selection, Strict Mode hydration and cleanup,
 overlap and cross-window key-move fallback, and 1,000 randomized queued differential updates.
 
+The shared keyed-row map builder inserts rows directly into the ordered map rather than first creating
+one temporary `[key, row]` array per row. The final map, indexes and cache cleanup are unchanged;
+this reduces allocations, not the required validation or linear map-building work. Regression
+tests cover repeated single and queued resized windows in static and hybrid modes, while control
+tests verify that the real optimized queued-resize handler emits two hints and its snapshot
+control emits none.
+
 Same-key exact-window refresh has a separate 10,000-row gate. The benchmark replaces a 64-row
 snapshot with 64 new objects carrying the same keys in the same order and changes one visible row,
 which isolates the avoided full-list key scan without hiding the required binding update. All 64

@@ -19,6 +19,7 @@ const snapshotAction = `${optimizedAction}-snapshot`;
 const queuedWindowAction = "table-position-window-refresh-queued";
 const queuedWindowSnapshotAction = `${queuedWindowAction}-snapshot`;
 const batchInsertAction = "table-position-batch-insert";
+const queuedResizeAction = "table-position-window-resize-queued";
 
 // Read the actual benchmark instead of copying a control that could drift from it.
 function isolateAction(action: string) {
@@ -118,6 +119,21 @@ describe("production compiler dashboard controls", () => {
       expect(result.diagnostics).toEqual([]);
       expect(result.optimizations.keyedArrayPositionHints).toBe(hints);
       expect(result.code.includes("createCompilerKeyedArrayBatchInsert")).toBe(hints > 0);
+    });
+
+    it.each([
+      [queuedResizeAction, 2],
+      [`${queuedResizeAction}-snapshot`, 0],
+    ] as const)("keeps %s at %i resize hints in " + reactivity, async (action, hints) => {
+      const result = await compileReactModule(
+        isolateAction(action).source,
+        filename,
+        normalizeReactCompilerOptions({ reactivity }),
+      );
+      expect(result.compiled).toContain("StandardTableBenchmark");
+      expect(result.diagnostics).toEqual([]);
+      expect(result.optimizations.keyedArrayPositionHints).toBe(hints);
+      expect(result.code.includes("createCompilerKeyedArrayWindowReplace")).toBe(hints > 0);
     });
   }
 
