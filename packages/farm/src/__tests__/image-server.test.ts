@@ -380,6 +380,79 @@ describe("image cache keys", () => {
   });
 });
 
+describe("image request coalescing", () => {
+  it("runs one fetch and transform for identical concurrent misses", async () => {
+    let transforms = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const transform: FarmImageTransformer = async (input) => {
+      transforms += 1;
+      await gate;
+      return { body: input.source, contentType: input.sourceType };
+    };
+    const fetcher = vi.fn(
+      async () => new Response(PNG, { headers: { "content-type": "image/png" } }),
+    );
+    const handler = createFarmImageHandler(resolveFarmImageConfig(undefined), {
+      fetch: fetcher as typeof fetch,
+      transform,
+    });
+
+    const send = () =>
+      handler(
+        new Request(optimizerUrl("/assets/product.png"), { headers: { accept: "image/webp" } }),
+      );
+
+    // Both requests miss the cache and overlap on the same key.
+    const pending = [send(), send()];
+    release();
+    const responses = await Promise.all(pending);
+
+    for (const response of responses) expect(response.status).toBe(200);
+    expect(transforms).toBe(1);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("still serves other waiters when one request is aborted", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const transform: FarmImageTransformer = async (input) => {
+      await gate;
+      return { body: input.source, contentType: input.sourceType };
+    };
+    const fetcher = vi.fn(
+      async () => new Response(PNG, { headers: { "content-type": "image/png" } }),
+    );
+    const handler = createFarmImageHandler(resolveFarmImageConfig(undefined), {
+      fetch: fetcher as typeof fetch,
+      transform,
+    });
+
+    const aborted = new AbortController();
+    const first = handler(
+      new Request(optimizerUrl("/assets/product.png"), {
+        headers: { accept: "image/webp" },
+        signal: aborted.signal,
+      }),
+    );
+    const second = handler(
+      new Request(optimizerUrl("/assets/product.png"), { headers: { accept: "image/webp" } }),
+    );
+
+    // One caller leaving must not cancel the image the other is waiting for.
+    aborted.abort();
+    release();
+
+    await first.catch(() => {});
+    const response = await second;
+    expect(response.status).toBe(200);
+  });
+});
+
 describe("image runtime adapters", () => {
   it("honors Accept quality values when selecting an output format", () => {
     const formats = ["image/avif", "image/webp"] as const;

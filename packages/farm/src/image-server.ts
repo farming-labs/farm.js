@@ -77,6 +77,10 @@ export function createFarmImageHandler(
 ): FarmImageHandler {
   const fetcher = options.fetch ?? globalThis.fetch;
   const cache = new FarmImageMemoryCache(options.cacheEntries ?? 100);
+  // Identical concurrent misses share one fetch + transform. Without this a
+  // burst for an uncached image (a new page going live, a CDN cold start)
+  // fetches the origin and runs the codec once per request.
+  const inflight = new Map<string, InflightOptimization>();
   const allowedWidths = new Set([...config.deviceSizes, ...config.imageSizes]);
   const allowedQualities = new Set(config.qualities);
 
@@ -119,47 +123,50 @@ export function createFarmImageHandler(
       let optimized = cache.get(cacheKey);
 
       if (!optimized) {
-        const fetchedSource = await fetchImageSource(
-          sourceUrl,
-          requestUrl.origin,
-          config,
-          fetcher,
-          options.fetchRemote,
-          options.validateRemoteUrl,
-          request.signal,
-        );
-        const source = await readResponseWithLimit(
-          fetchedSource.response,
-          config.maximumResponseBody,
-        );
-        const sourceType = detectImageContentType(source);
-        validateSourceType(sourceType, config);
-        throwIfAborted(request.signal);
+        optimized = await runCoalesced(inflight, cacheKey, request.signal, async (signal) => {
+          const fetchedSource = await fetchImageSource(
+            sourceUrl,
+            requestUrl.origin,
+            config,
+            fetcher,
+            options.fetchRemote,
+            options.validateRemoteUrl,
+            signal,
+          );
+          const source = await readResponseWithLimit(
+            fetchedSource.response,
+            config.maximumResponseBody,
+          );
+          const sourceType = detectImageContentType(source);
+          validateSourceType(sourceType, config);
+          throwIfAborted(signal);
 
-        const result = await options.transform({
-          source,
-          sourceUrl: fetchedSource.url,
-          sourceType,
-          width,
-          quality,
-          accept,
-          formats: config.formats,
-          signal: request.signal,
-          maximumResponseBody: config.maximumResponseBody,
+          const result = await options.transform({
+            source,
+            sourceUrl: fetchedSource.url,
+            sourceType,
+            width,
+            quality,
+            accept,
+            formats: config.formats,
+            signal,
+            maximumResponseBody: config.maximumResponseBody,
+          });
+          throwIfAborted(signal);
+          validateTransformedResult(result, config);
+
+          const entry = {
+            ...result,
+            etag: createImageEtag(result.body),
+            cacheControl: `public, max-age=${config.minimumCacheTTL}, stale-while-revalidate=${Math.max(
+              config.minimumCacheTTL,
+              60,
+            )}`,
+            expiresAt: Date.now() + config.minimumCacheTTL * 1_000,
+          };
+          cache.set(cacheKey, entry);
+          return entry;
         });
-        throwIfAborted(request.signal);
-        validateTransformedResult(result, config);
-
-        optimized = {
-          ...result,
-          etag: createImageEtag(result.body),
-          cacheControl: `public, max-age=${config.minimumCacheTTL}, stale-while-revalidate=${Math.max(
-            config.minimumCacheTTL,
-            60,
-          )}`,
-          expiresAt: Date.now() + config.minimumCacheTTL * 1_000,
-        };
-        cache.set(cacheKey, optimized);
       }
 
       return createOptimizedImageResponse(request, optimized, config);
@@ -424,6 +431,74 @@ async function fetchImageSource(
     currentUrl = new URL(location, currentUrl);
     await validateImageSourceUrl(currentUrl, requestOrigin, config, validateRemoteUrl);
   }
+}
+
+type InflightOptimization = {
+  promise: Promise<OptimizedImage>;
+  controller: AbortController;
+  waiters: number;
+};
+
+/**
+ * Share one in-flight optimization between identical concurrent requests.
+ *
+ * The shared work runs under its own AbortController rather than any single
+ * request's signal, so one caller going away cannot cancel the image everyone
+ * else is waiting for. The controller is aborted only when the last waiter
+ * leaves, so an abandoned burst still stops promptly.
+ */
+async function runCoalesced(
+  inflight: Map<string, InflightOptimization>,
+  key: string,
+  requestSignal: AbortSignal,
+  run: (signal: AbortSignal) => Promise<OptimizedImage>,
+): Promise<OptimizedImage> {
+  let entry = inflight.get(key);
+  if (!entry) {
+    const controller = new AbortController();
+    const created: InflightOptimization = {
+      controller,
+      waiters: 0,
+      promise: undefined as unknown as Promise<OptimizedImage>,
+    };
+    created.promise = run(controller.signal).finally(() => {
+      if (inflight.get(key) === created) inflight.delete(key);
+    });
+    // Every waiter can detach before the shared work settles: an already
+    // aborted request returns early without ever attaching to this promise,
+    // and the last waiter leaving aborts the controller. Keep one no-op
+    // handler so that rejection is never reported as unhandled. Waiters still
+    // observe it, because this does not replace the promise they await.
+    created.promise.catch(() => {});
+    inflight.set(key, created);
+    entry = created;
+  }
+
+  const pending = entry;
+  pending.waiters += 1;
+  try {
+    return await raceRequestAbort(pending.promise, requestSignal);
+  } finally {
+    pending.waiters -= 1;
+    if (pending.waiters === 0 && inflight.get(key) === pending) {
+      inflight.delete(key);
+      pending.controller.abort();
+    }
+  }
+}
+
+function raceRequestAbort(
+  promise: Promise<OptimizedImage>,
+  signal: AbortSignal,
+): Promise<OptimizedImage> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(signal.reason ?? new Error("Aborted"));
+
+  return new Promise<OptimizedImage>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason ?? new Error("Aborted"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
 }
 
 async function readResponseWithLimit(response: Response, limit: number): Promise<Uint8Array> {
