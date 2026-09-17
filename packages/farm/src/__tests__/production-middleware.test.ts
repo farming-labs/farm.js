@@ -169,6 +169,15 @@ describe("production middleware runtime", () => {
       expect(response.status).toBe(200);
       expect(response.headers.get("x-farm-middleware")).toBe("yes");
       expect(response.headers.get("cache-control")).toBe("private, no-store");
+      // Agent JSON-LD from the resolved agent config is baked into the document head.
+      expect(html).toContain('<script type="application/ld+json">');
+      const jsonLd = html.match(/application\/ld\+json">(.*?)<\/script>/s)?.[1] ?? "";
+      expect(JSON.parse(jsonLd)).toMatchObject({
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        name: "Farm production fixture",
+        url: "https://example.test",
+      });
       expect(html).toContain(
         "production middleware: dashboard / settings / dashboard-file / /dashboard/settings",
       );

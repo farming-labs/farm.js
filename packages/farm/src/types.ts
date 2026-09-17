@@ -1,5 +1,6 @@
 import type { FarmRenderer } from "./renderer";
 import type { IncomingMessage, ServerResponse } from "http";
+import type { FarmAgentUserConfig } from "./agent-config";
 import type { FarmStorageUserConfig } from "./storage/types";
 import type { FarmIntegrationsUserConfig } from "./integrations";
 import type { FarmDocsResolvedConfig, FarmDocsUserConfig } from "./docs/types";
@@ -202,6 +203,8 @@ export interface FarmConfig {
   serverActions?: FarmServerActionsConfig;
   /** App-wide HTTP security policy. */
   security?: FarmSecurityConfig | ResolvedFarmSecurityConfig;
+  /** Opt-in agent-readiness primitives (JSON-LD and related). Off by default. */
+  agent?: FarmAgentUserConfig;
   images?: FarmImageConfig;
   /** Browser resource scheduling and preload budgets. */
   performance?: FarmPerformanceConfig;

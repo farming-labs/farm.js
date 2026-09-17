@@ -45,6 +45,13 @@ export default {
   experimental: {
     ppr: true,
   },
+  agent: {
+    jsonLd: {
+      type: "SoftwareApplication",
+      name: "Farm production fixture",
+      url: "https://example.test",
+    },
+  },
   deploy: {
     target: "vercel",
   },

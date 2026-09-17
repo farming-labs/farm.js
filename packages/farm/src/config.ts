@@ -87,6 +87,7 @@ import {
 } from "./security";
 import { isFarmRedirectStatus } from "./navigation-errors";
 import { resolveFarmThemeConfig } from "./theme/config";
+import { resolveFarmAgentConfig, type ResolvedFarmAgentConfig } from "./agent-config";
 import type { ResolvedFarmThemeConfig } from "./theme/types";
 import { isReactRenderer, resolveFarmRenderer } from "./renderer";
 import type { FarmRenderer } from "./renderer";
@@ -383,8 +384,10 @@ export interface ResolvedFarmConfig extends Required<
     | "security"
     | "theme"
     | "renderer"
+    | "agent"
   >
 > {
+  agent: ResolvedFarmAgentConfig;
   /** @internal Tracks whether `context` came from user/layer config instead of the default noop. */
   [FARM_RESOLVED_CUSTOM_CONTEXT]?: boolean;
   root: string;
@@ -1011,6 +1014,7 @@ export async function resolveConfig(
       ppr: false,
       ...userConfig.experimental,
     },
+    agent: resolveFarmAgentConfig(userConfig.agent),
     plugins: [...resolveIntegrationPlugins(integrations), ...(userConfig.plugins || [])],
     integrations,
     trailingSlash: userConfig.trailingSlash ?? false,

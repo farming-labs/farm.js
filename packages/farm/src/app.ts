@@ -210,6 +210,7 @@ export class FarmApp {
         ppr: config.experimental?.ppr ?? false,
         ...config.experimental,
       },
+      agent: config.agent ?? {},
       vite: config.vite || {},
     };
   }

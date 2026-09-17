@@ -2305,6 +2305,7 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
         hasExplicitTitle,
       } = renderMetadataHead((req as any).__FARM_METADATA__, {
         pathname: getFarmMetadataPathname(req),
+        jsonLd: this.config.agent?.jsonLd,
       });
       // A renderer-emitted <title> (e.g. <svelte:head>) must take effect: the
       // first <title> in a document wins, so the fallback framework title is
@@ -2561,6 +2562,7 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
         hasFavicon,
       } = renderMetadataHead((req as any).__FARM_METADATA__, {
         pathname: getFarmMetadataPathname(req),
+        jsonLd: this.config.agent?.jsonLd,
       });
       const i18nSnapshot = getFarmI18nClientSnapshot();
       const i18nAlternateTags = i18nSnapshot

@@ -1,4 +1,5 @@
 import type { Metadata } from "./types";
+import { renderFarmAgentJsonLd, type FarmAgentJsonLd } from "./agent-config";
 
 export type MetadataImageKind = "opengraph" | "twitter";
 
@@ -107,6 +108,12 @@ export interface RenderMetadataHeadOptions {
    * base is configured; otherwise emitted as a self-referential path.
    */
   pathname?: string;
+  /**
+   * Agent JSON-LD config. When truthy, a schema.org JSON-LD script is emitted in
+   * the head, built from this config and the page/site metadata. `true` uses the
+   * defaults; `false`/omitted (the default) emits nothing.
+   */
+  jsonLd?: FarmAgentJsonLd | boolean;
 }
 
 export function renderMetadataHead(
@@ -172,6 +179,19 @@ export function renderMetadataHead(
 
   appendOpenGraph(tags, resolvedMetadata.openGraph, metadataBase);
   appendTwitter(tags, resolvedMetadata.twitter, metadataBase);
+
+  if (options.jsonLd) {
+    const jsonLdConfig = options.jsonLd === true ? {} : options.jsonLd;
+    const jsonLdScript = renderFarmAgentJsonLd(jsonLdConfig, {
+      metadataBase,
+      siteName: isRecord(resolvedMetadata.openGraph)
+        ? normalizeContent(resolvedMetadata.openGraph.siteName)
+        : undefined,
+      title: explicitTitle,
+      description: normalizeContent(resolvedMetadata.description),
+    });
+    if (jsonLdScript) tags.push(jsonLdScript);
+  }
 
   return {
     title: escapeText(title),

@@ -6937,7 +6937,7 @@ async function handleFarmRequestInContext(
           }
         }
 
-        const renderedMetadata = renderMetadataHead(mergedMetadata, { pathname });
+        const renderedMetadata = renderMetadataHead(mergedMetadata, { pathname, jsonLd: ${JSON.stringify(config.agent?.jsonLd ?? false)} });
         const title = renderedMetadata.title;
         const metaTags = renderedMetadata.tags;
         const hasFavicon = renderedMetadata.hasFavicon;
