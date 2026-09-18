@@ -83,6 +83,7 @@ program
   .command("dev")
   .description("Start development server")
   .option("-p, --port <port>", "Override the port to run the server on")
+  .option("-H, --host [host]", "Expose the server on the network")
   .option("-r, --root <root>", "Root directory", process.cwd())
   .option("--cron", "Run configured cron routes in-process during development")
   .action(async (options) => {
@@ -93,6 +94,7 @@ program
           root: options.root,
         },
         options.port === undefined ? undefined : parsePortOption(options.port),
+        options.host,
       );
       if (options.cron) {
         const { startFarmCronScheduler } = require("../dist/index.js");

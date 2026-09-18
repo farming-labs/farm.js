@@ -21,3 +21,11 @@ test("farm dev rejects partially numeric ports", async () => {
     },
   );
 });
+
+test("farm dev exposes Vite-compatible host options", async () => {
+  const { stdout } = await execFileAsync(process.execPath, [cliBin, "dev", "--help"], {
+    env: { ...process.env, FARM_TELEMETRY_DISABLED: "1" },
+  });
+
+  assert.match(stdout, /-H, --host \[host\]/);
+});

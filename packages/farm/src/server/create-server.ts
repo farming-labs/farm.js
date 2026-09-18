@@ -55,6 +55,8 @@ function createBrandingPlugin() {
             typeof address === "object" && address
               ? address.port
               : server.config.server.port || port || 3000;
+          const localUrl = server.resolvedUrls?.local[0] || `http://localhost:${resolvedPort}/`;
+          const networkUrls = server.resolvedUrls?.network || [];
 
           const pc = createCliColors();
           console.log("");
@@ -62,10 +64,16 @@ function createBrandingPlugin() {
             `  ${pc.bold(pc.green("Farm.js"))} ${pc.dim(`v${FARM_VERSION}`)} ${pc.dim(`ready in ${elapsed}ms`)}`,
           );
           console.log("");
-          console.log(
-            `  ${pc.dim("➜")}  ${pc.bold("Local:")}   ${pc.cyan(`http://localhost:${resolvedPort}/`)}`,
-          );
-          console.log(`  ${pc.dim("➜")}  ${pc.bold("Network:")} ${pc.dim("use --host to expose")}`);
+          console.log(`  ${pc.dim("➜")}  ${pc.bold("Local:")}   ${pc.cyan(localUrl)}`);
+          if (networkUrls.length > 0) {
+            for (const url of networkUrls) {
+              console.log(`  ${pc.dim("➜")}  ${pc.bold("Network:")} ${pc.cyan(url)}`);
+            }
+          } else {
+            console.log(
+              `  ${pc.dim("➜")}  ${pc.bold("Network:")} ${pc.dim("use --host to expose")}`,
+            );
+          }
           console.log("");
         }
         return result;
@@ -371,8 +379,15 @@ export async function createServer(config: FarmConfig = {}) {
 /**
  * Start the development server
  */
-export async function startDevServer(config: FarmConfig = {}, port?: number) {
+export async function startDevServer(
+  config: FarmConfig = {},
+  port?: number,
+  host?: string | boolean,
+) {
   const server = await createServer(config);
+  if (host !== undefined) {
+    server.config.server.host = host;
+  }
   await server.listen(port);
   const pluginManager = (server as any).__farmPluginManager as PluginManager | undefined;
   // Shutdown is owned by the close() installed in createServer, which awaits
