@@ -2340,7 +2340,15 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
           ? removeFarmDocumentTitles(rendererHead)
           : rendererHead;
         html = composeFarmFullDocument(documentHtml, {
-          htmlAttributes: `${i18nSnapshot ? ` dir="${i18nSnapshot.direction}"` : ""}${themeDocument.attributes}`,
+          htmlAttributes: `${
+            i18nSnapshot
+              ? ` lang="${escapeHtmlAttribute(i18nSnapshot.locale)}" dir="${escapeHtmlAttribute(i18nSnapshot.direction)}"`
+              : ""
+          }${themeDocument.attributes}`,
+          replaceHtmlAttributes: [
+            ...(i18nSnapshot ? ["lang", "dir"] : []),
+            ...(themeDocument.attributes ? ["data-theme"] : []),
+          ],
           headAssets: [
             themeDocument.head,
             `<meta name="farm-deployment-id" content="${escapeHtmlAttribute(deploymentId)}">`,
@@ -2915,7 +2923,15 @@ ${i18nSnapshot ? `window.__FARM_I18N__ = ${serializeInlineValue(i18nSnapshot)};`
       return composeFarmFullDocument(
         metadataHead ? removeFarmDocumentTitles(fullDocument) : fullDocument,
         {
-          htmlAttributes: `${i18nSnapshot ? ` dir="${i18nSnapshot.direction}"` : ""}${themeDocument.attributes}`,
+          htmlAttributes: `${
+            i18nSnapshot
+              ? ` lang="${escapeHtmlAttribute(i18nSnapshot.locale)}" dir="${escapeHtmlAttribute(i18nSnapshot.direction)}"`
+              : ""
+          }${themeDocument.attributes}`,
+          replaceHtmlAttributes: [
+            ...(i18nSnapshot ? ["lang", "dir"] : []),
+            ...(themeDocument.attributes ? ["data-theme"] : []),
+          ],
           headAssets: [
             themeDocument.head,
             `<meta name="farm-deployment-id" content="${escapeHtmlAttribute(this.getDeploymentId())}">`,
