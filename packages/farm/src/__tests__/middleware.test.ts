@@ -1612,10 +1612,12 @@ describe("URL Rewriting", () => {
     const ctx = createContext(req, res);
 
     expect(ctx.pathname).toBe("/old-path");
+    expect(ctx.route).toBe("/old-path");
 
     ctx.rewrite("/new-path");
 
     expect(ctx.pathname).toBe("/new-path");
+    expect(ctx.route).toBe("/new-path");
     expect(ctx._rewriteUrl).toBe("/new-path");
     expect(req.url).toBe("/new-path");
   });
