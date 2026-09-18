@@ -143,6 +143,7 @@ export function createContext(
       ctx.url = newUrl;
       ctx.pathname = newUrl.pathname;
       ctx.searchParams = newUrl.searchParams;
+      ctx.route = newUrl.pathname;
       // Update the original request URL
       req.url = rewriteUrl;
     },
