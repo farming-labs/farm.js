@@ -187,4 +187,60 @@ describe("default error diagnostics", () => {
       highlight: true,
     });
   });
+
+  it("redacts OAuth clientSecret and secretKey values from message and stack", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "farm-error-page-"));
+    temporaryDirectories.push(root);
+    const sourcePath = path.join(root, "src", "app", "auth", "page.tsx");
+    await mkdir(path.dirname(sourcePath), { recursive: true });
+    await writeFile(
+      sourcePath,
+      [
+        "export async function AuthPage() {",
+        "  const config = await loadOAuthConfig();",
+        "  return config;",
+        "}",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const secret = "sk-1234567890abcdef";
+    const error = new Error(
+      `OAuth config: clientSecret="${secret}" secretKey=${secret} client_secret: ${secret}`,
+    );
+    error.stack = [
+      `Error: OAuth config: clientSecret="${secret}" secretKey=${secret} client_secret: ${secret}`,
+      `    at AuthPage (${sourcePath}:2:22)`,
+      "    at processTicksAndRejections (node:internal/process/task_queues:105:5)",
+    ].join("\n");
+
+    const diagnostics = createDefaultErrorDiagnostics(error, root);
+
+    expect(diagnostics.message).not.toContain(secret);
+    expect(diagnostics.message).toContain("clientSecret=[REDACTED]");
+    expect(diagnostics.message).toContain("secretKey=[REDACTED]");
+    expect(diagnostics.message).toContain("client_secret=[REDACTED]");
+    expect(diagnostics.stack).not.toContain(secret);
+    expect(diagnostics.stack).toContain("<project>/src/app/auth/page.tsx:2:22");
+  });
+
+  it("redacts secret identifiers across camelCase, snake_case, and colon forms", () => {
+    const root = os.tmpdir();
+    const probe = (message: string) =>
+      createDefaultErrorDiagnostics(new Error(message), root).message;
+
+    expect(probe("clientSecret=abc")).toBe("clientSecret=[REDACTED]");
+    expect(probe("client_secret=abc")).toBe("client_secret=[REDACTED]");
+    expect(probe("secretKey=abc")).toBe("secretKey=[REDACTED]");
+    expect(probe("secret_key=abc")).toBe("secret_key=[REDACTED]");
+    expect(probe('clientSecret: "sk-xyz"')).toBe("clientSecret=[REDACTED]");
+
+    expect(probe("apiKey=abc")).toBe("apiKey=[REDACTED]");
+    expect(probe("api_key=abc")).toBe("api_key=[REDACTED]");
+    expect(probe("accessToken=abc")).toBe("accessToken=[REDACTED]");
+    expect(probe("authToken=abc")).toBe("authToken=[REDACTED]");
+    expect(probe("token=abc")).toBe("token=[REDACTED]");
+    expect(probe("password=abc")).toBe("password=[REDACTED]");
+    expect(probe("secret=abc")).toBe("secret=[REDACTED]");
+  });
 });
