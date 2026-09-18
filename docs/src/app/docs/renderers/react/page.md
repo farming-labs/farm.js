@@ -2428,6 +2428,11 @@ Path-based bindings continue to skip those branches, so a nearby text or input u
 its intended element. Hiding or replacing a branch and real unmounts remove the old registration;
 disposed owners cannot update the detached nodes or a new component instance.
 
+If a host conditional or conditional-range container has already requested React fallback,
+Strict Mode replay restores its nested fallback subscriptions instead of attempting compiled
+adoption again. Descendant-only updates remain live, including after hydration, and real
+unmounts still dispose those subscriptions. The existing fallback eligibility rules are unchanged.
+
 During development, compiled components receive a module-and-component identity plus a state-layout
 signature. A compatible Fast Refresh replaces the compiled definition while retaining the React
 component type and its local cells. An interactive keyed boundary lets React commit the refreshed
