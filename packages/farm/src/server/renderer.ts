@@ -16,6 +16,7 @@ import {
   composeFarmFullDocument,
   extractFarmFullDocument,
   opensFarmFullDocument,
+  removeFarmDocumentTitles,
 } from "./full-document";
 import { getClientModuleMetadata } from "../utils/client-component";
 import { Writable } from "stream";
@@ -2313,6 +2314,7 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
       // still come first and win.
       const documentTitleTag =
         !hasExplicitTitle && /<title[\s>]/i.test(rendererHead) ? "" : `<title>${title}</title>`;
+      const rendererHasTitle = /<title[\s>]/i.test(rendererHead);
       const i18nSnapshot = getFarmI18nClientSnapshot();
       const alternateTags = i18nSnapshot
         ? renderI18nAlternateLinks((req as any).__FARM_ROUTE__ || req.url || "/", i18nSnapshot)
@@ -2330,14 +2332,22 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
       let html: string;
       if (fullDocument) {
         warnFarmFullDocumentLayout();
-        html = composeFarmFullDocument(fullDocument, {
+        const shouldReplaceLayoutTitle = hasExplicitTitle || rendererHasTitle;
+        const documentHtml = shouldReplaceLayoutTitle
+          ? removeFarmDocumentTitles(fullDocument)
+          : fullDocument;
+        const effectiveRendererHead = hasExplicitTitle
+          ? removeFarmDocumentTitles(rendererHead)
+          : rendererHead;
+        html = composeFarmFullDocument(documentHtml, {
           htmlAttributes: `${i18nSnapshot ? ` dir="${i18nSnapshot.direction}"` : ""}${themeDocument.attributes}`,
           headAssets: [
             themeDocument.head,
             `<meta name="farm-deployment-id" content="${escapeHtmlAttribute(deploymentId)}">`,
+            hasExplicitTitle ? documentTitleTag : "",
             metaTags,
             alternateTags,
-            rendererHead,
+            effectiveRendererHead,
             renderFarmFontDevHead(this.config.root || process.cwd()),
             `<link rel="stylesheet" href="/src/app/globals.css">`,
             ...this.collectDevStyleLinks(),
@@ -2902,24 +2912,27 @@ ${i18nSnapshot ? `window.__FARM_I18N__ = ${serializeInlineValue(i18nSnapshot)};`
     const fullDocument = extractFarmFullDocument(content);
     if (fullDocument) {
       warnFarmFullDocumentLayout();
-      return composeFarmFullDocument(fullDocument, {
-        htmlAttributes: `${i18nSnapshot ? ` dir="${i18nSnapshot.direction}"` : ""}${themeDocument.attributes}`,
-        headAssets: [
-          themeDocument.head,
-          `<meta name="farm-deployment-id" content="${escapeHtmlAttribute(this.getDeploymentId())}">`,
-          metadataHead,
-          alternateLinks,
-          fontHead,
-          `<link rel="stylesheet" href="/src/app/globals.css" />`,
-          ...this.collectDevStyleLinks(),
-          `<script type="module" src="/@vite/client"></script>`,
-          rendererHydrationScript,
-          integrationManifestScript,
-        ]
-          .filter(Boolean)
-          .join("\n  "),
-        bodyFooter: clientScript.trim(),
-      });
+      return composeFarmFullDocument(
+        metadataHead ? removeFarmDocumentTitles(fullDocument) : fullDocument,
+        {
+          htmlAttributes: `${i18nSnapshot ? ` dir="${i18nSnapshot.direction}"` : ""}${themeDocument.attributes}`,
+          headAssets: [
+            themeDocument.head,
+            `<meta name="farm-deployment-id" content="${escapeHtmlAttribute(this.getDeploymentId())}">`,
+            metadataHead,
+            alternateLinks,
+            fontHead,
+            `<link rel="stylesheet" href="/src/app/globals.css" />`,
+            ...this.collectDevStyleLinks(),
+            `<script type="module" src="/@vite/client"></script>`,
+            rendererHydrationScript,
+            integrationManifestScript,
+          ]
+            .filter(Boolean)
+            .join("\n  "),
+          bodyFooter: clientScript.trim(),
+        },
+      );
     }
 
     return `<!DOCTYPE html>

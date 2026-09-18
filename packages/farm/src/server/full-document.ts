@@ -49,6 +49,11 @@ export function opensFarmFullDocument(markup: string): boolean {
   return /^<!doctype/i.test(inner) || /^<html[\s>]/i.test(inner);
 }
 
+/** Remove document title elements before inserting a higher-priority title. */
+export function removeFarmDocumentTitles(markup: string): string {
+  return markup.replace(/<title\b[^>]*>[\s\S]*?<\/title>\s*/gi, "");
+}
+
 export interface FarmFullDocumentAssets {
   /** Farm-managed `<head>` markup (styles, client/runtime scripts, metadata). */
   headAssets: string;

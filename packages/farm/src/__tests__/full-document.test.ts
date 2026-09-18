@@ -6,6 +6,7 @@ import {
   extractFarmFullDocument,
   isFarmFullDocument,
   opensFarmFullDocument,
+  removeFarmDocumentTitles,
 } from "../server/full-document";
 
 // How a full-document root layout renders through the dev pipeline: the layout's
@@ -41,6 +42,14 @@ describe("full-document detection", () => {
     expect(opensFarmFullDocument(prefix)).toBe(true);
     expect(extractFarmFullDocument(prefix)).toBeNull(); // no closing tag yet
     expect(opensFarmFullDocument(fragmentMarkup)).toBe(false);
+  });
+
+  it("removes attributed and multiline title elements", () => {
+    expect(
+      removeFarmDocumentTitles(
+        '<html><head><title data-source="layout">Layout\nTitle</title><meta name="x"></head></html>',
+      ),
+    ).toBe('<html><head><meta name="x"></head></html>');
   });
 });
 

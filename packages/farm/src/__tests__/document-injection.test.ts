@@ -45,6 +45,8 @@ function createInjector() {
     "title",
     "metaTags",
     "rendererHead",
+    "rendererHasTitle",
+    "renderedMetadata",
     "pageProps",
     "routeSlotPayload",
     "clientPageProps",
@@ -56,6 +58,8 @@ function createInjector() {
     title: string,
     metaTags: string,
     rendererHead: string,
+    rendererHasTitle: boolean,
+    renderedMetadata: { hasExplicitTitle: boolean },
     pageProps: Record<string, unknown>,
     routeSlotPayload: unknown[],
     clientPageProps: Record<string, unknown>,
@@ -74,6 +78,8 @@ describe("generated full-document injection", () => {
       "Farm.js App",
       "",
       "",
+      false,
+      { hasExplicitTitle: false },
       { __farmCanonicalPath: "/notes" },
       [],
       clientPageProps,
@@ -99,6 +105,8 @@ describe("generated full-document injection", () => {
       "Farm.js App",
       "",
       rendererHead,
+      true,
+      { hasExplicitTitle: false },
       { __farmCanonicalPath: "/docs" },
       [],
       {},
@@ -110,6 +118,50 @@ describe("generated full-document injection", () => {
     expect(fullHtml.indexOf(rendererHead)).toBeGreaterThan(-1);
     expect(fullHtml.indexOf(rendererHead)).toBeLessThan(headEnd);
     expect(fullHtml.split(rendererHead)).toHaveLength(2);
+  });
+
+  it("lets explicit metadata replace layout and renderer titles", () => {
+    const inject = createInjector();
+    const fullHtml = inject(
+      '<html><head><title data-source="layout">Layout</title></head><body></body></html>',
+      "Product details",
+      "",
+      "<title>Renderer title</title><meta name=renderer>",
+      true,
+      { hasExplicitTitle: true },
+      {},
+      [],
+      {},
+      renderFarmClientBootstrapScript,
+      () => "",
+    );
+
+    expect(fullHtml.match(/<title[\s>]/gi)).toHaveLength(1);
+    expect(fullHtml).toContain("<title>Product details</title>");
+    expect(fullHtml).not.toContain("Layout</title>");
+    expect(fullHtml).not.toContain("Renderer title</title>");
+    expect(fullHtml).toContain("<meta name=renderer>");
+  });
+
+  it("lets a renderer title replace a compatibility-layout title", () => {
+    const inject = createInjector();
+    const fullHtml = inject(
+      "<html><head><title>Layout title</title></head><body></body></html>",
+      "Farm.js App",
+      "",
+      "<title>Renderer title</title>",
+      true,
+      { hasExplicitTitle: false },
+      {},
+      [],
+      {},
+      renderFarmClientBootstrapScript,
+      () => "",
+    );
+
+    expect(fullHtml.match(/<title[\s>]/gi)).toHaveLength(1);
+    expect(fullHtml).toContain("<title>Renderer title</title>");
+    expect(fullHtml).not.toContain("Layout title</title>");
   });
 
   it("never passes dynamic markup as a string replacement in the generated document pipeline", () => {
