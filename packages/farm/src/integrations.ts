@@ -46,7 +46,7 @@ import {
   hasRequestContext,
   setRequestContext,
 } from "./request-context";
-import { sendWebResponse } from "./server/response";
+import { applyWebResponseHeaders, sendWebResponse } from "./server/response";
 import type { FarmRequest } from "./types";
 import {
   bufferFarmRequestBody,
@@ -151,6 +151,69 @@ export interface FarmIntegrationRouteInputSchemas<TBody = unknown, TQuery = unkn
 export type FarmIntegrationRequestContextStore = FarmRequestStore;
 
 export const FARM_INTEGRATION_INTERNAL_DISPATCH_CONTEXT_KEY = "farm.integration.internalDispatch";
+
+/**
+ * Request-context key under which an integration middleware can hand
+ * `Set-Cookie` values to the runtime when it returns `void` (i.e. lets the
+ * request continue to the downstream route/page handler). The runtime reads
+ * this key back after a `void` middleware return and forwards the cookies onto
+ * the response it ultimately sends, so a server-side session refresh (or any
+ * other cookie rotation) reaches the browser instead of being dropped.
+ */
+export const FARM_INTEGRATION_SET_COOKIES_KEY = "farm:integration:set-cookies";
+
+/**
+ * Forward `Set-Cookie` values from an integration middleware that returns
+ * `void` (the authenticated/passthrough branch) to the runtime, so they are
+ * merged onto the response the runtime sends for the matched route. This is
+ * the passthrough counterpart to appending `Set-Cookie` to a `Response` the
+ * middleware returns directly (e.g. a failure redirect): both paths can rotate
+ * auth cookies, and both must be able to reach the browser.
+ */
+export function forwardIntegrationSetCookies(
+  context: Pick<FarmIntegrationHandlerContext, "req">,
+  cookies: string[],
+): void {
+  if (cookies.length === 0) return;
+  context.req.set(FARM_INTEGRATION_SET_COOKIES_KEY, cookies);
+}
+
+/**
+ * Read and clear the forwarded `Set-Cookie` values an integration middleware
+ * stashed on the request context. Reading-and-clearing guarantees each batch
+ * is applied at most once even when several middleware run for one request.
+ */
+function takeForwardedIntegrationSetCookies(
+  context: Pick<FarmIntegrationHandlerContext, "req">,
+): string[] {
+  const cookies = context.req.get<string[]>(FARM_INTEGRATION_SET_COOKIES_KEY);
+  if (cookies && cookies.length > 0) {
+    context.req.delete(FARM_INTEGRATION_SET_COOKIES_KEY);
+    return cookies;
+  }
+  if (cookies) {
+    context.req.delete(FARM_INTEGRATION_SET_COOKIES_KEY);
+  }
+  return [];
+}
+
+/**
+ * Return a copy of `response` carrying the forwarded `Set-Cookie` values, or
+ * `response` unchanged when there is nothing to forward. Existing `Set-Cookie`
+ * headers on the response are preserved (appended to, not replaced).
+ */
+function appendIntegrationForwardedCookies(response: Response, cookies: string[]): Response {
+  if (cookies.length === 0) return response;
+  const headers = new Headers(response.headers);
+  for (const cookie of cookies) {
+    headers.append("set-cookie", cookie);
+  }
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
 
 export type FarmIntegrationRouteDb<TSchema extends FarmIntegrationSchema | undefined> =
   InferFarmIntegrationOrmClient<TSchema>;
@@ -1972,6 +2035,23 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
 
         try {
           const response = await entry.handler(request, handlerContext);
+
+          // A middleware that returns `void` lets the request continue to the
+          // downstream route/page handler, so its rotated `Set-Cookie` values
+          // cannot ride on its own response. It hands them to the runtime via
+          // forwardIntegrationSetCookies; merge them onto the Node response now
+          // (appending, so a later short-circuit Response or the page renderer
+          // can add its own Set-Cookie without dropping these). Read-and-clear
+          // so multiple middleware for one request each forward at most once.
+          const forwardedCookies = takeForwardedIntegrationSetCookies(handlerContext);
+          if (forwardedCookies.length > 0) {
+            const setCookieHeaders = new Headers();
+            for (const cookie of forwardedCookies) {
+              setCookieHeaders.append("set-cookie", cookie);
+            }
+            applyWebResponseHeaders(res, setCookieHeaders, { appendSetCookie: true });
+          }
+
           if (response) {
             await sendWebResponse(res, response);
             await emitIntegrationLog(integration, {
@@ -2787,6 +2867,14 @@ export async function dispatchIntegrationRequest(
   const routes = normalizeIntegrationRoutes(integration.routes || []);
   const middleware = [...(integration.middleware || [])];
 
+  // Cookies an integration middleware forwards via forwardIntegrationSetCookies
+  // while returning `void` (letting the request continue). They are merged onto
+  // whichever Response this dispatch ultimately returns so a server-side
+  // refresh/rotation reaches the browser instead of being dropped. Top-level
+  // and per-route middleware both contribute here; read-and-clear keeps each
+  // batch applied at most once.
+  const forwardedSetCookies: string[] = [];
+
   for (const entry of middleware) {
     const params = resolveMatcherParams(entry.matcher, pathname);
     if (!params) {
@@ -2827,6 +2915,7 @@ export async function dispatchIntegrationRequest(
 
     try {
       const response = await entry.handler(request, handlerContext);
+      forwardedSetCookies.push(...takeForwardedIntegrationSetCookies(handlerContext));
       if (response) {
         await emitIntegrationLog(integration, {
           category: integration.category,
@@ -2844,7 +2933,7 @@ export async function dispatchIntegrationRequest(
           durationMs: Date.now() - startedAt,
           context: handlerContext.req.snapshot(),
         });
-        return response;
+        return appendIntegrationForwardedCookies(response, forwardedSetCookies);
       }
 
       await emitIntegrationLog(integration, {
@@ -2942,12 +3031,13 @@ export async function dispatchIntegrationRequest(
           durationMs: Date.now() - startedAt,
           context: handlerContext.req.snapshot(),
         });
-        return validation.response;
+        return appendIntegrationForwardedCookies(validation.response, forwardedSetCookies);
       }
       handlerContext.input = validation.input;
 
       for (const middlewareEntry of route.middleware || []) {
         const middlewareResponse = await middlewareEntry.handler(request, handlerContext);
+        forwardedSetCookies.push(...takeForwardedIntegrationSetCookies(handlerContext));
         if (middlewareResponse) {
           await emitIntegrationLog(integration, {
             category: integration.category,
@@ -2965,7 +3055,7 @@ export async function dispatchIntegrationRequest(
             durationMs: Date.now() - startedAt,
             context: handlerContext.req.snapshot(),
           });
-          return middlewareResponse;
+          return appendIntegrationForwardedCookies(middlewareResponse, forwardedSetCookies);
         }
       }
 
@@ -2993,7 +3083,7 @@ export async function dispatchIntegrationRequest(
           durationMs: Date.now() - startedAt,
           context: handlerContext.req.snapshot(),
         });
-        return response;
+        return appendIntegrationForwardedCookies(response, forwardedSetCookies);
       }
 
       const handlerResponse = await route.handler(request, handlerContext);
@@ -3019,7 +3109,7 @@ export async function dispatchIntegrationRequest(
         durationMs: Date.now() - startedAt,
         context: handlerContext.req.snapshot(),
       });
-      return response;
+      return appendIntegrationForwardedCookies(response, forwardedSetCookies);
     } catch (error) {
       await emitIntegrationLog(integration, {
         category: integration.category,

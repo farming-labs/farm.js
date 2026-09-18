@@ -1,6 +1,7 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import {
   defineIntegration,
+  forwardIntegrationSetCookies,
   type FarmIntegrationHandlerContext,
   type FarmIntegrationLogger,
 } from "@farm.js/core";
@@ -788,7 +789,6 @@ function createSupabaseHandler(
         for (const cookie of cookiesToSet) {
           setCookies.push(serializeCookie(cookie.name, cookie.value, cookie.options));
         }
-        context.req.set("supabase:set-cookies", [...setCookies]);
       },
     },
   };
@@ -1420,6 +1420,21 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
                 const { data, error } = await supabase.auth.getUser();
 
                 if (!error && data?.user) {
+                  // getUser() verifies the token with Supabase Auth, and while
+                  // doing so can rotate the session server-side (e.g. when the
+                  // access token is near expiry), capturing the refreshed
+                  // Set-Cookie in setCookies. This branch returns void so the
+                  // protected route still renders, which means those cookies
+                  // cannot ride on this branch's response — hand them to the
+                  // runtime via forwardIntegrationSetCookies so it forwards
+                  // them on the downstream response, mirroring the failure
+                  // branch's appendSetCookies on its redirect. Without this the
+                  // rotated cookie is dropped, the browser keeps the stale
+                  // refresh token, and the next protected request logs the user
+                  // out via refresh-token reuse detection.
+                  if (setCookies.length > 0) {
+                    forwardIntegrationSetCookies(context, setCookies);
+                  }
                   return;
                 }
 
