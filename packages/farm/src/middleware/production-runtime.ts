@@ -330,9 +330,12 @@ function createHandledResponse(
   init: ResponseInit,
   headers: WebResponseHeaderMap,
 ): Response {
-  const responseHeaders = new Headers(init.headers);
+  const responseHeaders = new Headers();
   for (const [key, value] of headers) {
     if (key.toLowerCase() === "set-cookie") continue;
+    responseHeaders.set(key, value);
+  }
+  for (const [key, value] of new Headers(init.headers)) {
     responseHeaders.set(key, value);
   }
   for (const cookie of headers.getSetCookies()) {

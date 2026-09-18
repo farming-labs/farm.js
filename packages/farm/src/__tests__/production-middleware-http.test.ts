@@ -92,6 +92,45 @@ describe("production middleware HTTP behavior", () => {
     await expect(result.response?.text()).resolves.toBe("created");
   });
 
+  it("keeps redirect helper headers authoritative over ctx.headers", async () => {
+    const runner = createProductionMiddlewareRunner({
+      config: {
+        handler(ctx) {
+          ctx.headers.set("location", "/wrong");
+          ctx.headers.set("content-type", "application/json");
+          ctx.headers.set("x-middleware", "kept");
+          ctx.redirect("/right", 308);
+        },
+      },
+    });
+
+    const result = await runner(new Request("https://example.com/"));
+    expect(result.response?.status).toBe(308);
+    expect(result.response?.headers.get("location")).toBe("/right");
+    expect(result.response?.headers.get("content-type")).toBe("text/plain");
+    expect(result.response?.headers.get("x-middleware")).toBe("kept");
+  });
+
+  it.each([
+    ["json", "application/json"],
+    ["text", "text/plain"],
+    ["html", "text/html"],
+  ] as const)("keeps %s helper content type authoritative", async (helper, contentType) => {
+    const runner = createProductionMiddlewareRunner({
+      config: {
+        handler(ctx) {
+          ctx.headers.set("content-type", "application/octet-stream");
+          if (helper === "json") ctx.json({ ok: true });
+          if (helper === "text") ctx.text("ok");
+          if (helper === "html") ctx.html("<p>ok</p>");
+        },
+      },
+    });
+
+    const result = await runner(new Request("https://example.com/"));
+    expect(result.response?.headers.get("content-type")).toBe(contentType);
+  });
+
   it("serves requests with malformed percent-encoded paths instead of throwing", async () => {
     const seen: Array<Record<string, string>> = [];
     const runner = createProductionMiddlewareRunner({
