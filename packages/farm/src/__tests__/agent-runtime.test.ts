@@ -244,7 +244,19 @@ describe("agent runtime proxy", () => {
 
   it("keeps a real zstd upstream consistent with this runtime's fetch decoder", async () => {
     const plaintext = "real-zstd-agent-response-body";
-    const compressed = zstdCompressSync(Buffer.from(plaintext));
+    // zstdCompressSync is undefined on Node 22.13 (the engines floor), which
+    // ships undici 6.x and does not decode zstd. Fall back to the exact zstd
+    // frame zstdCompressSync produces for this plaintext so the test still
+    // drives a real zstd upstream on 22.13 (its preserve-branch guard) rather
+    // than skipping it on the only Node 22 version CI runs.
+    const compressed =
+      typeof zstdCompressSync === "function"
+        ? zstdCompressSync(Buffer.from(plaintext))
+        : Buffer.from([
+            0x28, 0xb5, 0x2f, 0xfd, 0x20, 0x1d, 0xe9, 0x00, 0x00, 0x72, 0x65, 0x61, 0x6c, 0x2d,
+            0x7a, 0x73, 0x74, 0x64, 0x2d, 0x61, 0x67, 0x65, 0x6e, 0x74, 0x2d, 0x72, 0x65, 0x73,
+            0x70, 0x6f, 0x6e, 0x73, 0x65, 0x2d, 0x62, 0x6f, 0x64, 0x79,
+          ]);
     const server = createServer((_request, response) => {
       response.writeHead(200, {
         "content-encoding": "zstd",
