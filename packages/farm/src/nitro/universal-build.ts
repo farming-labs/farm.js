@@ -7143,10 +7143,11 @@ async function handleFarmRequestInContext(
         }
         
         const rendererHead = renderedPage.head || "";
+        const rendererHasTitle = /<title[\\s>]/i.test(rendererHead);
         // First <title> wins: the fallback framework title yields to a
         // renderer-emitted one; explicit metadata titles still come first.
         const suppressDefaultTitle =
-          !renderedMetadata.hasExplicitTitle && /<title[\\s>]/i.test(rendererHead);
+          !renderedMetadata.hasExplicitTitle && rendererHasTitle;
         let fullHtml;
         if (hasFullDocument) {
           // Layout provides full HTML structure - inject CSS and client script
@@ -7155,16 +7156,23 @@ async function handleFarmRequestInContext(
             // Inject CSS link after opening head tag or first meta tag
             .replace(/<head([^>]*)>/i, '<head$1>\\n  <link rel="stylesheet" href="/__farm_client_css_href__">')
             .replace(/<\\/head>/i, () => renderFarmRendererHydrationScript() + '\\n</head>')
-            // Inject title if not present and we have one
+            // Explicit metadata wins over renderer and layout titles. Without
+            // explicit metadata, a renderer title wins over the layout title.
             .replace(/<head([^>]*)>([\\s\\S]*?)<\\/head>/i, (match, attrs, headContent) => {
-              let nextHeadContent = headContent;
-              if (!headContent.includes('<title>') && title !== "Farm.js App") {
+              const hasAuthoritativeTitle = renderedMetadata.hasExplicitTitle || rendererHasTitle;
+              let nextHeadContent = hasAuthoritativeTitle
+                ? headContent.replace(/<title\\b[^>]*>[\\s\\S]*?<\\/title>\\s*/gi, "")
+                : headContent;
+              if (renderedMetadata.hasExplicitTitle) {
                 nextHeadContent += "\\n  <title>" + title + "</title>";
               }
               if (metaTags) nextHeadContent += metaTags;
               // Renderer-emitted head markup (e.g. <svelte:head>). Function
               // replacement below keeps $-sequences literal.
-              if (rendererHead) nextHeadContent += "\\n  " + rendererHead;
+              const effectiveRendererHead = renderedMetadata.hasExplicitTitle
+                ? rendererHead.replace(/<title\\b[^>]*>[\\s\\S]*?<\\/title>\\s*/gi, "")
+                : rendererHead;
+              if (effectiveRendererHead) nextHeadContent += "\\n  " + effectiveRendererHead;
               return nextHeadContent === headContent
                 ? match
                 : "<head" + attrs + ">" + nextHeadContent + "\\n</head>";
