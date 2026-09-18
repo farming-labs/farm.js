@@ -181,7 +181,7 @@ function normalizeRouteInput<TMeta>(
   index: number,
 ): NormalizedRouterRoute<TMeta> {
   const route = typeof input === "string" ? { path: input } : input;
-  const path = normalizePathname(route.path);
+  const path = normalizeRoutePattern(route.path);
   const segments = parseRoutePattern(path);
 
   return {
@@ -198,7 +198,7 @@ function normalizeRouteInput<TMeta>(
 function parseRoutePattern(pattern: string): RouterSegment[] {
   assertTerminalCatchAll(pattern, "router");
   assertUniqueRouteParameters(pattern, "router");
-  return splitPathname(pattern)
+  return splitRoutePattern(pattern)
     .filter((part) => !isRouteGroup(part))
     .map((part) => {
       const optionalCatchAll = part.match(/^\[\[\.\.\.([A-Za-z0-9_$-]+)\]\]$/);
@@ -319,6 +319,17 @@ function normalizePathname(value: string) {
 
 function splitPathname(pathname: string) {
   return normalizePathname(pathname).split("/").filter(Boolean);
+}
+
+function normalizeRoutePattern(value: string) {
+  let pathname = (value || "/").replace(/\\/g, "/").replace(/\/+/g, "/");
+  if (!pathname.startsWith("/")) pathname = `/${pathname}`;
+  if (pathname.length > 1) pathname = pathname.replace(/\/+$/, "");
+  return pathname || "/";
+}
+
+function splitRoutePattern(pattern: string) {
+  return normalizeRoutePattern(pattern).split("/").filter(Boolean);
 }
 
 function isRouteGroup(part: string) {
