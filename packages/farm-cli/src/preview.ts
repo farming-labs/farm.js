@@ -37,6 +37,7 @@ export interface PreviewTunnelPlan {
   command: string;
   args: string[];
   shell?: boolean;
+  provider?: "custom" | "cloudflared" | "localtunnel";
   target: PreviewTarget;
   requestedName: string;
   requestedHostname: string;
@@ -212,6 +213,7 @@ export function createPreviewTunnelPlan(
       command: expandTunnelTemplate(template, target, requestedName, requestedHostname),
       args: [],
       shell: true,
+      provider: "custom",
       target,
       requestedName,
       requestedHostname,
@@ -222,6 +224,7 @@ export function createPreviewTunnelPlan(
     return {
       command: "cloudflared",
       args: ["tunnel", "--url", target.localUrl],
+      provider: "cloudflared",
       target,
       requestedName,
       requestedHostname,
@@ -241,6 +244,7 @@ export function createPreviewTunnelPlan(
         "--subdomain",
         requestedName,
       ],
+      provider: "localtunnel",
       target,
       requestedName,
       requestedHostname,
@@ -255,6 +259,7 @@ export function createPreviewTunnelPlan(
 export function parsePreviewPublicUrl(
   output: string,
   preferredHostname?: string,
+  options: { allowUnknownHost?: boolean } = {},
 ): string | undefined {
   const matches = output.match(PREVIEW_URL_PATTERN) || [];
   const urls = matches.filter((value) => {
@@ -271,21 +276,20 @@ export function parsePreviewPublicUrl(
     if (preferred) return preferred;
   }
 
-  return (
-    urls.find((value) => {
-      const host = new URL(value).hostname;
-      return (
-        host.endsWith(".trycloudflare.com") ||
-        host.endsWith(".loca.lt") ||
-        host.endsWith(".localtunnel.me") ||
-        host.endsWith(".ngrok.app") ||
-        host.endsWith(".ngrok-free.app") ||
-        host.endsWith(".ngrok.dev") ||
-        host.endsWith(".ngrok.io") ||
-        host.endsWith(".preview.farming-labs.dev")
-      );
-    }) || urls[0]
-  );
+  const knownUrl = urls.find((value) => {
+    const host = new URL(value).hostname;
+    return (
+      host.endsWith(".trycloudflare.com") ||
+      host.endsWith(".loca.lt") ||
+      host.endsWith(".localtunnel.me") ||
+      host.endsWith(".ngrok.app") ||
+      host.endsWith(".ngrok-free.app") ||
+      host.endsWith(".ngrok.dev") ||
+      host.endsWith(".ngrok.io") ||
+      host.endsWith(".preview.farming-labs.dev")
+    );
+  });
+  return knownUrl || (options.allowUnknownHost === false ? undefined : urls[0]);
 }
 
 export async function runPreviewTunnel(
@@ -334,7 +338,9 @@ export async function runPreviewTunnel(
           output.length + text.length > MAX_TUNNEL_SCAN_CHARS
             ? (output + text).slice(-MAX_TUNNEL_SCAN_CHARS)
             : output + text;
-        const nextUrl = parsePreviewPublicUrl(output, plan.requestedHostname);
+        const nextUrl = parsePreviewPublicUrl(output, plan.requestedHostname, {
+          allowUnknownHost: plan.provider === undefined || plan.provider === "custom",
+        });
         if (nextUrl && !settled) {
           settled = true;
           clearTimeout(timer);
