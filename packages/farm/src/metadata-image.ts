@@ -95,7 +95,18 @@ async function prepareMetadataImageNode(node: unknown): Promise<unknown> {
     }
     if (type.$$typeof === REACT_LAZY_TYPE) {
       const { createElement } = await import("react");
-      return prepareMetadataImageNode(createElement(type._init(type._payload), props));
+      let resolvedType: unknown;
+      try {
+        resolvedType = type._init(type._payload);
+      } catch (suspension) {
+        if (suspension && typeof (suspension as Promise<unknown>).then === "function") {
+          await suspension;
+          resolvedType = type._init(type._payload);
+        } else {
+          throw suspension;
+        }
+      }
+      return prepareMetadataImageNode(createElement(resolvedType as any, props));
     }
   }
 
