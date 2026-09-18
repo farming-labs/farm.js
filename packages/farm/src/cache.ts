@@ -1228,6 +1228,26 @@ function stableSerialize(value: unknown, seen = new WeakSet<object>()): string {
       seen.delete(value);
       return `map:[${items.join(",")}]`;
     }
+    // URLSearchParams and Headers keep their contents internally, so
+    // Object.entries is empty for both (same rationale as Set/Map above).
+    // Serialize the iterable [key, value] string pairs, sorted by codepoint
+    // so equal contents give the same key regardless of insertion order.
+    if (value instanceof URLSearchParams) {
+      const items = Array.from(
+        value,
+        ([key, item]) => `[${stableSerialize(key, seen)},${stableSerialize(item, seen)}]`,
+      ).sort(compareCodepoint);
+      seen.delete(value);
+      return `urlsearchparams:[${items.join(",")}]`;
+    }
+    if (value instanceof Headers) {
+      const items = Array.from(
+        value,
+        ([key, item]) => `[${stableSerialize(key, seen)},${stableSerialize(item, seen)}]`,
+      ).sort(compareCodepoint);
+      seen.delete(value);
+      return `headers:[${items.join(",")}]`;
+    }
 
     // Codepoint comparison, not localeCompare: the host locale must not
     // change how a "stable" key serializes, or invalidations computed on one
