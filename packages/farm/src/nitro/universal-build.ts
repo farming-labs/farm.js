@@ -7648,7 +7648,11 @@ async function handleFarmFetch(request, context) {
           _runWithAfterRequest(request, runRequest, context),
         );
         const pathname = new URL(request.url).pathname;
-        return applyFarmPreloadBudget(applyConfiguredResponseHeaders(response, pathname), pathname);
+        const routePathname = getFarmRoutePathname(pathname);
+        return applyFarmPreloadBudget(
+          applyConfiguredResponseHeaders(response, routePathname),
+          routePathname,
+        );
       }),
     {
       onResponseFinished: typeof context?.onResponseFinished === "function"
