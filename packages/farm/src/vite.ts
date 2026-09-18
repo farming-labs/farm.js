@@ -1761,7 +1761,8 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               docsHeaders.set(key, Array.isArray(value) ? value.join(", ") : value);
             }
           }
-          // Docs and raw markdown-source responses expose page content, so app
+          // Docs, raw markdown-source, the markdown mirror, and the Markdown
+          // 404 fallback expose page content or route-existence, so app
           // middleware must pass before they are sent — matching the production
           // entry, where these handlers run after the middleware runner.
           const runAppMiddlewareForContentRoute = async (): Promise<boolean> => {
@@ -1840,6 +1841,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               .getRouteManager()
               .matchRoute(normalizeFarmMarkdownRoutePath(requestPathname));
             if (!markdownRoute.route) {
+              if (await runAppMiddlewareForContentRoute()) return;
               res.statusCode = 404;
               res.setHeader("Content-Type", FARM_MARKDOWN_CONTENT_TYPE);
               res.setHeader("X-Farm-Markdown-Error", "404");
