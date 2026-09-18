@@ -74,10 +74,12 @@ export default defineConfig({
 ```
 
 Vercel preview, development, and custom-environment deployments are skipped automatically from
-`VERCEL_ENV` and `VERCEL_TARGET_ENV`. Farm does not classify deployments from the hostname suffix,
-so a production website whose public domain ends in `.vercel.app` remains eligible. On another
-provider, set `FARM_TELEMETRY=0` or `FARM_TELEMETRY_DISABLED=1` in preview environments while
-leaving production enabled.
+`VERCEL_ENV` and `VERCEL_TARGET_ENV`, as are Netlify preview, branch, and dev deployments (when
+`NETLIFY=true`) and Render pull-request previews (when `IS_PULL_REQUEST=true`). Farm does not
+classify deployments from the hostname suffix, so a production website whose public domain ends
+in `.vercel.app` remains eligible. On a provider Farm does not auto-detect, set
+`FARM_TELEMETRY=0` or `FARM_TELEMETRY_DISABLED=1` in preview environments while leaving
+production enabled.
 
 The Farm-owned endpoint removes the Vercel-confirmed legacy preview aliases that were stored before
 this runtime guard existed. It does not guess whether a deployment is a preview from its hostname.
