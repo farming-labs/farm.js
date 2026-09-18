@@ -245,6 +245,142 @@ const testSource = String.raw`
   }
   delete globalThis.IS_REACT_ACT_ENVIRONMENT;
 
+  // Conditional roots are excluded from direct-binding paths, even during React 18 replay.
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const conditionalRootFailures = [];
+  for (const reactivity of ["static", "hybrid"]) {
+    for (const lifecycle of ["mount", "hydrate"]) {
+      for (const targeting of ["path", "ref"]) {
+        const context = reactivity + "/" + lifecycle + "/" + targeting;
+        let update, updateControl, owner;
+        let executions = 0;
+        const outer = (kind) => kind === "strong" || kind === "em"
+          ? React.createElement(kind, { "data-branch": "outer" }, "Outer") : kind;
+        const inner = (visible) => visible ? React.createElement("b", { "data-branch": "inner" }, "Inner") : null;
+        const text = (label, count) => label + ": " + count;
+        const Panel = createCompiledComponent({
+          displayName: "CompatibilityConditionalRootReplay",
+          reactivity,
+          initialize: () => ["strong", true, 0],
+          readProps: (props) => [props.label],
+          render(_props, cells, blocks) {
+            executions += 1;
+            update = (index, value) => cells[index].set(value);
+            const target = (id) => targeting === "ref" ? blocks.target(id) : undefined;
+            return React.createElement("main", null,
+              React.createElement(blocks.Conditional, { id: 0, render: () => outer(cells[0].get()) }),
+              React.createElement("output", { "data-output": "outer", ref: target(0) }, text(cells[3].get(), cells[2].get())),
+              React.createElement("section", null,
+                React.createElement(blocks.Conditional, { id: 1, render: () => inner(cells[1].get()) }),
+                React.createElement("output", { "data-output": "inner", ref: target(1) }, text(cells[3].get(), cells[2].get())),
+              ),
+              React.createElement("input", { ref: target(2), value: text(cells[3].get(), cells[2].get()), onChange: () => {} }),
+            );
+          },
+          bindings: [
+            { kind: "block", id: 0, dependencies: [0] },
+            { kind: "block", id: 1, dependencies: [1] },
+            ...[[0], [1, 0]].map((path, target) => ({
+              kind: "text", path, target: targeting === "ref" ? target : undefined,
+              dependencies: [2, 3], tracking: "dynamic", read: (_props, cells) => text(cells[3].get(), cells[2].get()),
+            })),
+            { kind: "attribute", name: "value", path: [2], target: targeting === "ref" ? 2 : undefined,
+              dependencies: [2, 3], tracking: "dynamic", read: (_props, cells) => text(cells[3].get(), cells[2].get()) },
+          ],
+        });
+        function Control({ label }) {
+          const [model, setModel] = React.useState(["strong", true, 0]);
+          updateControl = (index, value) => setModel((previous) => previous.map((entry, slot) => slot === index ? value : entry));
+          return React.createElement("main", null,
+            outer(model[0]),
+            React.createElement("output", { "data-output": "outer" }, text(label, model[2])),
+            React.createElement("section", null, inner(model[1]), React.createElement("output", { "data-output": "inner" }, text(label, model[2]))),
+            React.createElement("input", { value: text(label, model[2]), onChange: () => {} }),
+          );
+        }
+        const tree = (Component, label, key = "first") => React.createElement(React.StrictMode, null,
+          React.createElement(Component, { label, key, ...(Component === Panel ? { ref: (instance) => { if (instance) owner = instance; } } : {}) }),
+        );
+        const target = document.createElement("div");
+        const controlTarget = document.createElement("div");
+        document.body.append(target, controlTarget);
+        if (lifecycle === "hydrate") target.innerHTML = renderToString(tree(Panel, "Before"));
+        const serverElements = [...target.querySelectorAll("*")];
+        const recoverableErrors = [];
+        let root;
+        const controlRoot = createRoot(controlTarget);
+        try {
+          await React.act(async () => {
+            root = lifecycle === "hydrate" ? hydrateRoot(target, tree(Panel, "Before"), { onRecoverableError: (error) => recoverableErrors.push(error) }) : createRoot(target);
+            if (lifecycle === "mount") root.render(tree(Panel, "Before"));
+            controlRoot.render(tree(Control, "Before"));
+          });
+          if (lifecycle === "hydrate") [...target.querySelectorAll("*")].forEach((element, index) => assert.ok(element === serverElements[index], context + "/server identity"));
+          const outputs = [...target.querySelectorAll("output")];
+          const input = target.querySelector("input");
+          const initialExecutions = executions;
+          input.focus();
+          input.setSelectionRange(1, 3, "backward");
+          const parity = () => {
+            // React updates a controlled input's defaultValue attribute; the compiler only updates its live value.
+            const snapshot = (container) => [...container.querySelectorAll("main, output, section, [data-branch]")].map((element) => [element.tagName, element.getAttribute("data-branch"), element.textContent]);
+            assert.deepEqual(snapshot(target), snapshot(controlTarget), context);
+            assert.equal(input.value, controlTarget.querySelector("input").value, context);
+            [...target.querySelectorAll("output")].forEach((element, index) => assert.ok(element === outputs[index], context + "/output identity"));
+            assert.ok(target.querySelector("input") === input, context + "/input identity");
+            assert.ok(document.activeElement === input, context + "/focus");
+            assert.deepEqual([input.selectionStart, input.selectionEnd, input.selectionDirection], [1, 3, "backward"], context);
+            assert.equal(executions, initialExecutions, context);
+          };
+          // No block refresh or parent render can repair a lost registration before this update.
+          await React.act(async () => { update(2, 1); updateControl(2, 1); });
+          parity();
+          let count = 1;
+          for (const kind of [null, "em", 0, false, "text", "strong"]) {
+            count += 1;
+            const visible = count % 2 === 0;
+            await React.act(async () => {
+              update(0, kind); updateControl(0, kind);
+              update(1, visible); updateControl(1, visible);
+              update(2, count); updateControl(2, count);
+            });
+            parity();
+            assert.equal(owner.blockRoots.size, Number(kind === "strong" || kind === "em") + Number(visible), context);
+            assert.equal(owner.blockRootElements.size, owner.blockRoots.size, context);
+          }
+          await React.act(async () => {
+            update(2, 8); updateControl(2, 8);
+            root.render(tree(Panel, "After")); controlRoot.render(tree(Control, "After"));
+          });
+          parity();
+          const disposed = owner;
+          const staleUpdate = update;
+          await React.act(async () => { update(2, 99); flushSync(() => root.render(null)); });
+          assert.equal(disposed.blockRoots.size, 0, context);
+          assert.equal(disposed.blockRootElements.size, 0, context);
+          assert.equal(disposed.blockRefreshListeners.size, 0, context);
+          const detachedText = outputs.map((element) => element.textContent);
+          await React.act(async () => staleUpdate(2, 100));
+          assert.deepEqual(outputs.map((element) => element.textContent), detachedText, context);
+          assert.equal(input.isConnected, false, context);
+          await React.act(async () => root.render(tree(Panel, "Fresh", "second")));
+          await React.act(async () => { staleUpdate(2, 101); update(2, 4); });
+          assert.equal(target.querySelector("output").textContent, "Fresh: 4", context);
+          assert.equal(target.querySelector("[data-branch='outer']").textContent, "Outer", context);
+          assert.deepEqual(outputs.map((element) => element.textContent), detachedText, context);
+          assert.deepEqual(recoverableErrors, [], context);
+        } catch (error) {
+          conditionalRootFailures.push({ context, message: error.message });
+        } finally {
+          await React.act(async () => { root?.unmount(); controlRoot.unmount(); });
+          target.remove(); controlTarget.remove();
+        }
+      }
+    }
+  }
+  assert.deepEqual(conditionalRootFailures, []);
+  delete globalThis.IS_REACT_ACT_ENVIRONMENT;
+
   let reverseCompatibilityRows = () => undefined;
   let mapReverseParityCompatibilityRows = () => undefined;
   let queuedMapReverseParityCompatibilityRows = () => undefined;
