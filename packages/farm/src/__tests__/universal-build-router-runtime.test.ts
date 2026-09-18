@@ -16,7 +16,9 @@ import {
 import {
   compileConfigRoutePattern,
   interpolateConfigRouteDestination,
+  resolveConfigRoutePathname,
 } from "../plugins/route-pattern";
+import { resolveFarmI18nConfig } from "../i18n/config";
 
 describe("generateConfiguredResponseHeadersRuntimeSource", () => {
   it("preserves handler and configured Set-Cookie fields separately", () => {
@@ -78,6 +80,192 @@ describe("generateConfiguredResponseHeadersRuntimeSource", () => {
     );
 
     expect(response.headers.getSetCookie()).toEqual(["theme=dark; Path=/"]);
+  });
+});
+
+describe("configured response headers locale-prefix parity (production fetch entry)", () => {
+  // The production fetch entry must strip the locale/base prefix before matching
+  // configured header routes, mirroring the dev reference implementation in
+  // plugins/headers.ts (resolveConfigRoutePathname) and the documented contract
+  // that "/fr/legacy" matches a "/legacy" rule "in development and production
+  // equally". Before the fix, the production call site passed the raw,
+  // locale-prefixed pathname to applyConfiguredResponseHeaders, so route-scoped
+  // (non-catch-all) header rules silently failed for non-default-locale
+  // requests in production. This is the configured-headers counterpart of the
+  // redirect/rewrite interpolation parity test below.
+  const matcherSource = generateRuntimePathMatcherSource();
+  const headersSource = generateConfiguredResponseHeadersRuntimeSource();
+  const prod = new Function(
+    "configuredHeaderRoutes",
+    "appendFarmLinkHeader",
+    `${matcherSource}\n${headersSource}\nreturn { matchRuntimePathPattern, applyConfiguredResponseHeaders };`,
+  ) as (
+    configuredHeaderRoutes: Array<{
+      source: string;
+      headers: Array<{ key: string; value: string }>;
+    }>,
+    appendFarmLinkHeader: (headers: Headers, value: string) => void,
+  ) => {
+    matchRuntimePathPattern: (pattern: string, pathname: string) => Record<string, string> | null;
+    applyConfiguredResponseHeaders: (response: Response, pathname: string) => Response;
+  };
+
+  function appendFarmLinkHeader(headers: Headers, value: string): void {
+    const existing = headers.get("Link");
+    if (existing) {
+      if (!existing.includes(value)) headers.set("Link", `${existing}, ${value}`);
+    } else {
+      headers.set("Link", value);
+    }
+  }
+
+  const i18n = resolveFarmI18nConfig(
+    {
+      locales: ["en", "fr"],
+      defaultLocale: "en",
+      routing: "prefix-except-default",
+    },
+    { root: "/tmp/farm-config-headers-parity", mode: "development" },
+  );
+
+  function runProduction(
+    routes: Array<{ source: string; headers: Array<{ key: string; value: string }> }>,
+    requestPathname: string,
+  ): Response {
+    // Mirror the production fetch entry: only the call site strips the
+    // locale/base prefix before matching. applyConfiguredResponseHeaders itself
+    // is prefix-unaware, so the strip must happen at the call site, exactly as
+    // the sibling redirects/rewrites path uses getFarmRoutePathname.
+    const routePathname = resolveConfigRoutePathname(requestPathname, i18n).pathname;
+    const runtime = prod(routes, appendFarmLinkHeader);
+    return runtime.applyConfiguredResponseHeaders(new Response("ok"), routePathname);
+  }
+
+  function runDevelopment(
+    routes: Array<{ source: string; headers: Array<{ key: string; value: string }> }>,
+    requestPathname: string,
+  ): Record<string, string> {
+    // Mirrors plugins/headers.ts: strip the locale, then match each route's
+    // compiled regex against the unprefixed pathname.
+    const routePathname = resolveConfigRoutePathname(requestPathname, i18n).pathname;
+    const applied: Record<string, string> = {};
+    for (const route of routes) {
+      const compiled = compileConfigRoutePattern(route.source);
+      if (!compiled.regex.test(routePathname)) continue;
+      for (const header of route.headers) {
+        applied[header.key.toLowerCase()] = header.value;
+      }
+    }
+    return applied;
+  }
+
+  const cases: Array<{
+    source: string;
+    headerKey: string;
+    headerValue: string;
+    requestPathname: string;
+    expectedApplied: boolean;
+    // Whether the raw, locale-prefixed pathname still matches the source
+    // without stripping (true only for root catch-alls that consume the
+    // locale segment, or for unprefixed default-locale requests).
+    rawMatches: boolean;
+  }> = [
+    {
+      source: "/dashboard",
+      headerKey: "content-security-policy",
+      headerValue: "default-src 'self'",
+      requestPathname: "/fr/dashboard",
+      expectedApplied: true,
+      rawMatches: false,
+    },
+    {
+      source: "/api/billing/:id",
+      headerKey: "x-billing",
+      headerValue: "restricted",
+      requestPathname: "/fr/api/billing/42",
+      expectedApplied: true,
+      rawMatches: false,
+    },
+    {
+      source: "/docs/:path*",
+      headerKey: "x-docs",
+      headerValue: "yes",
+      requestPathname: "/fr/docs/start",
+      expectedApplied: true,
+      rawMatches: false,
+    },
+    {
+      source: "/dashboard",
+      headerKey: "x-default-locale",
+      headerValue: "still-unprefixed",
+      requestPathname: "/dashboard",
+      expectedApplied: true,
+      rawMatches: true,
+    },
+    // A root catch-all source still matches a locale-prefixed pathname even
+    // without stripping (the catch-all consumes the locale segment), so it
+    // must keep working after the fix — guards against regressing
+    // globally-scoped headers.
+    {
+      source: "/:path*",
+      headerKey: "x-global",
+      headerValue: "global",
+      requestPathname: "/fr/anything",
+      expectedApplied: true,
+      rawMatches: true,
+    },
+    // A route-specific source must NOT match a locale-prefixed path for an
+    // unrelated route, confirming matching stays scoped after the strip.
+    {
+      source: "/dashboard",
+      headerKey: "x-no-match",
+      headerValue: "no",
+      requestPathname: "/fr/profile",
+      expectedApplied: false,
+      rawMatches: false,
+    },
+  ];
+
+  for (const {
+    source,
+    headerKey,
+    headerValue,
+    requestPathname,
+    expectedApplied,
+    rawMatches,
+  } of cases) {
+    const label = expectedApplied ? "applies" : "does not apply";
+    it(`production ${label} ${headerKey} for ${source} against ${requestPathname} in parity with dev`, () => {
+      const routes = [{ source, headers: [{ key: headerKey, value: headerValue }] }];
+      const runtime = prod(routes, appendFarmLinkHeader);
+
+      // Pre-fix behavior: feeding the RAW locale-prefixed pathname to the
+      // production matcher reproduces the bug for route-specific sources
+      // (rawMatches === false) while catch-alls/unprefixed requests already
+      // matched (rawMatches === true).
+      const broken = runtime.applyConfiguredResponseHeaders(new Response("ok"), requestPathname);
+      expect(broken.headers.get(headerKey)).toBe(rawMatches ? headerValue : null);
+
+      // Fixed behavior: the production call site strips the locale/base prefix
+      // before matching, so the configured header is applied iff the route
+      // actually matches the locale-stripped pathname.
+      const response = runProduction(routes, requestPathname);
+      expect(response.headers.get(headerKey)).toBe(expectedApplied ? headerValue : null);
+
+      // Production must match the development reference's decision exactly.
+      const devValue = runDevelopment(routes, requestPathname)[headerKey] ?? null;
+      expect(devValue).toBe(expectedApplied ? headerValue : null);
+      expect(response.headers.get(headerKey)).toBe(devValue);
+    });
+  }
+
+  it("matches the exact dev fixture: /fr/docs/start against /docs/:path* sets x-docs", () => {
+    // Direct mirror of the dev test pinned in config-route-plugins.test.ts
+    // ("matches locale-prefixed config routes and localizes their destinations"),
+    // but exercised against the production-emitted applyConfiguredResponseHeaders.
+    const routes = [{ source: "/docs/:path*", headers: [{ key: "x-docs", value: "yes" }] }];
+    const response = runProduction(routes, "/fr/docs/start");
+    expect(response.headers.get("x-docs")).toBe("yes");
   });
 });
 
