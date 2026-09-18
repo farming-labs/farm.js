@@ -19,7 +19,7 @@ This project was generated from the Better Auth template included with `@farm.js
 ## Quick start
 
 ```bash
-pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-app --template better-auth --renderer solid
+PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta my-app --template better-auth --renderer solid
 cd my-app
 cp .env.example .env.local
 ```

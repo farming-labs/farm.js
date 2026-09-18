@@ -10,7 +10,7 @@ update beside ordinary React reconciliation.
 ## Create this starter
 
 ```bash
-pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-compiler-app --template react-compiler
+PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta my-compiler-app --template react-compiler
 cd my-compiler-app
 pnpm dev
 ```

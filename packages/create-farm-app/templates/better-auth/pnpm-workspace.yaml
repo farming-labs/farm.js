@@ -7,7 +7,4 @@ allowBuilds:
   sharp: true
   vue-demi: true
 minimumReleaseAgeExclude:
-  - "@farm.js/better-auth"
-  - "@farm.js/cli"
-  - "@farm.js/core"
-  - "@farm.js/integration-utils"
+  - "@farm.js/*"

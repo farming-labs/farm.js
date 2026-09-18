@@ -333,6 +333,8 @@ test("generates a buildable starter application", async () => {
     assert.match(generatedPnpmWorkspace, /^  esbuild: true$/m);
     assert.match(generatedPnpmWorkspace, /^  sharp: true$/m);
     assert.match(generatedPnpmWorkspace, /^  vue-demi: true$/m);
+    assert.match(generatedPnpmWorkspace, /^minimumReleaseAgeExclude:$/m);
+    assert.match(generatedPnpmWorkspace, /^  - "@farm\.js\/\*"$/m);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
@@ -440,6 +442,13 @@ test("generates the experimental React Compiler starter with the shared dark sta
     );
     await readFile(path.join(generatedDir, "scripts/verify-experiment.mjs"), "utf8");
     assert.match(await readFile(path.join(generatedDir, ".gitignore"), "utf8"), /^\.farm\/$/m);
+
+    const generatedWorkspace = await readFile(
+      path.join(generatedDir, "pnpm-workspace.yaml"),
+      "utf8",
+    );
+    assert.match(generatedWorkspace, /^minimumReleaseAgeExclude:$/m);
+    assert.match(generatedWorkspace, /^  - "@farm\.js\/\*"$/m);
 
     assert.match(output, /React AOT compiler is experimental/);
     assert.match(output, /pnpm experiment/);
@@ -775,7 +784,6 @@ for (const template of [
     brandPattern: /FARMJS \/ Auth starter/,
     instructionPattern: /FARMJS Auth uses local SQLite automatically/,
     betterCall: "1.3.2",
-    workspacePackage: "@farm.js/auth",
   },
   {
     name: "better-auth",
@@ -784,7 +792,6 @@ for (const template of [
     brandPattern: /FARMJS \/ Better Auth starter/,
     instructionPattern: /copy \.env\.example to \.env\.local/,
     betterCall: "1.3.7",
-    workspacePackage: "@farm.js/better-auth",
   },
 ]) {
   test(`generates the ${template.name} starter with setup guidance`, async () => {
@@ -911,13 +918,7 @@ for (const template of [
       assert.match(generatedWorkspace, /^packages:\n  - "\."$/m);
       assert.match(generatedWorkspace, /^allowBuilds:$/m);
       assert.match(generatedWorkspace, /^minimumReleaseAgeExclude:$/m);
-      assert.match(
-        generatedWorkspace,
-        new RegExp(
-          `^  - "${template.workspacePackage.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"$`,
-          "m",
-        ),
-      );
+      assert.match(generatedWorkspace, /^  - "@farm\.js\/\*"$/m);
 
       const generatedGitignore = await readFile(path.join(generatedDir, ".gitignore"), "utf8");
       assert.match(generatedGitignore, /^\.env\.local$/m);
