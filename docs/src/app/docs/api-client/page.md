@@ -499,13 +499,13 @@ const createProduct = useMutation(apiClient.products.post, {
 ```
 
 While the browser reports offline, a new submission waits in a `paused` state instead of
-dispatching, and a dispatch that failed while offline pauses and rides the next reconnect
-instead of surfacing a connectivity error. `pending` stays true and `status` stays `"pending"`
-for a paused submission; the new `paused` flag distinguishes "waiting for connection" from "on
-the wire" so the UI can say so. Paused submissions resume in submission order on the `online`
-event. `reset()` rejects paused submissions immediately rather than leaving them waiting, and a
-disowned submission never dispatches after a later reconnect. Optimistic state applied before
-the pause stays visible while waiting.
+dispatching, and a dispatch that failed with a connectivity error while offline pauses and
+rides the next reconnect instead of surfacing that error. `pending` stays true and `status`
+stays `"pending"` for a paused submission; the new `paused` flag distinguishes "waiting for
+connection" from "on the wire" so the UI can say so. Paused submissions resume in submission
+order on the `online` event. `reset()` rejects paused submissions immediately rather than
+leaving them waiting, and a disowned submission never dispatches after a later reconnect.
+Optimistic state applied before the pause stays visible while waiting.
 
 The pause window is in-memory: a reload drops paused submissions, so keep them short-lived and
 surface `paused` to the user. `useFetcher` accepts the same option and exposes the same flag.
