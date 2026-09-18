@@ -884,6 +884,61 @@ function isClosingCodeFence(line: string, fence: { marker: "`" | "~"; length: nu
   );
 }
 
+const SETEXT_H1_UNDERLINE = /^(?: {0,3})=+\s*$/;
+const SETEXT_H2_UNDERLINE = /^(?: {0,3})-+\s*$/;
+const THEMATIC_BREAK_LINE = /^(?: {0,3})([-*_])(\s*\1){2,}\s*$/;
+const ATX_HEADING_LINE = /^(#{1,6})\s+(.+)$/;
+const LAZY_CONTINUATION_OPENER = /^(?: {0,3})([-*+]\s|\d+\.\s)/;
+const BLOCKQUOTE_OPENER = /^(?: {0,3})>/;
+const INDENTED_CODE_LINE = /^(?: {4})\S/;
+const HASH_LEADING_LINE = /^#{1,6}/;
+
+function setextUnderline(line: string): { level: 1 | 2 } | null {
+  if (SETEXT_H1_UNDERLINE.test(line)) return { level: 1 };
+  if (SETEXT_H2_UNDERLINE.test(line)) return { level: 2 };
+  return null;
+}
+
+function isGfmTableDelimiter(line: string): boolean {
+  const value = line.replace(/^(?: {0,3})/, "").trim();
+  return value.includes("-") && value.includes("|") && /^[|:\s-]+$/.test(value);
+}
+
+// A line that may serve as the content of a Setext heading. marked treats a
+// `===`/`---` underline as a heading only when the preceding run of text is a
+// standalone paragraph, so blank lines, fences, other headings, thematic
+// breaks, indented code, and container/block openers (which marked parses as
+// their own blocks) break the run rather than belonging to it.
+function isSetextContent(line: string): boolean {
+  const value = line.trim();
+  if (value === "") return false;
+  if (getCodeFence(line)) return false;
+  if (ATX_HEADING_LINE.test(line)) return false;
+  if (setextUnderline(line)) return false;
+  if (HASH_LEADING_LINE.test(value)) return false;
+  if (LAZY_CONTINUATION_OPENER.test(line)) return false;
+  if (BLOCKQUOTE_OPENER.test(line)) return false;
+  if (THEMATIC_BREAK_LINE.test(line)) return false;
+  if (INDENTED_CODE_LINE.test(line)) return false;
+  if (isGfmTableDelimiter(line)) return false;
+  return true;
+}
+
+// The line immediately preceding a gathered Setext-content run must be a block
+// boundary for the run to be a standalone paragraph; a list-item, blockquote,
+// table data row, or `#`-leading non-ATX line directly above it (with no blank
+// line between) is a lazy continuation that marked would keep inside the
+// container, so it must not form a heading here.
+function acceptsSetextStopper(stopper: string | undefined): boolean {
+  if (stopper === undefined) return true;
+  if (stopper.trim() === "") return true;
+  if (ATX_HEADING_LINE.test(stopper)) return true;
+  if (getCodeFence(stopper)) return true;
+  if (setextUnderline(stopper)) return true;
+  if (THEMATIC_BREAK_LINE.test(stopper)) return true;
+  return false;
+}
+
 function stripMdxRuntimeSyntax(body: string): string {
   const output: string[] = [];
   let fence: { marker: "`" | "~"; length: number } | null = null;
@@ -1136,7 +1191,9 @@ function extractTocItems(body: string, depth: number): TocItem[] {
   // tracking in stripMdxRuntimeSyntax / attachCodeBlockLabels.
   let fence: { marker: "`" | "~"; length: number } | null = null;
 
-  for (const line of body.split(/\r?\n/)) {
+  const lines = body.split(/\r?\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
     const nextFence = getCodeFence(line);
     if (fence) {
       if (nextFence && nextFence.marker === fence.marker && isClosingCodeFence(line, fence)) {
@@ -1155,14 +1212,45 @@ function extractTocItems(body: string, depth: number): TocItem[] {
     // `## Configuration` gives the h2 the id `configuration-2` in the rendered
     // HTML, but a slugger that skipped the h1 would emit `#configuration` and
     // link to the page title instead of the section.
-    const match = line.match(/^(#{1,6})\s+(.+)$/);
-    if (!match) continue;
+    const atx = line.match(/^(#{1,6})\s+(.+)$/);
+    if (atx) {
+      const title = atx[2].trim();
+      const level = atx[1].length;
+      const id = slug(title);
+      if (level >= 2 && level <= maxLevel) {
+        items.push({ id, title, level });
+      }
+      continue;
+    }
 
-    const title = match[2].trim();
-    const id = slug(title);
-    const level = match[1].length;
-    if (level >= 2 && level <= maxLevel) {
-      items.push({ id, title, level });
+    // Setext headings (`Foo\n===`, `Bar\n---`) are also recognized by marked and
+    // slug the renderer, so they must advance this slugger too — otherwise a
+    // Setext heading whose slug base collides with a later ATX heading drifts
+    // (the TOC links to `#foo` while the rendered heading is `#foo-2`). The
+    // underline is only a heading when its preceding paragraph is standalone, so
+    // a list/blockquote/table data row directly above it is rejected to mirror
+    // marked and keep both slug counters in lock-step. Setext h1s are excluded
+    // from the TOC by depth but still slug, matching the page-title case.
+    const setext = setextUnderline(line);
+    if (setext) {
+      const gathered: number[] = [];
+      for (let prev = index - 1; prev >= 0 && isSetextContent(lines[prev]); prev -= 1) {
+        gathered.push(prev);
+      }
+      if (gathered.length === 0) continue;
+      const stopperIndex = gathered[gathered.length - 1] - 1;
+      const stopper = stopperIndex < 0 ? undefined : lines[stopperIndex];
+      if (!acceptsSetextStopper(stopper)) continue;
+      const { level } = setext;
+      const title = gathered
+        .slice()
+        .reverse()
+        .map((prev) => lines[prev].trim())
+        .join("\n");
+      const id = slug(title);
+      if (level >= 2 && level <= maxLevel) {
+        items.push({ id, title, level });
+      }
     }
   }
 
