@@ -1201,6 +1201,7 @@ export function farmPlugin(
       let pendingTypeArtifacts = createEmptyTypeArtifactSelection();
       let pendingTypeArtifactReason = "";
       let routeRefreshScheduled: ReturnType<typeof setTimeout> | null = null;
+      let pendingRouteRefreshIncludesMiddleware = false;
       const scheduleTypeArtifactGen = (
         file: string,
         event: string,
@@ -1251,23 +1252,29 @@ export function farmPlugin(
               .then(() => server.ws.send({ type: "full-reload", path: "*" }))
               .catch((error) => logger.warn(`i18n catalog reload failed: ${error.message}`));
           }
-          if (
+          const isRouteRefreshEvent =
             (ev !== "change" || isStaticMetadataImageFile(file)) &&
             (isAppRuntimeFile(file) ||
               isProgrammaticRouteFile(file) ||
               (isProgrammaticRouteSourceFile(file) &&
-                (ev === "unlink" || fileContainsProgrammaticPageRoute(file)))) &&
-            !routeRefreshScheduled
-          ) {
-            routeRefreshScheduled = setTimeout(() => {
-              routeRefreshScheduled = null;
-              Promise.all([
-                refreshRouteDiscovery?.(`${ev} ${file}`),
-                file.includes("middleware.") ? middlewareManager?.reload() : undefined,
-              ])
-                .then(() => server.ws.send({ type: "full-reload", path: "*" }))
-                .catch((error) => logger.warn(`Route refresh failed: ${error.message}`));
-            }, 50);
+                (ev === "unlink" || fileContainsProgrammaticPageRoute(file))));
+          if (isRouteRefreshEvent) {
+            if (file.includes("middleware.")) {
+              pendingRouteRefreshIncludesMiddleware = true;
+            }
+            if (!routeRefreshScheduled) {
+              routeRefreshScheduled = setTimeout(() => {
+                routeRefreshScheduled = null;
+                const reloadsMiddleware = pendingRouteRefreshIncludesMiddleware;
+                pendingRouteRefreshIncludesMiddleware = false;
+                Promise.all([
+                  refreshRouteDiscovery?.(`${ev} ${file}`),
+                  reloadsMiddleware ? middlewareManager?.reload() : undefined,
+                ])
+                  .then(() => server.ws.send({ type: "full-reload", path: "*" }))
+                  .catch((error) => logger.warn(`Route refresh failed: ${error.message}`));
+              }, 50);
+            }
           }
         });
       });
