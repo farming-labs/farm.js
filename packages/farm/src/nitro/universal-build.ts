@@ -5353,11 +5353,40 @@ function createFarmDocumentStream(contentStream, prefix, suffix, onComplete) {
   });
 }
 
+function stripFarmDocumentWrappers(markup) {
+  let output = markup.replace(/^\\s+/, "");
+  const wrapper = /^<div\\b[^>]*style=["']display\\s*:\\s*contents["'][^>]*>/i;
+  let match;
+  while ((match = wrapper.exec(output))) {
+    output = output.slice(match[0].length).replace(/^\\s+/, "");
+  }
+  return output;
+}
+
+function opensFarmFullDocument(markup) {
+  const inner = stripFarmDocumentWrappers(markup);
+  return /^<!doctype/i.test(inner) || /^<html[\\s>]/i.test(inner);
+}
+
+function extractFarmFullDocument(markup) {
+  if (!opensFarmFullDocument(markup)) return null;
+  const start = markup.search(/<!doctype|<html[\\s>]/i);
+  const closeIndex = markup.toLowerCase().lastIndexOf("</html>");
+  if (start < 0 || closeIndex < 0) return null;
+  return markup.slice(start, closeIndex + "</html>".length);
+}
+
+function ensureFarmDocumentHead(markup) {
+  if (/<head[\\s>]/i.test(markup)) return markup;
+  return markup.replace(/<html([^>]*)>/i, function(_match, attributes) {
+    return "<html" + attributes + "><head></head>";
+  });
+}
+
 function createFarmErrorDocument(html, title) {
   const escapedTitle = escapeFarmHtmlAttribute(title || "Application Error");
-  const trimmedHtml = html.trim();
-  const hasFullDocument = trimmedHtml.startsWith("<html") ||
-    trimmedHtml.startsWith("<!DOCTYPE");
+  const fullDocument = extractFarmFullDocument(html);
+  const hasFullDocument = fullDocument !== null;
 
   if (!hasFullDocument) {
     return '<!DOCTYPE html>\\n<html lang="en">\\n<head>\\n' +
@@ -5374,7 +5403,7 @@ function createFarmErrorDocument(html, title) {
       '</body>\\n</html>';
   }
 
-  let fullHtml = html;
+  let fullHtml = ensureFarmDocumentHead(fullDocument);
   if (!/\\sid=["']root["']/.test(fullHtml)) {
     fullHtml = fullHtml
       .replace(/<body([^>]*)>/i, '<body$1><div id="root">')
@@ -7039,8 +7068,8 @@ async function handleFarmRequestInContext(
         let html = renderedPage.html;
         
         // Check if the layout already rendered a full HTML document
-        const trimmedHtml = (html !== undefined ? html : renderedPage.shellHtml || "").trim();
-        const hasFullDocument = trimmedHtml.startsWith('<html') || trimmedHtml.startsWith('<!DOCTYPE');
+        const initialHtml = html !== undefined ? html : renderedPage.shellHtml || "";
+        const hasFullDocument = opensFarmFullDocument(initialHtml);
 
         // Stream a suspended body as soon as React's shell is ready. Full-document
         // layouts, localized documents, and cacheable PPR shells still use the
@@ -7121,6 +7150,7 @@ async function handleFarmRequestInContext(
         let fullHtml;
         if (hasFullDocument) {
           // Layout provides full HTML structure - inject CSS and client script
+          html = ensureFarmDocumentHead(extractFarmFullDocument(html) || html);
           fullHtml = html
             // Inject CSS link after opening head tag or first meta tag
             .replace(/<head([^>]*)>/i, '<head$1>\\n  <link rel="stylesheet" href="/__farm_client_css_href__">')
@@ -7462,12 +7492,12 @@ async function handleFarmRequestInContext(
     const html = await ReactDOMServer.renderToString(notFoundElement);
     
     // Check if layout provides full HTML document
-    const trimmedHtml = html.trim();
-    const hasFullDocument = trimmedHtml.startsWith('<html') || trimmedHtml.startsWith('<!DOCTYPE');
+    const fullDocument = extractFarmFullDocument(html);
+    const hasFullDocument = fullDocument !== null;
     
     let fullHtml;
     if (hasFullDocument) {
-      fullHtml = html
+      fullHtml = ensureFarmDocumentHead(fullDocument)
         .replace(/<head([^>]*)>/i, '<head$1>\\n  <link rel="stylesheet" href="/__farm_client_css_href__">')
         .replace(/<\\/head>/i, () => renderFarmRendererHydrationScript() + '\\n</head>')
         .replace(

@@ -393,7 +393,11 @@ describe("production prebuilt SSR output", () => {
         path.join(root, ".farm", ".output", "server"),
         async (response) => {
           expect(response.status).toBe(200);
-          await expect(response.text()).resolves.toContain("prebuilt SSR output");
+          const html = await response.text();
+          expect(html).toContain("prebuilt SSR output");
+          expect(html.match(/<html[\s>]/gi)).toHaveLength(1);
+          expect(html.match(/<body[\s>]/gi)).toHaveLength(1);
+          expect(html).not.toContain('data-farm-layout-boundary="true"');
         },
         "/workspace",
       );
