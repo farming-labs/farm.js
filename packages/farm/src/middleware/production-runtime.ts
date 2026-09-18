@@ -58,6 +58,11 @@ interface WebMiddlewareContextState {
   getResponse(): Response | null;
 }
 
+interface WebResponseShimState {
+  response: Record<string, any>;
+  getResponse(method: string): Response | null;
+}
+
 const FARM_SET_COOKIE_HEADERS = Symbol("farm.setCookieHeaders");
 
 type InternalMiddlewareParent = MiddlewareContext["parent"] & {
@@ -160,31 +165,141 @@ function isMiddlewareResponse(value: unknown): value is Response {
   return value instanceof Response;
 }
 
-function createResponseShim(headers: WebResponseHeaderMap): Record<string, any> {
-  return {
+function findHeaderName(headers: WebResponseHeaderMap, name: string): string | undefined {
+  const normalizedName = name.toLowerCase();
+  return [...headers.keys()].find((key) => key.toLowerCase() === normalizedName);
+}
+
+function createResponseShim(headers: WebResponseHeaderMap): WebResponseShimState {
+  const bodyChunks: Uint8Array[] = [];
+  const encoder = new TextEncoder();
+
+  const response = {
     headersSent: false,
     writableEnded: false,
-    setHeader(name: string, value: string | string[]) {
+    statusCode: 200,
+    statusMessage: "",
+    setHeader(name: string, value: string | number | readonly string[]) {
+      const existingName = findHeaderName(headers, name);
+      if (existingName) headers.delete(existingName);
       if (name.toLowerCase() === "set-cookie") {
         headers.replaceSetCookies(Array.isArray(value) ? value.map(String) : [String(value)]);
       } else {
         headers.set(name, Array.isArray(value) ? value.join(", ") : String(value));
       }
+      return this;
     },
     getHeader(name: string) {
-      return headers.get(name);
+      if (name.toLowerCase() === "set-cookie") {
+        const cookies = headers.getSetCookies();
+        return cookies.length > 0 ? [...cookies] : undefined;
+      }
+      const existingName = findHeaderName(headers, name);
+      return existingName ? headers.get(existingName) : undefined;
     },
-    writeHead(status: number, responseHeaders?: Record<string, string>) {
+    hasHeader(name: string) {
+      return name.toLowerCase() === "set-cookie"
+        ? headers.getSetCookies().length > 0
+        : findHeaderName(headers, name) !== undefined;
+    },
+    getHeaderNames() {
+      return [...headers.keys()].map((name) => name.toLowerCase());
+    },
+    getHeaders() {
+      return Object.fromEntries(
+        [...headers.keys()].map((name) => [name.toLowerCase(), this.getHeader(name)]),
+      );
+    },
+    removeHeader(name: string) {
+      const existingName = findHeaderName(headers, name);
+      if (existingName) headers.delete(existingName);
+    },
+    appendHeader(name: string, value: string | readonly string[]) {
+      const values = Array.isArray(value) ? value.map(String) : [String(value)];
+      if (name.toLowerCase() === "set-cookie") {
+        for (const item of values) headers.appendSetCookie(item);
+        return this;
+      }
+      const existing = this.getHeader(name);
+      return this.setHeader(name, existing ? `${String(existing)}, ${values.join(", ")}` : values);
+    },
+    writeHead(
+      status: number,
+      statusMessageOrHeaders?: string | Record<string, string | number | readonly string[]>,
+      responseHeaders?: Record<string, string | number | readonly string[]>,
+    ) {
       this.statusCode = status;
-      if (responseHeaders) {
-        for (const [key, value] of Object.entries(responseHeaders)) {
-          headers.set(key, value);
+      const nextHeaders =
+        typeof statusMessageOrHeaders === "string" ? responseHeaders : statusMessageOrHeaders;
+      if (typeof statusMessageOrHeaders === "string") {
+        this.statusMessage = statusMessageOrHeaders;
+      }
+      if (nextHeaders) {
+        for (const [key, value] of Object.entries(nextHeaders)) {
+          this.setHeader(key, value);
         }
       }
       this.headersSent = true;
+      return this;
     },
-    end() {
+    flushHeaders() {
+      this.headersSent = true;
+    },
+    write(
+      chunk: string | Uint8Array,
+      encodingOrCallback?: string | (() => void),
+      callback?: () => void,
+    ) {
+      bodyChunks.push(typeof chunk === "string" ? encoder.encode(chunk) : new Uint8Array(chunk));
+      this.headersSent = true;
+      const done = typeof encodingOrCallback === "function" ? encodingOrCallback : callback;
+      done?.();
+      return true;
+    },
+    end(
+      chunk?: string | Uint8Array | (() => void),
+      encodingOrCallback?: string | (() => void),
+      callback?: () => void,
+    ) {
+      if (typeof chunk === "string" || chunk instanceof Uint8Array) {
+        bodyChunks.push(typeof chunk === "string" ? encoder.encode(chunk) : new Uint8Array(chunk));
+      }
+      this.headersSent = true;
       this.writableEnded = true;
+      const done =
+        typeof chunk === "function"
+          ? chunk
+          : typeof encodingOrCallback === "function"
+            ? encodingOrCallback
+            : callback;
+      done?.();
+      return this;
+    },
+  };
+
+  return {
+    response,
+    getResponse(method: string) {
+      if (!response.headersSent && !response.writableEnded) return null;
+
+      const bodyLength = bodyChunks.reduce((total, chunk) => total + chunk.byteLength, 0);
+      const body = new Uint8Array(bodyLength);
+      let offset = 0;
+      for (const chunk of bodyChunks) {
+        body.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+
+      const bodyAllowed =
+        method.toUpperCase() !== "HEAD" &&
+        response.statusCode !== 204 &&
+        response.statusCode !== 205 &&
+        response.statusCode !== 304;
+      return new Response(bodyAllowed && bodyLength > 0 ? body : null, {
+        status: response.statusCode,
+        statusText: response.statusMessage || undefined,
+        headers: mapToHeaders(headers),
+      });
     },
   };
 }
@@ -246,10 +361,11 @@ function createWebMiddlewareContext(
   }
   const parentCookies = (parent as InternalMiddlewareParent | undefined)?.[FARM_SET_COOKIE_HEADERS];
   if (parentCookies) headers.replaceSetCookies(parentCookies);
+  const responseShim = createResponseShim(headers);
 
   const ctx = {
     request: currentRequest as any,
-    response: createResponseShim(headers) as any,
+    response: responseShim.response as any,
     url,
     pathname: url.pathname,
     searchParams: url.searchParams,
@@ -343,7 +459,7 @@ function createWebMiddlewareContext(
     ctx,
     headers,
     getRequest: () => currentRequest,
-    getResponse: () => handledResponse,
+    getResponse: () => handledResponse || responseShim.getResponse(currentRequest.method),
   };
 }
 
@@ -736,7 +852,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
           };
         }
 
-        if (ctx._handled) {
+        if (ctx._handled || ctx.response.headersSent || ctx.response.writableEnded) {
           const response = contextState.getResponse() || new Response(null);
           emitFarmEvent({
             type: "middleware.shortCircuit",

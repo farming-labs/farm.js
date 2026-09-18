@@ -63,6 +63,35 @@ describe("production middleware HTTP behavior", () => {
     expect(response.headers.get("x-mw")).toBe("1");
   });
 
+  it("short-circuits when middleware writes to the raw response", async () => {
+    const runner = createProductionMiddlewareRunner({
+      config: {
+        handler(ctx) {
+          const response = ctx.response
+            .setHeader("X-Middleware", "raw")
+            .writeHead(201, "Created", {
+              "Set-Cookie": ["session=abc; Path=/", "theme=dark; Path=/"],
+            })
+            .end("created");
+
+          expect(response).toBe(ctx.response);
+        },
+      },
+    });
+
+    const result = await runner(new Request("https://example.com/"));
+
+    expect(result.handled).toBe(true);
+    expect(result.response?.status).toBe(201);
+    expect(result.response?.statusText).toBe("Created");
+    expect(result.response?.headers.get("x-middleware")).toBe("raw");
+    expect(result.response?.headers.getSetCookie()).toEqual([
+      "session=abc; Path=/",
+      "theme=dark; Path=/",
+    ]);
+    await expect(result.response?.text()).resolves.toBe("created");
+  });
+
   it("serves requests with malformed percent-encoded paths instead of throwing", async () => {
     const seen: Array<Record<string, string>> = [];
     const runner = createProductionMiddlewareRunner({
