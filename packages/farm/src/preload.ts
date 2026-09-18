@@ -343,6 +343,10 @@ function findHtmlLinkElements(html: string): HtmlLinkElement[] {
     if (rawText?.[1]) {
       const openingEnd = findHtmlTagEnd(html, start);
       if (openingEnd === -1) break;
+      if (rawText[1] === "svg" && html[openingEnd - 2] === "/") {
+        cursor = openingEnd;
+        continue;
+      }
       const closingStart = findHtmlClosingTag(lowerHtml, rawText[1], openingEnd);
       if (closingStart === -1) {
         cursor = html.length;

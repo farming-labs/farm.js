@@ -180,4 +180,90 @@ describe("smart preload manager", () => {
     );
     expect(warn).toHaveBeenCalledTimes(2);
   });
+
+  it("counts and budgets preloads after a self-closing foreign-content <svg/>", () => {
+    const config = resolveFarmPerformanceConfig({ preload: { maxImages: 1 } }).preload;
+    const html = [
+      '<svg width="24" height="24"/>',
+      '<link rel="preload" as="image" href="/hero.webp" fetchpriority="high">',
+      '<link rel="preload" as="image" href="/below.webp">',
+    ].join("\n");
+
+    const result = manageFarmDocumentPreloads(html, "", config);
+
+    expect(result.html).toContain("/hero.webp");
+    expect(result.html).not.toContain("/below.webp");
+    expect(result.linkHeader).toBe("");
+    expect(result.warnings).toEqual([{ kind: "image", count: 2, budget: 1, removed: 1 }]);
+  });
+
+  it("resumes scanning preloads after a self-closing <svg/> followed by a later <svg>…</svg>", () => {
+    const config = resolveFarmPerformanceConfig({ preload: { maxImages: 1 } }).preload;
+    const html = [
+      '<svg width="24" height="24"/>',
+      '<link rel="preload" as="image" href="/hero.webp" fetchpriority="high">',
+      '<link rel="preload" as="image" href="/below.webp">',
+      '<svg><path d="M0 0"/></svg>',
+      '<link rel="preload" as="image" href="/after.webp">',
+    ].join("\n");
+
+    const result = manageFarmDocumentPreloads(html, "", config);
+
+    expect(result.html).toContain("/hero.webp");
+    expect(result.html).not.toContain("/below.webp");
+    expect(result.html).not.toContain("/after.webp");
+    expect(result.warnings).toEqual([{ kind: "image", count: 3, budget: 1, removed: 2 }]);
+  });
+
+  it("reports an accurate count when a self-closing <svg/> precedes a later <svg>…</svg> and excess hints", () => {
+    const config = resolveFarmPerformanceConfig({ preload: { maxImages: 1 } }).preload;
+    const html = [
+      '<svg width="24" height="24"/>',
+      '<link rel="preload" as="image" href="/hero.webp" fetchpriority="high">',
+      '<link rel="preload" as="image" href="/below.webp">',
+      '<svg><path d="M0 0"/></svg>',
+      '<link rel="preload" as="image" href="/after1.webp">',
+      '<link rel="preload" as="image" href="/after2.webp">',
+      '<link rel="preload" as="image" href="/after3.webp">',
+    ].join("\n");
+
+    const result = manageFarmDocumentPreloads(html, "", config);
+
+    expect(result.html).toContain("/hero.webp");
+    expect(result.html).not.toContain("/below.webp");
+    expect(result.html).not.toContain("/after1.webp");
+    expect(result.html).not.toContain("/after2.webp");
+    expect(result.html).not.toContain("/after3.webp");
+    expect(result.warnings).toEqual([{ kind: "image", count: 5, budget: 1, removed: 4 }]);
+  });
+
+  it("still treats <script …/> without a closing tag as raw-text that swallows the rest", () => {
+    const config = resolveFarmPerformanceConfig({ preload: { maxImages: 1 } }).preload;
+    const html = [
+      '<script src="/app.js"/>',
+      '<link rel="preload" as="image" href="/hero.webp" fetchpriority="high">',
+      '<link rel="preload" as="image" href="/below.webp">',
+    ].join("\n");
+
+    const result = manageFarmDocumentPreloads(html, "", config);
+
+    expect(result.html).toBe(html);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("keeps preloads inside a properly-closed <svg>…</svg> inert while counting the ones after it", () => {
+    const config = resolveFarmPerformanceConfig({ preload: { maxImages: 1 } }).preload;
+    const html = [
+      '<svg><link rel="preload" as="image" href="/inside.webp"></svg>',
+      '<link rel="preload" as="image" href="/after.webp" fetchpriority="high">',
+      '<link rel="preload" as="image" href="/other.webp">',
+    ].join("\n");
+
+    const result = manageFarmDocumentPreloads(html, "", config);
+
+    expect(result.html).toContain("/inside.webp");
+    expect(result.html).toContain("/after.webp");
+    expect(result.html).not.toContain("/other.webp");
+    expect(result.warnings).toEqual([{ kind: "image", count: 2, budget: 1, removed: 1 }]);
+  });
 });
