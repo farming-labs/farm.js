@@ -533,8 +533,8 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
             res.end(JSON.stringify({ error: "Internal server error" }));
           }
         });
-        server.middlewares.use((req, res, next) =>
-          _runWithAPIRequestRuntime(
+        server.middlewares.use((req, res, next) => {
+          const result = _runWithAPIRequestRuntime(
             {
               basePath: basePath ?? "/api",
               dispatch: async (request) =>
@@ -543,8 +543,22 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
                   : Response.json({ error: "Not Found" }, { status: 404 }),
             },
             () => apiMiddleware(req, res, next),
-          ),
-        );
+          );
+          return Promise.resolve(result).catch((error) => {
+            console.error(
+              `[FARM] Unhandled API error while handling ${req.method || "GET"} ${req.url || "/"}:`,
+              error,
+            );
+            if (res.writableEnded) return;
+            if (res.headersSent) {
+              res.destroy?.(error instanceof Error ? error : new Error(String(error)));
+              return;
+            }
+            res.statusCode = 500;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: "Internal server error" }));
+          });
+        });
       };
     },
 
