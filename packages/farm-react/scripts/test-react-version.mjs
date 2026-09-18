@@ -359,6 +359,174 @@ const testSource = String.raw`
   assert.equal(reorderExecutions, 1);
   flushSync(() => reorderRoot.unmount());
 
+  // Exercise parent callback synchronization using the packed runtime, not workspace source.
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const delegatedSortCases = ["mount", "hydrate"].flatMap((lifecycle) =>
+    ["batched", "parent-first", "local-first"].map((ordering) => ({ lifecycle, ordering })),
+  );
+  for (const reactivity of ["static", "hybrid"]) {
+    for (const { lifecycle, ordering } of delegatedSortCases) {
+      const context = reactivity + "/" + lifecycle + "/" + ordering;
+      const initial = [
+        { id: "a", label: "Alpha", rank: 3 },
+        { id: "b", label: "Beta", rank: 1 },
+        { id: "c", label: "Gamma", rank: 2 },
+      ];
+      const calls = [];
+      const counters = { executions: 0, renders: 0, keys: 0, bindings: 0, descriptors: 0 };
+      let updateRows = () => undefined;
+      let updateVersion = () => undefined;
+      const DelegatedSortRows = createCompiledComponent({
+        displayName: "CompatibilityDelegatedSortRows",
+        reactivity,
+        initialize: () => [initial],
+        render(props, state, blocks) {
+          counters.executions += 1;
+          const items = () => state[0].get();
+          updateRows = (compare) => {
+            state[0].set((previous) =>
+              createCompilerKeyedArrayQueuedMapPipeline(previous, (current, applyMap) =>
+                applyMap(current, previous.map, (item) =>
+                  item.id === "b" ? { ...item, label: item.label + "!" } : item,
+                ),
+              ),
+            );
+            state[0].set((previous) =>
+              createCompilerKeyedArrayMapReorder(previous, previous.toSorted, compare),
+            );
+          };
+          return React.createElement("section", null, React.createElement(blocks.KeyedRows, {
+            id: 0,
+            collectionDependency: 0,
+            dependencies: [0],
+            structureDependencies: [0],
+            items,
+            reorderIndexIndependent: true,
+            delegateEvents: true,
+            events: [{ name: "onClick", path: [], invoke: props.onRowClick }],
+            render: () => {
+              counters.renders += 1;
+              return React.createElement("ul", null, items().map((item) =>
+                React.createElement("li", { key: item.id, "data-key": item.id }, item.label),
+              ));
+            },
+            rowKey: (item) => {
+              counters.keys += 1;
+              return item.id;
+            },
+            create: (item) => {
+              counters.descriptors += 1;
+              return {
+                kind: "element", tag: "li",
+                attributes: [{ name: "data-key", value: item.id }],
+                styles: [], children: [item.label],
+              };
+            },
+            bindings: [{
+              kind: "text", path: [], dependencies: [],
+              read: (item) => {
+                counters.bindings += 1;
+                return [item.label];
+              },
+            }],
+          }));
+        },
+        bindings: [{ kind: "block", id: 0, dependencies: [0] }],
+      });
+      function Parent() {
+        const [version, setVersion] = React.useState(0);
+        updateVersion = setVersion;
+        return React.createElement(DelegatedSortRows, {
+          onRowClick: (item, index) => calls.push([version, item.id, item.label, index]),
+        });
+      }
+      const target = document.createElement("div");
+      document.body.append(target);
+      const tree = React.createElement(React.StrictMode, null, React.createElement(Parent));
+      if (lifecycle === "hydrate") target.innerHTML = renderToString(tree);
+      const serverRows = [...target.querySelectorAll("li")];
+      const recoverableErrors = [];
+      let delegatedRoot;
+      try {
+        await React.act(async () => {
+          delegatedRoot = lifecycle === "hydrate"
+            ? hydrateRoot(target, tree, { onRecoverableError: (error) => recoverableErrors.push(error) })
+            : createRoot(target);
+          if (lifecycle === "mount") delegatedRoot.render(tree);
+        });
+        if (lifecycle === "hydrate") {
+          [...target.querySelectorAll("li")].forEach((row, index) => assert.equal(row, serverRows[index], context));
+        }
+        const rows = new Map([...target.querySelectorAll("li")].map((row) => [row.dataset.key, row]));
+        const listRenders = counters.renders;
+        let expected = initial;
+        for (const version of [0, 1, 2]) {
+          // First exercise the replayed mount before a parent render can refresh any refs.
+          for (const parentUpdate of version === 0 ? [false] : [true, false]) {
+            const compare = parentUpdate
+              ? (left, right) => left.rank - right.rank
+              : (left, right) => right.rank - left.rank;
+            expected = expected
+              .map((item) => item.id === "b" ? { ...item, label: item.label + "!" } : item)
+              .toSorted(compare);
+            const before = { ...counters };
+            await React.act(async () => {
+              if (!parentUpdate) updateRows(compare);
+              else if (ordering === "parent-first") {
+                flushSync(() => updateVersion(version));
+                updateRows(compare);
+              } else if (ordering === "local-first") {
+                updateRows(compare);
+                flushSync(() => updateVersion(version));
+              } else {
+                updateVersion(version);
+                updateRows(compare);
+              }
+              await Promise.resolve();
+              await Promise.resolve();
+            });
+            const currentRows = [...target.querySelectorAll("li")];
+            assert.deepEqual(currentRows.map((row) => row.textContent), expected.map((item) => item.label), context);
+            currentRows.forEach((row, index) => assert.equal(row, rows.get(expected[index].id), context));
+            assert.equal(counters.renders, listRenders, context);
+            assert.equal(counters.descriptors, before.descriptors, context);
+            if (parentUpdate) assert.ok(counters.executions > before.executions, context);
+            else assert.deepEqual(counters, {
+              ...before, keys: before.keys + 1, bindings: before.bindings + 1,
+            }, context);
+            calls.length = 0;
+            await React.act(async () => currentRows.forEach((row) => row.click()));
+            assert.deepEqual(calls, expected.map((item, index) => [version, item.id, item.label, index]), context);
+          }
+        }
+        const detachedRows = [...target.querySelectorAll("li")];
+        const beforeUnmount = { ...counters };
+        calls.length = 0;
+        await React.act(async () => {
+          updateRows((left, right) => left.rank - right.rank);
+          flushSync(() => delegatedRoot.unmount());
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+        await React.act(async () => {
+          updateRows((left, right) => right.rank - left.rank);
+          detachedRows.forEach((row) => row.click());
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+        assert.deepEqual(counters, beforeUnmount, context);
+        assert.deepEqual(calls, [], context);
+        assert.deepEqual(recoverableErrors, [], context);
+        assert.equal(target.childElementCount, 0, context);
+        detachedRows.forEach((row) => assert.equal(row.isConnected, false, context));
+      } finally {
+        await React.act(async () => delegatedRoot?.unmount());
+        target.remove();
+      }
+    }
+  }
+  delete globalThis.IS_REACT_ACT_ENVIRONMENT;
+
   const StaticBindings = createCompiledComponentWithFeatures({
     displayName: "CompatibilityStaticBindings",
     initialize: () => [8, "draft", "safe", true],

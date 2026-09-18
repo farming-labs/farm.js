@@ -9463,7 +9463,8 @@ function createKeyedRowsBlockComponent(
     componentWillUnmount(): void {
       this.mounted = false;
       this.unsubscribe?.();
-      this.root = null;
+      // React 18 StrictMode replays mount lifecycles without detaching host refs.
+      // captureRoot clears the element on a real unmount; retain it for replay adoption.
       this.cleanupHostScopes();
       this.instances.clear();
       this.identityTargets.clear();

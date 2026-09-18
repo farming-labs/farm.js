@@ -2407,6 +2407,11 @@ is not replaced during hydration. Interactive rows keep their React event props 
 process. A hydration mismatch stays on React's recoverable-error path; Farm adopts only the host
 shape React committed.
 
+In development, React 18 and React 19 Strict Mode can replay mount lifecycles. Eligible keyed-row
+containers re-adopt their existing DOM after that replay instead of switching permanently to React
+fallback. A real unmount still clears the host ref, disposes subscriptions, and ignores queued work
+or stale setters from the removed owner.
+
 During development, compiled components receive a module-and-component identity plus a state-layout
 signature. A compatible Fast Refresh replaces the compiled definition while retaining the React
 component type and its local cells. An interactive keyed boundary lets React commit the refreshed
