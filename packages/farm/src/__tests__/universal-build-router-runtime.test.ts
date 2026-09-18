@@ -492,6 +492,40 @@ describe("generateRuntimePathMatcherSource", () => {
     expect(matchRuntimePathPattern("/café", "/caf%C3%A9")).toEqual({});
     expect(matchRuntimePathPattern("/a%20b", "/a%2520b")).toEqual({});
   });
+
+  it("returns null when no backtracking split lets the following segment match", () => {
+    // Regression guard for the non-terminal catch-all backtracking path: when
+    // no split of the catch-all lets a later segment match, the matcher must
+    // still return null rather than over-matching.
+    const matchRuntimePathPattern = new Function(
+      matcher + "; return matchRuntimePathPattern;",
+    )() as (pattern: string, pathname: string) => Record<string, string> | null;
+
+    expect(matchRuntimePathPattern("/docs/:slug*/missing", "/docs/a/asset")).toBeNull();
+  });
+
+  it("memoizes failed matcher states across multiple non-terminal catch-alls", () => {
+    const marker =
+      "function matchFromUncached(patternIndex, pathIndex, params, catchAllParamSegments) {";
+    const instrumented =
+      "let uncachedStateVisits = 0;\n" +
+      matcher.replace(marker, `${marker}\nuncachedStateVisits += 1;`);
+    expect(instrumented).not.toBe(`let uncachedStateVisits = 0;\n${matcher}`);
+    const runtime = new Function(
+      instrumented +
+        "; return { matchRuntimePathPattern, getUncachedStateVisits: () => uncachedStateVisits };",
+    )() as {
+      matchRuntimePathPattern: (pattern: string, pathname: string) => Record<string, string> | null;
+      getUncachedStateVisits: () => number;
+    };
+    const pattern = "/root/:a*/x/:b*/x/:c*/x/:d*/missing";
+    const pathname = `/root/${Array.from({ length: 24 }, () => "x").join("/")}/asset`;
+
+    expect(runtime.matchRuntimePathPattern(pattern, pathname)).toBeNull();
+    const stateUpperBound =
+      pattern.split("/").filter(Boolean).length * pathname.split("/").filter(Boolean).length;
+    expect(runtime.getUncachedStateVisits()).toBeLessThanOrEqual(stateUpperBound);
+  });
 });
 
 describe("generateRedirectInterpolationSource", () => {
@@ -539,6 +573,41 @@ describe("generateRedirectInterpolationSource", () => {
         destination: "/z/$3/$2/$1",
         pathname: "/a/1/2/w/q",
         expected: "/z/w/q/2/1",
+      },
+      // Non-terminal catch-alls (e.g. /docs/:slug*/asset/*) were matched by the
+      // development plugin but silently dropped by the production matcher, which
+      // consumed every remaining segment without backtracking. Production must
+      // mirror the greedy (.*) backtracking emitted by route-pattern.ts.
+      {
+        source: "/docs/:slug*/asset/*",
+        destination: "/new/:slug*/copy/*",
+        pathname: "/docs/guides/start/asset/logo.svg",
+        expected: "/new/guides/start/copy/logo.svg",
+      },
+      {
+        source: "/docs/:slug*/asset",
+        destination: "/new/:slug*/copy",
+        pathname: "/docs/guides/start/asset",
+        expected: "/new/guides/start/copy",
+      },
+      {
+        source: "/x/*/y",
+        destination: "/z/$1",
+        pathname: "/x/a/b/y",
+        expected: "/z/a/b",
+      },
+      {
+        source: "/api/:version*/assets/*",
+        destination: "/internal/:version*/files/*",
+        pathname: "/api/v1/public/assets/logo.svg",
+        expected: "/internal/v1/public/files/logo.svg",
+      },
+      // Greedy catch-alls backtrack to the latest split, matching route-pattern.ts.
+      {
+        source: "/docs/:slug*/asset/*",
+        destination: "/new/:slug*/copy/*",
+        pathname: "/docs/asset/asset/logo.svg",
+        expected: "/new/asset/copy/logo.svg",
       },
       // Out-of-range numbered captures collapse to "" in both paths.
       { source: "/only/:id", destination: "/x/$9", pathname: "/only/7", expected: "/x/" },

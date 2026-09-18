@@ -1715,49 +1715,89 @@ const farmCatchAllParamSegments = Symbol("farm.catch-all-param-segments");
 function matchRuntimePathPattern(pattern, pathname) {
   const patternSegments = splitRuntimePath(pattern);
   const pathnameSegments = splitRuntimePath(pathname);
-  const params = {};
-  const catchAllParamSegments = {};
-  Object.defineProperty(params, farmCatchAllParamSegments, {
-    value: catchAllParamSegments,
-  });
-  let pathIndex = 0;
+  const failedStates = new Set();
 
-  for (const segment of patternSegments) {
-    const optionalCatchAll = segment.match(/^\\[\\[\\.\\.\\.(.+)\\]\\]$/);
-    const catchAll = segment.match(/^\\[\\.\\.\\.(.+)\\]$/);
-    const dynamic = segment.match(/^\\[(.+)\\]$/);
-    const namedCatchAll = segment.match(/^:([^/]+)\\*$/);
-    const namedDynamic = segment.match(/^:([^/]+)$/);
-    const starCatchAll = segment.match(/^\\*([^?]+)(\\?)?$/);
-    const wildcard = segment === "*";
-
-    if (optionalCatchAll || catchAll || namedCatchAll || starCatchAll || wildcard) {
-      const name = wildcard
-        ? "wildcard"
-        : (optionalCatchAll || catchAll || namedCatchAll || starCatchAll)[1];
-      const remainingSegments = pathnameSegments.slice(pathIndex).map(decodeRouteSegment);
-      const remaining = remainingSegments.join("/");
-      if (!remaining && (catchAll || (starCatchAll && !starCatchAll[2]))) return null;
-      params[name] = remaining;
-      catchAllParamSegments[name] = remainingSegments;
-      pathIndex = pathnameSegments.length;
-      continue;
-    }
-
-    const pathnameSegment = pathnameSegments[pathIndex];
-    if (pathnameSegment === undefined) return null;
-
-    if (dynamic || namedDynamic) {
-      params[(dynamic || namedDynamic)[1]] = decodeRouteSegment(pathnameSegment);
-      pathIndex++;
-      continue;
-    }
-
-    if (segment !== decodeRouteSegment(pathnameSegment)) return null;
-    pathIndex++;
+  function matchFrom(patternIndex, pathIndex, params, catchAllParamSegments) {
+    const stateKey = patternIndex + ":" + pathIndex;
+    if (failedStates.has(stateKey)) return null;
+    const matched = matchFromUncached(patternIndex, pathIndex, params, catchAllParamSegments);
+    if (!matched) failedStates.add(stateKey);
+    return matched;
   }
 
-  return pathIndex === pathnameSegments.length ? params : null;
+  function matchFromUncached(patternIndex, pathIndex, params, catchAllParamSegments) {
+    while (patternIndex < patternSegments.length) {
+      const segment = patternSegments[patternIndex];
+      const optionalCatchAll = segment.match(/^\\[\\[\\.\\.\\.(.+)\\]\\]$/);
+      const catchAll = segment.match(/^\\[\\.\\.\\.(.+)\\]$/);
+      const dynamic = segment.match(/^\\[(.+)\\]$/);
+      const namedCatchAll = segment.match(/^:([^/]+)\\*$/);
+      const namedDynamic = segment.match(/^:([^/]+)$/);
+      const starCatchAll = segment.match(/^\\*([^?]+)(\\?)?$/);
+      const wildcard = segment === "*";
+
+      if (optionalCatchAll || catchAll || namedCatchAll || starCatchAll || wildcard) {
+        const name = wildcard
+          ? "wildcard"
+          : (optionalCatchAll || catchAll || namedCatchAll || starCatchAll)[1];
+        const required = !!(catchAll || (starCatchAll && !starCatchAll[2]));
+
+        if (patternIndex === patternSegments.length - 1) {
+          const remainingSegments = pathnameSegments.slice(pathIndex).map(decodeRouteSegment);
+          const remaining = remainingSegments.join("/");
+          if (!remaining && required) return null;
+          params[name] = remaining;
+          catchAllParamSegments[name] = remainingSegments;
+          pathIndex = pathnameSegments.length;
+          patternIndex += 1;
+          continue;
+        }
+
+        const maxConsume = pathnameSegments.length - pathIndex;
+        const minConsume = required ? 1 : 0;
+        for (let consume = maxConsume; consume >= minConsume; consume--) {
+          const consumedSegments = pathnameSegments
+            .slice(pathIndex, pathIndex + consume)
+            .map(decodeRouteSegment);
+          const remaining = consumedSegments.join("/");
+          const trialParams = Object.assign({}, params);
+          const trialCatchAll = Object.assign({}, catchAllParamSegments);
+          trialParams[name] = remaining;
+          trialCatchAll[name] = consumedSegments;
+          const matched = matchFrom(
+            patternIndex + 1,
+            pathIndex + consume,
+            trialParams,
+            trialCatchAll,
+          );
+          if (matched) return matched;
+        }
+        return null;
+      }
+
+      const pathnameSegment = pathnameSegments[pathIndex];
+      if (pathnameSegment === undefined) return null;
+
+      if (dynamic || namedDynamic) {
+        params[(dynamic || namedDynamic)[1]] = decodeRouteSegment(pathnameSegment);
+        pathIndex += 1;
+        patternIndex += 1;
+        continue;
+      }
+
+      if (segment !== decodeRouteSegment(pathnameSegment)) return null;
+      pathIndex += 1;
+      patternIndex += 1;
+    }
+
+    if (pathIndex !== pathnameSegments.length) return null;
+    Object.defineProperty(params, farmCatchAllParamSegments, {
+      value: catchAllParamSegments,
+    });
+    return params;
+  }
+
+  return matchFrom(0, 0, {}, {});
 }
 `.trim();
 }
