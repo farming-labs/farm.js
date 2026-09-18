@@ -49,12 +49,13 @@ export async function POST(request: Request): Promise<Response> {
   }
   const fields = new URLSearchParams(read.text);
   if (fields.get("action") === "logout") {
-    // Only act on a logout for a request that actually carries the session.
-    // SameSite=Strict keeps the cookie off cross-site posts, so this stops a
-    // third-party page from clearing the cookie on the visitor's behalf.
-    if (!request.headers.get("cookie")?.includes(`${DASHBOARD_SESSION_COOKIE}=`)) {
-      return redirect("/telemetry");
-    }
+    // The session cookie is scoped `Path=/telemetry`, but this route lives at
+    // `/api/telemetry/dashboard/session` — which does not path-match it (RFC
+    // 6265 §5.1.4) — so the browser never sends the cookie on this POST. A
+    // presence-of-cookie guard is therefore structurally always-false and the
+    // deletion becomes unreachable. Emit it unconditionally: a `Set-Cookie` is
+    // applied to the store by its own `Path`/`Domain`, not by the request path.
+    // Cross-site cookie-clearing is already bounded by `SameSite=Strict`.
     return redirect("/telemetry", sessionCookie("", 0));
   }
 
