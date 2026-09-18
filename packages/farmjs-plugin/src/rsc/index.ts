@@ -22,7 +22,13 @@
  * ```
  */
 
-import { parseAst, type ConfigEnv, type Plugin, type UserConfig } from "vite";
+import {
+  parseAst,
+  version as viteVersion,
+  type ConfigEnv,
+  type Plugin,
+  type UserConfig,
+} from "vite";
 import { init as initModuleLexer, parse as parseModuleImports } from "es-module-lexer";
 import type { FarmRscPluginOptions, EntryContext } from "./types.js";
 import type { FarmServerActionsConfig } from "@farm.js/core/server-action-security";
@@ -528,12 +534,50 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
 
   // Context passed to entry generators
   let entryContext: EntryContext;
-  /** Set in config when RSC enabled; used by build plugin to run Nitro after client writeBundle. */
   let rscBuildRoot: string | undefined;
 
   // Store for debugging
   const debug = options.debug ?? false;
   const automaticDeploymentId = `build-${Date.now()}`;
+  const supportsBuildAppHook = Number(viteVersion.split(".")[0]) >= 7;
+
+  type RscApplicationBuilder = {
+    environments: Record<string, { config?: { build?: { outDir?: string; assetsDir?: string } } }>;
+    config?: { plugins?: readonly { name?: string }[] };
+    build(environment: unknown): Promise<unknown>;
+  };
+
+  const runNitroAfterApplicationBuild = async (builder: RscApplicationBuilder) => {
+    const nitroEnabled = builder.config?.plugins?.some(
+      (plugin) => plugin.name === "vite-plugin-nitro",
+    );
+    if (!nitroEnabled || !rscBuildRoot) return;
+
+    const { runNitroFromBuildApp } = await import("./vite-plugin-nitro.js");
+    if ((globalThis as any).__FARM_NITRO_PATHS) {
+      await runNitroFromBuildApp();
+      return;
+    }
+
+    // Vite creates environment-specific plugin instances by default, so state
+    // captured by a Rollup hook is not guaranteed to be visible here. Resolve
+    // the final environment outputs directly when that state is unavailable.
+    const rscBuild = builder.environments.rsc?.config?.build;
+    const ssrBuild = builder.environments.ssr?.config?.build;
+    const clientBuild = builder.environments.client?.config?.build;
+    if (!rscBuild?.outDir || !ssrBuild?.outDir || !clientBuild?.outDir) return;
+
+    const { buildRscNitro } = await import("./nitro-build.js");
+    const root = path.resolve(rscBuildRoot);
+    await buildRscNitro({
+      root,
+      rendererPath: resolveRscBuildOutputPath(root, rscBuild.outDir, "index.js"),
+      publicDir: resolveRscBuildOutputPath(root, clientBuild.outDir),
+      ssrPath: resolveRscBuildOutputPath(root, ssrBuild.outDir, "index.js"),
+      assetsDir: clientBuild.assetsDir,
+      preset: process.env.NITRO_PRESET || "vercel",
+    });
+  };
 
   const getColors = () => {
     try {
@@ -1004,40 +1048,44 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
       },
     },
 
-    // Nitro: run after all environments (like @hiogawa/vite-plugin-nitro). If the runtime supports
-    // plugin buildApp order "post", this runs automatically; else use build script (see comment below).
     {
-      name: "@farm.js/plugin/rsc:nitro-build",
+      name: "@farm.js/plugin/rsc:nitro-application-build",
+      enforce: "post",
       apply: "build",
+
+      // @vitejs/plugin-rsc owns the Vite 6 builder callback. Wrap its final
+      // callback after config composition so Nitro starts only after the RSC,
+      // client, and SSR outputs have all been written.
+      config(config) {
+        const builderConfig = (
+          config as UserConfig & {
+            builder?: { buildApp?: (builder: RscApplicationBuilder) => Promise<unknown> };
+          }
+        ).builder;
+        const buildApp = builderConfig?.buildApp;
+        if (typeof buildApp !== "function") return;
+
+        return {
+          builder: {
+            ...builderConfig,
+            async buildApp(builder: RscApplicationBuilder) {
+              await buildApp(builder);
+              if (!supportsBuildAppHook) {
+                await runNitroAfterApplicationBuild(builder);
+              }
+            },
+          },
+        } as unknown as UserConfig;
+      },
+
+      // Vite 7+ composes application build hooks directly. Keep the Vite 6
+      // wrapper above for the versions where this hook is not dispatched.
       buildApp: {
         order: "post",
-        handler: async (builder: {
-          environments: Record<
-            string,
-            { config: { build: { outDir: string; assetsDir?: string } } }
-          >;
-        }) => {
-          if (!rscEnabled || !rscBuildRoot || !entryContext) return;
-          if ((globalThis as any).__FARM_NITRO_PLUGIN_RAN) return;
-          const root = path.resolve(rscBuildRoot);
-          if ((globalThis as any).__FARM_NITRO_PATHS) {
-            const { runNitroFromBuildApp } = await import("./vite-plugin-nitro.js");
-            await runNitroFromBuildApp();
-            return;
+        async handler(builder: RscApplicationBuilder) {
+          if (supportsBuildAppHook) {
+            await runNitroAfterApplicationBuild(builder);
           }
-          const rscEnv = builder.environments?.rsc;
-          const ssrEnv = builder.environments?.ssr;
-          const clientEnv = builder.environments?.client;
-          if (!rscEnv || !ssrEnv || !clientEnv) return;
-          const { buildRscNitro } = await import("./nitro-build.js");
-          await buildRscNitro({
-            root,
-            rendererPath: resolveRscBuildOutputPath(root, rscEnv.config.build.outDir, "index.js"),
-            publicDir: resolveRscBuildOutputPath(root, clientEnv.config.build.outDir),
-            ssrPath: resolveRscBuildOutputPath(root, ssrEnv.config.build.outDir, "index.js"),
-            assetsDir: clientEnv.config.build.assetsDir,
-            preset: process.env.NITRO_PRESET || "vercel",
-          });
         },
       },
     } as Plugin,

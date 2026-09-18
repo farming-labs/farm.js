@@ -14,7 +14,7 @@ import nitroPlugin from "./vite-plugin-nitro";
 const buildRscNitroMock = vi.mocked(buildRscNitro);
 const waitForRscOutputsMock = vi.mocked(waitForRscOutputs);
 
-describe("vite-plugin-nitro buildEnd gate with custom build.assetsDir", () => {
+describe("vite-plugin-nitro post-app build with custom build.assetsDir", () => {
   let fixtureRoot: string;
 
   beforeEach(() => {
@@ -24,6 +24,7 @@ describe("vite-plugin-nitro buildEnd gate with custom build.assetsDir", () => {
     delete (globalThis as any).__FARM_NITRO_PLUGIN_RAN;
     delete (globalThis as any).__FARM_NITRO_PATHS;
     delete (globalThis as any).__FARM_NITRO_SERVER_BUNDLE;
+    delete (globalThis as any).__FARM_NITRO_BUILD_PROMISE;
   });
 
   afterEach(() => {
@@ -41,10 +42,11 @@ describe("vite-plugin-nitro buildEnd gate with custom build.assetsDir", () => {
     return distDir;
   }
 
-  it("captures the resolved client assetsDir, passes the gate, and forwards it to buildRscNitro", async () => {
+  it("captures the resolved client assetsDir and forwards it after every environment is written", async () => {
     writeDist("_assets");
     const plugin = nitroPlugin({ config: { preset: "node-server" } }) as any;
 
+    plugin.config();
     plugin.configResolved({
       root: fixtureRoot,
       environments: {
@@ -54,7 +56,13 @@ describe("vite-plugin-nitro buildEnd gate with custom build.assetsDir", () => {
       },
     });
 
-    await plugin.buildEnd.call({ environment: { name: "rsc" } });
+    plugin.writeBundle.call(
+      { environment: { name: "rsc" } },
+      {},
+      { e: { type: "chunk", isEntry: true, fileName: "index.js", name: "index" } },
+    );
+    const { runNitroFromBuildApp } = await import("./vite-plugin-nitro");
+    await runNitroFromBuildApp();
 
     expect(buildRscNitroMock).toHaveBeenCalledTimes(1);
     expect(waitForRscOutputsMock).toHaveBeenCalledTimes(1);
@@ -64,7 +72,7 @@ describe("vite-plugin-nitro buildEnd gate with custom build.assetsDir", () => {
     expect(args.root).toBe(path.resolve(fixtureRoot));
     expect(args.publicDir).toBe(path.resolve(fixtureRoot, ".nitro/vite/dist", "client"));
     expect(args.ssrPath).toBe(path.resolve(fixtureRoot, ".nitro/vite/dist", "ssr", "index.js"));
-    expect((globalThis as any).__FARM_NITRO_PLUGIN_RAN).toBe(true);
+    expect((globalThis as any).__FARM_NITRO_PLUGIN_RAN).toBeUndefined();
   }, 30_000);
 });
 
@@ -76,6 +84,7 @@ describe("runNitroFromBuildApp forwards captured assetsDir", () => {
     buildRscNitroMock.mockClear();
     waitForRscOutputsMock.mockClear();
     delete (globalThis as any).__FARM_NITRO_PLUGIN_RAN;
+    delete (globalThis as any).__FARM_NITRO_BUILD_PROMISE;
     (globalThis as any).__FARM_NITRO_PATHS = {
       root: fixtureRoot,
       rscOutDir: ".nitro/vite/dist/rsc",
