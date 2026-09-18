@@ -320,10 +320,12 @@ export { createFarmNodeRequestAbortSignal } from "./server-http";
 export function withFarmRequestTracing(
   handler: Parameters<typeof _withAfterNodeMiddleware>[0],
   apiRuntime?: APIRequestRuntime,
+  resolveTraceUrl: (request: Connect.IncomingMessage) => URL = (request) =>
+    resolveFarmRequestURL(request as FarmRequest),
 ): Connect.NextHandleFunction {
   const middleware = _withAfterNodeMiddleware(handler);
   return (req, res, next) => {
-    const traceUrl = new URL(`http://${req.headers.host || "localhost:3000"}${req.url || "/"}`);
+    const traceUrl = resolveTraceUrl(req);
     const traceRequest = createRequestFromNodeRequest(req, traceUrl);
     const run = () =>
       runWithFarmRequestSpan(traceRequest, () => middleware(req, res, next), {
@@ -1603,16 +1605,26 @@ window.__FARM_MANIFEST__ = ${inlineValue({
 
       // Register middleware directly (not in return function) to ensure it runs early
       const withAPIRequestTracing = (handler: Parameters<typeof withFarmRequestTracing>[0]) =>
-        withFarmRequestTracing(handler, {
-          basePath: apiServerBasePath,
-          dispatch: async (request) => {
-            // Resolve at call time so HMR never leaves a captured endpoint map.
-            const handler = apiRouteManager.getHandler();
-            return handler
-              ? handler(request)
-              : Response.json({ error: "Not Found" }, { status: 404 });
+        withFarmRequestTracing(
+          handler,
+          {
+            basePath: apiServerBasePath,
+            dispatch: async (request) => {
+              // Resolve at call time so HMR never leaves a captured endpoint map.
+              const handler = apiRouteManager.getHandler();
+              return handler
+                ? handler(request)
+                : Response.json({ error: "Not Found" }, { status: 404 });
+            },
           },
-        });
+          (request) => {
+            const currentConfig = farmApp?.getConfig() ?? options;
+            const currentServerConfig = resolveFarmServerConfig(currentConfig.server);
+            return resolveFarmRequestURL(request as FarmRequest, {
+              trustProxy: currentServerConfig.trustProxy,
+            });
+          },
+        );
       server.middlewares.use(
         withAPIRequestTracing(async (req, res, next) => {
           const requestUrl = req.url || "/";
@@ -2053,8 +2065,9 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             const startTime = Date.now();
             const method = req.method || "GET";
             const urlPath = req.url || "/";
-            const pathname = new URL(urlPath, `http://${req.headers.host || "localhost:3000"}`)
-              .pathname;
+            const pathname = resolveFarmRequestURL(req as FarmRequest, {
+              trustProxy: currentServerConfig.trustProxy,
+            }).pathname;
 
             try {
               if (pm) {
@@ -2642,8 +2655,9 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           const startTime = Date.now();
           const method = req.method || "GET";
           const urlPath = req.url || "/";
-          const pathname = new URL(urlPath, `http://${req.headers.host || "localhost:3000"}`)
-            .pathname;
+          const pathname = resolveFarmRequestURL(req as FarmRequest, {
+            trustProxy: currentServerConfig.trustProxy,
+          }).pathname;
           const routeManager = farmApp.getRouteManager();
           const hasBeforeRouteMatchHook = pm?.hasHook("beforeRouteMatch") ?? false;
           const hasAfterRouteMatchHook = pm?.hasHook("afterRouteMatch") ?? false;
