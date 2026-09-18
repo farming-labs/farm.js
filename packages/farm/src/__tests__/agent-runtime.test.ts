@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { mkdtemp, mkdir, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { gzipSync } from "node:zlib";
+import { gzipSync, zstdCompressSync } from "node:zlib";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   applyAgentRuntimeViteProxy,
@@ -214,6 +214,102 @@ describe("agent runtime proxy", () => {
     expect(response.headers.get("content-encoding")).toBeNull();
     expect(response.headers.get("content-length")).toBeNull();
     expect(await response.text()).toBe(payload);
+  });
+
+  it("does not forward stale zstd metadata after fetch decodes a zstd body", async () => {
+    const plaintext = "decoded-zstd-agent-response-plaintext-body";
+    const encodedLength = 48;
+    const response = await proxyAgentRuntimeRequest(
+      new Request("http://farm.test/agents/zstd", {
+        headers: { "accept-encoding": "identity" },
+      }),
+      "https://agent.example.com",
+      {
+        fetch: async (_input, _init) =>
+          new Response(plaintext, {
+            status: 200,
+            headers: {
+              "content-encoding": "zstd",
+              "content-length": String(encodedLength),
+              "content-type": "text/plain",
+            },
+          }),
+      },
+    );
+
+    expect(response.headers.get("content-encoding")).toBeNull();
+    expect(response.headers.get("content-length")).toBeNull();
+    expect(await response.text()).toBe(plaintext);
+  });
+
+  it("keeps a real zstd upstream consistent with this runtime's fetch decoder", async () => {
+    const plaintext = "real-zstd-agent-response-body";
+    // zstdCompressSync is undefined on Node 22.13 (the engines floor), which
+    // ships undici 6.x and does not decode zstd. Fall back to the exact zstd
+    // frame zstdCompressSync produces for this plaintext so the test still
+    // drives a real zstd upstream on 22.13 (its preserve-branch guard) rather
+    // than skipping it on the only Node 22 version CI runs.
+    const compressed =
+      typeof zstdCompressSync === "function"
+        ? zstdCompressSync(Buffer.from(plaintext))
+        : Buffer.from([
+            0x28, 0xb5, 0x2f, 0xfd, 0x20, 0x1d, 0xe9, 0x00, 0x00, 0x72, 0x65, 0x61, 0x6c, 0x2d,
+            0x7a, 0x73, 0x74, 0x64, 0x2d, 0x61, 0x67, 0x65, 0x6e, 0x74, 0x2d, 0x72, 0x65, 0x73,
+            0x70, 0x6f, 0x6e, 0x73, 0x65, 0x2d, 0x62, 0x6f, 0x64, 0x79,
+          ]);
+    const server = createServer((_request, response) => {
+      response.writeHead(200, {
+        "content-encoding": "zstd",
+        "content-length": compressed.byteLength,
+        "content-type": "text/plain",
+      });
+      response.end(compressed);
+    });
+    const origin = await listen(server);
+    cleanups.push(() => close(server));
+
+    const response = await proxyAgentRuntimeRequest(
+      new Request("http://farm.test/agents/zstd", {
+        headers: { "accept-encoding": "identity" },
+      }),
+      origin,
+    );
+
+    const body = Buffer.from(await response.arrayBuffer());
+    if (response.headers.get("content-encoding") === "zstd") {
+      expect(response.headers.get("content-length")).toBe(String(compressed.byteLength));
+      expect(body.equals(compressed)).toBe(true);
+    } else {
+      expect(response.headers.get("content-encoding")).toBeNull();
+      expect(response.headers.get("content-length")).toBeNull();
+      expect(body.toString("utf8")).toBe(plaintext);
+    }
+  });
+
+  it("preserves zstd metadata when a valid stream begins with a skippable frame", async () => {
+    const encoded = Uint8Array.from([
+      // Empty skippable frame (magic 0x184D2A50 plus a zero payload length).
+      0x50, 0x2a, 0x4d, 0x18, 0x00, 0x00, 0x00, 0x00,
+      // A regular zstd frame follows the skippable frame.
+      0x28, 0xb5, 0x2f, 0xfd, 0x20, 0x01, 0x09, 0x00, 0x00, 0x78,
+    ]);
+    const response = await proxyAgentRuntimeRequest(
+      new Request("http://farm.test/agents/zstd-skippable"),
+      "https://agent.example.com",
+      {
+        fetch: async () =>
+          new Response(encoded, {
+            headers: {
+              "content-encoding": "zstd",
+              "content-length": String(encoded.byteLength),
+            },
+          }),
+      },
+    );
+
+    expect(response.headers.get("content-encoding")).toBe("zstd");
+    expect(response.headers.get("content-length")).toBe(String(encoded.byteLength));
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(encoded);
   });
 
   it.each(["HEAD", "GET"])(
