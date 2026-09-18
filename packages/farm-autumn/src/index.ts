@@ -954,11 +954,12 @@ function resolveActiveProduct(
     .filter((entry) => byPlanId.has(entry.planId))
     .sort((left, right) => right.startedAt - left.startedAt)[0];
   if (matchedPurchase) {
+    const expired = matchedPurchase.expiresAt != null && matchedPurchase.expiresAt <= Date.now();
     return {
       product: byPlanId.get(matchedPurchase.planId) ?? null,
       subscription: null,
       purchase: matchedPurchase,
-      status: "active",
+      status: expired ? "canceled" : "active",
     };
   }
 
