@@ -638,7 +638,7 @@ export function auth0(input: Auth0IntegrationInput = {}) {
                   `${requestUrl.pathname}${requestUrl.search}`,
                 );
 
-                return Response.redirect(redirectUrl, 307);
+                return Response.redirect(redirectUrl, 303); // 303 (See Other) mandates a GET on the GET-only login route regardless of the original method (RFC 7231 §6.4.4)
               },
             },
           ]

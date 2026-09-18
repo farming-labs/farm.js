@@ -459,7 +459,7 @@ export function workos(input: WorkOSIntegrationInput = {}) {
                 const requestUrl = new URL(request.url);
                 const loginUrl = new URL(loginPath, request.url);
                 loginUrl.searchParams.set("returnTo", `${requestUrl.pathname}${requestUrl.search}`);
-                return Response.redirect(loginUrl, 307);
+                return Response.redirect(loginUrl, 303); // 303 (See Other) mandates a GET on the GET-only login route regardless of the original method (RFC 7231 §6.4.4)
               },
             },
           ]
