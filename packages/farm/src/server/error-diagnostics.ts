@@ -18,7 +18,7 @@ interface StackLocation {
 }
 
 const SECRET_VALUE_PATTERN =
-  /\b(api[_-]?key|access[_-]?token|auth[_-]?token|token|password|secret)\s*[:=]\s*([^\s,;]+)/gi;
+  /\b(api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|secret[_-]?key|token|password|secret)\s*[:=]\s*([^\s,;]+)/gi;
 const BEARER_PATTERN = /\b(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi;
 
 function redactErrorText(value: string): string {
