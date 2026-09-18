@@ -261,10 +261,17 @@ async function restoreRepeatedDependencySections(
   const packageJson = JSON.parse(source) as ProjectPackageJson;
 
   for (const entries of repeatedPackages) {
-    const installedSpecifier = [...entries]
-      .reverse()
-      .map((entry) => packageJson[entry.section]?.[entry.name])
-      .find((value): value is string => typeof value === "string");
+    const installedSpecifier =
+      entries
+        .map((entry) => packageJson[entry.section]?.[entry.name])
+        .find(
+          (value, index): value is string =>
+            typeof value === "string" && value !== entries[index].current,
+        ) ??
+      [...entries]
+        .reverse()
+        .map((entry) => packageJson[entry.section]?.[entry.name])
+        .find((value): value is string => typeof value === "string");
     if (!installedSpecifier) {
       throw new Error(
         `Package manager removed ${entries[0].name} while upgrading repeated dependency sections.`,
