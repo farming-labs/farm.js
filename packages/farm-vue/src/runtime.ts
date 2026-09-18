@@ -192,7 +192,16 @@ function normalizeProps(element: FarmVueElement): {
 
 function asVNodeChildren(children: unknown[]): VNodeChild {
   if (children.length === 0) return undefined;
-  return children.length === 1 ? (children[0] as VNodeChild) : (children as VNodeChild[]);
+  // React treats `false`, `true`, `null`, and `undefined` as children that do
+  // not render. Vue coerces a scalar primitive child to a text node via
+  // `String(child)`, so an unfiltered boolean would render the visible text
+  // "false"/"true". Drop React-ignored values here so a sole boolean child
+  // (the `cond && <X/>` idiom) never reaches `h()`.
+  const filtered = children.filter(
+    (child) => child !== null && child !== undefined && typeof child !== "boolean",
+  );
+  if (filtered.length === 0) return undefined;
+  return filtered.length === 1 ? (filtered[0] as VNodeChild) : (filtered as VNodeChild[]);
 }
 
 export function materializeVueElement(value: unknown): VNodeChild {
