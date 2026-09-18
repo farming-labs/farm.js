@@ -647,3 +647,91 @@ describe("generated server action security", () => {
     ).resolves.toMatchObject({ code: expect.any(String) });
   });
 });
+
+describe("RSC client link interceptor respects modified and non-primary clicks", () => {
+  function extractHandleClickFactory(entry: string) {
+    const start = entry.indexOf("const handleClick = (e) => {");
+    const end = entry.indexOf("document.addEventListener('click', handleClick, true);", start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const slice = entry.slice(start, end);
+    return new Function("location", "history", "nav", `${slice} return handleClick;`) as (
+      location: any,
+      history: any,
+      nav: any,
+    ) => (e: any) => void;
+  }
+
+  const origin = "https://farm.test";
+
+  function makeLink(overrides: Record<string, any> = {}) {
+    return {
+      href: `${origin}/page`,
+      origin,
+      download: false,
+      target: "",
+      hasAttribute: () => false,
+      ...overrides,
+    };
+  }
+
+  function makeEvent(link: any, overrides: Record<string, any> = {}) {
+    return {
+      target: { closest: () => link },
+      preventDefault: vi.fn(),
+      metaKey: false,
+      altKey: false,
+      ctrlKey: false,
+      shiftKey: false,
+      button: 0,
+      ...overrides,
+    };
+  }
+
+  function harness() {
+    const history = { pushState: vi.fn() };
+    const nav = vi.fn();
+    const location = { origin };
+    const handleClick = extractHandleClickFactory(generateClientEntry(context))(
+      location,
+      history,
+      nav,
+    );
+    return { history, nav, location, handleClick };
+  }
+
+  it("performs SPA navigation for a plain left-click on a same-origin link", () => {
+    const { handleClick, history, nav } = harness();
+    const e = makeEvent(makeLink());
+    handleClick(e);
+    expect(e.preventDefault).toHaveBeenCalledOnce();
+    expect(history.pushState).toHaveBeenCalledWith(null, "", `${origin}/page`);
+    expect(nav).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["metaKey", { metaKey: true }],
+    ["ctrlKey", { ctrlKey: true }],
+    ["shiftKey", { shiftKey: true }],
+    ["altKey", { altKey: true }],
+  ])("skips SPA navigation on %s-click so the browser opens a new tab", (_label, mods) => {
+    const { handleClick, history, nav } = harness();
+    const e = makeEvent(makeLink(), mods);
+    handleClick(e);
+    expect(e.preventDefault).not.toHaveBeenCalled();
+    expect(history.pushState).not.toHaveBeenCalled();
+    expect(nav).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["middle-click", { button: 1 }],
+    ["right-click", { button: 2 }],
+  ])("skips SPA navigation on %s", (_label, mods) => {
+    const { handleClick, history, nav } = harness();
+    const e = makeEvent(makeLink(), mods);
+    handleClick(e);
+    expect(e.preventDefault).not.toHaveBeenCalled();
+    expect(history.pushState).not.toHaveBeenCalled();
+    expect(nav).not.toHaveBeenCalled();
+  });
+});
