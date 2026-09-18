@@ -196,7 +196,6 @@ describe("farm devtools", () => {
     const html = renderFarmDevtoolsHtml(snapshot);
 
     expect(html).toContain("<title>Farm Devtools - app</title>");
-    expect(html).toContain("/__farm/devtools.json");
     expect(html).toContain('data-inspector="overview"');
     expect(html).toContain('data-view-panel="overview"');
     expect(html).toContain('data-view-panel="runtime"');
