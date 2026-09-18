@@ -61,6 +61,7 @@ export default function nitro(options: NitroPluginOptions = {}): Plugin {
   let ssrOutDir: string = path.join(NITRO_VITE_DIST, "ssr");
   let clientOutDir: string = path.join(NITRO_VITE_DIST, "client");
   let baseOutDir: string = NITRO_VITE_DIST;
+  let clientAssetsDir: string = "assets";
 
   return {
     name: "vite-plugin-nitro",
@@ -92,6 +93,11 @@ export default function nitro(options: NitroPluginOptions = {}): Plugin {
         ssrOutDir = path.join(baseOutDir, "ssr");
         clientOutDir = path.join(baseOutDir, "client");
       }
+      const clientBuildAssetsDir = envs?.client?.build?.assetsDir;
+      clientAssetsDir =
+        typeof clientBuildAssetsDir === "string" && clientBuildAssetsDir
+          ? clientBuildAssetsDir
+          : "assets";
     },
 
     // Step 2: Capture the server (RSC) Rollup bundle when that environment writes.
@@ -110,6 +116,7 @@ export default function nitro(options: NitroPluginOptions = {}): Plugin {
           clientOutDir,
           serverEntryName,
           preset: options.config?.preset ?? process.env.NITRO_PRESET ?? "vercel",
+          clientAssetsDir,
         };
       }
     },
@@ -127,7 +134,9 @@ export default function nitro(options: NitroPluginOptions = {}): Plugin {
           : path.dirname(rscOutDir);
       const rscOk = existsSync(resolveRscBuildOutputPath(root, baseOutDir, "rsc", "index.js"));
       const ssrOk = existsSync(resolveRscBuildOutputPath(root, baseOutDir, "ssr", "index.js"));
-      const clientOk = existsSync(resolveRscBuildOutputPath(root, baseOutDir, "client", "assets"));
+      const clientOk = existsSync(
+        resolveRscBuildOutputPath(root, baseOutDir, "client", clientAssetsDir),
+      );
       if (!rscOk || !ssrOk || !clientOk) return;
       nitroRunScheduled = true;
 
@@ -159,7 +168,7 @@ export default function nitro(options: NitroPluginOptions = {}): Plugin {
           rendererPath,
           publicDir: resolveRscBuildOutputPath(root, clientOutDir),
           ssrPath: resolveRscBuildOutputPath(root, ssrOutDir, "index.js"),
-          assetsDir: undefined,
+          assetsDir: clientAssetsDir,
           preset,
         });
         (globalThis as any).__FARM_NITRO_PLUGIN_RAN = true;
@@ -180,6 +189,7 @@ export async function runNitroFromBuildApp(): Promise<void> {
         clientOutDir: string;
         serverEntryName: string;
         preset: string;
+        clientAssetsDir?: string;
       }
     | undefined;
   const bundle = (globalThis as any).__FARM_NITRO_SERVER_BUNDLE as Record<
@@ -215,7 +225,7 @@ export async function runNitroFromBuildApp(): Promise<void> {
     rendererPath,
     publicDir: resolveRscBuildOutputPath(root, paths.clientOutDir),
     ssrPath: resolveRscBuildOutputPath(root, paths.ssrOutDir, "index.js"),
-    assetsDir: undefined,
+    assetsDir: paths.clientAssetsDir ?? "assets",
     preset,
   });
 }
