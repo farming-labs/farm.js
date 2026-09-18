@@ -54,10 +54,17 @@ export function renderToPipeableStream(
   let shellErrored = false;
   let destination: (NodeJS.WritableStream & { destroy?(error?: unknown): void }) | undefined;
 
-  const abortDestination = (error: unknown) => {
+  const abortDestination = () => {
     if (!destination) return;
-    if (typeof destination.destroy === "function") destination.destroy(error as Error);
-    else destination.end();
+    // `pipe()` forwards source `end` but not errors, so the awaiting consumer
+    // needs an explicit nudge to settle. End the destination (rather than
+    // destroying it with the error) so the consumer's `_final` -> `res.end()` /
+    // `resolve()` runs. The consumer's piped `Writable` attaches no `'error'`
+    // listener; `destination.destroy(error)` would re-emit the error through
+    // `pipe()`'s prepended destination onerror -> `uncaughtException` (worker
+    // crash) and, even if contained, skips `_final` so the request hangs.
+    if (typeof destination.end === "function") destination.end();
+    else if (typeof destination.destroy === "function") destination.destroy();
   };
 
   source.on("error", (error) => {
@@ -72,7 +79,7 @@ export function renderToPipeableStream(
     }
     // `pipe()` does not forward source errors, so end the destination explicitly
     // or the awaiting consumer never settles.
-    abortDestination(error);
+    abortDestination();
   });
 
   // The shell is ready once the render produces its first output (or completes)
