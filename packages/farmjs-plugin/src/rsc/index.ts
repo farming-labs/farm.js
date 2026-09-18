@@ -1018,7 +1018,6 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           >;
         }) => {
           if (!rscEnabled || !rscBuildRoot || !entryContext) return;
-          if ((globalThis as any).__FARM_NITRO_PLUGIN_RAN) return;
           const root = path.resolve(rscBuildRoot);
           if ((globalThis as any).__FARM_NITRO_PATHS) {
             const { runNitroFromBuildApp } = await import("./vite-plugin-nitro.js");

@@ -1,15 +1,29 @@
 /**
- * Vite plugin to run Nitro after RSC build (single "vite build", no post script).
- * Implements the Nitro RSC deployment pipeline:
- * - Step 1: Force per-environment output dirs to .nitro/vite/dist/${name} so Nitro can locate artifacts.
- * - Step 2: Capture the server (RSC) Rollup bundle in writeBundle.
- * - Step 3: Find the SSR entry chunk from the bundle.
- * - Step 4: Compute renderer path and pass to Nitro with client publicDir.
+ * Vite plugin for the Nitro RSC deployment pipeline. It forces per-environment
+ * output dirs (`Step 1`), captures the server (RSC) Rollup bundle in `writeBundle`
+ * (`Step 2`), and exposes `runNitroFromBuildApp()`, which builds Nitro from the
+ * captured outputs once all environments have finished writing.
+ *
+ * `runNitroFromBuildApp()` is meant to be invoked after the build's environments
+ * complete — for example by a post-build script (the repo's
+ * `scripts/nitro-post.mjs`) or by the consuming RSC plugin's
+ * `buildApp: { order: "post" }` handler where the runtime dispatches that hook.
+ *
+ * The plugin no longer triggers Nitro itself from a Rollup hook: the previous
+ * `buildEnd` trigger fired before its own environment's `prepareOutDir`/`writeBundle`,
+ * so on a rebuild it observed the previous build's stale outputs and built Nitro
+ * against them (and set `__FARM_NITRO_PLUGIN_RAN`, suppressing the proper run).
+ * Removing it keeps Nitro from running against stale artifacts; Nitro is run after
+ * outputs are written, via `runNitroFromBuildApp()` / `buildRscNitro()`.
+ *
+ * - Step 1: Force per-environment output dirs to `.nitro/vite/dist/${name}` so Nitro can locate artifacts.
+ * - Step 2: Capture the server (RSC) Rollup bundle in `writeBundle`.
  *
  * @example
  * ```ts
- * import nitro from '@farm.js/plugin/rsc/vite-plugin-nitro'
+ * import { defineConfig, nitro } from '@farm.js/plugin/rsc'
  * export default defineConfig({
+ *   srcDir: 'src',
  *   plugins: [rsc(), react(), nitro({ server: { environmentName: 'rsc' }, config: { preset: 'vercel' } })],
  * })
  * ```
@@ -42,13 +56,6 @@ export interface NitroPluginOptions {
   /** Base output dir when not using .nitro/vite/dist (fallback). */
   outDir?: string;
 }
-
-let nitroRunScheduled = false;
-/** Stored RSC (server) bundle from writeBundle so we can find the entry chunk. */
-let serverBundle: Record<
-  string,
-  { type: string; fileName?: string; isEntry?: boolean; name?: string }
-> | null = null;
 
 const NITRO_VITE_DIST = ".nitro/vite/dist";
 
@@ -101,7 +108,6 @@ export default function nitro(options: NitroPluginOptions = {}): Plugin {
       bundle: Record<string, { type: string; fileName?: string; isEntry?: boolean; name?: string }>,
     ) {
       if ((this as any).environment?.name === serverEnvName) {
-        serverBundle = bundle;
         (globalThis as any).__FARM_NITRO_SERVER_BUNDLE = bundle;
         (globalThis as any).__FARM_NITRO_PATHS = {
           root: resolvedRoot,
@@ -112,60 +118,6 @@ export default function nitro(options: NitroPluginOptions = {}): Plugin {
           preset: options.config?.preset ?? process.env.NITRO_PRESET ?? "vercel",
         };
       }
-    },
-
-    // Run Nitro once all env outputs exist (after step 5). buildEnd runs after each env; only run when all exist.
-    async buildEnd(this: { environment?: { name?: string } }) {
-      if (nitroRunScheduled) return;
-      const root = path.resolve(resolvedRoot);
-      const { existsSync } = await import("fs");
-      await new Promise((r) => setTimeout(r, 800));
-      const baseOutDir = rscOutDir.includes(".nitro/vite/dist")
-        ? NITRO_VITE_DIST
-        : path.isAbsolute(path.dirname(rscOutDir))
-          ? path.relative(root, path.dirname(rscOutDir)) || "."
-          : path.dirname(rscOutDir);
-      const rscOk = existsSync(resolveRscBuildOutputPath(root, baseOutDir, "rsc", "index.js"));
-      const ssrOk = existsSync(resolveRscBuildOutputPath(root, baseOutDir, "ssr", "index.js"));
-      const clientOk = existsSync(resolveRscBuildOutputPath(root, baseOutDir, "client", "assets"));
-      if (!rscOk || !ssrOk || !clientOk) return;
-      nitroRunScheduled = true;
-
-      const preset = options.config?.preset ?? process.env.NITRO_PRESET ?? "vercel";
-
-      const run = async () => {
-        await waitForRscOutputs(root, baseOutDir, { timeoutMs: 20_000 }).catch(() => {
-          // Outputs already verified; proceed (nitro-build stubs manifest if missing)
-        });
-
-        let rendererPath = resolveRscBuildOutputPath(root, rscOutDir, "index.js");
-        if (serverBundle) {
-          const serverEntryChunks: OutputChunkLike[] = [];
-          for (const chunk of Object.values(serverBundle)) {
-            if (chunk.type === "chunk" && chunk.isEntry && chunk.fileName) {
-              serverEntryChunks.push(chunk as OutputChunkLike);
-            }
-          }
-          const selected = serverEntryName
-            ? serverEntryChunks.find((c) => (c.name ?? c.fileName) === serverEntryName)
-            : serverEntryChunks[0];
-          if (selected?.fileName) {
-            rendererPath = resolveRscBuildOutputPath(root, rscOutDir, selected.fileName);
-          }
-        }
-
-        await buildRscNitro({
-          root,
-          rendererPath,
-          publicDir: resolveRscBuildOutputPath(root, clientOutDir),
-          ssrPath: resolveRscBuildOutputPath(root, ssrOutDir, "index.js"),
-          assetsDir: undefined,
-          preset,
-        });
-        (globalThis as any).__FARM_NITRO_PLUGIN_RAN = true;
-      };
-
-      await run();
     },
   };
 }
