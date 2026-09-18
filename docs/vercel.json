@@ -1,4 +1,4 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- ':/docs' ':/packages/farm' ':/packages/farm-cli' ':/packages/farm-devtools' ':/pnpm-lock.yaml'"
+  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- ':/docs' ':/packages/farm' ':/packages/farm-cli' ':/packages/farm-devtools' ':/pnpm-lock.yaml' ':(exclude,top)packages/farm/src/__tests__' ':(exclude,top)packages/farm-cli/src/__tests__' ':(exclude,top)packages/farm-devtools/src/__tests__'"
 }
