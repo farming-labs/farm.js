@@ -5405,9 +5405,9 @@ function createHostConditionalBlockComponent(
         return;
       }
       if (this.state.fallback) {
-        // React owns the container while in fallback; re-render with the
-        // stable key so updates reconcile in place instead of remounting the
-        // subtree (which would wipe uncontrolled inputs, focus, and scroll).
+        // Nested fallback may contain duplicate keys; retain its complete recovery reset.
+        // Otherwise React already owns the subtree and can preserve unchanged form state.
+        if (this.fallbackUnsubscribers.length > 0) this.fallbackVersion += 1;
         this.forceUpdate(afterCommit);
         return;
       }
@@ -5736,7 +5736,9 @@ function createConditionalRangesBlockComponent(
         return;
       }
       if (this.state.fallback) {
-        this.fallbackVersion += 1;
+        // Nested fallback may contain duplicate keys; retain its complete recovery reset.
+        // Otherwise React already owns the subtree and can preserve unchanged form state.
+        if (this.fallbackUnsubscribers.length > 0) this.fallbackVersion += 1;
         this.forceUpdate(afterCommit);
         return;
       }

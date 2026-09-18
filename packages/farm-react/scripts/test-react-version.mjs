@@ -384,15 +384,26 @@ const testSource = String.raw`
   // StrictMode must restore descendant subscriptions when structural adoption fell back to React.
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const fallbackReplayFailures = [];
-  for (const kind of ["HostConditional", "ConditionalRanges"]) {
+  for (const { kind, descendants } of ["HostConditional", "ConditionalRanges"].flatMap((kind) =>
+    [true, false].map((descendants) => ({ kind, descendants })))) {
     for (const reactivity of ["static", "hybrid"]) {
       for (const lifecycle of ["mount", "hydrate"]) {
-        const context = kind + "/" + reactivity + "/" + lifecycle;
+        const context = kind + "/" + reactivity + "/" + lifecycle + (descendants ? "/nested" : "/leaf");
         let update, updateControl, owner, block;
         let owners = 0, renders = 0;
         const host = (tag, children = []) => ({ kind: "element", tag, attributes: [], styles: [], children });
+        function LocalCounter() {
+          const [count, setCount] = React.useState(0);
+          return React.createElement("button", { onClick: () => setCount((previous) => previous + 1) }, "Local: " + count);
+        }
         const view = (visible, count) => React.createElement("section", null,
-          React.createElement("aside", null, "Extra"),
+          descendants ? React.createElement("aside", null, "Extra") : React.createElement("aside", null,
+            React.createElement(LocalCounter),
+            React.createElement("input", { defaultValue: "draft", "aria-label": "Text" }),
+            React.createElement("textarea", { defaultValue: "draft", "aria-label": "Note" }),
+            React.createElement("select", { defaultValue: "a", "aria-label": "Choice" },
+              React.createElement("option", { value: "a" }, "A"), React.createElement("option", { value: "b" }, "B")),
+          ),
           visible ? React.createElement("article", null, count >= 0 ? React.createElement("em", null, count) : null) : null,
         );
         const Panel = createCompiledComponent({
@@ -405,9 +416,9 @@ const testSource = String.raw`
             const nested = { create: () => host("em", [cells[1].get()]), bindings: [] };
             const branch = { create: () => ({
               ...host("article", cells[1].get() >= 0 ? [nested.create()] : []),
-              block: { kind: "conditional-ranges", id: 1, trailing: 0,
+              block: descendants ? { kind: "conditional-ranges", id: 1, trailing: 0,
                 ranges: [{ before: 0, test: () => cells[1].get() >= 0, truthy: nested }],
-              },
+              } : undefined,
             }), bindings: [] };
             const condition = { before: 0, test: () => cells[0].get(), truthy: branch };
             return React.createElement("main", null, React.createElement(blocks[kind], {
@@ -418,7 +429,9 @@ const testSource = String.raw`
               ...(kind === "HostConditional" ? condition : { ranges: [condition], trailing: 0 }),
             }));
           },
-          bindings: [{ kind: "block", id: 0, dependencies: [0] }, { kind: "block", id: 1, parent: 0, dependencies: [1] }],
+          bindings: descendants
+            ? [{ kind: "block", id: 0, dependencies: [0] }, { kind: "block", id: 1, parent: 0, dependencies: [1] }]
+            : [{ kind: "block", id: 0, dependencies: [0, 1] }],
         });
         function Control() {
           const [model, setModel] = React.useState([true, 0]);
@@ -441,11 +454,42 @@ const testSource = String.raw`
           });
           assert.equal(block.state.fallback, true, context);
           const initialOwners = owners;
+          let checkDomState = () => {};
+          if (!descendants) {
+          await React.act(async () => {
+            target.querySelector("button").click();
+            controlTarget.querySelector("button").click();
+          });
+          const container = target.querySelector("section");
+          const input = target.querySelector("input");
+          const textarea = target.querySelector("textarea");
+          const select = target.querySelector("select");
+          for (const surface of [target, controlTarget]) {
+            surface.querySelector("input").value = "typed text";
+            surface.querySelector("textarea").value = "typed note";
+            surface.querySelector("select").value = "b";
+          }
+          input.focus();
+          input.setSelectionRange(1, 4, "backward");
+          checkDomState = () => {
+            assert.ok(target.querySelector("section") === container, context + "/container identity");
+            assert.ok(target.querySelector("input") === input, context + "/input identity");
+            assert.ok(target.querySelector("textarea") === textarea, context + "/textarea identity");
+            assert.ok(target.querySelector("select") === select, context + "/select identity");
+            assert.equal(input.value, controlTarget.querySelector("input").value, context);
+            assert.equal(textarea.value, controlTarget.querySelector("textarea").value, context);
+            assert.equal(select.value, controlTarget.querySelector("select").value, context);
+            assert.equal(target.querySelector("button").textContent, "Local: 1", context);
+            assert.ok(document.activeElement === input, context + "/focus");
+            assert.deepEqual([input.selectionStart, input.selectionEnd, input.selectionDirection], [1, 4, "backward"], context);
+          };
+          }
           for (const [index, value] of [[1, 1], [0, false], [1, 2], [0, true], [1, -1], [1, 3]]) {
             await React.act(async () => { update(index, value); updateControl(index, value); });
             assert.equal(target.innerHTML, controlTarget.innerHTML, context);
-            assert.deepEqual([...owner.blockRefreshListeners.keys()].sort(), [0, 1], context);
+            assert.deepEqual([...owner.blockRefreshListeners.keys()].sort(), descendants ? [0, 1] : [0], context);
             assert.equal(owners, initialOwners, context);
+            checkDomState();
           }
           // A later replay must also retain a committed permanent fallback.
           for (const count of [4, 5]) {
@@ -456,7 +500,8 @@ const testSource = String.raw`
               update(1, count); updateControl(1, count);
             });
             assert.equal(target.innerHTML, controlTarget.innerHTML, context);
-            assert.deepEqual([...owner.blockRefreshListeners.keys()].sort(), [0, 1], context);
+            assert.deepEqual([...owner.blockRefreshListeners.keys()].sort(), descendants ? [0, 1] : [0], context);
+            checkDomState();
           }
           const beforeUnmount = { owners, renders };
           const detached = target.firstElementChild;
@@ -479,6 +524,84 @@ const testSource = String.raw`
     }
   }
   assert.deepEqual(fallbackReplayFailures, []);
+  delete globalThis.IS_REACT_ACT_ENVIRONMENT;
+
+  // Nested keyed fallback must recover completely even when only its outer block is notified.
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const nestedRecoveryFailures = [];
+  for (const kind of ["HostConditional", "ConditionalRanges"]) {
+    for (const reactivity of ["static", "hybrid"]) {
+      for (const lifecycle of ["mount", "hydrate"]) {
+        for (const updates of ["outer", "nested"]) {
+          const context = kind + "/" + reactivity + "/" + lifecycle + "/" + updates;
+          const host = (tag, children = []) => ({ kind: "element", tag, attributes: [], styles: [], children });
+          let update, owners = 0;
+          const Panel = createCompiledComponent({
+            displayName: "CompatibilityNestedRecovery",
+            reactivity,
+            initialize: () => [[{ id: "a", label: "Alpha" }, { id: "b", label: "Beta" }]],
+            render(_props, cells, blocks) {
+              owners += 1;
+              update = cells[0].set;
+              const items = () => cells[0].get();
+              const branch = {
+                create: () => host("section", [{
+                  ...host("ul", items().map((item) => host("li", [item.label]))),
+                  block: { kind: "keyed-ranges", id: 1, trailing: 0, ranges: [{
+                    before: 0, items, rowKey: (item) => item.id,
+                    create: (item) => host("li", [item.label]),
+                    bindings: [{ kind: "text", path: [], read: (item) => item.label }],
+                  }] },
+                }]),
+                bindings: [],
+              };
+              const condition = { before: 0, test: () => true, truthy: branch };
+              return React.createElement("main", null, React.createElement(blocks[kind], {
+                id: 0,
+                render: () => React.createElement("div", null, React.createElement("section", null,
+                  React.createElement("ul", null, items().map((item) => React.createElement("li", { key: item.id }, item.label))))),
+                ...(kind === "HostConditional" ? condition : { ranges: [condition], trailing: 0 }),
+              }));
+            },
+            bindings: [
+              { kind: "block", id: 0, dependencies: updates === "outer" ? [0] : [] },
+              { kind: "block", id: 1, parent: 0, dependencies: updates === "nested" ? [0] : [] },
+            ],
+          });
+          const target = document.createElement("div");
+          document.body.append(target);
+          const tree = React.createElement(React.StrictMode, null, React.createElement(Panel));
+          if (lifecycle === "hydrate") target.innerHTML = renderToString(tree);
+          const errors = [];
+          let root;
+          try {
+            await React.act(async () => {
+              root = lifecycle === "hydrate" ? hydrateRoot(target, tree, { onRecoverableError: (error) => errors.push(error) }) : createRoot(target);
+              if (lifecycle === "mount") root.render(tree);
+            });
+            const initialOwners = owners;
+            for (const items of [
+              [{ id: "a", label: "First" }, { id: "a", label: "Second" }],
+              [{ id: "c", label: "Recovered" }],
+              [],
+              [{ id: "d", label: "Fresh" }],
+            ]) {
+              await React.act(async () => update(items));
+              assert.deepEqual([...target.querySelectorAll("li")].map((row) => row.textContent), items.map((item) => item.label), context);
+              assert.equal(owners, initialOwners, context);
+            }
+            assert.deepEqual(errors, [], context);
+          } catch (error) {
+            nestedRecoveryFailures.push({ context, message: error.message });
+          } finally {
+            await React.act(async () => root?.unmount());
+            target.remove();
+          }
+        }
+      }
+    }
+  }
+  assert.deepEqual(nestedRecoveryFailures, []);
   delete globalThis.IS_REACT_ACT_ENVIRONMENT;
 
   let reverseCompatibilityRows = () => undefined;
