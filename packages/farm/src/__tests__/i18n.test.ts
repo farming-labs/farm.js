@@ -7,6 +7,7 @@ import { resolveFarmI18nConfig } from "../i18n/config";
 import {
   createFarmLocaleCookie,
   getFarmLocaleVaryHeaders,
+  matchFarmLocale,
   resolveFarmLocaleRequest,
 } from "../i18n/resolver";
 import { FarmI18nRuntime } from "../i18n/runtime";
@@ -297,6 +298,55 @@ describe("Farm locale request signals", () => {
 
     expect(getFarmLocaleVaryHeaders(config, detected)).toEqual(["Cookie", "Accept-Language"]);
     expect(getFarmLocaleVaryHeaders(config, explicit)).toEqual([]);
+  });
+});
+
+describe("Farm regional locale fallback", () => {
+  it("prefers a configured base language over a regional sharing the primary subtag", () => {
+    expect(matchFarmLocale("en-US", ["en-GB", "en"])).toBe("en");
+    expect(matchFarmLocale("en-GB", ["en-US", "en"])).toBe("en");
+  });
+
+  it("still falls back to a regional variant when no base language is configured", () => {
+    expect(matchFarmLocale("en-US", ["en-GB"])).toBe("en-GB");
+    expect(matchFarmLocale("en-US", ["en-AU", "en-GB"])).toBe("en-AU");
+  });
+
+  it("keeps exact regional matches ahead of a configured base language", () => {
+    expect(matchFarmLocale("en-US", ["en", "en-US"])).toBe("en-US");
+    expect(matchFarmLocale("en-GB", ["en", "en-GB"])).toBe("en-GB");
+  });
+
+  it("resolves an Accept-Language regional request to the configured base language", () => {
+    const cfg = resolveFarmI18nConfig({
+      locales: ["en-GB", "en"],
+      defaultLocale: "en-GB",
+    });
+
+    expect(
+      resolveFarmLocaleRequest(
+        new Request("https://farm.test/", {
+          headers: { "accept-language": "en-US,en;q=0.9" },
+        }),
+        cfg,
+      ),
+    ).toMatchObject({ locale: "en", source: "accept-language" });
+  });
+
+  it("resolves a regional cookie value to the configured base language", () => {
+    const cfg = resolveFarmI18nConfig({
+      locales: ["en-GB", "en"],
+      defaultLocale: "en-GB",
+    });
+
+    expect(
+      resolveFarmLocaleRequest(
+        new Request("https://farm.test/dashboard", {
+          headers: { cookie: "farm_locale=en-US" },
+        }),
+        cfg,
+      ),
+    ).toMatchObject({ locale: "en", source: "cookie" });
   });
 });
 
