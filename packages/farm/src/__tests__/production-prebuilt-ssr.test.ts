@@ -3528,4 +3528,66 @@ export default function OpenGraphImage() {
       await fs.rm(root, { recursive: true, force: true });
     }
   }, 120_000);
+
+  it("serves a React.lazy opengraph-image as a PNG from a built universal node-server", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      await fs.writeFile(
+        path.join(root, "src", "lib", "lazy-og-target.tsx"),
+        `
+export default function LazyLabel() {
+  return <span className="text-4xl text-white">Lazy OG</span>;
+}
+`.trim(),
+      );
+      await fs.writeFile(
+        path.join(root, "src", "app", "opengraph-image.tsx"),
+        `
+import { lazy } from "react";
+
+const LazyLabel = lazy(() => import("../lib/lazy-og-target"));
+
+export const alt = "Lazy universal metadata image";
+
+export default function OpenGraphImage() {
+  return (
+    <div className="flex h-full w-full items-center justify-center bg-black text-white">
+      <LazyLabel />
+    </div>
+  );
+}
+`.trim(),
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          generateBuildId: () => "metadata-image-lazy-universal-test",
+        },
+        "production",
+      );
+
+      await build(config, { root, preset: "node-server" });
+
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (homeResponse) => {
+          expect(homeResponse.status).toBe(200);
+          const og = await fetch(`${new URL(homeResponse.url).origin}/opengraph-image`);
+          expect(og.status).toBe(200);
+          expect(og.headers.get("content-type")).toBe("image/png");
+          const bytes = Buffer.from(await og.arrayBuffer());
+          expect(bytes.subarray(0, 8)).toEqual(
+            Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+          );
+          expect(bytes.length).toBeGreaterThan(0);
+        },
+        "/",
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 180_000);
 });
