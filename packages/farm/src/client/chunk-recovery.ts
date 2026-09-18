@@ -105,7 +105,7 @@ function markRecovered(options: FarmChunkRecoveryOptions): boolean {
   const key = getStorageKey(options);
 
   if (!storage) {
-    return true;
+    return false;
   }
 
   try {
@@ -116,7 +116,7 @@ function markRecovered(options: FarmChunkRecoveryOptions): boolean {
     storage.setItem(key, String(now));
     return true;
   } catch {
-    return true;
+    return false;
   }
 }
 
