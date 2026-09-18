@@ -5,7 +5,7 @@ Create a new FARMJS application
 FARMJS is currently in beta.
 
 ```bash
-pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-app --template basic
+PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta my-app --template basic
 cd my-app
 pnpm dev
 ```
@@ -15,13 +15,24 @@ automatically. Every starter also registers the official
 [`@farm.js/devtools`](https://farmjs.dev/docs/plugins/devtools) workspace, available at
 `/__farm/devtools` (or `Command/Ctrl + Shift + .`) during `pnpm dev`. The command explicitly selects the minimal Basic starter. Use `pnpm create`, not
 `pnpm add`; pnpm resolves this initializer command to the published `@farm.js/create-app` package.
-The command scopes `minimumReleaseAge=0` to the initializer so pnpm 11 can resolve a beta published
-within the last 24 hours. Pass `--skip-install` when you only want to generate the project files.
+`PNPM_CONFIG_DLX_CACHE_MAX_AGE=0` refreshes pnpm's one-day `create`/`dlx` cache so the `beta`
+dist-tag is resolved on every run. `PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE` keeps pnpm's default
+release-age protection enabled for third-party packages while allowing newly published
+`@farm.js/*` betas. Generated pnpm projects preserve that scoped exclusion. Pass `--skip-install`
+when you only want to generate the project files.
+
+In PowerShell, set the same variables before running the command:
+
+```powershell
+$env:PNPM_CONFIG_DLX_CACHE_MAX_AGE = "0"
+$env:PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE = '["@farm.js/*"]'
+pnpm create @farm.js/app@beta my-app --template basic
+```
 
 Choose React, Preact, Solid, Vue, or Svelte for the Basic and Better Auth starters:
 
 ```bash
-pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-app --template better-auth --renderer solid
+PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta my-app --template better-auth --renderer solid
 ```
 
 React remains the default when `--renderer` is omitted. The interactive Basic and Better Auth
@@ -30,7 +41,7 @@ flows also offer a renderer chooser.
 List every starter:
 
 ```bash
-pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta --list-templates
+PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta --list-templates
 ```
 
 Available templates:
@@ -45,7 +56,7 @@ home page, and setup documentation. Better Auth has renderer-native UI for all f
 other integration templates currently use React. For example:
 
 ```bash
-pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta stripe-app --template stripe
+PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta stripe-app --template stripe
 ```
 
 See the [FARMJS repository](https://github.com/farming-labs/farm.js) for documentation, examples, and support.
