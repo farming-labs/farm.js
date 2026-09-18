@@ -13,11 +13,14 @@ Call app API routes with apiClient.hello.get style inference, cache policies, in
 **src/lib/api.ts**
 
 ```ts
-import { createApiClients } from "@farm.js/core/client";
+import { createApiClients } from "@farm.js/core/api/client";
 import { apiRoutes, type APIRouter } from "./api.generated";
 
 export const { api, apiClient } = createApiClients<APIRouter>({ routes: apiRoutes });
 ```
+
+`@farm.js/core/api/client` is the renderer-neutral entry for typed API callers. The existing
+`@farm.js/core/client` export remains supported for React apps that also use Farm's client hooks.
 
 Define each endpoint once in a file route or plugin. This shared module imports only generated
 paths/methods and types, never server handlers or credentials. Import `api` in server code and

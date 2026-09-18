@@ -191,6 +191,9 @@
         "./types/api.d.ts",
         "./dist/api.d.ts"
       ],
+      "api/client": [
+        "./dist/api/client.d.ts"
+      ],
       "api/route-manager": [
         "./dist/api/route-manager.d.ts"
       ],
@@ -475,6 +478,11 @@
       "types": "./dist/api.d.ts",
       "import": "./dist/api.mjs",
       "require": "./dist/api.cjs"
+    },
+    "./api/client": {
+      "types": "./dist/api/client.d.ts",
+      "import": "./dist/api/client.mjs",
+      "require": "./dist/api/client.cjs"
     },
     "./api/route-manager": {
       "types": "./dist/api/route-manager.d.ts",

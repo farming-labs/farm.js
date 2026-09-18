@@ -96,6 +96,8 @@ describe("generateFarmTypeArtifacts", () => {
     };
     expect(packageJson.exports["./css"]?.types).toBe("./types/css.d.ts");
     expect(packageJson.typesVersions["*"]?.css).toEqual(["./types/css.d.ts"]);
+    expect(packageJson.exports["./api/client"]?.types).toBe("./dist/api/client.d.ts");
+    expect(packageJson.typesVersions["*"]?.["api/client"]).toEqual(["./dist/api/client.d.ts"]);
   });
 
   it("types global CSS side effects and CSS Modules", () => {

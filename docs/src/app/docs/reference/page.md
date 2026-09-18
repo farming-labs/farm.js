@@ -14,6 +14,7 @@ A compact map of the main package exports and where to learn more.
 | ----------------------------- | ------------------------------------------------------------------------------------ |
 | @farm.js/core                 | Config, app types, plugins, integrations, routing, OpenAPI, docs, cache.             |
 | @farm.js/core/client          | Link, router helpers, callable route actions, API client, integration client.        |
+| @farm.js/core/api/client      | Renderer-neutral typed API clients.                                                  |
 | @farm.js/core/plugin/client   | Advanced browser lifecycle manager and client plugin event types.                    |
 | @farm.js/core/navigation      | Next-compatible redirect, notFound, and client navigation hooks.                     |
 | @farm.js/core/headers         | Next-compatible request headers and cookies helpers.                                 |
