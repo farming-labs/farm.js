@@ -458,6 +458,11 @@ Each trial attempts to stop its production server even if browser-context setup,
 or context disposal fails. A failed trial still aborts the run; it does not publish an aggregate
 pass or continue with a potentially contaminated comparison.
 
+Server shutdown waits for the child process to exit, including after the existing two-second
+grace period escalates to a forced stop. Signal-delivery failures abort the run instead of
+reporting successful cleanup. Already-exited servers are left alone, and shutdown removes its
+own timer and event listeners. This teardown is outside the measured browser updates.
+
 ## Reading the result
 
 - Dashboard active updates measure the case where the visible chart and metrics really change.

@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { once } from "node:events";
 import { readFile, readdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -206,10 +205,39 @@ async function waitForServer(server, origin, readOutput) {
 }
 
 async function stopServer(server) {
-  if (server.exitCode !== null) return;
-  server.kill("SIGTERM");
-  await Promise.race([once(server, "exit"), new Promise((resolve) => setTimeout(resolve, 2_000))]);
-  if (server.exitCode === null) server.kill("SIGKILL");
+  if (server.exitCode !== null || server.signalCode !== null) return;
+  await new Promise((resolve, reject) => {
+    let timeout;
+    const cleanup = () => {
+      clearTimeout(timeout);
+      server.off("exit", onExit);
+      server.off("error", onError);
+    };
+    const onExit = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = (error) => {
+      cleanup();
+      reject(error);
+    };
+    const signal = (name) => {
+      try {
+        if (!server.kill(name)) {
+          onError(new Error(`Could not send ${name} to benchmark server.`));
+        }
+      } catch (error) {
+        onError(error);
+      }
+    };
+
+    // Sending a signal is not proof of exit. Listen before signaling, including
+    // after escalation, so the next trial cannot overlap a still-running server.
+    server.once("exit", onExit);
+    server.once("error", onError);
+    timeout = setTimeout(() => signal("SIGKILL"), 2_000);
+    signal("SIGTERM");
+  });
 }
 
 async function measureTrial(browser, trial, compilerMode, port) {

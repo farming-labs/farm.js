@@ -8,7 +8,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runInNewContext } from "node:vm";
 import { parseSync, types as t } from "@babel/core";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const filename = fileURLToPath(
   new URL("../../../../examples/react-compiler-dashboard/scripts/benchmark.mjs", import.meta.url),
@@ -129,7 +129,7 @@ function createHarness(failures: Stage[] = [], realServer = false) {
       return context;
     }),
   };
-  const actualStop = runnerFunction("stopServer", { once, setTimeout });
+  const actualStop = runnerFunction("stopServer", { once, setTimeout, clearTimeout });
   const stopServer = vi.fn(async (child) => {
     stage("stop");
     if (realServer) await actualStop(child);
@@ -246,4 +246,173 @@ describe("compiler dashboard trial cleanup", () => {
       expect(harness.stopServer).toHaveBeenCalledExactlyOnceWith(child);
     },
   );
+});
+
+describe("compiler dashboard server shutdown", () => {
+  function stop(server: unknown) {
+    return runnerFunction("stopServer", { once, setTimeout, clearTimeout })(server);
+  }
+
+  describe("exit and signal ordering", () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    function createServer() {
+      const server = Object.assign(new EventEmitter(), {
+        exitCode: null as number | null,
+        signalCode: null as NodeJS.Signals | null,
+        kill: vi.fn((_signal: string) => true),
+      });
+      return {
+        server,
+        exit(code: number | null, signal: NodeJS.Signals | null) {
+          server.exitCode = code;
+          server.signalCode = signal;
+          server.emit("exit", code, signal);
+        },
+      };
+    }
+
+    function expectClean(server: EventEmitter) {
+      expect(server.listenerCount("exit")).toBe(0);
+      expect(server.listenerCount("error")).toBe(0);
+      expect(vi.getTimerCount()).toBe(0);
+    }
+
+    it.each([
+      [0, null],
+      [null, "SIGTERM"],
+    ] as const)("does not signal an already-exited server (%s, %s)", async (code, signal) => {
+      const { server, exit } = createServer();
+      exit(code, signal);
+      const stopping = stop(server);
+      await vi.advanceTimersByTimeAsync(2_000);
+      await stopping;
+      expect(server.kill).not.toHaveBeenCalled();
+      expectClean(server);
+    });
+
+    it.each([
+      [0, null],
+      [null, "SIGTERM"],
+    ] as const)("waits for graceful exit (%s, %s) and cancels escalation", async (code, signal) => {
+      const { server, exit } = createServer();
+      let settled = false;
+      const stopping = stop(server).then(() => {
+        settled = true;
+      });
+      await vi.advanceTimersByTimeAsync(1_999);
+      expect(settled).toBe(false);
+      expect(server.kill.mock.calls).toEqual([["SIGTERM"]]);
+      exit(code, signal);
+      await stopping;
+      expectClean(server);
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(server.kill.mock.calls).toEqual([["SIGTERM"]]);
+    });
+
+    it("waits for the exit event after sending SIGKILL", async () => {
+      const { server, exit } = createServer();
+      let settled = false;
+      const stopping = stop(server).then(() => {
+        settled = true;
+      });
+      await vi.advanceTimersByTimeAsync(1_999);
+      expect(server.kill.mock.calls).toEqual([["SIGTERM"]]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(server.kill.mock.calls).toEqual([["SIGTERM"], ["SIGKILL"]]);
+      expect(settled).toBe(false);
+      exit(null, "SIGKILL");
+      await stopping;
+      expectClean(server);
+    });
+
+    it("installs the exit listener before signaling", async () => {
+      const { server, exit } = createServer();
+      server.kill.mockImplementation(() => {
+        exit(null, "SIGTERM");
+        return true;
+      });
+      const stopping = stop(server);
+      await vi.advanceTimersByTimeAsync(2_000);
+      await stopping;
+      expect(server.kill.mock.calls).toEqual([["SIGTERM"]]);
+      expectClean(server);
+    });
+
+    it.each(["SIGTERM", "SIGKILL"])(
+      "rejects a %s delivery error and removes owned listeners",
+      async (signal) => {
+        const { server } = createServer();
+        const error = new Error("Cannot signal server");
+        const observer = vi.fn();
+        server.on("error", observer);
+        server.kill.mockImplementation((sent) => {
+          if (sent === signal) server.emit("error", error);
+          return sent !== signal;
+        });
+        const rejected = expect(stop(server)).rejects.toBe(error);
+        await Promise.all([rejected, vi.advanceTimersByTimeAsync(2_000)]);
+        expect(observer).toHaveBeenCalledExactlyOnceWith(error);
+        expect(server.listeners("error")).toEqual([observer]);
+        server.off("error", observer);
+        expectClean(server);
+      },
+    );
+
+    it.each(["SIGTERM", "SIGKILL"])("rejects when %s throws", async (signal) => {
+      const { server } = createServer();
+      const error = new Error("Unsupported signal");
+      server.kill.mockImplementation((sent) => {
+        if (sent === signal) throw error;
+        return true;
+      });
+      const rejected = expect(stop(server)).rejects.toBe(error);
+      await Promise.all([rejected, vi.advanceTimersByTimeAsync(2_000)]);
+      expectClean(server);
+    });
+
+    it.each(["SIGTERM", "SIGKILL"])(
+      "does not report success when %s is not delivered",
+      async (signal) => {
+        const { server } = createServer();
+        server.kill.mockImplementation((sent) => sent !== signal);
+        const rejected = expect(stop(server)).rejects.toThrow(
+          `Could not send ${signal} to benchmark server`,
+        );
+        await Promise.all([rejected, vi.advanceTimersByTimeAsync(2_000)]);
+        expectClean(server);
+      },
+    );
+  });
+
+  it("confirms a real stubborn child has exited before returning", async () => {
+    const child = spawn(
+      process.execPath,
+      [
+        "-e",
+        'process.on("SIGTERM", () => {}); process.stdout.write("ready\\n"); setInterval(() => {}, 1000);',
+      ],
+      { stdio: ["ignore", "pipe", "pipe"] },
+    );
+    const exited = once(child, "exit");
+    children.push({ child, exited });
+    await Promise.race([
+      once(child.stdout!, "data"),
+      exited.then(() => {
+        throw new Error("Test child exited before readiness");
+      }),
+    ]);
+    const signal = vi.spyOn(child, "kill");
+    try {
+      await stop(child);
+      expect(child.exitCode !== null || child.signalCode !== null).toBe(true);
+      // Windows terminates SIGTERM recipients immediately; POSIX can ignore it.
+      expect(signal.mock.calls).toEqual(
+        process.platform === "win32" ? [["SIGTERM"]] : [["SIGTERM"], ["SIGKILL"]],
+      );
+    } finally {
+      signal.mockRestore();
+    }
+  });
 });
