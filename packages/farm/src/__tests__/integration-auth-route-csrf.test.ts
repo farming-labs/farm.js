@@ -163,6 +163,56 @@ describe("supabase auth route origin validation", () => {
     expect(signInWithPassword).toHaveBeenCalledTimes(1);
   });
 
+  it("rescues a TLS-offload POST via allowedOrigins when request.url stays http:", async () => {
+    const { factory, signInWithPassword } = createSupabaseStub();
+    const integration = supabase({
+      instance: factory,
+      allowedOrigins: ["https://app.example.com"],
+    });
+    const route = integration.routes.find((candidate) => candidate.path === "/auth/login");
+
+    // TLS-terminating proxy that leaves request.url as http: (trustProxy off,
+    // or no X-Forwarded-Proto). The browser origin is https: and the Host
+    // header matches, but `source.origin !== requestUrl.origin` (https vs http)
+    // and matchesHostHeader rejects on the scheme mismatch, so the request is
+    // only accepted because the configured allowed origin matches.
+    const request = new Request("http://app.example.com/auth/login", {
+      method: "POST",
+      headers: {
+        origin: "https://app.example.com",
+        "sec-fetch-site": "same-origin",
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: credentialBody(),
+    });
+
+    const response = await route!.handler(request, createContext(request, "/auth/login"));
+
+    expect(response.status).not.toBe(403);
+    expect(signInWithPassword).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects the same TLS-offload POST when the browser origin is not allowed", async () => {
+    const { factory, signInWithPassword } = createSupabaseStub();
+    const integration = supabase({ instance: factory });
+    const route = integration.routes.find((candidate) => candidate.path === "/auth/login");
+
+    const request = new Request("http://app.example.com/auth/login", {
+      method: "POST",
+      headers: {
+        origin: "https://app.example.com",
+        "sec-fetch-site": "same-origin",
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: credentialBody(),
+    });
+
+    const response = await route!.handler(request, createContext(request, "/auth/login"));
+
+    expect(response.status).toBe(403);
+    expect(signInWithPassword).not.toHaveBeenCalled();
+  });
+
   it("accepts a configured trusted origin", async () => {
     const { factory, signInWithPassword } = createSupabaseStub();
     const integration = supabase({
