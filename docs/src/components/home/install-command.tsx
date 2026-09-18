@@ -61,7 +61,8 @@ const commands: readonly CommandOption[] = [
   },
   {
     label: "pnpm",
-    command: "pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-app",
+    command:
+      "pnpm --config.dlx-cache-max-age=0 --config.minimum-release-age=0 create @farm.js/app@beta my-app",
     brand: pnpmIconUrl,
     kind: "install",
   },

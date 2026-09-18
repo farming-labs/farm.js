@@ -19,5 +19,5 @@ export default defineConfig({
 Create a complete starter from the FARMJS CLI:
 
 ```bash
-pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-preact-app --template basic --renderer preact --typescript
+pnpm --config.dlx-cache-max-age=0 --config.minimum-release-age=0 create @farm.js/app@beta my-preact-app --template basic --renderer preact --typescript
 ```

@@ -18,14 +18,15 @@ Farm keeps the first project small: an app directory, a config file, package met
 **Terminal**
 
 ```bash
-pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-app --template basic --typescript
+pnpm --config.dlx-cache-max-age=0 --config.minimum-release-age=0 create @farm.js/app@beta my-app --template basic --typescript
 cd my-app
 pnpm dev
 ```
 
 This command follows the current `beta` dist-tag and explicitly selects the minimal Basic starter.
-The scoped `minimumReleaseAge=0` setting lets pnpm 11 use a beta published within the last 24 hours
-without changing your global supply-chain policy.
+The scoped `dlx-cache-max-age=0` setting refreshes pnpm's cached `create`/`dlx` metadata, while
+`minimum-release-age=0` allows a beta published within the last 24 hours without changing your
+global supply-chain policy.
 Use `pnpm create`, not `pnpm add`: pnpm resolves the `@farm.js/app` initializer name to the
 published `@farm.js/create-app` package. The scaffolder installs React and all other starter
 dependencies automatically. Use `--skip-install` if you only want it to generate the project
@@ -34,10 +35,10 @@ files.
 React is the default renderer. The Basic starter can instead use Preact, Solid, Vue, or Svelte:
 
 ```bash
-pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-preact-app --template basic --renderer preact --typescript
-pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-solid-app --template basic --renderer solid --typescript
-pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-vue-app --template basic --renderer vue --typescript
-pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-svelte-app --template basic --renderer svelte --typescript
+pnpm --config.dlx-cache-max-age=0 --config.minimum-release-age=0 create @farm.js/app@beta my-preact-app --template basic --renderer preact --typescript
+pnpm --config.dlx-cache-max-age=0 --config.minimum-release-age=0 create @farm.js/app@beta my-solid-app --template basic --renderer solid --typescript
+pnpm --config.dlx-cache-max-age=0 --config.minimum-release-age=0 create @farm.js/app@beta my-vue-app --template basic --renderer vue --typescript
+pnpm --config.dlx-cache-max-age=0 --config.minimum-release-age=0 create @farm.js/app@beta my-svelte-app --template basic --renderer svelte --typescript
 ```
 
 See [Renderers](/docs/renderers) before choosing an adapter. Integration starters currently use
@@ -74,7 +75,7 @@ and drop the `@farm.js/devtools` dev dependency if you do not want it.
 For example:
 
 ```bash
-pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta stripe-app --template stripe --typescript
+pnpm --config.dlx-cache-max-age=0 --config.minimum-release-age=0 create @farm.js/app@beta stripe-app --template stripe --typescript
 ```
 
 The generated README lists the required environment values and links to the provider guide.
@@ -82,7 +83,7 @@ The generated README lists the required environment values and links to the prov
 To explore Farm's experimental React AOT compiler with the shared dark starter UI:
 
 ```bash
-pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta compiler-app --template react-compiler --typescript
+pnpm --config.dlx-cache-max-age=0 --config.minimum-release-age=0 create @farm.js/app@beta compiler-app --template react-compiler --typescript
 ```
 
 The same project is available as the standalone
