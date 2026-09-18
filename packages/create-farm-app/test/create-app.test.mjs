@@ -15,6 +15,17 @@ async function workspaceRendererVersion(rendererPackage) {
   return JSON.parse(await readFile(manifestPath, "utf8")).version;
 }
 
+async function assertRendererNeutralStarter(generatedDir, packageJson) {
+  assert.equal(packageJson.dependencies["@farming-labs/docs"], undefined);
+  assert.equal(packageJson.dependencies["@farming-labs/farmjs"], undefined);
+  assert.equal(packageJson.dependencies["@farming-labs/theme"], undefined);
+  assert.equal(packageJson.dependencies.react, undefined);
+  assert.equal(packageJson.dependencies["react-dom"], undefined);
+  await assert.rejects(readFile(path.join(generatedDir, "docs.config.ts"), "utf8"));
+  await assert.rejects(readFile(path.join(generatedDir, "docs.json"), "utf8"));
+  await assert.rejects(readFile(path.join(generatedDir, "src/app/docs/page.md"), "utf8"));
+}
+
 test("spaces the CLI banner and matches the website hero copy", async () => {
   const { showBanner } = await import("../dist/utils.mjs");
   const lines = [];
@@ -472,8 +483,7 @@ test("generates a Solid starter while keeping React as the default renderer", as
       await workspaceRendererVersion("farm-solid"),
     );
     assert.equal(packageJson.dependencies["solid-js"], "1.9.14");
-    assert.equal(packageJson.dependencies.react, undefined);
-    assert.equal(packageJson.dependencies["react-dom"], undefined);
+    await assertRendererNeutralStarter(generatedDir, packageJson);
     assert.match(config, /renderer: solid\(\)/);
     assert.match(config, /from "@farm\.js\/solid"/);
     assert.match(page, /createSignal/);
@@ -483,6 +493,7 @@ test("generates a Solid starter while keeping React as the default renderer", as
     assert.match(apiClient, /createApiClients<APIRouter>/);
     assert.match(apiClient, /export const \{ api, apiClient \}/);
     assert.match(apiClient, /routes: apiRoutes/);
+    assert.match(apiClient, /from "@farm\.js\/core\/api\/client"/);
     assert.doesNotMatch(apiClient, /from ["'].*(?:route|server)["']/);
     assert.equal(tsconfig.compilerOptions.jsx, "preserve");
     assert.equal(tsconfig.compilerOptions.jsxImportSource, "solid-js");
@@ -526,8 +537,7 @@ test("generates a Preact starter with typed server interaction", async () => {
 
     assert.equal(packageJson.dependencies["@farm.js/preact"], rendererPackage.version);
     assert.equal(packageJson.dependencies.preact, "10.29.8");
-    assert.equal(packageJson.dependencies.react, undefined);
-    assert.equal(packageJson.dependencies["react-dom"], undefined);
+    await assertRendererNeutralStarter(generatedDir, packageJson);
     assert.match(config, /renderer: preact\(\)/);
     assert.match(config, /from "@farm\.js\/preact"/);
     assert.match(page, /useState/);
@@ -538,6 +548,7 @@ test("generates a Preact starter with typed server interaction", async () => {
     assert.match(apiClient, /createApiClients<APIRouter>/);
     assert.match(apiClient, /export const \{ api, apiClient \}/);
     assert.match(apiClient, /routes: apiRoutes/);
+    assert.match(apiClient, /from "@farm\.js\/core\/api\/client"/);
     assert.doesNotMatch(apiClient, /from ["'].*(?:route|server)["']/);
     assert.equal(tsconfig.compilerOptions.jsx, "react-jsx");
     assert.equal(tsconfig.compilerOptions.jsxImportSource, "preact");
@@ -577,8 +588,7 @@ test("generates a Vue SFC starter with typed server interaction", async () => {
       await workspaceRendererVersion("farm-vue"),
     );
     assert.equal(packageJson.dependencies.vue, "3.5.41");
-    assert.equal(packageJson.dependencies.react, undefined);
-    assert.equal(packageJson.dependencies["react-dom"], undefined);
+    await assertRendererNeutralStarter(generatedDir, packageJson);
     assert.equal(packageJson.scripts["type-check"], "vue-tsc --noEmit");
     assert.ok(packageJson.devDependencies["@farm.js/devtools"]);
     assert.match(config, /plugins: \[devtools\(\)\]/);
@@ -627,8 +637,7 @@ test("generates a Svelte starter with typed server interaction", async () => {
 
     assert.equal(packageJson.dependencies["@farm.js/svelte"], rendererPackage.version);
     assert.equal(packageJson.dependencies.svelte, "5.56.8");
-    assert.equal(packageJson.dependencies.react, undefined);
-    assert.equal(packageJson.dependencies["react-dom"], undefined);
+    await assertRendererNeutralStarter(generatedDir, packageJson);
     assert.equal(packageJson.scripts["type-check"], "svelte-check --tsconfig ./tsconfig.json");
     assert.match(config, /renderer: svelte\(\)/);
     assert.match(config, /from "@farm\.js\/svelte"/);

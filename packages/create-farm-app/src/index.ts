@@ -466,6 +466,14 @@ async function applyRendererTemplate(
 ) {
   const rendererTemplatePath = path.join(__dirname, "..", "templates", "_renderers", renderer);
 
+  // The starter docs page and config are powered by React-only packages. A
+  // renderer overlay must not leave that route or its configuration behind.
+  await Promise.all([
+    fs.rm(path.join(projectPath, "docs.config.ts"), { force: true }),
+    fs.rm(path.join(projectPath, "docs.json"), { force: true }),
+    fs.rm(path.join(projectPath, "src", "app", "docs"), { recursive: true, force: true }),
+  ]);
+
   if (renderer === "vue" || renderer === "svelte") {
     await Promise.all([
       fs.rm(path.join(projectPath, "src", "app", "page.tsx"), { force: true }),
@@ -489,7 +497,15 @@ function mergeRendererPackageJson(
   const dependencies = { ...base.dependencies, ...renderer.dependencies };
   const devDependencies = { ...base.devDependencies, ...renderer.devDependencies };
 
-  for (const name of ["react", "react-dom"]) delete dependencies[name];
+  for (const name of [
+    "@farming-labs/docs",
+    "@farming-labs/farmjs",
+    "@farming-labs/theme",
+    "react",
+    "react-dom",
+  ]) {
+    delete dependencies[name];
+  }
   for (const name of ["@types/react", "@types/react-dom"]) delete devDependencies[name];
 
   return {
