@@ -625,8 +625,8 @@ function renderBelowTitleMeta(page: LoadedFarmDocsPage, docs: FarmDocsResolvedCo
 function renderMarkdownHtmlWithTitleMeta(
   page: LoadedFarmDocsPage,
   docs: FarmDocsResolvedConfig,
+  html: string,
 ): string {
-  const html = renderMarkdownHtml(page.body);
   const meta = renderBelowTitleMeta(page, docs);
   if (!meta) return html;
 
@@ -1066,12 +1066,21 @@ function renderCodeCopyButton(className = "code-copy"): string {
   return `<button class="${className}" type="button" data-copied="false" aria-label="Copy code" title="Copy code" onclick="navigator.clipboard?.writeText(this.closest('figure').querySelector('code').innerText); this.dataset.copied='true'; this.setAttribute('aria-label','Copied'); this.title='Copied'; clearTimeout(this._copyTimer); this._copyTimer=setTimeout(() => { this.dataset.copied='false'; this.setAttribute('aria-label','Copy code'); this.title='Copy code'; }, 4500);"><svg class="code-copy-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg><svg class="code-copy-check" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 6 9 17l-5-5"></path></svg></button>`;
 }
 
-function renderMarkdownHtml(body: string): string {
+function renderMarkdownDocument(
+  body: string,
+  depth: number,
+): { html: string; tocItems: TocItem[] } {
   const slug = createSlugger();
   const renderer = new Renderer();
+  const maxLevel = Math.max(2, Math.min(depth, 6));
+  const tocItems: TocItem[] = [];
 
   renderer.heading = (text, level, raw) => {
-    const id = slug(raw || stripHtml(text));
+    const title = raw || stripHtml(text);
+    const id = slug(title);
+    if (level >= 2 && level <= maxLevel) {
+      tocItems.push({ id, title, level });
+    }
     return `<h${level} id="${escapeAttribute(id)}"><a class="heading-anchor" href="#${escapeAttribute(id)}">${text}</a></h${level}>\n`;
   };
 
@@ -1117,56 +1126,13 @@ function renderMarkdownHtml(body: string): string {
     renderer,
   }) as string;
 
-  return html.trim();
+  return { html: html.trim(), tocItems };
 }
 
 interface TocItem {
   id: string;
   title: string;
   level: number;
-}
-
-function extractTocItems(body: string, depth: number): TocItem[] {
-  const slug = createSlugger();
-  const maxLevel = Math.max(2, Math.min(depth, 6));
-  const items: TocItem[] = [];
-  // Track fenced code blocks so a `##` line inside a fence is not treated as a
-  // heading. marked skips those when rendering, so counting them here would
-  // produce phantom TOC links with no matching anchor. Mirrors the fence
-  // tracking in stripMdxRuntimeSyntax / attachCodeBlockLabels.
-  let fence: { marker: "`" | "~"; length: number } | null = null;
-
-  for (const line of body.split(/\r?\n/)) {
-    const nextFence = getCodeFence(line);
-    if (fence) {
-      if (nextFence && nextFence.marker === fence.marker && isClosingCodeFence(line, fence)) {
-        fence = null;
-      }
-      continue;
-    }
-    if (nextFence) {
-      fence = nextFence;
-      continue;
-    }
-
-    // Match every heading level, not just the TOC-visible ones. The renderer
-    // slugs every heading (including the page h1), so the slug counter here must
-    // advance identically or a repeated title drifts: `# Configuration` then
-    // `## Configuration` gives the h2 the id `configuration-2` in the rendered
-    // HTML, but a slugger that skipped the h1 would emit `#configuration` and
-    // link to the page title instead of the section.
-    const match = line.match(/^(#{1,6})\s+(.+)$/);
-    if (!match) continue;
-
-    const title = match[2].trim();
-    const id = slug(title);
-    const level = match[1].length;
-    if (level >= 2 && level <= maxLevel) {
-      items.push({ id, title, level });
-    }
-  }
-
-  return items;
 }
 
 function getThemeUI(docs: FarmDocsResolvedConfig): Record<string, any> {
@@ -1725,7 +1691,12 @@ function renderPixelDocsHtml(
       ? String((docs.config.nav as { title?: unknown }).title || "Docs")
       : "Docs";
   const description = page.description || docs.config.metadata?.description || "";
-  const tocItems = extractTocItems(page.body, getThemeTocDepth(docs));
+  // Rendering and TOC extraction share the same preprocessed Marked pass. This
+  // guarantees MDX lines removed before rendering, Setext/CommonMark edge
+  // cases, and duplicate-slug counters cannot diverge between the article and
+  // its navigation.
+  const renderedMarkdown = renderMarkdownDocument(page.body, getThemeTocDepth(docs));
+  const tocItems = renderedMarkdown.tocItems;
   const themeName = getThemeName(docs);
   const searchEnabled = isFarmDocsSearchEnabled(docs);
   const socialMetadata = isFarmDocsSocialImageEnabled(page, docs)
@@ -1775,7 +1746,7 @@ function renderPixelDocsHtml(
       <div class="fd-page">
       <article id="nd-page" class="prose fd-page-article fd-page-body fd-docs-content">
         ${renderPixelBreadcrumb(page, docs)}
-${renderMarkdownHtmlWithTitleMeta(page, docs)}
+${renderMarkdownHtmlWithTitleMeta(page, docs, renderedMarkdown.html)}
         ${renderPixelPageFooter(page, docs)}
         ${renderPixelPageNav(pages, page.href, docs)}
       </article>
