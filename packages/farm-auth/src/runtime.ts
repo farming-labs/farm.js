@@ -77,6 +77,14 @@ export async function getFarmAuthRuntime(): Promise<BetterAuthRuntime> {
       }
     });
     state.runtime = runtime;
+    void runtime.catch(() => {
+      if (state.runtime === runtime) {
+        state.runtime = undefined;
+        const database = state.database;
+        state.database = undefined;
+        if (database) void closeDatabase(database).catch(() => {});
+      }
+    });
   }
   return state.runtime;
 }
