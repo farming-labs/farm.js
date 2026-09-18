@@ -237,13 +237,17 @@ export function createFarmWorkflowRequestHandler(options: FarmWorkflowHTTPHandle
     }
 
     const id = decodeRouteSegment(url.pathname.slice(route.length + 1));
+
+    // Verify the secret before consulting the workflow id map so the
+    // existing-vs-missing distinction is not disclosed to callers without
+    // the secret (a 401 for unknown ids would otherwise become a 404 oracle).
+    const secretError = verifyWorkflowSecret(request, options.config);
+    if (secretError) return secretError;
+
     const workflow = workflowsById.get(id);
     if (!workflow) {
       return Response.json({ error: `Workflow "${id}" was not found.` }, { status: 404 });
     }
-
-    const secretError = verifyWorkflowSecret(request, options.config);
-    if (secretError) return secretError;
 
     let payload: unknown;
     try {
@@ -706,12 +710,16 @@ export default new H3()
   })
   .all(route + "/:id", async (event) => {
     const id = decodeRouteSegment(event.context.params?.id || "");
+
+    // Verify the secret before consulting the workflow id map so the
+    // existing-vs-missing distinction is not disclosed to callers without
+    // the secret (a 401 for unknown ids would otherwise become a 404 oracle).
+    const unauthorized = verifySecret(event);
+    if (unauthorized) return unauthorized;
+
     if (!workflowIds.has(id)) {
       return json({ error: "Workflow " + id + " was not found." }, 404);
     }
-
-    const unauthorized = verifySecret(event);
-    if (unauthorized) return unauthorized;
 
     let payload;
     try {

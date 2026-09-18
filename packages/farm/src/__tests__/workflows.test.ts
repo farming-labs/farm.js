@@ -514,6 +514,106 @@ describe("Farm workflows", () => {
     ).toBeNull();
   });
 
+  it("verifies the secret before the id lookup in generated Nitro workflow routes", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-workflow-nitro-ordering-"));
+    await fs.mkdir(path.join(root, "src", "jobs"), { recursive: true });
+    await fs.writeFile(
+      path.join(root, "src", "jobs", "sync.mjs"),
+      "export default { async run() { return { ok: true }; } };",
+    );
+
+    const prepared = await prepareFarmWorkflowsForNitro({
+      root,
+      workflows: { secret: "test-secret" },
+    });
+    const handlerSource = await fs.readFile(prepared.handlerPath!, "utf8");
+
+    // The per-id branch must call verifySecret(event) before workflowIds.has(id)
+    // so an unauthenticated caller cannot distinguish existing from missing ids.
+    const perIdStart = handlerSource.indexOf('.all(route + "/:id"');
+    expect(perIdStart).toBeGreaterThan(-1);
+    const verifySecretIndex = handlerSource.indexOf("verifySecret(event)", perIdStart);
+    const hasIdIndex = handlerSource.indexOf("workflowIds.has(id)", perIdStart);
+    expect(verifySecretIndex).toBeGreaterThan(perIdStart);
+    expect(hasIdIndex).toBeGreaterThan(perIdStart);
+    expect(verifySecretIndex).toBeLessThan(hasIdIndex);
+
+    // Execute the pre-payload slice of the per-id branch with mocked helpers to
+    // confirm the runtime ordering matches the source ordering.
+    const branchStart = handlerSource.indexOf("const id = decodeRouteSegment", perIdStart);
+    const branchEnd = handlerSource.indexOf("let payload;", branchStart);
+    expect(branchStart).toBeGreaterThan(perIdStart);
+    expect(branchEnd).toBeGreaterThan(branchStart);
+
+    const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+    const generatedBranch = AsyncFunction(
+      "event",
+      "decodeRouteSegment",
+      "verifySecret",
+      "workflowIds",
+      "json",
+      `${handlerSource.slice(branchStart, branchEnd)}; return undefined;`,
+    ) as (
+      event: { req: Request; url: URL; context: { params?: Record<string, string> } },
+      decodeRouteSegment: (segment: string) => string,
+      verifySecret: (event: { req: Request }) => Response | null,
+      workflowIds: { has: (id: string) => boolean },
+      json: (value: unknown, status?: number) => Response,
+    ) => Promise<Response | null | undefined>;
+
+    const decode = (segment: string): string => {
+      try {
+        return decodeURIComponent(segment);
+      } catch {
+        return segment;
+      }
+    };
+    const json = (value: unknown, status = 200): Response => Response.json(value, { status });
+    const eventFor = (id: string) => ({
+      req: new Request(`https://example.com/api/_farm/workflows/${id}`, { method: "POST" }),
+      url: new URL(`https://example.com/api/_farm/workflows/${id}`),
+      context: { params: { id } },
+    });
+
+    // Unauthenticated request to a non-existent id: verifySecret returns 401 and
+    // the id map is never consulted, so existence is not leaked.
+    const has = vi.fn((_id: string) => false);
+    const unauthorized = await generatedBranch(
+      eventFor("unknown-job"),
+      decode,
+      () => json({ error: "Unauthorized workflow request." }, 401),
+      { has },
+      json,
+    );
+    expect(unauthorized?.status).toBe(401);
+    expect(has).not.toHaveBeenCalled();
+
+    // Authenticated request to a non-existent id: verifySecret passes and the
+    // branch returns 404 from the existence check.
+    const missing = await generatedBranch(
+      eventFor("unknown-job"),
+      decode,
+      () => null,
+      { has: () => false },
+      json,
+    );
+    expect(missing?.status).toBe(404);
+    await expect(missing?.json()).resolves.toEqual({
+      error: "Workflow unknown-job was not found.",
+    });
+
+    // Authenticated request to an existing id: verifySecret passes and the
+    // branch falls through to the payload/runTask section (returns undefined).
+    const existing = await generatedBranch(
+      eventFor("sync"),
+      decode,
+      () => null,
+      { has: () => true },
+      json,
+    );
+    expect(existing).toBeUndefined();
+  });
+
   it("gives nested and hyphenated workflow ids distinct wrappers", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-workflow-collide-"));
     const jobsDir = path.join(root, "src", "jobs");
@@ -597,7 +697,7 @@ describe("Farm workflows", () => {
     }
   });
 
-  it("404s on a malformed percent-encoded workflow id instead of throwing", async () => {
+  it("does not throw on a malformed percent-encoded workflow id and does not leak existence", async () => {
     const workflow = {
       id: "sync-users",
       filePath: "/virtual/sync-users.ts",
@@ -612,13 +712,61 @@ describe("Farm workflows", () => {
     });
 
     // The id is decoded before the secret is checked, so these are reachable
-    // without credentials and must not throw out of the handler.
+    // without credentials and must not throw out of the handler. With a
+    // secret configured, the secret check runs before the existence lookup, so
+    // unknown and malformed ids return 401 rather than 404 and do not disclose
+    // whether a workflow id is deployed.
     for (const id of ["caf%E9", "%ZZ", "a%"]) {
       const response = await handler(
         new Request(`https://example.com/api/_farm/workflows/${id}`, { method: "POST" }),
       );
-      expect(response?.status).toBe(404);
+      expect(response?.status).toBe(401);
     }
+  });
+
+  it("does not disclose workflow existence to unauthenticated callers", async () => {
+    const workflow = {
+      id: "sync-users",
+      filePath: "/virtual/sync-users.ts",
+      description: "Sync users.",
+      schedule: [],
+      routePath: "/api/_farm/workflows/sync-users",
+    };
+    const handler = createFarmWorkflowRequestHandler({
+      workflows: [workflow],
+      config: resolveWorkflowsConfig({ secret: "test-secret" }),
+      loadModule: async () => ({ default: { run: async () => ({}) } }),
+    });
+
+    // Without credentials, both existing and non-existent ids must return 401
+    // so an unauthenticated caller cannot distinguish them.
+    for (const id of ["sync-users", "unknown-job"]) {
+      const response = await handler(
+        new Request(`https://example.com/api/_farm/workflows/${id}`, { method: "POST" }),
+      );
+      expect(response?.status).toBe(401);
+    }
+
+    // With credentials, the existing id runs and the unknown id returns 404:
+    // existence is only disclosed to authenticated callers.
+    const executed = await handler(
+      new Request("https://example.com/api/_farm/workflows/sync-users", {
+        method: "POST",
+        headers: { authorization: "Bearer test-secret" },
+      }),
+    );
+    expect(executed?.status).toBe(200);
+
+    const missing = await handler(
+      new Request("https://example.com/api/_farm/workflows/unknown-job", {
+        method: "POST",
+        headers: { authorization: "Bearer test-secret" },
+      }),
+    );
+    expect(missing?.status).toBe(404);
+    await expect(missing?.json()).resolves.toEqual({
+      error: 'Workflow "unknown-job" was not found.',
+    });
   });
 
   it("keeps every value of a repeated query parameter in a GET trigger payload", async () => {
