@@ -1191,6 +1191,108 @@ writeFileSync(process.env.FARM_CREATE_APP_INSTALL_MARKER, JSON.stringify({
   }
 });
 
+test("uses the invoking package manager throughout generated guidance", async () => {
+  const tempDir = await mkdtemp(
+    path.join(os.tmpdir(), "create-farm-app-package-manager-guidance-"),
+  );
+  const cases = [
+    {
+      name: "npm",
+      userAgent: "npm/11.6.0 node/v22.0.0",
+      dev: "npm run dev",
+      migrate: "npm run auth:migrate",
+      check: "npm run type-check && npm run build",
+    },
+    {
+      name: "pnpm",
+      userAgent: "pnpm/11.18.0 npm/? node/v22.0.0",
+      dev: "pnpm dev",
+      migrate: "pnpm auth:migrate",
+      check: "pnpm type-check && pnpm build",
+    },
+    {
+      name: "yarn",
+      userAgent: "yarn/4.9.2 npm/? node/v22.0.0",
+      dev: "yarn dev",
+      migrate: "yarn auth:migrate",
+      check: "yarn type-check && yarn build",
+    },
+    {
+      name: "bun",
+      userAgent: "bun/1.2.22 npm/? node/v22.0.0",
+      dev: "bun run dev",
+      migrate: "bun run auth:migrate",
+      check: "bun run type-check && bun run build",
+    },
+  ];
+
+  try {
+    for (const packageManager of cases) {
+      const projectName = `${packageManager.name}-app`;
+      const output = execFileSync(
+        process.execPath,
+        [
+          path.join(packageDir, "bin/create-farm-app.js"),
+          projectName,
+          "--template",
+          "better-auth",
+          "--skip-install",
+        ],
+        {
+          cwd: tempDir,
+          encoding: "utf8",
+          env: { ...process.env, npm_config_user_agent: packageManager.userAgent },
+        },
+      );
+      const generatedDir = path.join(tempDir, projectName);
+      const homePage = await readFile(path.join(generatedDir, "src/app/page.tsx"), "utf8");
+      const readme = await readFile(path.join(generatedDir, "README.md"), "utf8");
+      const farmConfig = await readFile(path.join(generatedDir, "farm.config.ts"), "utf8");
+      const packageJson = JSON.parse(
+        await readFile(path.join(generatedDir, "package.json"), "utf8"),
+      );
+
+      assert.match(homePage, new RegExp(`<code>${escapeRegExp(packageManager.dev)}</code>`));
+      assert.match(readme, new RegExp(escapeRegExp(`${packageManager.name} install`)));
+      assert.match(readme, new RegExp(escapeRegExp(packageManager.dev)));
+      assert.match(readme, new RegExp(escapeRegExp(packageManager.migrate)));
+      assert.match(farmConfig, new RegExp(escapeRegExp(packageManager.migrate)));
+      assert.equal(packageJson.scripts.check, packageManager.check);
+      assert.match(output, new RegExp(escapeRegExp(packageManager.dev)));
+      if (packageManager.name !== "pnpm") {
+        assert.doesNotMatch(homePage, /<code>pnpm dev<\/code>/);
+      }
+    }
+
+    execFileSync(
+      process.execPath,
+      [
+        path.join(packageDir, "bin/create-farm-app.js"),
+        "npm-integration-app",
+        "--template",
+        "ai",
+        "--skip-install",
+      ],
+      {
+        cwd: tempDir,
+        encoding: "utf8",
+        env: { ...process.env, npm_config_user_agent: "npm/11.6.0 node/v22.0.0" },
+      },
+    );
+    const integrationDir = path.join(tempDir, "npm-integration-app");
+    assert.match(
+      await readFile(path.join(integrationDir, "src/app/page.tsx"), "utf8"),
+      /<code>npm run dev<\/code>/,
+    );
+    const integrationReadme = await readFile(path.join(integrationDir, "README.md"), "utf8");
+    assert.match(integrationReadme, /npm install/);
+    assert.match(integrationReadme, /npm run dev/);
+    assert.doesNotMatch(integrationReadme, /pnpm (?:install|dev)/);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 function escapeRegExp(input) {
   return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
