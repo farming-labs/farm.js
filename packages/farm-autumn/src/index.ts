@@ -950,15 +950,20 @@ function resolveActiveProduct(
     };
   }
 
-  const matchedPurchase = [...(customer?.purchases ?? [])]
+  const matchingPurchases = [...(customer?.purchases ?? [])]
     .filter((entry) => byPlanId.has(entry.planId))
-    .sort((left, right) => right.startedAt - left.startedAt)[0];
+    .sort((left, right) => right.startedAt - left.startedAt);
+  const now = Date.now();
+  const activePurchase = matchingPurchases.find(
+    (entry) => entry.expiresAt == null || entry.expiresAt > now,
+  );
+  const matchedPurchase = activePurchase ?? matchingPurchases[0];
   if (matchedPurchase) {
     return {
       product: byPlanId.get(matchedPurchase.planId) ?? null,
       subscription: null,
       purchase: matchedPurchase,
-      status: "active",
+      status: activePurchase ? "active" : "canceled",
     };
   }
 
