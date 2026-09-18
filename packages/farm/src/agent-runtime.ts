@@ -28,6 +28,10 @@ const HOP_BY_HOP_HEADERS = [
   "upgrade",
 ] as const;
 
+const DECODED_CONTENT_CODINGS: readonly string[] = ["gzip", "x-gzip", "deflate", "br"];
+
+const ZSTD_FRAME_MAGIC = new Uint8Array([0x28, 0xb5, 0x2f, 0xfd]);
+
 export interface FarmAgentRuntimeInstance {
   readonly provider: string;
   readonly routePrefix: string;
@@ -260,21 +264,42 @@ export async function proxyAgentRuntimeRequest(
     const upstream = await (options.fetch || globalThis.fetch)(targetUrl, init);
     const responseHeaders = new Headers(upstream.headers);
     removeHopByHopHeaders(responseHeaders);
-    // Fetch decodes supported content codings before exposing the body while retaining
-    // the upstream metadata. Forwarding those headers would make the client
-    // try to decode an already-decoded stream and trust a stale byte length.
-    const contentCodings = responseHeaders.get("content-encoding")?.toLowerCase().split(",");
-    if (
-      upstream.body &&
-      contentCodings?.length &&
-      contentCodings.every((coding) => ["gzip", "x-gzip", "deflate", "br"].includes(coding.trim()))
-    ) {
-      responseHeaders.delete("content-encoding");
-      responseHeaders.delete("content-length");
+    // Fetch decodes supported content codings before exposing the body while
+    // retaining the upstream metadata, so forwarding those headers would make the
+    // client decode an already-decoded stream and trust a stale byte length.
+    // gzip/x-gzip/deflate/br are decoded by every supported Node, so the headers
+    // are stripped unconditionally. zstd is only decoded by undici >=7.11
+    // (Node >=24.4); on older runtimes the body stays a raw zstd frame and the
+    // headers are truthful, so the strip decision is derived from whether this
+    // fetch actually decoded by peeking the zstd frame magic.
+    const contentCodings = responseHeaders
+      .get("content-encoding")
+      ?.toLowerCase()
+      .split(",")
+      .map((coding) => coding.trim())
+      .filter(Boolean);
+    let responseBody: ReadableStream<Uint8Array> | null = upstream.body;
+    if (upstream.body && contentCodings && contentCodings.length) {
+      if (contentCodings.every((coding) => DECODED_CONTENT_CODINGS.includes(coding))) {
+        responseHeaders.delete("content-encoding");
+        responseHeaders.delete("content-length");
+      } else if (
+        contentCodings.includes("zstd") &&
+        contentCodings.every(
+          (coding) => DECODED_CONTENT_CODINGS.includes(coding) || coding === "zstd",
+        )
+      ) {
+        const { decoded, body } = await detectZstdDecoding(upstream.body);
+        responseBody = body;
+        if (decoded) {
+          responseHeaders.delete("content-encoding");
+          responseHeaders.delete("content-length");
+        }
+      }
     }
     rewriteProxyLocation(responseHeaders, upstreamOrigin, incomingUrl.origin);
 
-    return new Response(upstream.body, {
+    return new Response(responseBody, {
       status: upstream.status,
       statusText: upstream.statusText,
       headers: responseHeaders,
@@ -550,6 +575,88 @@ function removeHopByHopHeaders(headers: Headers): void {
   for (const header of HOP_BY_HOP_HEADERS) {
     headers.delete(header);
   }
+}
+
+async function detectZstdDecoding(body: ReadableStream<Uint8Array>): Promise<{
+  decoded: boolean;
+  body: ReadableStream<Uint8Array>;
+}> {
+  const reader = body.getReader();
+  const consumed: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (total < ZSTD_FRAME_MAGIC.byteLength) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (!value || value.byteLength === 0) continue;
+      consumed.push(value);
+      total += value.byteLength;
+    }
+  } catch {
+    // The upstream read failure is surfaced through the rebuilt body below;
+    // fall back to stripping the stale framing rather than forwarding it.
+  }
+  const lookahead = concatUint8(consumed);
+  const decoded = !startsWithZstdFrameMagic(lookahead);
+  const rebuilt = new ReadableStream<Uint8Array>({
+    start(controller) {
+      if (lookahead.byteLength > 0) controller.enqueue(lookahead);
+    },
+    async pull(controller) {
+      try {
+        const { value, done } = await reader.read();
+        if (done) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(value ?? new Uint8Array());
+      } catch (error) {
+        controller.error(error);
+      }
+    },
+    cancel(reason) {
+      reader.cancel(reason).catch(() => {});
+    },
+  });
+  return { decoded, body: rebuilt };
+}
+
+function concatUint8(chunks: Uint8Array[]): Uint8Array {
+  if (chunks.length === 0) return new Uint8Array(0);
+  if (chunks.length === 1) return chunks[0];
+  const total = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return merged;
+}
+
+function startsWithZstdFrameMagic(buffer: Uint8Array): boolean {
+  if (buffer.byteLength < ZSTD_FRAME_MAGIC.byteLength) return false;
+  let isStandardFrame = true;
+  for (let index = 0; index < ZSTD_FRAME_MAGIC.byteLength; index++) {
+    if (buffer[index] !== ZSTD_FRAME_MAGIC[index]) {
+      isStandardFrame = false;
+      break;
+    }
+  }
+  if (isStandardFrame) return true;
+
+  // RFC 8878 permits a zstd stream to begin with one or more skippable
+  // frames. Their little-endian magic range is 0x184D2A50-0x184D2A5F, so
+  // only the low byte varies. Treating those frames as decoded plaintext
+  // would strip truthful Content-Encoding metadata on Node versions whose
+  // fetch implementation does not decode zstd.
+  return (
+    buffer[0] >= 0x50 &&
+    buffer[0] <= 0x5f &&
+    buffer[1] === 0x2a &&
+    buffer[2] === 0x4d &&
+    buffer[3] === 0x18
+  );
 }
 
 function rewriteProxyLocation(

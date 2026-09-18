@@ -233,6 +233,8 @@ async function main() {
           if (a.hasAttribute('data-native') || a.hasAttribute('data-reload')) {
             return;
           }
+          if (e.metaKey || e.altKey || e.ctrlKey || e.shiftKey) return;
+          if (e.button !== 0) return;
           
           e.preventDefault();
           history.pushState(null, '', a.href);

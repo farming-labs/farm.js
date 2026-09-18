@@ -1153,6 +1153,27 @@ function serializeBinaryBytes(bytes: Uint8Array): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+function serializeCanonicalStringEntries(
+  entries: Iterable<readonly [string, string]>,
+  seen: WeakSet<object>,
+): string {
+  const valuesByKey = new Map<string, string[]>();
+  for (const [key, item] of entries) {
+    const values = valuesByKey.get(key);
+    if (values) values.push(item);
+    else valuesByKey.set(key, [item]);
+  }
+
+  return Array.from(valuesByKey.keys())
+    .sort(compareCodepoint)
+    .flatMap((key) =>
+      valuesByKey
+        .get(key)!
+        .map((item) => `[${stableSerialize(key, seen)},${stableSerialize(item, seen)}]`),
+    )
+    .join(",");
+}
+
 function stableSerialize(value: unknown, seen = new WeakSet<object>()): string {
   if (value === null) return "null";
   if (value === undefined) return "undefined";
@@ -1227,6 +1248,21 @@ function stableSerialize(value: unknown, seen = new WeakSet<object>()): string {
       ).sort(compareCodepoint);
       seen.delete(value);
       return `map:[${items.join(",")}]`;
+    }
+    // URLSearchParams and Headers keep their contents internally, so
+    // Object.entries is empty for both (same rationale as Set/Map above).
+    // Canonicalize key order while preserving the order of repeated values for
+    // each key. URLSearchParams treats `a=1&a=2` and `a=2&a=1` as observably
+    // different inputs, while `b=2&a=1` and `a=1&b=2` should still share a key.
+    if (value instanceof URLSearchParams) {
+      const serialized = serializeCanonicalStringEntries(value, seen);
+      seen.delete(value);
+      return `urlsearchparams:[${serialized}]`;
+    }
+    if (value instanceof Headers) {
+      const serialized = serializeCanonicalStringEntries(value, seen);
+      seen.delete(value);
+      return `headers:[${serialized}]`;
     }
 
     // Codepoint comparison, not localeCompare: the host locale must not

@@ -173,6 +173,7 @@ export function createFarmProductionLifecycle(
     handler: () => Response | Promise<Response>,
     context: FarmResponseCompletionContext = {},
   ): Promise<Response> => {
+    if (state === "failed") return createFailedResponse();
     if (state === "draining" || state === "closed") return createDrainingResponse();
     await start();
     if (state !== "ready") return createDrainingResponse();
@@ -231,6 +232,18 @@ function createDrainingResponse(): Response {
       connection: "close",
       "content-type": "text/plain; charset=utf-8",
       "retry-after": "1",
+      "x-content-type-options": "nosniff",
+    },
+  });
+}
+
+function createFailedResponse(): Response {
+  return new Response("Service Unavailable", {
+    status: 503,
+    headers: {
+      "cache-control": "no-store",
+      connection: "close",
+      "content-type": "text/plain; charset=utf-8",
       "x-content-type-options": "nosniff",
     },
   });

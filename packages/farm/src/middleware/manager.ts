@@ -110,8 +110,8 @@ export class MiddlewareManager {
 
     // Sort by path depth (root first, then nested)
     this.middleware.sort((a, b) => {
-      const depthA = a.path.split("/").length;
-      const depthB = b.path.split("/").length;
+      const depthA = a.path.split("/").filter(Boolean).length;
+      const depthB = b.path.split("/").filter(Boolean).length;
       return depthA - depthB;
     });
 

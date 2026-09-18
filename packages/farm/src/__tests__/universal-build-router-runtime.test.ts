@@ -16,7 +16,9 @@ import {
 import {
   compileConfigRoutePattern,
   interpolateConfigRouteDestination,
+  resolveConfigRoutePathname,
 } from "../plugins/route-pattern";
+import { resolveFarmI18nConfig } from "../i18n/config";
 
 describe("generateConfiguredResponseHeadersRuntimeSource", () => {
   it("preserves handler and configured Set-Cookie fields separately", () => {
@@ -78,6 +80,192 @@ describe("generateConfiguredResponseHeadersRuntimeSource", () => {
     );
 
     expect(response.headers.getSetCookie()).toEqual(["theme=dark; Path=/"]);
+  });
+});
+
+describe("configured response headers locale-prefix parity (production fetch entry)", () => {
+  // The production fetch entry must strip the locale/base prefix before matching
+  // configured header routes, mirroring the dev reference implementation in
+  // plugins/headers.ts (resolveConfigRoutePathname) and the documented contract
+  // that "/fr/legacy" matches a "/legacy" rule "in development and production
+  // equally". Before the fix, the production call site passed the raw,
+  // locale-prefixed pathname to applyConfiguredResponseHeaders, so route-scoped
+  // (non-catch-all) header rules silently failed for non-default-locale
+  // requests in production. This is the configured-headers counterpart of the
+  // redirect/rewrite interpolation parity test below.
+  const matcherSource = generateRuntimePathMatcherSource();
+  const headersSource = generateConfiguredResponseHeadersRuntimeSource();
+  const prod = new Function(
+    "configuredHeaderRoutes",
+    "appendFarmLinkHeader",
+    `${matcherSource}\n${headersSource}\nreturn { matchRuntimePathPattern, applyConfiguredResponseHeaders };`,
+  ) as (
+    configuredHeaderRoutes: Array<{
+      source: string;
+      headers: Array<{ key: string; value: string }>;
+    }>,
+    appendFarmLinkHeader: (headers: Headers, value: string) => void,
+  ) => {
+    matchRuntimePathPattern: (pattern: string, pathname: string) => Record<string, string> | null;
+    applyConfiguredResponseHeaders: (response: Response, pathname: string) => Response;
+  };
+
+  function appendFarmLinkHeader(headers: Headers, value: string): void {
+    const existing = headers.get("Link");
+    if (existing) {
+      if (!existing.includes(value)) headers.set("Link", `${existing}, ${value}`);
+    } else {
+      headers.set("Link", value);
+    }
+  }
+
+  const i18n = resolveFarmI18nConfig(
+    {
+      locales: ["en", "fr"],
+      defaultLocale: "en",
+      routing: "prefix-except-default",
+    },
+    { root: "/tmp/farm-config-headers-parity", mode: "development" },
+  );
+
+  function runProduction(
+    routes: Array<{ source: string; headers: Array<{ key: string; value: string }> }>,
+    requestPathname: string,
+  ): Response {
+    // Mirror the production fetch entry: only the call site strips the
+    // locale/base prefix before matching. applyConfiguredResponseHeaders itself
+    // is prefix-unaware, so the strip must happen at the call site, exactly as
+    // the sibling redirects/rewrites path uses getFarmRoutePathname.
+    const routePathname = resolveConfigRoutePathname(requestPathname, i18n).pathname;
+    const runtime = prod(routes, appendFarmLinkHeader);
+    return runtime.applyConfiguredResponseHeaders(new Response("ok"), routePathname);
+  }
+
+  function runDevelopment(
+    routes: Array<{ source: string; headers: Array<{ key: string; value: string }> }>,
+    requestPathname: string,
+  ): Record<string, string> {
+    // Mirrors plugins/headers.ts: strip the locale, then match each route's
+    // compiled regex against the unprefixed pathname.
+    const routePathname = resolveConfigRoutePathname(requestPathname, i18n).pathname;
+    const applied: Record<string, string> = {};
+    for (const route of routes) {
+      const compiled = compileConfigRoutePattern(route.source);
+      if (!compiled.regex.test(routePathname)) continue;
+      for (const header of route.headers) {
+        applied[header.key.toLowerCase()] = header.value;
+      }
+    }
+    return applied;
+  }
+
+  const cases: Array<{
+    source: string;
+    headerKey: string;
+    headerValue: string;
+    requestPathname: string;
+    expectedApplied: boolean;
+    // Whether the raw, locale-prefixed pathname still matches the source
+    // without stripping (true only for root catch-alls that consume the
+    // locale segment, or for unprefixed default-locale requests).
+    rawMatches: boolean;
+  }> = [
+    {
+      source: "/dashboard",
+      headerKey: "content-security-policy",
+      headerValue: "default-src 'self'",
+      requestPathname: "/fr/dashboard",
+      expectedApplied: true,
+      rawMatches: false,
+    },
+    {
+      source: "/api/billing/:id",
+      headerKey: "x-billing",
+      headerValue: "restricted",
+      requestPathname: "/fr/api/billing/42",
+      expectedApplied: true,
+      rawMatches: false,
+    },
+    {
+      source: "/docs/:path*",
+      headerKey: "x-docs",
+      headerValue: "yes",
+      requestPathname: "/fr/docs/start",
+      expectedApplied: true,
+      rawMatches: false,
+    },
+    {
+      source: "/dashboard",
+      headerKey: "x-default-locale",
+      headerValue: "still-unprefixed",
+      requestPathname: "/dashboard",
+      expectedApplied: true,
+      rawMatches: true,
+    },
+    // A root catch-all source still matches a locale-prefixed pathname even
+    // without stripping (the catch-all consumes the locale segment), so it
+    // must keep working after the fix — guards against regressing
+    // globally-scoped headers.
+    {
+      source: "/:path*",
+      headerKey: "x-global",
+      headerValue: "global",
+      requestPathname: "/fr/anything",
+      expectedApplied: true,
+      rawMatches: true,
+    },
+    // A route-specific source must NOT match a locale-prefixed path for an
+    // unrelated route, confirming matching stays scoped after the strip.
+    {
+      source: "/dashboard",
+      headerKey: "x-no-match",
+      headerValue: "no",
+      requestPathname: "/fr/profile",
+      expectedApplied: false,
+      rawMatches: false,
+    },
+  ];
+
+  for (const {
+    source,
+    headerKey,
+    headerValue,
+    requestPathname,
+    expectedApplied,
+    rawMatches,
+  } of cases) {
+    const label = expectedApplied ? "applies" : "does not apply";
+    it(`production ${label} ${headerKey} for ${source} against ${requestPathname} in parity with dev`, () => {
+      const routes = [{ source, headers: [{ key: headerKey, value: headerValue }] }];
+      const runtime = prod(routes, appendFarmLinkHeader);
+
+      // Pre-fix behavior: feeding the RAW locale-prefixed pathname to the
+      // production matcher reproduces the bug for route-specific sources
+      // (rawMatches === false) while catch-alls/unprefixed requests already
+      // matched (rawMatches === true).
+      const broken = runtime.applyConfiguredResponseHeaders(new Response("ok"), requestPathname);
+      expect(broken.headers.get(headerKey)).toBe(rawMatches ? headerValue : null);
+
+      // Fixed behavior: the production call site strips the locale/base prefix
+      // before matching, so the configured header is applied iff the route
+      // actually matches the locale-stripped pathname.
+      const response = runProduction(routes, requestPathname);
+      expect(response.headers.get(headerKey)).toBe(expectedApplied ? headerValue : null);
+
+      // Production must match the development reference's decision exactly.
+      const devValue = runDevelopment(routes, requestPathname)[headerKey] ?? null;
+      expect(devValue).toBe(expectedApplied ? headerValue : null);
+      expect(response.headers.get(headerKey)).toBe(devValue);
+    });
+  }
+
+  it("matches the exact dev fixture: /fr/docs/start against /docs/:path* sets x-docs", () => {
+    // Direct mirror of the dev test pinned in config-route-plugins.test.ts
+    // ("matches locale-prefixed config routes and localizes their destinations"),
+    // but exercised against the production-emitted applyConfiguredResponseHeaders.
+    const routes = [{ source: "/docs/:path*", headers: [{ key: "x-docs", value: "yes" }] }];
+    const response = runProduction(routes, "/fr/docs/start");
+    expect(response.headers.get("x-docs")).toBe("yes");
   });
 });
 
@@ -492,6 +680,40 @@ describe("generateRuntimePathMatcherSource", () => {
     expect(matchRuntimePathPattern("/café", "/caf%C3%A9")).toEqual({});
     expect(matchRuntimePathPattern("/a%20b", "/a%2520b")).toEqual({});
   });
+
+  it("returns null when no backtracking split lets the following segment match", () => {
+    // Regression guard for the non-terminal catch-all backtracking path: when
+    // no split of the catch-all lets a later segment match, the matcher must
+    // still return null rather than over-matching.
+    const matchRuntimePathPattern = new Function(
+      matcher + "; return matchRuntimePathPattern;",
+    )() as (pattern: string, pathname: string) => Record<string, string> | null;
+
+    expect(matchRuntimePathPattern("/docs/:slug*/missing", "/docs/a/asset")).toBeNull();
+  });
+
+  it("memoizes failed matcher states across multiple non-terminal catch-alls", () => {
+    const marker =
+      "function matchFromUncached(patternIndex, pathIndex, params, catchAllParamSegments) {";
+    const instrumented =
+      "let uncachedStateVisits = 0;\n" +
+      matcher.replace(marker, `${marker}\nuncachedStateVisits += 1;`);
+    expect(instrumented).not.toBe(`let uncachedStateVisits = 0;\n${matcher}`);
+    const runtime = new Function(
+      instrumented +
+        "; return { matchRuntimePathPattern, getUncachedStateVisits: () => uncachedStateVisits };",
+    )() as {
+      matchRuntimePathPattern: (pattern: string, pathname: string) => Record<string, string> | null;
+      getUncachedStateVisits: () => number;
+    };
+    const pattern = "/root/:a*/x/:b*/x/:c*/x/:d*/missing";
+    const pathname = `/root/${Array.from({ length: 24 }, () => "x").join("/")}/asset`;
+
+    expect(runtime.matchRuntimePathPattern(pattern, pathname)).toBeNull();
+    const stateUpperBound =
+      pattern.split("/").filter(Boolean).length * pathname.split("/").filter(Boolean).length;
+    expect(runtime.getUncachedStateVisits()).toBeLessThanOrEqual(stateUpperBound);
+  });
 });
 
 describe("generateRedirectInterpolationSource", () => {
@@ -539,6 +761,41 @@ describe("generateRedirectInterpolationSource", () => {
         destination: "/z/$3/$2/$1",
         pathname: "/a/1/2/w/q",
         expected: "/z/w/q/2/1",
+      },
+      // Non-terminal catch-alls (e.g. /docs/:slug*/asset/*) were matched by the
+      // development plugin but silently dropped by the production matcher, which
+      // consumed every remaining segment without backtracking. Production must
+      // mirror the greedy (.*) backtracking emitted by route-pattern.ts.
+      {
+        source: "/docs/:slug*/asset/*",
+        destination: "/new/:slug*/copy/*",
+        pathname: "/docs/guides/start/asset/logo.svg",
+        expected: "/new/guides/start/copy/logo.svg",
+      },
+      {
+        source: "/docs/:slug*/asset",
+        destination: "/new/:slug*/copy",
+        pathname: "/docs/guides/start/asset",
+        expected: "/new/guides/start/copy",
+      },
+      {
+        source: "/x/*/y",
+        destination: "/z/$1",
+        pathname: "/x/a/b/y",
+        expected: "/z/a/b",
+      },
+      {
+        source: "/api/:version*/assets/*",
+        destination: "/internal/:version*/files/*",
+        pathname: "/api/v1/public/assets/logo.svg",
+        expected: "/internal/v1/public/files/logo.svg",
+      },
+      // Greedy catch-alls backtrack to the latest split, matching route-pattern.ts.
+      {
+        source: "/docs/:slug*/asset/*",
+        destination: "/new/:slug*/copy/*",
+        pathname: "/docs/asset/asset/logo.svg",
+        expected: "/new/asset/copy/logo.svg",
       },
       // Out-of-range numbered captures collapse to "" in both paths.
       { source: "/only/:id", destination: "/x/$9", pathname: "/only/7", expected: "/x/" },

@@ -21,17 +21,8 @@ export const POST = createEndpoint(
   "/api/waitlist",
   { method: "POST", body: waitlistSchema },
   async (ctx): Promise<WaitlistResult> => {
-    const parsed = waitlistSchema.safeParse(ctx.body);
-
-    if (!parsed.success) {
-      return {
-        ok: false,
-        error: "Add a valid email and what you want to see from Farm.js.",
-      };
-    }
-
-    const email = parsed.data.email.toLowerCase();
-    const description = parsed.data.description;
+    const email = ctx.body.email.toLowerCase();
+    const description = ctx.body.description;
 
     try {
       const prisma = await getPrisma();

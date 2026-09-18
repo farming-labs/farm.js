@@ -3,10 +3,11 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { readFarmI18nCatalogs } from "../i18n/catalog";
-import { resolveFarmI18nConfig } from "../i18n/config";
+import { isFarmI18nCatalogFile, resolveFarmI18nConfig } from "../i18n/config";
 import {
   createFarmLocaleCookie,
   getFarmLocaleVaryHeaders,
+  matchFarmLocale,
   resolveFarmLocaleRequest,
 } from "../i18n/resolver";
 import { FarmI18nRuntime } from "../i18n/runtime";
@@ -300,6 +301,55 @@ describe("Farm locale request signals", () => {
   });
 });
 
+describe("Farm regional locale fallback", () => {
+  it("prefers a configured base language over a regional sharing the primary subtag", () => {
+    expect(matchFarmLocale("en-US", ["en-GB", "en"])).toBe("en");
+    expect(matchFarmLocale("en-GB", ["en-US", "en"])).toBe("en");
+  });
+
+  it("still falls back to a regional variant when no base language is configured", () => {
+    expect(matchFarmLocale("en-US", ["en-GB"])).toBe("en-GB");
+    expect(matchFarmLocale("en-US", ["en-AU", "en-GB"])).toBe("en-AU");
+  });
+
+  it("keeps exact regional matches ahead of a configured base language", () => {
+    expect(matchFarmLocale("en-US", ["en", "en-US"])).toBe("en-US");
+    expect(matchFarmLocale("en-GB", ["en", "en-GB"])).toBe("en-GB");
+  });
+
+  it("resolves an Accept-Language regional request to the configured base language", () => {
+    const cfg = resolveFarmI18nConfig({
+      locales: ["en-GB", "en"],
+      defaultLocale: "en-GB",
+    });
+
+    expect(
+      resolveFarmLocaleRequest(
+        new Request("https://farm.test/", {
+          headers: { "accept-language": "en-US,en;q=0.9" },
+        }),
+        cfg,
+      ),
+    ).toMatchObject({ locale: "en", source: "accept-language" });
+  });
+
+  it("resolves a regional cookie value to the configured base language", () => {
+    const cfg = resolveFarmI18nConfig({
+      locales: ["en-GB", "en"],
+      defaultLocale: "en-GB",
+    });
+
+    expect(
+      resolveFarmLocaleRequest(
+        new Request("https://farm.test/dashboard", {
+          headers: { cookie: "farm_locale=en-US" },
+        }),
+        cfg,
+      ),
+    ).toMatchObject({ locale: "en", source: "cookie" });
+  });
+});
+
 describe("Farm ICU catalogs", () => {
   it("loads nested catalogs, validates variables, and formats plurals", async () => {
     const root = await createCatalogFixture({
@@ -403,6 +453,91 @@ describe("Farm ICU catalogs", () => {
     expect(output).toContain('"home.welcome": { "name": string }');
     expect(output).toContain('"cart.items": { "count": number }');
     expect(output).toContain('"home.title": Record<never, never>');
+  });
+});
+
+describe("Farm i18n catalog file classifier", () => {
+  it("matches per-locale catalogs under the default flat layout", () => {
+    const config = resolveFarmI18nConfig(
+      { locales: ["en-US", "am"], defaultLocale: "en-US" },
+      { root: "/app" },
+    );
+    expect(isFarmI18nCatalogFile(config, "/app/src/messages/en-US.json")).toBe(true);
+    expect(isFarmI18nCatalogFile(config, "/app/src/messages/am.json")).toBe(true);
+  });
+
+  it("matches per-locale catalogs under the {locale}-templated layout", () => {
+    const config = resolveFarmI18nConfig(
+      {
+        locales: ["en-US", "am"],
+        defaultLocale: "en-US",
+        messages: "content/locales/{locale}/app.json",
+      },
+      { root: "/app" },
+    );
+    expect(isFarmI18nCatalogFile(config, "/app/content/locales/en-US/app.json")).toBe(true);
+    expect(isFarmI18nCatalogFile(config, "/app/content/locales/am/app.json")).toBe(true);
+  });
+
+  it("rejects unrelated files beneath a templated messages base directory", () => {
+    const config = resolveFarmI18nConfig(
+      {
+        locales: ["en-US"],
+        defaultLocale: "en-US",
+        messages: "content/locales/{locale}/app.json",
+      },
+      { root: "/app" },
+    );
+    expect(isFarmI18nCatalogFile(config, "/app/content/locales/en-US/app.json")).toBe(true);
+    expect(isFarmI18nCatalogFile(config, "/app/content/locales/_shared.json")).toBe(false);
+    expect(isFarmI18nCatalogFile(config, "/app/content/locales/fr/app.json")).toBe(false);
+  });
+
+  it("normalizes backslash separators on both the messages path and the edited file", () => {
+    const config = {
+      enabled: true,
+      locales: ["en-US"],
+      messages: "C:\\app\\content\\locales\\{locale}\\app.json",
+    };
+    expect(isFarmI18nCatalogFile(config, "C:\\app\\content\\locales\\en-US\\app.json")).toBe(true);
+    expect(isFarmI18nCatalogFile(config, "C:/app/content/locales/en-US/app.json")).toBe(true);
+  });
+
+  it("does not treat every project file as a catalog for a root-level template", () => {
+    const config = resolveFarmI18nConfig(
+      { locales: ["en", "am"], defaultLocale: "en", messages: "{locale}.json" },
+      { root: "/app" },
+    );
+
+    expect(isFarmI18nCatalogFile(config, "/app/en.json")).toBe(true);
+    expect(isFarmI18nCatalogFile(config, "/app/am.json")).toBe(true);
+    expect(isFarmI18nCatalogFile(config, "/app/src/app/page.tsx")).toBe(false);
+  });
+
+  it("does not match a sibling directory that only shares the flat-layout prefix", () => {
+    const config = resolveFarmI18nConfig(
+      { locales: ["en"], defaultLocale: "en", messages: "src/messages" },
+      { root: "/app" },
+    );
+
+    expect(isFarmI18nCatalogFile(config, "/app/src/messages/en.json")).toBe(true);
+    expect(isFarmI18nCatalogFile(config, "/app/src/messages-backup/en.json")).toBe(false);
+  });
+
+  it("returns false when i18n is disabled or the file is outside the messages tree", () => {
+    const disabled = resolveFarmI18nConfig(false, { root: "/app" });
+    expect(isFarmI18nCatalogFile(disabled, "/app/src/messages/en.json")).toBe(false);
+
+    const templated = resolveFarmI18nConfig(
+      {
+        locales: ["en-US"],
+        defaultLocale: "en-US",
+        messages: "content/locales/{locale}/app.json",
+      },
+      { root: "/app" },
+    );
+    expect(isFarmI18nCatalogFile(templated, "/app/src/app/page.tsx")).toBe(false);
+    expect(isFarmI18nCatalogFile(templated, "/other/content/locales/en-US/app.json")).toBe(false);
   });
 });
 

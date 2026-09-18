@@ -50,6 +50,37 @@ describe("Farm production lifecycle", () => {
     expect(liveness?.status).toBe(503);
   });
 
+  it("serves a controlled 503 (no retry-after) for traffic once the runtime has failed", async () => {
+    const startError = new Error("db connection failed");
+    const start = vi.fn(() => {
+      throw startError;
+    });
+    const lifecycle = createFarmProductionLifecycle({
+      server: resolveFarmServerConfig(undefined),
+      start,
+    });
+
+    const firstHandler = vi.fn(() => new Response("should not run"));
+    await expect(lifecycle.runRequest(firstHandler)).rejects.toBe(startError);
+    expect(firstHandler).not.toHaveBeenCalled();
+    expect(lifecycle.state).toBe("failed");
+
+    const secondHandler = vi.fn(() => new Response("should not run"));
+    const response = await lifecycle.runRequest(secondHandler);
+    expect(secondHandler).not.toHaveBeenCalled();
+    expect(response.status).toBe(503);
+    expect(response.headers.get("retry-after")).toBeNull();
+    expect(response.headers.get("connection")).toBe("close");
+    expect(response.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+    expect(await response.text()).toBe("Service Unavailable");
+    expect(lifecycle.activeRequests).toBe(0);
+
+    const liveness = await lifecycle.handleHealthRequest(
+      new Request("https://example.com/_farm/health/live"),
+    );
+    expect(liveness?.status).toBe(503);
+  });
+
   it("fails readiness and rejects new work while draining", async () => {
     const handler = vi.fn(async () => new Response("should not run"));
     const lifecycle = createFarmProductionLifecycle({

@@ -89,6 +89,7 @@ const UNITLESS_STYLE_PROPERTIES = new Set([
   "opacity",
   "order",
   "orphans",
+  "scale",
   "stop-opacity",
   "stroke-dasharray",
   "stroke-dashoffset",

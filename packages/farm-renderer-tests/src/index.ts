@@ -135,6 +135,54 @@ export function defineRendererServerConformance(runtime: RendererServerFixture):
       expect(html).toMatch(/opacity:\s*0?\.5/);
       expect(html).toMatch(/z-index:\s*3(?!px)/);
     });
+
+    it("skips boolean, null, and undefined children like React", async () => {
+      // A single boolean child is the `cond && <X/>` idiom. React drops
+      // `false`/`true`/`null`/`undefined`; a shim that passes a raw scalar
+      // boolean through to the renderer coerces it to visible "false"/"true"
+      // text. `0` is not in React's ignore set and must still render.
+      const falseChild = await runtime.renderToString(runtime.createElement("div", null, false));
+      expect(falseChild).not.toContain("false");
+
+      const trueChild = await runtime.renderToString(runtime.createElement("div", null, true));
+      expect(trueChild).not.toContain("true");
+
+      // The `cond && <X/>` idiom: a falsy condition collapses to a bare boolean
+      // child that must be skipped, not rendered as "false" text.
+      const condition = false;
+      const conditional = await runtime.renderToString(
+        runtime.createElement(
+          "div",
+          null,
+          condition && runtime.createElement("span", null, "never"),
+        ),
+      );
+      expect(conditional).not.toContain("false");
+      expect(conditional).not.toContain("<span");
+      expect(conditional).not.toContain("never");
+
+      const nullChild = await runtime.renderToString(runtime.createElement("div", null, null));
+      expect(nullChild).not.toContain("null");
+
+      const undefinedChild = await runtime.renderToString(
+        runtime.createElement("div", null, undefined),
+      );
+      expect(undefinedChild).not.toContain("undefined");
+
+      // Mixed children keep their real content and drop the ignored values.
+      const mixed = await runtime.renderToString(
+        runtime.createElement("div", null, false, "kept", true, null, undefined),
+      );
+      expect(mixed).toContain("kept");
+      expect(mixed).not.toContain("false");
+      expect(mixed).not.toContain("true");
+      expect(mixed).not.toContain("null");
+      expect(mixed).not.toContain("undefined");
+
+      // `0` is falsy but not ignored by React; it must still render as text.
+      const zero = await runtime.renderToString(runtime.createElement("div", null, 0));
+      expect(zero).toContain("0");
+    });
   });
 }
 

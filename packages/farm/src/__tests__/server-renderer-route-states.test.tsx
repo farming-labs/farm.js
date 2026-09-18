@@ -4,6 +4,7 @@ import React from "react";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { imageSize } from "image-size";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ServerRenderer } from "../server/renderer";
 import type { FarmConfig, FarmRequest, FarmResponse, LoadingProps, ErrorProps } from "../types";
@@ -225,6 +226,40 @@ describe("file route loading.tsx and error.tsx", () => {
     expect(response.headers.get("content-type")).toBe("image/svg+xml");
     expect(response.body).toContain("<svg");
     expect(response.body).toContain("OG /dashboard");
+  });
+
+  it("serves a React.lazy opengraph-image.tsx as a PNG on the dev ServerRenderer cold start", async () => {
+    const LazyDiv = React.lazy(async () => ({
+      default: function LazyInner() {
+        return React.createElement(
+          "div",
+          { className: "flex h-full w-full bg-black text-white" },
+          "Lazy",
+        );
+      },
+    }));
+    const renderer = createRenderer(
+      {
+        [ogImageModulePath]: {
+          size: { width: 120, height: 63 },
+          default: () => React.createElement(LazyDiv),
+        },
+      },
+      { opengraphImage: true },
+    );
+
+    const response = createBinaryResponse();
+    await renderer.renderPage(createMockRequest("/dashboard/opengraph-image"), response);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers.get("content-type")).toBe("image/png");
+    expect(response.headers.get("cache-control")).toBe("public, max-age=0, must-revalidate");
+
+    const body = Buffer.concat(response.chunks);
+    expect(body.subarray(0, 8)).toEqual(
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    );
+    expect(imageSize(body)).toMatchObject({ width: 120, height: 63, type: "png" });
   });
 
   it("serves sitemap.ts with params, search params, and cache headers", async () => {
@@ -1067,6 +1102,42 @@ function createMockResponse(): MockResponse {
   };
 
   return response as unknown as MockResponse;
+}
+
+type BinaryMockResponse = MockResponse & {
+  chunks: Buffer[];
+};
+
+function createBinaryResponse(): BinaryMockResponse {
+  const response = {
+    statusCode: 200,
+    chunks: [] as Buffer[],
+    headers: new Map<string, string | number | readonly string[]>(),
+    headersSent: false,
+    writableEnded: false,
+    setHeader(key: string, value: string | number | readonly string[]) {
+      this.headers.set(key.toLowerCase(), value);
+      return this;
+    },
+    getHeader(key: string) {
+      return this.headers.get(key.toLowerCase());
+    },
+    write(chunk: unknown) {
+      this.headersSent = true;
+      this.chunks.push(Buffer.from(chunk as Uint8Array));
+      return true;
+    },
+    end(chunk?: unknown) {
+      if (chunk !== undefined) {
+        this.write(chunk);
+      }
+      this.writableEnded = true;
+      return this;
+    },
+    flush() {},
+  };
+
+  return response as unknown as BinaryMockResponse;
 }
 
 function createDeferred<T>() {

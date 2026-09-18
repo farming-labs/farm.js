@@ -95,6 +95,7 @@ import { farmImageImportsPlugin } from "./image-vite";
 import { farmFontImportsPlugin } from "./font-vite";
 import { resolveFarmLayoutFonts } from "./font";
 import { createFarmImageHandler, type FarmImageHandler } from "./image-server";
+import { isFarmI18nCatalogFile, resolveFarmI18nMessagePath } from "./i18n/config";
 import { getFarmI18nClientSnapshot } from "./i18n/server";
 import { localizeFarmPathname } from "./i18n/routing";
 import type { FarmI18nClientSnapshot } from "./i18n/types";
@@ -1083,9 +1084,9 @@ export function farmPlugin(
       server.watcher.add(sourceRoots.map((source) => path.join(source.root, source.srcDir)));
       if (farmConfig.i18n.enabled) {
         server.watcher.add(
-          farmConfig.i18n.messages.includes("{locale}")
-            ? path.dirname(farmConfig.i18n.messages)
-            : farmConfig.i18n.messages,
+          farmConfig.i18n.locales.map((locale) =>
+            resolveFarmI18nMessagePath(farmConfig.i18n, locale),
+          ),
         );
       }
       const workflowConfig = farmConfig.workflows;
@@ -1192,15 +1193,12 @@ export function farmPlugin(
         /\/(?:opengraph-image|twitter-image)(?:\.(?:png|jpg|jpeg|gif|webp)|\.alt\.txt)$/.test(
           file.replace(/\\/g, "/"),
         );
-      const isI18nCatalogFile = (file: string) =>
-        farmConfig.i18n.enabled &&
-        file
-          .replace(/\\/g, "/")
-          .startsWith(farmConfig.i18n.messages.replace(/\\/g, "/").replace("{locale}", ""));
+      const isI18nCatalogFile = (file: string) => isFarmI18nCatalogFile(farmConfig.i18n, file);
       let typeArtifactGenScheduled: ReturnType<typeof setTimeout> | null = null;
       let pendingTypeArtifacts = createEmptyTypeArtifactSelection();
       let pendingTypeArtifactReason = "";
       let routeRefreshScheduled: ReturnType<typeof setTimeout> | null = null;
+      let pendingRouteRefreshIncludesMiddleware = false;
       const scheduleTypeArtifactGen = (
         file: string,
         event: string,
@@ -1251,23 +1249,29 @@ export function farmPlugin(
               .then(() => server.ws.send({ type: "full-reload", path: "*" }))
               .catch((error) => logger.warn(`i18n catalog reload failed: ${error.message}`));
           }
-          if (
+          const isRouteRefreshEvent =
             (ev !== "change" || isStaticMetadataImageFile(file)) &&
             (isAppRuntimeFile(file) ||
               isProgrammaticRouteFile(file) ||
               (isProgrammaticRouteSourceFile(file) &&
-                (ev === "unlink" || fileContainsProgrammaticPageRoute(file)))) &&
-            !routeRefreshScheduled
-          ) {
-            routeRefreshScheduled = setTimeout(() => {
-              routeRefreshScheduled = null;
-              Promise.all([
-                refreshRouteDiscovery?.(`${ev} ${file}`),
-                file.includes("middleware.") ? middlewareManager?.reload() : undefined,
-              ])
-                .then(() => server.ws.send({ type: "full-reload", path: "*" }))
-                .catch((error) => logger.warn(`Route refresh failed: ${error.message}`));
-            }, 50);
+                (ev === "unlink" || fileContainsProgrammaticPageRoute(file))));
+          if (isRouteRefreshEvent) {
+            if (file.includes("middleware.")) {
+              pendingRouteRefreshIncludesMiddleware = true;
+            }
+            if (!routeRefreshScheduled) {
+              routeRefreshScheduled = setTimeout(() => {
+                routeRefreshScheduled = null;
+                const reloadsMiddleware = pendingRouteRefreshIncludesMiddleware;
+                pendingRouteRefreshIncludesMiddleware = false;
+                Promise.all([
+                  refreshRouteDiscovery?.(`${ev} ${file}`),
+                  reloadsMiddleware ? middlewareManager?.reload() : undefined,
+                ])
+                  .then(() => server.ws.send({ type: "full-reload", path: "*" }))
+                  .catch((error) => logger.warn(`Route refresh failed: ${error.message}`));
+              }, 50);
+            }
           }
         });
       });

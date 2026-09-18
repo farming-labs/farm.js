@@ -856,7 +856,7 @@ function createAPIClientRuntime<
         isCacheEnabled ||
         Boolean(clientOptions?.optimistic?.update?.length) ||
         Boolean(clientOptions?.invalidate);
-      let requestCacheContext = requestContextError ? `invalid:${requestId}` : undefined;
+      let requestCacheContext: string | undefined = undefined;
       if (needsCacheState && !requestContextError) {
         try {
           requestCacheContext = getRequestCacheContext(
@@ -867,7 +867,6 @@ function createAPIClientRuntime<
             httpFetch ? "client" : cacheOptions?.scope,
           );
         } catch (error) {
-          requestCacheContext = `invalid:${requestId}`;
           requestContextError = normalizeError(error);
         }
       }

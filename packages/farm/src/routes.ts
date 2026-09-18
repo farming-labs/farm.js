@@ -11,6 +11,7 @@ import { normalizeFarmRouteRuntimeConfig, type FarmRouteRuntimeConfig } from "./
 import type { ServerFn } from "./server-fn";
 import type { FarmServerRendererRuntime } from "./renderer";
 import { parseProgrammaticRoutePath as parseSharedProgrammaticRoutePath } from "./routes-shared";
+import { extractProgrammaticPageCallPathLiterals } from "./route-call-scanner";
 import type {
   FarmAppContext,
   LayoutProps,
@@ -1044,11 +1045,10 @@ export function createLayoutModuleFromProgrammaticLayout(route: ProgrammaticLayo
 
 export function scanProgrammaticPagePaths(source: string): string[] {
   const paths = new Set<string>();
-  const callRe = /\b(?:page|createRoute)\s*\(\s*(["'`])([^"'`]+)\1/g;
 
-  for (const match of source.matchAll(callRe)) {
-    if (match[2]) {
-      paths.add(normalizeRoutePath(match[2]));
+  for (const routePath of extractProgrammaticPageCallPathLiterals(source)) {
+    if (routePath) {
+      paths.add(normalizeRoutePath(routePath));
     }
   }
 
