@@ -230,12 +230,21 @@ function createLiveReport(
   baseUrl: string,
   now: FarmDoctorOptions["now"],
 ): FarmDoctorReport {
+  const runtimeHealth = snapshot.health ?? "ready";
+  const runtimeHealthStatus: FarmDoctorCheckStatus =
+    runtimeHealth === "error" ? "fail" : runtimeHealth === "attention" ? "warn" : "pass";
   const checks: FarmDoctorCheck[] = [
     {
       status: "pass",
       code: "LIVE_RUNTIME_READY",
       title: "Connected to the Farm runtime",
       message: `${formatCount(snapshot.counts.pages, "page")}, ${formatCount(snapshot.counts.apiRoutes, "API route")}, and ${formatCount(snapshot.counts.middleware, "middleware layer")} are registered.`,
+    },
+    {
+      status: runtimeHealthStatus,
+      code: "LIVE_RUNTIME_HEALTH",
+      title: "Runtime health is reported",
+      message: `The running Farm application reports ${runtimeHealth} health.`,
     },
     {
       status: "pass",
@@ -669,6 +678,10 @@ function isLiveSnapshot(value: unknown): value is LiveSnapshot {
   return Boolean(
     snapshot.project &&
     typeof snapshot.project.name === "string" &&
+    (snapshot.health === undefined ||
+      snapshot.health === "ready" ||
+      snapshot.health === "attention" ||
+      snapshot.health === "error") &&
     snapshot.deployment &&
     typeof snapshot.deployment.target === "string" &&
     snapshot.counts &&

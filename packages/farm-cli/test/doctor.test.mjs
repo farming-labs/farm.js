@@ -55,6 +55,41 @@ test("uses the running DevTools snapshot as the source of truth", async () => {
   assert.ok(report.checks.some((check) => check.code === "EPHEMERAL_PRODUCTION_STORAGE"));
 });
 
+test("preserves live runtime health without matching diagnostics", async () => {
+  for (const [health, status] of [
+    ["attention", "warn"],
+    ["error", "fail"],
+  ]) {
+    const report = await runFarmDoctor({
+      url: "http://localhost:4319",
+      fetch: async () =>
+        Response.json({
+          health,
+          project: { name: "storefront", root: "/repo/storefront" },
+          deployment: { target: "node", preset: "node-server" },
+          counts: {
+            pages: 1,
+            layouts: 1,
+            apiRoutes: 0,
+            middleware: 0,
+            integrations: 0,
+            storageMounts: 0,
+            cronJobs: 0,
+            workflows: 0,
+          },
+          diagnostics: [],
+        }),
+    });
+
+    assert.equal(report.health, health);
+    assert.ok(
+      report.checks.some(
+        (check) => check.code === "LIVE_RUNTIME_HEALTH" && check.status === status,
+      ),
+    );
+  }
+});
+
 test("inspects a project without starting its runtime", async () => {
   const root = await createTempProject();
 
