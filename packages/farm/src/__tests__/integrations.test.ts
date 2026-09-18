@@ -6,6 +6,7 @@ import { definePlugin, PluginManager, type FarmPluginIntegrationContext } from "
 import {
   defineIntegration,
   dispatchIntegrationRequest,
+  forwardIntegrationSetCookies,
   getFarmIntegrationPluginOwner,
   getFarmIntegrationPluginServerRuntime,
   getRegisteredIntegrationRuntime,
@@ -1636,5 +1637,174 @@ describe("integrations runtime", () => {
         method: "GET",
       }),
     ).toBeNull();
+  });
+
+  it("forwards an integration middleware's Set-Cookie onto the Node response when the middleware returns void", async () => {
+    const integration = defineIntegration({
+      category: "auth",
+      type: "refresh-forwarder",
+      instance: {},
+      middleware: [
+        {
+          matcher: "/dashboard(.*)",
+          async handler(_request, context) {
+            // A void-returning middleware (e.g. an authenticated protected-route
+            // branch that refreshed the session server-side) hands the rotated
+            // Set-Cookie to the runtime; the page still renders downstream.
+            forwardIntegrationSetCookies(context, ["sb-test-auth-token=rotated; Path=/"]);
+          },
+        },
+      ],
+    });
+    const manager = createManager();
+    manager.addPlugins(resolveIntegrationPlugins({ refresh: integration }));
+    await manager.runHookParallel("init");
+
+    const req = createRequest("/dashboard");
+    const res = createResponse();
+    const handled = await manager.runHookParallel("beforeRequest", req as any, res as any);
+
+    // void middleware does not short-circuit the request.
+    expect(handled).toBe(false);
+    expect(res.writableEnded).toBe(false);
+    // the rotated cookie still reached the response the runtime is building.
+    const setCookie = res.getHeader("Set-Cookie");
+    const setCookieText = Array.isArray(setCookie) ? setCookie.join("\n") : String(setCookie ?? "");
+    expect(setCookieText).toContain("sb-test-auth-token=rotated");
+
+    await manager.runHookParallel("shutdown", { reason: "test" });
+  });
+
+  it("accumulates forwarded Set-Cookie from multiple void middleware without double-applying", async () => {
+    const integration = defineIntegration({
+      category: "auth",
+      type: "multi-refresh-forwarder",
+      instance: {},
+      middleware: [
+        {
+          matcher: "/dashboard(.*)",
+          async handler(_request, context) {
+            forwardIntegrationSetCookies(context, ["first=1; Path=/"]);
+          },
+        },
+        {
+          matcher: "/dashboard(.*)",
+          async handler(_request, context) {
+            forwardIntegrationSetCookies(context, ["second=2; Path=/"]);
+          },
+        },
+      ],
+    });
+    const manager = createManager();
+    manager.addPlugins(resolveIntegrationPlugins({ multi: integration }));
+    await manager.runHookParallel("init");
+
+    const req = createRequest("/dashboard");
+    const res = createResponse();
+    await manager.runHookParallel("beforeRequest", req as any, res as any);
+
+    const setCookie = res.getHeader("Set-Cookie");
+    const setCookieText = Array.isArray(setCookie) ? setCookie.join("\n") : String(setCookie ?? "");
+    expect(setCookieText).toContain("first=1");
+    expect(setCookieText).toContain("second=2");
+    // read-and-clear keeps each batch applied at most once.
+    expect(setCookieText.match(/first=1/g)?.length).toBe(1);
+    expect(setCookieText.match(/second=2/g)?.length).toBe(1);
+
+    await manager.runHookParallel("shutdown", { reason: "test" });
+  });
+
+  it("forwards an integration middleware's Set-Cookie onto the route response in dispatchIntegrationRequest", async () => {
+    const integration = defineIntegration({
+      category: "custom",
+      type: "refresh-route",
+      instance: {},
+      middleware: [
+        {
+          matcher: "/api/protected(.*)",
+          async handler(_request, context) {
+            forwardIntegrationSetCookies(context, ["sb-test-auth-token=rotated; Path=/"]);
+            // return void → continue to the matched route handler.
+          },
+        },
+      ],
+      routes: [
+        {
+          path: "/api/protected",
+          method: "GET",
+          handler: async () =>
+            new Response(JSON.stringify({ ok: true }), {
+              headers: { "content-type": "application/json" },
+            }),
+        },
+      ],
+    });
+    const manager = createManager();
+    manager.addPlugins(resolveIntegrationPlugins({ refresh: integration }));
+    await manager.runHookParallel("init");
+    const runtime = getRegisteredIntegrationRuntime("refresh")!;
+
+    const response = await dispatchIntegrationRequest(
+      runtime,
+      new Request("http://localhost/api/protected"),
+    );
+
+    expect(response).toBeInstanceOf(Response);
+    expect(response!.status).toBe(200);
+    expect(await response!.json()).toEqual({ ok: true });
+    expect(response!.headers.get("set-cookie")).toContain("sb-test-auth-token=rotated");
+
+    await manager.runHookParallel("shutdown", { reason: "test" });
+  });
+
+  it("forwards integration middleware Set-Cookie onto a short-circuiting middleware Response in dispatchIntegrationRequest", async () => {
+    const integration = defineIntegration({
+      category: "custom",
+      type: "refresh-then-redirect",
+      instance: {},
+      middleware: [
+        {
+          matcher: "/api/protected(.*)",
+          async handler(_request, context) {
+            forwardIntegrationSetCookies(context, ["sb-test-auth-token=rotated; Path=/"]);
+            // A later middleware short-circuits with its own Response; prior
+            // forwarded cookies must still ride on that response.
+            return undefined;
+          },
+        },
+        {
+          matcher: "/api/protected(.*)",
+          async handler() {
+            return new Response(null, {
+              status: 302,
+              headers: { location: "/login" },
+            });
+          },
+        },
+      ],
+      routes: [
+        {
+          path: "/api/protected",
+          method: "GET",
+          handler: async () => new Response("unreachable"),
+        },
+      ],
+    });
+    const manager = createManager();
+    manager.addPlugins(resolveIntegrationPlugins({ redirect: integration }));
+    await manager.runHookParallel("init");
+    const runtime = getRegisteredIntegrationRuntime("redirect")!;
+
+    const response = await dispatchIntegrationRequest(
+      runtime,
+      new Request("http://localhost/api/protected"),
+    );
+
+    expect(response).toBeInstanceOf(Response);
+    expect(response!.status).toBe(302);
+    expect(response!.headers.get("location")).toBe("/login");
+    expect(response!.headers.get("set-cookie")).toContain("sb-test-auth-token=rotated");
+
+    await manager.runHookParallel("shutdown", { reason: "test" });
   });
 });
