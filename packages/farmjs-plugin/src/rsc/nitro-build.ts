@@ -460,12 +460,13 @@ export async function buildRscNitro(options: BuildRscNitroOptions): Promise<void
     }
   }
   if (existsSync(ssrIndexPath)) {
-    const assetsDir = path.join(publicDir, "assets");
+    const assetsDirName = assetsDir ?? "assets";
+    const assetsRoot = path.join(publicDir, assetsDirName);
     let clientCssHref = "";
-    if (existsSync(assetsDir)) {
-      const files = readdirSync(assetsDir);
+    if (existsSync(assetsRoot)) {
+      const files = readdirSync(assetsRoot);
       const cssFile = files.find((f) => f.endsWith(".css"));
-      if (cssFile) clientCssHref = "/assets/" + cssFile;
+      if (cssFile) clientCssHref = `/${assetsDirName}/${cssFile}`;
     }
     try {
       let ssrCode = readFileSync(ssrIndexPath, "utf-8");
