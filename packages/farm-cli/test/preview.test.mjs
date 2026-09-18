@@ -927,6 +927,26 @@ test("terminates the tunnel process when the preview URL times out", async () =>
   }
 });
 
+test("ignores vendor documentation URLs before a built-in tunnel is ready", async () => {
+  const script =
+    "process.stdout.write('Learn more: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/\\n');" +
+    "setTimeout(() => {" +
+    "  process.stdout.write('tunnel ready at https://actual-preview.trycloudflare.com\\n');" +
+    "}, 50);";
+
+  const plan = {
+    command: process.execPath,
+    args: ["-e", script],
+    provider: "cloudflared",
+    target: { localUrl: "http://127.0.0.1:3000", host: "127.0.0.1", port: 3000, source: "port" },
+    requestedName: "actual-preview",
+    requestedHostname: "actual-preview.preview.farming-labs.dev",
+  };
+
+  const publicUrl = await runPreviewTunnel(plan, 2_000);
+  assert.equal(publicUrl, "https://actual-preview.trycloudflare.com");
+});
+
 test("finds the preview URL after a noisy tunnel prologue", async () => {
   // The scan buffer is bounded, so a tunnel that prints a lot before announcing
   // its URL must still be matched - including when the URL lands in a later
