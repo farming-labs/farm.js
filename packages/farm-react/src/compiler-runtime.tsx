@@ -5496,7 +5496,7 @@ function createHostConditionalBlockComponent(
       for (const unsubscribe of this.fallbackUnsubscribers) unsubscribe();
       this.fallbackUnsubscribers = [];
       this.instance?.scope?.cleanup();
-      this.root = null;
+      // React 18 replays lifecycles without detaching refs; captureRoot owns ref cleanup.
       this.activeBranch = null;
       this.instance = null;
     }
@@ -5813,7 +5813,7 @@ function createConditionalRangesBlockComponent(
       for (const unsubscribe of this.fallbackUnsubscribers) unsubscribe();
       this.fallbackUnsubscribers = [];
       for (const instance of this.rangeInstances) instance?.host.scope?.cleanup();
-      this.root = null;
+      // Keep the attached root for React 18 replay; captureRoot clears real detachments.
       this.rangeInstances = [];
       this.staticSegments = [];
       this.staticValues.length = 0;
@@ -9740,7 +9740,7 @@ function createKeyedRangesBlockComponent(
     componentWillUnmount(): void {
       this.mounted = false;
       this.unsubscribe?.();
-      this.root = null;
+      // Keep the attached root for React 18 replay; captureRoot clears real detachments.
       this.rangeInstances = [];
       this.staticSegments = [];
       this.staticValues.length = 0;
@@ -9882,7 +9882,7 @@ function createMixedRangesBlockComponent(
       this.controller?.cleanup();
       this.controller = null;
       this.clearFallbackSubscriptions();
-      this.root = null;
+      // Keep the attached root for React 18 replay; captureRoot clears real detachments.
     }
 
     render(): React.ReactNode {
