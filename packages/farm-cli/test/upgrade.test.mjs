@@ -210,6 +210,70 @@ test("restores repeated sections after the package manager relocates a package",
   }
 });
 
+test("restores the upgraded specifier when a repeated section is left stale", async () => {
+  const root = await createTempProject({
+    devDependencies: { "@farm.js/core": "^0.1.0-beta.3" },
+    peerDependencies: { "@farm.js/core": "^0.1.0-beta.2" },
+  });
+
+  try {
+    await upgradeFarm({
+      root,
+      channel: "beta",
+      packageManager: "yarn",
+      runCommand: async (command) => {
+        if (command.args[0] !== "add") return;
+        if (command.args.includes("--peer")) return;
+        const manifestPath = path.join(root, "package.json");
+        const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+        manifest.devDependencies = {
+          ...manifest.devDependencies,
+          "@farm.js/core": "^0.1.0-beta.99",
+        };
+        await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+      },
+    });
+
+    const manifest = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
+    assert.equal(manifest.devDependencies["@farm.js/core"], "^0.1.0-beta.99");
+    assert.equal(manifest.peerDependencies["@farm.js/core"], "^0.1.0-beta.99");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("does not silently no-op when repeated sections start equal and one is left stale", async () => {
+  const root = await createTempProject({
+    devDependencies: { "@farm.js/core": "^0.1.0-beta.3" },
+    peerDependencies: { "@farm.js/core": "^0.1.0-beta.3" },
+  });
+
+  try {
+    await upgradeFarm({
+      root,
+      channel: "beta",
+      packageManager: "yarn",
+      runCommand: async (command) => {
+        if (command.args[0] !== "add") return;
+        if (command.args.includes("--peer")) return;
+        const manifestPath = path.join(root, "package.json");
+        const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+        manifest.devDependencies = {
+          ...manifest.devDependencies,
+          "@farm.js/core": "^0.1.0-beta.99",
+        };
+        await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+      },
+    });
+
+    const manifest = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
+    assert.equal(manifest.devDependencies["@farm.js/core"], "^0.1.0-beta.99");
+    assert.equal(manifest.peerDependencies["@farm.js/core"], "^0.1.0-beta.99");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("detects Bun from its lockfile when packageManager is not declared", async () => {
   const root = await createTempProject({
     dependencies: {
