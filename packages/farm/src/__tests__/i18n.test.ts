@@ -457,13 +457,16 @@ describe("Farm ICU catalogs", () => {
 });
 
 describe("Farm i18n catalog file classifier", () => {
+  const projectRoot = resolve(".tmp-i18n-catalog-classifier");
+  const projectFile = (...segments: string[]) => join(projectRoot, ...segments);
+
   it("matches per-locale catalogs under the default flat layout", () => {
     const config = resolveFarmI18nConfig(
       { locales: ["en-US", "am"], defaultLocale: "en-US" },
-      { root: "/app" },
+      { root: projectRoot },
     );
-    expect(isFarmI18nCatalogFile(config, "/app/src/messages/en-US.json")).toBe(true);
-    expect(isFarmI18nCatalogFile(config, "/app/src/messages/am.json")).toBe(true);
+    expect(isFarmI18nCatalogFile(config, projectFile("src", "messages", "en-US.json"))).toBe(true);
+    expect(isFarmI18nCatalogFile(config, projectFile("src", "messages", "am.json"))).toBe(true);
   });
 
   it("matches per-locale catalogs under the {locale}-templated layout", () => {
@@ -473,10 +476,14 @@ describe("Farm i18n catalog file classifier", () => {
         defaultLocale: "en-US",
         messages: "content/locales/{locale}/app.json",
       },
-      { root: "/app" },
+      { root: projectRoot },
     );
-    expect(isFarmI18nCatalogFile(config, "/app/content/locales/en-US/app.json")).toBe(true);
-    expect(isFarmI18nCatalogFile(config, "/app/content/locales/am/app.json")).toBe(true);
+    expect(
+      isFarmI18nCatalogFile(config, projectFile("content", "locales", "en-US", "app.json")),
+    ).toBe(true);
+    expect(isFarmI18nCatalogFile(config, projectFile("content", "locales", "am", "app.json"))).toBe(
+      true,
+    );
   });
 
   it("rejects unrelated files beneath a templated messages base directory", () => {
@@ -486,11 +493,17 @@ describe("Farm i18n catalog file classifier", () => {
         defaultLocale: "en-US",
         messages: "content/locales/{locale}/app.json",
       },
-      { root: "/app" },
+      { root: projectRoot },
     );
-    expect(isFarmI18nCatalogFile(config, "/app/content/locales/en-US/app.json")).toBe(true);
-    expect(isFarmI18nCatalogFile(config, "/app/content/locales/_shared.json")).toBe(false);
-    expect(isFarmI18nCatalogFile(config, "/app/content/locales/fr/app.json")).toBe(false);
+    expect(
+      isFarmI18nCatalogFile(config, projectFile("content", "locales", "en-US", "app.json")),
+    ).toBe(true);
+    expect(isFarmI18nCatalogFile(config, projectFile("content", "locales", "_shared.json"))).toBe(
+      false,
+    );
+    expect(isFarmI18nCatalogFile(config, projectFile("content", "locales", "fr", "app.json"))).toBe(
+      false,
+    );
   });
 
   it("normalizes backslash separators on both the messages path and the edited file", () => {
@@ -506,27 +519,29 @@ describe("Farm i18n catalog file classifier", () => {
   it("does not treat every project file as a catalog for a root-level template", () => {
     const config = resolveFarmI18nConfig(
       { locales: ["en", "am"], defaultLocale: "en", messages: "{locale}.json" },
-      { root: "/app" },
+      { root: projectRoot },
     );
 
-    expect(isFarmI18nCatalogFile(config, "/app/en.json")).toBe(true);
-    expect(isFarmI18nCatalogFile(config, "/app/am.json")).toBe(true);
-    expect(isFarmI18nCatalogFile(config, "/app/src/app/page.tsx")).toBe(false);
+    expect(isFarmI18nCatalogFile(config, projectFile("en.json"))).toBe(true);
+    expect(isFarmI18nCatalogFile(config, projectFile("am.json"))).toBe(true);
+    expect(isFarmI18nCatalogFile(config, projectFile("src", "app", "page.tsx"))).toBe(false);
   });
 
   it("does not match a sibling directory that only shares the flat-layout prefix", () => {
     const config = resolveFarmI18nConfig(
       { locales: ["en"], defaultLocale: "en", messages: "src/messages" },
-      { root: "/app" },
+      { root: projectRoot },
     );
 
-    expect(isFarmI18nCatalogFile(config, "/app/src/messages/en.json")).toBe(true);
-    expect(isFarmI18nCatalogFile(config, "/app/src/messages-backup/en.json")).toBe(false);
+    expect(isFarmI18nCatalogFile(config, projectFile("src", "messages", "en.json"))).toBe(true);
+    expect(isFarmI18nCatalogFile(config, projectFile("src", "messages-backup", "en.json"))).toBe(
+      false,
+    );
   });
 
   it("returns false when i18n is disabled or the file is outside the messages tree", () => {
-    const disabled = resolveFarmI18nConfig(false, { root: "/app" });
-    expect(isFarmI18nCatalogFile(disabled, "/app/src/messages/en.json")).toBe(false);
+    const disabled = resolveFarmI18nConfig(false, { root: projectRoot });
+    expect(isFarmI18nCatalogFile(disabled, projectFile("src", "messages", "en.json"))).toBe(false);
 
     const templated = resolveFarmI18nConfig(
       {
@@ -534,10 +549,15 @@ describe("Farm i18n catalog file classifier", () => {
         defaultLocale: "en-US",
         messages: "content/locales/{locale}/app.json",
       },
-      { root: "/app" },
+      { root: projectRoot },
     );
-    expect(isFarmI18nCatalogFile(templated, "/app/src/app/page.tsx")).toBe(false);
-    expect(isFarmI18nCatalogFile(templated, "/other/content/locales/en-US/app.json")).toBe(false);
+    expect(isFarmI18nCatalogFile(templated, projectFile("src", "app", "page.tsx"))).toBe(false);
+    expect(
+      isFarmI18nCatalogFile(
+        templated,
+        join(resolve(".tmp-other-i18n-app"), "content", "locales", "en-US", "app.json"),
+      ),
+    ).toBe(false);
   });
 });
 
