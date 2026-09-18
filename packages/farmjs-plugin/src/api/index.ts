@@ -24,7 +24,12 @@
 
 import type { Plugin, ViteDevServer } from "vite";
 import { _withAfterNodeMiddleware } from "@farm.js/core/after";
-import { _runWithAPIRequestRuntime } from "@farm.js/core/internal/production-runtime";
+import {
+  _runWithAPIRequestRuntime,
+  createFarmRequestBodyErrorResponse,
+  readNodeRequestBody,
+  resolveFarmServerConfig,
+} from "@farm.js/core/internal/production-runtime";
 import { invokeAPIRouteEndpoint } from "@farm.js/core/api/runtime";
 import { sendWebResponse } from "@farm.js/core/server";
 
@@ -33,6 +38,8 @@ export interface FarmApiOptions {
   srcDir?: string;
   /** Enable debug logging */
   debug?: boolean;
+  /** Maximum request body size, for example `"10mb"`. */
+  bodySizeLimit?: number | string;
 }
 
 export interface ApiRoute {
@@ -48,6 +55,9 @@ export interface ApiRoute {
 export default function farmApi(options: FarmApiOptions = {}): Plugin {
   const srcDir = options.srcDir ?? "src";
   const debug = options.debug ?? false;
+  const bodySizeLimit = resolveFarmServerConfig({
+    bodySizeLimit: options.bodySizeLimit,
+  }).bodySizeLimit;
 
   // API routes cache
   let apiRoutesCache: Map<string, ApiRoute> = new Map();
@@ -373,23 +383,20 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
             }
 
             // Get body for non-GET requests
-            let body: string | undefined;
+            let body: Buffer | undefined;
             if (method !== "GET" && method !== "HEAD") {
-              body = await new Promise<string>((resolve) => {
-                let data = "";
-                req.on("data", (chunk: any) => {
-                  data += chunk;
-                });
-                req.on("end", () => {
-                  resolve(data);
-                });
-              });
+              body = await readNodeRequestBody(req as any, bodySizeLimit);
             }
 
             const request = new Request(fullUrl, {
               method,
               headers,
-              body: body || undefined,
+              body: body
+                ? (body.buffer.slice(
+                    body.byteOffset,
+                    body.byteOffset + body.byteLength,
+                  ) as ArrayBuffer)
+                : undefined,
             });
 
             const response = await apiRouterHandler(request);
@@ -399,6 +406,11 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
 
             await sendWebResponse(res, response);
           } catch (error: any) {
+            const bodyErrorResponse = createFarmRequestBodyErrorResponse(error);
+            if (bodyErrorResponse) {
+              await sendWebResponse(res, bodyErrorResponse);
+              return;
+            }
             const duration = Date.now() - startTime;
             logResponse(method, pathname, 500, duration);
             console.error("[FARM] API error:", error);
