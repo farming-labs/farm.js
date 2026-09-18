@@ -84,4 +84,21 @@ describe("full-document composition", () => {
     expect(html).toContain("$&amp; $` $' $$");
     expect(html).toContain("<script>1</script>");
   });
+
+  it("replaces Farm-managed document attributes without duplicating them", () => {
+    const html = composeFarmFullDocument(
+      '<html lang="en" dir="ltr" data-theme="light" class="app"><head></head><body></body></html>',
+      {
+        htmlAttributes: ' lang="ar" dir="rtl" data-theme="dark"',
+        replaceHtmlAttributes: ["lang", "dir", "data-theme"],
+        headAssets: "",
+        bodyFooter: "",
+      },
+    );
+
+    expect(html).toContain('<html class="app" lang="ar" dir="rtl" data-theme="dark">');
+    expect(html.match(/\slang=/gi)).toHaveLength(1);
+    expect(html.match(/\sdir=/gi)).toHaveLength(1);
+    expect(html.match(/\sdata-theme=/gi)).toHaveLength(1);
+  });
 });
