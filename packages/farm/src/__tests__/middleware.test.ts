@@ -1605,6 +1605,22 @@ describe("Parent Data Access (Cascading)", () => {
 });
 
 describe("URL Rewriting", () => {
+  it("preserves the trusted request origin when rewriting a relative URL", () => {
+    const req = createMockRequest("/old-path");
+    req.headers.host = "internal:3000";
+    req.headers["x-forwarded-host"] = "app.example.com";
+    req.headers["x-forwarded-proto"] = "https";
+    const ctx = createContext(req, createMockResponse(), undefined, undefined, {
+      trustProxy: true,
+    });
+
+    expect(ctx.url.href).toBe("https://app.example.com/old-path");
+
+    ctx.rewrite("/new-path?from=middleware");
+
+    expect(ctx.url.href).toBe("https://app.example.com/new-path?from=middleware");
+  });
+
   it("should update pathname when rewriting", () => {
     const req = createMockRequest("/old-path?foo=bar");
     const res = createMockResponse();
