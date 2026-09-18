@@ -373,11 +373,26 @@ export async function createServer(config: FarmConfig = {}) {
  */
 export async function startDevServer(config: FarmConfig = {}, port?: number) {
   const server = await createServer(config);
-  await server.listen(port);
-  const pluginManager = (server as any).__farmPluginManager as PluginManager | undefined;
-  // Shutdown is owned by the close() installed in createServer, which awaits
-  // the plugin runtime and reports failures rather than swallowing them.
-  await pluginManager?.startRuntime();
+
+  try {
+    await server.listen(port);
+    const pluginManager = (server as any).__farmPluginManager as PluginManager | undefined;
+    // Shutdown is owned by the close() installed in createServer, which awaits
+    // the plugin runtime and reports failures rather than swallowing them.
+    await pluginManager?.startRuntime();
+  } catch (error) {
+    // createServer already opened watchers, instrumentation, and plugin
+    // resources. A failure here — an occupied port is the common one — would
+    // otherwise leave all of them running with no handle to close them, since
+    // the caller never receives the server.
+    try {
+      await server.close();
+    } catch (closeError) {
+      logger.error(`Failed to clean up after a failed dev server start: ${closeError}`);
+    }
+    throw error;
+  }
+
   // Branding is handled by farmBrandingPlugin in vite.ts
   return server;
 }
