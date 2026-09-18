@@ -49,8 +49,13 @@ function parseSourceOrigin(value: string): RequestSourceOriginResult {
 }
 
 /**
- * Accept a source origin that matches the Host header even when `request.url`
- * was rebuilt behind a proxy with a different visible origin.
+ * Accept a source origin whose host matches the `Host` header *and* whose
+ * scheme matches the rebuilt `request.url` scheme. The scheme check blocks
+ * browser-driven protocol-downgrade CSRF and also rejects proxy-rebuilt
+ * `request.url` values whose scheme differs from the browser origin. For
+ * TLS-terminating proxies that leave `request.url` as `http:`, enable
+ * `trustProxy` with a proxy-emitted `X-Forwarded-Proto: https`, or add the
+ * browser origin to `serverActions.allowedOrigins`.
  */
 export function matchesHostHeader(sourceOrigin: string, request: Request): boolean {
   const host = request.headers.get("host")?.trim().toLowerCase();
