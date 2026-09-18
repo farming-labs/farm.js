@@ -33,6 +33,8 @@ React is the default renderer. `--renderer preact`, `--renderer solid`, `--rende
 | Command                          | Purpose                                                              |
 | -------------------------------- | -------------------------------------------------------------------- |
 | farm dev                         | Start the dev server.                                                |
+| farm dev --host                  | Expose the dev server on the local network.                          |
+| farm dev --host 127.0.0.1        | Bind the dev server to a specific host.                              |
 | farm build                       | Build the app for the configured target.                             |
 | farm start                       | Run the Node server produced by farm build.                          |
 | farm upgrade --latest            | Upgrade installed Farm packages to the latest stable release.        |
