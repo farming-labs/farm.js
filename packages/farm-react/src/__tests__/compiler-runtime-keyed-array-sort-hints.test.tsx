@@ -104,7 +104,7 @@ function createSortHarness(
     displayName: "SortTable",
     reactivity,
     initialize: () => [initialItems],
-    render(_props: Record<string, never>, state, blocks) {
+    render(props: { onRowClick?: (item: Item, index: number) => void }, state, blocks) {
       counters.executions += 1;
       const items = () => state[0].get() as Item[];
       sort = (compare) => state[0].set((previous) => hintedSort(previous as Item[], compare));
@@ -220,6 +220,7 @@ function createSortHarness(
                       invoke: (item, index) => {
                         const row = item as Item;
                         calls.push(`${row.id}:${row.label}:${index}`);
+                        props.onRowClick?.(row, index);
                       },
                     },
                   ]
@@ -330,6 +331,159 @@ function trackRowIndexWrites() {
 
 describe("compiled keyed-array sort hints", () => {
   for (const reactivity of ["static", "hybrid"] as const) {
+    it.each(["batched", "parent-first", "local-first"] as const)(
+      `keeps delegated callbacks current across %s parent updates in ${reactivity}`,
+      async (ordering) => {
+        const initialItems = Array.from(
+          { length: 16 },
+          (_, index): Item => ({
+            id: `row-${index}`,
+            label: `Row ${index}`,
+            rank: (index * 5) % 16,
+          }),
+        );
+        const harness = createSortHarness(initialItems, false, reactivity, true);
+        const compiledCalls: string[] = [];
+        const normalCalls: string[] = [];
+        let setVersion: React.Dispatch<React.SetStateAction<number>> = () => undefined;
+        let updateNormal: (compare: (left: Item, right: Item) => number) => void = () => undefined;
+        function NormalTable({ version }: { version: number }) {
+          const [items, setItems] = useState(initialItems);
+          updateNormal = (compare) => {
+            setItems((previous) =>
+              previous.map((item) =>
+                item.id === "row-0" ? { ...item, label: `${item.label}!` } : item,
+              ),
+            );
+            setItems((previous) => previous.toSorted(compare));
+          };
+          return (
+            <ul>
+              {items.map((item, index) => (
+                <li
+                  data-key={item.id}
+                  key={item.id}
+                  onClick={() => normalCalls.push(`${version}:${item.id}:${item.label}:${index}`)}
+                >
+                  {item.label}
+                </li>
+              ))}
+            </ul>
+          );
+        }
+        function Parent() {
+          const [version, updateVersion] = useState(0);
+          setVersion = updateVersion;
+          return (
+            <>
+              <div data-compiled>
+                <harness.Table
+                  onRowClick={(item, index) =>
+                    compiledCalls.push(`${version}:${item.id}:${item.label}:${index}`)
+                  }
+                />
+              </div>
+              <div data-control>
+                <NormalTable version={version} />
+              </div>
+            </>
+          );
+        }
+        const container = document.createElement("div");
+        document.body.append(container);
+        const root = createRoot(container);
+        roots.push(root);
+        await act(async () =>
+          root.render(
+            <StrictMode>
+              <Parent />
+            </StrictMode>,
+          ),
+        );
+        const compiledContainer = container.querySelector("[data-compiled]")!;
+        const normalContainer = container.querySelector("[data-control]")!;
+        const rows = new Map(
+          [...compiledContainer.querySelectorAll("li")].map((row) => [
+            row.getAttribute("data-key"),
+            row,
+          ]),
+        );
+        const moves = vi.spyOn(compiledContainer.querySelector("ul")!, "insertBefore");
+        const writes = trackRowIndexWrites();
+        const renders = harness.counters.renders;
+        let expectedItems = initialItems;
+        for (const version of [1, 2]) {
+          const compare =
+            version === 1
+              ? (left: Item, right: Item) => right.rank - left.rank
+              : (left: Item, right: Item) => left.rank - right.rank;
+          // The second commit has no parent update and must retain the fast path.
+          for (const parentUpdate of [true, false]) {
+            const previousIndices = new Map(expectedItems.map((item, index) => [item.id, index]));
+            const localCompare = parentUpdate
+              ? compare
+              : (left: Item, right: Item) => -compare(left, right);
+            expectedItems = expectedItems
+              .map((item) => (item.id === "row-0" ? { ...item, label: `${item.label}!` } : item))
+              .toSorted(localCompare);
+            const before = { ...harness.counters };
+            moves.mockClear();
+            writes.count = 0;
+            const updateRows = () => {
+              harness.editAndSort(localCompare);
+              updateNormal(localCompare);
+            };
+            await act(async () => {
+              if (!parentUpdate) updateRows();
+              else if (ordering === "parent-first") {
+                flushSync(() => setVersion(version));
+                updateRows();
+              } else if (ordering === "local-first") {
+                updateRows();
+                flushSync(() => setVersion(version));
+              } else {
+                setVersion(version);
+                updateRows();
+              }
+              await flushCompilerUpdates();
+            });
+            expect(itemLabels(compiledContainer)).toEqual(expectedItems.map((item) => item.label));
+            expect(itemLabels(compiledContainer)).toEqual(itemLabels(normalContainer));
+            const currentRows = [...compiledContainer.querySelectorAll("li")];
+            currentRows.forEach((row, index) =>
+              expect(row).toBe(rows.get(expectedItems[index].id)),
+            );
+            expect(moves).toHaveBeenCalledTimes(
+              expectedItems.length -
+                lisLength(expectedItems.map((item) => previousIndices.get(item.id)!)),
+            );
+            expect(harness.counters.renders).toBe(renders);
+            expect(harness.counters.descriptors).toBe(before.descriptors);
+            if (parentUpdate) {
+              expect(harness.counters.executions).toBeGreaterThan(before.executions);
+            } else {
+              expect(harness.counters).toEqual({
+                ...before,
+                keys: before.keys + 1,
+                bindings: before.bindings + 1,
+              });
+              expect(writes.count).toBe(0);
+            }
+            compiledCalls.length = 0;
+            normalCalls.length = 0;
+            await act(async () => {
+              currentRows.forEach((row) => row.click());
+              normalContainer.querySelectorAll("li").forEach((row) => row.click());
+            });
+            expect(compiledCalls).toEqual(
+              expectedItems.map((item, index) => `${version}:${item.id}:${item.label}:${index}`),
+            );
+            expect(compiledCalls).toEqual(normalCalls);
+          }
+        }
+      },
+    );
+
     it.each(["hydration", "remount"] as const)(
       `preserves retained delegated lookups through StrictMode %s in ${reactivity}`,
       async (lifecycle) => {
