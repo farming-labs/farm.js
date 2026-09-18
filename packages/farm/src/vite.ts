@@ -95,6 +95,7 @@ import { farmImageImportsPlugin } from "./image-vite";
 import { farmFontImportsPlugin } from "./font-vite";
 import { resolveFarmLayoutFonts } from "./font";
 import { createFarmImageHandler, type FarmImageHandler } from "./image-server";
+import { isFarmI18nCatalogFile } from "./i18n/config";
 import { getFarmI18nClientSnapshot } from "./i18n/server";
 import { localizeFarmPathname } from "./i18n/routing";
 import type { FarmI18nClientSnapshot } from "./i18n/types";
@@ -1192,11 +1193,7 @@ export function farmPlugin(
         /\/(?:opengraph-image|twitter-image)(?:\.(?:png|jpg|jpeg|gif|webp)|\.alt\.txt)$/.test(
           file.replace(/\\/g, "/"),
         );
-      const isI18nCatalogFile = (file: string) =>
-        farmConfig.i18n.enabled &&
-        file
-          .replace(/\\/g, "/")
-          .startsWith(farmConfig.i18n.messages.replace(/\\/g, "/").replace("{locale}", ""));
+      const isI18nCatalogFile = (file: string) => isFarmI18nCatalogFile(farmConfig.i18n, file);
       let typeArtifactGenScheduled: ReturnType<typeof setTimeout> | null = null;
       let pendingTypeArtifacts = createEmptyTypeArtifactSelection();
       let pendingTypeArtifactReason = "";

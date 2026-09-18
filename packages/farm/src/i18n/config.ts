@@ -111,6 +111,16 @@ export function resolveFarmI18nMessagePath(
     : path.join(config.messages, `${locale}.json`);
 }
 
+export function isFarmI18nCatalogFile(
+  config: Pick<ResolvedFarmI18nConfig, "enabled" | "messages">,
+  file: string,
+): boolean {
+  if (!config.enabled) return false;
+  const dir = config.messages.replace(/\\/g, "/");
+  const base = dir.includes("{locale}") ? dir.split("{locale}")[0] : dir;
+  return file.replace(/\\/g, "/").startsWith(base);
+}
+
 export function canonicalizeLocale(locale: string): string {
   if (!locale || typeof locale !== "string") {
     throw new Error("Farm i18n locales must be non-empty strings.");
