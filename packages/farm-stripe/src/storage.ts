@@ -341,13 +341,21 @@ function createBillingSnapshotData(
   };
 }
 
-function isUnknownPrismaFieldError(error: unknown, field: string): boolean {
+/**
+ * Prisma's query engine surfaces `Unknown argument \`<field>\`` validation errors
+ * one at a time, naming the unknown argument that appears first in the
+ * `data` object's key-insertion order (not the order of any caller-supplied
+ * candidate list). Extract that field so the fallback can drop the column
+ * Prisma actually complained about instead of guessing by iteration order.
+ */
+function extractUnknownPrismaField(error: unknown): string | null {
   if (!(error instanceof Error)) {
-    return false;
+    return null;
   }
 
-  const normalizedMessage = error.message.replace(/\s+/g, " ");
-  return normalizedMessage.includes(`Unknown argument \`${field}\``);
+  const match = error.message.replace(/\s+/g, " ").match(/Unknown argument `([^`]+)`/);
+
+  return match ? (match[1] ?? null) : null;
 }
 
 async function withPrismaDataFieldsFallback<T>(
@@ -356,20 +364,24 @@ async function withPrismaDataFieldsFallback<T>(
   fallbackFields: readonly string[],
 ): Promise<T> {
   let nextData = { ...data };
+  const allowed = new Set(fallbackFields);
 
-  for (const field of fallbackFields) {
+  for (;;) {
     try {
       return await operation(nextData);
     } catch (error) {
-      if (!isUnknownPrismaFieldError(error, field)) {
+      const unknown = extractUnknownPrismaField(error);
+
+      // Re-throw unless Prisma reported an unknown argument that we are
+      // permitted to drop and that is still present in the payload (the
+      // `in nextData` guard also prevents any pathological retry loop).
+      if (!unknown || !allowed.has(unknown) || !(unknown in nextData)) {
         throw error;
       }
 
-      delete nextData[field];
+      delete nextData[unknown];
     }
   }
-
-  return await operation(nextData);
 }
 
 /**
