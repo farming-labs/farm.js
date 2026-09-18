@@ -4,6 +4,12 @@ const path = require("node:path");
 const workspaceRoot = path.resolve(__dirname, "..");
 const packagesRoot = path.join(workspaceRoot, "packages");
 const templatesRoot = path.join(workspaceRoot, "packages/create-farm-app/templates");
+const standalonePackages = [
+  {
+    label: "StackBlitz example",
+    packagePath: path.join(workspaceRoot, "examples/stackblitz/package.json"),
+  },
+];
 
 const workspaceVersions = new Map();
 
@@ -32,21 +38,29 @@ for (const directoryName of fs.readdirSync(packagesRoot).sort()) {
   }
 }
 
-for (const templatePackagePath of findTemplatePackageFiles(templatesRoot).sort()) {
-  const templateName = path.relative(templatesRoot, path.dirname(templatePackagePath));
-  const templatePackage = JSON.parse(fs.readFileSync(templatePackagePath, "utf8"));
+function syncPackageVersions(packagePath, label) {
+  const packageJson = JSON.parse(fs.readFileSync(packagePath, "utf8"));
   const syncedPackages = [];
 
   for (const dependencyGroup of ["dependencies", "devDependencies"]) {
-    for (const packageName of Object.keys(templatePackage[dependencyGroup] ?? {})) {
+    for (const packageName of Object.keys(packageJson[dependencyGroup] ?? {})) {
       const workspaceVersion = workspaceVersions.get(packageName);
       if (!workspaceVersion) continue;
 
-      templatePackage[dependencyGroup][packageName] = workspaceVersion;
+      packageJson[dependencyGroup][packageName] = workspaceVersion;
       syncedPackages.push(`${packageName}@${workspaceVersion}`);
     }
   }
 
-  fs.writeFileSync(templatePackagePath, `${JSON.stringify(templatePackage, null, 2)}\n`);
-  console.log(`Synced ${templateName} template: ${syncedPackages.join(", ")}`);
+  fs.writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`);
+  console.log(`Synced ${label}: ${syncedPackages.join(", ")}`);
+}
+
+for (const templatePackagePath of findTemplatePackageFiles(templatesRoot).sort()) {
+  const templateName = path.relative(templatesRoot, path.dirname(templatePackagePath));
+  syncPackageVersions(templatePackagePath, `${templateName} template`);
+}
+
+for (const { label, packagePath } of standalonePackages) {
+  syncPackageVersions(packagePath, label);
 }
