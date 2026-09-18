@@ -102,6 +102,8 @@ export function matchFarmLocale(
   if (exact) return exact;
 
   const language = canonical.split("-")[0]?.toLowerCase();
+  const base = locales.find((locale) => locale.toLowerCase() === language);
+  if (base) return base;
   return locales.find((locale) => locale.split("-")[0]?.toLowerCase() === language);
 }
 
