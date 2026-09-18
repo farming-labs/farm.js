@@ -5376,6 +5376,13 @@ function extractFarmFullDocument(markup) {
   return markup.slice(start, closeIndex + "</html>".length);
 }
 
+function ensureFarmDocumentHead(markup) {
+  if (/<head[\\s>]/i.test(markup)) return markup;
+  return markup.replace(/<html([^>]*)>/i, function(_match, attributes) {
+    return "<html" + attributes + "><head></head>";
+  });
+}
+
 function createFarmErrorDocument(html, title) {
   const escapedTitle = escapeFarmHtmlAttribute(title || "Application Error");
   const fullDocument = extractFarmFullDocument(html);
@@ -5396,7 +5403,7 @@ function createFarmErrorDocument(html, title) {
       '</body>\\n</html>';
   }
 
-  let fullHtml = fullDocument;
+  let fullHtml = ensureFarmDocumentHead(fullDocument);
   if (!/\\sid=["']root["']/.test(fullHtml)) {
     fullHtml = fullHtml
       .replace(/<body([^>]*)>/i, '<body$1><div id="root">')
@@ -7143,7 +7150,7 @@ async function handleFarmRequestInContext(
         let fullHtml;
         if (hasFullDocument) {
           // Layout provides full HTML structure - inject CSS and client script
-          html = extractFarmFullDocument(html) || html;
+          html = ensureFarmDocumentHead(extractFarmFullDocument(html) || html);
           fullHtml = html
             // Inject CSS link after opening head tag or first meta tag
             .replace(/<head([^>]*)>/i, '<head$1>\\n  <link rel="stylesheet" href="/__farm_client_css_href__">')
@@ -7490,7 +7497,7 @@ async function handleFarmRequestInContext(
     
     let fullHtml;
     if (hasFullDocument) {
-      fullHtml = fullDocument
+      fullHtml = ensureFarmDocumentHead(fullDocument)
         .replace(/<head([^>]*)>/i, '<head$1>\\n  <link rel="stylesheet" href="/__farm_client_css_href__">')
         .replace(/<\\/head>/i, () => renderFarmRendererHydrationScript() + '\\n</head>')
         .replace(
