@@ -8,6 +8,7 @@ import {
   type FarmRouterPathParam,
   type FarmRouterPathParams,
 } from "../router";
+import { resolveFarmNavigationURL } from "./navigation-url";
 import type { FarmViewTransitionMode } from "./spa-router";
 import { isFarmLocaleChangeHref, localizeActiveFarmHref } from "../i18n/client-runtime";
 import type { FarmI18nLocale } from "../i18n/types";
@@ -612,7 +613,7 @@ function applyPreservedSearchParams(href: string): string {
     manifest?.routes && typeof manifest.routes === "object" ? Object.values(manifest.routes) : [];
   if (routes.length === 0) return href;
 
-  const url = new URL(href, window.location.origin);
+  const url = resolveFarmNavigationURL(href, window.location.href);
   const route = routes.find((candidate: any) => matchManifestRoute(url.pathname, candidate));
   const preserve = Array.isArray((route as any)?.search?.preserve)
     ? ((route as any).search.preserve as string[])
