@@ -885,7 +885,8 @@ function rewritePackageManagerCommands(content: string, packageManager: PackageM
   let output = content.replace(/\bpnpm install\b/g, `${packageManager} install`);
   output = output.replace(
     /\bpnpm run (dev|auth:migrate|type-check|build|check|deploy|experiment)\b/g,
-    (_match, script: string) => getRunCommand(packageManager, script),
+    (match, script: string) =>
+      packageManager === "pnpm" ? match : getRunCommand(packageManager, script),
   );
   return output.replace(
     /\bpnpm (dev|auth:migrate|type-check|build|check|deploy|experiment)\b/g,
