@@ -2426,6 +2426,11 @@ server-rendered nodes. Nested subscriptions are disposed and re-established duri
 a branch or unmounting the component still disposes its scopes. Unsupported shapes keep the
 existing React fallback behavior.
 
+React-owned conditional boundaries also retain their attached-root registration during replay.
+Path-based bindings continue to skip those branches, so a nearby text or input update reaches
+its intended element. Hiding or replacing a branch and real unmounts remove the old registration;
+disposed owners cannot update the detached nodes or a new component instance.
+
 During development, compiled components receive a module-and-component identity plus a state-layout
 signature. A compatible Fast Refresh replaces the compiled definition while retaining the React
 component type and its local cells. An interactive keyed boundary lets React commit the refreshed
