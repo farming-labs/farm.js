@@ -5487,7 +5487,9 @@ function createHostConditionalBlockComponent(
     componentDidMount(): void {
       this.mounted = true;
       this.unsubscribe = owner.subscribe(this.props.id, this.refresh);
-      if (!this.adopt()) this.activateFallback();
+      // Replay must restore nested listeners even before the fallback state update commits.
+      if (this.state.fallback || this.fallbackRequested) this.subscribeFallbackDescendants();
+      else if (!this.adopt()) this.activateFallback();
     }
 
     componentWillUnmount(): void {
@@ -5804,7 +5806,9 @@ function createConditionalRangesBlockComponent(
     componentDidMount(): void {
       this.mounted = true;
       this.unsubscribe = owner.subscribe(this.props.id, this.refresh);
-      if (!this.adopt()) this.activateFallback();
+      // Replay must restore nested listeners even before the fallback state update commits.
+      if (this.state.fallback || this.fallbackRequested) this.subscribeFallbackDescendants();
+      else if (!this.adopt()) this.activateFallback();
     }
 
     componentWillUnmount(): void {
