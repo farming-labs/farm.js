@@ -581,7 +581,9 @@ export class SPARouter {
         window.scrollTo(0, 0);
       }
     } else if (this.options.scrollRestoration) {
-      this.restoreScrollPosition(this.currentHistoryPath ?? options.fullPath);
+      const restorePath = this.currentHistoryPath ?? options.fullPath;
+      this.restoreWindowScroll(restorePath);
+      this.restoreScrollElements(restorePath);
     }
   }
 
@@ -769,14 +771,27 @@ export class SPARouter {
         await this.onNavigate(pageData);
       }
 
-      // A fragment in the destination URL is an explicit scroll target and
-      // takes precedence over saved-position restoration, matching forward
-      // navigation and native browser back/forward. Saved positions are keyed
-      // without the hash, so restoreScrollPosition would not cover it.
+      // A fragment in the destination URL is an explicit scroll target for the
+      // window and takes precedence over the saved *window* scroll position,
+      // matching forward navigation and native browser back/forward. Element
+      // scroll positions are keyed without the hash (see
+      // getScrollElementStorageKey), so registered scroll containers are
+      // restored regardless of whether a fragment is present, even when the
+      // anchor resolves, so a persistent-layout scroll element is not left at
+      // the prior route's offset on a hash-destination popstate.
+      const destinationPath = window.location.pathname + window.location.search;
       if (window.location.hash) {
-        getHashTargetElement(window.location.hash)?.scrollIntoView();
+        const target = getHashTargetElement(window.location.hash);
+        if (target) {
+          target.scrollIntoView();
+        } else if (this.options.scrollRestoration) {
+          this.restoreWindowScroll(destinationPath);
+        }
       } else if (this.options.scrollRestoration) {
-        this.restoreScrollPosition(window.location.pathname + window.location.search);
+        this.restoreWindowScroll(destinationPath);
+      }
+      if (this.options.scrollRestoration) {
+        this.restoreScrollElements(destinationPath);
       }
 
       if (clientNavigation) {
@@ -966,15 +981,27 @@ export class SPARouter {
   }
 
   /**
-   * Restore scroll position for a path
+   * Restore the saved window scroll position for a path.
    */
-  private restoreScrollPosition(path: string): void {
+  private restoreWindowScroll(path: string): void {
     try {
       const saved = sessionStorage.getItem(`farm-scroll-${path}`);
       if (saved) {
         const { x, y } = JSON.parse(saved);
         setTimeout(() => window.scrollTo(x, y), 0);
       }
+    } catch {
+      // Ignore storage errors
+    }
+  }
+
+  /**
+   * Restore saved scroll positions for every registered scroll element. Keys
+   * are hash-stripped (see getScrollElementStorageKey), so this runs regardless
+   * of whether the destination URL carries a fragment.
+   */
+  private restoreScrollElements(path: string): void {
+    try {
       for (const [key, element] of this.scrollElements) {
         this.restoreScrollElement(path, key, element);
       }
