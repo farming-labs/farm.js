@@ -1,6 +1,11 @@
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+  css: {
+    postcss: {
+      plugins: [],
+    },
+  },
   plugins: [
     {
       name: "farm-hints-test-core",
