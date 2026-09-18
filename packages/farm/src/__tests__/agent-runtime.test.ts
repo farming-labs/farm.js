@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { mkdtemp, mkdir, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { gzipSync } from "node:zlib";
+import { gzipSync, zstdCompressSync } from "node:zlib";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   applyAgentRuntimeViteProxy,
@@ -214,6 +214,64 @@ describe("agent runtime proxy", () => {
     expect(response.headers.get("content-encoding")).toBeNull();
     expect(response.headers.get("content-length")).toBeNull();
     expect(await response.text()).toBe(payload);
+  });
+
+  it("does not forward stale zstd metadata after fetch decodes a zstd body", async () => {
+    const plaintext = "decoded-zstd-agent-response-plaintext-body";
+    const encodedLength = 48;
+    const response = await proxyAgentRuntimeRequest(
+      new Request("http://farm.test/agents/zstd", {
+        headers: { "accept-encoding": "identity" },
+      }),
+      "https://agent.example.com",
+      {
+        fetch: async (_input, _init) =>
+          new Response(plaintext, {
+            status: 200,
+            headers: {
+              "content-encoding": "zstd",
+              "content-length": String(encodedLength),
+              "content-type": "text/plain",
+            },
+          }),
+      },
+    );
+
+    expect(response.headers.get("content-encoding")).toBeNull();
+    expect(response.headers.get("content-length")).toBeNull();
+    expect(await response.text()).toBe(plaintext);
+  });
+
+  it("keeps a real zstd upstream consistent with this runtime's fetch decoder", async () => {
+    const plaintext = "real-zstd-agent-response-body";
+    const compressed = zstdCompressSync(Buffer.from(plaintext));
+    const server = createServer((_request, response) => {
+      response.writeHead(200, {
+        "content-encoding": "zstd",
+        "content-length": compressed.byteLength,
+        "content-type": "text/plain",
+      });
+      response.end(compressed);
+    });
+    const origin = await listen(server);
+    cleanups.push(() => close(server));
+
+    const response = await proxyAgentRuntimeRequest(
+      new Request("http://farm.test/agents/zstd", {
+        headers: { "accept-encoding": "identity" },
+      }),
+      origin,
+    );
+
+    const body = Buffer.from(await response.arrayBuffer());
+    if (response.headers.get("content-encoding") === "zstd") {
+      expect(response.headers.get("content-length")).toBe(String(compressed.byteLength));
+      expect(body.equals(compressed)).toBe(true);
+    } else {
+      expect(response.headers.get("content-encoding")).toBeNull();
+      expect(response.headers.get("content-length")).toBeNull();
+      expect(body.toString("utf8")).toBe(plaintext);
+    }
   });
 
   it.each(["HEAD", "GET"])(
