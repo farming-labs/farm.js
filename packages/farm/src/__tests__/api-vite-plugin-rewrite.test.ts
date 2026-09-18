@@ -230,13 +230,21 @@ describe("dev API dispatch after middleware rewrites", () => {
       expect.objectContaining({ name: "APIRouteConflictError" }),
     );
 
-    await expect(
-      apiMiddleware!(
-        { url: "/api/health", method: "GET", headers: {} },
-        { once() {}, writableEnded: false },
-        vi.fn(),
-      ),
-    ).rejects.toThrow("Duplicate API route for GET /api/health");
+    const conflictRes: any = {
+      statusCode: 200,
+      headersSent: false,
+      writableEnded: false,
+      setHeader() {},
+      end(chunk?: unknown) {
+        if (typeof chunk === "string") conflictRes.__body = (conflictRes.__body ?? "") + chunk;
+        conflictRes.writableEnded = true;
+      },
+      once() {},
+    };
+    apiMiddleware!({ url: "/api/health", method: "GET", headers: {} }, conflictRes, vi.fn());
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(conflictRes.statusCode).toBe(500);
+    expect(conflictRes.__body).toContain("Internal server error");
 
     rootMethod = "POST";
     await plugin.handleHotUpdate({ file: routesFile, modules: [], server });
