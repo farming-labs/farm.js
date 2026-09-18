@@ -2412,6 +2412,11 @@ containers re-adopt their existing DOM after that replay instead of switching pe
 fallback. A real unmount still clears the host ref, disposes subscriptions, and ignores queued work
 or stale setters from the removed owner.
 
+Direct text, attribute, style, and controlled-input bindings also retain their attached DOM refs
+during Strict Mode's lifecycle replay. Local updates keep working before a parent renders again,
+including after hydration. React's ref-detach callbacks clear those references on a real unmount;
+queued updates and stale setters cannot update a removed component or its replacement.
+
 During development, compiled components receive a module-and-component identity plus a state-layout
 signature. A compatible Fast Refresh replaces the compiled definition while retaining the React
 component type and its local cells. An interactive keyed boundary lets React commit the refreshed

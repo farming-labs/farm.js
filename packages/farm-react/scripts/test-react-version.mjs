@@ -102,6 +102,149 @@ const testSource = String.raw`
   assert.equal(container.textContent, "Count: 1");
   flushSync(() => root.unmount());
 
+  // Ref callbacks, not StrictMode's simulated unmount, own DOM reference cleanup.
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  for (const reactivity of ["static", "hybrid"]) {
+    for (const lifecycle of ["mount", "hydrate"]) {
+      for (const targeting of ["path", "ref"]) {
+        const context = reactivity + "/" + lifecycle + "/" + targeting;
+        let updateCompiled;
+        let updateControl;
+        let executions = 0;
+        let reads = 0;
+        const readText = (state) => String(state[1].get()) + ": " + state[0].get();
+        const read = (get) => (_props, state) => {
+          reads += 1;
+          return get(state);
+        };
+        const DirectBindings = createCompiledComponentWithFeatures({
+          displayName: "CompatibilityStrictDirectBindings",
+          reactivity,
+          initialize: () => [0],
+          readProps: (props) => [props.label],
+          render(_props, state, blocks) {
+            executions += 1;
+            updateCompiled = (value) => state[0].set(value);
+            const target = (id) => targeting === "ref" ? blocks.target(id) : undefined;
+            return React.createElement("section", { "data-count": state[0].get() },
+              React.createElement("span", { ref: target(0) }, readText(state)),
+              React.createElement("div", { ref: target(1), style: { width: Number(state[0].get()) + 8 } }),
+              React.createElement("input", { ref: target(2), value: readText(state), onChange: () => {} }),
+            );
+          },
+          bindings: [
+            { kind: "attribute", name: "data-count", path: [], dependencies: [0],
+              tracking: "dynamic", read: read((state) => state[0].get()) },
+            { kind: "text", path: [0], target: targeting === "ref" ? 0 : undefined,
+              dependencies: [0, 1], tracking: "dynamic", read: read(readText) },
+            { kind: "style", name: "width", path: [1], target: targeting === "ref" ? 1 : undefined,
+              dependencies: [0], tracking: "dynamic", read: read((state) => Number(state[0].get()) + 8) },
+            { kind: "attribute", name: "value", path: [2], target: targeting === "ref" ? 2 : undefined,
+              dependencies: [0, 1], tracking: "dynamic", read: read(readText) },
+          ],
+        }, []);
+        function Control({ label }) {
+          const [count, setCount] = React.useState(0);
+          updateControl = setCount;
+          return React.createElement("section", { "data-count": count },
+            React.createElement("span", null, label + ": " + count),
+            React.createElement("div", { style: { width: count + 8 } }),
+            React.createElement("input", { value: label + ": " + count, onChange: () => {} }),
+          );
+        }
+        const target = document.createElement("div");
+        const controlTarget = document.createElement("div");
+        document.body.append(target, controlTarget);
+        const tree = (Component, label, key = "first") => React.createElement(
+          React.StrictMode, null, React.createElement(Component, { label, key }),
+        );
+        if (lifecycle === "hydrate") target.innerHTML = renderToString(tree(DirectBindings, "Before"));
+        const serverElements = [...target.querySelectorAll("*")];
+        const errors = [];
+        let compiledRoot;
+        const controlRoot = createRoot(controlTarget);
+        try {
+          await React.act(async () => {
+            compiledRoot = lifecycle === "hydrate"
+              ? hydrateRoot(target, tree(DirectBindings, "Before"), { onRecoverableError: (error) => errors.push(error) })
+              : createRoot(target);
+            if (lifecycle === "mount") compiledRoot.render(tree(DirectBindings, "Before"));
+            controlRoot.render(tree(Control, "Before"));
+          });
+          const elements = [...target.querySelectorAll("*")];
+          if (lifecycle === "hydrate") elements.forEach((element, index) => assert.equal(element, serverElements[index], context));
+          const input = target.querySelector("input");
+          input.focus();
+          input.setSelectionRange(1, 3, "backward");
+          const initialExecutions = executions;
+          const assertParity = () => {
+            const snapshot = (container) => ({
+              count: container.querySelector("section").getAttribute("data-count"),
+              text: container.querySelector("span").textContent,
+              width: container.querySelector("section > div").style.width,
+            });
+            assert.deepEqual(snapshot(target), snapshot(controlTarget), context);
+            assert.equal(input.value, controlTarget.querySelector("input").value, context);
+            [...target.querySelectorAll("*")].forEach((element, index) => assert.equal(element, elements[index], context));
+            assert.equal(document.activeElement, input, context);
+            assert.equal(input.selectionStart, 1, context);
+            assert.equal(input.selectionEnd, 3, context);
+            assert.equal(input.selectionDirection, "backward", context);
+            assert.equal(executions, initialExecutions, context);
+          };
+          // Update before a parent render could hide missing refs, then mix parent/local work.
+          for (const count of [1, 2, 3]) {
+            const beforeReads = reads;
+            await React.act(async () => {
+              if (count === 2) {
+                flushSync(() => {
+                  compiledRoot.render(tree(DirectBindings, "After"));
+                  controlRoot.render(tree(Control, "After"));
+                });
+              }
+              updateCompiled(count);
+              updateControl(count);
+              if (count === 3) {
+                compiledRoot.render(tree(DirectBindings, "Together"));
+                controlRoot.render(tree(Control, "Together"));
+              }
+            });
+            assertParity();
+            assert.ok(reads >= beforeReads + 4, context);
+          }
+          const beforeNoop = reads;
+          await React.act(async () => { updateCompiled(3); updateControl(3); });
+          assertParity();
+          assert.equal(reads, beforeNoop, context);
+          const staleUpdate = updateCompiled;
+          const beforeUnmount = { reads, executions };
+          await React.act(async () => {
+            updateCompiled(99);
+            flushSync(() => compiledRoot.render(null));
+          });
+          const detachedHTML = elements[0].outerHTML;
+          await React.act(async () => staleUpdate(100));
+          assert.deepEqual({ reads, executions }, beforeUnmount, context);
+          assert.equal(elements[0].outerHTML, detachedHTML, context);
+          assert.equal(target.childElementCount, 0, context);
+          elements.forEach((element) => assert.equal(element.isConnected, false, context));
+          // A fresh owner must not inherit the disposed owner's pending work or refs.
+          await React.act(async () => compiledRoot.render(tree(DirectBindings, "Fresh", "second")));
+          await React.act(async () => { staleUpdate(101); updateCompiled(4); });
+          assert.equal(target.querySelector("span").textContent, "Fresh: 4", context);
+          assert.notEqual(target.querySelector("input"), input, context);
+          assert.equal(elements[0].outerHTML, detachedHTML, context);
+          assert.deepEqual(errors, [], context);
+        } finally {
+          await React.act(async () => { compiledRoot?.unmount(); controlRoot.unmount(); });
+          target.remove();
+          controlTarget.remove();
+        }
+      }
+    }
+  }
+  delete globalThis.IS_REACT_ACT_ENVIRONMENT;
+
   let reverseCompatibilityRows = () => undefined;
   let mapReverseParityCompatibilityRows = () => undefined;
   let queuedMapReverseParityCompatibilityRows = () => undefined;

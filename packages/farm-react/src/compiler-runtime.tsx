@@ -11189,13 +11189,13 @@ export function createCompiledComponentWithFeatures<Props>(
 
     componentWillUnmount(): void {
       this.mounted = false;
-      this.root = null;
       this.dirtyState.clear();
       this.inputSelection = null;
       this.blockRefreshListeners.clear();
       this.blockRoots.clear();
       this.blockRootElements.clear();
-      this.bindingTargets.clear();
+      // React 18 StrictMode replays lifecycles without detaching host refs.
+      // Root and binding-target ref callbacks clear DOM references on real unmounts.
       this.bindingTargetRefs.clear();
       this.indexedDefinition = null;
       this.staticBindingsByDependency = [];
