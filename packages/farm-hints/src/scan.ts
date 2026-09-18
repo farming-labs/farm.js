@@ -66,8 +66,9 @@ async function scanAccessibility(
     }
     return violation.nodes.map((node, index): HintIssue => {
       const selector = selectorFromAxeTarget(node.target);
+      const acrossFrames = node.target.length > 1;
       return {
-        id: `accessibility:${violation.id}:${selector || index}`,
+        id: `accessibility:${violation.id}:${selector || index}${acrossFrames ? `#${index}` : ""}`,
         category: "accessibility",
         severity: impactToSeverity(impact),
         title: violation.help,

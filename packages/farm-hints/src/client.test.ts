@@ -83,4 +83,49 @@ describe("Farm Hints browser runtime", () => {
     expect(mocks.onINP).toHaveBeenCalledOnce();
     runtime.close();
   });
+
+  it("preserves every scan finding whose id is unique across the frame chain (iframe fix)", async () => {
+    mocks.collectDocumentHints.mockResolvedValue([
+      {
+        id: "accessibility:button-name:#frame#0",
+        category: "accessibility",
+        severity: "critical",
+        title: "First button",
+        detail: "Add text.",
+        selector: "#frame",
+      },
+      {
+        id: "accessibility:button-name:#frame#1",
+        category: "accessibility",
+        severity: "critical",
+        title: "Second button",
+        detail: "Add text.",
+        selector: "#frame",
+      },
+    ]);
+
+    const runtime = startHintsRuntime(
+      resolveHintsOptions({
+        accessibility: false,
+        html: false,
+        thirdParty: false,
+        report: "console",
+      }),
+      window,
+    );
+    await runtime.scan("test", "/iframe");
+
+    expect(console.warn).toHaveBeenCalledTimes(2);
+    expect(console.warn).toHaveBeenCalledWith(
+      "[accessibility] First button",
+      "#frame",
+      "Add text.",
+    );
+    expect(console.warn).toHaveBeenCalledWith(
+      "[accessibility] Second button",
+      "#frame",
+      "Add text.",
+    );
+    runtime.close();
+  });
 });
