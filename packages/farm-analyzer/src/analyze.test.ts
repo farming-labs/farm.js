@@ -50,6 +50,36 @@ describe("analyzeBuild", () => {
     expect(violations.some((violation) => violation.kind === "server")).toBe(true);
     expect(violations.every((violation) => violation.metric === "raw")).toBe(true);
   });
+
+  it("ignores script and link tags inside HTML comments", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "farm-analyzer-"));
+    const publicDirectory = path.join(root, ".farm/.output/public");
+    await mkdir(publicDirectory, { recursive: true });
+    await Promise.all([
+      writeFile(
+        path.join(publicDirectory, "index.html"),
+        '<!-- <script type="module" src="/old.js"></script> -->\n' +
+          '<!-- <link rel="stylesheet" href="/old.css"> -->\n' +
+          '<script type="module" src="/entry.js"></script>\n' +
+          '<link rel="stylesheet" href="/theme.css">',
+      ),
+      writeFile(path.join(publicDirectory, "old.js"), "export const old = 1;"),
+      writeFile(path.join(publicDirectory, "old.css"), "body{color:red}"),
+      writeFile(path.join(publicDirectory, "entry.js"), "export const x = 1;"),
+      writeFile(path.join(publicDirectory, "theme.css"), ":root{color-scheme:dark}"),
+    ]);
+    const report = await analyzeBuild({
+      root,
+      distDir: ".farm",
+      outputDir: path.join(root, ".farm/.output"),
+      preset: "node-server",
+      metric: "raw",
+    });
+    const page = report.pages.find((p) => p.route === "/");
+    expect(page?.assets).toEqual(["entry.js", "theme.css"]);
+    expect(page?.assets).not.toContain("old.js");
+    expect(page?.assets).not.toContain("old.css");
+  });
 });
 
 describe("extractStaticImports", () => {

@@ -223,7 +223,8 @@ function extractHtmlReferences(
   files: Map<string, ReadAsset>,
 ): Set<string> {
   const references = new Set<string>();
-  for (const match of html.matchAll(/<(script|link)\b((?:"[^"]*"|'[^']*'|[^'">])*)>/gi)) {
+  const stripped = html.replace(/<!--[\s\S]*?-->/g, "");
+  for (const match of stripped.matchAll(/<(script|link)\b((?:"[^"]*"|'[^']*'|[^'">])*)>/gi)) {
     const tag = match[1].toLowerCase();
     const attributes = parseAttributes(match[2]);
     const value = tag === "script" ? attributes.src : attributes.href;
