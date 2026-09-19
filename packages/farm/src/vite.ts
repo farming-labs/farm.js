@@ -132,6 +132,7 @@ import {
   parseFarmLayoutChainHeader,
 } from "./navigation/render-plan";
 import { resolveFarmPageDataFailure } from "./navigation/page-data-error";
+import { mergeMetadata } from "./metadata";
 import { FARM_CONFIG_REWRITES_PLUGIN_NAME } from "./plugins/rewrites";
 import { resolveFarmRequestURL } from "./server/request";
 import { reportOpenAPIDevGenerationResult } from "./openapi/dev-status";
@@ -2433,22 +2434,6 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   ? (hydrationStrategies[0] ?? "load")
                   : "load";
 
-                for (const layoutModule of layoutModules) {
-                  if ((layoutModule as any).metadata) {
-                    mergedMetadata = {
-                      ...mergedMetadata,
-                      ...(layoutModule as any).metadata,
-                    };
-                  }
-                }
-
-                if ((routeModule as any).metadata) {
-                  mergedMetadata = {
-                    ...mergedMetadata,
-                    ...(routeModule as any).metadata,
-                  };
-                }
-
                 // Build search params
                 const targetUrl = new URL(targetPath, "http://localhost");
                 const searchParams = searchParamsToObject(targetUrl.searchParams);
@@ -2470,6 +2455,29 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   search: searchParams,
                   routePath: route.pattern,
                 });
+
+                // Collect metadata exactly the way a full-page load does:
+                // static and generated interleaved per layer, deep-merged with
+                // mergeMetadata so a page's openGraph extends a layout's
+                // instead of replacing it. Layouts receive the params,
+                // the route receives its full resolved props.
+                for (const layoutModule of layoutModules) {
+                  mergedMetadata = mergeMetadata(mergedMetadata, (layoutModule as any).metadata);
+                  if (typeof (layoutModule as any).generateMetadata === "function") {
+                    mergedMetadata = mergeMetadata(
+                      mergedMetadata,
+                      await (layoutModule as any).generateMetadata({ params: routeProps.params }),
+                    );
+                  }
+                }
+                mergedMetadata = mergeMetadata(mergedMetadata, (routeModule as any).metadata);
+                if (typeof (routeModule as any).generateMetadata === "function") {
+                  mergedMetadata = mergeMetadata(
+                    mergedMetadata,
+                    await (routeModule as any).generateMetadata(routeProps),
+                  );
+                }
+
                 const routeSlots = await Promise.all(
                   slots.map(async (slot) => {
                     const slotModule = await routeManager.loadRouteModule(slot.route.modulePath);
