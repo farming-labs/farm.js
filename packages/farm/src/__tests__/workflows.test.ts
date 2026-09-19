@@ -12,6 +12,7 @@ import {
   prepareFarmWorkflowsForNitro,
   resolveWorkflowsConfig,
 } from "../workflows";
+import { farmSecretsMatch } from "../secret-compare";
 
 const originalEnv = { ...process.env };
 const originalRuntimeEnv = (globalThis as { __env__?: unknown }).__env__;
@@ -510,6 +511,41 @@ describe("Farm workflows", () => {
     expect(
       generatedVerifySecret({
         req: new Request("https://example.com/api/_farm/workflows/sync"),
+      }),
+    ).toBeNull();
+  });
+
+  it("resolves the generated route secret from runtime bindings, not just process.env", async () => {
+    // A deployed edge runtime (e.g. Cloudflare Workers) exposes CRON_SECRET on
+    // globalThis.__env__, not process.env. The generated handler must resolve it
+    // the same way the dev-path verifyWorkflowSecret does, or a correctly
+    // configured deployment rejects every request with 401.
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-workflow-runtime-secret-"));
+    await fs.mkdir(path.join(root, "src", "jobs"), { recursive: true });
+    await fs.writeFile(
+      path.join(root, "src", "jobs", "sync.mjs"),
+      "export default { async run() { return { ok: true }; } };",
+    );
+
+    const prepared = await prepareFarmWorkflowsForNitro({ root, workflows: {} });
+    const source = await fs.readFile(prepared.handlerPath!, "utf8");
+
+    const start = source.indexOf("const secretEnv =");
+    const end = source.indexOf("\n\nasync function readPayload", start);
+    const generatedVerifySecret = Function(
+      "farmSecretsMatch",
+      `${source.slice(start, end)}; return verifySecret;`,
+    )(farmSecretsMatch) as (event: { req: Request }) => Response | null;
+
+    // Secret lives only on the runtime bindings, not process.env.
+    delete process.env.CRON_SECRET;
+    (globalThis as { __env__?: unknown }).__env__ = { CRON_SECRET: "worker-secret" };
+
+    const url = "https://example.com/api/_farm/workflows/sync";
+    expect(generatedVerifySecret({ req: new Request(url) })?.status).toBe(401);
+    expect(
+      generatedVerifySecret({
+        req: new Request(url, { headers: { authorization: "Bearer worker-secret" } }),
       }),
     ).toBeNull();
   });

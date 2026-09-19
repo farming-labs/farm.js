@@ -669,7 +669,20 @@ function getHeader(event, name) {
 }
 
 function getSecret() {
-  return inlineSecret || process.env[secretEnv] || "";
+  // Match the dev-path verifyWorkflowSecret's resolution (readFarmEnvironmentValue):
+  // runtime bindings on globalThis.__env__ first, then process.env. Reading
+  // process.env alone misses a Cloudflare Workers secret, so a correctly
+  // configured deployment would see no secret and reject every request with 401.
+  const runtimeBindings = globalThis.__env__;
+  const runtimeSecret =
+    runtimeBindings && typeof runtimeBindings === "object" ? runtimeBindings[secretEnv] : undefined;
+  const resolved =
+    typeof runtimeSecret === "string"
+      ? runtimeSecret
+      : typeof process !== "undefined"
+        ? process.env?.[secretEnv]
+        : undefined;
+  return inlineSecret || resolved || "";
 }
 
 function verifySecret(event) {
