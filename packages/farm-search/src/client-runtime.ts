@@ -68,9 +68,46 @@ export function createSearchClient(
   options: SearchClientOptions,
   loadModule: PagefindModuleLoader,
 ): FarmSearchClient {
-  let loaded: Promise<{ api: PagefindBrowserApi; bundlePath: string }> | undefined;
+  interface ActiveInstance {
+    api: PagefindBrowserApi;
+    bundlePath: string;
+    /** Calls currently running against this instance. */
+    uses: number;
+    /** A retired instance accepts no new calls and is destroyed once drained. */
+    retired: boolean;
+    drained?: Promise<void>;
+    resolveDrained?: () => void;
+  }
 
-  const getApi = async () => {
+  let loading: Promise<ActiveInstance> | undefined;
+
+  /**
+   * Stop handing this instance out and destroy it once every in-flight call
+   * has released it. Destroying eagerly is the bug this replaces: a
+   * bundle-path change or destroy() could tear the engine down under a
+   * search(), preload(), or filters() call that had already resolved it.
+   */
+  const retire = (instance: ActiveInstance): Promise<void> => {
+    if (!instance.retired) {
+      instance.retired = true;
+      instance.drained = (async () => {
+        if (instance.uses > 0) {
+          await new Promise<void>((resolve) => {
+            instance.resolveDrained = resolve;
+          });
+        }
+        await instance.api.destroy();
+      })();
+    }
+    return instance.drained!;
+  };
+
+  const release = (instance: ActiveInstance): void => {
+    instance.uses -= 1;
+    if (instance.retired && instance.uses === 0) instance.resolveDrained?.();
+  };
+
+  const getInstance = async (): Promise<ActiveInstance> => {
     const config = resolveConfig();
     if (!config.available && !options.bundlePath) {
       throw new Error(
@@ -80,8 +117,8 @@ export function createSearchClient(
     }
 
     const bundlePath = normalizeBundlePath(options.bundlePath ?? config.bundlePath);
-    if (!loaded) {
-      const loading = loadModule(`${bundlePath}pagefind.js`)
+    if (!loading) {
+      const attempt: Promise<ActiveInstance> = loadModule(`${bundlePath}pagefind.js`)
         .then(async (module) => {
           const highlightParam =
             options.highlightParam === false
@@ -98,22 +135,48 @@ export function createSearchClient(
           const api = module.createInstance ? await module.createInstance(pagefindOptions) : module;
           if (!module.createInstance) await api.options(pagefindOptions);
           await api.init();
-          return { api, bundlePath };
+          return { api, bundlePath, uses: 0, retired: false } satisfies ActiveInstance;
         })
         .catch((error) => {
-          loaded = undefined;
+          if (loading === attempt) loading = undefined;
           throw error;
         });
-      loaded = loading;
+      loading = attempt;
     }
 
-    const current = await loaded;
+    const attempt = loading;
+    const current = await attempt;
     if (current.bundlePath !== bundlePath) {
-      await current.api.destroy();
-      loaded = undefined;
-      return getApi();
+      // Only clear our own load: a concurrent caller that noticed the same
+      // stale bundle may already have started the replacement.
+      if (loading === attempt) loading = undefined;
+      // Drain the old engine in the background; the swap must not wait for
+      // calls that are still finishing against it. Its destroy() failure has
+      // no caller to surface to here — an explicit destroy() still reports it.
+      void retire(current).catch(() => {});
+      return getInstance();
     }
-    return current.api;
+    return current;
+  };
+
+  /** Resolve an instance and hold it for the duration of one call. */
+  const withApi = async <T>(run: (api: PagefindBrowserApi) => Promise<T>): Promise<T> => {
+    for (;;) {
+      const instance = await getInstance();
+      instance.uses += 1;
+      if (instance.retired) {
+        // Retired between resolving and acquiring; hand it back and take the
+        // replacement instead of running against an engine that may already
+        // be destroyed.
+        release(instance);
+        continue;
+      }
+      try {
+        return await run(instance.api);
+      } finally {
+        release(instance);
+      }
+    }
   };
 
   return {
@@ -124,37 +187,39 @@ export function createSearchClient(
       const limit = normalizePositiveInteger(queryOptions.limit ?? 20, "limit");
       const offset = normalizeOffset(queryOptions.offset ?? 0);
       const pagefindOptions = engineOptions(queryOptions);
-      const api = await getApi();
-      const response = await api.search(term, pagefindOptions);
-      const handles = response.results.slice(offset, offset + limit);
-      const results = await Promise.all(handles.map(loadResult));
-      return {
-        results,
-        total: response.results.length,
-        unfilteredTotal: response.unfilteredResultCount,
-        filters: response.filters,
-        totalFilters: response.totalFilters,
-        timings: combineTimings(response.timings),
-      } satisfies SearchResponse;
+      // Result fragments load lazily, so the instance stays held until they
+      // have loaded too, not just through the initial query.
+      return withApi(async (api) => {
+        const response = await api.search(term, pagefindOptions);
+        const handles = response.results.slice(offset, offset + limit);
+        const results = await Promise.all(handles.map(loadResult));
+        return {
+          results,
+          total: response.results.length,
+          unfilteredTotal: response.unfilteredResultCount,
+          filters: response.filters,
+          totalFilters: response.totalFilters,
+          timings: combineTimings(response.timings),
+        } satisfies SearchResponse;
+      });
     },
 
     async preload(term, queryOptions = {}) {
       if (typeof term !== "string") throw new TypeError("Search preload term must be a string");
       const pagefindOptions = engineOptions(queryOptions);
-      const api = await getApi();
-      await api.preload(term, pagefindOptions);
+      await withApi((api) => api.preload(term, pagefindOptions));
     },
 
     async filters() {
-      const api = await getApi();
-      return api.filters();
+      return withApi((api) => api.filters());
     },
 
     async destroy() {
-      if (!loaded) return;
-      const current = await loaded;
-      loaded = undefined;
-      await current.api.destroy();
+      if (!loading) return;
+      const attempt = loading;
+      const current = await attempt.catch(() => undefined);
+      if (loading === attempt) loading = undefined;
+      if (current) await retire(current);
     },
   };
 }
