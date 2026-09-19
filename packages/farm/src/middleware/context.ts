@@ -139,7 +139,7 @@ export function createContext(
     rewrite(rewriteUrl: string): void {
       ctx._rewriteUrl = rewriteUrl;
       // Update the URL for downstream middleware
-      const newUrl = new URL(rewriteUrl, `http://${req.headers.host || "localhost"}`);
+      const newUrl = new URL(rewriteUrl, ctx.url);
       ctx.url = newUrl;
       ctx.pathname = newUrl.pathname;
       ctx.searchParams = newUrl.searchParams;
