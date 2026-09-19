@@ -305,10 +305,11 @@ async function defaultHandler({
               layoutPatterns: destinationLayoutPatterns,
             }
           : undefined,
-        metadata: {
-          title: mergedMetadata.title,
-          description: mergedMetadata.description,
-        },
+        // The full merged metadata, not a title/description projection: client
+        // navigation reconciles the same head tags a full-page load renders,
+        // so it needs the same input. Keep this in step with the dev handler
+        // in vite.ts.
+        metadata: mergedMetadata,
         layoutModules: layouts.map((l) => l.modulePath),
       };
 

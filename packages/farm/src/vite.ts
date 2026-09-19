@@ -2594,10 +2594,10 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                     html: fragmentHtml,
                     layoutPatterns: destinationLayoutPatterns,
                   },
-                  metadata: {
-                    title: mergedMetadata.title,
-                    description: mergedMetadata.description,
-                  },
+                  // The full merged metadata, not a title/description
+                  // projection: client navigation reconciles the same head
+                  // tags a full-page load renders, so it needs the same input.
+                  metadata: mergedMetadata,
                   layoutModules: layouts.map((l) => toUrlPath(l.modulePath)),
                   routeSlots: routeSlots.map(({ renderModule: _renderModule, ...slot }) => ({
                     ...slot,
