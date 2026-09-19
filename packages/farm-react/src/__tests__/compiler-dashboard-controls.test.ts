@@ -18,6 +18,8 @@ const optimizedAction = "table-multi-map-update";
 const snapshotAction = `${optimizedAction}-snapshot`;
 const queuedWindowAction = "table-position-window-refresh-queued";
 const queuedWindowSnapshotAction = `${queuedWindowAction}-snapshot`;
+const reverseAction = "table-reverse";
+const reverseSnapshotAction = `${reverseAction}-snapshot`;
 
 // Read the actual benchmark instead of copying a control that could drift from it.
 function isolateAction(action: string) {
@@ -103,7 +105,65 @@ describe("production compiler dashboard controls", () => {
       expect(result.optimizations.keyedArrayPositionHints).toBe(hints);
       expect(result.code.includes("createCompilerKeyedArrayWindowReplace")).toBe(hints > 0);
     });
+
+    it.each([
+      [reverseAction, 1],
+      [reverseSnapshotAction, 0],
+    ] as const)("keeps %s at %i reorder hints in " + reactivity, async (action, hints) => {
+      const result = await compileReactModule(
+        isolateAction(action).source,
+        filename,
+        normalizeReactCompilerOptions({ reactivity }),
+      );
+      expect(result.compiled).toContain("StandardTableBenchmark");
+      expect(result.diagnostics).toEqual([]);
+      expect(result.optimizations.keyedArrayReorderHints).toBe(hints);
+      expect(result.code.includes("createCompilerKeyedArrayReorder")).toBe(hints > 0);
+    });
   }
+
+  it.each([0, 1, 2, 11, 10_000])(
+    "keeps reversal handlers equivalent across repeated %i-row updates",
+    (count) => {
+      const rows = Object.freeze(
+        Array.from({ length: count }, (_, index) => Object.freeze({ id: index + 1 })),
+      );
+      const results = [reverseAction, reverseSnapshotAction].map((action) => {
+        let next = rows;
+        let revision = 0;
+        let setterCalls = 0;
+        const run = new Function(
+          "setRows",
+          "setOperation",
+          "setRevision",
+          `return (${isolateAction(action).handler})();`,
+        );
+        for (let round = 1; round <= 3; round += 1) {
+          const previous = next;
+          run(
+            (update: (current: typeof rows) => typeof rows) => {
+              next = update(previous);
+              setterCalls += 1;
+            },
+            () => {},
+            (update: (value: number) => number) => {
+              revision = update(revision);
+            },
+          );
+          expect(setterCalls).toBe(round);
+          expect(revision).toBe(round);
+          expect(next).not.toBe(previous);
+          expect(next).toHaveLength(count);
+          for (let index = 0; index < count; index += 1) {
+            expect(next[index]).toBe(previous[count - 1 - index]);
+          }
+          Object.freeze(next);
+        }
+        return next;
+      });
+      expect(results[0]).toEqual(results[1]);
+    },
+  );
 
   it.each([0, 1, 10, 11, 10_000])(
     "keeps optimized and control native updates equivalent for %i rows",
