@@ -552,7 +552,12 @@ function matchPattern(
   }
 
   if (pattern.endsWith("(.*)")) {
-    const prefix = pattern.slice(0, -4);
+    // Strip a trailing slash before the wildcard so `/admin/(.*)` matches the
+    // `/admin` subtree like `/admin/**` does. Without this the prefix keeps its
+    // slash and the check becomes startsWith("/admin//"), which no path
+    // satisfies, so the matcher silently matches nothing — an auth gate written
+    // that way would never run.
+    const prefix = pattern.slice(0, -4).replace(/\/$/, "");
     return { matched: pathname === prefix || pathname.startsWith(`${prefix}/`) };
   }
 
