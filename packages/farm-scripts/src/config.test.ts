@@ -109,9 +109,11 @@ describe("resolveScriptsOptions", () => {
     const cycleB = defineScript({ name: "b", src: "/b.js", dependsOn: ["a"] });
 
     expect(() => resolveScriptsOptions({ scripts: [first, first] })).toThrow("duplicate name");
-    expect(() => defineScript({ name: "first", src: "/different.js" })).toThrow(
-      "conflicting options",
-    );
+    // Redefining a name nobody has configured replaces the entry — that is how
+    // an HMR re-evaluation carries an edited definition. A conflicting
+    // redefinition only throws while a live runtime owns the name (covered in
+    // client-hmr.test.ts), and configuring both handles still fails above.
+    expect(() => defineScript({ name: "first", src: "/different.js" })).not.toThrow();
     expect(() => resolveScriptsOptions({ scripts: [first, duplicateSource] })).toThrow("same src");
     expect(() => resolveScriptsOptions({ scripts: [missing] })).toThrow("unregistered script");
     expect(() => resolveScriptsOptions({ scripts: [cycleA, cycleB] })).toThrow("a -> b -> a");

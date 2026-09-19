@@ -35,8 +35,15 @@ export type {
 const SCRIPT_STORE = Symbol.for("@farm.js/scripts.browser-store");
 
 interface ScriptEntry {
-  definition: Readonly<ResolvedScriptDefinition>;
-  configured: boolean;
+  definition: ResolvedScriptDefinition;
+  /**
+   * Live runtimes that configured this script. Configuration is a reference
+   * count rather than a one-way flag so a closed runtime releases its
+   * definitions: HMR can then re-register a changed definition instead of
+   * hitting the conflicting-options error, and a definition removed from the
+   * configuration stops being loadable once no live runtime owns it.
+   */
+  owners: Set<symbol>;
   status: ScriptStatus;
   attempt: number;
   error?: unknown;
@@ -142,7 +149,7 @@ export function defineScript<T = void>(definition: ScriptDefinition): ScriptHand
       }
       const store = currentStore();
       if (!store) return () => {};
-      const entry = ensureEntry(store, resolved, false);
+      const entry = ensureEntry(store, resolved, null);
       entry.listeners.add(listener);
       callListener(store, listener, snapshot(entry));
       return () => entry.listeners.delete(listener);
@@ -210,8 +217,11 @@ export function startScriptRuntime(
   basePath = "/",
 ): ScriptRuntime {
   const store = getStore(runtimeWindow, basePath);
+  // This runtime's claim on its configured scripts. Released on close so a
+  // successor (an HMR re-evaluation) can re-register changed definitions.
+  const owner = Symbol("farm-scripts-runtime");
   const entries = definitions.map((definition) =>
-    ensureEntry(store, cloneScriptDefinition(definition), true),
+    ensureEntry(store, cloneScriptDefinition(definition), owner),
   );
   let closed = false;
   let idleHandle: number | undefined;
@@ -379,6 +389,7 @@ export function startScriptRuntime(
     close() {
       if (closed) return;
       closed = true;
+      for (const entry of entries) entry.owners.delete(owner);
       if (idleHandle !== undefined) {
         if (typeof runtimeWindow.cancelIdleCallback === "function") {
           runtimeWindow.cancelIdleCallback(idleHandle);
@@ -438,27 +449,41 @@ function getStore(runtimeWindow: Window & typeof globalThis, basePath?: string):
 
 function registerLocalDefinition(definition: Readonly<ResolvedScriptDefinition>): void {
   const store = currentStore();
-  if (store) ensureEntry(store, definition, false);
+  if (store) ensureEntry(store, definition, null);
 }
 
 function ensureEntry(
   store: ScriptStore,
   definition: Readonly<ResolvedScriptDefinition>,
-  configured: boolean,
+  owner: symbol | null,
 ): ScriptEntry {
   const existing = store.entries.get(definition.name);
   if (existing) {
     if (!sameScriptDefinition(existing.definition, definition)) {
-      throw new TypeError(
-        `Script ${JSON.stringify(definition.name)} was defined with conflicting options`,
-      );
+      if (existing.owners.size > 0) {
+        // Two live registrations disagreeing about the same script is a real
+        // application error and keeps failing loudly.
+        throw new TypeError(
+          `Script ${JSON.stringify(definition.name)} was defined with conflicting options`,
+        );
+      }
+      // No live runtime owns the old definition — its runtime has closed, as
+      // happens on every HMR configuration change. Adopt the new definition
+      // and reset load state so it loads fresh; a previously injected element
+      // cannot be un-executed, but the replacement no longer throws. Status
+      // subscribers survive the swap and are told about the reset.
+      existing.definition = definition;
+      existing.triggered = false;
+      existing.attempt = 0;
+      existing.promise = undefined;
+      setEntryState(store, existing, "idle");
     }
-    if (configured) existing.configured = true;
+    if (owner) existing.owners.add(owner);
     return existing;
   }
   const entry: ScriptEntry = {
     definition,
-    configured,
+    owners: new Set(owner ? [owner] : []),
     status: "idle",
     attempt: 0,
     triggered: false,
@@ -475,7 +500,7 @@ async function loadRegisteredScript(
   stack: string[] = [],
 ): Promise<unknown> {
   const entry = store.entries.get(name);
-  if (!entry?.configured) {
+  if (!entry || entry.owners.size === 0) {
     throw new ScriptNotRegisteredError(
       `Script ${JSON.stringify(name)} is not registered. Pass its defineScript() handle to scripts({ scripts: [...] })`,
     );

@@ -2,6 +2,13 @@ import { defineConfig } from "vitest/config";
 import { fileURLToPath } from "node:url";
 
 export default defineConfig({
+  // Match core's vitest config: never let a postcss config found above the
+  // workspace leak into unit tests.
+  css: {
+    postcss: {
+      plugins: [],
+    },
+  },
   resolve: {
     alias: {
       "@farm.js/scripts/client": fileURLToPath(new URL("./src/client.ts", import.meta.url)),
