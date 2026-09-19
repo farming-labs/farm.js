@@ -32,6 +32,27 @@ export interface OpenAPISpec {
 type AllowedType = "string" | "number" | "boolean" | "array" | "object";
 const allowedType = new Set(["string", "number", "boolean", "array", "object"]);
 
+/**
+ * OpenAPI `type` for a literal's value(s). A single-type literal keeps its JS
+ * type; mixed-type literal sets fall back to string (the enum still carries the
+ * exact values). bigint maps to integer.
+ */
+function openAPITypeForLiteralValues(values: readonly unknown[]): AllowedType {
+  if (values.length === 0) return "string";
+  const jsType = typeof values[0];
+  if (!values.every((value) => typeof value === jsType)) return "string";
+  switch (jsType) {
+    case "number":
+      return "number";
+    case "bigint":
+      return "number";
+    case "boolean":
+      return "boolean";
+    default:
+      return "string";
+  }
+}
+
 export class OpenAPIGenerator {
   private config: OpenAPIConfig;
   private appDir: string;
@@ -47,6 +68,16 @@ export class OpenAPIGenerator {
   private getTypeFromZodType(zodType: z.ZodType<any>): AllowedType {
     const tag = (zodType as any)._def?.type;
     return typeof tag === "string" && allowedType.has(tag) ? (tag as AllowedType) : "string";
+  }
+
+  /**
+   * Whether a schema field must be supplied by the caller. A field with a
+   * default is supplied by the server when omitted, so — like an explicitly
+   * optional field — it is not required. Only ZodOptional was excluded before,
+   * which documented every `.default()` field as required.
+   */
+  private isRequiredField(value: z.ZodType<any>): boolean {
+    return !(value instanceof z.ZodOptional) && !(value instanceof z.ZodDefault);
   }
 
   /**
@@ -78,7 +109,7 @@ export class OpenAPIGenerator {
         Object.entries(shape).forEach(([key, value]) => {
           if (value instanceof z.ZodType) {
             properties[key] = this.processZodType(value as z.ZodType<any>);
-            if (!(value instanceof z.ZodOptional)) {
+            if (this.isRequiredField(value as z.ZodType<any>)) {
               required.push(key);
             }
           }
@@ -108,6 +139,54 @@ export class OpenAPIGenerator {
         enum: (zodType as any).options,
         description: (zodType as any).description,
       };
+    }
+
+    // Handle ZodLiteral: emit the concrete value(s) as an enum rather than
+    // dropping the constraint and documenting a bare string.
+    if (zodType instanceof z.ZodLiteral) {
+      const values = ((zodType as any)._def.values as unknown[]) ?? [];
+      return {
+        type: openAPITypeForLiteralValues(values),
+        ...(values.length > 0 ? { enum: [...values] } : {}),
+        description: (zodType as any).description,
+      };
+    }
+
+    // Handle ZodUnion (including discriminated unions): oneOf over the members.
+    if (zodType instanceof z.ZodUnion) {
+      const options = ((zodType as any)._def.options as z.ZodType<any>[]) ?? [];
+      return {
+        oneOf: options.map((option) => this.processZodType(option)),
+        description: (zodType as any).description,
+      };
+    }
+
+    // Handle ZodRecord: an object whose values share a schema.
+    if (zodType instanceof z.ZodRecord) {
+      return {
+        type: "object",
+        additionalProperties: this.processZodType((zodType as any)._def.valueType),
+        description: (zodType as any).description,
+      };
+    }
+
+    // Handle ZodTuple: a fixed-length (unless variadic) array. OpenAPI 3.0 has no
+    // positional items, so the element schemas are unioned; the length is pinned
+    // when there is no rest element.
+    if (zodType instanceof z.ZodTuple) {
+      const items = ((zodType as any)._def.items as z.ZodType<any>[]) ?? [];
+      const rest = (zodType as any)._def.rest;
+      const itemSchemas = items.map((item) => this.processZodType(item));
+      const tupleSchema: any = {
+        type: "array",
+        items: itemSchemas.length === 1 ? itemSchemas[0] : { oneOf: itemSchemas },
+        description: (zodType as any).description,
+      };
+      if (!rest) {
+        tupleSchema.minItems = items.length;
+        tupleSchema.maxItems = items.length;
+      }
+      return tupleSchema;
     }
 
     // For primitive types
@@ -311,11 +390,34 @@ export class OpenAPIGenerator {
   }
 
   /**
-   * Convert Farm.js API path to OpenAPI path format
+   * Convert a Farm.js API path to OpenAPI path format.
+   *
+   * Strips the `/api` prefix and rewrites dynamic segments to OpenAPI's
+   * `{name}` templating: `[id]` -> `{id}`, `[...slug]` -> `{slug}`, and
+   * `[[...slug]]` -> `{slug}`. Leaving the bracket form produces a path key that
+   * is invalid OpenAPI, which breaks "try it" and any generated client.
    */
   private convertToOpenAPIPath(path: string): string {
-    // Convert /api/auth/login to /auth/login
-    return path.replace(/^\/api/, "");
+    return path
+      .replace(/^\/api/, "")
+      .replace(/\[\[\.\.\.([^\]]+)\]\]/g, "{$1}")
+      .replace(/\[\.\.\.([^\]]+)\]/g, "{$1}")
+      .replace(/\[([^\]]+)\]/g, "{$1}");
+  }
+
+  /**
+   * Path parameters implied by a Farm.js API path's dynamic segments. Every
+   * path parameter is `required: true` per the OpenAPI spec (a path parameter
+   * cannot be optional), including catch-all segments.
+   */
+  private getPathParameters(path: string): any[] {
+    const openAPIPath = this.convertToOpenAPIPath(path);
+    return [...openAPIPath.matchAll(/\{([^}]+)\}/g)].map((match) => ({
+      name: match[1],
+      in: "path",
+      required: true,
+      schema: { type: "string" },
+    }));
   }
 
   /**
@@ -347,7 +449,7 @@ export class OpenAPIGenerator {
             Object.entries(shape).forEach(([key, value]) => {
               if (value instanceof z.ZodType) {
                 properties[key] = this.processZodType(value as z.ZodType<any>);
-                if (!(value instanceof z.ZodOptional)) {
+                if (this.isRequiredField(value as z.ZodType<any>)) {
                   required.push(key);
                 }
               }
@@ -381,7 +483,7 @@ export class OpenAPIGenerator {
             Object.entries(shape).forEach(([key, value]) => {
               if (value instanceof z.ZodType) {
                 properties[key] = this.processZodType(value as z.ZodType<any>);
-                if (!(value instanceof z.ZodOptional)) {
+                if (this.isRequiredField(value as z.ZodType<any>)) {
                   required.push(key);
                 }
               }
@@ -445,7 +547,7 @@ export class OpenAPIGenerator {
               parameters.push({
                 name: key,
                 in: "query",
-                required: !(value instanceof z.ZodOptional),
+                required: this.isRequiredField(value as z.ZodType<any>),
                 schema: this.processZodType(value as z.ZodType<any>),
               });
             }
@@ -463,7 +565,7 @@ export class OpenAPIGenerator {
               parameters.push({
                 name: key,
                 in: "query",
-                required: !(value instanceof z.ZodOptional),
+                required: this.isRequiredField(value as z.ZodType<any>),
                 schema: this.processZodType(value as z.ZodType<any>),
               });
             }
@@ -490,8 +592,11 @@ export class OpenAPIGenerator {
       responses: this.getStandardResponses(),
     };
 
-    // Add query parameters
-    const parameters = await this.getParameters(route, method);
+    // Path parameters (from dynamic route segments) precede query parameters.
+    const parameters = [
+      ...this.getPathParameters(route.path),
+      ...(await this.getParameters(route, method)),
+    ];
     if (parameters.length > 0) {
       operation.parameters = parameters;
     }

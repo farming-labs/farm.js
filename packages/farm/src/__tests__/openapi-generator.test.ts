@@ -59,7 +59,83 @@ describe("OpenAPIGenerator", () => {
   });
 });
 
+describe("OpenAPIGenerator dynamic paths", () => {
+  it("templates dynamic segments and emits path parameters", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const root = mkdtempSync(path.join(os.tmpdir(), "farm-openapi-path-"));
+    tempDirs.push(root);
+    const routeFile = path.join(root, "route.mjs");
+    writeFileSync(routeFile, "export const GET = async () => Response.json({ ok: true });\n");
+
+    const generator = new OpenAPIGenerator(root, { title: "Users API" });
+    const spec = await generator.generateSpec([
+      {
+        path: "/api/users/[id]",
+        methods: ["GET"],
+        filePath: realpathSync(routeFile),
+        relativePath: "api/users/[id]/route.ts",
+      },
+    ]);
+
+    // OpenAPI templating, not the raw bracket form.
+    expect(spec.paths["/users/{id}"]).toBeDefined();
+    expect(spec.paths["/users/[id]"]).toBeUndefined();
+    expect(spec.paths["/users/{id}"].get.parameters).toContainEqual({
+      name: "id",
+      in: "path",
+      required: true,
+      schema: { type: "string" },
+    });
+  });
+
+  it("templates catch-all and optional catch-all segments", () => {
+    const generator = new OpenAPIGenerator(os.tmpdir(), { title: "T" });
+    const convert = (p: string) => (generator as any).convertToOpenAPIPath(p);
+    expect(convert("/api/files/[...slug]")).toBe("/files/{slug}");
+    expect(convert("/api/files/[[...slug]]")).toBe("/files/{slug}");
+    expect(convert("/api/a/[x]/b/[y]")).toBe("/a/{x}/b/{y}");
+  });
+});
+
 describe("OpenAPIGenerator schema conversion", () => {
+  it("does not mark a defaulted field as required", () => {
+    const schema = toSchema(
+      z.object({
+        name: z.string(),
+        role: z.string().default("user"),
+        nickname: z.string().optional(),
+      }),
+    );
+    expect(schema.required).toEqual(["name"]);
+  });
+
+  it("documents a literal as an enum with its value", () => {
+    expect(toSchema(z.literal("admin"))).toMatchObject({ type: "string", enum: ["admin"] });
+    expect(toSchema(z.literal(42))).toMatchObject({ type: "number", enum: [42] });
+  });
+
+  it("documents a union as oneOf over its members", () => {
+    expect(toSchema(z.union([z.string(), z.number()]))).toMatchObject({
+      oneOf: [{ type: "string" }, { type: "number" }],
+    });
+  });
+
+  it("documents a record as an object with additionalProperties", () => {
+    expect(toSchema(z.record(z.string(), z.number()))).toMatchObject({
+      type: "object",
+      additionalProperties: { type: "number" },
+    });
+  });
+
+  it("documents a tuple as a length-pinned array", () => {
+    expect(toSchema(z.tuple([z.string(), z.number()]))).toMatchObject({
+      type: "array",
+      items: { oneOf: [{ type: "string" }, { type: "number" }] },
+      minItems: 2,
+      maxItems: 2,
+    });
+  });
+
   it("keeps the declared type for primitives", () => {
     expect(toSchema(z.string())).toMatchObject({ type: "string" });
     expect(toSchema(z.number())).toMatchObject({ type: "number" });
