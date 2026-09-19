@@ -1742,6 +1742,19 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             return;
           }
 
+          // The OpenAPI spec and reference, docs, raw markdown-source, the
+          // markdown mirror, and the Markdown 404 fallback expose page content
+          // or route-existence, so app middleware must pass before they are
+          // sent — matching the production entry, where these handlers run
+          // after the middleware runner.
+          const runAppMiddlewareForContentRoute = async (): Promise<boolean> => {
+            if (!middlewareManager?.hasMiddleware()) return false;
+            const middlewareRequest = createRequestFromNodeRequest(req, new URL(fullUrl));
+            return farmApp
+              .getServerRenderer()
+              .runWithRequestContext(middlewareRequest, () => middlewareManager!.execute(req, res));
+          };
+
           // Serve the raw OpenAPI spec as JSON at a predictable URL for agents
           // and API tooling.
           if (
@@ -1749,6 +1762,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             options.openapi?.specRoute &&
             requestPathname === options.openapi.specRoute
           ) {
+            if (await runAppMiddlewareForContentRoute()) return;
             if (requestMethod !== "GET" && requestMethod !== "HEAD") {
               res.statusCode = 405;
               res.setHeader("Allow", "GET, HEAD");
@@ -1767,6 +1781,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
 
           // Handle OpenAPI docs route
           if (openAPIManager && requestPathname === options.openapi?.route) {
+            if (await runAppMiddlewareForContentRoute()) return;
             const docsHandler = openAPIManager.getDocsRouteHandler();
             return docsHandler(req, res);
           }
@@ -1777,17 +1792,6 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               docsHeaders.set(key, Array.isArray(value) ? value.join(", ") : value);
             }
           }
-          // Docs, raw markdown-source, the markdown mirror, and the Markdown
-          // 404 fallback expose page content or route-existence, so app
-          // middleware must pass before they are sent — matching the production
-          // entry, where these handlers run after the middleware runner.
-          const runAppMiddlewareForContentRoute = async (): Promise<boolean> => {
-            if (!middlewareManager?.hasMiddleware()) return false;
-            const middlewareRequest = createRequestFromNodeRequest(req, new URL(fullUrl));
-            return farmApp
-              .getServerRenderer()
-              .runWithRequestContext(middlewareRequest, () => middlewareManager!.execute(req, res));
-          };
           if (farmDocsHandler) {
             const docsRequest = new Request(fullUrl, {
               method: requestMethod,
