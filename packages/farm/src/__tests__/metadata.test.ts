@@ -68,6 +68,27 @@ describe("metadata head rendering", () => {
     expect(renderMetadataHead({}).tags).not.toContain('rel="canonical"');
   });
 
+  it("keeps the defaulted canonical same-origin for authority-introducing paths", () => {
+    // A request path like `//evil.com` or `/\evil.com` must not become a
+    // cross-origin canonical (SEO canonical poisoning). It is collapsed to a
+    // same-origin path.
+    const base = { metadataBase: "https://farm.test" };
+    expect(renderMetadataHead(base, { pathname: "//evil.com/phish" }).tags).toContain(
+      '<link rel="canonical" href="https://farm.test/evil.com/phish">',
+    );
+    expect(renderMetadataHead(base, { pathname: "/\\evil.com" }).tags).toContain(
+      '<link rel="canonical" href="https://farm.test/evil.com">',
+    );
+    // Never an off-origin authority.
+    expect(renderMetadataHead(base, { pathname: "//evil.com/phish" }).tags).not.toContain(
+      "https://evil.com",
+    );
+    // Without a base the default stays a rooted path, never protocol-relative.
+    expect(renderMetadataHead({}, { pathname: "//evil.com/phish" }).tags).toContain(
+      '<link rel="canonical" href="/evil.com/phish">',
+    );
+  });
+
   it("keeps an explicit canonical over the request-path default", () => {
     const tags = renderMetadataHead(
       { alternates: { canonical: "https://farm.test/canonical" } },

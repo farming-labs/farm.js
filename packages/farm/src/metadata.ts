@@ -153,7 +153,7 @@ export function renderMetadataHead(
     explicitCanonical != null
       ? resolveMetadataUrl(explicitCanonical, metadataBase)
       : options.pathname
-        ? resolveMetadataUrl(options.pathname, metadataBase)
+        ? resolveMetadataUrl(sanitizeSelfCanonicalPathname(options.pathname), metadataBase)
         : undefined;
   if (canonicalHref) {
     appendLink(tags, "canonical", canonicalHref);
@@ -394,6 +394,21 @@ function resolveMetadataBase(metadata: MetadataRecord): string | undefined {
   const base = metadata.metadataBase;
   if (!base) return undefined;
   return String(base);
+}
+
+/**
+ * Keep the defaulted self-canonical on this origin. The pathname comes straight
+ * from the request URL, and forms like `//evil.com` or `/\evil.com` resolve to a
+ * cross-origin URL through `new URL()` (and browsers treat `\` as `/`), which
+ * would advertise an attacker's domain as the page's canonical identity. Any
+ * request path introducing an authority is collapsed to a single leading slash
+ * so the canonical stays same-origin. Developer-supplied `alternates.canonical`
+ * is trusted and does not pass through here.
+ */
+function sanitizeSelfCanonicalPathname(pathname: string): string {
+  if (typeof pathname !== "string" || pathname.length === 0) return "/";
+  const collapsed = pathname.replace(/^[/\\]+/, "/");
+  return collapsed.startsWith("/") ? collapsed : `/${collapsed}`;
 }
 
 function resolveMetadataUrl(value: unknown, metadataBase?: string): string | undefined {
