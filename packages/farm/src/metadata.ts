@@ -362,7 +362,12 @@ function hasMetadataImages(value: unknown): boolean {
   return normalizeMetadataImages(value).length > 0;
 }
 
-function resolveMetadataTitle(title: Metadata["title"]): string | undefined {
+/**
+ * Resolve a metadata title into displayable text. Exported so client-side
+ * navigation resolves the object form the same way SSR does instead of
+ * stringifying it into "[object Object]".
+ */
+export function resolveMetadataTitle(title: Metadata["title"]): string | undefined {
   if (typeof title === "string") return title;
   if (isRecord(title)) {
     return normalizeContent(title.default);

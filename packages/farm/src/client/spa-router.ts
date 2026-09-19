@@ -9,6 +9,7 @@ import {
 } from "../deployment";
 import { getHashTargetElement } from "./hash-target";
 import { isFarmExternalNavigationURL, resolveFarmNavigationURL } from "./navigation-url";
+import { applyFarmMetadataToDocument, type NavigationMetadata } from "./metadata-reconciler";
 import type { FarmClientNavigationSession, FarmClientPluginManager } from "./plugin";
 import { _hydrateFarmI18n, isFarmLocaleChangeHref } from "../i18n/client-runtime";
 import type { FarmI18nClientSnapshot } from "../i18n/types";
@@ -43,10 +44,7 @@ interface PageData {
     html: string;
     layoutPatterns: string[];
   };
-  metadata?: {
-    title?: string;
-    description?: string;
-  };
+  metadata?: NavigationMetadata;
   layoutModules?: string[];
   routeSlots?: RouteSlotPageData[];
   interception?: {
@@ -857,20 +855,9 @@ export class SPARouter {
   }
 
   private updateDocumentMetadata(metadata: PageData["metadata"]): void {
-    document.title = metadata?.title || "Farm.js App";
-
-    let description = document.querySelector('meta[name="description"]');
-    if (!metadata?.description) {
-      description?.remove();
-      return;
-    }
-
-    if (!description) {
-      description = document.createElement("meta");
-      description.setAttribute("name", "description");
-      document.head.appendChild(description);
-    }
-    description.setAttribute("content", metadata.description);
+    // Both call sites run after the history entry is committed, so the current
+    // pathname is the navigated-to page and drives the default canonical.
+    applyFarmMetadataToDocument(metadata, window.location.pathname);
   }
 
   private startNavigation(options: {
