@@ -170,6 +170,104 @@ describe("compiled React runtime hardening", () => {
     expect(bindingReads).toBe(0);
   });
 
+  it.each(["static", "hybrid"] as const)(
+    "retains attached refs through lifecycle-only replay and clears them on real unmount in %s",
+    async (reactivity) => {
+      let renders = 0;
+      let reads = 0;
+      let update = (_value: number) => {};
+      const Counter = createCompiledComponentWithFeatures<Record<string, never>>(
+        {
+          displayName: "LifecycleOnlyReplayCounter",
+          reactivity,
+          initialize: () => [0],
+          render(_props, state, blocks) {
+            renders += 1;
+            update = (value) => state[0].set(value);
+            return (
+              <section data-count={Number(state[0].get())}>
+                <output ref={blocks.target(0)}>{Number(state[0].get())}</output>
+              </section>
+            );
+          },
+          bindings: [
+            {
+              kind: "attribute",
+              name: "data-count",
+              path: [],
+              dependencies: [0],
+              tracking: "dynamic",
+              read: (_props, state) => {
+                reads += 1;
+                return state[0].get();
+              },
+            },
+            {
+              kind: "text",
+              path: [0],
+              target: 0,
+              dependencies: [0],
+              tracking: "dynamic",
+              read: (_props, state) => {
+                reads += 1;
+                return state[0].get();
+              },
+            },
+          ],
+        },
+        [],
+      );
+      const container = document.createElement("div");
+      document.body.append(container);
+      const root = trackRoot(createRoot(container));
+      const instanceRef = React.createRef<React.Component<Record<string, never>>>();
+      await act(async () => {
+        root.render(
+          React.createElement(Counter as React.ComponentClass<Record<string, never>>, {
+            ref: instanceRef,
+          }),
+        );
+      });
+      // Model React 18's replay even when this source suite uses React 19.
+      // The packaged compatibility suite also exercises actual StrictMode on both versions.
+      const instance = instanceRef.current as React.Component & {
+        componentWillUnmount(): void;
+        componentDidMount(): void;
+        root: Element | null;
+        bindingTargets: Map<number, Element>;
+      };
+      const section = container.querySelector("section")!;
+      const output = container.querySelector("output")!;
+      await act(async () => {
+        instance.componentWillUnmount();
+        instance.componentDidMount();
+        update(1);
+        await flushCompilerUpdates();
+      });
+      expect(section.dataset.count).toBe("1");
+      expect(output.textContent).toBe("1");
+      expect(renders).toBe(1);
+      expect(instance.root).toBe(section);
+      expect(instance.bindingTargets.get(0)).toBe(output);
+
+      const beforeUnmountReads = reads;
+      await act(async () => {
+        update(2);
+        root.unmount();
+        roots.delete(root);
+        await flushCompilerUpdates();
+        update(3);
+        await flushCompilerUpdates();
+      });
+      expect(instance.root).toBeNull();
+      expect(instance.bindingTargets.size).toBe(0);
+      expect(reads).toBe(beforeUnmountReads);
+      expect(section.dataset.count).toBe("1");
+      expect(output.textContent).toBe("1");
+      expect(section.isConnected).toBe(false);
+    },
+  );
+
   it("keeps parent props and compiler-local state coherent when both update in one event", async () => {
     interface Props {
       label: string;

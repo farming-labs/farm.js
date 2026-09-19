@@ -102,6 +102,149 @@ const testSource = String.raw`
   assert.equal(container.textContent, "Count: 1");
   flushSync(() => root.unmount());
 
+  // Ref callbacks, not StrictMode's simulated unmount, own DOM reference cleanup.
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  for (const reactivity of ["static", "hybrid"]) {
+    for (const lifecycle of ["mount", "hydrate"]) {
+      for (const targeting of ["path", "ref"]) {
+        const context = reactivity + "/" + lifecycle + "/" + targeting;
+        let updateCompiled;
+        let updateControl;
+        let executions = 0;
+        let reads = 0;
+        const readText = (state) => String(state[1].get()) + ": " + state[0].get();
+        const read = (get) => (_props, state) => {
+          reads += 1;
+          return get(state);
+        };
+        const DirectBindings = createCompiledComponentWithFeatures({
+          displayName: "CompatibilityStrictDirectBindings",
+          reactivity,
+          initialize: () => [0],
+          readProps: (props) => [props.label],
+          render(_props, state, blocks) {
+            executions += 1;
+            updateCompiled = (value) => state[0].set(value);
+            const target = (id) => targeting === "ref" ? blocks.target(id) : undefined;
+            return React.createElement("section", { "data-count": state[0].get() },
+              React.createElement("span", { ref: target(0) }, readText(state)),
+              React.createElement("div", { ref: target(1), style: { width: Number(state[0].get()) + 8 } }),
+              React.createElement("input", { ref: target(2), value: readText(state), onChange: () => {} }),
+            );
+          },
+          bindings: [
+            { kind: "attribute", name: "data-count", path: [], dependencies: [0],
+              tracking: "dynamic", read: read((state) => state[0].get()) },
+            { kind: "text", path: [0], target: targeting === "ref" ? 0 : undefined,
+              dependencies: [0, 1], tracking: "dynamic", read: read(readText) },
+            { kind: "style", name: "width", path: [1], target: targeting === "ref" ? 1 : undefined,
+              dependencies: [0], tracking: "dynamic", read: read((state) => Number(state[0].get()) + 8) },
+            { kind: "attribute", name: "value", path: [2], target: targeting === "ref" ? 2 : undefined,
+              dependencies: [0, 1], tracking: "dynamic", read: read(readText) },
+          ],
+        }, []);
+        function Control({ label }) {
+          const [count, setCount] = React.useState(0);
+          updateControl = setCount;
+          return React.createElement("section", { "data-count": count },
+            React.createElement("span", null, label + ": " + count),
+            React.createElement("div", { style: { width: count + 8 } }),
+            React.createElement("input", { value: label + ": " + count, onChange: () => {} }),
+          );
+        }
+        const target = document.createElement("div");
+        const controlTarget = document.createElement("div");
+        document.body.append(target, controlTarget);
+        const tree = (Component, label, key = "first") => React.createElement(
+          React.StrictMode, null, React.createElement(Component, { label, key }),
+        );
+        if (lifecycle === "hydrate") target.innerHTML = renderToString(tree(DirectBindings, "Before"));
+        const serverElements = [...target.querySelectorAll("*")];
+        const errors = [];
+        let compiledRoot;
+        const controlRoot = createRoot(controlTarget);
+        try {
+          await React.act(async () => {
+            compiledRoot = lifecycle === "hydrate"
+              ? hydrateRoot(target, tree(DirectBindings, "Before"), { onRecoverableError: (error) => errors.push(error) })
+              : createRoot(target);
+            if (lifecycle === "mount") compiledRoot.render(tree(DirectBindings, "Before"));
+            controlRoot.render(tree(Control, "Before"));
+          });
+          const elements = [...target.querySelectorAll("*")];
+          if (lifecycle === "hydrate") elements.forEach((element, index) => assert.equal(element, serverElements[index], context));
+          const input = target.querySelector("input");
+          input.focus();
+          input.setSelectionRange(1, 3, "backward");
+          const initialExecutions = executions;
+          const assertParity = () => {
+            const snapshot = (container) => ({
+              count: container.querySelector("section").getAttribute("data-count"),
+              text: container.querySelector("span").textContent,
+              width: container.querySelector("section > div").style.width,
+            });
+            assert.deepEqual(snapshot(target), snapshot(controlTarget), context);
+            assert.equal(input.value, controlTarget.querySelector("input").value, context);
+            [...target.querySelectorAll("*")].forEach((element, index) => assert.equal(element, elements[index], context));
+            assert.equal(document.activeElement, input, context);
+            assert.equal(input.selectionStart, 1, context);
+            assert.equal(input.selectionEnd, 3, context);
+            assert.equal(input.selectionDirection, "backward", context);
+            assert.equal(executions, initialExecutions, context);
+          };
+          // Update before a parent render could hide missing refs, then mix parent/local work.
+          for (const count of [1, 2, 3]) {
+            const beforeReads = reads;
+            await React.act(async () => {
+              if (count === 2) {
+                flushSync(() => {
+                  compiledRoot.render(tree(DirectBindings, "After"));
+                  controlRoot.render(tree(Control, "After"));
+                });
+              }
+              updateCompiled(count);
+              updateControl(count);
+              if (count === 3) {
+                compiledRoot.render(tree(DirectBindings, "Together"));
+                controlRoot.render(tree(Control, "Together"));
+              }
+            });
+            assertParity();
+            assert.ok(reads >= beforeReads + 4, context);
+          }
+          const beforeNoop = reads;
+          await React.act(async () => { updateCompiled(3); updateControl(3); });
+          assertParity();
+          assert.equal(reads, beforeNoop, context);
+          const staleUpdate = updateCompiled;
+          const beforeUnmount = { reads, executions };
+          await React.act(async () => {
+            updateCompiled(99);
+            flushSync(() => compiledRoot.render(null));
+          });
+          const detachedHTML = elements[0].outerHTML;
+          await React.act(async () => staleUpdate(100));
+          assert.deepEqual({ reads, executions }, beforeUnmount, context);
+          assert.equal(elements[0].outerHTML, detachedHTML, context);
+          assert.equal(target.childElementCount, 0, context);
+          elements.forEach((element) => assert.equal(element.isConnected, false, context));
+          // A fresh owner must not inherit the disposed owner's pending work or refs.
+          await React.act(async () => compiledRoot.render(tree(DirectBindings, "Fresh", "second")));
+          await React.act(async () => { staleUpdate(101); updateCompiled(4); });
+          assert.equal(target.querySelector("span").textContent, "Fresh: 4", context);
+          assert.notEqual(target.querySelector("input"), input, context);
+          assert.equal(elements[0].outerHTML, detachedHTML, context);
+          assert.deepEqual(errors, [], context);
+        } finally {
+          await React.act(async () => { compiledRoot?.unmount(); controlRoot.unmount(); });
+          target.remove();
+          controlTarget.remove();
+        }
+      }
+    }
+  }
+  delete globalThis.IS_REACT_ACT_ENVIRONMENT;
+
   let reverseCompatibilityRows = () => undefined;
   let mapReverseParityCompatibilityRows = () => undefined;
   let queuedMapReverseParityCompatibilityRows = () => undefined;
@@ -525,6 +668,186 @@ const testSource = String.raw`
       }
     }
   }
+  delete globalThis.IS_REACT_ACT_ENVIRONMENT;
+
+  // Structural containers must re-adopt after lifecycle replay without replacing hydrated DOM.
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const structuralReplayFailures = [];
+  for (const kind of ["HostConditional", "ConditionalRanges", "KeyedRanges", "MixedRanges"]) {
+    for (const reactivity of ["static", "hybrid"]) {
+      for (const lifecycle of ["mount", "hydrate"]) {
+        for (const rootOwned of kind === "HostConditional" ? [false] : [false, true]) {
+          const context = kind + "/" + reactivity + "/" + lifecycle + "/" + (rootOwned ? "root" : "nested");
+          const conditional = kind !== "KeyedRanges";
+          const keyed = kind === "KeyedRanges" || kind === "MixedRanges";
+          const statics = kind !== "HostConditional";
+          const initial = { count: 0, enabled: true, items: [{ id: "a", label: "Alpha" }, { id: "b", label: "Beta" }] };
+          const counters = { owners: 0, blocks: 0, nestedReads: 0 };
+          let updateModel, updateNested, updateControlModel, updateControlNested;
+          let blockInstance;
+          const host = (tag, children = [], attributes = []) => ({ kind: "element", tag, attributes, styles: [], children });
+          const nestedText = (value) => "Nested " + value;
+          const renderView = (model, nested) => React.createElement("section", { "data-container": kind },
+            statics ? React.createElement("input", { key: "input", value: "selection", readOnly: true }) : null,
+            conditional && model.enabled ? React.createElement("article", { key: "branch", "data-branch": true },
+              React.createElement("strong", null, "Count " + model.count),
+              React.createElement("div", null, nested >= 0 ? React.createElement("em", null, nestedText(nested)) : null),
+            ) : null,
+            keyed ? model.items.map((item) => React.createElement("p", { key: item.id, "data-key": item.id }, item.label)) : null,
+            statics ? React.createElement("footer", { key: "footer" }, "Footer " + model.count) : null,
+          );
+          const wrap = (element) => rootOwned ? element : React.createElement("main", null, element);
+          const Compiled = createCompiledComponent({
+            displayName: "CompatibilityStrict" + kind,
+            reactivity,
+            initialize: () => [initial, 0],
+            render(_props, cells, blocks) {
+              counters.owners += 1;
+              const model = () => cells[0].get();
+              const nested = () => cells[1].get();
+              updateModel = (value) => cells[0].set(value);
+              updateNested = (value) => cells[1].set(value);
+              const innerBranch = {
+                create: () => host("em", [nestedText(nested())]),
+                bindings: [{ kind: "text", path: [], read: () => {
+                  counters.nestedReads += 1;
+                  return nestedText(nested());
+                } }],
+              };
+              const branch = {
+                create: () => host("article", [
+                  host("strong", ["Count " + model().count]),
+                  { ...host("div", nested() >= 0 ? [innerBranch.create()] : []), block: {
+                    kind: "conditional-ranges", id: 1, trailing: 0,
+                    ranges: [{ before: 0, test: () => nested() >= 0, logical: true, truthy: innerBranch }],
+                  } },
+                ], [{ name: "data-branch", value: true }]),
+                bindings: [{ kind: "text", path: [0], read: () => "Count " + model().count }],
+              };
+              const condition = { before: statics ? 1 : 0, test: () => model().enabled, logical: true, truthy: branch };
+              const rows = {
+                before: kind === "MixedRanges" ? 0 : 1,
+                items: () => model().items,
+                rowKey: (item) => item.id,
+                create: (item) => host("p", [item.label], [{ name: "data-key", value: item.id }]),
+                bindings: [{ kind: "text", path: [], read: (item) => item.label }],
+              };
+              const ranges = kind === "ConditionalRanges" ? [condition] : kind === "KeyedRanges" ? [rows] : [
+                { kind: "conditional", ...condition }, { kind: "keyed", ...rows },
+              ];
+              const bindings = [{ kind: "text", segment: ranges.length, sibling: 0, path: [], read: () => "Footer " + model().count }];
+              const props = {
+                id: 0,
+                ref: (instance) => { if (instance) blockInstance = instance; },
+                render: () => { counters.blocks += 1; return renderView(model(), nested()); },
+              };
+              if (kind === "HostConditional") Object.assign(props, condition);
+              else if (kind === "MixedRanges") props.create = () => ({
+                ...host("section", [
+                  host("input", [], [{ name: "value", value: "selection" }, { name: "readOnly", value: true }]),
+                  ...(model().enabled ? [branch.create()] : []),
+                  ...model().items.map(rows.create),
+                  host("footer", ["Footer " + model().count]),
+                ], [{ name: "data-container", value: kind }]),
+                block: { kind: "mixed-ranges", id: 0, ranges, trailing: 1, bindings },
+              });
+              else Object.assign(props, { ranges, trailing: 1, bindings });
+              return wrap(React.createElement(blocks[kind], props));
+            },
+            bindings: [
+              { kind: "block", id: 0, dependencies: [0] },
+              ...(conditional ? [{ kind: "block", id: 1, parent: 0, dependencies: [1] }] : []),
+            ],
+          });
+          function Control() {
+            const [model, setModel] = React.useState(initial);
+            const [nested, setNested] = React.useState(0);
+            updateControlModel = setModel;
+            updateControlNested = setNested;
+            return wrap(renderView(model, nested));
+          }
+          const target = document.createElement("div");
+          const controlTarget = document.createElement("div");
+          document.body.append(target, controlTarget);
+          const tree = React.createElement(React.StrictMode, null, React.createElement(Compiled));
+          if (lifecycle === "hydrate") target.innerHTML = renderToString(tree);
+          const serverElements = [...target.querySelectorAll("*")];
+          const recoverableErrors = [];
+          let root;
+          const controlRoot = createRoot(controlTarget);
+          try {
+            await React.act(async () => {
+              root = lifecycle === "hydrate"
+                ? hydrateRoot(target, tree, { onRecoverableError: (error) => recoverableErrors.push(error) })
+                : createRoot(target);
+              if (lifecycle === "mount") root.render(tree);
+              controlRoot.render(React.createElement(React.StrictMode, null, React.createElement(Control)));
+            });
+            if (lifecycle === "hydrate") [...target.querySelectorAll("*")].forEach((element, index) => assert.ok(element === serverElements[index], context + "/server identity"));
+            const container = target.querySelector("section");
+            const input = target.querySelector("input");
+            const footer = target.querySelector("footer");
+            input?.focus();
+            input?.setSelectionRange(1, 4, "backward");
+            const initialOwners = counters.owners;
+            const initialBlocks = counters.blocks;
+            const parity = () => {
+              assert.equal(target.innerHTML, controlTarget.innerHTML, context);
+              assert.ok(target.querySelector("section") === container, context + "/container identity");
+              assert.ok(target.querySelector("input") === input, context + "/input identity");
+              assert.ok(target.querySelector("footer") === footer, context + "/footer identity");
+              assert.equal(counters.owners, initialOwners, context);
+              assert.equal(counters.blocks, initialBlocks, context);
+              if (input) {
+                assert.ok(document.activeElement === input, context + "/focus");
+                assert.deepEqual([input.selectionStart, input.selectionEnd, input.selectionDirection], [1, 4, "backward"], context);
+              }
+            };
+            for (const count of [1, 2, 3, 4]) {
+              const oldRows = new Map([...target.querySelectorAll("[data-key]")].map((row) => [row.dataset.key, row]));
+              const model = {
+                count, enabled: count !== 2,
+                items: count === 2 ? [] : count === 3
+                  ? [{ id: "b", label: "Beta " + count }, { id: "c", label: "Gamma" }]
+                  : [{ id: "b", label: "Beta " + count }, { id: "a", label: "Alpha" }],
+              };
+              await React.act(async () => { updateModel(model); updateControlModel(model); });
+              parity();
+              for (const row of target.querySelectorAll("[data-key]")) {
+                if (oldRows.has(row.dataset.key)) assert.ok(row === oldRows.get(row.dataset.key), context + "/row identity");
+              }
+              const beforeNested = counters.nestedReads;
+              await React.act(async () => { updateNested(count); updateControlNested(count); });
+              parity();
+              if (conditional && model.enabled) assert.ok(counters.nestedReads > beforeNested, context);
+              else assert.equal(counters.nestedReads, beforeNested, context);
+            }
+            const beforeUnmount = { ...counters };
+            await React.act(async () => {
+              updateModel(initial);
+              updateNested(99);
+              flushSync(() => root.unmount());
+            });
+            const detachedHTML = container.outerHTML;
+            await React.act(async () => { updateModel(initial); updateNested(100); });
+            assert.deepEqual(counters, beforeUnmount, context);
+            assert.equal(container.outerHTML, detachedHTML, context);
+            assert.equal(container.isConnected, false, context);
+            assert.ok(blockInstance.root === null, context + "/root detached");
+            assert.equal(target.childElementCount, 0, context);
+            assert.deepEqual(recoverableErrors, [], context);
+          } catch (error) {
+            structuralReplayFailures.push({ context, message: error.message });
+          } finally {
+            await React.act(async () => { root?.unmount(); controlRoot.unmount(); });
+            target.remove();
+            controlTarget.remove();
+          }
+        }
+      }
+    }
+  }
+  assert.deepEqual(structuralReplayFailures, []);
   delete globalThis.IS_REACT_ACT_ENVIRONMENT;
 
   const StaticBindings = createCompiledComponentWithFeatures({

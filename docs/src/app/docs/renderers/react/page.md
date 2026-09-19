@@ -2415,6 +2415,17 @@ containers re-adopt their existing DOM after that replay instead of switching pe
 fallback. A real unmount still clears the host ref, disposes subscriptions, and ignores queued work
 or stale setters from the removed owner.
 
+Direct text, attribute, style, and controlled-input bindings also retain their attached DOM refs
+during Strict Mode's lifecycle replay. Local updates keep working before a parent renders again,
+including after hydration. React's ref-detach callbacks clear those references on a real unmount;
+queued updates and stale setters cannot update a removed component or its replacement.
+
+Host conditionals and conditional, keyed, and mixed range containers follow the same replay rule.
+They re-adopt the existing container, static siblings, and eligible branches or rows, including
+server-rendered nodes. Nested subscriptions are disposed and re-established during replay; hiding
+a branch or unmounting the component still disposes its scopes. Unsupported shapes keep the
+existing React fallback behavior.
+
 During development, compiled components receive a module-and-component identity plus a state-layout
 signature. A compatible Fast Refresh replaces the compiled definition while retaining the React
 component type and its local cells. An interactive keyed boundary lets React commit the refreshed
