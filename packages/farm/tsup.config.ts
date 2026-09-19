@@ -25,6 +25,7 @@ export const farmPackageBuildOptions = {
     request: "src/request.ts",
     plugin: "src/plugin.ts",
     integrations: "src/integrations.ts",
+    schema: "src/schema.ts",
     storage: "src/storage/index.ts",
     cache: "src/cache.ts",
     deferred: "src/deferred.ts",

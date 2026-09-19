@@ -101,14 +101,18 @@ storage: {
 }
 ```
 
-### Declare an integration schema
+### Declare a schema
+
+Schemas are plain data: models, fields, and relationships. The same declaration
+works for an integration or for application-owned models, so it is not part of the
+integration API.
 
 **src/integrations/billing-schema.ts**
 
 ```ts
-import { defineIntegrationSchema } from "@farm.js/core";
+import { defineSchema } from "@farm.js/core";
 
-export const billingSchema = defineIntegrationSchema({
+export const billingSchema = defineSchema({
   models: {
     billingAccount: {
       name: "billing_account",
@@ -152,6 +156,11 @@ export const billingSchema = defineIntegrationSchema({
   },
 });
 ```
+
+`defineIntegrationSchema` remains available as a deprecated exact alias of
+`defineSchema`, along with the `FarmIntegrationSchema*` type names. Existing code
+keeps working without changes; new code should use `defineSchema` and the
+`FarmSchema*` types.
 
 ### Query through `ctx.args.db`
 
