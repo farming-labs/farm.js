@@ -192,6 +192,12 @@ at least 1.5x faster than the compiled snapshot control with an extra local decl
 is independent of the older single-row position gates, so a batch regression cannot hide inside
 their aggregate.
 
+Batch preparation checks collisions directly in the committed row map and tracks only new keys
+in a temporary set. It no longer copies every committed key before preparing incoming rows.
+Full source validation, final-map cleanup, DOM identity, focus/selection, and suffix event indexes
+are unchanged. Static/hybrid regressions cover repeated boundary and middle insertions, late
+duplicate-key collisions, and descriptor/binding failures before any live DOM insertion.
+
 The exact-window replacement case derives its delete count from the 64-row replacement array and
 swaps that window in the middle of a 10,000-row table. It must
 preserve both retained boundary nodes, disconnect both removed boundaries, add no owner

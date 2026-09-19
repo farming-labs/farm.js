@@ -62,8 +62,9 @@ function rowDescriptor(item: Item): CompilerKeyedRowElement {
   };
 }
 
-function createBatchHarness(initialItems: Item[]) {
+function createBatchHarness(initialItems: Item[], reactivity?: "static" | "hybrid") {
   const counters = { executions: 0, renders: 0, keys: 0, descriptors: 0, bindings: 0 };
+  let observe: ((phase: "key" | "descriptor" | "binding", item: Item) => void) | undefined;
   let insert: (position: number, items: readonly Item[]) => void = () => undefined;
   let remove: (position: number, count: number) => void = () => undefined;
   let queueTwo: (first: readonly Item[], second: readonly Item[]) => void = () => undefined;
@@ -71,6 +72,7 @@ function createBatchHarness(initialItems: Item[]) {
   const Table = createCompiledComponentWithFeatures(
     {
       displayName: "BatchPositionTable",
+      reactivity,
       initialize: () => [initialItems],
       render(_props: Record<string, never>, state, blocks) {
         counters.executions += 1;
@@ -119,10 +121,12 @@ function createBatchHarness(initialItems: Item[]) {
               }}
               rowKey={(item) => {
                 counters.keys += 1;
+                observe?.("key", item as Item);
                 return (item as Item).id;
               }}
               create={(item) => {
                 counters.descriptors += 1;
+                observe?.("descriptor", item as Item);
                 return rowDescriptor(item as Item);
               }}
               bindings={[
@@ -131,6 +135,7 @@ function createBatchHarness(initialItems: Item[]) {
                   path: [],
                   read: (item) => {
                     counters.bindings += 1;
+                    observe?.("binding", item as Item);
                     return [(item as Item).label];
                   },
                 },
@@ -146,6 +151,9 @@ function createBatchHarness(initialItems: Item[]) {
   return {
     Table,
     counters,
+    observePreparation: (callback: typeof observe) => {
+      observe = callback;
+    },
     customInsert: (position: number, items: readonly Item[]) => customInsert(position, items),
     insert: (position: number, items: readonly Item[]) => insert(position, items),
     remove: (position: number, count: number) => remove(position, count),
@@ -154,6 +162,164 @@ function createBatchHarness(initialItems: Item[]) {
 }
 
 describe("compiled keyed-array batch insertion hints", () => {
+  for (const reactivity of ["static", "hybrid"] as const) {
+    it.each([
+      { name: "start", position: (_length: number) => 0 },
+      { name: "middle", position: (length: number) => Math.floor(length / 2) },
+      { name: "end", position: (length: number) => length },
+      { name: "negative", position: (_length: number) => -1 },
+      { name: "oversized", position: (length: number) => length + 100 },
+    ])(`avoids copying committed keys for $name batches in ${reactivity}`, async ({ position }) => {
+      let expected = Array.from(
+        { length: 256 },
+        (_, index): Item => ({ id: `row-${index}`, label: `Row ${index}` }),
+      );
+      const harness = createBatchHarness(expected, reactivity);
+      const container = document.createElement("div");
+      document.body.append(container);
+      const root = createRoot(container);
+      roots.push(root);
+      await act(async () => root.render(<harness.Table />));
+      const anchor = container.querySelector("li");
+      let sourceLength = expected.length;
+      let sourceEnumerations = 0;
+      let resultEnumerations = 0;
+      const originalKeys = Map.prototype.keys;
+      vi.spyOn(Map.prototype, "keys").mockImplementation(
+        function (this: Map<string, { element?: Element }>) {
+          if (this.get("row-0")?.element === anchor) {
+            if (this.size === sourceLength) sourceEnumerations += 1;
+            if (this.size === sourceLength + 3) resultEnumerations += 1;
+          }
+          return originalKeys.call(this);
+        },
+      );
+
+      for (let round = 0; round < 3; round += 1) {
+        const before = new Map(
+          [...container.querySelectorAll("li")].map((row) => [row.dataset.key, row]),
+        );
+        sourceLength = expected.length;
+        sourceEnumerations = 0;
+        resultEnumerations = 0;
+        harness.counters.keys = 0;
+        harness.counters.descriptors = 0;
+        harness.counters.bindings = 0;
+        const incoming = Array.from(
+          { length: 3 },
+          (_, offset): Item => ({
+            id: `new-${round}-${offset}`,
+            label: `New ${round}.${offset}`,
+          }),
+        );
+        const index = position(expected.length);
+        expected = (expected as BatchArray).toSpliced(index, 0, ...incoming);
+        await act(async () => {
+          harness.insert(index, incoming);
+          await flushCompilerUpdates();
+        });
+        const rows = [...container.querySelectorAll("li")];
+        expect(rows.map((row) => row.dataset.key)).toEqual(expected.map((item) => item.id));
+        expect(rows.map((row) => row.textContent)).toEqual(expected.map((item) => item.label));
+        for (const row of rows) {
+          const retained = before.get(row.dataset.key);
+          if (retained) expect(row).toBe(retained);
+        }
+        expect(harness.counters).toEqual({
+          executions: 1,
+          renders: 1,
+          keys: 3,
+          descriptors: 3,
+          bindings: 3,
+        });
+        // Keep the existing final-map cleanup; eliminate only the preparation copy.
+        expect(resultEnumerations).toBe(1);
+        expect(sourceEnumerations).toBe(0);
+      }
+    });
+
+    it.each(["existing", "incoming", "previous commit", "descriptor", "binding"] as const)(
+      `falls back atomically after a late %s failure in ${reactivity}`,
+      async (failure) => {
+        vi.spyOn(console, "error").mockImplementation(() => undefined);
+        let expected: Item[] = [
+          { id: "a", label: "Alpha" },
+          { id: "b", label: "Beta" },
+          { id: "c", label: "Gamma" },
+        ];
+        const harness = createBatchHarness(expected, reactivity);
+        const container = document.createElement("div");
+        document.body.append(container);
+        const root = createRoot(container);
+        roots.push(root);
+        await act(async () => root.render(<harness.Table />));
+        if (failure === "previous commit") {
+          const first = [
+            { id: "prior", label: "Prior" },
+            { id: "other", label: "Other" },
+          ];
+          expected = (expected as BatchArray).toSpliced(1, 0, ...first);
+          await act(async () => {
+            harness.insert(1, first);
+            await flushCompilerUpdates();
+          });
+        }
+        const originalDOM = container.innerHTML;
+        const finalId =
+          failure === "existing"
+            ? "b"
+            : failure === "incoming"
+              ? "new-a"
+              : failure === "previous commit"
+                ? "prior"
+                : "new-c";
+        const incoming = [
+          { id: "new-a", label: "New Alpha" },
+          { id: "new-b", label: "New Beta" },
+          { id: finalId, label: "Last incoming" },
+        ];
+        harness.counters.keys = 0;
+        let fallbackDOM: string | undefined;
+        let failureDOM: string | undefined;
+        let shouldThrow = true;
+        harness.observePreparation((phase, item) => {
+          if (harness.counters.keys > incoming.length && fallbackDOM === undefined) {
+            fallbackDOM = container.innerHTML;
+          }
+          if (shouldThrow && phase === failure && item.id === "new-c") {
+            shouldThrow = false;
+            failureDOM = container.innerHTML;
+            throw new Error(`late ${phase} failure`);
+          }
+        });
+        expected = (expected as BatchArray).toSpliced(1, 0, ...incoming);
+        await act(async () => {
+          harness.insert(1, incoming);
+          await flushCompilerUpdates();
+        });
+        harness.observePreparation(undefined);
+        expect(fallbackDOM).toBe(originalDOM);
+        if (failure === "descriptor" || failure === "binding") expect(failureDOM).toBe(originalDOM);
+        expect([...container.querySelectorAll("li")].map((row) => row.textContent)).toEqual(
+          expected.map((item) => item.label),
+        );
+        if (failure === "descriptor" || failure === "binding") {
+          const next = [
+            { id: "recovery-a", label: "Recovered A" },
+            { id: "recovery-b", label: "Recovered B" },
+          ];
+          await act(async () => {
+            harness.insert(0, next);
+            await flushCompilerUpdates();
+          });
+          expect([...container.querySelectorAll("li")].map((row) => row.textContent)).toEqual(
+            [...next, ...expected].map((item) => item.label),
+          );
+        }
+      },
+    );
+  }
+
   it("preserves custom method arguments, return values, and errors", () => {
     const source = [{ id: "a", label: "Alpha" }];
     const first = { id: "b", label: "Beta" };
@@ -499,75 +665,79 @@ describe("compiled keyed-array batch insertion hints", () => {
     expect(calls).toEqual(["d:1", "c:4"]);
   });
 
-  it("matches normal React through 1,000 deterministic batch insertions", async () => {
-    const initialItems = Array.from(
-      { length: 16 },
-      (_, index): Item => ({ id: `row-${index}`, label: `Row ${index}` }),
-    );
-    const harness = createBatchHarness(initialItems);
-    let updateReact: (position: number, incoming: readonly Item[]) => void = () => undefined;
-    let removeReact: (position: number, count: number) => void = () => undefined;
-    function NormalTable() {
-      const [items, setItems] = useState(initialItems);
-      updateReact = (position, incoming) =>
-        setItems((previous) => [
-          ...previous.slice(0, position),
-          ...incoming,
-          ...previous.slice(position),
-        ]);
-      removeReact = (position, count) =>
-        setItems((previous) => [
-          ...previous.slice(0, position),
-          ...previous.slice(position + count),
-        ]);
-      return (
-        <ol>
-          {items.map((item) => (
-            <li key={item.id}>{item.label}</li>
-          ))}
-        </ol>
+  it.each(["static", "hybrid"] as const)(
+    "matches normal React through 1,000 deterministic batch insertions in %s",
+    async (reactivity) => {
+      const initialItems = Array.from(
+        { length: 16 },
+        (_, index): Item => ({ id: `row-${index}`, label: `Row ${index}` }),
       );
-    }
-    const compiledContainer = document.createElement("div");
-    const reactContainer = document.createElement("div");
-    document.body.append(compiledContainer, reactContainer);
-    const compiledRoot = createRoot(compiledContainer);
-    const reactRoot = createRoot(reactContainer);
-    roots.push(compiledRoot, reactRoot);
-    await act(async () => {
-      compiledRoot.render(<harness.Table />);
-      reactRoot.render(<NormalTable />);
-    });
+      const harness = createBatchHarness(initialItems, reactivity);
+      let updateReact: (position: number, incoming: readonly Item[]) => void = () => undefined;
+      let removeReact: (position: number, count: number) => void = () => undefined;
+      function NormalTable() {
+        const [items, setItems] = useState(initialItems);
+        updateReact = (position, incoming) =>
+          setItems((previous) => [
+            ...previous.slice(0, position),
+            ...incoming,
+            ...previous.slice(position),
+          ]);
+        removeReact = (position, count) =>
+          setItems((previous) => [
+            ...previous.slice(0, position),
+            ...previous.slice(position + count),
+          ]);
+        return (
+          <ol>
+            {items.map((item) => (
+              <li key={item.id}>{item.label}</li>
+            ))}
+          </ol>
+        );
+      }
+      const compiledContainer = document.createElement("div");
+      const reactContainer = document.createElement("div");
+      document.body.append(compiledContainer, reactContainer);
+      const compiledRoot = createRoot(compiledContainer);
+      const reactRoot = createRoot(reactContainer);
+      roots.push(compiledRoot, reactRoot);
+      await act(async () => {
+        compiledRoot.render(<harness.Table />);
+        reactRoot.render(<NormalTable />);
+      });
 
-    for (let step = 0; step < 1_000; step += 1) {
-      const position = (step * 37) % (initialItems.length + 1);
-      const incoming = Array.from(
-        { length: (step % 5) + 2 },
-        (_, offset): Item => ({
-          id: `insert-${step}-${offset}`,
-          label: `Insert ${step}.${offset}`,
-        }),
-      );
-      await act(async () => {
-        harness.insert(position, incoming);
-        updateReact(position, incoming);
-        await flushCompilerUpdates();
-      });
-      expect(compiledContainer.querySelector("ul")?.textContent).toBe(
-        reactContainer.querySelector("ol")?.textContent,
-      );
-      await act(async () => {
-        harness.remove(position, incoming.length);
-        removeReact(position, incoming.length);
-        await flushCompilerUpdates();
-      });
-      expect(compiledContainer.querySelector("ul")?.textContent).toBe(
-        reactContainer.querySelector("ol")?.textContent,
-      );
-    }
-    expect(harness.counters.executions).toBe(1);
-    expect(harness.counters.renders).toBe(1);
-  }, 15_000);
+      for (let step = 0; step < 1_000; step += 1) {
+        const position = (step * 37) % (initialItems.length + 1);
+        const incoming = Array.from(
+          { length: (step % 5) + 2 },
+          (_, offset): Item => ({
+            id: `insert-${step}-${offset}`,
+            label: `Insert ${step}.${offset}`,
+          }),
+        );
+        await act(async () => {
+          harness.insert(position, incoming);
+          updateReact(position, incoming);
+          await flushCompilerUpdates();
+        });
+        expect(compiledContainer.querySelector("ul")?.textContent).toBe(
+          reactContainer.querySelector("ol")?.textContent,
+        );
+        await act(async () => {
+          harness.remove(position, incoming.length);
+          removeReact(position, incoming.length);
+          await flushCompilerUpdates();
+        });
+        expect(compiledContainer.querySelector("ul")?.textContent).toBe(
+          reactContainer.querySelector("ol")?.textContent,
+        );
+      }
+      expect(harness.counters.executions).toBe(1);
+      expect(harness.counters.renders).toBe(1);
+    },
+    15_000,
+  );
 
   it("hydrates in StrictMode and drops a queued batch after unmount", async () => {
     const harness = createBatchHarness([

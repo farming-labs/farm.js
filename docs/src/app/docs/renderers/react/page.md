@@ -1323,9 +1323,12 @@ otherwise unsafe still runs normally but takes complete keyed reconciliation.
 
 At update time, Farm validates the committed native source, result length, source token, normalized
 position, clamped removal count, and any incoming key before changing the DOM. For a batch, Farm
-computes every key, descriptor, binding snapshot, and detached host row before mutating the live
-tree. Duplicate incoming keys or collisions with existing keys therefore take complete
-reconciliation without a partial insertion. Valid rows are mounted in one document fragment;
+checks existing-key collisions against the committed row map and keeps a temporary set of only
+the incoming batch's keys. It does not copy every existing key into that set. Complete source-row
+validation still runs, and Farm computes every incoming key, descriptor, binding snapshot, and
+detached host row before mutating the live tree. Duplicate incoming keys or collisions with
+existing keys therefore take complete reconciliation without a partial insertion. Valid rows
+are mounted in one document fragment;
 surrounding elements remain connected and only stored suffix indexes shift. Exact-window
 replacement with fresh keys removes only the proven old interval after every incoming row is
 prepared. If the incoming interval has the same length and exactly the same keys in the same order,
