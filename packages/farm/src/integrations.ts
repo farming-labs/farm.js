@@ -1,4 +1,15 @@
 import { validateConfigRouteSource } from "./plugins/route-pattern";
+import { defineSchema } from "./schema";
+import type {
+  FarmSchema,
+  FarmSchemaConstraint,
+  FarmSchemaField,
+  FarmSchemaFieldType,
+  FarmSchemaModel,
+  FarmSchemaModelExtension,
+  FarmSchemaModelOverride,
+  FarmSchemaReference,
+} from "./schema";
 
 // Origin validation for integration auth routes is part of the integration
 // contract, so it is re-exported here alongside defineIntegration rather than
@@ -438,85 +449,36 @@ export interface FarmIntegrationDocumentNavigation {
   matcher: string | readonly string[];
 }
 
-export type FarmIntegrationSchemaFieldType =
-  | "id"
-  | "uuid"
-  | "string"
-  | "text"
-  | "boolean"
-  | "integer"
-  | "number"
-  | "datetime"
-  | "json"
-  | "enum";
+// The data schema is renderer- and feature-neutral: it now lives in ./schema
+// so applications can declare one without reaching into the integration API.
+// These aliases keep every shipped `*IntegrationSchema*` name working.
 
-export interface FarmIntegrationSchemaReference {
-  model: string;
-  field: string;
-  relation?: "belongsTo" | "hasOne" | "hasMany";
-  onDelete?: "cascade" | "restrict" | "setNull" | "noAction";
-  enforced?: "db" | "app" | "none";
-}
+/** @deprecated Use `FarmSchemaFieldType`. */
+export type FarmIntegrationSchemaFieldType = FarmSchemaFieldType;
 
-export interface FarmIntegrationSchemaField {
-  type: FarmIntegrationSchemaFieldType;
-  name?: string;
-  description?: string;
-  required?: boolean;
-  nullable?: boolean;
-  primaryKey?: boolean;
-  unique?: boolean;
-  index?: boolean;
-  list?: boolean;
-  default?: unknown;
-  values?: readonly string[];
-  reference?: FarmIntegrationSchemaReference;
-  meta?: Record<string, unknown>;
-}
+/** @deprecated Use `FarmSchemaReference`. */
+export type FarmIntegrationSchemaReference = FarmSchemaReference;
 
-export interface FarmIntegrationSchemaConstraint {
-  type: "unique" | "index";
-  fields: readonly string[];
-  name?: string;
-  meta?: Record<string, unknown>;
-}
+/** @deprecated Use `FarmSchemaField`. */
+export type FarmIntegrationSchemaField = FarmSchemaField;
 
-export interface FarmIntegrationSchemaModel {
-  name?: string;
-  description?: string;
-  fields: Record<string, FarmIntegrationSchemaField>;
-  constraints?: readonly FarmIntegrationSchemaConstraint[];
-  meta?: Record<string, unknown>;
-}
+/** @deprecated Use `FarmSchemaConstraint`. */
+export type FarmIntegrationSchemaConstraint = FarmSchemaConstraint;
 
-export interface FarmIntegrationSchemaModelExtension {
-  name?: string;
-  description?: string;
-  fields?: Record<string, FarmIntegrationSchemaField>;
-  constraints?: readonly FarmIntegrationSchemaConstraint[];
-  meta?: Record<string, unknown>;
-}
+/** @deprecated Use `FarmSchemaModel`. */
+export type FarmIntegrationSchemaModel = FarmSchemaModel;
 
-export interface FarmIntegrationSchemaModelOverride {
-  name?: string;
-  description?: string;
-  fields?: Record<string, Partial<FarmIntegrationSchemaField>>;
-  constraints?: readonly FarmIntegrationSchemaConstraint[];
-  meta?: Record<string, unknown>;
-}
+/** @deprecated Use `FarmSchemaModelExtension`. */
+export type FarmIntegrationSchemaModelExtension = FarmSchemaModelExtension;
 
-export interface FarmIntegrationSchema {
-  models: Record<string, FarmIntegrationSchemaModel>;
-  meta?: Record<string, unknown>;
-  extend?: Record<string, FarmIntegrationSchemaModelExtension>;
-  override?: Record<string, FarmIntegrationSchemaModelOverride>;
-}
+/** @deprecated Use `FarmSchemaModelOverride`. */
+export type FarmIntegrationSchemaModelOverride = FarmSchemaModelOverride;
 
-export function defineIntegrationSchema<TSchema extends FarmIntegrationSchema>(
-  schema: TSchema,
-): TSchema {
-  return schema;
-}
+/** @deprecated Use `FarmSchema`. */
+export type FarmIntegrationSchema = FarmSchema;
+
+/** @deprecated Use `defineSchema`. This is an exact alias, not a wrapper. */
+export const defineIntegrationSchema = defineSchema;
 
 export type FarmIntegrationLogPhase =
   | "registered"

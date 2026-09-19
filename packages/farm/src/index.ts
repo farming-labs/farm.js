@@ -9,6 +9,7 @@ export type {
 } from "./renderer";
 export * from "./utils";
 export * from "./storage";
+export * from "./schema";
 export * from "./integrations";
 export * from "./integration-orm";
 export * from "./integration-api";

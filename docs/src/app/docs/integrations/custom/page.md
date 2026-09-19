@@ -796,9 +796,9 @@ Route handlers, route middleware, and route hooks receive `ctx` with these field
 Declare `schema` when an integration owns database records. Farm maps that schema to the integration ORM so route handlers and lifecycle hooks can use `ctx.args.db`. This path is separate from KV mounts read with `getStorage()`.
 
 ```ts
-import { defineIntegration, defineIntegrationSchema, integrationRoute } from "@farm.js/core";
+import { defineIntegration, defineSchema, integrationRoute } from "@farm.js/core";
 
-const billingSchema = defineIntegrationSchema({
+const billingSchema = defineSchema({
   models: {
     billingAccount: {
       name: "billing_account",

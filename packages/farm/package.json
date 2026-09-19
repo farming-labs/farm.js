@@ -45,6 +45,9 @@
       "integrations": [
         "./dist/integrations.d.ts"
       ],
+      "schema": [
+        "./dist/schema.d.ts"
+      ],
       "cache": [
         "./dist/cache.d.ts"
       ],
@@ -293,6 +296,11 @@
       "types": "./dist/integrations.d.ts",
       "import": "./dist/integrations.mjs",
       "require": "./dist/integrations.cjs"
+    },
+    "./schema": {
+      "types": "./dist/schema.d.ts",
+      "import": "./dist/schema.mjs",
+      "require": "./dist/schema.cjs"
     },
     "./cache": {
       "types": "./dist/cache.d.ts",
