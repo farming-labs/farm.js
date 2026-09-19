@@ -82,6 +82,57 @@ describe("client cache persistence engine", () => {
     expect(cache.get("user:profile")).toBeUndefined();
   });
 
+  it("does not resurrect an in-flight write after the cache is cleared on logout", async () => {
+    const store = new Map<string, PersistedEntry>();
+    let releaseSet!: () => void;
+    const setGate = new Promise<void>((resolve) => {
+      releaseSet = resolve;
+    });
+    let setStarted!: () => void;
+    const setInFlight = new Promise<void>((resolve) => {
+      setStarted = resolve;
+    });
+    const adapter: FarmClientCacheAdapter = {
+      keys: async () => Array.from(store.keys()),
+      get: async (key) => store.get(key) ?? null,
+      set: async (key, entry) => {
+        setStarted();
+        await setGate;
+        store.set(key, entry);
+      },
+      delete: async (key) => {
+        store.delete(key);
+      },
+      clear: async () => {
+        store.clear();
+      },
+    };
+    initPersistedClientCache(adapter, { flushDelayMs: 0 });
+    await microtasks();
+
+    getFarmClientDataCache().set("user:secret", {
+      data: { token: "abc" },
+      updatedAt: Date.now(),
+      staleAt: Date.now() + 60_000,
+      status: "success",
+      error: null,
+      persist: true,
+    });
+
+    // Start a flush and let it park inside adapter.set (write in flight).
+    const flush = flushPersistedClientCache();
+    await setInFlight;
+
+    // Log out while that write is still parked, then let the write resolve.
+    const clear = clearPersistedCache();
+    releaseSet();
+    await Promise.all([flush, clear]);
+
+    // The in-flight write must not survive the clear.
+    expect(store.size).toBe(0);
+    expect(store.has("user:secret")).toBe(false);
+  });
+
   it("clears in-memory entries on logout when no adapter is configured", async () => {
     disposePersistedClientCache();
     const cache = getFarmClientDataCache();

@@ -139,6 +139,8 @@ type PersistenceEngine = {
   hydrating: boolean;
   disabled: boolean;
   clearing: boolean;
+  /** The in-flight flush, so overlapping flushes serialize instead of racing. */
+  flushing: Promise<void> | undefined;
 };
 
 let activeEngine: PersistenceEngine | undefined;
@@ -180,20 +182,44 @@ function scheduleFlush(engine: PersistenceEngine): void {
 }
 
 async function flushEngine(engine: PersistenceEngine): Promise<void> {
-  if (engine.disabled) return;
-  const sets = Array.from(engine.pendingSets.entries());
-  const deletes = Array.from(engine.pendingDeletes);
-  engine.pendingSets.clear();
-  engine.pendingDeletes.clear();
+  // Serialize: a second flush scheduled while one is mid-await must not run its
+  // own adapter writes in parallel, or the two can resolve out of order and
+  // persist a stale value over a fresher one. Await the in-flight flush instead;
+  // its drain loop picks up whatever this caller queued.
+  if (engine.flushing) return engine.flushing;
+  if (engine.disabled || engine.clearing) return;
+  if (engine.pendingSets.size === 0 && engine.pendingDeletes.size === 0) return;
 
-  try {
-    if (sets.length > 0) {
-      if (engine.adapter.setMany) await engine.adapter.setMany(sets);
-      else for (const [key, entry] of sets) await engine.adapter.set(key, entry);
+  const run = (async () => {
+    // Drain until empty so entries queued during an await still flush, without a
+    // second concurrent loop. Re-check disabled/clearing after every await: a
+    // clear() that started mid-flush must stop further writes.
+    while (
+      !engine.disabled &&
+      !engine.clearing &&
+      (engine.pendingSets.size > 0 || engine.pendingDeletes.size > 0)
+    ) {
+      const sets = Array.from(engine.pendingSets.entries());
+      const deletes = Array.from(engine.pendingDeletes);
+      engine.pendingSets.clear();
+      engine.pendingDeletes.clear();
+      try {
+        if (sets.length > 0) {
+          if (engine.adapter.setMany) await engine.adapter.setMany(sets);
+          else for (const [key, entry] of sets) await engine.adapter.set(key, entry);
+        }
+        for (const key of deletes) await engine.adapter.delete(key);
+      } catch (error) {
+        disableEngine(engine, error);
+        return;
+      }
     }
-    for (const key of deletes) await engine.adapter.delete(key);
-  } catch (error) {
-    disableEngine(engine, error);
+  })();
+  engine.flushing = run;
+  try {
+    await run;
+  } finally {
+    engine.flushing = undefined;
   }
 }
 
@@ -302,6 +328,7 @@ export function initPersistedClientCache(
     hydrating: false,
     disabled: false,
     clearing: false,
+    flushing: undefined,
   };
 
   activeEngine = engine;
@@ -370,23 +397,30 @@ export async function clearPersistedCache(): Promise<void> {
     getFarmClientDataCache().clear();
     return;
   }
-  engine.pendingSets.clear();
-  engine.pendingDeletes.clear();
-  // Clearing the persisted copy alone leaves the in-memory cache holding the
-  // signed-out user's data, which a single-page app keeps serving to whoever
-  // uses the tab next. Drop both.
+  // Hold `clearing` for the whole operation. It both suppresses re-persist from
+  // the in-memory cache.clear() below and makes flushEngine bail, so no flush
+  // scheduled during the clear can write the signed-out user's data back.
   engine.clearing = true;
   try {
+    engine.pendingSets.clear();
+    engine.pendingDeletes.clear();
+    // Clearing the persisted copy alone leaves the in-memory cache holding the
+    // signed-out user's data, which a single-page app keeps serving to whoever
+    // uses the tab next. Drop both.
     engine.cache.clear();
-  } finally {
-    engine.clearing = false;
-  }
-  engine.pendingSets.clear();
-  engine.pendingDeletes.clear();
-  try {
+    engine.pendingSets.clear();
+    engine.pendingDeletes.clear();
+    // Let an in-flight flush finish its current adapter write before wiping.
+    // Otherwise a write parked in `await adapter.set(...)` resolves after
+    // adapter.clear() and resurrects the data for the next visitor.
+    await engine.flushing;
+    engine.pendingSets.clear();
+    engine.pendingDeletes.clear();
     await engine.adapter.clear();
   } catch (error) {
     disableEngine(engine, error);
+  } finally {
+    engine.clearing = false;
   }
 }
 
