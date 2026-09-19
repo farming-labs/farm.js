@@ -23,6 +23,7 @@ import {
 import { renderFarmI18nTypes } from "../i18n/type-generator";
 import { localizeFarmHref, localizeFarmPathname, resolveFarmLocalePath } from "../i18n/routing";
 import { getFarmDataCache, unstable_cache } from "../cache";
+import { t as clientT, _hydrateFarmI18n } from "../i18n/client-runtime";
 
 describe("Farm i18n configuration", () => {
   it("resolves production defaults and canonical locales", () => {
@@ -632,6 +633,37 @@ describe("Farm server i18n context", () => {
     await expect(run("/")).resolves.toBe("en:1");
     await expect(run("/")).resolves.toBe("en:1");
     await expect(run("/am")).resolves.toBe("am:2");
+  });
+});
+
+describe("Farm i18n client message lookup", () => {
+  function hydrate(messages: Record<string, string>) {
+    _hydrateFarmI18n({
+      locale: "en",
+      source: "default",
+      locales: ["en"],
+      defaultLocale: "en",
+      routing: "prefix-except-default",
+      direction: "ltr",
+      messages,
+    } as any);
+  }
+
+  it("does not resolve inherited Object.prototype members as messages", () => {
+    hydrate({ greeting: "Hello" });
+
+    // Real own key still works.
+    expect(clientT("greeting")).toBe("Hello");
+    expect(clientT.has("greeting")).toBe(true);
+    expect(clientT.raw("greeting")).toBe("Hello");
+
+    // Prototype-named keys must not resolve to native methods (which would throw
+    // in IntlMessageFormat on the client while the server renders the key).
+    for (const key of ["toString", "constructor", "valueOf", "hasOwnProperty"]) {
+      expect(clientT.has(key)).toBe(false);
+      expect(clientT.raw(key)).toBe(key);
+      expect(clientT(key)).toBe(key);
+    }
   });
 });
 
