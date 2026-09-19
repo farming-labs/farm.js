@@ -75,6 +75,7 @@ import {
 import { resolveFarmPerformanceConfig, type ResolvedFarmPerformanceConfig } from "./preload";
 import { validateConfigRouteSource } from "./plugins/route-pattern";
 import {
+  farmCspBlocksFrameworkInlineScripts,
   getFarmSecurityHeader,
   resolveFarmSecurityConfig,
   type FarmCspConfig,
@@ -946,6 +947,14 @@ export async function resolveConfig(
   const routeRuleHeaders = routeRulesToHeaders(routeRules);
   const security = resolveFarmSecurityConfig(userConfig.security);
   const securityHeader = getFarmSecurityHeader(security);
+  if (farmCspBlocksFrameworkInlineScripts(security)) {
+    logger.warn(
+      "security.csp restricts inline scripts (no 'unsafe-inline', nonce, or hash in " +
+        "script-src/default-src), which blocks the inline scripts Farm injects for theming " +
+        "and hydration. Add 'unsafe-inline' or the scripts' hashes until nonce support lands " +
+        "(https://github.com/farming-labs/farm.js/issues/1275).",
+    );
+  }
 
   const deploy = resolveDeployConfig(userConfig);
   const root = userConfig.root || process.cwd();
