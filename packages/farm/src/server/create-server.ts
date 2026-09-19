@@ -33,6 +33,13 @@ import { loadFarmRendererVitePlugins, resolveFarmRenderer } from "../renderer";
 
 export const DEFAULT_FARM_DEV_SERVER_PORT = 3000;
 
+/**
+ * Upper bound on waiting for Vite's own close. Vite 5.4 can strand its plugin
+ * container's in-flight promises when closed after dependency discovery has
+ * started (#1263); farm's shutdown must not inherit that hang.
+ */
+const VITE_CLOSE_TIMEOUT_MS = 10_000;
+
 // Farm.js branding plugin for createServer
 function createBrandingPlugin() {
   let serverStarted = false;
@@ -315,7 +322,46 @@ export async function createServer(config: FarmConfig = {}) {
 
         // Stop serving first, then release what the plugins hold, then flush
         // telemetry last so shutdown problems are still reported.
-        await step("Vite server close", () => closeViteServer());
+        // Vite 5.4's close() can deadlock after the client entry has been
+        // transformed: background pre-transforms of its bare imports wait in
+        // the optimized-deps load hook for a dependency run that
+        // depsOptimizer.close() cancels without settling, and the plugin
+        // container then awaits those promises forever (#1263). Bound the wait
+        // so farm's own teardown — plugin disposers, instrumentation — still
+        // runs, and report loudly instead of hanging the caller. The listen
+        // sockets and watchers have already settled by this point; only the
+        // container's internal await is stuck.
+        await step("Vite server close", async () => {
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          const timedOut = new Promise<"timeout">((resolve) => {
+            timer = setTimeout(() => resolve("timeout"), VITE_CLOSE_TIMEOUT_MS);
+            timer.unref?.();
+          });
+          try {
+            const outcome = await Promise.race([
+              closeViteServer().then(() => "closed" as const),
+              timedOut,
+            ]);
+            if (outcome === "timeout") {
+              logger.error(
+                `Vite server close did not settle within ${VITE_CLOSE_TIMEOUT_MS}ms; ` +
+                  "continuing shutdown without it (https://github.com/farming-labs/farm.js/issues/1263)",
+              );
+              // Best effort, all idempotent: make sure nothing keeps serving
+              // even though the container promise is stranded.
+              await Promise.allSettled([
+                new Promise<void>((resolve) => {
+                  if (!server.httpServer || !server.httpServer.listening) return resolve();
+                  server.httpServer.close(() => resolve());
+                }),
+                Promise.resolve(server.watcher?.close?.()).catch(() => {}),
+                Promise.resolve((server as any).ws?.close?.()).catch(() => {}),
+              ]);
+            }
+          } finally {
+            if (timer) clearTimeout(timer);
+          }
+        });
         await step("Plugin runtime shutdown", () =>
           pluginManager?.closeRuntime("dev-server-closed"),
         );
