@@ -10,6 +10,7 @@ import {
   matchFarmLocale,
   resolveFarmLocaleRequest,
 } from "../i18n/resolver";
+import { resolveFarmTrailingSlashRedirect } from "../trailing-slash";
 import { FarmI18nRuntime } from "../i18n/runtime";
 import {
   _runWithFarmI18nRequest,
@@ -664,6 +665,54 @@ describe("Farm i18n client message lookup", () => {
       expect(clientT.raw(key)).toBe(key);
       expect(clientT(key)).toBe(key);
     }
+  });
+});
+
+describe("Farm i18n with trailingSlash", () => {
+  const config = resolveFarmI18nConfig({
+    locales: ["en", "fr"],
+    defaultLocale: "en",
+    routing: "prefix-always",
+  });
+
+  // Replay the server's redirect ordering: i18n canonicalization first, then the
+  // dedicated trailing-slash redirect (renderer.ts / universal-build.ts both do
+  // this). With trailingSlash: true the two must converge, not loop.
+  function stepOnce(pathname: string): { kind: string; to?: string } {
+    const resolution = resolveFarmLocaleRequest(
+      new Request(`https://farm.test${pathname}`),
+      config,
+    );
+    if (resolution.redirect) return { kind: "i18n", to: resolution.redirect };
+    const trailing = resolveFarmTrailingSlashRedirect(
+      new URL(`https://farm.test${pathname}`),
+      true,
+    );
+    if (trailing) return { kind: "trailing", to: trailing };
+    return { kind: "render" };
+  }
+
+  it("converges instead of looping between the locale and trailing-slash redirects", () => {
+    let pathname = "/en/about";
+    const visited = new Set<string>();
+    let step = stepOnce(pathname);
+    let hops = 0;
+    while (step.kind !== "render") {
+      expect(hops++).toBeLessThan(6); // a loop would blow past this
+      expect(visited.has(pathname + "->" + step.to)).toBe(false);
+      visited.add(pathname + "->" + step.to);
+      pathname = step.to!;
+      step = stepOnce(pathname);
+    }
+    // trailingSlash: true settles on the slashed locale URL.
+    expect(pathname).toBe("/en/about/");
+  });
+
+  it("still canonicalizes a non-trailing-slash locale difference", () => {
+    // A casing/duplicate-slash difference is a real i18n redirect, not deferred.
+    expect(
+      resolveFarmLocaleRequest(new Request("https://farm.test/EN/about"), config).redirect,
+    ).toBe("/en/about");
   });
 });
 
