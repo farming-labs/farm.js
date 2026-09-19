@@ -3651,7 +3651,9 @@ const COMPILER_KEYED_ROLLING_WINDOW_DELTAS = /* @__PURE__ */ new WeakMap<
 function keyedRowInstancesByKey(
   instances: readonly CompilerKeyedRowInstance[],
 ): Map<string, CompilerKeyedRowInstance> {
-  return new Map(instances.map((instance) => [instance.key, instance]));
+  const result = new Map<string, CompilerKeyedRowInstance>();
+  for (const instance of instances) result.set(instance.key, instance);
+  return result;
 }
 
 interface CompilerKeyedIdentityTargetSnapshot {

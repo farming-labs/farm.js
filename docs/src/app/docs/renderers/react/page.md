@@ -1361,6 +1361,10 @@ position through earlier length changes, proves that the source and final interv
 disjoint, and prepares all local key reuse, fresh rows, binding updates, cleanup, and per-window LIS
 moves before changing the DOM. Adjacent windows and empty incoming intervals remain eligible. An
 overlapping structural window or a key transferred between windows keeps complete reconciliation.
+When a structural window update rebuilds the keyed-row map, Farm inserts each row directly in order,
+without first allocating a temporary `[key, row]` array for every row. This reduces temporary
+allocations; it does not skip source validation, index updates, or cleanup, and rebuilding the
+map still visits every resulting row.
 A single insertion
 creates one row at that position. A removal cleans up and removes only the known row or contiguous
 range while preserving every
