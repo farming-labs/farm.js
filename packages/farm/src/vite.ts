@@ -4301,8 +4301,17 @@ window.__FARM_CLIENT_RUNTIME__ = farmClientRuntime;
 void farmClientRuntime.start();
 
 if (import.meta.hot) {
-  import.meta.hot.dispose(() => {
-    void farmClientRuntime.close('hmr');
+  // Vite awaits a promise returned from dispose before evaluating the new
+  // module, so the old runtime is fully closed before its successor starts.
+  // The router is destroyed afterwards — plugins may still touch navigation
+  // during close — and unconditionally, or every entry reload would leave
+  // another popstate/beforeunload listener behind.
+  import.meta.hot.dispose(async () => {
+    try {
+      await farmClientRuntime.close('hmr');
+    } finally {
+      spaRouter.destroy();
+    }
   });
 }
 
