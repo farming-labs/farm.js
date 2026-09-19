@@ -85,6 +85,18 @@ describe.each([
     const seen = await run([never, "/dashboard/[section]"], ["/dashboard/reports"]);
     expect(seen).toEqual([{ path: "/dashboard/reports", params: { section: "reports" } }]);
   });
+
+  it("matches the subtree for a trailing-slash (.*) matcher", async () => {
+    // `/admin/(.*)` must guard the /admin subtree, like `/admin/**` does.
+    // The trailing slash before the wildcard previously produced a
+    // startsWith("/admin//") check that matched nothing, silently disabling
+    // the middleware.
+    const seen = await run(
+      ["/admin/(.*)"],
+      ["/admin/users", "/admin", "/admin/", "/administrator", "/other"],
+    );
+    expect(seen.map((entry) => entry.path)).toEqual(["/admin/users", "/admin", "/admin/"]);
+  });
 });
 
 describe("dev middleware request URL parsing", () => {
