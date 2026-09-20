@@ -284,6 +284,38 @@ describe("Storage", () => {
     expect(await cache.getItem("profiles:b")).toEqual({ id: "b" });
   });
 
+  it("does not let a namespaced handle dispose or observe the whole store", async () => {
+    await initStorage({
+      mounts: {
+        nsA: { driver: memoryDriver() },
+        nsB: { driver: memoryDriver() },
+      },
+    });
+
+    await getStorage("nsB").setItem("secret", "vb");
+
+    // watch on nsA must only see nsA's writes, and with the namespace stripped.
+    const nsA = getStorage("nsA");
+    const seen: string[] = [];
+    const unwatch = await nsA.watch((_event, key) => seen.push(key));
+    await getStorage("nsB").setItem("leak", "x");
+    await getStorage("nsA").setItem("own", "y");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await unwatch();
+    expect(seen).toEqual(["own"]);
+
+    // getMounts on nsA must not enumerate other namespaces.
+    expect(
+      getStorage("nsA")
+        .getMounts()
+        .every((mount) => !mount.base.startsWith("nsB")),
+    ).toBe(true);
+
+    // dispose on a namespaced handle must not tear down the global store.
+    await getStorage("nsA").dispose();
+    expect(await getStorage("nsB").getItem("secret")).toBe("vb");
+  });
+
   it.skipIf(!supportsNodeSqlite)(
     "supports sqlite storage with a simple path-based config",
     async () => {
