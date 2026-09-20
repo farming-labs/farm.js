@@ -415,7 +415,12 @@ export default defineConfig({});
   }
 
   const layoutPath = path.join(root, "src", "app", "layout.tsx");
-  if (!existsSync(layoutPath)) {
+  // Only scaffold a stub layout when nothing produces one. A Next app with a
+  // root app/layout.tsx already queued a copy to this exact path; the file does
+  // not exist at plan time, so an existsSync check alone adds the stub too, and
+  // since operations run in order the stub overwrites the user's copied layout.
+  const layoutAlreadyPlanned = plan.operations.some((operation) => operation.path === layoutPath);
+  if (!existsSync(layoutPath) && !layoutAlreadyPlanned) {
     plan.operations.push({
       kind: "write-file",
       path: layoutPath,

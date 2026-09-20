@@ -302,6 +302,39 @@ export default function AboutPage() {
   }
 });
 
+test("keeps a Next root layout instead of overwriting it with the stub", async () => {
+  const root = await createTempProject({
+    scripts: { dev: "next dev", build: "next build" },
+    dependencies: { next: "latest", react: "latest", "react-dom": "latest" },
+  });
+
+  try {
+    await mkdir(path.join(root, "app"), { recursive: true });
+    await writeFile(
+      path.join(root, "app", "layout.tsx"),
+      `export default function RootLayout({ children }) {
+  return (
+    <html lang="en">
+      <body className="app-shell">{children}</body>
+    </html>
+  );
+}
+`,
+      "utf8",
+    );
+
+    await migrateFarm({ root, source: "next", write: true });
+
+    const layout = await readFile(path.join(root, "src", "app", "layout.tsx"), "utf8");
+    // The user's real layout must survive, not be replaced by the minimal stub.
+    assert.match(layout, /app-shell/);
+    assert.match(layout, /<html lang="en">/);
+    assert.doesNotMatch(layout, /import type \{ LayoutProps \}/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("applies a simple TanStack file-route migration", async () => {
   const root = await createTempProject({
     scripts: {
