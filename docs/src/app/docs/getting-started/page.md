@@ -18,7 +18,7 @@ Farm keeps the first project small: an app directory, a config file, package met
 **Terminal**
 
 ```bash
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta my-app --template basic --typescript
+pnpm create @farm.js/app@beta my-app --template basic --typescript
 cd my-app
 pnpm dev
 ```
@@ -44,10 +44,10 @@ pnpm create @farm.js/app@beta my-app --template basic --typescript
 React is the default renderer. The Basic starter can instead use Preact, Solid, Vue, or Svelte:
 
 ```bash
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta my-preact-app --template basic --renderer preact --typescript
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta my-solid-app --template basic --renderer solid --typescript
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta my-vue-app --template basic --renderer vue --typescript
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta my-svelte-app --template basic --renderer svelte --typescript
+pnpm create @farm.js/app@beta my-preact-app --template basic --renderer preact --typescript
+pnpm create @farm.js/app@beta my-solid-app --template basic --renderer solid --typescript
+pnpm create @farm.js/app@beta my-vue-app --template basic --renderer vue --typescript
+pnpm create @farm.js/app@beta my-svelte-app --template basic --renderer svelte --typescript
 ```
 
 See [Renderers](/docs/renderers) before choosing an adapter. Integration starters currently use
@@ -84,7 +84,7 @@ and drop the `@farm.js/devtools` dev dependency if you do not want it.
 For example:
 
 ```bash
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta stripe-app --template stripe --typescript
+pnpm create @farm.js/app@beta stripe-app --template stripe --typescript
 ```
 
 The generated README lists the required environment values and links to the provider guide.
@@ -92,7 +92,7 @@ The generated README lists the required environment values and links to the prov
 To explore Farm's experimental React AOT compiler with the shared dark starter UI:
 
 ```bash
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta compiler-app --template react-compiler --typescript
+pnpm create @farm.js/app@beta compiler-app --template react-compiler --typescript
 ```
 
 The same project is available as the standalone
