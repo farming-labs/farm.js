@@ -43,10 +43,10 @@ const ERROR_STATUS_TEXT: Record<number, string> = {
 };
 
 const ERROR_TITLES: Record<number, string> = {
-  400: "The request could not be understood",
+  400: "This request could not be completed",
   401: "Authentication is required",
   403: "You do not have access to this page",
-  404: "The requested page could not be found",
+  404: "This page could not be found",
   405: "This request method is not supported",
   408: "The request took too long",
   409: "The request conflicts with the current state",
@@ -54,7 +54,7 @@ const ERROR_TITLES: Record<number, string> = {
   413: "The request is too large",
   422: "The request could not be processed",
   429: "Too many requests were sent",
-  500: "Application failed during server rendering",
+  500: "Something went wrong",
   501: "This operation is not implemented",
   502: "An upstream service returned an invalid response",
   503: "The service is temporarily unavailable",
@@ -62,7 +62,7 @@ const ERROR_TITLES: Record<number, string> = {
 };
 
 const ERROR_PUBLIC_MESSAGES: Record<number, string> = {
-  400: "Check the request and try again.",
+  400: "Check the request details, then try again.",
   401: "Sign in and try this request again.",
   403: "Use an account with the required permissions or return home.",
   404: "Check the address or return to the home page.",
@@ -73,7 +73,7 @@ const ERROR_PUBLIC_MESSAGES: Record<number, string> = {
   413: "Reduce the request size and try again.",
   422: "Review the request data and try again.",
   429: "Wait a moment before trying again.",
-  500: "An unexpected error prevented this page from rendering.",
+  500: "The application ran into an unexpected problem. Try again in a moment.",
   501: "This operation is not available yet.",
   502: "Try again after the upstream service recovers.",
   503: "Try again in a moment.",
@@ -85,7 +85,6 @@ export interface DefaultErrorSourceLine {
   content: string;
   highlight?: boolean;
 }
-
 export interface DefaultErrorSourceFrame {
   file: string;
   line: number;
@@ -215,8 +214,10 @@ function createDebugReport(
   ].join("\n");
 }
 
-const ERROR_PAGE_SCRIPT = `<script>(function(){var root=document.querySelector("[data-farm-default-error]");if(!root)return;var retry=root.querySelector("[data-farm-error-retry]");if(retry)retry.addEventListener("click",function(){window.location.reload()})})();</script>`;
+const ERROR_PAGE_SCRIPT = `<script>(function(){var root=document.querySelector("[data-farm-default-error]");if(!root)return;var retry=root.querySelector("[data-farm-error-retry]");var back=root.querySelector("[data-farm-error-back]");if(retry)retry.addEventListener("click",function(){window.location.reload()});if(back)back.addEventListener("click",function(){if(window.history.length>1){window.history.back()}else{window.location.assign("/")}})})();</script>`;
 const ERROR_COPY_SCRIPT = `<script>(function(){var root=document.querySelector("[data-farm-default-error]");var copy=root&&root.querySelector("[data-farm-error-copy]");var report=document.getElementById("farm-default-error-report");if(!copy||!report)return;copy.addEventListener("click",async function(){var value="";try{value=JSON.parse(report.textContent||'""')}catch(_error){value=report.textContent||""}try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(value)}else{var area=document.createElement("textarea");area.value=value;area.setAttribute("readonly","");area.style.position="fixed";area.style.opacity="0";document.body.appendChild(area);area.select();document.execCommand("copy");area.remove()}var label=copy.querySelector("[data-farm-error-copy-label]");var status=copy.querySelector("[data-farm-error-copy-status]");if(label)label.textContent="COPIED";if(status)status.textContent="Debug report copied";window.setTimeout(function(){if(label)label.textContent="COPY DEBUG REPORT";if(status)status.textContent=""},1800)}catch(_error){var status=copy.querySelector("[data-farm-error-copy-status]");if(status)status.textContent="Unable to copy the debug report"}})})();</script>`;
+
+const ERROR_DOCS_ICON = `<svg class="farm-default-error__docs-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false"><path d="M2.75 2.75h3.5A1.75 1.75 0 0 1 8 4.5v8.75a1.75 1.75 0 0 0-1.75-1.75h-3.5v-8.75Z"/><path d="M13.25 2.75h-3.5A1.75 1.75 0 0 0 8 4.5v8.75a1.75 1.75 0 0 1 1.75-1.75h3.5v-8.75Z"/></svg>`;
 
 export function createDefaultErrorMarkup(options: DefaultErrorPageOptions = {}): string {
   const statusCode = normalizeErrorStatus(options.statusCode) ?? 500;
@@ -227,13 +228,20 @@ export function createDefaultErrorMarkup(options: DefaultErrorPageOptions = {}):
     development && options.message ? options.message : getDefaultErrorPublicMessage(statusCode);
   const requestPath = options.requestPath || "/";
   const method = (options.method || "GET").toUpperCase();
-  const eyebrow = statusCode >= 500 ? "Runtime error" : "Request error";
+  const isServerError = statusCode >= 500;
   const details = development
-    ? `<section class="farm-default-error__details" aria-labelledby="farm-default-error-details-title"><div class="farm-default-error__details-header"><h2 id="farm-default-error-details-title" class="farm-default-error__details-title">Details</h2><button class="farm-default-error__copy" type="button" data-farm-error-copy><span data-farm-error-copy-label>COPY DEBUG REPORT</span><span class="farm-default-error__sr-only" aria-live="polite" data-farm-error-copy-status></span></button></div>${createSourceFrameMarkup(options.sourceFrame)}<p class="farm-default-error__meta">Farm.js v${escapeHtml(options.farmVersion || "unknown")} · ${escapeHtml(options.mode || "development")} · Node.js ${escapeHtml(options.nodeVersion || "unknown")}</p></section>`
+    ? `<section class="farm-default-error__details" aria-labelledby="farm-default-error-details-title"><div class="farm-default-error__details-header"><h2 id="farm-default-error-details-title" class="farm-default-error__details-title">Technical details</h2></div>${createSourceFrameMarkup(options.sourceFrame)}<p class="farm-default-error__meta">Farm.js v${escapeHtml(options.farmVersion || "unknown")} · ${escapeHtml(options.mode || "development")} · Node.js ${escapeHtml(options.nodeVersion || "unknown")}</p></section>`
     : "";
   const report = development
     ? `<script id="farm-default-error-report" type="application/json">${serializeJsonForHtml(createDebugReport({ ...options, statusCode, statusText, requestPath, method }))}</script>${ERROR_COPY_SCRIPT}`
     : "";
 
-  return `<style>${DEFAULT_ERROR_STYLES}</style><main class="farm-default-error" data-farm-default-error role="alert" aria-labelledby="farm-default-error-title" aria-describedby="farm-default-error-description"><div class="farm-default-error__content"><p class="farm-default-error__code" aria-hidden="true">${statusCode}</p><p class="farm-default-error__eyebrow">${escapeHtml(eyebrow)}</p><header class="farm-default-error__summary"><h1 id="farm-default-error-title" class="farm-default-error__title">${escapeHtml(title)}</h1><p id="farm-default-error-description" class="farm-default-error__message">${escapeHtml(message)}</p></header><section class="farm-default-error__panel" aria-label="Error information"><div class="farm-default-error__row"><span class="farm-default-error__label">Request</span><span class="farm-default-error__value">${escapeHtml(method)} ${escapeHtml(requestPath)}</span></div><div class="farm-default-error__row"><span class="farm-default-error__label">Status</span><span class="farm-default-error__value">${statusCode} ${escapeHtml(statusText)}</span></div>${details}</section><div class="farm-default-error__actions"><button class="farm-default-error__action farm-default-error__action--primary" type="button" data-farm-error-retry>TRY AGAIN</button><a class="farm-default-error__action" href="/">RETURN HOME</a></div></div>${report}${ERROR_PAGE_SCRIPT}</main>`;
+  const primaryAction = isServerError
+    ? `<button class="farm-default-error__action farm-default-error__action--primary" type="button" data-farm-error-retry>TRY AGAIN</button>`
+    : `<button class="farm-default-error__action farm-default-error__action--primary" type="button" data-farm-error-back>GO BACK</button>`;
+  const debugAction = development
+    ? `<span class="farm-default-error__footer-divider" aria-hidden="true">/</span><button class="farm-default-error__footer-action" type="button" data-farm-error-copy><span data-farm-error-copy-label>COPY DEBUG REPORT</span><span class="farm-default-error__sr-only" aria-live="polite" data-farm-error-copy-status></span></button>`
+    : "";
+
+  return `<style>${DEFAULT_ERROR_STYLES}</style><main class="farm-default-error${development ? " farm-default-error--development" : ""}" data-farm-default-error role="alert" aria-labelledby="farm-default-error-title" aria-describedby="farm-default-error-description"><div class="farm-default-error__frame"><div class="farm-default-error__brand" aria-hidden="true"><span>FARM.JS</span><span class="farm-default-error__brand-divider">/</span><span>ERROR</span></div><div class="farm-default-error__content"><p class="farm-default-error__status"><span class="farm-default-error__status-mark" aria-hidden="true"></span><span>${statusCode}</span><span class="farm-default-error__status-divider" aria-hidden="true">/</span><span>${escapeHtml(statusText)}</span></p><header class="farm-default-error__summary"><h1 id="farm-default-error-title" class="farm-default-error__title">${escapeHtml(title)}</h1><p id="farm-default-error-description" class="farm-default-error__message">${escapeHtml(message)}</p></header><div class="farm-default-error__actions">${primaryAction}<a class="farm-default-error__action" href="/">RETURN HOME</a></div><section class="farm-default-error__panel" aria-label="Error information"><div class="farm-default-error__row"><span class="farm-default-error__label">Request</span><span class="farm-default-error__value">${escapeHtml(method)} ${escapeHtml(requestPath)}</span></div><div class="farm-default-error__row"><span class="farm-default-error__label">Status</span><span class="farm-default-error__value">${statusCode} ${escapeHtml(statusText)}</span></div>${details}</section></div><footer class="farm-default-error__footer"><a class="farm-default-error__footer-action" href="https://farm.js.dev/docs" target="_blank" rel="noopener noreferrer">${ERROR_DOCS_ICON}<span>VIEW DOCUMENTATION</span></a>${debugAction}</footer></div>${report}${ERROR_PAGE_SCRIPT}</main>`;
 }
