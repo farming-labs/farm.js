@@ -161,9 +161,7 @@ async function runMiddleware(
   return context;
 }
 
-async function resolveSyncClient(
-  client: SyncPluginOptions["client"],
-): Promise<SyncOrmClient> {
+async function resolveSyncClient(client: SyncPluginOptions["client"]): Promise<SyncOrmClient> {
   if (client) {
     return typeof client === "function"
       ? await (client as () => SyncOrmClient | Promise<SyncOrmClient>)()

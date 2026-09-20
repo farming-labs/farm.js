@@ -223,7 +223,10 @@ function sanitizeInput(
   input: Record<string, unknown> | undefined,
   options: { allowKey: boolean },
 ): Record<string, unknown> {
-  if (input !== undefined && (typeof input !== "object" || input === null || Array.isArray(input))) {
+  if (
+    input !== undefined &&
+    (typeof input !== "object" || input === null || Array.isArray(input))
+  ) {
     throw new SyncOperationError("invalid_input", "Operation input must be an object.");
   }
 

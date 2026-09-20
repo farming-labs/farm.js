@@ -1,1 +1,2 @@
-@import "tailwindcss";
+/* Example uses inline styles; no Tailwind. */
+:root { color-scheme: light dark; }

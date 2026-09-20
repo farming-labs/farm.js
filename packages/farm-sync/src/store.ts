@@ -36,7 +36,10 @@ export class SyncModelStore {
   pending = 0;
   paused = 0;
 
-  constructor(readonly name: string, readonly descriptor: SyncModelDescriptor) {}
+  constructor(
+    readonly name: string,
+    readonly descriptor: SyncModelDescriptor,
+  ) {}
 
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);

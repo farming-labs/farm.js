@@ -85,7 +85,12 @@ describe("SyncModelStore", () => {
     s.applyServerRows([{ id: "1", title: "a" }], { full: true, cursor: "2026-01-01" });
     s.applyServerRows([{ id: "2", title: "b" }], { full: false, cursor: "2026-02-01" });
 
-    expect(s.getRows().map((r) => r.id).sort()).toEqual(["1", "2"]);
+    expect(
+      s
+        .getRows()
+        .map((r) => r.id)
+        .sort(),
+    ).toEqual(["1", "2"]);
     expect(s.cursor).toBe("2026-02-01");
   });
 
