@@ -117,7 +117,11 @@ describe("mutation lifecycle", () => {
     fetchMock.mockImplementation((_url: string, init: RequestInit) => {
       const body = JSON.parse(String(init.body));
       if (body.operation === "list") {
-        return json({ rows: [{ id: "t1", title: "original", status: "open" }], cursor: null, full: true });
+        return json({
+          rows: [{ id: "t1", title: "original", status: "open" }],
+          cursor: null,
+          full: true,
+        });
       }
       return json({ error: { code: "not_found", message: "outside scope" } }, 404);
     });
