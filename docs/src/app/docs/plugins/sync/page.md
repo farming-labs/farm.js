@@ -113,6 +113,38 @@ data layer from your schema, so the same configuration works for a `pg` pool, a
 Drizzle or Prisma client, a D1 binding, or a Mongo client. Sync never generates
 SQL and has no per-database code path.
 
+### Where the tables come from
+
+Sync reads and writes rows. It never creates or alters tables, so what you need
+before the first query depends on where the data lives.
+
+| Setup | What you do first |
+| --- | --- |
+| `storage: "app"` | nothing. A mount is key-value, so there is no table to create |
+| A database you already use | nothing. Describe the existing tables with `name` mappings, below |
+| A new table in a database | create it yourself, with the tooling you already use |
+
+For the last case, keep using whatever owns your schema. If the project already
+uses Prisma or Drizzle, keep them — sync reads through their client, and their
+migrations stay the source of truth. Wire them into Farm so the command runs
+with everything else:
+
+```ts title="farm.config.ts"
+export default defineConfig({
+  migrations: {
+    commands: ["pnpm prisma migrate deploy"],
+  },
+});
+```
+
+For a project with no ORM, a raw `pg`, `sqlite`, or `mysql` connection is the
+simplest option: sync drives it directly, and there is no second migration
+system to keep in step. For now that means writing the `CREATE TABLE` yourself
+once; a command that emits it from the schema is planned ([#1297](https://github.com/farming-labs/farm.js/issues/1297)).
+
+If a query fails with *relation "tasks" does not exist*, the table has not been
+created yet — sync will not create it for you.
+
 ### Syncing tables you already have
 
 Describe the existing tables instead of creating new ones. `name` maps a model
@@ -303,6 +335,8 @@ export const archiveProject = createServerFn({
   tracked separately.
 - **`storage` mounts are key-value.** Point `client` at a database when you need
   your existing relational tables.
+- **Tables are never created or altered.** Sync only reads and writes rows; see
+  [where the tables come from](#where-the-tables-come-from).
 
 ## Example
 
