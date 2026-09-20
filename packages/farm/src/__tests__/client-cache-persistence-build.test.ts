@@ -77,3 +77,21 @@ describe("generateClientCachePersistenceCode", () => {
     expect(code.init).toContain('{"version":"build-7"}');
   });
 });
+
+describe("generated entry contract", () => {
+  it("imports a symbol the client entry point actually exports", async () => {
+    const code = generateClientCachePersistenceCode({
+      importPath: "/app/src/cache-adapter.ts",
+      options: {},
+    });
+
+    // The generated entry renames this import locally, so a missing export is
+    // only discovered when an app boots. Pin the contract here instead: every
+    // app configuring cache.client.adapter fails to load without it.
+    const imported = code.imports.match(/import \{ (\w+) as/)?.[1];
+    expect(imported).toBe("initConfiguredClientCachePersistence");
+
+    const clientEntry = await import("../client");
+    expect(typeof (clientEntry as Record<string, unknown>)[imported!]).toBe("function");
+  });
+});
