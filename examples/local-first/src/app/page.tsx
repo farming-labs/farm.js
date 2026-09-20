@@ -23,173 +23,118 @@ export default function LocalFirstPage() {
   const done = useLiveQuery<Task>(tasks, (task) => task.status === "done");
 
   return (
-    <main style={styles.main}>
-      <header style={styles.header}>
-        <h1 style={styles.h1}>Local-first tasks</h1>
-        <p style={styles.sub}>
-          Writes apply instantly, survive a reload, and queue while offline.
-        </p>
-      </header>
+    <main className="landing-main">
+      <section className="hero-section">
+        <div className="hero-copy">
+          <div className="eyebrow-row">
+            <span>00</span>
+            <span>FARMJS / Local-first</span>
+          </div>
 
-      <div style={styles.statusRow} data-testid="status">
-        <Badge label="status" value={open.status} />
-        <Badge label="in flight" value={String(open.pending)} />
-        <Badge label="waiting for network" value={String(open.paused)} />
-      </div>
+          <h1>
+            Writes land in <code>the browser</code> first.
+          </h1>
 
-      {open.paused > 0 && (
-        <p style={styles.offline} role="status">
-          Offline — {open.paused} change(s) will send when the connection returns.
-        </p>
-      )}
+          <p className="hero-lede">
+            Rows render from the local store, edits apply before the server answers, and changes
+            made offline queue until the connection returns.
+          </p>
 
-      <form
-        style={styles.form}
-        onSubmit={(event) => {
-          event.preventDefault();
-          const value = title.trim();
-          if (!value) return;
-          // Fire and forget: the optimistic row is the feedback.
-          tasks.insert({ title: value, status: "open" });
-          setTitle("");
-        }}
-      >
-        <input
-          style={styles.input}
-          value={title}
-          onChange={(event) => setTitle(event.target.value)}
-          placeholder="Add a task"
-          aria-label="Task title"
-          data-testid="new-task"
-        />
-        <button style={styles.primary} type="submit">
-          Add
-        </button>
-      </form>
+          <div className="status-strip" aria-live="polite" data-testid="status">
+            <span className="status-item">
+              <b>status</b>
+              <span>{open.status}</span>
+            </span>
+            <span className="status-separator">/</span>
+            <span className="status-item">
+              <b>in flight</b>
+              <span>{open.pending}</span>
+            </span>
+            <span className="status-separator">/</span>
+            <span className="status-item">
+              <b>queued</b>
+              <span>{open.paused}</span>
+            </span>
+          </div>
 
-      <section>
-        <h2 style={styles.h2}>Open ({open.rows.length})</h2>
-        {open.status === "loading" && open.isEmpty ? (
-          <p style={styles.muted}>Loading…</p>
-        ) : open.isEmpty ? (
-          <p style={styles.muted}>Nothing open.</p>
-        ) : (
-          <ul style={styles.list} data-testid="open-list">
-            {open.rows.map((task) => (
-              <li key={task.id} style={styles.item}>
-                <span>{task.title}</span>
-                <span style={styles.actions}>
-                  <button
-                    style={styles.secondary}
-                    onClick={() => tasks.update({ id: task.id, status: "done" })}
-                  >
-                    Done
-                  </button>
-                  <button style={styles.danger} onClick={() => tasks.delete({ id: task.id })}>
-                    Delete
-                  </button>
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+          {open.paused > 0 && (
+            <p className="offline-note" role="status">
+              Offline — {open.paused} change(s) will send when the connection returns.
+            </p>
+          )}
 
-      <section>
-        <h2 style={styles.h2}>Done ({done.rows.length})</h2>
-        <ul style={styles.list} data-testid="done-list">
-          {done.rows.map((task) => (
-            <li key={task.id} style={{ ...styles.item, opacity: 0.6 }}>
-              <span style={{ textDecoration: "line-through" }}>{task.title}</span>
-              <button
-                style={styles.secondary}
-                onClick={() => tasks.update({ id: task.id, status: "open" })}
-              >
-                Reopen
-              </button>
-            </li>
-          ))}
-        </ul>
+          <form
+            className="composer"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const value = title.trim();
+              if (!value) return;
+              // Fire and forget: the optimistic row is the feedback.
+              tasks.insert({ title: value, status: "open" });
+              setTitle("");
+            }}
+          >
+            <span>01</span>
+            <input
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              placeholder="Add a task"
+              aria-label="Task title"
+              data-testid="new-task"
+            />
+            <button type="submit">Add</button>
+          </form>
+
+          <h2 className="list-heading">
+            <span>02</span>
+            <span>Open ({open.rows.length})</span>
+          </h2>
+
+          {open.status === "loading" && open.isEmpty ? (
+            <p className="empty-note">Loading…</p>
+          ) : open.isEmpty ? (
+            <p className="empty-note">Nothing open.</p>
+          ) : (
+            <ul className="task-list" data-testid="open-list">
+              {open.rows.map((task, index) => (
+                <li key={task.id} className="task-row">
+                  <span>{String(index + 1).padStart(2, "0")}</span>
+                  <span className="task-title">{task.title}</span>
+                  <span className="task-actions">
+                    <button onClick={() => tasks.update({ id: task.id, status: "done" })}>
+                      Done
+                    </button>
+                    <button onClick={() => tasks.delete({ id: task.id })}>Delete</button>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <h2 className="list-heading">
+            <span>03</span>
+            <span>Done ({done.rows.length})</span>
+          </h2>
+
+          {done.isEmpty ? (
+            <p className="empty-note">Nothing done yet.</p>
+          ) : (
+            <ul className="task-list" data-testid="done-list">
+              {done.rows.map((task, index) => (
+                <li key={task.id} className="task-row is-done">
+                  <span>{String(index + 1).padStart(2, "0")}</span>
+                  <span className="task-title">{task.title}</span>
+                  <span className="task-actions">
+                    <button onClick={() => tasks.update({ id: task.id, status: "open" })}>
+                      Reopen
+                    </button>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </section>
     </main>
   );
 }
-
-function Badge({ label, value }: { label: string; value: string }) {
-  return (
-    <span style={styles.badge}>
-      <strong>{label}</strong> {value}
-    </span>
-  );
-}
-
-const styles: Record<string, React.CSSProperties> = {
-  main: {
-    maxWidth: 640,
-    margin: "0 auto",
-    padding: "2.5rem 1.25rem",
-    fontFamily: "system-ui, sans-serif",
-  },
-  header: { marginBottom: "1.5rem" },
-  h1: { fontSize: "1.75rem", margin: 0 },
-  h2: { fontSize: "1rem", textTransform: "uppercase", letterSpacing: "0.06em", opacity: 0.6 },
-  sub: { margin: "0.35rem 0 0", opacity: 0.7 },
-  statusRow: { display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1rem" },
-  badge: {
-    fontSize: "0.75rem",
-    padding: "0.25rem 0.6rem",
-    borderRadius: 999,
-    background: "#f1f5f9",
-    border: "1px solid #e2e8f0",
-  },
-  offline: {
-    padding: "0.6rem 0.9rem",
-    borderRadius: 8,
-    background: "#fef3c7",
-    border: "1px solid #fcd34d",
-    marginBottom: "1rem",
-  },
-  form: { display: "flex", gap: "0.5rem", marginBottom: "2rem" },
-  input: {
-    flex: 1,
-    padding: "0.6rem 0.75rem",
-    borderRadius: 8,
-    border: "1px solid #cbd5f5",
-    fontSize: "1rem",
-  },
-  primary: {
-    padding: "0.6rem 1.1rem",
-    borderRadius: 8,
-    border: "none",
-    background: "#2563eb",
-    color: "white",
-    fontWeight: 600,
-    cursor: "pointer",
-  },
-  secondary: {
-    padding: "0.35rem 0.7rem",
-    borderRadius: 6,
-    border: "1px solid #cbd5f5",
-    background: "white",
-    cursor: "pointer",
-  },
-  danger: {
-    padding: "0.35rem 0.7rem",
-    borderRadius: 6,
-    border: "1px solid #fecaca",
-    background: "white",
-    color: "#b91c1c",
-    cursor: "pointer",
-  },
-  list: { listStyle: "none", padding: 0, margin: "0 0 1.5rem", display: "grid", gap: "0.5rem" },
-  item: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: "0.65rem 0.85rem",
-    borderRadius: 8,
-    border: "1px solid #e2e8f0",
-  },
-  actions: { display: "flex", gap: "0.4rem" },
-  muted: { opacity: 0.6 },
-};
