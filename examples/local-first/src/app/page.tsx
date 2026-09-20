@@ -14,7 +14,17 @@ type Task = {
 
 export default function LocalFirstPage() {
   const [title, setTitle] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const tasks = db.tasks;
+
+  /**
+   * A write that the server refuses is rolled back on screen. Without showing
+   * why, the row would simply vanish — so every mutation reports its failure.
+   */
+  const run = (handle: { catch(onRejected: (cause: Error) => void): unknown }) => {
+    setError(null);
+    handle.catch((cause: Error) => setError(cause.message));
+  };
 
   const open = useLiveQuery<Task>(tasks, (task) => task.status === "open", {
     orderBy: (task) => task.updatedAt ?? "",
@@ -57,6 +67,12 @@ export default function LocalFirstPage() {
             </span>
           </div>
 
+          {error && (
+            <p className="offline-note" role="alert" data-testid="error">
+              Write failed — {error}
+            </p>
+          )}
+
           {open.paused > 0 && (
             <p className="offline-note" role="status">
               Offline — {open.paused} change(s) will send when the connection returns.
@@ -70,7 +86,7 @@ export default function LocalFirstPage() {
               const value = title.trim();
               if (!value) return;
               // Fire and forget: the optimistic row is the feedback.
-              tasks.insert({ title: value, status: "open" });
+              run(tasks.insert({ title: value, status: "open" }));
               setTitle("");
             }}
           >
@@ -101,10 +117,10 @@ export default function LocalFirstPage() {
                   <span>{String(index + 1).padStart(2, "0")}</span>
                   <span className="task-title">{task.title}</span>
                   <span className="task-actions">
-                    <button onClick={() => tasks.update({ id: task.id, status: "done" })}>
+                    <button onClick={() => run(tasks.update({ id: task.id, status: "done" }))}>
                       Done
                     </button>
-                    <button onClick={() => tasks.delete({ id: task.id })}>Delete</button>
+                    <button onClick={() => run(tasks.delete({ id: task.id }))}>Delete</button>
                   </span>
                 </li>
               ))}
@@ -125,7 +141,7 @@ export default function LocalFirstPage() {
                   <span>{String(index + 1).padStart(2, "0")}</span>
                   <span className="task-title">{task.title}</span>
                   <span className="task-actions">
-                    <button onClick={() => tasks.update({ id: task.id, status: "open" })}>
+                    <button onClick={() => run(tasks.update({ id: task.id, status: "open" }))}>
                       Reopen
                     </button>
                   </span>

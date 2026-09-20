@@ -7,10 +7,28 @@ import {
 
 export type SyncMutationState = "pending" | "paused" | "completed" | "failed";
 
-export type SyncMutationHandle<TRow = SyncRow> = {
+/**
+ * The result of a mutation, usable three ways:
+ *
+ * ```ts
+ * tasks.update({ id, status: "done" });          // fire and forget
+ * await tasks.update({ id, status: "done" });    // awaited directly
+ * await tasks.update({ id, status: "done" }).persisted;  // explicit
+ * ```
+ *
+ * It is a thenable rather than a promise so that ignoring it is safe: the
+ * rejection is only materialized when a caller actually asks for it, and a
+ * write the UI already rolled back does not surface as an unhandled rejection.
+ */
+export type SyncMutationHandle<TRow = SyncRow> = PromiseLike<TRow> & {
   readonly key: unknown;
   readonly state: SyncMutationState;
-  readonly isPersisted: Promise<TRow>;
+  /** Resolves once the server has stored the write; rejects if it never lands. */
+  readonly persisted: Promise<TRow>;
+  catch<TResult = never>(
+    onRejected?: ((reason: unknown) => TResult | PromiseLike<TResult>) | null,
+  ): Promise<TRow | TResult>;
+  finally(onFinally?: (() => void) | null): Promise<TRow>;
 };
 
 export type SyncClientOptions = {
@@ -216,7 +234,8 @@ function runMutation(
     }
   })();
 
-  // Never surface an unhandled rejection for fire-and-forget calls.
+  // Keep the promise owned so a fire-and-forget failure never becomes an
+  // unhandled rejection. Callers that await get a fresh chain below.
   void isPersisted.catch(() => undefined);
 
   return {
@@ -224,8 +243,13 @@ function runMutation(
     get state() {
       return handleState;
     },
-    isPersisted,
-  };
+    get persisted() {
+      return isPersisted;
+    },
+    then: (onFulfilled, onRejected) => isPersisted.then(onFulfilled, onRejected),
+    catch: (onRejected) => isPersisted.catch(onRejected),
+    finally: (onFinally) => isPersisted.finally(onFinally),
+  } as SyncMutationHandle;
 }
 
 export type SyncModelClient = {
