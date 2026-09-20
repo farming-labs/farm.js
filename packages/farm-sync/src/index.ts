@@ -1,6 +1,8 @@
 import { definePlugin } from "@farm.js/core";
 import type { FarmSchema } from "@farm.js/core";
+import type { SyncDialect } from "./ddl.js";
 import { executeSyncOperation, SyncOperationError, type SyncOrmClient } from "./server.js";
+import { FARM_SYNC_PLUGIN_STATE } from "./state.js";
 import {
   resolveSyncModels,
   type ResolvedSyncModel,
@@ -35,6 +37,11 @@ export type SyncPluginOptions = {
   path?: string;
   /** Persist rows through the configured client cache adapter. */
   persist?: boolean;
+  /**
+   * Sql dialect for `farm sync migrate`. Only needed when the client's dialect
+   * cannot be detected from its shape.
+   */
+  dialect?: SyncDialect;
 };
 
 export type SyncMiddlewareContext = {
@@ -81,7 +88,7 @@ export function sync(options: SyncPluginOptions) {
     return ormPromise;
   };
 
-  return definePlugin({
+  const plugin = definePlugin({
     name: "farm:sync",
 
     client: {
@@ -155,6 +162,30 @@ export function sync(options: SyncPluginOptions) {
       }
     },
   });
+
+  // Expose the resolved schema and connection to tooling (`farm sync migrate`)
+  // without making it re-read or re-validate configuration.
+  Object.defineProperty(plugin, FARM_SYNC_PLUGIN_STATE, {
+    value: {
+      models,
+      dialect: options.dialect,
+      resolveClient: async () => {
+        if (options.client) {
+          return typeof options.client === "function"
+            ? await (options.client as () => unknown | Promise<unknown>)()
+            : options.client;
+        }
+        if (options.storage) {
+          const { getStorage } = await import("@farm.js/core/storage");
+          return getStorage(options.storage);
+        }
+        return undefined;
+      },
+    },
+    enumerable: false,
+  });
+
+  return plugin;
 }
 
 async function runMiddleware(

@@ -147,6 +147,30 @@ program
     }
   });
 
+const syncCommand = program.command("sync").description("Manage the local-first sync schema");
+
+syncCommand
+  .command("migrate")
+  .description("Create the database tables the sync schema needs")
+  .option("-r, --root <root>", "Root directory", process.cwd())
+  .option("-c, --config <config>", "Path to farm config file")
+  .option("-w, --write <file>", "Write the statements to a file instead of printing them")
+  .option("--apply", "Execute the statements against the database")
+  .action(async (options) => {
+    try {
+      const { migrateFarmSync } = require("../dist/index.js");
+      await migrateFarmSync({
+        root: options.root,
+        configPath: options.config,
+        write: options.write,
+        apply: options.apply,
+      });
+    } catch (error) {
+      console.error("Failed to migrate the sync schema:", error);
+      process.exit(1);
+    }
+  });
+
 const authCommand = program.command("auth").description("Manage Farm-native authentication");
 
 authCommand
