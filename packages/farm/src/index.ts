@@ -10,6 +10,9 @@ export type {
 export * from "./utils";
 export * from "./storage";
 export * from "./schema";
+export * from "./schema-sql";
+export * from "./schema-migrate";
+export * from "./schema-tables";
 export * from "./integrations";
 export * from "./integration-orm";
 export * from "./integration-api";

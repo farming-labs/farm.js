@@ -97,7 +97,7 @@ export {
   type FrameworkMigrationPlan,
 } from "./migrate";
 export { migrateFarmAuth, type MigrateFarmAuthOptions } from "./auth";
-export { migrateFarmSync, type MigrateFarmSyncOptions } from "./sync";
+export { listSchemaTableOwners, migrateSchema, type MigrateSchemaOptions } from "./schema-migrate";
 export {
   createFarmUpgradePlan,
   detectFarmPackageManager,

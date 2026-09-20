@@ -359,6 +359,7 @@ const sidebar = [
         children: [
           { label: "Create a Plugin", slug: "plugins/create-plugin", icon: "wrench" },
           { label: "Client Plugin API", slug: "plugins/client", icon: "monitor" },
+          { label: "Plugin Tables", slug: "plugins/schema-tables", icon: "database" },
         ],
       },
     ],
