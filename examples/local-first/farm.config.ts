@@ -1,7 +1,6 @@
 import { defineConfig } from "@farm.js/core";
 import { localStorage as fileStorage } from "@farm.js/core/storage";
 import { sync } from "@farm.js/sync";
-import { db } from "./src/db";
 import { schema } from "./src/schema";
 
 export default defineConfig({
@@ -12,17 +11,10 @@ export default defineConfig({
     },
   },
 
-  cache: {
-    client: {
-      // Rows and cached reads survive a reload, so revisits paint from disk.
-      adapter: "./src/cache-adapter",
-    },
-  },
-
   plugins: [
     sync({
       schema,
-      client: () => db,
+      storage: "app",
       models: {
         tasks: "write",
       },

@@ -115,6 +115,8 @@ export async function loadModel(model: string): Promise<void> {
       full: result.full !== false,
       cursor: result.cursor ?? null,
     });
+    // Keep the warm-start copy current even when the session performs no writes.
+    persistModel(model);
   } catch (cause) {
     store.setStatus("error", cause instanceof Error ? cause : new Error(String(cause)));
   }
@@ -203,7 +205,7 @@ function runMutation(
       const result = await dispatchWrite(store, { model, operation, input }, state.options);
       store.commitLayer(layer, operation === "delete" ? null : (result as SyncRow));
       handleState = "completed";
-      void persistModel(model);
+      persistModel(model);
       return result as SyncRow;
     } catch (error) {
       store.removeLayer(layer);
@@ -322,67 +324,85 @@ export const db: Record<string, SyncModelClient> = new Proxy(
 // so warm starts render from disk before the first network round trip.
 
 const PERSIST_PREFIX = "farm-sync:";
+const PERSIST_VERSION = "1";
 
-async function persistModel(model: string): Promise<void> {
+/**
+ * Rows are written to the browser directly rather than through the shared
+ * query cache: they are feature-owned data with their own lifetime, and this
+ * keeps the plugin working whether or not the app configures
+ * `cache.client.adapter`.
+ *
+ * `localStorage` is the default because it is synchronous on read, which is
+ * what makes a warm start paint before the first network round trip. Apps that
+ * outgrow it can pass their own store.
+ */
+type SyncPersistence = {
+  read(model: string): { rows: SyncRow[]; cursor: string | null } | null;
+  write(model: string, value: { rows: SyncRow[]; cursor: string | null }): void;
+  clear(): void;
+};
+
+function createLocalStoragePersistence(): SyncPersistence | null {
+  if (typeof localStorage === "undefined") return null;
+
+  const keyFor = (model: string) => `${PERSIST_PREFIX}${PERSIST_VERSION}:${model}`;
+  return {
+    read(model) {
+      try {
+        const raw = localStorage.getItem(keyFor(model));
+        return raw ? JSON.parse(raw) : null;
+      } catch {
+        return null;
+      }
+    },
+    write(model, value) {
+      try {
+        localStorage.setItem(keyFor(model), JSON.stringify(value));
+      } catch {
+        // Quota or private browsing: rows stay in memory for this session.
+      }
+    },
+    clear() {
+      try {
+        for (const key of Object.keys(localStorage)) {
+          if (key.startsWith(PERSIST_PREFIX)) localStorage.removeItem(key);
+        }
+      } catch {
+        // Nothing to clean up if storage is unavailable.
+      }
+    },
+  };
+}
+
+let persistence: SyncPersistence | null | undefined;
+function getPersistence(): SyncPersistence | null {
+  persistence ??= createLocalStoragePersistence();
+  return persistence;
+}
+
+/** Replace the default browser store, for example with an IndexedDB one. */
+export function setSyncPersistence(store: SyncPersistence | null): void {
+  persistence = store;
+}
+
+/** Remove every persisted row. Call on logout so a shared device stays clean. */
+export function clearSyncedRows(): void {
+  getPersistence()?.clear();
+}
+
+function persistModel(model: string): void {
   const store = runtime?.stores.get(model);
   if (!store?.descriptor.persist) return;
 
-  const cache = await importClientCache();
-  cache?.set(`${PERSIST_PREFIX}${model}`, {
-    data: { rows: store.confirmedRows(), cursor: store.cursor },
-    updatedAt: Date.now(),
-    staleAt: 0,
-    persist: true,
-  });
+  getPersistence()?.write(model, { rows: store.confirmedRows(), cursor: store.cursor });
 }
 
-export async function hydrateModel(model: string): Promise<void> {
+export function hydrateModel(model: string): void {
   const store = getSyncStore(model);
   if (!store.descriptor.persist) return;
 
-  const cache = await importClientCache();
-  const entry = cache?.get(`${PERSIST_PREFIX}${model}`) as
-    | { data?: { rows?: SyncRow[]; cursor?: string | null } }
-    | undefined;
-  if (entry?.data?.rows?.length) {
-    store.hydrate(entry.data.rows, entry.data.cursor ?? null);
-  }
-}
-
-type ClientCacheLike = {
-  get(key: string): unknown;
-  set(key: string, entry: Record<string, unknown>): unknown;
-};
-
-let cachePromise: Promise<ClientCacheLike | undefined> | undefined;
-let cacheWarned = false;
-
-function importClientCache(): Promise<ClientCacheLike | undefined> {
-  cachePromise ??= import("@farm.js/core/client")
-    .then((mod) => {
-      const accessor = (mod as { getFarmClientDataCache?: () => ClientCacheLike })
-        .getFarmClientDataCache;
-      if (typeof accessor !== "function") {
-        // Persistence is optional, but failing silently would look like a bug
-        // in the app rather than a missing export.
-        warnOnce(
-          "@farm.js/core/client does not export getFarmClientDataCache; synced rows will not persist.",
-        );
-        return undefined;
-      }
-      return accessor();
-    })
-    .catch((error) => {
-      warnOnce(`Sync persistence is unavailable: ${String(error)}`);
-      return undefined;
-    });
-  return cachePromise;
-}
-
-function warnOnce(message: string): void {
-  if (cacheWarned) return;
-  cacheWarned = true;
-  console.warn(`[farm:sync] ${message}`);
+  const saved = getPersistence()?.read(model);
+  if (saved?.rows?.length) store.hydrate(saved.rows, saved.cursor ?? null);
 }
 
 // Register for the plugin handshake: the client hook may run before or after

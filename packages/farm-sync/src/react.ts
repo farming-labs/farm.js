@@ -79,7 +79,7 @@ export function useLiveQuery<TRow extends SyncRow = SyncRow>(
 
   useEffect(() => {
     if (options.enabled === false) return;
-    void hydrateModel(name);
+    hydrateModel(name);
   }, [name, options.enabled]);
 
   // Recompute only when the underlying rows change; the predicate is read from

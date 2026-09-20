@@ -1,6 +1,7 @@
 import { definePlugin } from "@farm.js/core";
 import type { FarmSchema } from "@farm.js/core";
 import { executeSyncOperation, SyncOperationError, type SyncOrmClient } from "./server.js";
+import { createStorageSyncClient } from "./storage-client.js";
 import {
   resolveSyncModels,
   type ResolvedSyncModel,
@@ -13,8 +14,14 @@ export type SyncPluginOptions = {
   /** Declarative data schema; see `defineSchema` from `@farm.js/core`. */
   schema: FarmSchema;
   /**
-   * ORM client, or a factory for one. Omit to resolve the client configured
-   * under `storage` in `farm.config.ts`.
+   * Name of a mount from `storage.mounts` in `farm.config.ts`. Models are read
+   * and written through it, so an app with storage configured needs no
+   * separate data-layer module.
+   */
+  storage?: string;
+  /**
+   * An `@farming-labs/orm` client (or a factory) to use instead of `storage`.
+   * Reach for this when the data lives in a real database.
    */
   client?: SyncOrmClient | (() => SyncOrmClient | Promise<SyncOrmClient>);
   /** Row filter applied to every read and write, server side. */
@@ -69,7 +76,7 @@ export function sync(options: SyncPluginOptions) {
 
   let ormPromise: Promise<SyncOrmClient> | undefined;
   const resolveOrm = (): Promise<SyncOrmClient> => {
-    ormPromise ??= resolveSyncClient(options.client);
+    ormPromise ??= resolveSyncClient(options, models);
     return ormPromise;
   };
 
@@ -161,16 +168,26 @@ async function runMiddleware(
   return context;
 }
 
-async function resolveSyncClient(client: SyncPluginOptions["client"]): Promise<SyncOrmClient> {
-  if (client) {
-    return typeof client === "function"
-      ? await (client as () => SyncOrmClient | Promise<SyncOrmClient>)()
-      : client;
+async function resolveSyncClient(
+  options: SyncPluginOptions,
+  models: Map<string, ResolvedSyncModel>,
+): Promise<SyncOrmClient> {
+  if (options.client) {
+    return typeof options.client === "function"
+      ? await (options.client as () => SyncOrmClient | Promise<SyncOrmClient>)()
+      : options.client;
+  }
+
+  if (options.storage) {
+    const mount = options.storage;
+    // Imported lazily so the storage runtime never reaches a browser bundle.
+    const { getStorage } = await import("@farm.js/core/storage");
+    return createStorageSyncClient(models, async () => getStorage(mount) as never);
   }
 
   throw new Error(
-    "sync(): no ORM client is configured. Pass `client` with your @farming-labs/orm client, " +
-      "for example `client: () => db`.",
+    "sync(): no data source is configured. Set `storage` to a mount name from " +
+      "storage.mounts in farm.config.ts, or pass `client` with an @farming-labs/orm client.",
   );
 }
 

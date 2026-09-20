@@ -163,6 +163,21 @@ async function insertRow(
   input: Record<string, unknown> | undefined,
 ): Promise<Record<string, unknown>> {
   const data = sanitizeInput(resolved, input, { allowKey: true });
+
+  // The browser generates keys so an optimistic row is addressable immediately,
+  // but a direct API call may omit one. Without this an id-less row is written
+  // that no update or delete can ever target.
+  if (data[resolved.key] === undefined || data[resolved.key] === null) {
+    const generated = generateKey(resolved);
+    if (generated === undefined) {
+      throw new SyncOperationError(
+        "invalid_input",
+        `${resolved.name}.${resolved.key} is required: it has no generatable type.`,
+      );
+    }
+    data[resolved.key] = generated;
+  }
+
   // Scope columns are server-owned: a client-supplied value is discarded.
   return client.create({ data: { ...data, ...scope } });
 }
@@ -237,4 +252,15 @@ function sanitizeInput(
     data[field] = value;
   }
   return data;
+}
+
+/** Generate a key for schema types that carry one; other types must be supplied. */
+function generateKey(resolved: ResolvedSyncModel): string | undefined {
+  const type = resolved.fields[resolved.key]?.type;
+  if (type !== "uuid" && type !== "id" && type !== "string" && type !== "text") return undefined;
+
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }

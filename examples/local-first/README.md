@@ -30,7 +30,7 @@ and a `datetime` named `updatedAt` turns on incremental sync automatically.
 ```ts
 sync({
   schema,
-  client: () => db,
+  storage: "app",                                   // the mount configured above
   models: { tasks: "write" },
   where: ({ context }) => ({ listId: context.listId }),
   middleware: [/* puts listId on context */],
@@ -47,14 +47,15 @@ This demo scopes by a per-browser list id instead of a login so it runs with no
 auth setup. A real app puts a session on `context` through the same middleware
 and scopes by user or organisation.
 
-**`src/db.ts`** is the server data layer — a small relational-shaped client over
-a Farm storage mount, so the example runs with no external database. The plugin
-only needs `findMany/create/update/deleteMany`, which is the shape an
-`@farming-labs/orm` client already exposes; point `client` at a real ORM and
-nothing else changes.
+**There is no data-layer file.** `storage: "app"` points the plugin at the mount
+already configured above, and it reads and writes models through it. Swap the
+mount for sqlite, postgres, or redis and the app is unchanged. When the data
+lives in a real database, pass `client` with an `@farming-labs/orm` client
+instead; the plugin only needs `findMany/create/update/deleteMany`.
 
-**`src/cache-adapter.ts`** is five callbacks over `localStorage`. Swap it for
-IndexedDB, OPFS, or a native bridge without touching anything else.
+**There is no cache-adapter file either.** Synced rows persist to the browser
+automatically so a reload paints from disk. Pass your own store to
+`setSyncPersistence()` to use IndexedDB or OPFS instead.
 
 ## Try the local-first behavior
 

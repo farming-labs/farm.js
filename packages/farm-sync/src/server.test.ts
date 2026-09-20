@@ -250,3 +250,38 @@ describe("executeSyncOperation", () => {
     expect(store[0]).toMatchObject({ id: "1", title: "renamed" });
   });
 });
+
+describe("key generation on insert", () => {
+  const context = { listId: "list-a" };
+
+  it("generates a key when the client omits one", async () => {
+    const { orm, store } = makeOrm();
+
+    const created: any = await executeSyncOperation({
+      body: { model: "tasks", operation: "insert", input: { title: "no id supplied" } },
+      models: models(),
+      orm,
+      request,
+      context,
+    });
+
+    expect(typeof created.id).toBe("string");
+    expect(created.id).not.toHaveLength(0);
+    // The row must be addressable afterwards.
+    expect(store[0]!.id).toBe(created.id);
+  });
+
+  it("keeps a client-supplied key so optimistic rows stay addressable", async () => {
+    const { orm } = makeOrm();
+
+    const created: any = await executeSyncOperation({
+      body: { model: "tasks", operation: "insert", input: { id: "client-key", title: "x" } },
+      models: models(),
+      orm,
+      request,
+      context,
+    });
+
+    expect(created.id).toBe("client-key");
+  });
+});
