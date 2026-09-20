@@ -68,6 +68,9 @@ export {
   clearPersistedCache,
   defineClientCacheAdapter,
   FARM_CLIENT_CACHE_PERSIST_VERSION,
+  // The generated client entry imports this by name when `cache.client.adapter`
+  // is configured, so it has to be reachable from this entry point.
+  initConfiguredClientCachePersistence,
   initPersistedClientCache,
   storageClientCacheAdapter,
 } from "./client-cache-persistence";
