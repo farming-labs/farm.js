@@ -2,6 +2,8 @@ const SERVER_FUNCTION_FACTORY_IMPORT_RE =
   /\bimport\s+(?:type\s+)?(?:[A-Za-z_$][\w$]*\s*,\s*)?(\{[^}]*\})\s+from\s*["']@farm.js\/core(?:\/(?:server-fn|server-query))?["']\s*;?/g;
 const EXPORT_SERVER_FUNCTION_FACTORY_RE =
   /\bexport\s+(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*([A-Za-z_$][\w$]*)\s*(?:<[^<>]*(?:<[^<>]*>[^<>]*)*>)?\s*\(/g;
+const EXPORT_DEFAULT_SERVER_FUNCTION_FACTORY_RE =
+  /\bexport\s+default\s+([A-Za-z_$][\w$]*)\s*(?:<[^<>]*(?:<[^<>]*>[^<>]*)*>)?\s*\(/g;
 const MODULE_EXT_RE = /\.[cm]?[jt]sx?$/;
 const DECLARATION_RE = /(^|\n)\s*["']([^"']+)["']\s*;?/g;
 
@@ -109,6 +111,33 @@ function findServerFnExportReplacements(code: string, factoryNames: Map<string, 
       end: declarationEnd,
       exportName,
       code: `const ${privateName} = ${callExpression};\nexport async function ${exportName}(input) {\n  return ${privateName}(input);\n}`,
+    });
+  }
+
+  // `export default createServerFn(...)` needs the same treatment. Without it the
+  // module gets no "use server" directive and its handler ships to the client.
+  for (const match of code.matchAll(EXPORT_DEFAULT_SERVER_FUNCTION_FACTORY_RE)) {
+    const calleeName = match[1];
+    const factory = calleeName ? factoryNames.get(calleeName) : undefined;
+    if (!calleeName || !factory) continue;
+
+    const openParenIndex = (match.index ?? 0) + match[0].length - 1;
+    const callEnd = findMatchingParen(code, openParenIndex);
+    if (callEnd === -1) continue;
+
+    let declarationEnd = callEnd + 1;
+    while (/\s/.test(code[declarationEnd] ?? "")) declarationEnd++;
+    if (code[declarationEnd] === ";") declarationEnd++;
+
+    const calleeIndex = code.indexOf(calleeName, match.index);
+    const callExpression = code.slice(calleeIndex, callEnd + 1);
+    const privateName = `$$farm_server_${factory}_default`;
+
+    replacements.push({
+      start: match.index ?? 0,
+      end: declarationEnd,
+      exportName: "default",
+      code: `const ${privateName} = ${callExpression};\nexport default async function (input) {\n  return ${privateName}(input);\n}`,
     });
   }
 

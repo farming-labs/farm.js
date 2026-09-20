@@ -64,6 +64,24 @@ export const update = createServerFn({ handler: async () => { invalidate(["produ
     expect(result?.code).toContain("export async function update(input)");
   });
 
+  it("transforms a default-exported server function so it gets a server boundary", () => {
+    // Without this the module gets no "use server" directive and the handler
+    // (and its server-only imports) ships to the client.
+    const result = transformFarmServerFns(
+      `import { createServerFn } from "@farm.js/core";
+export default createServerFn({ handler: async () => true });`,
+      "/app/src/actions.ts",
+    );
+
+    expect(result).not.toBeNull();
+    expect(result?.exports).toEqual(["default"]);
+    expect(result?.code).toContain('"use server"');
+    expect(result?.code).toContain("const $$farm_server_fn_default = createServerFn(");
+    expect(result?.code).toContain("export default async function (input)");
+    // The raw factory call must no longer be the default export.
+    expect(result?.code).not.toContain("export default createServerFn(");
+  });
+
   it("rejects query declarations in client modules", () => {
     expect(() =>
       transformFarmServerFns(
