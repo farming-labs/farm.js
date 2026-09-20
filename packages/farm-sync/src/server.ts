@@ -178,8 +178,10 @@ async function insertRow(
     data[resolved.key] = generated;
   }
 
-  // Scope columns are server-owned: a client-supplied value is discarded.
-  return client.create({ data: { ...data, ...scope } });
+  // Scope and cursor columns are server-owned: client-supplied values are
+  // discarded so a caller cannot widen its scope or stall everyone's
+  // incremental sync by writing a stale timestamp.
+  return client.create({ data: { ...data, ...scope, ...cursorStamp(resolved) } });
 }
 
 async function updateRow(
@@ -192,7 +194,7 @@ async function updateRow(
   const key = requireKey(resolved, input);
   const where = { ...scope, [resolved.key]: key };
 
-  const updated = await client.update({ where, data });
+  const updated = await client.update({ where, data: { ...data, ...cursorStamp(resolved) } });
   if (!updated) {
     throw new SyncOperationError(
       "not_found",
@@ -249,9 +251,22 @@ function sanitizeInput(
   for (const [field, value] of Object.entries(input ?? {})) {
     if (!Object.hasOwn(resolved.fields, field)) continue;
     if (field === resolved.key && !options.allowKey) continue;
+    if (field === resolved.cursorField) continue;
     data[field] = value;
   }
   return data;
+}
+
+/**
+ * Value for the cursor column on a write.
+ *
+ * Drivers do not maintain this: the orm writes exactly the columns it is given.
+ * Stamping it here keeps incremental sync working the same way on every
+ * backend rather than depending on a database default or trigger.
+ */
+function cursorStamp(resolved: ResolvedSyncModel): Record<string, unknown> {
+  if (!resolved.cursorField) return {};
+  return { [resolved.cursorField]: new Date().toISOString() };
 }
 
 /** Generate a key for schema types that carry one; other types must be supplied. */

@@ -1,7 +1,6 @@
 import { definePlugin } from "@farm.js/core";
 import type { FarmSchema } from "@farm.js/core";
 import { executeSyncOperation, SyncOperationError, type SyncOrmClient } from "./server.js";
-import { createStorageSyncClient } from "./storage-client.js";
 import {
   resolveSyncModels,
   type ResolvedSyncModel,
@@ -183,29 +182,28 @@ async function resolveSyncClient(
     // Already model-shaped: an @farming-labs/orm client, or anything exposing
     // the same four methods. Use it directly.
     if (isModelClient(provided, models)) return provided;
-
-    // Otherwise it is a raw database connection (pg Pool, Drizzle, Prisma,
-    // D1, Mongo, an unstorage instance). The orm runtime detects which driver
-    // it is and builds the model client from the schema, so sync itself never
-    // grows a per-database code path.
-    const { createIntegrationOrm } = await import("@farm.js/core");
-    return (await createIntegrationOrm({
-      schema: options.schema,
-      client: provided,
-    })) as unknown as SyncOrmClient;
+    return buildOrm(options.schema, provided);
   }
 
   if (options.storage) {
     const mount = options.storage;
     // Imported lazily so the storage runtime never reaches a browser bundle.
     const { getStorage } = await import("@farm.js/core/storage");
-    return createStorageSyncClient(models, async () => getStorage(mount) as never);
+    // A mount is an unstorage instance, which the orm runtime drives like any
+    // other backend — so this is the same code path as a real database.
+    return buildOrm(options.schema, getStorage(mount));
   }
 
   throw new Error(
     "sync(): no data source is configured. Set `storage` to a mount name from " +
-      "storage.mounts in farm.config.ts, or pass `client` with an @farming-labs/orm client.",
+      "storage.mounts in farm.config.ts, or pass `client` with your database connection.",
   );
+}
+
+/** Let the orm runtime detect the driver and build the model client. */
+async function buildOrm(schema: FarmSchema, client: unknown): Promise<SyncOrmClient> {
+  const { createIntegrationOrm } = await import("@farm.js/core");
+  return (await createIntegrationOrm({ schema, client })) as unknown as SyncOrmClient;
 }
 
 /**

@@ -48,10 +48,19 @@ auth setup. A real app puts a session on `context` through the same middleware
 and scopes by user or organisation.
 
 **There is no data-layer file.** `storage: "app"` points the plugin at the mount
-already configured above, and it reads and writes models through it. Swap the
-mount for sqlite, postgres, or redis and the app is unchanged. When the data
-lives in a real database, pass `client` with an `@farming-labs/orm` client
-instead; the plugin only needs `findMany/create/update/deleteMany`.
+configured above. For a real database, pass the connection instead — the orm
+runtime detects the driver and builds the model client from the schema, so
+`storage` and `client` are the same code path:
+
+```ts
+sync({ schema, client: () => pool })      // pg
+sync({ schema, client: () => drizzleDb }) // drizzle
+sync({ schema, client: () => prisma })    // prisma
+```
+
+To sync tables you already have, map them in the schema with `name:` on the
+model and its fields. No migration: the schema describes your database rather
+than defining it.
 
 **There is no cache-adapter file either.** Synced rows persist to the browser
 automatically so a reload paints from disk. Pass your own store to
