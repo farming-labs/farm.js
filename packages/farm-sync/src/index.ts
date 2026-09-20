@@ -20,10 +20,12 @@ export type SyncPluginOptions = {
    */
   storage?: string;
   /**
-   * An `@farming-labs/orm` client (or a factory) to use instead of `storage`.
-   * Reach for this when the data lives in a real database.
+   * Your database, instead of `storage`. Pass a raw connection — a `pg` Pool, a
+   * Drizzle or Prisma client, a D1 binding, a Mongo client, an unstorage
+   * instance — and the orm runtime detects the driver and builds the model
+   * client from the schema. An already-built orm client is used as-is.
    */
-  client?: SyncOrmClient | (() => SyncOrmClient | Promise<SyncOrmClient>);
+  client?: unknown | (() => unknown | Promise<unknown>);
   /** Row filter applied to every read and write, server side. */
   where?: SyncWhere | false;
   /** Which models the browser may read or write. Unlisted models are not exposed. */
@@ -173,9 +175,24 @@ async function resolveSyncClient(
   models: Map<string, ResolvedSyncModel>,
 ): Promise<SyncOrmClient> {
   if (options.client) {
-    return typeof options.client === "function"
-      ? await (options.client as () => SyncOrmClient | Promise<SyncOrmClient>)()
-      : options.client;
+    const provided =
+      typeof options.client === "function"
+        ? await (options.client as () => unknown | Promise<unknown>)()
+        : options.client;
+
+    // Already model-shaped: an @farming-labs/orm client, or anything exposing
+    // the same four methods. Use it directly.
+    if (isModelClient(provided, models)) return provided;
+
+    // Otherwise it is a raw database connection (pg Pool, Drizzle, Prisma,
+    // D1, Mongo, an unstorage instance). The orm runtime detects which driver
+    // it is and builds the model client from the schema, so sync itself never
+    // grows a per-database code path.
+    const { createIntegrationOrm } = await import("@farm.js/core");
+    return (await createIntegrationOrm({
+      schema: options.schema,
+      client: provided,
+    })) as unknown as SyncOrmClient;
   }
 
   if (options.storage) {
@@ -204,6 +221,21 @@ function sendJson(res: any, status: number, payload: unknown): void {
   res.statusCode = status;
   res.setHeader?.("content-type", "application/json; charset=utf-8");
   res.end(JSON.stringify(payload));
+}
+
+/** True when every exposed model is already reachable with the methods sync calls. */
+function isModelClient(
+  value: unknown,
+  models: Map<string, ResolvedSyncModel>,
+): value is SyncOrmClient {
+  if (!value || typeof value !== "object") return false;
+
+  for (const name of models.keys()) {
+    const model = (value as Record<string, unknown>)[name] as Record<string, unknown> | undefined;
+    if (!model || typeof model !== "object") return false;
+    if (typeof model.findMany !== "function" || typeof model.create !== "function") return false;
+  }
+  return true;
 }
 
 /** Read and parse a JSON body, tolerating a body already parsed upstream. */

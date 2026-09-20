@@ -62,7 +62,10 @@
     "jsdom": "^25.0.0",
     "react": "^19.0.0",
     "typescript": "^5.3.3",
-    "vitest": "^3.2.7"
+    "vitest": "^3.2.7",
+    "@farming-labs/orm": "0.0.62",
+    "@farming-labs/orm-runtime": "0.0.62",
+    "unstorage": "^1.16.1"
   },
   "engines": {
     "node": ">=22.13.0"
