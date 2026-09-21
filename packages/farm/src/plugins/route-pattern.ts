@@ -41,9 +41,19 @@ export function resolveConfigRoutePathname(
   pathname: string,
   i18n?: ResolvedFarmI18nConfig,
 ): { pathname: string; locale?: string } {
-  if (!i18n?.enabled) return { pathname };
+  if (!i18n?.enabled) return { pathname: normalizeConfigRoutePathname(pathname) };
   const match = resolveFarmLocalePath(pathname, i18n);
-  return { pathname: match.pathname, locale: match.locale };
+  return { pathname: normalizeConfigRoutePathname(match.pathname), locale: match.locale };
+}
+
+/**
+ * Drop a trailing slash before matching, mirroring `normalizeRuntimePath` in
+ * the generated production matcher. Without this a request for `/old/` misses
+ * a `/old` rule in dev while matching it in a built app.
+ */
+function normalizeConfigRoutePathname(pathname: string): string {
+  if (!pathname || pathname === "/") return "/";
+  return pathname.endsWith("/") ? pathname.replace(/\/+$/, "") || "/" : pathname;
 }
 
 export function localizeConfigRouteDestination(
@@ -52,6 +62,21 @@ export function localizeConfigRouteDestination(
   i18n?: ResolvedFarmI18nConfig,
 ): string {
   return locale && i18n?.enabled ? localizeFarmHref(destination, locale, i18n) : destination;
+}
+
+/**
+ * Append a catch-all capture, absorbing the separator that precedes it.
+ *
+ * The production matcher works on split segments and lets a non-terminal
+ * catch-all consume zero of them (`minConsume = 0`), so `/x/*` + `/y` matches
+ * `/x/y` and `/files/:path*` matches `/files`. Emitting a bare `(.*)` after a
+ * literal `/` instead demands at least that separator, so the same rule was
+ * inert in dev. Folding the slash into the optional group is how path-to-regexp
+ * expresses the same thing, and it keeps one capture group so capture indexes
+ * are unchanged (a non-participating group reads back as "").
+ */
+function appendCatchAll(pattern: string): string {
+  return pattern.endsWith("/") ? `${pattern.slice(0, -1)}(?:/(.*))?` : `${pattern}(.*)`;
 }
 
 function escapeRegexCharacter(character: string): string {
@@ -74,7 +99,7 @@ export function compileConfigRoutePattern(source: string): CompiledConfigRoutePa
         captureIndex,
         catchAll: parameter[2] === "*",
       });
-      pattern += parameter[2] ? "(.*)" : "([^/]+)";
+      pattern = parameter[2] ? appendCatchAll(pattern) : `${pattern}([^/]+)`;
       captureIndex += 1;
       index += parameter[0].length;
       continue;
@@ -82,7 +107,7 @@ export function compileConfigRoutePattern(source: string): CompiledConfigRoutePa
 
     if (source[index] === "*") {
       tokens.push({ kind: "wildcard", captureIndex });
-      pattern += "(.*)";
+      pattern = appendCatchAll(pattern);
       captureIndex += 1;
       index += 1;
       continue;
