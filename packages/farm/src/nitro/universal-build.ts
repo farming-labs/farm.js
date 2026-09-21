@@ -4126,6 +4126,38 @@ export function toVirtualEntryImportSpecifier(modulePath: string): string {
   return JSON.stringify(modulePath.replace(/\\/g, "/"));
 }
 
+/**
+ * Runtime source that remounts the native `auth` integration in a built server.
+ *
+ * `resolveConfig` turns a top-level `auth` config into `integrations.auth`, but
+ * the generated production entry never calls `resolveConfig`: it rebuilds its
+ * integration map by re-evaluating the raw user config module, where auth only
+ * exists as `auth: true`. Without this the auth routes are absent from every
+ * production build and each one 404s while dev serves them.
+ *
+ * The import is literal so the bundler traces `@farm.js/auth` into the server
+ * output, and both pieces are empty when auth is disabled so nothing is pulled
+ * in for apps that do not use it.
+ */
+export function generateNativeAuthIntegrationSource(auth: ResolvedFarmConfig["auth"] | undefined): {
+  importSource: string;
+  registerSource: string;
+} {
+  if (auth?.enabled !== true) {
+    return { importSource: "", registerSource: "" };
+  }
+
+  return {
+    importSource: `import { createFarmAuthIntegration as __farmCreateAuthIntegration } from "@farm.js/auth/internal";`,
+    // resolveConfig rejects configuring both `auth` and `integrations.auth`,
+    // so this never overwrites a user-supplied integration.
+    registerSource: `configuredIntegrations.auth = __farmCreateAuthIntegration(${JSON.stringify(auth)}, {
+  root: process.cwd(),
+  mode: "production",
+});`,
+  };
+}
+
 export function generateConfiguredResponseHeadersRuntimeSource(): string {
   return `
 function getConfiguredSetCookieHeaders(headers) {
@@ -4625,10 +4657,12 @@ import { fileURLToPath as farmDocsFileURLToPath } from "node:url";`
   const instrumentationImport = instrumentationPath
     ? `import * as FarmInstrumentationModule from ${toVirtualEntryImportSpecifier(instrumentationPath)};`
     : "";
+  const nativeAuth = generateNativeAuthIntegrationSource(config.auth);
   const integrationImports = `
 ${configModulePath ? `import * as FarmUserConfigModule from ${toVirtualEntryImportSpecifier(configModulePath)};` : ""}
 ${layerConfigImports}
 ${integrationRuntimeImport}
+${nativeAuth.importSource}
 `;
   const imageRuntime = resolveImageRuntime(config, preset);
   const imageRuntimeImport =
@@ -4807,6 +4841,7 @@ for (const runtimeConfig of farmRuntimeConfigs) {
         : integration;
   }
 }
+${nativeAuth.registerSource}
 const farmIntegrationProviderModuleComponents = new Map([
 ${providerServerModules.entries}
 ]);
