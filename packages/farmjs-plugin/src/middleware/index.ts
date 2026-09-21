@@ -19,6 +19,8 @@ import type { IncomingMessage, ServerResponse } from "http";
 import { createRequire } from "node:module";
 import { _withAfterNodeMiddleware } from "@farm.js/core/after";
 import { devServableFileExists } from "../dev-static.js";
+import { matchesMiddlewareConfig } from "@farm.js/core/middleware";
+import type { MiddlewareConfig } from "@farm.js/core/middleware";
 import { middlewareMatchesPath, parseCookies, serializeCookie } from "./matching.js";
 
 // Create require for ESM compatibility
@@ -138,7 +140,7 @@ export interface DiscoveredMiddleware {
   module:
     | MiddlewareHandler
     | { build: () => { handlers: MiddlewareHandler[] }; setBasePath?: (path: string) => void };
-  config?: { matcher?: string[] };
+  config?: MiddlewareConfig;
 }
 
 /**
@@ -404,9 +406,27 @@ export default function farmMiddleware(options: FarmMiddlewareOptions = {}): Plu
           await discoveryPromise;
         }
 
-        // Find applicable middleware (cascading from root to specific)
+        // Create the context first: a function matcher in `export const
+        // config` receives it, so it has to exist before the filter runs.
+        const ctx = createContext(req, res, server);
+
+        // Use shared data if provided
+        if (sharedData) {
+          for (const [key, value] of sharedData) {
+            ctx.data.set(key, value);
+          }
+        }
+
+        // Find applicable middleware (cascading from root to specific). The
+        // directory path decides the subtree; `export const config` then
+        // narrows it, using core's own matcher so a matcher/exclude behaves
+        // here exactly as it does in the production runner.
         const applicable = Array.from(middlewareCache.values())
-          .filter((mw) => middlewareMatchesPath(pathname, mw.path))
+          .filter(
+            (mw) =>
+              middlewareMatchesPath(pathname, mw.path) &&
+              (!mw.config || matchesMiddlewareConfig(pathname, mw.config, ctx as never).matched),
+          )
           .sort((a, b) => a.path.split("/").length - b.path.split("/").length);
 
         if (applicable.length === 0) return false;
@@ -425,16 +445,6 @@ export default function farmMiddleware(options: FarmMiddlewareOptions = {}): Plu
           pc.dim(` (${applicable.length} middleware)`),
         ].join(" ");
         console.log(logMsg);
-
-        // Create full middleware context
-        const ctx = createContext(req, res, server);
-
-        // Use shared data if provided
-        if (sharedData) {
-          for (const [key, value] of sharedData) {
-            ctx.data.set(key, value);
-          }
-        }
 
         for (const mw of applicable) {
           const middleware = mw.module;

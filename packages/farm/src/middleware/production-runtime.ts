@@ -578,7 +578,13 @@ function matchPattern(
   };
 }
 
-function matchesConfig(
+/**
+ * Decide whether a middleware entry's `export const config` applies to a path.
+ *
+ * Exported so the standalone dev plugin matches exactly what the production
+ * runner does instead of maintaining a parallel implementation.
+ */
+export function matchesMiddlewareConfig(
   pathname: string,
   config: MiddlewareConfig,
   ctx: MiddlewareContext,
@@ -773,7 +779,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
     let parentData: MiddlewareContext["parent"] | undefined;
 
     if (globalConfig) {
-      const globalMatch = matchesConfig(initialPathname, globalConfig, ctx);
+      const globalMatch = matchesMiddlewareConfig(initialPathname, globalConfig, ctx);
       if (!globalMatch.matched) {
         return emptyResult(request);
       }
@@ -806,7 +812,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
     for (const candidate of applicable) {
       const { entry, routeMatch } = candidate;
       const configMatch = entry.config
-        ? matchesConfig(initialPathname, entry.config, ctx)
+        ? matchesMiddlewareConfig(initialPathname, entry.config, ctx)
         : { matched: true };
       if (!configMatch.matched) {
         continue;
