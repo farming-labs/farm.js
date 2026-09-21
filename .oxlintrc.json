@@ -3,5 +3,5 @@
   "rules": {
     "noUnusedVariables": "warn"
   },
-  "ignorePatterns": ["dist/**", "examples/**"]
+  "ignorePatterns": ["dist/**", "examples/**", "packages/farm-cli/test/fixtures/**"]
 }

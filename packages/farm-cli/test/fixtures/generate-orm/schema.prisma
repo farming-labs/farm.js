@@ -1,0 +1,57 @@
+datasource db {
+  provider = "postgresql"
+  url = "postgres://localhost/test"
+}
+
+// Farm.js integrations generated schema: start
+/// Farm.js generated from "alpha" model "orgs"
+model AlphaOrgs {
+  id String @id @default(uuid())
+  slug String @unique
+  @@map("orgs")
+}
+
+/// Farm.js generated from "alpha" model "members"
+model AlphaMembers {
+  id String @id @default(uuid())
+  /// References orgs.id (onDelete: cascade)
+  orgId String @map("org_id")
+  role String @default("member")
+  seatCount Int @default(1) @map("seat_count")
+  spendCap Float? @map("spend_cap")
+  active Boolean @default(true)
+  profile Json?
+  notes String?
+  joinedAt DateTime @default(now()) @map("joined_at")
+  /// References elsewhere.id
+  offsiteRef String? @map("offsite_ref")
+  @@map("members")
+  @@index([orgId], map: "members_org_id_idx")
+  @@unique([orgId, role])
+}
+
+/// Farm.js generated from "beta" model "projects"
+model BetaProjects {
+  id String @id @default(uuid())
+  projectTitle String
+  /// References tickets.id
+  ownerId String
+  createdAt DateTime
+  @@map("projects")
+  @@index([ownerId], map: "projects_ownerId_idx")
+}
+
+/// Farm.js generated from "beta" model "tickets"
+model BetaTickets {
+  id String @id @default(uuid())
+  ticketBody String?
+  @@map("tickets")
+}
+
+/// Farm.js generated from "widgets" model "widgets"
+model WidgetsWidgets {
+  id String @id @default(uuid())
+  label String
+  @@map("widgets")
+}
+// Farm.js integrations generated schema: end
