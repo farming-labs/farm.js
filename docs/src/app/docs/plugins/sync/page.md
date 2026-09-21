@@ -48,13 +48,13 @@ export const schema = defineSchema({
 
 Field metadata does real work, so configuration does not repeat it:
 
-| Declaration | What it decides |
-| --- | --- |
-| `primaryKey: true` | the row key |
-| `type: "enum"` + `values` | the column's type, and validation before the optimistic write |
-| `reference` | relationships between models |
+| Declaration                  | What it decides                                                    |
+| ---------------------------- | ------------------------------------------------------------------ |
+| `primaryKey: true`           | the row key                                                        |
+| `type: "enum"` + `values`    | the column's type, and validation before the optimistic write      |
+| `reference`                  | relationships between models                                       |
 | `datetime` named `updatedAt` | incremental sync — after the first load only changed rows are sent |
-| `name` on a model or field | the real table or column name in an existing database |
+| `name` on a model or field   | the real table or column name in an existing database              |
 
 ## Configure the plugin
 
@@ -78,16 +78,16 @@ export default defineConfig({
 
 ### Options
 
-| Option | Purpose |
-| --- | --- |
-| `schema` | the declarative schema above |
-| `storage` | a mount name from `storage.mounts` |
-| `client` | your database instead of a mount; see below |
-| `models` | which models the browser may touch: `"write"`, `"read"`, or `false` |
-| `where` | the row filter applied to every read and write, server side |
-| `middleware` | request middleware producing the context `where` reads |
-| `persist` | keep rows on the device for warm starts. Default `true` |
-| `path` | the endpoint the browser calls. Default `/_farm/sync` |
+| Option       | Purpose                                                             |
+| ------------ | ------------------------------------------------------------------- |
+| `schema`     | the declarative schema above                                        |
+| `storage`    | a mount name from `storage.mounts`                                  |
+| `client`     | your database instead of a mount; see below                         |
+| `models`     | which models the browser may touch: `"write"`, `"read"`, or `false` |
+| `where`      | the row filter applied to every read and write, server side         |
+| `middleware` | request middleware producing the context `where` reads              |
+| `persist`    | keep rows on the device for warm starts. Default `true`             |
+| `path`       | the endpoint the browser calls. Default `/_farm/sync`               |
 
 ## Point it at your database
 
@@ -118,11 +118,11 @@ SQL and has no per-database code path.
 Sync reads and writes rows. It never creates or alters tables, so what you need
 before the first query depends on where the data lives.
 
-| Setup | What you do first |
-| --- | --- |
-| `storage: "app"` | nothing. A mount is key-value, so there is no table to create |
+| Setup                      | What you do first                                                 |
+| -------------------------- | ----------------------------------------------------------------- |
+| `storage: "app"`           | nothing. A mount is key-value, so there is no table to create     |
 | A database you already use | nothing. Describe the existing tables with `name` mappings, below |
-| A new table in a database | create it yourself, with the tooling you already use |
+| A new table in a database  | create it yourself, with the tooling you already use              |
 
 For the last case, keep using whatever owns your schema. If the project already
 uses Prisma or Drizzle, keep them — sync reads through their client, and their
@@ -142,7 +142,7 @@ simplest option: sync drives it directly, and there is no second migration
 system to keep in step. For now that means writing the `CREATE TABLE` yourself
 once; a command that emits it from the schema is planned ([#1297](https://github.com/farming-labs/farm.js/issues/1297)).
 
-If a query fails with *relation "tasks" does not exist*, the table has not been
+If a query fails with _relation "tasks" does not exist_, the table has not been
 created yet — sync will not create it for you.
 
 ### Syncing tables you already have
@@ -194,14 +194,14 @@ The predicate runs in the browser over rows already on the device, so any
 expression is fine. Which rows reach the device is decided separately, by the
 server's row filter.
 
-| Field | Meaning |
-| --- | --- |
-| `rows` | matching rows |
-| `status` | `"loading"` only on a genuine cold start; a revisit with persistence on is `"ready"` |
-| `error` | a failed read. Previously loaded rows stay visible |
-| `pending` | writes in flight against this model |
-| `paused` | writes waiting for the connection to return |
-| `isEmpty` | no rows matched |
+| Field     | Meaning                                                                              |
+| --------- | ------------------------------------------------------------------------------------ |
+| `rows`    | matching rows                                                                        |
+| `status`  | `"loading"` only on a genuine cold start; a revisit with persistence on is `"ready"` |
+| `error`   | a failed read. Previously loaded rows stay visible                                   |
+| `pending` | writes in flight against this model                                                  |
+| `paused`  | writes waiting for the connection to return                                          |
+| `isEmpty` | no rows matched                                                                      |
 
 `useRow(db.tasks, id)` subscribes to a single row.
 
@@ -221,14 +221,14 @@ be omitted.
 Every write returns a handle, usable whichever way suits the call site:
 
 ```ts
-tasks.insert({ title });                    // fire and forget
-await tasks.insert({ title });              // wait for the server
-await tasks.insert({ title }).persisted;    // the same, named explicitly
-tasks.insert({ title }).catch(showError);   // handle the failure inline
+tasks.insert({ title }); // fire and forget
+await tasks.insert({ title }); // wait for the server
+await tasks.insert({ title }).persisted; // the same, named explicitly
+tasks.insert({ title }).catch(showError); // handle the failure inline
 
 const handle = tasks.insert({ title });
-handle.key;     // the row key, available before any network call
-handle.state;   // "pending" | "paused" | "completed" | "failed"
+handle.key; // the row key, available before any network call
+handle.state; // "pending" | "paused" | "completed" | "failed"
 ```
 
 Ignoring the handle is safe: a write the interface already rolled back does not
@@ -236,12 +236,12 @@ surface as an unhandled rejection.
 
 ### What happens when a write fails
 
-| Situation | Behavior |
-| --- | --- |
-| Server rejects it | the row reverts to its previous values, and the handle rejects |
-| Network error or 5xx | retried with backoff; the row stays on screen throughout |
-| Offline | the write pauses, `paused` increments, and it sends itself on reconnect |
-| Reload while pending | the pending write is lost; optimistic state is in memory only |
+| Situation            | Behavior                                                                |
+| -------------------- | ----------------------------------------------------------------------- |
+| Server rejects it    | the row reverts to its previous values, and the handle rejects          |
+| Network error or 5xx | retried with backoff; the row stays on screen throughout                |
+| Offline              | the write pauses, `paused` increments, and it sends itself on reconnect |
+| Reload while pending | the pending write is lost; optimistic state is in memory only           |
 
 Because a rejected write reverts silently, surface the reason:
 
@@ -257,7 +257,9 @@ const [error, setError] = useState<string | null>(null);
   Done
 </button>;
 
-{error && <p role="alert">{error}</p>}
+{
+  error && <p role="alert">{error}</p>;
+}
 ```
 
 ## Security

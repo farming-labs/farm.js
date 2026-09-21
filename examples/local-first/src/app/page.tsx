@@ -1,6 +1,6 @@
 "use client";
 
-import { db } from "@farm.js/sync/client";
+import { db, type SyncMutationHandle } from "@farm.js/sync/client";
 import { useLiveQuery } from "@farm.js/sync/react";
 import { useState } from "react";
 
@@ -21,9 +21,9 @@ export default function LocalFirstPage() {
    * A write that the server refuses is rolled back on screen. Without showing
    * why, the row would simply vanish — so every mutation reports its failure.
    */
-  const run = (handle: { catch(onRejected: (cause: Error) => void): unknown }) => {
+  const run = (handle: SyncMutationHandle) => {
     setError(null);
-    handle.catch((cause: Error) => setError(cause.message));
+    handle.catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
   };
 
   const open = useLiveQuery<Task>(tasks, (task) => task.status === "open", {
