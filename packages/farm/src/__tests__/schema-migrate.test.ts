@@ -375,6 +375,29 @@ describe("table owners", () => {
     expect(logs.join("\n")).toContain("jobs stores data through a storage mount");
   });
 
+  it("hands the app config to an owner that reads its client from there", async () => {
+    const { DatabaseSync } = await import("node:sqlite");
+    const database = new DatabaseSync(":memory:");
+    // An integration configured through `storage.client` rather than its own
+    // options — the shape @farm.js/stripe uses.
+    const integration = declareSchemaTables(
+      { type: "stripe" },
+      {
+        name: "stripe",
+        schema,
+        resolveClient: async (config) =>
+          (config.storage as { client?: unknown } | undefined)?.client,
+      },
+    );
+
+    const result = await migrateSchemaTables(
+      findSchemaTableOwners({ integrations: { billing: integration } })[0]!,
+      { apply: true, config: { storage: { client: database } } },
+    );
+
+    expect(result.applied).toContain("todo_items");
+  });
+
   it("finds nothing when no plugin declares tables", () => {
     expect(findSchemaTableOwners({ plugins: [{ name: "farm:unrelated" }] })).toEqual([]);
     expect(findSchemaTableOwners({})).toEqual([]);

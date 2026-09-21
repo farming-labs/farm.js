@@ -146,8 +146,14 @@ left out of its `models` option is never created.
 ### The client
 
 `resolveClient` is called only by tooling, never on the request path, so it can
-be as expensive as it needs to be. Return whatever the app configured — Farm
-detects the shape:
+be as expensive as it needs to be. It receives the app's resolved config, for an
+owner whose connection lives there rather than in its own options:
+
+```ts
+resolveClient: (config) => config.storage?.client,
+```
+
+Return whatever the app configured — Farm detects the shape:
 
 | Returned                                                          | Result                                                      |
 | ----------------------------------------------------------------- | ----------------------------------------------------------- |

@@ -27,8 +27,14 @@ export interface FarmSchemaTablesDeclaration {
    * schema; narrow it when an app shares one schema with the rest of its code.
    */
   models?: readonly string[];
-  /** Resolves the configured database client, or the storage mount behind it. */
-  resolveClient(): Promise<unknown>;
+  /**
+   * Resolves the configured database client, or the storage mount behind it.
+   *
+   * The app's resolved config is passed because an owner may read its
+   * connection from there rather than from its own options — an integration
+   * configured through `storage.client`, for example.
+   */
+  resolveClient(config: FarmSchemaOwnerConfig): Promise<unknown>;
   /** Set explicitly when the client's dialect cannot be detected. */
   dialect?: FarmSqlDialect;
 }
@@ -103,7 +109,16 @@ export function collectOwnerModels(owner: FarmSchemaTablesDeclaration): Collecte
   return collectSchemaModels([[owner.name, owner.schema, owner.models]]);
 }
 
+/** What an owner may read when resolving its client. */
+export type FarmSchemaOwnerConfig = {
+  storage?: unknown;
+  integrations?: Record<string, unknown> | readonly unknown[];
+  [key: string]: unknown;
+};
+
 export interface MigrateSchemaTablesOptions {
+  /** The app's resolved config, handed to the owner's `resolveClient`. */
+  config?: FarmSchemaOwnerConfig;
   /** Write the plan to this path instead of applying it. */
   write?: string;
   /** Execute the plan. */
@@ -128,7 +143,7 @@ export async function migrateSchemaTables(
   options: MigrateSchemaTablesOptions = {},
 ): Promise<MigrateSchemaTablesResult> {
   const log = options.log ?? (() => {});
-  const client = await owner.resolveClient();
+  const client = await owner.resolveClient(options.config ?? {});
   const adapter = createSchemaExecutor(client, owner.name);
 
   if (!adapter) {

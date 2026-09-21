@@ -16,7 +16,7 @@ export interface MigrateSchemaOptions {
   apply?: boolean;
 }
 
-async function loadOwners(options: MigrateSchemaOptions) {
+async function loadApp(options: MigrateSchemaOptions) {
   const root = path.resolve(options.root || process.cwd());
   const userConfig = await loadConfig(root, options.configPath, "production");
   if (!userConfig) {
@@ -24,12 +24,12 @@ async function loadOwners(options: MigrateSchemaOptions) {
   }
 
   const config = await resolveConfig({ ...userConfig, root }, "production");
-  return findSchemaTableOwners(config);
+  return { config, owners: findSchemaTableOwners(config) };
 }
 
 /** Names of the plugins in this app that own tables, for help and errors. */
 export async function listSchemaTableOwners(options: MigrateSchemaOptions = {}): Promise<string[]> {
-  return (await loadOwners(options)).map((owner) => owner.name);
+  return (await loadApp(options)).owners.map((owner) => owner.name);
 }
 
 /**
@@ -42,7 +42,7 @@ export async function migrateSchema(
   name: string,
   options: MigrateSchemaOptions = {},
 ): Promise<void> {
-  const owners = await loadOwners(options);
+  const { config, owners } = await loadApp(options);
   const owner = owners.find((candidate) => candidate.name === name);
 
   if (!owner) {
@@ -55,6 +55,7 @@ export async function migrateSchema(
   }
 
   const result = await migrateSchemaTables(owner, {
+    config,
     write: options.write,
     apply: options.apply,
     log: (message) => logger.info(message),
