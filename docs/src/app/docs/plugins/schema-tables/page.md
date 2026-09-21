@@ -79,7 +79,7 @@ drop-plus-add look identical from here, and one of them destroys data. That call
 stays with the person who knows which one it was — take the column change to
 your own migration tooling.
 
-Statements are emitted as `if not exists`, so `--apply` is safe to re-run.
+Statements are emitted as `IF NOT EXISTS`, so `--apply` is safe to re-run.
 
 ### When it does not apply
 
