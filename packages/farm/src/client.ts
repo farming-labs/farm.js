@@ -74,6 +74,14 @@ export {
   initPersistedClientCache,
   storageClientCacheAdapter,
 } from "./client-cache-persistence";
+// The shared browser store. Features that keep their own rows (for example
+// `@farm.js/sync`) persist through it rather than opening a second store.
+export { getFarmClientDataCache, normalizeFarmClientCacheKey } from "./client-cache";
+export type {
+  FarmClientCacheEntry,
+  FarmClientCacheKey,
+  FarmClientCacheStatus,
+} from "./client-cache";
 export type {
   ClientCachePersistenceOptions,
   FarmClientCacheAdapter,
