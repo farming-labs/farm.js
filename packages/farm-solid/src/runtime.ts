@@ -150,6 +150,18 @@ function normalizeProps(element: FarmSolidElement): Record<string, unknown> {
     props.onDblClick = props.onDoubleClick;
     delete props.onDoubleClick;
   }
+  // React reconciliation metadata, never a DOM attribute.
+  delete props.key;
+  // React seeds uncontrolled inputs by rendering defaultValue/defaultChecked as
+  // value/checked; Solid would otherwise emit a dead `defaultvalue` attribute.
+  if ("defaultValue" in props && !("value" in props)) {
+    props.value = props.defaultValue;
+    delete props.defaultValue;
+  }
+  if ("defaultChecked" in props && !("checked" in props)) {
+    props.checked = props.defaultChecked;
+    delete props.defaultChecked;
+  }
   delete props.suppressHydrationWarning;
 
   if (element.children.length > 0) {

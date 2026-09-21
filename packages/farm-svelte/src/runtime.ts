@@ -147,6 +147,21 @@ export function normalizeFarmSvelteProps(element: FarmSvelteElement): Record<str
     props.style = farmStyleObjectToCss(props.style as Record<string, unknown>);
   }
 
+  // React reconciliation metadata, never DOM attributes. Svelte would spread
+  // them onto <svelte:element> as literal key="..."/ref="[object Object]".
+  delete props.key;
+  delete props.ref;
+  // React seeds uncontrolled inputs by rendering defaultValue/defaultChecked as
+  // value/checked; a dead `defaultvalue` attribute would leak otherwise.
+  if ("defaultValue" in props && !("value" in props)) {
+    props.value = props.defaultValue;
+    delete props.defaultValue;
+  }
+  if ("defaultChecked" in props && !("checked" in props)) {
+    props.checked = props.defaultChecked;
+    delete props.defaultChecked;
+  }
+
   for (const key of Object.keys(props)) {
     if (/^on[A-Z]/.test(key)) {
       const lowered = key.slice(2).toLowerCase();

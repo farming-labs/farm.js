@@ -136,6 +136,29 @@ export function defineRendererServerConformance(runtime: RendererServerFixture):
       expect(html).toMatch(/z-index:\s*3(?!px)/);
     });
 
+    it("does not leak React-only props and maps defaultValue like React", async () => {
+      // key and ref are React reconciliation metadata, never DOM attributes.
+      const withMetadata = await runtime.renderToString(
+        runtime.createElement("div", {
+          key: "row-1",
+          ref: { current: null },
+          id: "kept",
+        }),
+      );
+      expect(withMetadata).toContain('id="kept"');
+      expect(withMetadata.toLowerCase()).not.toContain("row-1");
+      expect(withMetadata.toLowerCase()).not.toContain(">ref<");
+      expect(withMetadata.toLowerCase()).not.toMatch(/\sref=/);
+      expect(withMetadata.toLowerCase()).not.toMatch(/\skey=/);
+
+      // React seeds an uncontrolled input by rendering defaultValue as value.
+      const withDefaultValue = await runtime.renderToString(
+        runtime.createElement("input", { defaultValue: "seed" }),
+      );
+      expect(withDefaultValue).toContain('value="seed"');
+      expect(withDefaultValue.toLowerCase()).not.toContain("defaultvalue");
+    });
+
     it("skips boolean, null, and undefined children like React", async () => {
       // A single boolean child is the `cond && <X/>` idiom. React drops
       // `false`/`true`/`null`/`undefined`; a shim that passes a raw scalar

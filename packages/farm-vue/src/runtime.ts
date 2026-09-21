@@ -175,6 +175,17 @@ function normalizeProps(element: FarmVueElement): {
     props.onDblclick = props.onDoubleClick;
     delete props.onDoubleClick;
   }
+  // React seeds uncontrolled inputs by rendering defaultValue/defaultChecked as
+  // value/checked; Vue reserves key/ref itself but would emit a dead
+  // `defaultvalue` attribute otherwise.
+  if ("defaultValue" in props && !("value" in props)) {
+    props.value = props.defaultValue;
+    delete props.defaultValue;
+  }
+  if ("defaultChecked" in props && !("checked" in props)) {
+    props.checked = props.defaultChecked;
+    delete props.defaultChecked;
+  }
   delete props.suppressHydrationWarning;
 
   const sourceChildren = element.children.length
