@@ -291,6 +291,19 @@ async function main() {
         return;
       }
       
+      // A server redirect during navigation is followed transparently by
+      // fetch, so the payload is for res.url while the address bar still shows
+      // the URL the click pushed. Reconcile it so refresh, share, and back all
+      // reflect the page actually rendered (auth gates redirect this way).
+      if (res.redirected && res.url) {
+        const dest = new URL(res.url);
+        if (dest.origin === location.origin) {
+          const target = dest.pathname + dest.search + dest.hash;
+          if (target !== location.pathname + location.search + location.hash) {
+            history.replaceState(null, '', target);
+          }
+        }
+      }
       const newPayload = await createFromReadableStream(res.body);
       setPayloadRef.current?.(newPayload);
       debug('RSC navigation complete');
