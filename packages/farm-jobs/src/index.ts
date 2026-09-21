@@ -99,7 +99,7 @@ export type JobsTriggerBody<TInput> = [TInput] extends [void]
               $options?: JobsTriggerOptions;
             }
           : {
-              value: TInput;
+              $value: TInput;
               $options?: JobsTriggerOptions;
             })
       | JobsLegacyTriggerBody<TInput>;
@@ -135,7 +135,7 @@ export type JobsScheduleBody<TInput> = [TInput] extends [void]
               $schedule: JobsScheduleConfig;
             }
           : {
-              value: TInput;
+              $value: TInput;
               $schedule: JobsScheduleConfig;
             })
       | JobsLegacyScheduleBody<TInput>;
@@ -568,16 +568,18 @@ function isLegacyScheduleBody(value: Record<string, unknown>) {
 }
 
 function readInlinePayload(value: Record<string, unknown>, reservedKeys: readonly string[]) {
-  const payload = stripReservedKeys(value, reservedKeys);
-  const keys = Object.keys(payload);
-  if (keys.length === 0) {
-    return undefined;
+  // Scalar task inputs are wrapped as { $value: TInput } so run() receives the
+  // scalar itself. The marker is reserved and $-prefixed like $options and
+  // $schedule, which keeps it distinguishable from payload data: an object
+  // input that happens to carry a "value" key used to be indistinguishable
+  // from the wrapper and was silently unwrapped into its own property.
+  if (hasOwn(value, "$value")) {
+    return value.$value;
   }
-  // Scalar task inputs are declared as { value: TInput } in the typed body;
-  // unwrap that encoding so run() receives the scalar itself, matching the
-  // legacy { input } form. Object inputs spread inline and keep their shape.
-  if (keys.length === 1 && keys[0] === "value") {
-    return payload.value;
+
+  const payload = stripReservedKeys(value, reservedKeys);
+  if (Object.keys(payload).length === 0) {
+    return undefined;
   }
   return payload;
 }

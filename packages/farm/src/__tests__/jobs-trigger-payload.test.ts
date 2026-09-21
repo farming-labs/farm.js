@@ -31,7 +31,7 @@ describe("jobs trigger payload shapes", () => {
     vi.restoreAllMocks();
   });
 
-  it("delivers scalar { value } bodies unwrapped, matching the legacy input form", async () => {
+  it("delivers scalar { $value } bodies unwrapped, matching the legacy input form", async () => {
     const tasks = defineTasks({
       countTokens: task({
         description: "Scalar input task.",
@@ -45,8 +45,9 @@ describe("jobs trigger payload shapes", () => {
       .mockImplementation(async () => jsonResponse({ id: "run_1" }));
     const api = createApi(tasks);
 
-    // The typed body for a scalar TInput is { value: TInput }.
-    const typed = await api.jobs.countTokens.trigger({ body: { value: 42 } });
+    // The typed body for a scalar TInput is { $value: TInput }. The marker is
+    // reserved and $-prefixed so it cannot collide with payload data.
+    const typed = await api.jobs.countTokens.trigger({ body: { $value: 42 } });
     expect(typed.error).toBeNull();
     expect(sentPayload(fetchSpy, 0)).toBe(42);
 
@@ -75,5 +76,53 @@ describe("jobs trigger payload shapes", () => {
     });
     expect(result.error).toBeNull();
     expect(sentPayload(fetchSpy, 0)).toEqual({ value: 3, unit: "kg" });
+  });
+
+  it("keeps a single-key object input whose only field is named value", async () => {
+    // The wrapper used to be a bare { value }, so an object input carrying
+    // exactly one "value" field was indistinguishable from it and arrived at
+    // the provider as the bare scalar instead of the object.
+    const tasks = defineTasks({
+      storeNote: task({
+        description: "Object input whose only field is value.",
+        async run(input: { value: string }) {
+          return { stored: input.value };
+        },
+      }),
+    });
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => jsonResponse({ id: "run_3" }));
+    const api = createApi(tasks);
+
+    const result = await api.jobs.storeNote.trigger({ body: { value: "hello" } });
+
+    expect(result.error).toBeNull();
+    expect(sentPayload(fetchSpy, 0)).toEqual({ value: "hello" });
+  });
+
+  it("still reads a bare { input } body as the documented legacy envelope", async () => {
+    // The { input, options } envelope is documented as still accepted, so a
+    // body of exactly { input } is read as that envelope and unwrapped. An
+    // object input whose only field is named "input" is therefore still
+    // ambiguous on the wire; retiring that collision means deprecating the
+    // legacy envelope, which is tracked separately in #1313.
+    const tasks = defineTasks({
+      storeCount: task({
+        description: "Object input whose only field is input.",
+        async run(payload: { input: number }) {
+          return { stored: payload.input };
+        },
+      }),
+    });
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => jsonResponse({ id: "run_4" }));
+    const api = createApi(tasks);
+
+    const result = await api.jobs.storeCount.trigger({ body: { input: 5 } });
+
+    expect(result.error).toBeNull();
+    expect(sentPayload(fetchSpy, 0)).toBe(5);
   });
 });
