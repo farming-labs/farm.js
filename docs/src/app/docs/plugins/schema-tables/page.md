@@ -102,7 +102,7 @@ Two setups need nothing, and say so rather than guessing:
 Wrap the plugin you already return in `declareSchemaTables`:
 
 ```ts title="src/index.ts"
-import { declareSchemaTables, definePlugin, schemaTables } from "@farm.js/core";
+import { declareSchemaTables, definePlugin } from "@farm.js/core";
 
 export function jobs(options: JobsOptions) {
   const plugin = definePlugin({
@@ -112,34 +112,36 @@ export function jobs(options: JobsOptions) {
 
   return declareSchemaTables(plugin, {
     name: "jobs",
-    tables: schemaTables(options.schema),
+    schema: options.schema,
     resolveClient: () => resolveClient(options),
   });
 }
 ```
 
 That is the whole contract. `farm jobs migrate` now works in any app that
-configures the plugin.
+configures the plugin, and `farm generate --orm prisma|drizzle|...` includes the
+plugin's models alongside every integration's.
 
 | Field           | Purpose                                                          |
 | --------------- | ---------------------------------------------------------------- |
 | `name`          | the `<plugin>` in `farm <plugin> migrate`                        |
-| `tables`        | the tables this plugin owns; build with `schemaTables(schema)`   |
+| `schema`        | the schema whose models this plugin stores                       |
+| `models`        | model keys it owns; defaults to every model in the schema        |
 | `resolveClient` | returns the configured connection, or the storage mount          |
 | `dialect`       | only when the dialect cannot be detected from the client's shape |
 
 ### Declare only what you own
 
-`schemaTables(schema)` claims every model. Pass a list to narrow it:
+A declaration claims every model in the schema. Narrow it with `models` when an
+app hands your plugin a schema it shares with the rest of its code:
 
 ```ts
-tables: schemaTables(options.schema, ["jobs", "jobRuns"]),
+models: ["jobs", "jobRuns"],
 ```
 
-This matters when an app hands your plugin a schema it shares with the rest of
-its code. A model the plugin was never given control of is not its table to
-create. `@farm.js/sync` narrows to the models an app opened to the browser, so a
-model left out of its `models` option is never created.
+A model the plugin was never given control of is not its table to create.
+`@farm.js/sync` narrows to the models an app opened to the browser, so a model
+left out of its `models` option is never created.
 
 ### The client
 
@@ -161,19 +163,33 @@ Postgres — the shape alone cannot tell Postgres and MySQL apart.
 Everything comes from schema metadata, so the SQL is derivable and reviewable
 before it runs:
 
-| Declaration                   | What it emits                                         |
-| ----------------------------- | ----------------------------------------------------- |
-| `name` on a model or field    | the real table or column name                         |
-| `primaryKey: true`            | `primary key`                                         |
-| `required` without `nullable` | `not null`                                            |
-| `unique: true`                | a `unique (...)` clause                               |
-| `index: true`                 | `create index <table>_<column>_idx`                   |
-| `constraints: [...]`          | one index per constraint, unique when declared        |
-| `default`                     | a literal default, for strings, numbers, and booleans |
-| `type`                        | the column type for the target dialect                |
+| Declaration                      | What it emits                                              |
+| -------------------------------- | ---------------------------------------------------------- |
+| `name` on a model or field       | the real table or column name                              |
+| `type`                           | the column type for the target dialect                     |
+| `primaryKey: true`               | `PRIMARY KEY`                                              |
+| `unique: true`                   | `UNIQUE` on the column                                     |
+| `index: true`                    | `CREATE INDEX "<table>_<column>_idx"`                      |
+| `constraints: [...]`             | `CREATE [UNIQUE] INDEX "<table>_<columns>_<type>"`         |
+| `default`                        | a literal, for strings, numbers, and booleans              |
+| `default: "now"` on a `datetime` | `DEFAULT CURRENT_TIMESTAMP`                                |
+| `reference`                      | `REFERENCES <table> (<column>)`, with `ON DELETE` when set |
 
-Postgres, SQLite, and MySQL are supported.
+Postgres, SQLite, and MySQL are supported. A `reference` to a model outside this
+owner's schema is left as a comment rather than a foreign key, since the other
+table may not exist yet.
 
-Table and column names fall back to the schema's own keys, which is exactly what
-the runtime reads, so the tables this creates are the tables your queries find.
+### Two things worth knowing
+
+**Columns are `NOT NULL` by default.** A field is nullable only when it says so:
+
+```ts
+updatedAt: { type: "datetime" }                  // NOT NULL
+updatedAt: { type: "datetime", nullable: true }  // nullable
+updatedAt: { type: "datetime", required: false } // nullable
+```
+
+**Names fall back to the schema's own keys**, which is exactly what the runtime
+reads, so the tables this creates are the tables your queries find. A model
+`tasks` with a field `listId` becomes `tasks("listId")`, not `tasks("list_id")`.
 Set `name` on a model or field to point at a different one.
