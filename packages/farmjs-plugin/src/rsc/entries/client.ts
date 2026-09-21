@@ -235,7 +235,14 @@ async function main() {
           }
           if (e.metaKey || e.altKey || e.ctrlKey || e.shiftKey) return;
           if (e.button !== 0) return;
-          
+
+          // Same-document fragment link: let the browser update the hash and
+          // scroll to the anchor natively. Refetching the route here would
+          // discard the browser's fragment scroll and re-render for nothing.
+          if (a.hash && a.pathname === location.pathname && a.search === location.search) {
+            return;
+          }
+
           e.preventDefault();
           history.pushState(null, '', a.href);
           nav();
