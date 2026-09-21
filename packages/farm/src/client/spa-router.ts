@@ -656,10 +656,17 @@ export class SPARouter {
 
     const data = await readDeferredDataResponse<PageData>(response);
 
-    // Cache the result
+    // Cache the result. Expiry was previously only consulted on read, so a
+    // long-lived tab that navigates or prefetches many distinct routes grew
+    // this map without bound; sweeping on write bounds it to entries touched
+    // within the cacheMaxAge window.
+    const now = Date.now();
+    for (const [key, entry] of this.cache) {
+      if (now - entry.timestamp >= this.options.cacheMaxAge) this.cache.delete(key);
+    }
     this.cache.set(cacheKey, {
       data,
-      timestamp: Date.now(),
+      timestamp: now,
     });
 
     return data;
