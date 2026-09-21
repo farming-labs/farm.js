@@ -80,14 +80,15 @@ describe("static routes under a base path", () => {
       options: resolvePwaOptions({ cache: "auto" }),
     });
     expect(result.staticRoutes["/app/@alice"]).toBe("@alice/index.html");
-    // Asset URLs stay percent-encoded (unchanged): the precache URL and the
-    // STATIC_ROUTES *value* still use encodeURIComponent segments.
-    expect(result.precacheUrls).toContain("/app/%40alice/index.html");
+    // The precache URL and the STATIC_ROUTES *value* keep '@' literal too, the
+    // same form the browser requests, so a direct asset fetch and the offline
+    // navigation lookup hit the same cache key.
+    expect(result.precacheUrls).toContain("/app/@alice/index.html");
 
     const listeners = new Map<string, (event: any) => void>();
     const cached = new Map([
       ["/app/index.html", "home"],
-      ["/app/%40alice/index.html", "profile"],
+      ["/app/@alice/index.html", "profile"],
     ]);
     runInNewContext(await readFile(result.workerPath, "utf8"), {
       URL,

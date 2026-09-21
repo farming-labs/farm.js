@@ -490,8 +490,19 @@ function encodeRoutePathname(pathname: string): string {
 }
 
 function encodePathname(pathname: string): string {
+  // Match how a browser encodes location.pathname. encodeURIComponent is safe
+  // for every character but over-encodes the path sub-delimiters and ":"/"@"
+  // that browsers leave literal, so a precached asset like /logo@2x.css would
+  // be stored (and its PRECACHE_PATHS key derived) as /logo%402x.css and never
+  // match the live request for /logo@2x.css. Restore that path-safe set while
+  // leaving "?", "#", spaces and non-ASCII percent-encoded, the same divergence
+  // encodeRoutePathname documents for static-route keys.
   return pathname
     .split("/")
-    .map((segment) => encodeURIComponent(segment))
+    .map((segment) =>
+      encodeURIComponent(segment).replace(/%(24|26|2B|2C|3A|3B|3D|40)/gi, (match) =>
+        decodeURIComponent(match),
+      ),
+    )
     .join("/");
 }
