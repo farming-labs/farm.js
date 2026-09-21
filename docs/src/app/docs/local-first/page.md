@@ -303,6 +303,13 @@ Be honest with yourself about where built-in behavior ends, and design inside it
   `navigator.onLine` is false, and reconcile through your normal mutation path once the `online`
   event fires — rather than letting writes fail silently.
 
+## When you want rows instead of responses
+
+Everything above treats a cached response as the unit of data. When the same row
+appears in several views and you would rather update it once, the
+[sync plugin](/docs/plugins/sync) turns a schema into browser-side collections
+with the same optimistic, offline, and warm-start behavior applied per row.
+
 If your product genuinely requires long offline editing sessions or multi-device merge — field
 work, collaborative documents — pair Farm with a dedicated client store or sync engine for that
 feature's data. The division of labor stays clean: the sync client owns the read path and local
