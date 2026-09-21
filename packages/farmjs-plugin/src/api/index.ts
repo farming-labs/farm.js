@@ -30,7 +30,12 @@ import {
   readNodeRequestBody,
   resolveFarmServerConfig,
 } from "@farm.js/core/internal/production-runtime";
-import { invokeAPIRouteEndpoint } from "@farm.js/core/api/runtime";
+import {
+  getAllowedAPIRouteMethods,
+  invokeAPIRouteEndpoint,
+  matchAPIRouteAtBasePath,
+  resolveAPIRouteEndpoint,
+} from "@farm.js/core/api/runtime";
 import { sendWebResponse } from "@farm.js/core/server";
 
 export interface FarmApiOptions {
@@ -116,25 +121,32 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
         const method = request.method;
         const pathname = url.pathname;
 
-        // Find matching route
-        const route = apiRoutesCache.get(pathname);
-        if (!route) {
+        // Match through core's matcher, the same one the production entry
+        // uses, so dynamic segments resolve here too. An exact Map lookup
+        // registers `src/api/users/[id]/route.ts` under the literal
+        // "/api/users/[id]" and 404s every real request for it.
+        const match = matchAPIRouteAtBasePath(apiRoutesCache, pathname);
+        if (!match) {
           return new Response(JSON.stringify({ error: "Not Found" }), {
             status: 404,
             headers: { "Content-Type": "application/json" },
           });
         }
 
-        const endpoint = route.endpoints[method];
+        const route = match.route;
+        const endpoint = resolveAPIRouteEndpoint(route, method);
         if (!endpoint) {
           return new Response(JSON.stringify({ error: "Method Not Allowed" }), {
             status: 405,
-            headers: { "Content-Type": "application/json" },
+            headers: {
+              Allow: getAllowedAPIRouteMethods(route).join(", "),
+              "Content-Type": "application/json",
+            },
           });
         }
 
         try {
-          return await invokeAPIRouteEndpoint(endpoint, request);
+          return await invokeAPIRouteEndpoint(endpoint, request, match.params);
         } catch (error: any) {
           return new Response(JSON.stringify({ error: error.message || "Internal Server Error" }), {
             status: 500,
@@ -153,20 +165,23 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
       const url = new URL(request.url);
       const method = request.method;
 
-      // Find matching route
-      const route = apiRoutesCache.get(url.pathname);
-      if (!route) {
+      // Same core matcher as above so dynamic segments resolve here too.
+      const match = matchAPIRouteAtBasePath(apiRoutesCache, url.pathname);
+      if (!match) {
         return new Response(JSON.stringify({ error: "Not Found" }), {
           status: 404,
           headers: { "Content-Type": "application/json" },
         });
       }
 
-      const endpoint = route.endpoints[method];
+      const endpoint = resolveAPIRouteEndpoint(match.route, method);
       if (!endpoint) {
         return new Response(JSON.stringify({ error: "Method Not Allowed" }), {
           status: 405,
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            Allow: getAllowedAPIRouteMethods(match.route).join(", "),
+            "Content-Type": "application/json",
+          },
         });
       }
 
