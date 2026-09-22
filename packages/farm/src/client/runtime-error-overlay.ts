@@ -81,6 +81,15 @@ const OVERLAY_STYLES = `
   display: block;
   width: 100%;
   height: 100%;
+  /* Owned by the overlay: the default error page's source marker is a neutral
+     accent, but the overlay uses this to mark the expression that threw. */
+  --farm-runtime-error-inline-code: #f87171;
+}
+
+@media (prefers-color-scheme: light) {
+  :host {
+    --farm-runtime-error-inline-code: #b91c1c;
+  }
 }
 
 :host([hidden]) {
@@ -192,7 +201,7 @@ const OVERLAY_STYLES = `
 }
 
 .farm-runtime-error__inline-code {
-  color: var(--farm-error-source-marker);
+  color: var(--farm-runtime-error-inline-code);
   font-family: var(--farm-error-font-mono);
   font-size: 0.94em;
   font-weight: 600;
@@ -257,7 +266,15 @@ const OVERLAY_STYLES = `
   }
 
   .farm-runtime-error__viewport .farm-default-error__actions {
+    /* The redesigned page is taller than a short window. Rather than shrink it
+       until it is unreadable, keep the recovery controls pinned to the bottom
+       so they stay reachable while the rest of the report scrolls under them. */
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
     margin-top: 10px;
+    padding: 10px 0;
+    background: var(--farm-error-bg);
   }
 }
 `;
