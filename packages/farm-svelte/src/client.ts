@@ -7,9 +7,10 @@ import SvelteCompat, {
   ErrorBoundary,
   createElement,
   isValidElement,
+  markFunctionComponent,
 } from "./runtime";
 
-export { Fragment, Suspense, ErrorBoundary, createElement, isValidElement };
+export { Fragment, Suspense, ErrorBoundary, createElement, isValidElement, markFunctionComponent };
 
 export interface FarmSvelteRoot {
   render(element: unknown): void;

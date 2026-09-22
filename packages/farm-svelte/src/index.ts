@@ -11,6 +11,7 @@ const SVELTE_RENDERER: Readonly<FarmRenderer> = Object.freeze({
   capabilities: {
     reconcilesRerenders: false,
     streaming: { node: false, web: false },
+    functionComponents: true,
   },
 });
 
@@ -24,6 +25,7 @@ export function svelte(): FarmRenderer {
     capabilities: {
       reconcilesRerenders: false,
       streaming: { ...SVELTE_RENDERER.capabilities?.streaming },
+      functionComponents: true,
     },
   };
 }

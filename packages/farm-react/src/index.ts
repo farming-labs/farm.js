@@ -114,6 +114,7 @@ const REACT_RENDERER: Readonly<FarmRenderer> = Object.freeze({
   capabilities: {
     reconcilesRerenders: true,
     streaming: { node: true, web: false },
+    functionComponents: true,
   },
 });
 
@@ -129,6 +130,7 @@ export function react(options: ReactRendererOptions = {}): FarmRenderer {
     capabilities: {
       reconcilesRerenders: true,
       streaming: { ...REACT_RENDERER.capabilities?.streaming },
+      functionComponents: true,
     },
     options: {
       experimental: { compiler: normalizedCompiler },

@@ -9,9 +9,40 @@ export type FarmIntegrationProviderClientCode = {
   runtime: string;
 };
 
+/**
+ * Whether a provider component comes from a module the renderer compiles
+ * itself, rather than a plain function component.
+ *
+ * Only the renderer's own declared extensions count here. The resolved set
+ * from getFarmRendererComponentExtensions() always folds in .ts/.tsx/.js/.jsx,
+ * and that is exactly the distinction this needs to keep: under the Svelte
+ * renderer a .svelte provider is a Svelte component while a .tsx provider is a
+ * function component.
+ */
+function isRendererCompiledComponent(
+  moduleId: string,
+  rendererComponentExtensions: readonly string[],
+): boolean {
+  const lowered = moduleId.toLowerCase();
+  return rendererComponentExtensions.some((extension) => lowered.endsWith(extension.toLowerCase()));
+}
+
+/**
+ * Renderers that compile their own components cannot tell a function
+ * component from one of their own at runtime, so Farm marks the ones it wires
+ * up. Renderers without the hook (React) get the identity function.
+ */
+const FARM_PROVIDER_MARK_HELPER = [
+  "const farmMarkProviderComponent =",
+  '  typeof React.markFunctionComponent === "function"',
+  "    ? React.markFunctionComponent",
+  "    : function (component) { return component; };",
+].join("\n");
+
 export function generateFarmIntegrationProviderClientCode(
   providers: FarmIntegrationProvider[],
   root: string,
+  rendererComponentExtensions: readonly string[] = [],
 ): FarmIntegrationProviderClientCode {
   const renderedProviders = providers.filter(
     (provider) => provider.component || provider.type === "clerk",
@@ -28,6 +59,12 @@ export function generateFarmIntegrationProviderClientCode(
         `import * as ${namespace} from ${JSON.stringify(resolveProviderModule(provider.component.module, root))};`,
       );
       componentExpression = `${namespace}[${JSON.stringify(provider.component.export || "default")}]`;
+      if (
+        rendererComponentExtensions.length > 0 &&
+        !isRendererCompiledComponent(provider.component.module, rendererComponentExtensions)
+      ) {
+        componentExpression = `farmMarkProviderComponent(${componentExpression})`;
+      }
     } else if (typeof provider.component === "function") {
       throw new Error(
         `Integration provider "${provider.name}" must use an importable component reference for client hydration, for example component: { module: "@/components/provider" }.`,
@@ -49,10 +86,16 @@ export function generateFarmIntegrationProviderClientCode(
     imports.unshift(`import { ClerkProvider as FarmClerkProvider } from "@clerk/react";`);
   }
 
+  const markHelper = registrations.some((registration) =>
+    registration.includes("farmMarkProviderComponent("),
+  )
+    ? `${FARM_PROVIDER_MARK_HELPER}\n`
+    : "";
+
   return {
     hasProviders: renderedProviders.length > 0,
     imports: imports.join("\n"),
-    runtime: `const integrationProviders = [${registrations.join(",\n")}];
+    runtime: `${markHelper}const integrationProviders = [${registrations.join(",\n")}];
 
 function wrapWithIntegrationProviders(element) {
   let wrapped = element;
@@ -78,9 +121,11 @@ export function createFarmIntegrationProviderModuleKey(component: {
 export function generateFarmIntegrationProviderServerModules(
   providers: FarmIntegrationProvider[],
   root: string,
-): { imports: string; entries: string; hasClerkProvider: boolean } {
+  rendererComponentExtensions: readonly string[] = [],
+): { imports: string; entries: string; helpers: string; hasClerkProvider: boolean } {
   const imports: string[] = [];
   const entries: string[] = [];
+  let needsMarkHelper = false;
 
   providers.forEach((provider, index) => {
     if (!isFarmIntegrationProviderComponentReference(provider.component)) return;
@@ -88,14 +133,23 @@ export function generateFarmIntegrationProviderServerModules(
     imports.push(
       `import * as ${namespace} from ${JSON.stringify(resolveProviderModule(provider.component.module, root))};`,
     );
+    let componentExpression = `${namespace}[${JSON.stringify(provider.component.export || "default")}]`;
+    if (
+      rendererComponentExtensions.length > 0 &&
+      !isRendererCompiledComponent(provider.component.module, rendererComponentExtensions)
+    ) {
+      componentExpression = `farmMarkProviderComponent(${componentExpression})`;
+      needsMarkHelper = true;
+    }
     entries.push(
-      `[${JSON.stringify(createFarmIntegrationProviderModuleKey(provider.component))}, ${namespace}[${JSON.stringify(provider.component.export || "default")}]]`,
+      `[${JSON.stringify(createFarmIntegrationProviderModuleKey(provider.component))}, ${componentExpression}]`,
     );
   });
 
   return {
     imports: imports.join("\n"),
     entries: entries.join(",\n"),
+    helpers: needsMarkHelper ? FARM_PROVIDER_MARK_HELPER : "",
     hasClerkProvider: providers.some(
       (provider) => provider.type === "clerk" && !provider.component,
     ),

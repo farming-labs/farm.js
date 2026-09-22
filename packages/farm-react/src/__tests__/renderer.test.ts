@@ -8,6 +8,16 @@ import {
   react,
 } from "../index";
 
+describe("React renderer capabilities", () => {
+  it("keeps functionComponents on the descriptor react() builds", () => {
+    // react() rebuilds capabilities rather than spreading them, so a new
+    // capability has to be added here too. Integration provider components are
+    // gated on this one: dropping it makes them throw on React apps.
+    expect(react().capabilities?.functionComponents).toBe(true);
+    expect(react({ experimental: { compiler: true } }).capabilities?.functionComponents).toBe(true);
+  });
+});
+
 describe("React renderer compiler options", () => {
   it("keeps the compiler disabled unless the experimental option is enabled", () => {
     expect(react().options).toEqual({ experimental: { compiler: false } });

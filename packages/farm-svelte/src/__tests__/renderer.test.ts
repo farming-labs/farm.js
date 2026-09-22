@@ -7,7 +7,12 @@ import {
 import { describe, expect, it } from "vitest";
 import { svelte } from "../index";
 import * as serverRuntime from "../server";
-import { createElement, generateHydrationScript, renderToString } from "../server";
+import {
+  createElement,
+  generateHydrationScript,
+  markFunctionComponent,
+  renderToString,
+} from "../server";
 
 defineRendererDescriptorConformance({
   name: "svelte",
@@ -17,7 +22,10 @@ defineRendererDescriptorConformance({
     server: "@farm.js/svelte/server",
     client: "@farm.js/svelte/client",
     componentExtensions: [".svelte"],
-    capabilities: { streaming: { node: false, web: false } },
+    capabilities: {
+      streaming: { node: false, web: false },
+      functionComponents: true,
+    },
   },
 });
 
@@ -56,6 +64,57 @@ describe("Svelte renderer", () => {
 
   it("does not require a renderer-specific hydration bootstrap", () => {
     expect(generateHydrationScript()).toBe("");
+  });
+
+  it("calls a marked function component instead of mounting it as a Svelte component", async () => {
+    const Provider = markFunctionComponent((props: Record<string, unknown>) =>
+      createElement(
+        "section",
+        { className: "provider", "data-tenant": props.tenant },
+        props.children,
+      ),
+    );
+
+    const html = await renderToString(
+      createElement(Provider, { tenant: "acme" }, createElement("p", null, "wrapped")),
+    );
+
+    expect(html).toContain('class="provider"');
+    expect(html).toContain('data-tenant="acme"');
+    expect(html).toContain("<p>");
+    expect(html).toContain("wrapped");
+  });
+
+  it("gives a marked function component its props unnormalized", async () => {
+    const seen: Record<string, unknown>[] = [];
+    const Probe = markFunctionComponent((props: Record<string, unknown>) => {
+      seen.push(props);
+      return createElement("div", null, "probe");
+    });
+
+    await renderToString(createElement(Probe, { className: "raw", onClick: () => {} }));
+
+    expect(seen).toHaveLength(1);
+    // A function component is React-shaped: it reads className/onClick itself,
+    // so compat-root must not translate them the way it does for DOM elements.
+    expect(seen[0]).toHaveProperty("className", "raw");
+    expect(seen[0]).toHaveProperty("onClick");
+    expect(seen[0]).not.toHaveProperty("class");
+  });
+
+  it("renders a marked function component nested inside another", async () => {
+    const Inner = markFunctionComponent((props: Record<string, unknown>) =>
+      createElement("span", { className: "inner" }, props.children),
+    );
+    const Outer = markFunctionComponent((props: Record<string, unknown>) =>
+      createElement("div", { className: "outer" }, createElement(Inner, null, props.children)),
+    );
+
+    const html = await renderToString(createElement(Outer, null, "deep"));
+
+    expect(html).toContain('class="outer"');
+    expect(html).toContain('class="inner"');
+    expect(html).toContain("deep");
   });
 
   it("carries svelte:head markup through renderToStringWithHead", async () => {

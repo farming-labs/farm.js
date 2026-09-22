@@ -16,6 +16,7 @@ export interface RendererDescriptorFixture {
       web?: boolean;
     };
     reconcilesRerenders?: boolean;
+    functionComponents?: boolean;
   };
 }
 

@@ -91,7 +91,12 @@ import { createFarmSourceAlias } from "../server/vite-config";
 import { DEFAULT_NOT_FOUND_STYLES } from "../components/not-found-styles";
 import { createFarmThemeCssPlugin } from "../theme/vite";
 import { resolveFarmInstrumentationFile } from "../instrumentation";
-import { isReactRenderer, loadFarmRendererVitePlugins, REACT_RENDERER } from "../renderer";
+import {
+  getFarmRendererCapabilities,
+  isReactRenderer,
+  loadFarmRendererVitePlugins,
+  REACT_RENDERER,
+} from "../renderer";
 import { appendMiddlewareRoutePath } from "../middleware/path";
 import type { FarmRenderer } from "../renderer";
 
@@ -2183,7 +2188,11 @@ function generateClientHydrationEntry(
   const rendererClientImports = isReactRenderer(renderer)
     ? `import React from "react";\nimport { createRoot, hydrateRoot } from "react-dom/client";`
     : `import React, { createRoot, hydrateRoot } from ${JSON.stringify(renderer.client)};`;
-  const providerClientCode = generateFarmIntegrationProviderClientCode(integrationProviders, root);
+  const providerClientCode = generateFarmIntegrationProviderClientCode(
+    integrationProviders,
+    root,
+    renderer.componentExtensions ?? [],
+  );
 
   // Import global CSS (the Tailwind entry) only when the app ships one; an
   // unconditional import of a missing file fails the client build with
@@ -4259,12 +4268,18 @@ function generateVirtualEntryCode(
   const renderedIntegrationProviders = integrationProviders.filter(
     (provider) => provider.component || provider.type === "clerk",
   );
-  if (renderedIntegrationProviders.length > 0 && !isReactRenderer(config.renderer)) {
-    throw new Error("Integration provider components currently require the React renderer.");
+  if (
+    renderedIntegrationProviders.length > 0 &&
+    !getFarmRendererCapabilities(config.renderer).functionComponents
+  ) {
+    throw new Error(
+      `Integration provider components are not supported by the "${config.renderer.name}" renderer.`,
+    );
   }
   const providerServerModules = generateFarmIntegrationProviderServerModules(
     renderedIntegrationProviders,
     config.root,
+    config.renderer.componentExtensions ?? [],
   );
   const resolvedIntegrationProviderFallback = Object.fromEntries(
     Object.entries(config.integrations).flatMap(([name, integration]) => {
@@ -4842,6 +4857,7 @@ for (const runtimeConfig of farmRuntimeConfigs) {
   }
 }
 ${nativeAuth.registerSource}
+${providerServerModules.helpers}
 const farmIntegrationProviderModuleComponents = new Map([
 ${providerServerModules.entries}
 ]);

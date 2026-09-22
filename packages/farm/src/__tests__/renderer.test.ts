@@ -53,6 +53,7 @@ describe("renderer configuration", () => {
     expect(getFarmRendererCapabilities()).toEqual({
       streaming: { node: false, web: false },
       reconcilesRerenders: false,
+      functionComponents: false,
     });
     expect(
       getFarmRendererCapabilities({
@@ -61,6 +62,7 @@ describe("renderer configuration", () => {
     ).toEqual({
       streaming: { node: false, web: true },
       reconcilesRerenders: false,
+      functionComponents: false,
     });
     expect(
       getFarmRendererCapabilities({
@@ -69,7 +71,20 @@ describe("renderer configuration", () => {
     ).toEqual({
       streaming: { node: false, web: false },
       reconcilesRerenders: true,
+      functionComponents: false,
     });
+  });
+
+  it("defaults functionComponents off until a renderer opts in", () => {
+    // Integration provider components are gated on this, so a renderer that
+    // has not taught its adapter to call a plain function component must not
+    // be assumed capable.
+    expect(getFarmRendererCapabilities().functionComponents).toBe(false);
+    expect(
+      getFarmRendererCapabilities({ capabilities: { functionComponents: true } })
+        .functionComponents,
+    ).toBe(true);
+    expect(getFarmRendererCapabilities(REACT_RENDERER).functionComponents).toBe(true);
   });
 
   it("consumes renderer Web streams without assuming one chunk type", async () => {

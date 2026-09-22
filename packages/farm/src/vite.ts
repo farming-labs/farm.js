@@ -3916,7 +3916,11 @@ function generateClientCode(
   basePath = "/",
   clientCachePersistence: ClientCachePersistenceEntryCode = { imports: "", init: "" },
 ): string {
-  const providerClientCode = generateFarmIntegrationProviderClientCode(integrationProviders, root);
+  const providerClientCode = generateFarmIntegrationProviderClientCode(
+    integrationProviders,
+    root,
+    renderer.componentExtensions ?? [],
+  );
   const clientPluginEntry = generateFarmClientPluginEntryCode(
     plugins,
     root,

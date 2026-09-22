@@ -4,8 +4,10 @@
     Fragment,
     Suspense,
     createElement,
+    getFarmFunctionComponentProps,
     getFarmSvelteChildren,
     getFarmSvelteInnerHtml,
+    isFarmFunctionComponent,
     isFarmSvelteElement,
     normalizeFarmSvelteProps,
   } from "../runtime";
@@ -51,6 +53,8 @@
           {/each}
         </svelte:element>
       {/if}
+    {:else if isFarmFunctionComponent(type)}
+      {@render renderNode(type(getFarmFunctionComponentProps(value)))}
     {:else}
       {@const Component = type}
       {@const props = normalizeFarmSvelteProps(value)}
