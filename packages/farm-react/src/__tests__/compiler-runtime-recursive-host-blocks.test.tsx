@@ -753,12 +753,19 @@ describe("compiled recursive host-block runtime", () => {
   it.each(
     (["HostConditional", "ConditionalRanges"] as const).flatMap((kind) =>
       (["static", "hybrid"] as const).flatMap((reactivity) =>
-        (["outer", "nested"] as const).map((updates) => ({ kind, reactivity, updates })),
+        (["outer", "nested"] as const).flatMap((updates) =>
+          (["keyed-ranges", "mixed-ranges"] as const).map((nestedKind) => ({
+            kind,
+            reactivity,
+            updates,
+            nestedKind,
+          })),
+        ),
       ),
     ),
   )(
-    "keeps $kind fallback live after duplicate keys ($reactivity, $updates)",
-    async ({ kind, reactivity, updates }) => {
+    "keeps $kind fallback live after duplicate keys ($reactivity, $updates, $nestedKind)",
+    async ({ kind, reactivity, updates, nestedKind }) => {
       let setItems: ((next: unknown) => void) | undefined;
       let ownerRenders = 0;
       const Panel = createCompiledComponent({
@@ -775,6 +782,29 @@ describe("compiled recursive host-block runtime", () => {
           ownerRenders += 1;
           setItems = state[1].set;
           const items = () => state[1].get() as Item[];
+          const keyedRange = {
+            before: 0,
+            items,
+            rowKey: (item: unknown) => (item as Item).id,
+            create: (item: unknown) => host("li", [(item as Item).label]),
+            bindings: [
+              { kind: "text" as const, path: [], read: (item: unknown) => (item as Item).label },
+            ],
+          };
+          const nestedBlock: NonNullable<CompilerHostElement["block"]> =
+            nestedKind === "keyed-ranges"
+              ? {
+                  kind: "keyed-ranges",
+                  id: 1,
+                  ranges: [keyedRange],
+                  trailing: 0,
+                }
+              : {
+                  kind: "mixed-ranges",
+                  id: 1,
+                  ranges: [{ kind: "keyed", ...keyedRange }],
+                  trailing: 0,
+                };
           const branch: CompilerHostConditionalBranch = {
             create: () => ({
               ...host("section", [
@@ -783,22 +813,7 @@ describe("compiled recursive host-block runtime", () => {
                     "ul",
                     items().map((item) => host("li", [item.label])),
                   ),
-                  block: {
-                    kind: "keyed-ranges",
-                    id: 1,
-                    ranges: [
-                      {
-                        before: 0,
-                        items,
-                        rowKey: (item) => (item as Item).id,
-                        create: (item) => host("li", [(item as Item).label]),
-                        bindings: [
-                          { kind: "text", path: [], read: (item) => (item as Item).label },
-                        ],
-                      },
-                    ],
-                    trailing: 0,
-                  },
+                  block: nestedBlock,
                 },
               ]),
             }),
