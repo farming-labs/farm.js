@@ -14,6 +14,7 @@ declare global {
 }
 
 defineRendererClientConformance({
+  reconcilesRerenders: false,
   name: "solid",
   client: clientRuntime,
   server: {

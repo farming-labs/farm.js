@@ -12,6 +12,7 @@ const VUE_RENDERER: Readonly<FarmRenderer> = Object.freeze({
   // Serial graphs prevent one plugin instance from invalidating the other.
   buildConcurrency: "serial",
   capabilities: {
+    reconcilesRerenders: true,
     streaming: { node: true, web: true },
   },
 });
@@ -25,6 +26,7 @@ export function vue(): FarmRenderer {
     optimizeDeps: [...(VUE_RENDERER.optimizeDeps || [])],
     buildConcurrency: VUE_RENDERER.buildConcurrency,
     capabilities: {
+      reconcilesRerenders: true,
       streaming: { ...VUE_RENDERER.capabilities?.streaming },
     },
   };

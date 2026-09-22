@@ -15,6 +15,7 @@ export interface RendererDescriptorFixture {
       node?: boolean;
       web?: boolean;
     };
+    reconcilesRerenders?: boolean;
   };
 }
 
@@ -215,8 +216,64 @@ export function defineRendererClientConformance(options: {
   server: Pick<RendererServerFixture, "createElement" | "renderToString">;
   hydrationHtml?: () => string | Promise<string>;
   beforeHydrate?: () => void | Promise<void>;
+  /**
+   * Whether re-rendering an existing root diffs against the live DOM, matching
+   * the renderer descriptor's `capabilities.reconcilesRerenders`. Passing it
+   * here keeps the declared capability honest: the renderer is held to the
+   * behavior it advertises rather than to an assumption.
+   */
+  reconcilesRerenders: boolean;
 }): void {
   describe(`${options.name} client conformance`, () => {
+    it(
+      options.reconcilesRerenders
+        ? "keeps matching DOM and its state when an existing root re-renders"
+        : "rebuilds the tree when an existing root re-renders",
+      async () => {
+        const container = document.createElement("div");
+        document.body.append(container);
+        const root = options.client.createRoot(container);
+
+        const tree = (label: string) =>
+          options.client.createElement(
+            "div",
+            null,
+            options.client.createElement("input", { "data-keep": "1" }),
+            options.client.createElement("span", null, label),
+          );
+
+        root.render(tree("first"));
+        await settleClientRender(() => expect(container.textContent).toBe("first"));
+
+        const before = container.querySelector("input");
+        expect(before).toBeTruthy();
+        before!.value = "typed-by-user";
+
+        root.render(tree("second"));
+        await settleClientRender(() => expect(container.textContent).toBe("second"));
+        const after = container.querySelector("input");
+        expect(after).toBeTruthy();
+
+        if (options.reconcilesRerenders) {
+          // A virtual-DOM renderer matches the incoming tree against what is
+          // mounted, so the shared layout a navigation re-renders keeps its
+          // DOM identity and anything the user typed into it.
+          expect(after).toBe(before);
+          expect(after!.value).toBe("typed-by-user");
+        } else {
+          // A compile-time fine-grained renderer has no virtual DOM to diff,
+          // so a freshly materialized tree replaces the nodes. Pinning that
+          // here records the real behavior instead of leaving callers to
+          // assume reconciliation they will not get.
+          expect(after).not.toBe(before);
+          expect(after!.value).toBe("");
+        }
+
+        root.unmount();
+        container.remove();
+      },
+    );
+
     it("mounts, updates, wires events, and unmounts a managed root", async () => {
       const container = document.createElement("div");
       document.body.append(container);
