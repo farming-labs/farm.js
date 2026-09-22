@@ -116,6 +116,7 @@ import { createFarmThemeCssPlugin } from "./theme/vite";
 import { searchParamsToObject } from "./search-params";
 import { emitFarmEvent, runWithFarmRequestSpan } from "./observability";
 import {
+  getFarmRendererCapabilities,
   isReactRenderer,
   loadFarmRendererVitePlugins,
   REACT_RENDERER,
@@ -962,6 +963,22 @@ function warnClientBoundaryOnce(
   }
   warnedClientBoundaryIds.add(id);
   logger.warn(formatClientBoundaryWarning(id, findings));
+}
+
+/**
+ * Whether Farm should append its own client-root HMR handler to a
+ * `"use client"` module.
+ *
+ * Re-rendering the whole root on every edit only makes sense for a renderer
+ * that diffs the result against the live DOM. On Solid and Svelte `render()`
+ * tears the tree down and rebuilds it, so a one character change in any client
+ * component would wipe the page's state. Those renderers ship their own HMR
+ * integration (solid-refresh, svelte's hot API) which preserves component
+ * state, and appending an `import.meta.hot.accept` here would swallow the
+ * update before theirs could run.
+ */
+export function shouldEmitFarmClientRootHmr(renderer?: FarmRenderer): boolean {
+  return getFarmRendererCapabilities(resolveFarmRenderer(renderer)).reconcilesRerenders;
 }
 
 export function farmPlugin(
@@ -3159,7 +3176,17 @@ export const manifest = getManifest();
       return;
     }`
           : "";
-        const hmrCode = `
+        // Re-rendering the whole root on every edit only makes sense for a
+        // renderer that diffs the result against the live DOM. On Solid and
+        // Svelte `render()` tears the tree down and rebuilds it, so a one
+        // character change in any client component would wipe the page's
+        // state. Those renderers ship their own HMR integration (solid-refresh
+        // and svelte's hot API) which preserves component state, so leave the
+        // module for them to accept: appending our own `import.meta.hot.accept`
+        // here would swallow the update instead of letting theirs run.
+        const hmrCode = !shouldEmitFarmClientRootHmr(currentConfig.renderer)
+          ? ""
+          : `
 if (import.meta.hot) {
   import.meta.hot.accept((newModule) => {
     ${isolatedHmrUpdate}
