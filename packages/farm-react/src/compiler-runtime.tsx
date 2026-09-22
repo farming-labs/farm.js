@@ -3385,7 +3385,7 @@ function createConditionalBlockComponent(
 
     componentWillUnmount(): void {
       this.unsubscribe?.();
-      owner.setRoot(this.props.id, null);
+      // React 18 lifecycle replay keeps refs attached; captureRoot owns deregistration.
     }
 
     render(): React.ReactNode {
@@ -11194,10 +11194,8 @@ export function createCompiledComponentWithFeatures<Props>(
       this.dirtyState.clear();
       this.inputSelection = null;
       this.blockRefreshListeners.clear();
-      this.blockRoots.clear();
-      this.blockRootElements.clear();
       // React 18 StrictMode replays lifecycles without detaching host refs.
-      // Root and binding-target ref callbacks clear DOM references on real unmounts.
+      // Root, conditional-block, and binding-target refs clear DOM references on real unmounts.
       this.bindingTargetRefs.clear();
       this.indexedDefinition = null;
       this.staticBindingsByDependency = [];
