@@ -397,7 +397,8 @@ const testSource = String.raw`
           return React.createElement("button", { onClick: () => setCount((previous) => previous + 1) }, "Local: " + count);
         }
         const view = (visible, count) => React.createElement("section", null,
-          descendants ? React.createElement("aside", null, "Extra") : React.createElement("aside", null,
+          React.createElement("aside", null,
+            descendants ? React.createElement("span", null, "Extra") : null,
             React.createElement(LocalCounter),
             React.createElement("input", { defaultValue: "draft", "aria-label": "Text" }),
             React.createElement("textarea", { defaultValue: "draft", "aria-label": "Note" }),
@@ -454,8 +455,6 @@ const testSource = String.raw`
           });
           assert.equal(block.state.fallback, true, context);
           const initialOwners = owners;
-          let checkDomState = () => {};
-          if (!descendants) {
           await React.act(async () => {
             target.querySelector("button").click();
             controlTarget.querySelector("button").click();
@@ -471,7 +470,7 @@ const testSource = String.raw`
           }
           input.focus();
           input.setSelectionRange(1, 4, "backward");
-          checkDomState = () => {
+          const checkDomState = () => {
             assert.ok(target.querySelector("section") === container, context + "/container identity");
             assert.ok(target.querySelector("input") === input, context + "/input identity");
             assert.ok(target.querySelector("textarea") === textarea, context + "/textarea identity");
@@ -483,7 +482,6 @@ const testSource = String.raw`
             assert.ok(document.activeElement === input, context + "/focus");
             assert.deepEqual([input.selectionStart, input.selectionEnd, input.selectionDirection], [1, 4, "backward"], context);
           };
-          }
           for (const [index, value] of [[1, 1], [0, false], [1, 2], [0, true], [1, -1], [1, 3]]) {
             await React.act(async () => { update(index, value); updateControl(index, value); });
             assert.equal(target.innerHTML, controlTarget.innerHTML, context);

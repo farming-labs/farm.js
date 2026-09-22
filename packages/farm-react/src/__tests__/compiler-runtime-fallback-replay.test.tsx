@@ -37,19 +37,16 @@ function LocalCounter() {
 function view(visible: boolean, count: number, descendants: boolean) {
   return (
     <section>
-      {descendants ? (
-        <aside>Extra</aside>
-      ) : (
-        <aside>
-          <LocalCounter />
-          <input aria-label="Text" defaultValue="draft" />
-          <textarea aria-label="Note" defaultValue="draft" />
-          <select aria-label="Choice" defaultValue="a">
-            <option value="a">A</option>
-            <option value="b">B</option>
-          </select>
-        </aside>
-      )}
+      <aside>
+        {descendants ? <span>Extra</span> : null}
+        <LocalCounter />
+        <input aria-label="Text" defaultValue="draft" />
+        <textarea aria-label="Note" defaultValue="draft" />
+        <select aria-label="Choice" defaultValue="a">
+          <option value="a">A</option>
+          <option value="b">B</option>
+        </select>
+      </aside>
       {visible ? <article>{count >= 0 ? <em>{count}</em> : null}</article> : null}
     </section>
   );
@@ -161,40 +158,37 @@ describe("conditional fallback lifecycle replay", () => {
         });
         const initialOwners = owners;
         expect(block!.state.fallback).toBe(true);
-        let checkDomState = () => {};
-        if (!descendants) {
-          await act(async () => {
-            target.querySelector("button")!.click();
-            control.querySelector("button")!.click();
-          });
-          const container = target.querySelector("section");
-          const input = target.querySelector("input")!;
-          const textarea = target.querySelector("textarea")!;
-          const select = target.querySelector("select")!;
-          for (const surface of [target, control]) {
-            surface.querySelector("input")!.value = "typed text";
-            surface.querySelector("textarea")!.value = "typed note";
-            surface.querySelector("select")!.value = "b";
-          }
-          input.focus();
-          input.setSelectionRange(1, 4, "backward");
-          checkDomState = () => {
-            expect(target.querySelector("section") === container).toBe(true);
-            expect(target.querySelector("input") === input).toBe(true);
-            expect(target.querySelector("textarea") === textarea).toBe(true);
-            expect(target.querySelector("select") === select).toBe(true);
-            expect(input.value).toBe(control.querySelector("input")!.value);
-            expect(textarea.value).toBe(control.querySelector("textarea")!.value);
-            expect(select.value).toBe(control.querySelector("select")!.value);
-            expect(target.querySelector("button")?.textContent).toBe("Local: 1");
-            expect(document.activeElement === input).toBe(true);
-            expect([input.selectionStart, input.selectionEnd, input.selectionDirection]).toEqual([
-              1,
-              4,
-              "backward",
-            ]);
-          };
+        await act(async () => {
+          target.querySelector("button")!.click();
+          control.querySelector("button")!.click();
+        });
+        const container = target.querySelector("section");
+        const input = target.querySelector("input")!;
+        const textarea = target.querySelector("textarea")!;
+        const select = target.querySelector("select")!;
+        for (const surface of [target, control]) {
+          surface.querySelector("input")!.value = "typed text";
+          surface.querySelector("textarea")!.value = "typed note";
+          surface.querySelector("select")!.value = "b";
         }
+        input.focus();
+        input.setSelectionRange(1, 4, "backward");
+        const checkDomState = () => {
+          expect(target.querySelector("section") === container).toBe(true);
+          expect(target.querySelector("input") === input).toBe(true);
+          expect(target.querySelector("textarea") === textarea).toBe(true);
+          expect(target.querySelector("select") === select).toBe(true);
+          expect(input.value).toBe(control.querySelector("input")!.value);
+          expect(textarea.value).toBe(control.querySelector("textarea")!.value);
+          expect(select.value).toBe(control.querySelector("select")!.value);
+          expect(target.querySelector("button")?.textContent).toBe("Local: 1");
+          expect(document.activeElement === input).toBe(true);
+          expect([input.selectionStart, input.selectionEnd, input.selectionDirection]).toEqual([
+            1,
+            4,
+            "backward",
+          ]);
+        };
         // A descendant-only update must work before an outer update can mask the lost listener.
         for (const [index, value] of [
           [1, 1],

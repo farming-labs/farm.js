@@ -3545,31 +3545,47 @@ function materializeCompilerHostChildren(descriptor: CompilerHostElement): reado
   return children;
 }
 
-function collectCompilerHostBlockIds(descriptor: CompilerHostElement, ids: Set<number>): void {
+interface CompilerFallbackRecoveryMetadata {
+  requiresReset: boolean;
+}
+
+function collectCompilerHostBlockIds(
+  descriptor: CompilerHostElement,
+  ids: Set<number>,
+  recovery?: CompilerFallbackRecoveryMetadata,
+): void {
   for (const child of flattenCompilerHostElements(descriptor.children)) {
-    collectCompilerHostBlockIds(child, ids);
+    collectCompilerHostBlockIds(child, ids, recovery);
   }
   const block = descriptor.block;
-  if (!block || ids.has(block.id)) return;
+  if (!block) return;
+  if (
+    recovery &&
+    (block.kind === "keyed-ranges" ||
+      (block.kind === "mixed-ranges" && block.ranges.some((range) => range.kind === "keyed")))
+  ) {
+    recovery.requiresReset = true;
+  }
+  if (ids.has(block.id)) return;
   ids.add(block.id);
   if (block.kind === "conditional-ranges") {
     for (const range of block.ranges) {
-      if (range.truthy) collectCompilerHostBlockIds(range.truthy.create(), ids);
-      if (range.falsy) collectCompilerHostBlockIds(range.falsy.create(), ids);
+      if (range.truthy) collectCompilerHostBlockIds(range.truthy.create(), ids, recovery);
+      if (range.falsy) collectCompilerHostBlockIds(range.falsy.create(), ids, recovery);
     }
   } else if (block.kind === "keyed-ranges") {
     for (const range of block.ranges) {
       const first = materializeIterable(range.items())[0];
-      if (first !== undefined) collectCompilerHostBlockIds(range.create(first, 0), ids);
+      if (first !== undefined) collectCompilerHostBlockIds(range.create(first, 0), ids, recovery);
     }
   } else {
     for (const range of block.ranges) {
       if (range.kind === "conditional") {
-        if (range.truthy) collectCompilerHostBlockIds(range.truthy.create(), ids);
-        if (range.falsy) collectCompilerHostBlockIds(range.falsy.create(), ids);
+        if (range.truthy) collectCompilerHostBlockIds(range.truthy.create(), ids, recovery);
+        if (range.falsy) collectCompilerHostBlockIds(range.falsy.create(), ids, recovery);
       } else {
         const first = materializeIterable(range.items())[0];
-        if (first !== undefined) collectCompilerHostBlockIds(range.create(first, 0), ids);
+        if (first !== undefined) collectCompilerHostBlockIds(range.create(first, 0), ids, recovery);
       }
     }
   }
@@ -5317,6 +5333,7 @@ function createHostConditionalBlockComponent(
     private currentProps = this.props;
     private unsubscribe: (() => void) | undefined;
     private fallbackUnsubscribers: Array<() => void> = [];
+    private fallbackRequiresReset = false;
     private activeBranch: "truthy" | "falsy" | null = null;
     private instance: CompilerHostInstance | null = null;
 
@@ -5329,17 +5346,19 @@ function createHostConditionalBlockComponent(
       for (const unsubscribe of this.fallbackUnsubscribers) unsubscribe();
       this.fallbackUnsubscribers = [];
       const ids = new Set<number>();
+      const recovery: CompilerFallbackRecoveryMetadata = { requiresReset: false };
       if (this.currentProps.truthy) {
-        collectCompilerHostBlockIds(this.currentProps.truthy.create(), ids);
+        collectCompilerHostBlockIds(this.currentProps.truthy.create(), ids, recovery);
       }
       if (this.currentProps.falsy) {
-        collectCompilerHostBlockIds(this.currentProps.falsy.create(), ids);
+        collectCompilerHostBlockIds(this.currentProps.falsy.create(), ids, recovery);
       }
       ids.delete(this.currentProps.id);
+      this.fallbackRequiresReset = recovery.requiresReset;
       for (const id of ids) {
         this.fallbackUnsubscribers.push(
           owner.subscribe(id, (afterCommit) => {
-            this.fallbackVersion += 1;
+            if (this.fallbackRequiresReset) this.fallbackVersion += 1;
             this.forceUpdate(afterCommit);
           }),
         );
@@ -5405,9 +5424,9 @@ function createHostConditionalBlockComponent(
         return;
       }
       if (this.state.fallback) {
-        // Nested fallback may contain duplicate keys; retain its complete recovery reset.
-        // Otherwise React already owns the subtree and can preserve unchanged form state.
-        if (this.fallbackUnsubscribers.length > 0) this.fallbackVersion += 1;
+        // Keyed descendants may contain duplicate keys and retain a complete recovery reset.
+        // Conditional-only descendants can preserve the subtree that React already owns.
+        if (this.fallbackRequiresReset) this.fallbackVersion += 1;
         this.forceUpdate(afterCommit);
         return;
       }
@@ -5497,6 +5516,7 @@ function createHostConditionalBlockComponent(
       this.unsubscribe?.();
       for (const unsubscribe of this.fallbackUnsubscribers) unsubscribe();
       this.fallbackUnsubscribers = [];
+      this.fallbackRequiresReset = false;
       this.instance?.scope?.cleanup();
       // React 18 replays lifecycles without detaching refs; captureRoot owns ref cleanup.
       this.activeBranch = null;
@@ -5547,6 +5567,7 @@ function createConditionalRangesBlockComponent(
     private currentProps = this.props;
     private unsubscribe: (() => void) | undefined;
     private fallbackUnsubscribers: Array<() => void> = [];
+    private fallbackRequiresReset = false;
     private rangeInstances: Array<ConditionalRangeInstance | null> = [];
     private staticSegments: Element[][] = [];
     private readonly staticValues: unknown[] = [];
@@ -5560,15 +5581,17 @@ function createConditionalRangesBlockComponent(
       for (const unsubscribe of this.fallbackUnsubscribers) unsubscribe();
       this.fallbackUnsubscribers = [];
       const ids = new Set<number>();
+      const recovery: CompilerFallbackRecoveryMetadata = { requiresReset: false };
       for (const range of this.currentProps.ranges) {
-        if (range.truthy) collectCompilerHostBlockIds(range.truthy.create(), ids);
-        if (range.falsy) collectCompilerHostBlockIds(range.falsy.create(), ids);
+        if (range.truthy) collectCompilerHostBlockIds(range.truthy.create(), ids, recovery);
+        if (range.falsy) collectCompilerHostBlockIds(range.falsy.create(), ids, recovery);
       }
       ids.delete(this.currentProps.id);
+      this.fallbackRequiresReset = recovery.requiresReset;
       for (const id of ids) {
         this.fallbackUnsubscribers.push(
           owner.subscribe(id, (afterCommit) => {
-            this.fallbackVersion += 1;
+            if (this.fallbackRequiresReset) this.fallbackVersion += 1;
             this.forceUpdate(afterCommit);
           }),
         );
@@ -5736,9 +5759,9 @@ function createConditionalRangesBlockComponent(
         return;
       }
       if (this.state.fallback) {
-        // Nested fallback may contain duplicate keys; retain its complete recovery reset.
-        // Otherwise React already owns the subtree and can preserve unchanged form state.
-        if (this.fallbackUnsubscribers.length > 0) this.fallbackVersion += 1;
+        // Keyed descendants may contain duplicate keys and retain a complete recovery reset.
+        // Conditional-only descendants can preserve the subtree that React already owns.
+        if (this.fallbackRequiresReset) this.fallbackVersion += 1;
         this.forceUpdate(afterCommit);
         return;
       }
@@ -5818,6 +5841,7 @@ function createConditionalRangesBlockComponent(
       this.unsubscribe?.();
       for (const unsubscribe of this.fallbackUnsubscribers) unsubscribe();
       this.fallbackUnsubscribers = [];
+      this.fallbackRequiresReset = false;
       for (const instance of this.rangeInstances) instance?.host.scope?.cleanup();
       // Keep the attached root for React 18 replay; captureRoot clears real detachments.
       this.rangeInstances = [];
