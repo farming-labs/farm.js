@@ -7,27 +7,32 @@
 export const DEFAULT_ERROR_STYLES = `
 body {
   margin: 0;
+  background: #080808;
 }
 
 .farm-default-error {
-  --farm-error-bg: #fafafa;
-  --farm-error-fg: #171717;
-  --farm-error-muted: #737373;
-  --farm-error-line: rgba(0, 0, 0, 0.1);
-  --farm-error-line-strong: rgba(0, 0, 0, 0.22);
-  --farm-error-panel: rgba(0, 0, 0, 0.018);
-  --farm-error-button-fg: #ffffff;
-  --farm-error-source-line: rgba(185, 28, 28, 0.08);
-  --farm-error-source-marker: #b91c1c;
+  --farm-error-bg: #080808;
+  --farm-error-panel: #0d0d0d;
+  --farm-error-fg: #f3f3f3;
+  --farm-error-muted: #9a9a9a;
+  --farm-error-subtle: #6f6f6f;
+  --farm-error-line: rgba(255, 255, 255, 0.1);
+  --farm-error-line-strong: rgba(255, 255, 255, 0.2);
+  --farm-error-button-bg: #f1f1f1;
+  --farm-error-button-fg: #0a0a0a;
+  --farm-error-source-line: rgba(255, 255, 255, 0.055);
+  --farm-error-source-marker: #f3f3f3;
+  --farm-error-font-sans: "Geist Variable", "Geist Sans", Geist, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --farm-error-font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   min-height: 100vh;
   min-height: 100svh;
   display: grid;
-  place-items: center;
-  padding: clamp(28px, 6vw, 72px) 24px;
   color: var(--farm-error-fg);
   background: var(--farm-error-bg);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color-scheme: light;
+  font-family: var(--farm-error-font-sans);
+  font-synthesis: none;
+  color-scheme: dark;
+  text-rendering: optimizeLegibility;
 }
 
 .farm-default-error,
@@ -35,125 +40,191 @@ body {
   box-sizing: border-box;
 }
 
-.farm-default-error__content {
-  width: min(100%, 840px);
+.farm-default-error__frame {
+  width: min(100%, 1180px);
+  min-height: 100vh;
+  min-height: 100svh;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  margin: 0 auto;
+  padding: clamp(24px, 4vw, 52px);
+}
+
+.farm-default-error__brand {
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
+  align-items: center;
+  gap: 10px;
+  color: var(--farm-error-muted);
+  font-family: var(--farm-error-font-mono);
+  font-size: 11px;
+  font-weight: 520;
+  line-height: 1;
+  letter-spacing: 0.08em;
+}
+
+.farm-default-error__brand > span:first-child {
+  color: var(--farm-error-fg);
+}
+
+.farm-default-error__brand-divider,
+.farm-default-error__status-divider,
+.farm-default-error__footer-divider {
+  color: var(--farm-error-subtle);
+}
+
+.farm-default-error__content {
+  width: min(100%, 680px);
+  min-width: 0;
+  align-self: center;
+  margin: 0 auto;
+  padding: clamp(64px, 10vh, 112px) 0;
+}
+
+.farm-default-error--development .farm-default-error__content {
+  width: min(100%, 900px);
+}
+
+.farm-default-error > .farm-default-error__content {
+  align-self: center;
+  padding-right: 24px;
+  padding-left: 24px;
+}
+
+.farm-default-error__status,
+.farm-default-error__eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 24px;
+  color: var(--farm-error-muted);
+  font-family: var(--farm-error-font-mono);
+  font-size: 12px;
+  font-weight: 520;
+  line-height: 1.4;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+
+.farm-default-error__status-mark {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  background: var(--farm-error-fg);
 }
 
 .farm-default-error__code {
-  margin: 0;
+  margin: 0 0 18px;
   color: var(--farm-error-fg);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: clamp(76px, 13vw, 112px);
-  font-weight: 800;
-  line-height: 0.78;
-  letter-spacing: -0.08em;
-  text-align: center;
-  transform: translateX(-3px);
-}
-
-@supports (-webkit-text-stroke: 1px currentColor) {
-  .farm-default-error__code {
-    color: var(--farm-error-bg);
-    -webkit-text-stroke: 1.5px var(--farm-error-fg);
-    text-shadow: 2px 2px 0 var(--farm-error-fg);
-  }
-}
-
-.farm-default-error__eyebrow {
-  width: min(100%, 590px);
-  display: flex;
-  align-items: center;
-  align-self: center;
-  gap: 16px;
-  margin: 34px 0 28px;
-  color: var(--farm-error-fg);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-.farm-default-error__eyebrow::before,
-.farm-default-error__eyebrow::after {
-  content: "";
-  height: 1px;
-  flex: 1 1 auto;
-  background: var(--farm-error-line-strong);
+  font-family: var(--farm-error-font-mono);
+  font-size: clamp(48px, 8vw, 72px);
+  font-weight: 540;
+  line-height: 0.95;
+  letter-spacing: -0.055em;
 }
 
 .farm-default-error__summary {
-  margin-bottom: 28px;
-  text-align: center;
+  margin: 0;
 }
 
 .farm-default-error__title {
+  max-width: 680px;
   margin: 0;
-  font-size: clamp(20px, 3vw, 26px);
-  font-weight: 540;
-  line-height: 1.25;
-  letter-spacing: -0.02em;
+  color: var(--farm-error-fg);
+  font-family: var(--farm-error-font-sans);
+  font-size: clamp(36px, 5.2vw, 56px);
+  font-weight: 560;
+  line-height: 1.04;
+  letter-spacing: -0.052em;
+  text-wrap: balance;
 }
 
 .farm-default-error__message {
-  max-width: 680px;
-  margin: 8px auto 0;
+  max-width: 590px;
+  margin: 18px 0 0;
   color: var(--farm-error-muted);
-  font-size: 15px;
+  font-family: var(--farm-error-font-sans);
+  font-size: clamp(16px, 2vw, 19px);
   line-height: 1.55;
+  letter-spacing: -0.012em;
   overflow-wrap: anywhere;
 }
 
-.farm-default-error__panel {
+.farm-default-error__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 30px;
+}
+
+.farm-default-error__action {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 17px;
   border: 1px solid var(--farm-error-line-strong);
-  background: var(--farm-error-panel);
+  border-radius: 7px;
+  color: var(--farm-error-fg);
+  background: transparent;
+  font: inherit;
+  font-family: var(--farm-error-font-mono);
+  font-size: 13px;
+  font-weight: 560;
+  line-height: 1;
+  letter-spacing: 0.015em;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 150ms ease-out, border-color 150ms ease-out, color 150ms ease-out, transform 100ms ease-out;
+}
+
+.farm-default-error__action--primary {
+  border-color: var(--farm-error-button-bg);
+  color: var(--farm-error-button-fg);
+  background: var(--farm-error-button-bg);
+}
+
+.farm-default-error__panel {
+  margin-top: 42px;
+  border-top: 1px solid var(--farm-error-line-strong);
 }
 
 .farm-default-error__row {
-  min-height: 58px;
+  min-height: 45px;
   display: grid;
-  grid-template-columns: minmax(124px, 180px) minmax(0, 1fr);
+  grid-template-columns: 92px minmax(0, 1fr);
   align-items: center;
   border-bottom: 1px solid var(--farm-error-line);
-}
-
-.farm-default-error__row:last-child {
-  border-bottom: 0;
 }
 
 .farm-default-error__label,
 .farm-default-error__value,
 .farm-default-error__details-title,
 .farm-default-error__source-path,
-.farm-default-error__meta {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+.farm-default-error__meta,
+.farm-default-error__footer-action {
+  font-family: var(--farm-error-font-mono);
 }
 
 .farm-default-error__label {
-  padding: 0 22px;
-  color: var(--farm-error-muted);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
+  color: var(--farm-error-subtle);
+  font-size: 10px;
+  font-weight: 560;
+  letter-spacing: 0.09em;
   text-transform: uppercase;
 }
 
 .farm-default-error__value {
   min-width: 0;
-  padding: 15px 22px;
-  color: var(--farm-error-fg);
-  font-size: 14px;
-  line-height: 1.45;
+  padding: 11px 0;
+  color: var(--farm-error-muted);
+  font-size: 12px;
+  line-height: 1.55;
   overflow-wrap: anywhere;
 }
 
 .farm-default-error__details {
-  padding: 20px 22px 18px;
+  padding: 24px 0 0;
+  border-bottom: 1px solid var(--farm-error-line);
 }
 
 .farm-default-error__details-header {
@@ -161,49 +232,49 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
 }
 
 .farm-default-error__details-title {
   margin: 0;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
+  color: var(--farm-error-muted);
+  font-size: 10px;
+  font-weight: 560;
+  line-height: 1;
+  letter-spacing: 0.09em;
   text-transform: uppercase;
 }
 
 .farm-default-error__copy {
-  min-height: 34px;
+  min-height: 32px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0 12px;
+  padding: 0 10px;
   border: 1px solid var(--farm-error-line);
-  border-radius: 0;
-  color: var(--farm-error-fg);
+  border-radius: 6px;
+  color: var(--farm-error-muted);
   background: transparent;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1;
-  letter-spacing: 0.01em;
+  font: inherit;
+  font-size: 11px;
   cursor: pointer;
-  transition: border-color 150ms ease-out, background 150ms ease-out;
+  transition: background-color 150ms ease-out, border-color 150ms ease-out, color 150ms ease-out;
 }
 
 .farm-default-error__source {
-  border: 1px solid var(--farm-error-line);
-  background: var(--farm-error-bg);
   overflow: hidden;
+  border: 1px solid var(--farm-error-line);
+  border-radius: 7px;
+  background: var(--farm-error-panel);
 }
 
 .farm-default-error__source-path {
   margin: 0;
-  padding: 11px 14px;
+  padding: 10px 13px;
   border-bottom: 1px solid var(--farm-error-line);
-  color: var(--farm-error-fg);
-  font-size: 12px;
-  line-height: 1.4;
+  color: var(--farm-error-muted);
+  font-size: 11px;
+  line-height: 1.45;
   overflow-wrap: anywhere;
 }
 
@@ -212,7 +283,7 @@ body {
   padding: 8px 0;
   overflow-x: auto;
   color: var(--farm-error-fg);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--farm-error-font-mono);
   font-size: 12px;
   line-height: 1.75;
   tab-size: 2;
@@ -233,7 +304,7 @@ body {
 
 .farm-default-error__source-gutter {
   padding-right: 14px;
-  color: var(--farm-error-muted);
+  color: var(--farm-error-subtle);
   text-align: right;
   user-select: none;
 }
@@ -248,55 +319,57 @@ body {
 
 .farm-default-error__details-empty {
   margin: 0;
-  padding: 15px;
+  padding: 14px;
   border: 1px solid var(--farm-error-line);
+  border-radius: 7px;
   color: var(--farm-error-muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  background: var(--farm-error-panel);
+  font-family: var(--farm-error-font-mono);
   font-size: 12px;
   line-height: 1.5;
 }
 
 .farm-default-error__meta {
-  margin: 14px 0 0;
-  color: var(--farm-error-muted);
+  margin: 12px 0 20px;
+  color: var(--farm-error-subtle);
   font-size: 10px;
   line-height: 1.5;
-  letter-spacing: 0.04em;
-  text-align: center;
+  letter-spacing: 0.035em;
 }
 
-.farm-default-error__actions {
+.farm-default-error__footer {
   display: flex;
-  justify-content: center;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 12px;
-  margin-top: 28px;
+  padding-top: 24px;
 }
 
-.farm-default-error__action {
-  min-width: 152px;
-  min-height: 44px;
+.farm-default-error__footer-action {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  padding: 0 20px;
-  border: 1px solid var(--farm-error-line-strong);
-  border-radius: 0;
-  color: var(--farm-error-fg);
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  color: var(--farm-error-muted);
   background: transparent;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1;
-  letter-spacing: 0.01em;
+  font-size: 10px;
+  font-weight: 540;
+  line-height: 1.4;
+  letter-spacing: 0.065em;
   text-decoration: none;
   cursor: pointer;
-  transition: opacity 150ms ease-out, transform 100ms ease-out;
+  transition: color 150ms ease-out;
 }
 
-.farm-default-error__action--primary {
-  border-color: var(--farm-error-fg);
-  color: var(--farm-error-button-fg);
-  background: var(--farm-error-fg);
+.farm-default-error__docs-icon {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  stroke: currentColor;
+  stroke-width: 1.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .farm-default-error__sr-only {
@@ -312,13 +385,24 @@ body {
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .farm-default-error__copy:hover {
-    border-color: var(--farm-error-line-strong);
-    background: var(--farm-error-panel);
+  .farm-default-error__action:hover {
+    border-color: var(--farm-error-fg);
+    background: var(--farm-error-source-line);
   }
 
-  .farm-default-error__action:hover {
-    opacity: 0.76;
+  .farm-default-error__action--primary:hover {
+    border-color: var(--farm-error-muted);
+    background: var(--farm-error-muted);
+  }
+
+  .farm-default-error__copy:hover {
+    border-color: var(--farm-error-line-strong);
+    color: var(--farm-error-fg);
+    background: var(--farm-error-source-line);
+  }
+
+  .farm-default-error__footer-action:hover {
+    color: var(--farm-error-fg);
   }
 }
 
@@ -328,34 +412,50 @@ body {
 }
 
 .farm-default-error__copy:focus-visible,
-.farm-default-error__action:focus-visible {
-  outline: 1px solid var(--farm-error-fg);
-  outline-offset: 2px;
+.farm-default-error__action:focus-visible,
+.farm-default-error__footer-action:focus-visible {
+  outline: 2px solid var(--farm-error-fg);
+  outline-offset: 3px;
 }
 
 @media (max-width: 620px) {
-  .farm-default-error {
-    place-items: start center;
-    padding: 48px 16px 32px;
+  .farm-default-error__frame {
+    padding: 22px 18px 26px;
   }
 
-  .farm-default-error__eyebrow {
-    margin-top: 28px;
+  .farm-default-error__content {
+    padding: 56px 0 68px;
+  }
+
+  .farm-default-error > .farm-default-error__content {
+    padding: 48px 18px;
+  }
+
+  .farm-default-error__title {
+    font-size: clamp(34px, 11vw, 44px);
+  }
+
+  .farm-default-error__message {
+    margin-top: 15px;
+  }
+
+  .farm-default-error__actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .farm-default-error__action {
+    width: 100%;
   }
 
   .farm-default-error__row {
     grid-template-columns: 1fr;
-    gap: 5px;
-    padding: 14px 16px;
+    gap: 2px;
+    padding: 11px 0;
   }
 
-  .farm-default-error__label,
   .farm-default-error__value {
     padding: 0;
-  }
-
-  .farm-default-error__details {
-    padding: 16px;
   }
 
   .farm-default-error__details-header {
@@ -368,66 +468,65 @@ body {
   }
 
   .farm-default-error__source-line {
-    grid-template-columns: 56px minmax(0, 1fr);
-  }
-
-  .farm-default-error__actions {
-    flex-direction: column;
-  }
-
-  .farm-default-error__action {
-    width: 100%;
+    grid-template-columns: 54px minmax(0, 1fr);
   }
 }
 
-@media (prefers-color-scheme: dark) {
+@media (prefers-color-scheme: light) {
   .farm-default-error {
-    --farm-error-bg: #0a0a0a;
-    --farm-error-fg: #ededed;
-    --farm-error-muted: #a1a1a1;
-    --farm-error-line: rgba(255, 255, 255, 0.1);
-    --farm-error-line-strong: rgba(255, 255, 255, 0.22);
-    --farm-error-panel: rgba(255, 255, 255, 0.018);
-    --farm-error-button-fg: #0a0a0a;
-    --farm-error-source-line: rgba(248, 113, 113, 0.12);
-    --farm-error-source-marker: #f87171;
-    color-scheme: dark;
+    --farm-error-bg: #f7f7f5;
+    --farm-error-panel: #ffffff;
+    --farm-error-fg: #141414;
+    --farm-error-muted: #666666;
+    --farm-error-subtle: #8a8a8a;
+    --farm-error-line: rgba(0, 0, 0, 0.1);
+    --farm-error-line-strong: rgba(0, 0, 0, 0.19);
+    --farm-error-button-bg: #141414;
+    --farm-error-button-fg: #ffffff;
+    --farm-error-source-line: rgba(0, 0, 0, 0.045);
+    --farm-error-source-marker: #141414;
+    color-scheme: light;
   }
 }
 
 .dark .farm-default-error,
 [data-theme="dark"] .farm-default-error,
 [data-color-scheme="dark"] .farm-default-error {
-  --farm-error-bg: #0a0a0a;
-  --farm-error-fg: #ededed;
-  --farm-error-muted: #a1a1a1;
+  --farm-error-bg: #080808;
+  --farm-error-panel: #0d0d0d;
+  --farm-error-fg: #f3f3f3;
+  --farm-error-muted: #9a9a9a;
+  --farm-error-subtle: #6f6f6f;
   --farm-error-line: rgba(255, 255, 255, 0.1);
-  --farm-error-line-strong: rgba(255, 255, 255, 0.22);
-  --farm-error-panel: rgba(255, 255, 255, 0.018);
+  --farm-error-line-strong: rgba(255, 255, 255, 0.2);
+  --farm-error-button-bg: #f1f1f1;
   --farm-error-button-fg: #0a0a0a;
-  --farm-error-source-line: rgba(248, 113, 113, 0.12);
-  --farm-error-source-marker: #f87171;
+  --farm-error-source-line: rgba(255, 255, 255, 0.055);
+  --farm-error-source-marker: #f3f3f3;
   color-scheme: dark;
 }
 
 .light .farm-default-error,
 [data-theme="light"] .farm-default-error,
 [data-color-scheme="light"] .farm-default-error {
-  --farm-error-bg: #fafafa;
-  --farm-error-fg: #171717;
-  --farm-error-muted: #737373;
+  --farm-error-bg: #f7f7f5;
+  --farm-error-panel: #ffffff;
+  --farm-error-fg: #141414;
+  --farm-error-muted: #666666;
+  --farm-error-subtle: #8a8a8a;
   --farm-error-line: rgba(0, 0, 0, 0.1);
-  --farm-error-line-strong: rgba(0, 0, 0, 0.22);
-  --farm-error-panel: rgba(0, 0, 0, 0.018);
+  --farm-error-line-strong: rgba(0, 0, 0, 0.19);
+  --farm-error-button-bg: #141414;
   --farm-error-button-fg: #ffffff;
-  --farm-error-source-line: rgba(185, 28, 28, 0.08);
-  --farm-error-source-marker: #b91c1c;
+  --farm-error-source-line: rgba(0, 0, 0, 0.045);
+  --farm-error-source-marker: #141414;
   color-scheme: light;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .farm-default-error__copy,
-  .farm-default-error__action {
+  .farm-default-error__action,
+  .farm-default-error__footer-action {
     transition: none;
   }
 

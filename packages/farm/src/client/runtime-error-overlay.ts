@@ -152,7 +152,7 @@ const OVERLAY_STYLES = `
   padding: 0 8px;
   border: 1px solid var(--farm-error-line);
   color: var(--farm-error-muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--farm-error-font-mono);
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.08em;
@@ -188,12 +188,12 @@ const OVERLAY_STYLES = `
 }
 
 .farm-runtime-error__message-value {
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: var(--farm-error-font-sans);
 }
 
 .farm-runtime-error__inline-code {
   color: var(--farm-error-source-marker);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--farm-error-font-mono);
   font-size: 0.94em;
   font-weight: 600;
   line-height: inherit;
