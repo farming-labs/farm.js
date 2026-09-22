@@ -120,6 +120,26 @@ export async function disposeFarmAuth(): Promise<void> {
 }
 
 export async function migrateFarmAuth(): Promise<void> {
+  await withAuthMigrations(async (migrations) => {
+    await migrations.runMigrations();
+  });
+}
+
+/**
+ * The statements `migrateFarmAuth` would run, for review before applying them.
+ * Better Auth owns the schema, so the sql comes from its migrator rather than
+ * from Farm's own table declarations.
+ */
+export async function compileFarmAuthMigration(): Promise<string> {
+  return withAuthMigrations((migrations) => migrations.compileMigrations());
+}
+
+async function withAuthMigrations<T>(
+  use: (migrations: {
+    runMigrations: () => Promise<void>;
+    compileMigrations: () => Promise<string>;
+  }) => Promise<T>,
+): Promise<T> {
   const state = getState();
   if (!state.config?.enabled || !state.options) {
     throw new Error("Farm Auth is not enabled in farm.config.ts.");
@@ -130,8 +150,7 @@ export async function migrateFarmAuth(): Promise<void> {
   });
   const { getMigrations } = await import("better-auth/db/migration");
   try {
-    const migrations = await getMigrations(options);
-    await migrations.runMigrations();
+    return await use(await getMigrations(options));
   } finally {
     await closeDatabase(options.database);
   }

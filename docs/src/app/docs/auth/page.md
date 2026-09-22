@@ -175,6 +175,15 @@ farm auth migrate
 
 The migration command needs `DATABASE_URL`, but it does not require the runtime secret.
 
+To read the statements before they touch the database, ask for them instead of applying:
+
+```bash
+farm auth migrate --dry-run
+farm auth migrate --write auth-schema.sql
+```
+
+Both print or save exactly what `farm auth migrate` would run and change nothing. Better Auth owns this schema, so the statements come from its migrator rather than from the table declarations a plugin makes to `farm <plugin> migrate`.
+
 ## Extend with Better Auth
 
 The built-in path is intentionally opinionated, but it does not replace the existing Better Auth integration. Both approaches are supported:
