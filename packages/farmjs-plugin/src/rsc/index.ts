@@ -1194,6 +1194,12 @@ setServerCallback(async (id, args) => {
   if (!res.ok) throw new Error('Server action failed: ' + res.status);
   const p = await createFromReadableStream(res.body, { temporaryReferences: refs });
   if (p?.returnValue?.ok) return p.returnValue.data;
+  // This entry hydrates a single page and has no client router, so a redirect
+  // from the action becomes a full document navigation.
+  if (p?.returnValue?.redirect?.url) {
+    location.assign(p.returnValue.redirect.url);
+    return;
+  }
   throw createFarmServerFnTransportError(p?.returnValue?.data);
 });
 `

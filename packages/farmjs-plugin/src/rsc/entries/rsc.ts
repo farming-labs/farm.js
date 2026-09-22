@@ -620,12 +620,22 @@ async function handleFarmRequest(request) {
         if (request.signal.aborted) {
           return new Response(null, { status: 499, headers: { 'Cache-Control': 'no-store' } });
         }
-        const actionError = sanitizeServerActionError(e);
-        if (actionError.name === 'ServerActionError') {
-          console.error('[Farm.js] Server action failed:', e);
+        // redirect() unwinds by throwing, so it arrives here looking like a
+        // failure. It is control flow, not an error: carry it to the client as
+        // data so the router can navigate. Everything else still goes through
+        // sanitizeServerActionError untouched.
+        const actionRedirect = getFarmRedirectError(e);
+        if (actionRedirect) {
+          returnValue = { ok: false, redirect: { url: actionRedirect.url, status: actionRedirect.status } };
+          debug('Server action redirected:', actionId, actionRedirect.url);
+        } else {
+          const actionError = sanitizeServerActionError(e);
+          if (actionError.name === 'ServerActionError') {
+            console.error('[Farm.js] Server action failed:', e);
+          }
+          returnValue = { ok: false, data: actionError };
+          debug('Server action failed:', actionId, e);
         }
-        returnValue = { ok: false, data: actionError };
-        debug('Server action failed:', actionId, e);
       }
     } else {
       // Progressive enhancement (form submitted before JS loaded)
@@ -654,6 +664,16 @@ async function handleFarmRequest(request) {
       } catch (e) {
         if (request.signal.aborted) {
           return new Response(null, { status: 499, headers: { 'Cache-Control': 'no-store' } });
+        }
+        // No client router here, so the redirect has to be a real HTTP
+        // redirect the browser follows on its own.
+        const formRedirect = getFarmRedirectError(e);
+        if (formRedirect) {
+          debug('Form action redirected:', formRedirect.url);
+          return new Response(null, {
+            status: formRedirect.status,
+            headers: { location: formRedirect.url, 'Cache-Control': 'no-store' },
+          });
         }
         const actionError = sanitizeServerActionError(e);
         if (actionError.name === 'ServerActionError') {

@@ -83,8 +83,11 @@ import {
     actionSetup = `
 ${serverFnTransportErrorClientRuntime}
 
-// Ref for payload setter (used by server action callback and refetch)
+// Refs for payload setter and router navigation. refetch() is defined inside
+// main(), so the action callback reaches it through this ref rather than by
+// closing over it.
 const setPayloadRef = { current: null };
+const farmNavigateRef = { current: null };
 
 // Ensure __viteRscCallServer is a function before any other chunk may call it (avoids "is not a function")
 if (typeof globalThis.__viteRscCallServer !== 'function') {
@@ -135,6 +138,14 @@ setServerCallback(async (id, args) => {
     applyFarmCacheInvalidations(p.returnValue?.invalidations);
   }
   if (!p.returnValue || !p.returnValue.ok) {
+    // A redirect() from the action comes back as data, not as a 3xx, so the
+    // router performs the navigation here.
+    if (p.returnValue?.redirect?.url) {
+      debug('Server action redirected:', p.returnValue.redirect.url);
+      history.pushState(null, '', p.returnValue.redirect.url);
+      await farmNavigateRef.current?.(location.href);
+      return;
+    }
     debug('Server action failed:', id);
     throw createFarmServerFnTransportError(p.returnValue?.data);
   }
@@ -144,6 +155,7 @@ setServerCallback(async (id, args) => {
   } else {
     actionSetup = `
 const setPayloadRef = { current: null };
+const farmNavigateRef = { current: null };
 `;
   }
 
@@ -268,6 +280,7 @@ async function main() {
   }
   
   // Fetch new RSC payload for a URL
+  farmNavigateRef.current = (url) => refetch(url);
   async function refetch(url) {
     debug('Fetching RSC for:', url);
     
