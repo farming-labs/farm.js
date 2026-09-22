@@ -9546,6 +9546,7 @@ function createKeyedRangesBlockComponent(
     private mounted = false;
     private fallbackRequested = false;
     private fallbackVersion = 0;
+    private fallbackKeysWereUnsafe = false;
     private propFallbackQueued = false;
     private currentProps = this.props;
     private unsubscribe: (() => void) | undefined;
@@ -9573,6 +9574,14 @@ function createKeyedRangesBlockComponent(
         ranges.push(rows);
       }
       return ranges;
+    }
+
+    private hasUnsafeFallbackKeys(): boolean {
+      try {
+        return this.readRanges(this.currentProps) === null;
+      } catch {
+        return true;
+      }
     }
 
     private adopt(props: CompilerKeyedRangesBlockProps = this.currentProps): boolean {
@@ -9695,7 +9704,12 @@ function createKeyedRangesBlockComponent(
         return;
       }
       if (this.state.fallback) {
-        this.fallbackVersion += 1;
+        // React can reconcile a permanently fallen-back range in place while
+        // its keys remain unique. Duplicate keys are ambiguous, so remount the
+        // render that introduces them and the first safe render after them.
+        const unsafeKeys = this.hasUnsafeFallbackKeys();
+        if (unsafeKeys || this.fallbackKeysWereUnsafe) this.fallbackVersion += 1;
+        this.fallbackKeysWereUnsafe = unsafeKeys;
         this.forceUpdate(afterCommit);
         return;
       }
@@ -9741,6 +9755,7 @@ function createKeyedRangesBlockComponent(
         return;
       }
       this.fallbackRequested = true;
+      this.fallbackKeysWereUnsafe = this.hasUnsafeFallbackKeys();
       this.setState({ fallback: true }, afterCommit);
     }
 
