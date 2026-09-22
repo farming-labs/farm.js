@@ -1485,9 +1485,17 @@ export function farmPlugin(
           });
         }
 
-        const [React, ReactDOMServer, layoutModules] = await Promise.all([
-          import("react"),
-          import("react-dom/server"),
+        // The app's layouts are authored for whichever renderer it selected, so
+        // they have to be composed and rendered through that renderer's server
+        // module. The production entry already resolves this the same way
+        // (nitro/universal-build.ts, rendererServerImports); importing react
+        // and react-dom/server literally here made dev disagree with prod for
+        // every non-React app.
+        const docsRenderer = resolveFarmRenderer((farmApp?.getConfig() ?? options).renderer);
+        const [rendererRuntime, layoutModules] = await Promise.all([
+          isReactRenderer(docsRenderer)
+            ? import("./renderer/react/server")
+            : server.ssrLoadModule(docsRenderer.server),
           Promise.all(
             layoutEntries.map((layout) => routeManager.loadLayoutModule(layout.modulePath)),
           ),
@@ -1543,7 +1551,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
         })};
 </script>`;
 
-        let wrappedElement: any = React.createElement("div", {
+        let wrappedElement: any = rendererRuntime.createElement("div", {
           id: "__farm_page__",
           "data-farm-client": "false",
           "data-farm-layout-client": "true",
@@ -1554,15 +1562,15 @@ window.__FARM_MANIFEST__ = ${inlineValue({
         for (let index = layoutModules.length - 1; index >= 0; index--) {
           const LayoutComponent = layoutModules[index].default;
           if (LayoutComponent) {
-            wrappedElement = React.createElement(LayoutComponent, {
+            wrappedElement = rendererRuntime.createElement(LayoutComponent, {
               children: wrappedElement,
               params,
             });
           }
         }
 
-        const rootMarkup = ReactDOMServer.renderToString(
-          React.createElement("div", { id: "root" }, wrappedElement),
+        const rootMarkup = await rendererRuntime.renderToString(
+          rendererRuntime.createElement("div", { id: "root" }, wrappedElement),
         );
         const html = source.replace(bodyMatch[0], `<body${bodyMatch[1]}>${rootMarkup}</body>`);
         const headers = new Headers(response.headers);
