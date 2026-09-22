@@ -750,106 +750,123 @@ describe("compiled recursive host-block runtime", () => {
     }
   });
 
-  it("keeps React fallback live after duplicate nested keys", async () => {
-    let setItems: ((next: unknown) => void) | undefined;
-    let ownerRenders = 0;
-    const Panel = createCompiledComponent({
-      displayName: "RecursiveDuplicateKeys",
-      initialize: () => [
-        true,
-        [
-          { id: "a", label: "Alpha" },
-          { id: "b", label: "Beta" },
+  it.each(
+    (["HostConditional", "ConditionalRanges"] as const).flatMap((kind) =>
+      (["static", "hybrid"] as const).flatMap((reactivity) =>
+        (["outer", "nested"] as const).map((updates) => ({ kind, reactivity, updates })),
+      ),
+    ),
+  )(
+    "keeps $kind fallback live after duplicate keys ($reactivity, $updates)",
+    async ({ kind, reactivity, updates }) => {
+      let setItems: ((next: unknown) => void) | undefined;
+      let ownerRenders = 0;
+      const Panel = createCompiledComponent({
+        displayName: "RecursiveDuplicateKeys",
+        reactivity,
+        initialize: () => [
+          true,
+          [
+            { id: "a", label: "Alpha" },
+            { id: "b", label: "Beta" },
+          ],
         ],
-      ],
-      render(_props: Record<string, never>, state, blocks) {
-        ownerRenders += 1;
-        setItems = state[1].set;
-        const items = () => state[1].get() as Item[];
-        const branch: CompilerHostConditionalBranch = {
-          create: () => ({
-            ...host("section", [
-              {
-                ...host(
-                  "ul",
-                  items().map((item) => host("li", [item.label])),
-                ),
-                block: {
-                  kind: "keyed-ranges",
-                  id: 1,
-                  ranges: [
-                    {
-                      before: 0,
-                      items,
-                      rowKey: (item) => (item as Item).id,
-                      create: (item) => host("li", [(item as Item).label]),
-                      bindings: [{ kind: "text", path: [], read: (item) => (item as Item).label }],
-                    },
-                  ],
-                  trailing: 0,
+        render(_props: Record<string, never>, state, blocks) {
+          ownerRenders += 1;
+          setItems = state[1].set;
+          const items = () => state[1].get() as Item[];
+          const branch: CompilerHostConditionalBranch = {
+            create: () => ({
+              ...host("section", [
+                {
+                  ...host(
+                    "ul",
+                    items().map((item) => host("li", [item.label])),
+                  ),
+                  block: {
+                    kind: "keyed-ranges",
+                    id: 1,
+                    ranges: [
+                      {
+                        before: 0,
+                        items,
+                        rowKey: (item) => (item as Item).id,
+                        create: (item) => host("li", [(item as Item).label]),
+                        bindings: [
+                          { kind: "text", path: [], read: (item) => (item as Item).label },
+                        ],
+                      },
+                    ],
+                    trailing: 0,
+                  },
                 },
-              },
-            ]),
-          }),
-          bindings: [],
-        };
-        const HostConditional = blocks.HostConditional;
-        return (
-          <main>
-            <HostConditional
-              id={0}
-              render={() => (
-                <div>
-                  <section>
-                    <ul>
-                      {items().map((item) => (
-                        <li key={item.id}>{item.label}</li>
-                      ))}
-                    </ul>
-                  </section>
-                </div>
-              )}
-              test={() => state[0].get()}
-              truthy={branch}
-            />
-          </main>
-        );
-      },
-      bindings: [
-        { kind: "block", id: 0, dependencies: [0] },
-        { kind: "block", id: 1, parent: 0, dependencies: [1] },
-      ],
-    });
+              ]),
+            }),
+            bindings: [],
+          };
+          const props = {
+            id: 0,
+            render: () => (
+              <div>
+                <section>
+                  <ul>
+                    {items().map((item) => (
+                      <li key={item.id}>{item.label}</li>
+                    ))}
+                  </ul>
+                </section>
+              </div>
+            ),
+          };
+          const condition = { before: 0, test: () => state[0].get(), truthy: branch };
+          return (
+            <main>
+              {kind === "HostConditional"
+                ? React.createElement(blocks.HostConditional, { ...props, ...condition })
+                : React.createElement(blocks.ConditionalRanges, {
+                    ...props,
+                    ranges: [condition],
+                    trailing: 0,
+                  })}
+            </main>
+          );
+        },
+        bindings: [
+          { kind: "block", id: 0, dependencies: updates === "outer" ? [0, 1] : [0] },
+          { kind: "block", id: 1, parent: 0, dependencies: updates === "outer" ? [] : [1] },
+        ],
+      });
 
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const container = document.createElement("div");
-    document.body.append(container);
-    const root = createRoot(container);
-    roots.push(root);
-    await act(async () => root.render(<Panel />));
-    const rendersAfterMount = ownerRenders;
-    await act(async () => {
-      setItems?.([
-        { id: "a", label: "First" },
-        { id: "a", label: "Second" },
+      const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const container = document.createElement("div");
+      document.body.append(container);
+      const root = createRoot(container);
+      roots.push(root);
+      await act(async () => root.render(<Panel />));
+      const rendersAfterMount = ownerRenders;
+      await act(async () => {
+        setItems?.([
+          { id: "a", label: "First" },
+          { id: "a", label: "Second" },
+        ]);
+        await flushCompilerUpdates();
+      });
+      expect([...container.querySelectorAll("li")].map((row) => row.textContent)).toEqual([
+        "First",
+        "Second",
       ]);
-      await flushCompilerUpdates();
-    });
-    expect([...container.querySelectorAll("li")].map((row) => row.textContent)).toEqual([
-      "First",
-      "Second",
-    ]);
 
-    await act(async () => {
-      setItems?.([{ id: "c", label: "Recovered" }]);
-      await flushCompilerUpdates();
-    });
-    expect([...container.querySelectorAll("li")].map((row) => row.textContent)).toEqual([
-      "Recovered",
-    ]);
-    expect(ownerRenders).toBe(rendersAfterMount);
-    consoleError.mockRestore();
-  });
+      await act(async () => {
+        setItems?.([{ id: "c", label: "Recovered" }]);
+        await flushCompilerUpdates();
+      });
+      expect([...container.querySelectorAll("li")].map((row) => row.textContent)).toEqual([
+        "Recovered",
+      ]);
+      expect(ownerRenders).toBe(rendersAfterMount);
+      consoleError.mockRestore();
+    },
+  );
 
   it("rebinds nested descriptors when parent props and local state change together", async () => {
     let setItems: ((next: unknown) => void) | undefined;

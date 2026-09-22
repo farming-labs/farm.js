@@ -2436,6 +2436,12 @@ Strict Mode replay restores its nested fallback subscriptions instead of attempt
 adoption again. Descendant-only updates remain live, including after hydration, and real
 unmounts still dispose those subscriptions. The existing fallback eligibility rules are unchanged.
 
+Host conditional and conditional-range containers without nested compiled blocks keep a stable key
+after entering React fallback. Later updates preserve unchanged form controls, user-entered values,
+focus, selection, and React child state. The first fallback still resets DOM ownership, and
+containers with nested compiled blocks retain their full reset for safe recovery, including
+duplicate-key recovery. Removing a branch still follows normal React unmount behavior.
+
 During development, compiled components receive a module-and-component identity plus a state-layout
 signature. A compatible Fast Refresh replaces the compiled definition while retaining the React
 component type and its local cells. An interactive keyed boundary lets React commit the refreshed

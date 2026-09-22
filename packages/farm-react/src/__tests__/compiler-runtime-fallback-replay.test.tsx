@@ -29,10 +29,27 @@ const host = (
   styles: [],
   children,
 });
-function view(visible: boolean, count: number) {
+function LocalCounter() {
+  const [count, setCount] = useState(0);
+  return <button onClick={() => setCount((previous) => previous + 1)}>Local: {count}</button>;
+}
+
+function view(visible: boolean, count: number, descendants: boolean) {
   return (
     <section>
-      <aside>Extra</aside>
+      {descendants ? (
+        <aside>Extra</aside>
+      ) : (
+        <aside>
+          <LocalCounter />
+          <input aria-label="Text" defaultValue="draft" />
+          <textarea aria-label="Note" defaultValue="draft" />
+          <select aria-label="Choice" defaultValue="a">
+            <option value="a">A</option>
+            <option value="b">B</option>
+          </select>
+        </aside>
+      )}
       {visible ? <article>{count >= 0 ? <em>{count}</em> : null}</article> : null}
     </section>
   );
@@ -40,9 +57,13 @@ function view(visible: boolean, count: number) {
 
 describe("conditional fallback lifecycle replay", () => {
   for (const kind of ["HostConditional", "ConditionalRanges"] as const) {
-    it.each(["static", "hybrid"] as const)(
-      `restores ${kind} nested subscriptions in %s mode`,
-      async (reactivity) => {
+    it.each(
+      (["static", "hybrid"] as const).flatMap((reactivity) =>
+        [true, false].map((descendants) => ({ reactivity, descendants })),
+      ),
+    )(
+      `${kind} fallback: $reactivity, nested blocks: $descendants`,
+      async ({ reactivity, descendants }) => {
         interface BlockProbe {
           state: { fallback: boolean };
           componentWillUnmount(): void;
@@ -65,12 +86,16 @@ describe("conditional fallback lifecycle replay", () => {
             const branch = {
               create: (): CompilerHostElement => ({
                 ...host("article", Number(state[1].get()) >= 0 ? [nested.create()] : []),
-                block: {
-                  kind: "conditional-ranges",
-                  id: 1,
-                  trailing: 0,
-                  ranges: [{ before: 0, test: () => Number(state[1].get()) >= 0, truthy: nested }],
-                },
+                block: descendants
+                  ? {
+                      kind: "conditional-ranges",
+                      id: 1,
+                      trailing: 0,
+                      ranges: [
+                        { before: 0, test: () => Number(state[1].get()) >= 0, truthy: nested },
+                      ],
+                    }
+                  : undefined,
               }),
               bindings: [],
             };
@@ -83,7 +108,7 @@ describe("conditional fallback lifecycle replay", () => {
               // The undeclared aside forces complete React fallback for both block types.
               render: () => {
                 renders += 1;
-                return view(Boolean(state[0].get()), Number(state[1].get()));
+                return view(Boolean(state[0].get()), Number(state[1].get()), descendants);
               },
             };
             return (
@@ -98,16 +123,18 @@ describe("conditional fallback lifecycle replay", () => {
               </main>
             );
           },
-          bindings: [
-            { kind: "block", id: 0, dependencies: [0] },
-            { kind: "block", id: 1, parent: 0, dependencies: [1] },
-          ],
+          bindings: descendants
+            ? [
+                { kind: "block", id: 0, dependencies: [0] },
+                { kind: "block", id: 1, parent: 0, dependencies: [1] },
+              ]
+            : [{ kind: "block", id: 0, dependencies: [0, 1] }],
         });
         function Control() {
           const [model, setModel] = useState<(boolean | number)[]>([true, 0]);
           updateControl = (index, value) =>
             setModel((previous) => previous.map((entry, slot) => (slot === index ? value : entry)));
-          return <main>{view(Boolean(model[0]), Number(model[1]))}</main>;
+          return <main>{view(Boolean(model[0]), Number(model[1]), descendants)}</main>;
         }
         const target = document.createElement("div");
         const control = document.createElement("div");
@@ -134,6 +161,40 @@ describe("conditional fallback lifecycle replay", () => {
         });
         const initialOwners = owners;
         expect(block!.state.fallback).toBe(true);
+        let checkDomState = () => {};
+        if (!descendants) {
+          await act(async () => {
+            target.querySelector("button")!.click();
+            control.querySelector("button")!.click();
+          });
+          const container = target.querySelector("section");
+          const input = target.querySelector("input")!;
+          const textarea = target.querySelector("textarea")!;
+          const select = target.querySelector("select")!;
+          for (const surface of [target, control]) {
+            surface.querySelector("input")!.value = "typed text";
+            surface.querySelector("textarea")!.value = "typed note";
+            surface.querySelector("select")!.value = "b";
+          }
+          input.focus();
+          input.setSelectionRange(1, 4, "backward");
+          checkDomState = () => {
+            expect(target.querySelector("section") === container).toBe(true);
+            expect(target.querySelector("input") === input).toBe(true);
+            expect(target.querySelector("textarea") === textarea).toBe(true);
+            expect(target.querySelector("select") === select).toBe(true);
+            expect(input.value).toBe(control.querySelector("input")!.value);
+            expect(textarea.value).toBe(control.querySelector("textarea")!.value);
+            expect(select.value).toBe(control.querySelector("select")!.value);
+            expect(target.querySelector("button")?.textContent).toBe("Local: 1");
+            expect(document.activeElement === input).toBe(true);
+            expect([input.selectionStart, input.selectionEnd, input.selectionDirection]).toEqual([
+              1,
+              4,
+              "backward",
+            ]);
+          };
+        }
         // A descendant-only update must work before an outer update can mask the lost listener.
         for (const [index, value] of [
           [1, 1],
@@ -148,8 +209,11 @@ describe("conditional fallback lifecycle replay", () => {
             updateControl(index, value);
           });
           expect(target.innerHTML).toBe(control.innerHTML);
-          expect([...owner!.blockRefreshListeners.keys()].sort()).toEqual([0, 1]);
+          expect([...owner!.blockRefreshListeners.keys()].sort()).toEqual(
+            descendants ? [0, 1] : [0],
+          );
           expect(owners).toBe(initialOwners);
+          checkDomState();
         }
         // Replay an already committed fallback as well as the initial pending fallback.
         for (const count of [4, 5, 6]) {
@@ -161,7 +225,10 @@ describe("conditional fallback lifecycle replay", () => {
             updateControl(1, count);
           });
           expect(target.innerHTML).toBe(control.innerHTML);
-          expect([...owner!.blockRefreshListeners.keys()].sort()).toEqual([0, 1]);
+          expect([...owner!.blockRefreshListeners.keys()].sort()).toEqual(
+            descendants ? [0, 1] : [0],
+          );
+          checkDomState();
         }
         const beforeUnmount = { owners, renders };
         const detached = target.firstElementChild!;
