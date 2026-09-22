@@ -266,7 +266,15 @@ const OVERLAY_STYLES = `
   }
 
   .farm-runtime-error__viewport .farm-default-error__actions {
+    /* The redesigned page is taller than a short window. Rather than shrink it
+       until it is unreadable, keep the recovery controls pinned to the bottom
+       so they stay reachable while the rest of the report scrolls under them. */
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
     margin-top: 10px;
+    padding: 10px 0;
+    background: var(--farm-error-bg);
   }
 }
 `;

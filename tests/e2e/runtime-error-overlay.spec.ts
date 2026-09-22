@@ -31,7 +31,7 @@ test.describe("Development runtime error overlay", () => {
     await expect(copyButton).toHaveCSS("font-family", /Inter|system-ui/);
     const issueLink = overlay.getByRole("link", { name: "Open GitHub issue" });
     await expect(issueLink).toBeVisible();
-    await expect(issueLink).toHaveCSS("font-family", /Inter|system-ui/);
+    await expect(issueLink).toHaveCSS("font-family", /Geist Mono|ui-monospace/);
     await expect(issueLink).toHaveCSS("outline-width", "1px");
     const issueUrl = new URL((await issueLink.getAttribute("href")) || "");
     expect(issueUrl.origin + issueUrl.pathname).toBe(
