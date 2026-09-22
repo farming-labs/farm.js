@@ -381,6 +381,106 @@ const testSource = String.raw`
   assert.deepEqual(conditionalRootFailures, []);
   delete globalThis.IS_REACT_ACT_ENVIRONMENT;
 
+  // StrictMode must restore descendant subscriptions when structural adoption fell back to React.
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const fallbackReplayFailures = [];
+  for (const kind of ["HostConditional", "ConditionalRanges"]) {
+    for (const reactivity of ["static", "hybrid"]) {
+      for (const lifecycle of ["mount", "hydrate"]) {
+        const context = kind + "/" + reactivity + "/" + lifecycle;
+        let update, updateControl, owner, block;
+        let owners = 0, renders = 0;
+        const host = (tag, children = []) => ({ kind: "element", tag, attributes: [], styles: [], children });
+        const view = (visible, count) => React.createElement("section", null,
+          React.createElement("aside", null, "Extra"),
+          visible ? React.createElement("article", null, count >= 0 ? React.createElement("em", null, count) : null) : null,
+        );
+        const Panel = createCompiledComponent({
+          displayName: "CompatibilityFallbackReplay",
+          reactivity,
+          initialize: () => [true, 0],
+          render(_props, cells, blocks) {
+            owners += 1;
+            update = (index, value) => cells[index].set(value);
+            const nested = { create: () => host("em", [cells[1].get()]), bindings: [] };
+            const branch = { create: () => ({
+              ...host("article", cells[1].get() >= 0 ? [nested.create()] : []),
+              block: { kind: "conditional-ranges", id: 1, trailing: 0,
+                ranges: [{ before: 0, test: () => cells[1].get() >= 0, truthy: nested }],
+              },
+            }), bindings: [] };
+            const condition = { before: 0, test: () => cells[0].get(), truthy: branch };
+            return React.createElement("main", null, React.createElement(blocks[kind], {
+              id: 0,
+              ref: (instance) => { if (instance) block = instance; },
+              // The undeclared aside forces complete fallback without a React hydration mismatch.
+              render: () => { renders += 1; return view(cells[0].get(), cells[1].get()); },
+              ...(kind === "HostConditional" ? condition : { ranges: [condition], trailing: 0 }),
+            }));
+          },
+          bindings: [{ kind: "block", id: 0, dependencies: [0] }, { kind: "block", id: 1, parent: 0, dependencies: [1] }],
+        });
+        function Control() {
+          const [model, setModel] = React.useState([true, 0]);
+          updateControl = (index, value) => setModel((previous) => previous.map((entry, slot) => slot === index ? value : entry));
+          return React.createElement("main", null, view(model[0], model[1]));
+        }
+        const target = document.createElement("div");
+        const controlTarget = document.createElement("div");
+        document.body.append(target, controlTarget);
+        const tree = React.createElement(React.StrictMode, null, React.createElement(Panel, { ref: (instance) => { if (instance) owner = instance; } }));
+        if (lifecycle === "hydrate") target.innerHTML = renderToString(tree);
+        const errors = [];
+        let root;
+        const controlRoot = createRoot(controlTarget);
+        try {
+          await React.act(async () => {
+            root = lifecycle === "hydrate" ? hydrateRoot(target, tree, { onRecoverableError: (error) => errors.push(error) }) : createRoot(target);
+            if (lifecycle === "mount") root.render(tree);
+            controlRoot.render(React.createElement(React.StrictMode, null, React.createElement(Control)));
+          });
+          assert.equal(block.state.fallback, true, context);
+          const initialOwners = owners;
+          for (const [index, value] of [[1, 1], [0, false], [1, 2], [0, true], [1, -1], [1, 3]]) {
+            await React.act(async () => { update(index, value); updateControl(index, value); });
+            assert.equal(target.innerHTML, controlTarget.innerHTML, context);
+            assert.deepEqual([...owner.blockRefreshListeners.keys()].sort(), [0, 1], context);
+            assert.equal(owners, initialOwners, context);
+          }
+          // A later replay must also retain a committed permanent fallback.
+          for (const count of [4, 5]) {
+            await React.act(async () => {
+              block.componentWillUnmount();
+              assert.equal(owner.blockRefreshListeners.size, 0, context);
+              block.componentDidMount();
+              update(1, count); updateControl(1, count);
+            });
+            assert.equal(target.innerHTML, controlTarget.innerHTML, context);
+            assert.deepEqual([...owner.blockRefreshListeners.keys()].sort(), [0, 1], context);
+          }
+          const beforeUnmount = { owners, renders };
+          const detached = target.firstElementChild;
+          await React.act(async () => { update(1, 99); flushSync(() => root.unmount()); });
+          const detachedHTML = detached.outerHTML;
+          await React.act(async () => update(1, 100));
+          assert.equal(owner.blockRefreshListeners.size, 0, context);
+          assert.deepEqual({ owners, renders }, beforeUnmount, context);
+          assert.equal(detached.outerHTML, detachedHTML, context);
+          assert.equal(detached.isConnected, false, context);
+          assert.equal(target.childElementCount, 0, context);
+          assert.deepEqual(errors, [], context);
+        } catch (error) {
+          fallbackReplayFailures.push({ context, message: error.message });
+        } finally {
+          await React.act(async () => { root?.unmount(); controlRoot.unmount(); });
+          target.remove(); controlTarget.remove();
+        }
+      }
+    }
+  }
+  assert.deepEqual(fallbackReplayFailures, []);
+  delete globalThis.IS_REACT_ACT_ENVIRONMENT;
+
   let reverseCompatibilityRows = () => undefined;
   let mapReverseParityCompatibilityRows = () => undefined;
   let queuedMapReverseParityCompatibilityRows = () => undefined;
