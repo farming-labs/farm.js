@@ -134,6 +134,21 @@ export interface FarmServerRendererRuntime {
   isValidElement(value: unknown): boolean;
   /** Wraps a route-owned client tree so compiled leaf boundaries stay inside that React root. */
   wrapClientGraph?(element: unknown): unknown;
+  /**
+   * Optional: locate where a streamed chunk stops being the static shell.
+   *
+   * Partial prerendering caches everything before the first dynamic boundary
+   * and refreshes the rest on the client, so it has to know where that
+   * boundary is. The markers are renderer-specific (React streams Fizz
+   * boundary ids and `$RC`/`$RS` reveal calls, Solid streams `<template
+   * id="pl-N">` with `$df(N)`), so the renderer that emits them owns finding
+   * them. Returns the index to cut at, or -1 when the chunk is entirely
+   * static.
+   *
+   * A renderer that does not implement this gets no static shell at all:
+   * guessing would mean caching a per-request response as if it were shared.
+   */
+  findStaticShellBoundary?(chunk: string): number;
   renderToString(element: unknown): string | Promise<string>;
   /**
    * Optional variant for renderers whose components emit document-head markup

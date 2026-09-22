@@ -328,25 +328,6 @@ function renderI18nAlternateLinks(requestPath: string, snapshot: FarmI18nClientS
   return links.join("");
 }
 
-function findPPRDynamicChunkIndex(chunk: string): number {
-  const markerIndexes = [
-    chunk.indexOf('id="S:'),
-    chunk.indexOf("id='S:"),
-    chunk.indexOf("$RC("),
-    chunk.indexOf("$RS("),
-    chunk.indexOf("$RV("),
-    chunk.indexOf("$RX("),
-  ].filter((index) => index >= 0);
-
-  if (markerIndexes.length === 0) {
-    return -1;
-  }
-
-  const markerIndex = Math.min(...markerIndexes);
-  const tagStart = chunk.lastIndexOf("<", markerIndex);
-  return tagStart >= 0 ? tagStart : markerIndex;
-}
-
 function createPPRRefreshScript(): string {
   return `<script>(function(){if(window.__FARM_PPR_REFRESHING__)return;window.__FARM_PPR_REFRESHING__=true;function replaceRoot(html){var doc=new DOMParser().parseFromString(html,"text/html");var next=doc.getElementById("root");var current=document.getElementById("root");if(!next||!current)return;current.innerHTML=next.innerHTML;}fetch(window.location.href,{credentials:"same-origin",headers:{"x-farm-ppr-refresh":"1"}}).then(function(response){return response.ok?response.text():null;}).then(function(html){if(html)replaceRoot(html);}).catch(function(){});})();</script>`;
 }
@@ -2453,7 +2434,14 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
         res.setHeader(key, value);
       }
       const htmlParts: string[] = [];
-      const staticShellParts: string[] | undefined = options.captureStaticShell ? [] : undefined;
+      // Splitting a static shell out of the stream requires knowing where the
+      // first dynamic boundary is, and only the renderer that emitted the
+      // markers can say. Without that, every chunk would look static and a
+      // per-request response would be cached as a shared shell, so skip the
+      // shell entirely rather than guess.
+      const findStaticShellBoundary = this.rendererRuntime.findStaticShellBoundary;
+      const staticShellParts: string[] | undefined =
+        options.captureStaticShell && findStaticShellBoundary ? [] : undefined;
       let staticShellClosed = false;
       let suspenseHoleEmitted = false;
       let didError = false;
@@ -2656,8 +2644,8 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
               }
               htmlParts.push(chunkText);
 
-              if (staticShellParts && !staticShellClosed) {
-                const dynamicIndex = findPPRDynamicChunkIndex(chunkText);
+              if (staticShellParts && findStaticShellBoundary && !staticShellClosed) {
+                const dynamicIndex = findStaticShellBoundary(chunkText);
                 if (dynamicIndex >= 0) {
                   if (dynamicIndex > 0) {
                     staticShellParts.push(chunkText.slice(0, dynamicIndex));
