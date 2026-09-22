@@ -32,15 +32,6 @@ function toMiddlewareMap(data: MiddlewareStoreInput): Map<string, any> {
 }
 
 /**
- * Internal: Set middleware data for the current request
- * This is called by the server renderer before rendering starts.
- * Prefer _runWithMiddlewareData for request-scoped async flows.
- */
-export function _setCurrentMiddlewareData(data: MiddlewareStoreInput): void {
-  middlewareStore.enterWith(toMiddlewareMap(data));
-}
-
-/**
  * Internal: Clear middleware data after request completes
  */
 export function _clearCurrentMiddlewareData(): void {
@@ -125,40 +116,4 @@ export function getMiddlewareContext<
   T extends Record<string, any> = Record<string, any>,
 >(): ReadonlyMiddlewareStore<T> {
   return (middlewareContextStore.getStore() || new Map()) as unknown as ReadonlyMiddlewareStore<T>;
-}
-
-/**
- * Type-safe middleware data accessor with type parameter
- *
- * @example
- * ```tsx
- * import { createMiddlewareAccessor } from 'farm/middleware/server';
- *
- * interface MiddlewareData {
- *   user: { id: number; name: string };
- *   dashboardStats: { views: number; clicks: number };
- * }
- *
- * const getData = createMiddlewareAccessor<MiddlewareData>();
- *
- * export default function Page() {
- *   const data = getData();
- *   const user = data.user;  // Fully typed!
- *   const stats = data.dashboardStats;  // Fully typed!
- *
- *   return <div>Welcome {user?.name}</div>;
- * }
- * ```
- */
-export function createMiddlewareAccessor<T extends Record<string, any>>() {
-  return (): Partial<T> => {
-    const data = getMiddlewareData();
-    const result: any = {};
-
-    for (const [key, value] of data) {
-      result[key] = value;
-    }
-
-    return result as Partial<T>;
-  };
 }
