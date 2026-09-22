@@ -1,17 +1,26 @@
 import {
+  collectSchemaModels,
+  escapeSqlString,
+  findSchemaTableOwners,
   generateFarmTypeArtifacts,
   getFarmDocsRouteTypeEntries,
   getIntegrationSchemas,
+  isNullableField,
   loadConfig,
   logger,
+  renderSqlSchemaFile,
   resolveConfig,
-  type FarmIntegrationSchema,
-  type FarmIntegrationSchemaField,
-  type FarmIntegrationSchemaModel,
+  toCamelCase,
+  type CollectedSchemaModel,
+  type FarmSchema,
+  type ResolvedSchemaField,
 } from "@farm.js/core";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+
+// Kept exported here: this is where it has always been part of the cli surface.
+export { escapeSqlString } from "@farm.js/core";
 
 export type GenerateFarmSchemaTarget =
   | "prisma"
@@ -52,24 +61,6 @@ type PackageManifest = {
   devDependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
   optionalDependencies?: Record<string, string>;
-};
-
-type ResolvedSchemaField = FarmIntegrationSchemaField & {
-  name: string;
-};
-
-type ResolvedSchemaModel = Omit<FarmIntegrationSchemaModel, "fields"> & {
-  name: string;
-  fields: Record<string, ResolvedSchemaField>;
-};
-
-type CollectedSchemaModel = {
-  integrationKey: string;
-  modelKey: string;
-  modelName: string;
-  exportName: string;
-  prismaModelName: string;
-  model: ResolvedSchemaModel;
 };
 
 const PRISMA_GENERATED_START = "// Farm.js integrations generated schema: start";
@@ -122,12 +113,21 @@ export async function generateFarmArtifacts(options: GenerateFarmOptions = {}) {
     `Generated route, API, env${resolvedConfig.i18n.enabled ? ", and i18n" : ""} types (${typeArtifacts.apiRoutes.length} API route${typeArtifacts.apiRoutes.length === 1 ? "" : "s"}).`,
   );
 
+  // Integrations declare a schema directly; plugins declare one by owning
+  // tables, so both feed the same artifacts.
   const schemas = getIntegrationSchemas(resolvedConfig.integrations);
-  const schemaEntries = Object.entries(schemas);
+  const schemaEntries: Array<readonly [string, FarmSchema, (readonly string[])?]> = Object.entries(
+    schemas,
+  ).map(([key, schema]) => [key, schema] as const);
+
+  for (const owner of findSchemaTableOwners(resolvedConfig)) {
+    if (schemas[owner.name]) continue; // already collected as an integration
+    schemaEntries.push([owner.name, owner.schema, owner.models]);
+  }
 
   if (!schemaEntries.length) {
     if (hasSchemaOptions(options)) {
-      logger.warn("No integration schemas were found in the current Farm config.");
+      logger.warn("No schemas were found in the current Farm config.");
     }
     return typeArtifacts;
   }
@@ -142,7 +142,7 @@ export async function generateFarmArtifacts(options: GenerateFarmOptions = {}) {
       throw error;
     }
     logger.warn(
-      `Integration schemas were found, but Farm could not choose a schema target automatically: ${(error as Error).message}`,
+      `Schemas were found, but Farm could not choose a schema target automatically: ${(error as Error).message}`,
     );
     return typeArtifacts;
   }
@@ -150,7 +150,7 @@ export async function generateFarmArtifacts(options: GenerateFarmOptions = {}) {
   if (!orm) {
     if (!schemaOptionsExplicit) {
       logger.warn(
-        "Integration schemas were found, but no data layer was detected. Pass --orm prisma|drizzle|postgres|mysql|sqlite|mongodb to generate schema artifacts.",
+        "Schemas were found, but no data layer was detected. Pass --orm prisma|drizzle|postgres|mysql|sqlite|mongodb to generate schema artifacts.",
       );
       return typeArtifacts;
     }
@@ -202,7 +202,7 @@ export async function generateFarmArtifacts(options: GenerateFarmOptions = {}) {
       const outputPath = options.output
         ? path.resolve(root, options.output)
         : path.join(root, `farm-integrations.generated.${orm}.sql`);
-      await writeGeneratedFile(outputPath, generateSqlSchema(collectedModels, orm));
+      await writeGeneratedFile(outputPath, renderSqlSchemaFile(collectedModels, orm));
       logger.success(`Generated ${orm} integration schema in ${path.relative(root, outputPath)}.`);
       return typeArtifacts;
     }
@@ -374,149 +374,6 @@ function hasAnyDependency(dependencies: Set<string>, candidates: readonly string
   return candidates.some((candidate) => dependencies.has(candidate));
 }
 
-function collectSchemaModels(
-  schemaEntries: ReadonlyArray<readonly [string, FarmIntegrationSchema]>,
-) {
-  const collectedModels: CollectedSchemaModel[] = [];
-  const seenModelNames = new Map<string, string>();
-
-  for (const [integrationKey, schema] of schemaEntries) {
-    const resolvedModels = resolveSchemaModels(integrationKey, schema);
-
-    for (const [modelKey, model] of Object.entries(resolvedModels)) {
-      const collisionKey = model.name.toLowerCase();
-      const previousOwner = seenModelNames.get(collisionKey);
-
-      if (previousOwner && previousOwner !== `${integrationKey}.${modelKey}`) {
-        throw new Error(
-          `Integration schema model "${integrationKey}.${modelKey}" resolves to "${model.name}", which conflicts with "${previousOwner}". Rename one of the models with schema.models.<model>.name.`,
-        );
-      }
-
-      seenModelNames.set(collisionKey, `${integrationKey}.${modelKey}`);
-
-      collectedModels.push({
-        integrationKey,
-        modelKey,
-        modelName: model.name,
-        exportName: toCamelCase(`${integrationKey}_${modelKey}`),
-        prismaModelName: toPascalCase(`${integrationKey}_${modelKey}`),
-        model,
-      });
-    }
-  }
-
-  return collectedModels;
-}
-
-function resolveSchemaModels(integrationKey: string, schema: FarmIntegrationSchema) {
-  const models: Record<string, FarmIntegrationSchemaModel> = Object.fromEntries(
-    Object.entries(schema.models).map(([modelKey, model]) => [modelKey, cloneSchemaModel(model)]),
-  );
-
-  for (const [modelKey, extension] of Object.entries(schema.extend || {})) {
-    const existing = models[modelKey];
-    models[modelKey] = {
-      ...(existing || { fields: {} }),
-      ...(extension.name ? { name: extension.name } : {}),
-      ...(extension.description ? { description: extension.description } : {}),
-      fields: {
-        ...existing?.fields,
-        ...extension.fields,
-      },
-      constraints: [...(existing?.constraints || []), ...(extension.constraints || [])],
-      meta: {
-        ...existing?.meta,
-        ...extension.meta,
-      },
-    };
-  }
-
-  for (const [modelKey, override] of Object.entries(schema.override || {})) {
-    const existing = models[modelKey];
-
-    if (!existing) {
-      throw new Error(
-        `Integration schema override for "${integrationKey}.${modelKey}" is invalid because that model does not exist.`,
-      );
-    }
-
-    const fields = {
-      ...existing.fields,
-    };
-
-    for (const [fieldKey, fieldOverride] of Object.entries(override.fields || {})) {
-      const existingField = fields[fieldKey];
-
-      if (!existingField && !fieldOverride.type) {
-        throw new Error(
-          `Integration schema override for "${integrationKey}.${modelKey}.${fieldKey}" is missing a field type.`,
-        );
-      }
-
-      fields[fieldKey] = {
-        ...existingField,
-        ...fieldOverride,
-      } as FarmIntegrationSchemaField;
-    }
-
-    models[modelKey] = {
-      ...existing,
-      ...(override.name ? { name: override.name } : {}),
-      ...(override.description ? { description: override.description } : {}),
-      fields,
-      constraints: override.constraints || existing.constraints,
-      meta: {
-        ...existing.meta,
-        ...override.meta,
-      },
-    };
-  }
-
-  const resolvedModels: Record<string, ResolvedSchemaModel> = {};
-
-  for (const [modelKey, model] of Object.entries(models)) {
-    const modelName = model.name || toSnakeCase(`${integrationKey}_${modelKey}`);
-    const fieldNames = new Set<string>();
-    const resolvedFields: Record<string, ResolvedSchemaField> = {};
-
-    for (const [fieldKey, field] of Object.entries(model.fields)) {
-      const fieldName = field.name || toSnakeCase(fieldKey);
-
-      if (fieldNames.has(fieldName)) {
-        throw new Error(
-          `Integration schema model "${integrationKey}.${modelKey}" contains duplicate field name "${fieldName}".`,
-        );
-      }
-
-      fieldNames.add(fieldName);
-      resolvedFields[fieldKey] = {
-        ...field,
-        name: fieldName,
-      };
-    }
-
-    resolvedModels[modelKey] = {
-      ...model,
-      name: modelName,
-      fields: resolvedFields,
-    };
-  }
-
-  return resolvedModels;
-}
-
-function cloneSchemaModel(model: FarmIntegrationSchemaModel): FarmIntegrationSchemaModel {
-  return {
-    ...model,
-    fields: Object.fromEntries(
-      Object.entries(model.fields).map(([fieldKey, field]) => [fieldKey, { ...field }]),
-    ),
-    constraints: model.constraints ? [...model.constraints] : undefined,
-    meta: model.meta ? { ...model.meta } : undefined,
-  };
-}
-
 async function writePrismaSchema(schemaPath: string, models: readonly CollectedSchemaModel[]) {
   const source = await readFile(schemaPath, "utf8");
   const generated = createPrismaGeneratedBlock(generatePrismaSchema(models));
@@ -539,7 +396,7 @@ function generatePrismaSchema(models: readonly CollectedSchemaModel[]) {
 
 function renderPrismaModel(model: CollectedSchemaModel) {
   const lines: string[] = [
-    `/// Farm.js generated from integration "${model.integrationKey}" model "${model.modelKey}"`,
+    `/// Farm.js generated from "${model.ownerKey}" model "${model.modelKey}"`,
     `model ${model.prismaModelName} {`,
   ];
 
@@ -696,7 +553,7 @@ function renderDrizzleModel(
   tableFactoryName: string,
 ) {
   const lines = [
-    `// Farm.js generated from integration "${model.integrationKey}" model "${model.modelKey}"`,
+    `// Farm.js generated from "${model.ownerKey}" model "${model.modelKey}"`,
     `export const ${model.exportName} = ${tableFactoryName}("${model.modelName}", {`,
   ];
 
@@ -887,216 +744,6 @@ function getDrizzleDefaultExpression(field: ResolvedSchemaField, dialect: Genera
   return "";
 }
 
-function generateSqlSchema(
-  models: readonly CollectedSchemaModel[],
-  dialect: GenerateFarmSqlDialect,
-) {
-  const lines = ["-- Generated by Farm.js CLI. Review before applying.", ""];
-  const modelLookup = createModelLookup(models);
-
-  for (const model of models) {
-    lines.push(
-      `-- Integration "${model.integrationKey}" model "${model.modelKey}"`,
-      renderSqlTable(model, dialect, modelLookup),
-      "",
-    );
-
-    for (const statement of renderSqlIndexes(model, dialect)) {
-      lines.push(statement, "");
-    }
-  }
-
-  return lines.join("\n").trimEnd() + "\n";
-}
-
-function renderSqlTable(
-  model: CollectedSchemaModel,
-  dialect: GenerateFarmSqlDialect,
-  modelLookup: Map<string, CollectedSchemaModel>,
-) {
-  const tableName = quoteIdentifier(dialect, model.modelName);
-  const lines = [`CREATE TABLE IF NOT EXISTS ${tableName} (`];
-  const columns: string[] = [];
-  const internalReferences = createInternalReferenceLookup(model, dialect, modelLookup);
-
-  for (const [fieldKey, field] of Object.entries(model.model.fields)) {
-    const parts = [`  ${quoteIdentifier(dialect, field.name)}`, getSqlColumnType(field, dialect)];
-
-    if (field.primaryKey) {
-      parts.push("PRIMARY KEY");
-    } else if (!isNullableField(field)) {
-      parts.push("NOT NULL");
-    }
-
-    if (!field.primaryKey && field.unique) {
-      parts.push("UNIQUE");
-    }
-
-    const defaultValue = getSqlDefaultExpression(field, dialect);
-    if (defaultValue) {
-      parts.push(`DEFAULT ${defaultValue}`);
-    }
-
-    const reference = internalReferences.get(fieldKey);
-    if (reference) {
-      parts.push(reference);
-    } else if (field.reference) {
-      parts.push(
-        `/* references ${field.reference.model}.${field.reference.field}${field.reference.onDelete ? ` on delete ${field.reference.onDelete}` : ""} */`,
-      );
-    }
-
-    columns.push(parts.join(" "));
-  }
-
-  lines.push(columns.join(",\n"));
-  lines.push(");");
-  return lines.join("\n");
-}
-
-function renderSqlIndexes(model: CollectedSchemaModel, dialect: GenerateFarmSqlDialect) {
-  const statements: string[] = [];
-  const tableName = quoteIdentifier(dialect, model.modelName);
-
-  for (const [fieldKey, field] of Object.entries(model.model.fields)) {
-    if (!field.index) {
-      continue;
-    }
-
-    const indexName = `${model.modelName}_${field.name}_idx`;
-    statements.push(
-      `CREATE INDEX IF NOT EXISTS ${quoteIdentifier(dialect, indexName)} ON ${tableName} (${quoteIdentifier(dialect, field.name)});`,
-    );
-  }
-
-  for (const constraint of model.model.constraints || []) {
-    const indexName =
-      constraint.name ||
-      `${model.modelName}_${constraint.fields.map((fieldKey) => model.model.fields[fieldKey]?.name || fieldKey).join("_")}_${constraint.type}`;
-    const fields = constraint.fields
-      .map((fieldKey) => quoteIdentifier(dialect, model.model.fields[fieldKey]?.name || fieldKey))
-      .join(", ");
-
-    if (constraint.type === "unique") {
-      statements.push(
-        `CREATE UNIQUE INDEX IF NOT EXISTS ${quoteIdentifier(dialect, indexName)} ON ${tableName} (${fields});`,
-      );
-    } else {
-      statements.push(
-        `CREATE INDEX IF NOT EXISTS ${quoteIdentifier(dialect, indexName)} ON ${tableName} (${fields});`,
-      );
-    }
-  }
-
-  return statements;
-}
-
-function createInternalReferenceLookup(
-  model: CollectedSchemaModel,
-  dialect: GenerateFarmSqlDialect,
-  modelLookup: Map<string, CollectedSchemaModel>,
-) {
-  const lookup = new Map<string, string>();
-
-  for (const [fieldKey, field] of Object.entries(model.model.fields)) {
-    if (!field.reference) {
-      continue;
-    }
-
-    const referencedModel = modelLookup.get(`${model.integrationKey}.${field.reference.model}`);
-
-    if (referencedModel) {
-      const referencedField = field.reference.field;
-      const pieces = [
-        `REFERENCES ${quoteIdentifier(dialect, referencedModel.modelName)} (${quoteIdentifier(dialect, referencedModel.model.fields[referencedField]?.name || toSnakeCase(referencedField))})`,
-      ];
-
-      if (field.reference.onDelete) {
-        pieces.push(`ON DELETE ${field.reference.onDelete.toUpperCase()}`);
-      }
-
-      lookup.set(fieldKey, pieces.join(" "));
-    }
-  }
-
-  return lookup;
-}
-
-function getSqlColumnType(field: ResolvedSchemaField, dialect: GenerateFarmSqlDialect) {
-  if (dialect === "postgres") {
-    switch (field.type) {
-      case "boolean":
-        return "BOOLEAN";
-      case "integer":
-        return "INTEGER";
-      case "number":
-        return "DOUBLE PRECISION";
-      case "datetime":
-        return "TIMESTAMPTZ";
-      case "json":
-        return "JSONB";
-      default:
-        return "TEXT";
-    }
-  }
-
-  if (dialect === "mysql") {
-    switch (field.type) {
-      case "boolean":
-        return "BOOLEAN";
-      case "integer":
-        return "INT";
-      case "number":
-        return "DOUBLE";
-      case "datetime":
-        return "DATETIME";
-      case "json":
-        return "JSON";
-      case "text":
-        return "TEXT";
-      default:
-        return "VARCHAR(255)";
-    }
-  }
-
-  switch (field.type) {
-    case "boolean":
-    case "integer":
-      return "INTEGER";
-    case "number":
-      return "REAL";
-    default:
-      return "TEXT";
-  }
-}
-
-function getSqlDefaultExpression(field: ResolvedSchemaField, dialect: GenerateFarmSqlDialect) {
-  if (field.default === undefined) {
-    return null;
-  }
-
-  if (field.type === "datetime" && field.default === "now") {
-    return "CURRENT_TIMESTAMP";
-  }
-
-  if (typeof field.default === "string") {
-    return `'${escapeSqlString(field.default)}'`;
-  }
-
-  if (typeof field.default === "number") {
-    return String(field.default);
-  }
-
-  if (typeof field.default === "boolean") {
-    if (dialect === "sqlite") {
-      return field.default ? "1" : "0";
-    }
-    return field.default ? "TRUE" : "FALSE";
-  }
-
-  return null;
-}
-
 function generateMongoBootstrap(models: readonly CollectedSchemaModel[]) {
   const lines = [
     "// Generated by Farm.js CLI. Review before committing.",
@@ -1106,7 +753,7 @@ function generateMongoBootstrap(models: readonly CollectedSchemaModel[]) {
   ];
 
   for (const model of models) {
-    lines.push(`  // Integration "${model.integrationKey}" model "${model.modelKey}"`);
+    lines.push(`  // Owner "${model.ownerKey}" model "${model.modelKey}"`);
     lines.push(
       `  const ${model.exportName} = db.collection("${escapeDoubleQuoted(model.modelName)}");`,
     );
@@ -1160,53 +807,8 @@ async function writeGeneratedFile(filePath: string, contents: string) {
   await writeFile(filePath, contents, "utf8");
 }
 
-function isNullableField(field: ResolvedSchemaField) {
-  return field.nullable === true || field.required === false;
-}
-
-function quoteIdentifier(dialect: GenerateFarmSqlDialect, value: string) {
-  if (dialect === "mysql") {
-    return `\`${value.replace(/`/g, "``")}\``;
-  }
-
-  return `"${value.replace(/"/g, '""')}"`;
-}
-
-function createModelLookup(models: readonly CollectedSchemaModel[]) {
-  return new Map(models.map((model) => [`${model.integrationKey}.${model.modelKey}`, model]));
-}
-
-function toSnakeCase(value: string) {
-  return value
-    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
-    .replace(/[\s.-]+/g, "_")
-    .replace(/__+/g, "_")
-    .toLowerCase();
-}
-
-function toPascalCase(value: string) {
-  return value
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .replace(/[\s._-]+/g, " ")
-    .split(" ")
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join("");
-}
-
-function toCamelCase(value: string) {
-  const pascal = toPascalCase(value);
-  return pascal ? pascal.charAt(0).toLowerCase() + pascal.slice(1) : pascal;
-}
-
 export function escapeDoubleQuoted(value: string) {
   return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-}
-
-export function escapeSqlString(value: string) {
-  // Standard-conforming SQL string literal: only quote doubling; backslashes
-  // are literal characters.
-  return value.replace(/'/g, "''");
 }
 
 function escapeRegExp(value: string) {

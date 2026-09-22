@@ -1,5 +1,5 @@
-import { definePlugin } from "@farm.js/core";
-import type { FarmSchema } from "@farm.js/core";
+import { declareSchemaTables, definePlugin } from "@farm.js/core";
+import type { FarmSchema, FarmSqlDialect } from "@farm.js/core";
 import { executeSyncOperation, SyncOperationError, type SyncOrmClient } from "./server.js";
 import {
   resolveSyncModels,
@@ -35,6 +35,11 @@ export type SyncPluginOptions = {
   path?: string;
   /** Persist rows through the configured client cache adapter. */
   persist?: boolean;
+  /**
+   * Sql dialect for `farm sync migrate`. Only needed when the client's dialect
+   * cannot be detected from its shape.
+   */
+  dialect?: FarmSqlDialect;
 };
 
 export type SyncMiddlewareContext = {
@@ -81,7 +86,7 @@ export function sync(options: SyncPluginOptions) {
     return ormPromise;
   };
 
-  return definePlugin({
+  const plugin = definePlugin({
     name: "farm:sync",
 
     client: {
@@ -153,6 +158,28 @@ export function sync(options: SyncPluginOptions) {
           error: { code: "server_error", message: "The sync operation failed." },
         });
       }
+    },
+  });
+
+  // Declare the tables sync owns, so `farm sync migrate` can create them
+  // without re-reading or re-validating configuration.
+  return declareSchemaTables(plugin, {
+    name: "sync",
+    schema: options.schema,
+    // A model the app has not opened to the browser is not sync's to create.
+    models: Array.from(models.keys()),
+    dialect: options.dialect,
+    resolveClient: async () => {
+      if (options.client) {
+        return typeof options.client === "function"
+          ? await (options.client as () => unknown | Promise<unknown>)()
+          : options.client;
+      }
+      if (options.storage) {
+        const { getStorage } = await import("@farm.js/core/storage");
+        return getStorage(options.storage);
+      }
+      return undefined;
     },
   });
 }
