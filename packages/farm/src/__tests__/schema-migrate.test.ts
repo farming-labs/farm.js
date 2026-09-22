@@ -125,6 +125,43 @@ describe("sql generation", () => {
     ]);
   });
 
+  it("declares mysql indexes inside create table, which has no create index if not exists", () => {
+    const statements = generateSqlStatements(models(), "mysql");
+    const sql = statements.map((statement) => statement.sql).join("\n");
+
+    // MySQL rejects `CREATE INDEX IF NOT EXISTS` with a syntax error, so the
+    // indexes have to ride along with the table instead.
+    expect(sql).not.toContain("IF NOT EXISTS `todo_items_list_id_idx`");
+    expect(sql).not.toMatch(/CREATE (UNIQUE )?INDEX IF NOT EXISTS/);
+    expect(statements.filter((statement) => statement.kind === "index")).toEqual([]);
+
+    expect(statements[0]!.sql).toContain("KEY `todo_items_list_id_idx` (`list_id`)");
+    expect(statements[0]!.sql).toContain(
+      "KEY `todo_items_list_id_status_index` (`list_id`, `status`)",
+    );
+  });
+
+  it("declares a mysql unique constraint as a unique key on the table", () => {
+    const unique = models();
+    unique[0]!.model.constraints = [{ type: "unique", fields: ["listId", "status"] }];
+
+    const [table] = generateSqlStatements(unique, "mysql");
+
+    expect(table!.sql).toContain(
+      "UNIQUE KEY `todo_items_list_id_status_unique` (`list_id`, `status`)",
+    );
+  });
+
+  it("still uses standalone create index if not exists where the dialect supports it", () => {
+    for (const dialect of ["postgres", "sqlite"] as FarmSqlDialect[]) {
+      const sql = generateSqlStatements(models(), dialect)
+        .map((statement) => statement.sql)
+        .join("\n");
+
+      expect(sql).toContain('CREATE INDEX IF NOT EXISTS "todo_items_list_id_idx"');
+    }
+  });
+
   it.each([
     ["postgres", "TIMESTAMPTZ", '"todo_items"'],
     ["sqlite", "TEXT", '"todo_items"'],

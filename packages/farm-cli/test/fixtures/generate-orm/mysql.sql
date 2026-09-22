@@ -17,22 +17,19 @@ CREATE TABLE IF NOT EXISTS `members` (
   `profile` JSON,
   `notes` TEXT,
   `joined_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `offsite_ref` VARCHAR(255) /* references elsewhere.id */
+  `offsite_ref` VARCHAR(255) /* references elsewhere.id */,
+  KEY `members_org_id_idx` (`org_id`),
+  UNIQUE KEY `members_org_id_role_unique` (`org_id`, `role`)
 );
-
-CREATE INDEX IF NOT EXISTS `members_org_id_idx` ON `members` (`org_id`);
-
-CREATE UNIQUE INDEX IF NOT EXISTS `members_org_id_role_unique` ON `members` (`org_id`, `role`);
 
 -- Owner "beta" model "projects"
 CREATE TABLE IF NOT EXISTS `projects` (
   `id` VARCHAR(255) PRIMARY KEY,
   `projectTitle` VARCHAR(255) NOT NULL,
   `ownerId` VARCHAR(255) NOT NULL REFERENCES `tickets` (`id`),
-  `createdAt` DATETIME NOT NULL
+  `createdAt` DATETIME NOT NULL,
+  KEY `projects_ownerId_idx` (`ownerId`)
 );
-
-CREATE INDEX IF NOT EXISTS `projects_ownerId_idx` ON `projects` (`ownerId`);
 
 -- Owner "beta" model "tickets"
 CREATE TABLE IF NOT EXISTS `tickets` (

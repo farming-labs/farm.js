@@ -285,50 +285,77 @@ function renderSqlTable(
     columns.push(parts.join(" "));
   }
 
+  if (dialect === "mysql") {
+    for (const definition of collectSchemaIndexes(model, dialect)) {
+      columns.push(
+        `  ${definition.unique ? "UNIQUE KEY" : "KEY"} ${quoteSqlIdentifier(dialect, definition.name)} (${definition.columns.join(", ")})`,
+      );
+    }
+  }
+
   lines.push(columns.join(",\n"));
   lines.push(");");
   return lines.join("\n");
 }
 
-function renderSqlIndexes(
+type SchemaIndexDefinition = {
+  name: string;
+  /** Already quoted for the dialect. */
+  columns: string[];
+  unique: boolean;
+};
+
+/** The indexes a model asks for, before any dialect decides how to declare them. */
+function collectSchemaIndexes(
   model: CollectedSchemaModel,
   dialect: FarmSqlDialect,
-): FarmSqlStatement[] {
-  const statements: FarmSqlStatement[] = [];
-  const tableName = quoteSqlIdentifier(dialect, model.modelName);
+): SchemaIndexDefinition[] {
+  const definitions: SchemaIndexDefinition[] = [];
 
   for (const field of Object.values(model.model.fields)) {
     if (!field.index) {
       continue;
     }
 
-    const indexName = `${model.modelName}_${field.name}_idx`;
-    statements.push({
-      kind: "index",
-      target: indexName,
-      sql: `CREATE INDEX IF NOT EXISTS ${quoteSqlIdentifier(dialect, indexName)} ON ${tableName} (${quoteSqlIdentifier(dialect, field.name)});`,
+    definitions.push({
+      name: `${model.modelName}_${field.name}_idx`,
+      columns: [quoteSqlIdentifier(dialect, field.name)],
+      unique: false,
     });
   }
 
   for (const constraint of model.model.constraints || []) {
-    const indexName =
-      constraint.name ||
-      `${model.modelName}_${constraint.fields.map((fieldKey) => model.model.fields[fieldKey]?.name || fieldKey).join("_")}_${constraint.type}`;
-    const fields = constraint.fields
-      .map((fieldKey) =>
+    definitions.push({
+      name:
+        constraint.name ||
+        `${model.modelName}_${constraint.fields.map((fieldKey) => model.model.fields[fieldKey]?.name || fieldKey).join("_")}_${constraint.type}`,
+      columns: constraint.fields.map((fieldKey) =>
         quoteSqlIdentifier(dialect, model.model.fields[fieldKey]?.name || fieldKey),
-      )
-      .join(", ");
-
-    const kind = constraint.type === "unique" ? "CREATE UNIQUE INDEX" : "CREATE INDEX";
-    statements.push({
-      kind: "index",
-      target: indexName,
-      sql: `${kind} IF NOT EXISTS ${quoteSqlIdentifier(dialect, indexName)} ON ${tableName} (${fields});`,
+      ),
+      unique: constraint.type === "unique",
     });
   }
 
-  return statements;
+  return definitions;
+}
+
+function renderSqlIndexes(
+  model: CollectedSchemaModel,
+  dialect: FarmSqlDialect,
+): FarmSqlStatement[] {
+  // MySQL has no `CREATE INDEX ... IF NOT EXISTS`, so its indexes are declared
+  // inside CREATE TABLE, where IF NOT EXISTS already covers re-runs.
+  if (dialect === "mysql") {
+    return [];
+  }
+
+  const tableName = quoteSqlIdentifier(dialect, model.modelName);
+
+  return collectSchemaIndexes(model, dialect).map((definition) => ({
+    kind: "index",
+    target: definition.name,
+    sql: `CREATE ${definition.unique ? "UNIQUE " : ""}INDEX IF NOT EXISTS ${quoteSqlIdentifier(dialect, definition.name)} ON ${tableName} (${definition.columns.join(", ")});`,
+  }));
 }
 
 function createInternalReferenceLookup(
