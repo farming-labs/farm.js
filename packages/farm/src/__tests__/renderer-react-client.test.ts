@@ -5,6 +5,7 @@ import * as clientRoots from "../renderer/react/client";
 import * as serverRuntime from "../renderer/react/server";
 
 defineRendererClientConformance({
+  reconcilesRerenders: true,
   name: "react",
   client: {
     ...clientRoots,

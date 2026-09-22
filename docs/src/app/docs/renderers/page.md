@@ -98,9 +98,29 @@ export const customRenderer = defineRenderer({
       node: false,
       web: true,
     },
+    reconcilesRerenders: false,
   },
 });
 ```
+
+### Re-render behavior
+
+`reconcilesRerenders` states whether re-rendering an existing root diffs the new tree against the
+live DOM or rebuilds it.
+
+Virtual-DOM renderers (React, Preact, Vue) compare the incoming tree with what is mounted, so a
+client navigation that re-renders a shared layout keeps the matching DOM nodes along with their
+focus and component state.
+
+Compile-time fine-grained renderers (Solid, Svelte) have no virtual DOM to diff against. Their
+updates flow through bindings created when the elements were constructed, so a freshly materialized
+tree replaces the nodes. That is a property of those runtimes rather than a gap in their adapters.
+On those renderers, client state that must survive a navigation belongs in a root the navigation
+does not re-render, not in a shared layout.
+
+Renderers that do not declare the field are treated as rebuilding, so nothing silently depends on
+reconciliation it will not get. The shared renderer conformance suite asserts the behavior each
+renderer declares, so the flag cannot drift away from what the adapter actually does.
 
 FARMJS builds the production client and SSR graphs in parallel by default. If a renderer's compiler
 plugin uses process-global mutable caches, set `buildConcurrency: "serial"` on its descriptor. The

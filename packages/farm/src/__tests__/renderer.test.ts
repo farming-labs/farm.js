@@ -48,8 +48,11 @@ describe("renderer configuration", () => {
   });
 
   it("normalizes missing and partial capability declarations", () => {
+    // An undeclared renderer is assumed not to reconcile, so callers cannot
+    // silently depend on state surviving a re-render that will rebuild.
     expect(getFarmRendererCapabilities()).toEqual({
       streaming: { node: false, web: false },
+      reconcilesRerenders: false,
     });
     expect(
       getFarmRendererCapabilities({
@@ -57,6 +60,15 @@ describe("renderer configuration", () => {
       }),
     ).toEqual({
       streaming: { node: false, web: true },
+      reconcilesRerenders: false,
+    });
+    expect(
+      getFarmRendererCapabilities({
+        capabilities: { reconcilesRerenders: true },
+      }),
+    ).toEqual({
+      streaming: { node: false, web: false },
+      reconcilesRerenders: true,
     });
   });
 
