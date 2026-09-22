@@ -1,4 +1,5 @@
 import type { LayoutProps, Metadata } from "@farm.js/core";
+import { LayoutShell } from "../features/shell/layout-shell";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -10,5 +11,5 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout(props: LayoutProps) {
-  return <>{props.children}</>;
+  return <LayoutShell>{props.children}</LayoutShell>;
 }
