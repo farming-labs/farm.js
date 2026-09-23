@@ -37,14 +37,14 @@
     "@sanity/webhook": "^4.0.4"
   },
   "devDependencies": {
+    "@farm.js/content": "workspace:*",
     "@sanity/client": "^8.4.0",
     "typescript": "^5.3.3",
-    "vitest": "^3.2.7",
-    "@farm.js/content": "workspace:*"
+    "vitest": "^3.2.7"
   },
   "peerDependencies": {
-    "@sanity/client": "^7.0.0 || ^8.0.0",
-    "@farm.js/content": "workspace:^"
+    "@farm.js/content": "workspace:^",
+    "@sanity/client": "^7.0.0 || ^8.0.0"
   },
   "peerDependenciesMeta": {
     "@farm.js/content": {

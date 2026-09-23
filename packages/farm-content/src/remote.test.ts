@@ -50,7 +50,11 @@ describe("remote content sources", () => {
 
     const entries = loaded.collections.posts!;
     expect(entries.map((entry) => entry.id)).toEqual(["alpha", "zeta"]);
-    expect(entries[0]).toMatchObject({ data: { title: "A" }, body: "", filePath: "cms:posts/alpha" });
+    expect(entries[0]).toMatchObject({
+      data: { title: "A" },
+      body: "",
+      filePath: "cms:posts/alpha",
+    });
     expect(entries[1]).toMatchObject({ body: "two words" });
   });
 
@@ -109,7 +113,10 @@ describe("remote content sources", () => {
       load(
         root,
         collection({
-          source: remote({ name: "cms:posts", fetch: async () => [{ id: "", data: { title: "A" } }] }),
+          source: remote({
+            name: "cms:posts",
+            fetch: async () => [{ id: "", data: { title: "A" } }],
+          }),
           schema: postSchema,
         }),
       ),

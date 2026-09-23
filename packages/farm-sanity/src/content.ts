@@ -72,9 +72,7 @@ export function sanitySource(options: SanityContentSourceOptions): ContentRemote
   return {
     kind: "remote",
     name,
-    ...(options.refreshInterval !== undefined
-      ? { refreshInterval: options.refreshInterval }
-      : {}),
+    ...(options.refreshInterval !== undefined ? { refreshInterval: options.refreshInterval } : {}),
     async fetch(): Promise<readonly ContentRemoteDocument[]> {
       const result = await resolveClient().fetch(options.query, options.params ?? {});
       if (!Array.isArray(result)) {
@@ -111,7 +109,11 @@ export function sanitySource(options: SanityContentSourceOptions): ContentRemote
 
 function defaultDocumentId(document: Record<string, unknown>): string {
   const slug = document.slug;
-  if (slug && typeof slug === "object" && typeof (slug as { current?: unknown }).current === "string") {
+  if (
+    slug &&
+    typeof slug === "object" &&
+    typeof (slug as { current?: unknown }).current === "string"
+  ) {
     return (slug as { current: string }).current;
   }
   return typeof document._id === "string" ? document._id : "";
