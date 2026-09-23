@@ -81,37 +81,3 @@ export interface AppManifest {
   /** Shared assets (global CSS, etc.) */
   sharedAssets?: RouterManagedTag[];
 }
-
-/**
- * Dehydrated manifest sent to client (filtered version)
- */
-export interface DehydratedManifest {
-  /** Current route's full entry */
-  current: RouteManifestEntry;
-  /** Current layouts */
-  layouts: LayoutManifestEntry[];
-  /** All routes (for client-side matching, minimal info) */
-  routes: Record<
-    string,
-    Pick<
-      RouteManifestEntry,
-      | "modulePath"
-      | "pattern"
-      | "segments"
-      | "isClientComponent"
-      | "shouldHydrate"
-      | "islandStrategy"
-      | "renderPlan"
-      | "search"
-    >
-  >;
-  /** All layouts (for navigation) */
-  allLayouts: Record<
-    string,
-    Pick<LayoutManifestEntry, "modulePath" | "pattern" | "shouldHydrate" | "islandStrategy">
-  >;
-  /** Shared assets */
-  sharedAssets?: RouterManagedTag[];
-  /** Client entry */
-  clientEntry?: string;
-}
