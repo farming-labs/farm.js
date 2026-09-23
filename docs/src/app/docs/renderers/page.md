@@ -99,6 +99,7 @@ export const customRenderer = defineRenderer({
       web: true,
     },
     reconcilesRerenders: false,
+    functionComponents: false,
   },
 });
 ```
@@ -121,6 +122,27 @@ does not re-render, not in a shared layout.
 Renderers that do not declare the field are treated as rebuilding, so nothing silently depends on
 reconciliation it will not get. The shared renderer conformance suite asserts the behavior each
 renderer declares, so the flag cannot drift away from what the adapter actually does.
+
+### Function components
+
+`functionComponents` states whether the renderer can render a plain function component: one that
+takes props and returns an element tree rather than a component built by the renderer's own
+compiler. FARMJS gates integration provider components on this capability.
+
+React-shaped renderers do this natively. A compile-time renderer needs its adapter to recognize such
+a component and call it, because its own components are functions too and the two are otherwise
+indistinguishable at runtime.
+
+FARMJS resolves the ambiguity at build time rather than guessing. A provider component in a
+production build must be an importable module reference, so the module's extension answers the
+question: a `.svelte` provider under the Svelte renderer is a Svelte component, while a `.tsx` one is
+a function component. The check uses the extensions the renderer itself declares in
+`componentExtensions`, not the resolved set, which always includes `.ts`, `.tsx`, `.js`, and `.jsx`.
+Components that are not renderer-compiled are marked so the adapter calls them instead of
+instantiating them.
+
+The field defaults to `false`, so a renderer whose adapter has not been taught to handle function
+components fails with a clear error naming the renderer rather than rendering something broken.
 
 FARMJS builds the production client and SSR graphs in parallel by default. If a renderer's compiler
 plugin uses process-global mutable caches, set `buildConcurrency: "serial"` on its descriptor. The

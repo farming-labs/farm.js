@@ -2,6 +2,7 @@ const FARM_SVELTE_ELEMENT = Symbol.for("farm.svelte.element");
 const FARM_SVELTE_FRAGMENT = Symbol.for("farm.svelte.fragment");
 const FARM_SVELTE_SUSPENSE = Symbol.for("farm.svelte.suspense");
 const FARM_SVELTE_ERROR_BOUNDARY = Symbol.for("farm.svelte.error-boundary");
+const FARM_SVELTE_FUNCTION_COMPONENT = Symbol.for("farm.svelte.function-component");
 
 export interface FarmSvelteElement {
   readonly [FARM_SVELTE_ELEMENT]: true;
@@ -37,6 +38,56 @@ export function isFarmSvelteElement(value: unknown): value is FarmSvelteElement 
 
 export function isValidElement(value: unknown): boolean {
   return isFarmSvelteElement(value) || Array.isArray(value);
+}
+
+/**
+ * Marks a plain function component: one that takes props and returns a Farm
+ * element tree, rather than a component the Svelte compiler produced.
+ *
+ * Svelte 5 components are themselves functions, so the two shapes are
+ * indistinguishable at runtime. Farm marks the components it wires up from
+ * modules whose extension is not one the renderer declares (a .tsx provider
+ * under the Svelte renderer, say), and compat-root calls those directly
+ * instead of instantiating them as Svelte components.
+ *
+ * A frozen component stays unmarked and keeps the previous behavior rather
+ * than failing the render.
+ */
+export function markFunctionComponent<T>(component: T): T {
+  if (typeof component !== "function") return component;
+  try {
+    Object.defineProperty(component, FARM_SVELTE_FUNCTION_COMPONENT, {
+      value: true,
+      configurable: true,
+    });
+  } catch {
+    // Non-configurable or frozen: fall through unmarked.
+  }
+  return component;
+}
+
+export function isFarmFunctionComponent(
+  value: unknown,
+): value is (props: Record<string, unknown>) => unknown {
+  return (
+    typeof value === "function" &&
+    (value as { [FARM_SVELTE_FUNCTION_COMPONENT]?: boolean })[FARM_SVELTE_FUNCTION_COMPONENT] ===
+      true
+  );
+}
+
+/**
+ * Props for a marked function component. These stay in the element's own
+ * (React-shaped) form rather than going through normalizeFarmSvelteProps,
+ * which translates props for a DOM element or a Svelte component; a function
+ * component expects className/onClick/children as written.
+ */
+export function getFarmFunctionComponentProps(element: FarmSvelteElement): Record<string, unknown> {
+  const props: Record<string, unknown> = { ...element.props };
+  const children = getFarmSvelteChildren(element);
+  if (children.length === 1) props.children = children[0];
+  else if (children.length > 1) props.children = children;
+  return props;
 }
 
 export function getFarmSvelteChildren(element: FarmSvelteElement): unknown[] {
@@ -180,6 +231,7 @@ const SvelteCompat = {
   ErrorBoundary,
   createElement,
   isValidElement,
+  markFunctionComponent,
 };
 
 export default SvelteCompat;

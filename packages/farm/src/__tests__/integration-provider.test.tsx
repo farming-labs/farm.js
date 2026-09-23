@@ -65,6 +65,83 @@ describe("integration providers", () => {
     expect(generated.runtime).toContain("React.createElement(provider.Component");
   });
 
+  it("leaves provider components unmarked for a renderer without its own extensions", () => {
+    const providers = [
+      {
+        name: "acme",
+        type: "client" as const,
+        props: {},
+        component: { module: "@/components/acme-provider", export: "AcmeProvider" },
+      },
+    ];
+
+    // React compiles nothing of its own, so every provider is already a
+    // function component and there is nothing to disambiguate.
+    const client = generateFarmIntegrationProviderClientCode(providers, "/app");
+    const server = generateFarmIntegrationProviderServerModules(providers, "/app");
+
+    expect(client.runtime).not.toContain("farmMarkProviderComponent");
+    expect(server.entries).not.toContain("farmMarkProviderComponent");
+    expect(server.helpers).toBe("");
+  });
+
+  it("marks only non-renderer-compiled provider components", () => {
+    const providers = [
+      {
+        name: "acme",
+        type: "client" as const,
+        props: {},
+        component: { module: "@/components/acme-provider", export: "AcmeProvider" },
+      },
+      {
+        name: "beta",
+        type: "client" as const,
+        props: {},
+        component: { module: "@/components/beta-provider.svelte" },
+      },
+    ];
+
+    const client = generateFarmIntegrationProviderClientCode(providers, "/app", [".svelte"]);
+    const server = generateFarmIntegrationProviderServerModules(providers, "/app", [".svelte"]);
+
+    // The .tsx-style provider is a function component the Svelte adapter must
+    // call; the .svelte one is a component Svelte instantiates itself.
+    expect(client.runtime).toContain(
+      'farmMarkProviderComponent(FarmIntegrationProviderModule0["AcmeProvider"])',
+    );
+    expect(client.runtime).toContain('FarmIntegrationProviderModule1["default"]');
+    expect(client.runtime).not.toContain(
+      'farmMarkProviderComponent(FarmIntegrationProviderModule1["default"])',
+    );
+    expect(client.runtime).toContain("const farmMarkProviderComponent =");
+
+    expect(server.entries).toContain(
+      'farmMarkProviderComponent(FarmServerIntegrationProviderModule0["AcmeProvider"])',
+    );
+    expect(server.entries).not.toContain(
+      'farmMarkProviderComponent(FarmServerIntegrationProviderModule1["default"])',
+    );
+    expect(server.helpers).toContain("const farmMarkProviderComponent =");
+  });
+
+  it("treats a renderer component extension case-insensitively", () => {
+    const server = generateFarmIntegrationProviderServerModules(
+      [
+        {
+          name: "acme",
+          type: "client" as const,
+          props: {},
+          component: { module: "@/components/Acme.Svelte" },
+        },
+      ],
+      "/app",
+      [".svelte"],
+    );
+
+    expect(server.entries).not.toContain("farmMarkProviderComponent");
+    expect(server.helpers).toBe("");
+  });
+
   it("preserves an explicit isolated-root capability declaration", () => {
     const acme = defineIntegration({
       category: "custom",

@@ -7,13 +7,15 @@ import SvelteCompat, {
   ErrorBoundary,
   createElement,
   isValidElement,
+  markFunctionComponent,
 } from "./runtime";
 
 export const name = "svelte";
 export const capabilities = {
   streaming: { node: false, web: false },
+  functionComponents: true,
 } as const;
-export { Fragment, Suspense, ErrorBoundary, createElement, isValidElement };
+export { Fragment, Suspense, ErrorBoundary, createElement, isValidElement, markFunctionComponent };
 
 /** Svelte hydration markers are already included in the server-rendered body. */
 export function generateHydrationScript(): string {

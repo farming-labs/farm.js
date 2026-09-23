@@ -72,11 +72,25 @@ export interface FarmRendererCapabilities {
    * they do not re-render rather than expect reconciliation here.
    */
   reconcilesRerenders: boolean;
+  /**
+   * Whether this renderer can render a plain function component: one that
+   * takes props and returns an element tree, rather than a component built by
+   * the renderer's own compiler.
+   *
+   * React-shaped renderers do this natively. A compile-time renderer needs its
+   * adapter to recognize such a component and call it, because its own
+   * components are functions too and the two are otherwise indistinguishable.
+   * Farm uses this to decide whether integration provider components can be
+   * rendered at all, so it defaults to false and each adapter opts in once it
+   * handles them.
+   */
+  functionComponents: boolean;
 }
 
 export interface FarmRendererCapabilitiesInput {
   streaming?: Partial<FarmRendererStreamingCapabilities>;
   reconcilesRerenders?: boolean;
+  functionComponents?: boolean;
 }
 
 const DEFAULT_RENDERER_CAPABILITIES: Readonly<FarmRendererCapabilities> = Object.freeze({
@@ -84,6 +98,7 @@ const DEFAULT_RENDERER_CAPABILITIES: Readonly<FarmRendererCapabilities> = Object
   // Conservative default: assume a re-render rebuilds until a renderer states
   // otherwise, so callers do not silently rely on reconciliation.
   reconcilesRerenders: false,
+  functionComponents: false,
 });
 
 export function getFarmRendererCapabilities(
@@ -97,6 +112,9 @@ export function getFarmRendererCapabilities(
     reconcilesRerenders:
       renderer?.capabilities?.reconcilesRerenders ??
       DEFAULT_RENDERER_CAPABILITIES.reconcilesRerenders,
+    functionComponents:
+      renderer?.capabilities?.functionComponents ??
+      DEFAULT_RENDERER_CAPABILITIES.functionComponents,
   };
 }
 
@@ -197,6 +215,7 @@ export const REACT_RENDERER: Readonly<FarmRenderer> = Object.freeze({
   capabilities: {
     streaming: { node: true, web: false },
     reconcilesRerenders: true,
+    functionComponents: true,
   },
 });
 
