@@ -51,6 +51,12 @@ const cases: Array<{ pattern: string; path: string; expected: boolean; why: stri
   { pattern: "/old", path: "/old", expected: true, why: "exact" },
   { pattern: "/old", path: "/older", expected: false, why: "not a prefix match" },
   { pattern: "/", path: "/", expected: true, why: "root" },
+  {
+    pattern: "/docs/:slug",
+    path: "/docs/hello%20world",
+    expected: true,
+    why: "encoded dynamic segment",
+  },
 
   // Ordinary shapes that already agreed, kept so a fix cannot regress them.
   { pattern: "/blog/:slug", path: "/blog/hello", expected: true, why: "named param" },
@@ -79,6 +85,7 @@ describe("config route matcher dev/prod parity", () => {
     { pattern: "/docs/:slug*/end", path: "/docs/end", name: "slug", expected: "" },
     { pattern: "/files/:path*", path: "/files/a/b", name: "path", expected: "a/b" },
     { pattern: "/files/:path*", path: "/files", name: "path", expected: "" },
+    { pattern: "/docs/:slug", path: "/docs/hello%20world", name: "slug", expected: "hello world" },
   ];
 
   for (const { pattern, path, name, expected } of captureCases) {
