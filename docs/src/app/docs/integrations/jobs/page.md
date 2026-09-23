@@ -122,9 +122,23 @@ const queued = await api.jobs.countTokens.trigger({
 });
 ```
 
-Reserved keys are `$`-prefixed (`$value`, `$options`, `$schedule`), so an object input is free to use ordinary field names such as `value` or `input` without colliding with the envelope.
+Reserved keys are `$`-prefixed (`$value`, `$input`, `$options`, `$schedule`), so an object input is free to use ordinary field names such as `value` or `input` without colliding with the envelope.
 
 The older `{ input, options }` body is still accepted, but the inline shape above is the canonical API.
+
+If the task input itself has an `input` field, use the explicit `$input` envelope so Farm does not
+confuse the payload with that legacy trigger format:
+
+```ts
+await api.jobs.storeCount.trigger({
+  body: {
+    $input: { input: 5 },
+  },
+});
+```
+
+The same explicit form works for `schedule` (alongside `$schedule`) and for each item in a batch.
+The legacy `{ input, options }` form remains available for existing callers.
 
 ## Batch trigger
 

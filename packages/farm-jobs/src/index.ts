@@ -89,11 +89,26 @@ export type InferJobsTaskInput<TTask> =
 export type InferJobsTaskOutput<TTask> =
   TTask extends JobsTaskDefinition<any, infer TOutput> ? TOutput : never;
 
+/**
+ * An unambiguous input envelope for object payloads that collide with the
+ * legacy `{ input, options }` trigger form.
+ */
+export type JobsExplicitInputBody<TInput> = [TInput] extends [void]
+  ? {
+      $input?: undefined;
+      $options?: JobsTriggerOptions;
+    }
+  : {
+      $input: TInput;
+      $options?: JobsTriggerOptions;
+    };
+
 export type JobsTriggerBody<TInput> = [TInput] extends [void]
   ? {
       $options?: JobsTriggerOptions;
     }
   :
+      | JobsExplicitInputBody<TInput>
       | (TInput extends object
           ? TInput & {
               $options?: JobsTriggerOptions;
@@ -130,6 +145,9 @@ export type JobsScheduleBody<TInput> = [TInput] extends [void]
       $schedule: JobsScheduleConfig;
     }
   :
+      | (JobsExplicitInputBody<TInput> & {
+          $schedule: JobsScheduleConfig;
+        })
       | (TInput extends object
           ? TInput & {
               $schedule: JobsScheduleConfig;
@@ -1508,6 +1526,13 @@ function errorResponse(error: unknown) {
 
 function normalizeTriggerInput(body: Record<string, unknown> | undefined) {
   const value = body || {};
+  if (hasOwn(value, "$input")) {
+    return {
+      input: value.$input,
+      options: value.$options as JobsTriggerOptions | undefined,
+    };
+  }
+
   if (isLegacyTriggerBody(value)) {
     return {
       input: value.input,
@@ -1523,6 +1548,20 @@ function normalizeTriggerInput(body: Record<string, unknown> | undefined) {
 
 function normalizeScheduleInput(body: Record<string, unknown> | undefined) {
   const value = body || {};
+  if (hasOwn(value, "$input")) {
+    const schedule =
+      value.$schedule && typeof value.$schedule === "object"
+        ? (value.$schedule as JobsScheduleConfig)
+        : undefined;
+
+    return {
+      input: value.$input,
+      at: schedule?.at,
+      after: schedule?.after,
+      options: schedule,
+    };
+  }
+
   if (isLegacyScheduleBody(value)) {
     return {
       input: value.input,

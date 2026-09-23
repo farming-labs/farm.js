@@ -125,4 +125,51 @@ describe("jobs trigger payload shapes", () => {
     expect(result.error).toBeNull();
     expect(sentPayload(fetchSpy, 0)).toBe(5);
   });
+
+  it("preserves input-only objects with the explicit input envelope", async () => {
+    const tasks = defineTasks({
+      storeCount: task({
+        description: "Object input whose only field is input.",
+        async run(payload: { input: number }) {
+          return { stored: payload.input };
+        },
+      }),
+    });
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => jsonResponse({ id: "run_5" }));
+    const api = createApi(tasks);
+
+    const result = await api.jobs.storeCount.trigger({
+      body: { $input: { input: 5 } },
+    });
+
+    expect(result.error).toBeNull();
+    expect(sentPayload(fetchSpy, 0)).toEqual({ input: 5 });
+  });
+
+  it("preserves input-only objects when scheduling with the explicit envelope", async () => {
+    const tasks = defineTasks({
+      storeCount: task({
+        description: "Object input whose only field is input.",
+        async run(payload: { input: number }) {
+          return { stored: payload.input };
+        },
+      }),
+    });
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => jsonResponse({ id: "run_6" }));
+    const api = createApi(tasks);
+
+    const result = await api.jobs.storeCount.schedule({
+      body: {
+        $input: { input: 5 },
+        $schedule: { after: "10m" },
+      },
+    });
+
+    expect(result.error).toBeNull();
+    expect(sentPayload(fetchSpy, 0)).toEqual({ input: 5 });
+  });
 });
