@@ -4,11 +4,30 @@ const { test } = require("node:test");
 const { parsePublishBetaArgs, isRetryableStagedPublishError } = require("./publish-beta");
 
 test("publishes and verifies by default", () => {
-  assert.deepEqual(parsePublishBetaArgs([]), { help: false, verifyOnly: false });
+  assert.deepEqual(parsePublishBetaArgs([]), { help: false, verifyOnly: false, dryRun: false });
 });
 
 test("supports resuming with --verify-only", () => {
-  assert.deepEqual(parsePublishBetaArgs(["--verify-only"]), { help: false, verifyOnly: true });
+  assert.deepEqual(parsePublishBetaArgs(["--verify-only"]), {
+    help: false,
+    verifyOnly: true,
+    dryRun: false,
+  });
+});
+
+test("supports a non-publishing dry run", () => {
+  assert.deepEqual(parsePublishBetaArgs(["--dry-run"]), {
+    help: false,
+    verifyOnly: false,
+    dryRun: true,
+  });
+});
+
+test("rejects combining dry run and verification", () => {
+  assert.throws(
+    () => parsePublishBetaArgs(["--dry-run", "--verify-only"]),
+    /cannot combine --verify-only and --dry-run/,
+  );
 });
 
 test("rejects unknown options", () => {
