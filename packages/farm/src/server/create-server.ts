@@ -129,7 +129,7 @@ function createDevDependencyStubsPlugin() {
 /**
  * Create a Vite development server with Farm.js integration
  */
-export async function createServer(config: FarmConfig = {}) {
+export async function createServer(config: FarmConfig = {}, host?: string | boolean) {
   let pluginManager: PluginManager | null = null;
   let instrumentation: FarmInstrumentationLifecycle | null = null;
   try {
@@ -206,6 +206,15 @@ export async function createServer(config: FarmConfig = {}) {
     let finalConfig = resolvedConfig || config;
     finalConfig = await pluginManager.runHookSerial("config", finalConfig);
     finalConfig.renderer = resolveFarmRenderer(finalConfig.renderer);
+    if (host !== undefined) {
+      finalConfig.vite = {
+        ...finalConfig.vite,
+        server: {
+          ...finalConfig.vite?.server,
+          host,
+        },
+      };
+    }
     const projectRoot = finalConfig.root || process.cwd();
     const rendererVitePlugins = await loadFarmRendererVitePlugins(
       finalConfig.renderer,
@@ -384,10 +393,7 @@ export async function startDevServer(
   port?: number,
   host?: string | boolean,
 ) {
-  const server = await createServer(config);
-  if (host !== undefined) {
-    server.config.server.host = host;
-  }
+  const server = await createServer(config, host);
   await server.listen(port);
   const pluginManager = (server as any).__farmPluginManager as PluginManager | undefined;
   // Shutdown is owned by the close() installed in createServer, which awaits
