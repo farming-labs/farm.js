@@ -207,7 +207,7 @@ The command exits with a non-zero status only when a check fails. Warnings keep 
 
 `farm doctor --fix` applies only corrections Farm can make without replacing application code. Today that means creating a missing `src/app/layout.tsx`; an existing file is never overwritten. The command reruns diagnostics after each correction and reports exactly which files it created.
 
-See [DevTools and Doctor](/docs/devtools) for the browser dashboard, diagnostics, JSON contract, and CI examples.
+See [Doctor](/docs/doctor) for diagnostics, the JSON contract, and CI examples, and [Built-in DevTools](/docs/devtools) for the browser dashboard.
 
 ## Explain a route
 

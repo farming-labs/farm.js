@@ -1,12 +1,12 @@
 ---
-title: "DevTools and Doctor"
-description: "Inspect Farm's resolved routes, APIs, integrations, KV storage, schedules, deployment settings, and diagnostics in the browser or terminal."
+title: "Built-in DevTools"
+description: "Inspect Farm's resolved routes, APIs, integrations, KV storage, schedules, and deployment settings in the browser during development."
 section: "Runtime"
 ---
 
-# DevTools and Doctor
+# Built-in DevTools
 
-Farm exposes one operational view of the application in development. The browser dashboard is useful while working on the app, while `farm doctor` brings the same runtime diagnostics to the terminal and CI.
+Farm exposes one operational view of the application in development. The browser dashboard described here is the built-in one; [`farm doctor`](/docs/doctor) brings the same runtime diagnostics to the terminal and CI.
 
 > **Deprecated: use the DevTools plugin**
 >
@@ -14,7 +14,8 @@ Farm exposes one operational view of the application in development. The browser
 > the [`@farm.js/devtools` plugin](/docs/plugins/devtools), which reuses the same runtime
 > snapshot and adds a floating launcher, an expanded workspace UI, and syntax-highlighted
 > browser module inspection. The built-in dashboard, its configuration, its launcher URL, and
-> the shared keyboard shortcut keep working for now, and `farm doctor` is not deprecated.
+> the shared keyboard shortcut keep working for now, and [`farm doctor`](/docs/doctor) is not
+> deprecated.
 
 ## Open DevTools
 
@@ -130,116 +131,10 @@ The response contains these top-level fields:
 }
 ```
 
-Environment values are never included. Farm reports only the validated server and public key names so you can confirm the environment contract without exposing secrets.
-
-## Run Doctor
-
-Run this from the application root:
-
-```bash
-farm doctor
-```
-
-The command probes `http://localhost:3000/__farm/devtools.json`. When the app is running, the live snapshot is the source of truth:
-
-```txt
-FARM / DOCTOR
-storefront / LIVE RUNTIME
-
-PASS  Connected to the Farm runtime
-      8 pages, 4 API routes, and 2 middleware layers are registered.
-WARN  Production storage is in memory
-      vercel instances do not preserve in-memory data across executions.
-
-SUMMARY  2 passed / 1 warning / 0 failed / 1 info
-DEVTOOLS http://localhost:3000/__farm/devtools
-```
-
-When the dev server is not running, or when DevTools is disabled, Doctor automatically falls back to project inspection. It loads `farm.config.*`, validates the package manifest, checks the app router and root layout, resolves the deployment target, and inspects KV storage and cron configuration.
-
-## Target another server
-
-Use a port:
-
-```bash
-farm doctor --port 4319
-```
-
-Or pass the complete origin:
-
-```bash
-farm doctor --url http://localhost:4319
-```
-
-When an explicitly requested server cannot be reached, Doctor reports `LIVE_RUNTIME_UNREACHABLE` and continues with project checks. This keeps the command useful while making the failed probe visible.
-
-## Offline checks
-
-Skip the live probe when the command must use only repository state:
-
-```bash
-farm doctor --offline
-```
-
-Offline mode checks:
-
-- Node.js satisfies Farm's supported baseline.
-- `package.json` exists and declares `@farm.js/core`.
-- Farm config loads and resolves for development.
-- The app directory or programmatic router contains page routes.
-- A root layout is available from the app or an extended layer.
-- Deployment target, preset, and output directory resolve.
-- Integrations and KV mounts are visible in config.
-- Configured cron routes have matching app-directory API route files.
-- Serverless targets do not depend on explicitly configured in-memory root KV storage.
-
-Live mode is more complete because it sees generated and programmatic API routes, inherited runtime settings, loaded middleware, and discovered workflows after Farm initializes the app.
-
-## JSON and CI
-
-Print a structured report:
-
-```bash
-farm doctor --offline --json
-```
-
-A report includes `source`, `health`, project and target metadata, status totals, and the individual checks. Live reports also include runtime counts and a DevTools URL.
-
-Doctor uses these health rules:
-
-| Result      | Exit behavior                              |
-| ----------- | ------------------------------------------ |
-| `ready`     | No failed or warning checks; exits 0.      |
-| `attention` | At least one warning; exits 0.             |
-| `error`     | At least one failed check; exits non-zero. |
-
-This makes a basic CI check straightforward:
-
-```bash
-farm doctor --offline
-farm build
-```
-
-Use `farm doctor --offline --json` when CI should store or process the report. Keep `farm build` as the final production compatibility check because it validates bundling and adapter output, not only project structure.
-
-## Diagnostics
-
-Common diagnostic codes include:
-
-| Code                           | Meaning                                                      |
-| ------------------------------ | ------------------------------------------------------------ |
-| `NO_PAGE_ROUTES`               | Farm found no page modules or programmatic page router.      |
-| `ROOT_LAYOUT_MISSING`          | The app has no shared root layout.                           |
-| `CRON_ROUTE_MISSING`           | A configured schedule targets an API route Farm cannot find. |
-| `CRON_SECRET_NOT_SET`          | Scheduled production requests do not yet have `CRON_SECRET`. |
-| `EPHEMERAL_PRODUCTION_STORAGE` | A serverless deployment uses in-memory root KV storage.      |
-| `ROUTE_RUNTIME_UNRESOLVED`     | Farm could not resolve a page's inherited runtime controls.  |
-| `LIVE_RUNTIME_UNREACHABLE`     | An explicitly selected running app did not answer the probe. |
-
-Warnings identify behavior that can be valid locally but needs attention before production. Failures mean the project cannot satisfy a basic framework contract.
+Environment values are never included. Farm reports only the validated server and public key names so you can confirm the environment contract without exposing secrets. This endpoint is also what [`farm doctor`](/docs/doctor) probes for live diagnostics.
 
 ## Security boundary
 
 DevTools is development-only, but the snapshot still contains project paths, route structure, integration names, and environment key names. Do not expose the development server or the `__farm/devtools` routes to an untrusted network.
 
-The snapshot never serializes environment values, provider credentials, storage connection details, request data, cookies, or application records. `farm doctor --json` follows the same rule.
+The snapshot never serializes environment values, provider credentials, storage connection details, request data, cookies, or application records. [`farm doctor --json`](/docs/doctor) follows the same rule.
