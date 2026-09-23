@@ -39,6 +39,11 @@ async function flushCompilerUpdates(): Promise<void> {
   await Promise.resolve();
 }
 
+function LocalFallbackCounter() {
+  const [count, setCount] = useState(0);
+  return <button onClick={() => setCount((previous) => previous + 1)}>Local: {count}</button>;
+}
+
 function rowDescriptor(item: Item): CompilerKeyedRowElement {
   return {
     kind: "element",
@@ -273,6 +278,141 @@ describe("compiled keyed-row runtime", () => {
     expect(listRenders).toBeGreaterThan(2);
     expect(container.querySelector("li")?.textContent).toBe("Safe again");
   });
+
+  it.each(
+    (["static", "hybrid"] as const).flatMap((reactivity) =>
+      (["mount", "hydrate"] as const).map((lifecycle) => ({ lifecycle, reactivity })),
+    ),
+  )(
+    "resets parent-prop duplicate-key fallback and preserves later safe updates ($reactivity, $lifecycle)",
+    async ({ lifecycle, reactivity }) => {
+      vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const PropRows = createCompiledComponent<{ items: Item[] }>({
+        displayName: "PropDrivenFallbackRows",
+        reactivity,
+        initialize: () => [],
+        render(props, _state, blocks) {
+          const items = () => props.items;
+          const KeyedRows = blocks.KeyedRows;
+          return (
+            <main>
+              <KeyedRows
+                id={0}
+                render={() => (
+                  <section data-surface="prop-fallback-rows">
+                    <LocalFallbackCounter />
+                    <input aria-label="Draft" defaultValue="draft" />
+                    {items().map((item) => (
+                      <article data-key={item.id} key={item.id}>
+                        {item.label}
+                      </article>
+                    ))}
+                  </section>
+                )}
+                items={items}
+                rowKey={(item) => (item as Item).id}
+                create={(item) => rowDescriptor(item as Item)}
+                bindings={[{ kind: "text", path: [], read: (item) => [(item as Item).label] }]}
+              />
+            </main>
+          );
+        },
+        bindings: [{ kind: "block", id: 0, dependencies: [] }],
+      });
+      const duplicate = [
+        { id: "duplicate", label: "One" },
+        { id: "duplicate", label: "Two" },
+      ];
+      const safe = [
+        { id: "a", label: "Alpha" },
+        { id: "b", label: "Beta" },
+      ];
+      const tree = (items: Item[]) => (
+        <StrictMode>
+          <PropRows items={items} />
+        </StrictMode>
+      );
+      const container = document.createElement("div");
+      document.body.append(container);
+      if (lifecycle === "hydrate") container.innerHTML = renderToString(tree(duplicate));
+      const recoverable = vi.fn();
+      const root =
+        lifecycle === "hydrate"
+          ? hydrateRoot(container, tree(duplicate), { onRecoverableError: recoverable })
+          : createRoot(container);
+      roots.push(root);
+      await act(async () => {
+        if (lifecycle === "mount") root.render(tree(duplicate));
+        await flushCompilerUpdates();
+      });
+      expect(recoverable).not.toHaveBeenCalled();
+
+      const ambiguousSurface = container.querySelector<HTMLElement>(
+        "[data-surface='prop-fallback-rows']",
+      )!;
+      await act(async () => {
+        root.render(tree(safe));
+        await flushCompilerUpdates();
+      });
+      const recoveredSurface = container.querySelector<HTMLElement>(
+        "[data-surface='prop-fallback-rows']",
+      )!;
+      expect(recoveredSurface).not.toBe(ambiguousSurface);
+
+      await act(async () => recoveredSurface.querySelector("button")!.click());
+      const input = recoveredSurface.querySelector<HTMLInputElement>("input")!;
+      input.value = "typed";
+      input.focus();
+      input.setSelectionRange(1, 4, "backward");
+      await act(async () => {
+        root.render(
+          tree([
+            { id: "b", label: "Beta renamed" },
+            { id: "a", label: "Alpha renamed" },
+          ]),
+        );
+        await flushCompilerUpdates();
+      });
+      expect(container.querySelector("[data-surface='prop-fallback-rows']")).toBe(recoveredSurface);
+      expect(container.querySelector("input")).toBe(input);
+      expect(input.value).toBe("typed");
+      expect(recoveredSurface.querySelector("button")?.textContent).toBe("Local: 1");
+      expect(document.activeElement).toBe(input);
+      expect([input.selectionStart, input.selectionEnd, input.selectionDirection]).toEqual([
+        1,
+        4,
+        "backward",
+      ]);
+
+      await act(async () => {
+        root.render(tree(duplicate));
+        await flushCompilerUpdates();
+      });
+      const duplicateSurface = container.querySelector<HTMLElement>(
+        "[data-surface='prop-fallback-rows']",
+      )!;
+      expect(duplicateSurface).not.toBe(recoveredSurface);
+      expect(duplicateSurface.querySelector("button")?.textContent).toBe("Local: 0");
+
+      await act(async () => {
+        root.render(tree(safe));
+        await flushCompilerUpdates();
+      });
+      const safeSurface = container.querySelector<HTMLElement>(
+        "[data-surface='prop-fallback-rows']",
+      )!;
+      expect(safeSurface).not.toBe(duplicateSurface);
+      const safeInput = safeSurface.querySelector<HTMLInputElement>("input")!;
+      safeInput.value = "recovered";
+      await act(async () => {
+        root.render(tree([{ id: "a", label: "Alpha final" }]));
+        await flushCompilerUpdates();
+      });
+      expect(container.querySelector("[data-surface='prop-fallback-rows']")).toBe(safeSurface);
+      expect(container.querySelector("input")).toBe(safeInput);
+      expect(safeInput.value).toBe("recovered");
+    },
+  );
 
   it("combines parent props and local row updates without losing the newest values", async () => {
     let setPrefix: React.Dispatch<React.SetStateAction<string>> = () => undefined;

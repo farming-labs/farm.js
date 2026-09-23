@@ -9226,9 +9226,7 @@ function createKeyedRowsBlockComponent(
         // with duplicates is unreliable, so any render touched by them (this
         // one, or the previously committed one) still remounts.
         const unsafeKeys = this.hasUnsafeFallbackKeys();
-        if (unsafeKeys || this.fallbackKeysWereUnsafe) {
-          this.fallbackVersion += 1;
-        }
+        if (unsafeKeys || this.fallbackKeysWereUnsafe) this.fallbackVersion += 1;
         this.fallbackKeysWereUnsafe = unsafeKeys;
         this.forceUpdate(afterCommit);
         return;
@@ -9535,6 +9533,11 @@ function createKeyedRowsBlockComponent(
       const wasReactOwned = this.hasReactOwnedRows(this.currentProps);
       const willBeReactOwned = this.hasReactOwnedRows(nextProps);
       this.currentProps = nextProps;
+      if (this.state.fallback && nextState.fallback) {
+        const unsafeKeys = this.hasUnsafeFallbackKeys();
+        if (unsafeKeys || this.fallbackKeysWereUnsafe) this.fallbackVersion += 1;
+        this.fallbackKeysWereUnsafe = unsafeKeys;
+      }
       if (nextState.fallback || this.state.fallback) return true;
       if (wasReactOwned || willBeReactOwned) {
         // Parent prop updates and Fast Refresh definitions must pass through
@@ -9843,6 +9846,11 @@ function createKeyedRangesBlockComponent(
 
     shouldComponentUpdate(nextProps: CompilerKeyedRangesBlockProps, nextState: State): boolean {
       this.currentProps = nextProps;
+      if (this.state.fallback && nextState.fallback) {
+        const unsafeKeys = this.hasUnsafeFallbackKeys();
+        if (unsafeKeys || this.fallbackKeysWereUnsafe) this.fallbackVersion += 1;
+        this.fallbackKeysWereUnsafe = unsafeKeys;
+      }
       if (nextState.fallback || this.state.fallback) return true;
       // Parent props and compatible Fast Refresh definitions can change static
       // siblings that are deliberately outside the range descriptors. Remount

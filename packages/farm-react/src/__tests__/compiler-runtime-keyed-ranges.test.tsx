@@ -632,6 +632,162 @@ describe("compiled keyed DOM ranges", () => {
     },
   );
 
+  it.each(
+    (["static", "hybrid"] as const).flatMap((reactivity) =>
+      (["mount", "hydrate"] as const).map((lifecycle) => ({ lifecycle, reactivity })),
+    ),
+  )(
+    "resets parent-prop duplicate-key range fallback and preserves later safe updates ($reactivity, $lifecycle)",
+    async ({ lifecycle, reactivity }) => {
+      vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const PropRanges = createCompiledComponent<{ items: RangeItem[] }>({
+        displayName: "PropDrivenFallbackRanges",
+        reactivity,
+        initialize: () => [],
+        render(props, _state, blocks) {
+          const items = () => props.items;
+          const KeyedRanges = blocks.KeyedRanges;
+          const range: CompilerKeyedRange = {
+            before: 1,
+            items,
+            rowKey: (item) => (item as RangeItem).id,
+            create: (item) => ({
+              kind: "element",
+              tag: "article",
+              attributes: [{ name: "data-key", value: (item as RangeItem).id }],
+              styles: [],
+              children: [(item as RangeItem).label],
+            }),
+            bindings: [
+              {
+                kind: "text",
+                path: [],
+                read: (item) => (item as RangeItem).label,
+              },
+            ],
+          };
+          return (
+            <main>
+              <KeyedRanges
+                id={0}
+                ranges={[range]}
+                render={() => (
+                  <section data-surface="prop-fallback-ranges">
+                    <aside>
+                      <LocalFallbackCounter />
+                      <input aria-label="Draft" defaultValue="draft" />
+                    </aside>
+                    {items().map((item) => (
+                      <article data-key={item.id} key={item.id}>
+                        {item.label}
+                      </article>
+                    ))}
+                  </section>
+                )}
+                trailing={0}
+              />
+            </main>
+          );
+        },
+        bindings: [{ kind: "block", id: 0, dependencies: [] }],
+      });
+      const duplicate = [
+        { id: "duplicate", label: "One" },
+        { id: "duplicate", label: "Two" },
+      ];
+      const safe = [
+        { id: "a", label: "Alpha" },
+        { id: "b", label: "Beta" },
+      ];
+      const tree = (items: RangeItem[]) => (
+        <StrictMode>
+          <PropRanges items={items} />
+        </StrictMode>
+      );
+      const container = document.createElement("div");
+      document.body.append(container);
+      if (lifecycle === "hydrate") container.innerHTML = renderToString(tree(duplicate));
+      const recoverable = vi.fn();
+      const root =
+        lifecycle === "hydrate"
+          ? hydrateRoot(container, tree(duplicate), { onRecoverableError: recoverable })
+          : createRoot(container);
+      roots.add(root);
+      await act(async () => {
+        if (lifecycle === "mount") root.render(tree(duplicate));
+        await flushCompilerUpdates();
+      });
+      expect(recoverable).not.toHaveBeenCalled();
+
+      const ambiguousSurface = container.querySelector<HTMLElement>(
+        "[data-surface='prop-fallback-ranges']",
+      )!;
+      await act(async () => {
+        root.render(tree(safe));
+        await flushCompilerUpdates();
+      });
+      const recoveredSurface = container.querySelector<HTMLElement>(
+        "[data-surface='prop-fallback-ranges']",
+      )!;
+      expect(recoveredSurface).not.toBe(ambiguousSurface);
+
+      await act(async () => recoveredSurface.querySelector("button")!.click());
+      const input = recoveredSurface.querySelector<HTMLInputElement>("input")!;
+      input.value = "typed";
+      input.focus();
+      input.setSelectionRange(1, 4, "backward");
+      await act(async () => {
+        root.render(
+          tree([
+            { id: "b", label: "Beta renamed" },
+            { id: "a", label: "Alpha renamed" },
+          ]),
+        );
+        await flushCompilerUpdates();
+      });
+      expect(container.querySelector("[data-surface='prop-fallback-ranges']")).toBe(
+        recoveredSurface,
+      );
+      expect(container.querySelector("input")).toBe(input);
+      expect(input.value).toBe("typed");
+      expect(recoveredSurface.querySelector("button")?.textContent).toBe("Local: 1");
+      expect(document.activeElement).toBe(input);
+      expect([input.selectionStart, input.selectionEnd, input.selectionDirection]).toEqual([
+        1,
+        4,
+        "backward",
+      ]);
+
+      await act(async () => {
+        root.render(tree(duplicate));
+        await flushCompilerUpdates();
+      });
+      const duplicateSurface = container.querySelector<HTMLElement>(
+        "[data-surface='prop-fallback-ranges']",
+      )!;
+      expect(duplicateSurface).not.toBe(recoveredSurface);
+      expect(duplicateSurface.querySelector("button")?.textContent).toBe("Local: 0");
+
+      await act(async () => {
+        root.render(tree(safe));
+        await flushCompilerUpdates();
+      });
+      const safeSurface = container.querySelector<HTMLElement>(
+        "[data-surface='prop-fallback-ranges']",
+      )!;
+      expect(safeSurface).not.toBe(duplicateSurface);
+      const safeInput = safeSurface.querySelector<HTMLInputElement>("input")!;
+      safeInput.value = "recovered";
+      await act(async () => {
+        root.render(tree([{ id: "a", label: "Alpha final" }]));
+        await flushCompilerUpdates();
+      });
+      expect(container.querySelector("[data-surface='prop-fallback-ranges']")).toBe(safeSurface);
+      expect(container.querySelector("input")).toBe(safeInput);
+      expect(safeInput.value).toBe("recovered");
+    },
+  );
+
   it("routes root-range update errors through the nearest error boundary", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     let update: (next: CompilerStateUpdater) => void = () => undefined;
