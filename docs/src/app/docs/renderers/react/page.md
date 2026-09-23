@@ -2216,6 +2216,12 @@ render instead of guessing which row owns the identity. Later updates remain on 
 for that mounted list. Interactive fallback handlers use ordinary per-render item/index closures,
 not ambiguous keyed lookup. Unsupported source shapes also keep React ownership from the beginning.
 
+Once a keyed list or keyed-range container is on React fallback, updates with unique keys reconcile
+in place. Unchanged form controls, user-entered values, focus, selection, local component state, and
+DOM identity therefore survive later safe updates. A render containing duplicate keys still forces
+a complete remount, as does the first unique-key render after it; that recovery reset prevents React
+from reusing an identity made ambiguous by the preceding duplicate keys.
+
 For example, changing `[A, B, C, D]` to `[D, A, B, C]` keeps `[A, B, C]` as the LIS and moves only
 `D`. Reversing four rows needs three moves because the LIS has length one. Insertions and removals
 still do their necessary DOM work; LIS only minimizes moves among surviving keys.

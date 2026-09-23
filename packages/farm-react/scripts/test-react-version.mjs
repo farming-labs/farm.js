@@ -2257,12 +2257,22 @@ const testSource = String.raw`
   flushSync(() => nestedKeyedRoot.unmount());
 
   let keyedRangeExecutions = 0;
+  let setKeyedRangesModel = () => undefined;
+  function KeyedRangeLocalCounter() {
+    const [count, setCount] = React.useState(0);
+    return React.createElement(
+      "button",
+      { "data-local-counter": true, onClick: () => setCount((previous) => previous + 1) },
+      "Local: " + count,
+    );
+  }
   const KeyedRanges = createCompiledComponent({
     displayName: "CompatibilityKeyedRanges",
     initialize: () => [{ primary: ["a", "b", "c"], secondary: ["x", "y"] }],
     render(_props, state, blocks) {
       keyedRangeExecutions += 1;
       const model = () => state[0].get();
+      setKeyedRangesModel = (next) => state[0].set(next);
       const descriptor = (before, items) => ({
         before,
         items,
@@ -2303,6 +2313,8 @@ const testSource = String.raw`
                 },
                 "Update ranges",
               ),
+              React.createElement(KeyedRangeLocalCounter),
+              React.createElement("input", { "aria-label": "Range draft", defaultValue: "draft" }),
             ),
               model().primary.map((item, index) =>
                 React.createElement(
@@ -2366,6 +2378,36 @@ const testSource = String.raw`
   assert.equal(keyedRangesContainer.firstElementChild.tagName, "UL");
   assert.equal(keyedRangesContainer.firstElementChild.dataset.count, "6");
   assert.equal(keyedRangeExecutions, initialKeyedRangeExecutions);
+
+  const updateKeyedRangeModel = async (model) => {
+    setKeyedRangesModel(model);
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    flushSync(() => {});
+  };
+  await updateKeyedRangeModel({ primary: ["duplicate", "duplicate"], secondary: ["x"] });
+  const duplicateInput = keyedRangesContainer.querySelector("[aria-label='Range draft']");
+  await updateKeyedRangeModel({ primary: ["a", "b"], secondary: ["x"] });
+  const recoveredList = keyedRangesContainer.querySelector("ul");
+  const recoveredInput = keyedRangesContainer.querySelector("[aria-label='Range draft']");
+  assert.notEqual(recoveredInput, duplicateInput);
+  flushSync(() => keyedRangesContainer.querySelector("[data-local-counter]").click());
+  recoveredInput.value = "typed";
+  recoveredInput.focus();
+  recoveredInput.setSelectionRange(1, 4, "backward");
+  await updateKeyedRangeModel({ primary: ["b", "a"], secondary: ["x", "z"] });
+  assert.equal(keyedRangesContainer.querySelector("ul"), recoveredList);
+  assert.equal(keyedRangesContainer.querySelector("[aria-label='Range draft']"), recoveredInput);
+  assert.equal(recoveredInput.value, "typed");
+  assert.equal(keyedRangesContainer.querySelector("[data-local-counter]").textContent, "Local: 1");
+  assert.equal(document.activeElement, recoveredInput);
+  assert.deepEqual(
+    [recoveredInput.selectionStart, recoveredInput.selectionEnd, recoveredInput.selectionDirection],
+    [1, 4, "backward"],
+  );
+  await updateKeyedRangeModel({ primary: ["again", "again"], secondary: ["x"] });
+  assert.notEqual(keyedRangesContainer.querySelector("[aria-label='Range draft']"), recoveredInput);
+  assert.equal(keyedRangesContainer.querySelector("[data-local-counter]").textContent, "Local: 0");
   flushSync(() => keyedRangesRoot.unmount());
 
   let interactiveRowExecutions = 0;
