@@ -8,6 +8,7 @@ import {
   resolveHashedClientJsSrc,
 } from "./client-css-href";
 import type { RouteManager } from "../routing/route-manager";
+import { compareRoutePatternSpecificity } from "../routing/specificity";
 import type { APIRouteManager } from "../api/route-manager";
 import { resolveFarmAPIServerBasePath } from "../api/server-path";
 import type { ServerRenderer } from "../server/renderer";
@@ -4379,13 +4380,17 @@ function generateVirtualEntryCode(
   const pageImports: string[] = [];
   const pageRegistrations: string[] = [];
   const hasMarkdownPages = pageRoutes.some((route) => route.source !== undefined);
+  // Order with the shared route-specificity contract, not a local score. An
+  // additive per-segment score is not equivalent to the segment-wise comparison
+  // the route manager and the generated client matcher use, so the two ranked
+  // some patterns differently and the same build could serve one page on first
+  // load and another after a client navigation.
   const orderedPageRoutes = pageRoutes
     .map((route, index) => ({ route, index }))
-    .sort(
-      (left, right) =>
-        routePatternSpecificity(right.route.pattern) -
-          routePatternSpecificity(left.route.pattern) || left.index - right.index,
-    )
+    .sort((left, right) => {
+      const order = compareRoutePatternSpecificity(left.route.pattern, right.route.pattern);
+      return order || left.index - right.index;
+    })
     .map(({ route }) => route);
 
   orderedPageRoutes.forEach((route, index) => {
@@ -7916,6 +7921,11 @@ function appMiddlewareMayHandlePath(
   });
 }
 
+/**
+ * Rank a `routeRules` glob (`/blog/**`). This is config-pattern syntax, not file
+ * route syntax, and is deliberately separate from the file-route ordering in
+ * `compareRoutePatternSpecificity`.
+ */
 function routePatternSpecificity(pattern: string): number {
   return pattern
     .split("/")
@@ -7941,12 +7951,12 @@ function getManifestPageEntry(
   manifest: FarmRouteRuntimeManifest,
   pathname: string,
 ): FarmRouteRuntimeManifestEntry | undefined {
-  return manifest.routes
-    .filter((entry) => entry.kind === "page" && middlewarePatternMatches(entry.pattern, pathname))
-    .sort(
-      (left, right) =>
-        routePatternSpecificity(right.pattern) - routePatternSpecificity(left.pattern),
-    )[0];
+  return (
+    manifest.routes
+      .filter((entry) => entry.kind === "page" && middlewarePatternMatches(entry.pattern, pathname))
+      // Page patterns, so this uses the shared file-route ordering contract too.
+      .sort((left, right) => compareRoutePatternSpecificity(left.pattern, right.pattern))[0]
+  );
 }
 
 function getPhysicalPrerenderBypassReason(options: {
