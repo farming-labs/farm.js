@@ -405,6 +405,10 @@ export const exportBoard = createServerFn({
 
 ## Limits
 
+- **The endpoint runs on the dev server only.** Production Nitro output does
+  not yet mount plugin request hooks, so `/_farm/sync` is not served there;
+  see [#1347](https://github.com/farming-labs/farm.js/issues/1347). API routes
+  are unaffected, which is why a server-ruled action still works in a build.
 - **Live cross-user updates are not implemented.** Rows refresh on load and
   after your own writes; another user's change appears on the next load.
 - **A pending write does not survive a reload.** Durable offline queueing is
