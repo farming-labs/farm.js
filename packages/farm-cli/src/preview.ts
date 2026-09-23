@@ -244,6 +244,8 @@ export function createPreviewTunnelPlan(
         "--subdomain",
         requestedName,
       ],
+      // Windows exposes npx as a .cmd shim; spawn needs a shell to resolve it.
+      shell: process.platform === "win32",
       provider: "localtunnel",
       target,
       requestedName,

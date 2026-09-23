@@ -121,6 +121,22 @@ test("creates a tunnel plan from the preview command template", () => {
   }
 });
 
+test("marks the npx localtunnel plan for Windows shell resolution", () => {
+  const plan = createPreviewTunnelPlan(
+    {
+      localUrl: "http://localhost:3000",
+      host: "localhost",
+      port: 3000,
+      source: "port",
+    },
+    { name: "Local Tunnel" },
+  );
+
+  if (plan.provider === "localtunnel") {
+    assert.equal(plan.shell, process.platform === "win32");
+  }
+});
+
 test("creates a managed gateway preview plan by default", () => {
   const previousGateway = process.env.FARM_PREVIEW_GATEWAY_URL;
   const previousDomain = process.env.FARM_PREVIEW_DOMAIN;
