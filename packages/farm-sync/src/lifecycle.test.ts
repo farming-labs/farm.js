@@ -182,3 +182,96 @@ describe("mutation lifecycle", () => {
     expect(visible(mod)).toHaveLength(0);
   });
 });
+
+describe("durability lifecycle", () => {
+  it("records a refused write in the failures queue with its input and reason", async () => {
+    const mod = await freshRuntime();
+    serve(() => json({ error: { code: "invalid_input", message: "title taken" } }, 400));
+
+    mod.db.tasks.insert({ title: "dup" });
+    const store = mod.getSyncStore("tasks");
+    await vi.waitFor(() => expect(store.failures).toHaveLength(1));
+
+    const failure = store.failures[0]!;
+    expect(failure.operation).toBe("insert");
+    expect(failure.input).toMatchObject({ title: "dup" });
+    expect(failure.error.message).toMatch(/title taken/);
+    expect(visible(mod)).toHaveLength(0); // rolled back on screen
+  });
+
+  it("retry re-applies the optimistic row, resends, and clears the entry on success", async () => {
+    const mod = await freshRuntime();
+    serve((attempt) =>
+      attempt === 1 // a 400 is final, so the first send fails in one attempt
+        ? json({ error: { code: "invalid_input", message: "flake" } }, 400)
+        : json({ id: "t1", title: "second try", status: "open" }),
+    );
+
+    mod.db.tasks.insert({ title: "second try" });
+    const store = mod.getSyncStore("tasks");
+    await vi.waitFor(() => expect(store.failures).toHaveLength(1));
+
+    const handle = store.failures[0]!.retry() as { persisted: Promise<unknown> };
+    expect(store.failures).toHaveLength(0); // stale entry gone the moment retry starts
+
+    // Await the server's confirmation, not just the optimistic re-apply.
+    await handle.persisted;
+    expect(visible(mod)).toHaveLength(1);
+    expect(store.isPersisted({ id: "t1" })).toBe(true);
+    expect(store.failures).toHaveLength(0);
+  });
+
+  it("a failed retry records once, not a duplicate per attempt", async () => {
+    const mod = await freshRuntime();
+    serve(() => json({ error: { code: "invalid_input", message: "always no" } }, 400));
+
+    mod.db.tasks.insert({ title: "never" });
+    const store = mod.getSyncStore("tasks");
+    await vi.waitFor(() => expect(store.failures).toHaveLength(1));
+
+    store.failures[0]!.retry();
+    await vi.waitFor(() => expect(store.failures).toHaveLength(1));
+  });
+
+  it("dismiss drops the entry without resending", async () => {
+    const mod = await freshRuntime();
+    const writes = serve(() => json({ error: { code: "invalid_input", message: "no" } }, 400));
+
+    mod.db.tasks.insert({ title: "x" });
+    const store = mod.getSyncStore("tasks");
+    await vi.waitFor(() => expect(store.failures).toHaveLength(1));
+
+    const sent = writes();
+    store.failures[0]!.dismiss();
+    expect(store.failures).toHaveLength(0);
+    expect(writes()).toBe(sent);
+  });
+
+  it("isPersisted distinguishes confirmed rows from optimistic ones", async () => {
+    const mod = await freshRuntime();
+    let releaseWrite!: (value: Response) => void;
+    fetchMock.mockImplementation((_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      if (body.operation === "list") {
+        return json({ rows: [{ id: "old", title: "settled" }], cursor: null, full: true });
+      }
+      return new Promise<Response>((resolve) => (releaseWrite = resolve));
+    });
+
+    await mod.loadModel("tasks");
+    const store = mod.getSyncStore("tasks");
+    expect(store.isPersisted({ id: "old", title: "settled" })).toBe(true);
+
+    mod.db.tasks.insert({ id: "fresh", title: "optimistic" });
+    expect(store.isPersisted({ id: "fresh" })).toBe(false);
+    expect(store.isPersisted({ id: "old" })).toBe(true); // untouched rows unaffected
+
+    releaseWrite(
+      new Response(JSON.stringify({ id: "fresh", title: "optimistic" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    await vi.waitFor(() => expect(store.isPersisted({ id: "fresh" })).toBe(true));
+  });
+});

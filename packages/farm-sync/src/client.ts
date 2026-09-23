@@ -228,6 +228,12 @@ function runMutation(
     } catch (error) {
       store.removeLayer(layer);
       handleState = "failed";
+      store.recordFailure({
+        operation,
+        input,
+        error: error instanceof Error ? error : new Error(String(error)),
+        retry: () => runMutation(model, operation, input, optimistic),
+      });
       throw error;
     } finally {
       store.trackPending(-1);
@@ -266,7 +272,33 @@ export type SyncModelClient = {
   readonly __farmSyncModel: string;
 };
 
+/**
+ * Model row types, filled in by the generated `farm.d.ts` through declaration
+ * merging. Empty here so an app without generated types still compiles with
+ * plain `SyncRow` rows and any model name.
+ */
+export interface SyncModels {}
+
+/** Insert shapes per model: key, defaulted, and nullable columns optional. */
+export interface SyncModelInputs {}
+
+export type SyncModelName = [keyof SyncModels] extends [never] ? string : keyof SyncModels & string;
+
+export type SyncRowOf<K> = K extends keyof SyncModels ? SyncModels[K] : SyncRow;
+
+export type SyncInsertOf<K> = K extends keyof SyncModelInputs ? SyncModelInputs[K] : SyncRow;
+
 const clientCache = new Map<string, SyncModelClient>();
+
+/** The per-model client, created lazily. The `db` proxy delegates here. */
+export function getSyncModelClient(model: string): SyncModelClient {
+  let client = clientCache.get(model);
+  if (!client) {
+    client = createModelClient(model);
+    clientCache.set(model, client);
+  }
+  return client;
+}
 
 function createModelClient(model: string): SyncModelClient {
   const client: SyncModelClient = {
@@ -333,12 +365,7 @@ export const db: Record<string, SyncModelClient> = new Proxy(
   {
     get(_target, property: string) {
       if (typeof property !== "string") return undefined;
-      let client = clientCache.get(property);
-      if (!client) {
-        client = createModelClient(property);
-        clientCache.set(property, client);
-      }
-      return client;
+      return getSyncModelClient(property);
     },
   },
 ) as Record<string, SyncModelClient>;

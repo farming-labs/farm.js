@@ -1,10 +1,29 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
-import { getSyncStore, hydrateModel, type SyncModelClient } from "./client.js";
-import type { SyncRow, SyncStoreStatus } from "./store.js";
+import {
+  getSyncModelClient,
+  getSyncStore,
+  hydrateModel,
+  type SyncInsertOf,
+  type SyncModelClient,
+  type SyncModelName,
+  type SyncMutationHandle,
+  type SyncRowOf,
+} from "./client.js";
+import type { SyncRow, SyncStoreStatus, SyncWriteFailure } from "./store.js";
+
+export type { SyncModelInputs, SyncModels } from "./client.js";
 
 const EMPTY_ROWS: SyncRow[] = [];
+const EMPTY_FAILURES: readonly SyncWriteFailure[] = [];
+
+/** A model reference: its generated name, or a legacy client handle. */
+type SyncModelRef = SyncModelName | SyncModelClient;
+
+function resolveModelName(model: SyncModelRef): string {
+  return typeof model === "string" ? model : model.__farmSyncModel;
+}
 
 export type LiveQueryOptions<TRow> = {
   orderBy?: (row: TRow) => string | number | Date;
@@ -14,7 +33,7 @@ export type LiveQueryOptions<TRow> = {
   enabled?: boolean;
 };
 
-export type LiveQueryResult<TRow> = {
+export type LiveQueryResult<TRow, TInsert = TRow> = {
   rows: TRow[];
   status: SyncStoreStatus;
   error: Error | null;
@@ -22,8 +41,20 @@ export type LiveQueryResult<TRow> = {
   pending: number;
   /** Writes waiting for the connection to return. */
   paused: number;
+  /** Same as `paused`, named for what the user sees: queued until reconnect. */
+  queued: number;
   isEmpty: boolean;
   refresh(): Promise<void>;
+
+  /** Write straight into the local store; the engine persists it behind you. */
+  insert(input: TInsert): SyncMutationHandle<TRow>;
+  update(key: unknown, patch: Partial<TRow>): SyncMutationHandle<TRow>;
+  delete(key: unknown): SyncMutationHandle<TRow>;
+
+  /** True once the server confirmed this row; false while it is optimistic. */
+  isPersisted(row: TRow): boolean;
+  /** Rolled-back writes awaiting the user, each with retry() and dismiss(). */
+  failures: readonly SyncWriteFailure[];
 };
 
 /**
@@ -33,12 +64,22 @@ export type LiveQueryResult<TRow> = {
  * the browser, so any expression is fair game. Which rows reach the device is
  * decided separately by the server's row filter.
  */
+export function useLiveQuery<K extends SyncModelName>(
+  model: K,
+  predicate?: (row: SyncRowOf<K>) => boolean,
+  options?: LiveQueryOptions<SyncRowOf<K>>,
+): LiveQueryResult<SyncRowOf<K>, SyncInsertOf<K>>;
 export function useLiveQuery<TRow extends SyncRow = SyncRow>(
   model: SyncModelClient,
   predicate?: (row: TRow) => boolean,
+  options?: LiveQueryOptions<TRow>,
+): LiveQueryResult<TRow>;
+export function useLiveQuery<TRow extends SyncRow = SyncRow>(
+  model: SyncModelRef,
+  predicate?: (row: TRow) => boolean,
   options: LiveQueryOptions<TRow> = {},
 ): LiveQueryResult<TRow> {
-  const name = model.__farmSyncModel;
+  const name = resolveModelName(model);
   const store = getSyncStore(name);
 
   const predicateRef = useRef(predicate);
@@ -76,6 +117,11 @@ export function useLiveQuery<TRow extends SyncRow = SyncRow>(
     () => store.paused,
     () => 0,
   );
+  const failures = useSyncExternalStore(
+    subscribe,
+    () => store.failures,
+    () => EMPTY_FAILURES,
+  );
 
   useEffect(() => {
     if (options.enabled === false) return;
@@ -105,23 +151,41 @@ export function useLiveQuery<TRow extends SyncRow = SyncRow>(
     return result;
   }, [rows]);
 
+  const client = useMemo(() => getSyncModelClient(name), [name]);
+
   return {
     rows: visible,
     status,
     error,
     pending,
     paused,
+    queued: paused,
     isEmpty: visible.length === 0,
-    refresh: () => model.refresh(),
+    refresh: () => client.refresh(),
+    insert: (input) => client.insert(input as SyncRow) as SyncMutationHandle<TRow>,
+    update: (key, patch) =>
+      client.update({
+        ...patch,
+        [store.descriptor.key]: key,
+      } as SyncRow) as SyncMutationHandle<TRow>,
+    delete: (key) =>
+      client.delete({ [store.descriptor.key]: key } as SyncRow) as SyncMutationHandle<TRow>,
+    isPersisted: (row) => store.isPersisted(row as SyncRow),
+    failures,
   };
 }
 
 /** Subscribe to a single row by key. */
+export function useRow<K extends SyncModelName>(model: K, key: unknown): SyncRowOf<K> | undefined;
 export function useRow<TRow extends SyncRow = SyncRow>(
   model: SyncModelClient,
   key: unknown,
+): TRow | undefined;
+export function useRow<TRow extends SyncRow = SyncRow>(
+  model: SyncModelRef,
+  key: unknown,
 ): TRow | undefined {
-  const store = getSyncStore(model.__farmSyncModel);
+  const store = getSyncStore(resolveModelName(model));
   const subscribe = useCallback((listener: () => void) => store.subscribe(listener), [store]);
   const rows = useSyncExternalStore(
     subscribe,
