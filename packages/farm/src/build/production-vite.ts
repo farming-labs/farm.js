@@ -44,8 +44,10 @@ async function loadRollupVite(): Promise<FarmProductionViteRuntime> {
  * Vite 5 remains the compatibility path for unsupported runtimes, --no-optional installs,
  * and projects that explicitly request Rollup.
  */
-export async function loadFarmProductionVite(): Promise<FarmProductionViteRuntime> {
-  const requested = requestedProductionViteBuilder();
+export async function loadFarmProductionVite(
+  preferredBuilder?: FarmProductionViteBuilder,
+): Promise<FarmProductionViteRuntime> {
+  const requested = preferredBuilder ?? requestedProductionViteBuilder();
   if (requested === "rollup" || !supportsRolldownVite()) {
     if (requested === "rolldown") {
       throw new Error("FARM_VITE_BUILDER=rolldown requires Node 22.12 or newer");
