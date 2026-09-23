@@ -292,15 +292,55 @@ export default async function PostPage({ params }: PageProps<"/posts/[...slug]">
 
 ## Use a hosted CMS
 
-`content()` is the file-backed path. For Sanity, Contentful, Storyblok, or another hosted CMS,
-install the provider's SDK directly and choose where the content should enter the application:
+A collection's source does not have to be files. `remote()` fetches documents from anywhere -
+a CMS, an API, a database - and runs them through the same schema validation, transforms, and
+generated types:
 
-- **Build-time snapshot:** export or sync the CMS into a generated Markdown or JSON directory before
-  `farm build`, then point `files()` at that directory. The plugin validates and bundles the snapshot;
-  publishing new content triggers a new deployment.
-- **Live content:** keep the provider SDK in a server-only module and fetch through a
-  [Server Query](/docs/server-queries). Farm can validate the response, cache published content, and
-  share the typed result with server or client consumers.
+```ts
+import { collection, content, remote } from "@farm.js/content";
+
+content({
+  collections: {
+    posts: collection({
+      source: remote({
+        name: "cms:posts",
+        fetch: async () => loadDocumentsSomehow(), // [{ id, data, body? }, ...]
+        refreshInterval: 30_000, // dev only: poll and reload on change
+      }),
+      schema: post,
+    }),
+  },
+});
+```
+
+Remote content is a **build-time snapshot**, exactly like files: documents are fetched while the
+configuration loads, validated, and bundled into production output. Publishing new content means a
+new build - point the provider's webhook at a deploy hook. In development, `refreshInterval` polls
+and reloads only when the documents actually changed; entries are sorted by ID so re-fetch order
+never churns the generated module. Remote collections cannot declare
+[typed asset fields](#manage-local-assets), which resolve files on disk.
+
+Integrations can hand you a ready-made source. With [`@farm.js/sanity`](/docs/integrations/sanity):
+
+```ts
+import { sanitySource } from "@farm.js/sanity";
+
+posts: collection({
+  source: sanitySource({
+    query: `*[_type == "post"]{ _id, slug, title, publishedAt }`,
+    refreshInterval: 30_000,
+  }),
+  schema: post,
+});
+```
+
+`sanitySource` resolves its project from `SANITY_PROJECT_ID` and `SANITY_DATASET` or accepts an
+existing client, uses `slug.current` (falling back to `_id`) as the entry ID, and skips the CDN by
+default so a build sees the freshest documents.
+
+For **live content** that must update without a rebuild, keep the provider SDK in a server-only
+module and fetch through a [Server Query](/docs/server-queries) instead. Farm can validate the
+response, cache published content, and share the typed result with server or client consumers.
 
 For example, a Sanity-backed query can stay small:
 

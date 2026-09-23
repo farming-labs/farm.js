@@ -103,6 +103,33 @@ export default async function PostsPage() {
 }
 ```
 
+## Content collections
+
+Feed Sanity documents into [the content plugin](/docs/plugins/content) and they get the same
+schema validation, transforms, and generated server types as local Markdown:
+
+```ts
+import { collection, content } from "@farm.js/content";
+import { sanitySource } from "@farm.js/sanity";
+
+content({
+  collections: {
+    posts: collection({
+      source: sanitySource({
+        query: `*[_type == "post"]{ _id, slug, title, publishedAt }`,
+        refreshInterval: 30_000, // dev only
+      }),
+      schema: post,
+    }),
+  },
+});
+```
+
+The documents are fetched while the configuration loads and bundled as a build-time snapshot, so
+publishing means rebuilding: point a Sanity webhook at your platform's deploy hook. The
+[cache-invalidation webhook](#invalidate-on-publish) below is the complementary path for content read at runtime
+through server queries.
+
 ## Serve images
 
 `createSanityImageLoader` returns a loader for Farm's `Image` component that resolves images on the

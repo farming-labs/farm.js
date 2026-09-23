@@ -39,9 +39,16 @@
   "devDependencies": {
     "@sanity/client": "^8.4.0",
     "typescript": "^5.3.3",
-    "vitest": "^3.2.7"
+    "vitest": "^3.2.7",
+    "@farm.js/content": "workspace:*"
   },
   "peerDependencies": {
-    "@sanity/client": "^7.0.0 || ^8.0.0"
+    "@sanity/client": "^7.0.0 || ^8.0.0",
+    "@farm.js/content": "workspace:^"
+  },
+  "peerDependenciesMeta": {
+    "@farm.js/content": {
+      "optional": true
+    }
   }
 }

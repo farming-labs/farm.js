@@ -46,3 +46,5 @@ export type {
 } from "./config.js";
 export { createSanityImageLoader, type SanityImageLoaderOptions } from "./image.js";
 export { createSanityWebhookRoute, DEFAULT_SANITY_WEBHOOK_PATH } from "./webhook.js";
+export { sanitySource } from "./content.js";
+export type { SanityContentSourceOptions } from "./content.js";

@@ -6,6 +6,8 @@ import type {
   ContentCollectionInput,
   ContentDataWithAssets,
   ContentFileSource,
+  ContentRemoteDocument,
+  ContentRemoteSource,
   ContentSchema,
   InferContentSchema,
 } from "./types.js";
@@ -35,6 +37,43 @@ export function files(
   });
 }
 
+export interface ContentRemoteOptions {
+  /** Names the source in error messages, e.g. "sanity:posts". */
+  name: string;
+  fetch(): Promise<readonly ContentRemoteDocument[]>;
+  /** Development re-fetch cadence in milliseconds. */
+  refreshInterval?: number;
+}
+
+/** A content source that fetches documents instead of reading local files. */
+export function remote(options: ContentRemoteOptions): ContentRemoteSource {
+  if (!options || typeof options !== "object") {
+    throw new TypeError("remote() requires an options object");
+  }
+  const name = typeof options.name === "string" ? options.name.trim() : "";
+  if (!name) {
+    throw new TypeError("remote() requires a non-empty name for error messages");
+  }
+  if (typeof options.fetch !== "function") {
+    throw new TypeError(`remote(${JSON.stringify(name)}) requires a fetch() function`);
+  }
+  if (
+    options.refreshInterval !== undefined &&
+    (!Number.isFinite(options.refreshInterval) || options.refreshInterval < 100)
+  ) {
+    throw new TypeError(
+      `remote(${JSON.stringify(name)}) refreshInterval must be at least 100 milliseconds`,
+    );
+  }
+
+  return Object.freeze({
+    kind: "remote" as const,
+    name,
+    fetch: options.fetch,
+    ...(options.refreshInterval !== undefined ? { refreshInterval: options.refreshInterval } : {}),
+  });
+}
+
 export function collection<
   TSchema extends ContentSchema<any>,
   const TAssets extends ContentAssetsInput = undefined,
@@ -45,8 +84,15 @@ export function collection<
   if (!input || typeof input !== "object") {
     throw new TypeError("Content collection must be an object");
   }
-  if (input.source?.kind !== "files") {
-    throw new TypeError("Content collection source must come from files()");
+  if (input.source?.kind !== "files" && input.source?.kind !== "remote") {
+    throw new TypeError("Content collection source must come from files() or remote()");
+  }
+  if (input.source.kind === "remote" && input.assets && input.assets !== true) {
+    // Typed asset fields resolve files next to the entry on disk; a remote
+    // document has no directory for them to live in.
+    throw new TypeError(
+      `Content collection with remote source ${JSON.stringify(input.source.name)} cannot declare asset fields`,
+    );
   }
   if (!isContentSchema(input.schema)) {
     throw new TypeError(

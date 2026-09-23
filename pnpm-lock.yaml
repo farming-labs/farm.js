@@ -2700,6 +2700,9 @@ importers:
         specifier: ^4.0.4
         version: 4.0.4
     devDependencies:
+      '@farm.js/content':
+        specifier: workspace:*
+        version: link:../farm-content
       '@sanity/client':
         specifier: ^8.4.0
         version: 8.7.0(vitest@3.2.7)

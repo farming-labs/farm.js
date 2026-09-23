@@ -10,6 +10,8 @@ import type { ContentCollections, ContentOptions, ContentPlugin } from "./types.
 const CONTENT_SERVER_ID = "@farm.js/content/server";
 
 export { asset, collection, files };
+export { remote } from "./config.js";
+export type { ContentRemoteOptions } from "./config.js";
 export type { ContentFilesOptions } from "./config.js";
 export type {
   AppContentEntry,
@@ -25,6 +27,9 @@ export type {
   ContentEntry,
   ContentFileAsset,
   ContentFileSource,
+  ContentRemoteDocument,
+  ContentRemoteSource,
+  ContentSource,
   ContentImageAsset,
   ContentOptions,
   ContentPlugin,
@@ -77,13 +82,18 @@ export function content<const TCollections extends ContentCollections>(
     },
   }) as ContentPlugin<TCollections>;
 
-  async function rebuild(): Promise<void> {
+  async function rebuild(): Promise<boolean> {
     const attemptedSourceFiles = new Set<string>();
     try {
       await assertGeneratedOutputInsideRoot(root, generatedFile);
       const loaded = await loadContentCollections(root, options.collections, attemptedSourceFiles);
-      await writeContentServerModule(generatedFile, loaded.collections, loaded.assetImports);
+      const changed = await writeContentServerModule(
+        generatedFile,
+        loaded.collections,
+        loaded.assetImports,
+      );
       sourceFiles = new Set(loaded.sourceFiles);
+      return changed;
     } catch (error) {
       sourceFiles = new Set([...sourceFiles, ...attemptedSourceFiles]);
       throw error;
@@ -143,6 +153,38 @@ export function content<const TCollections extends ContentCollections>(
         };
         server.watcher.on("all", onFile);
         server.httpServer?.once("close", () => server.watcher.off?.("all", onFile));
+
+        // Remote sources have no file events; poll the ones that asked for it.
+        // One timer at the smallest requested cadence keeps ordering simple,
+        // and a reload only goes out when the generated module actually changed.
+        const intervals = Object.values(options.collections)
+          .map((definition) => definition.source)
+          .filter((candidate) => candidate.kind === "remote")
+          .map((candidate) => candidate.refreshInterval)
+          .filter((value): value is number => typeof value === "number");
+        if (intervals.length > 0) {
+          const timer = setInterval(
+            () => {
+              rebuildQueue = rebuildQueue
+                .then(async () => {
+                  if (!(await rebuild())) return;
+                  const modules = server.moduleGraph.getModulesByFile?.(generatedFile);
+                  for (const module of modules ?? []) server.moduleGraph.invalidateModule(module);
+                  server.ws.send({ type: "full-reload" });
+                })
+                .catch((error) => {
+                  const message = error instanceof Error ? error.message : String(error);
+                  server.ws.send({
+                    type: "error",
+                    err: { message, stack: error instanceof Error ? error.stack : undefined },
+                  });
+                });
+            },
+            Math.min(...intervals),
+          );
+          timer.unref?.();
+          server.httpServer?.once("close", () => clearInterval(timer));
+        }
       },
     };
   }
@@ -228,6 +270,7 @@ async function shouldRebuildForFile(
   }
 
   for (const definition of Object.values(collections)) {
+    if (definition.source.kind !== "files") continue;
     const matches = await fg([...definition.source.patterns], {
       cwd: root,
       absolute: true,
