@@ -2,7 +2,7 @@
 
 import { useLiveQuery, useSyncAction } from "@farm.js/sync/react";
 import { useState } from "react";
-import { completeTask } from "../actions";
+import { completeTask } from "../lib/actions";
 
 export default function LocalFirstPage() {
   const [title, setTitle] = useState("");
@@ -18,7 +18,7 @@ export default function LocalFirstPage() {
   /**
    * A transition the server rules on: only an open task may complete. The
    * optimistic patch shows the result instantly; a refusal rolls the row
-   * back and lands in the failures queue below.
+   * back into the failures queue above the composer.
    */
   const complete = useSyncAction(completeTask, "tasks", {
     optimistic: { status: "done" },

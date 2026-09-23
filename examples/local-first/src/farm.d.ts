@@ -74,6 +74,33 @@ declare module "@farm.js/core" {
 }
 
 /**
+ * Sync model types from the schema passed to sync() in farm.config.
+ * useLiveQuery, useRow, and useSyncAction resolve model names and row
+ * types against these maps. Regenerated when the schema changes.
+ */
+declare module "@farm.js/sync/client" {
+  interface SyncModels {
+    tasks: {
+      id: string;
+      title: string;
+      status: "open" | "done";
+      listId: string;
+      updatedAt: string;
+    };
+  }
+
+  interface SyncModelInputs {
+    tasks: {
+      id?: string;
+      title: string;
+      status?: "open" | "done";
+      listId?: string;
+      updatedAt?: string;
+    };
+  }
+}
+
+/**
  * Auto-generated content collection types from Farm layers and farm.config.
  * Regenerated on dev start, build, and farm generate.
  */

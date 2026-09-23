@@ -855,6 +855,9 @@ importers:
       react-dom:
         specifier: 19.2.8
         version: 19.2.8(react@19.2.8)
+      zod:
+        specifier: 4.1.12
+        version: 4.1.12
     devDependencies:
       '@farm.js/cli':
         specifier: workspace:*

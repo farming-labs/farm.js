@@ -5,12 +5,21 @@
  * Server modules are imported only as types. Runtime data contains paths and methods only.
  */
 
-
+import type { POST as POST_tasks_complete } from "../app/api/tasks/complete/route";
 
 // Type-only representation of your API routes
 export type APIRouter = {
-
+  tasks: {
+    complete: {
+      post: typeof POST_tasks_complete;
+    };
+  };
 };
 
 // Pass this schema-free manifest to createApiClients({ routes: apiRoutes }).
-export const apiRoutes = [] as const;
+export const apiRoutes = [
+  {
+    path: "/api/tasks/complete",
+    methods: ["POST"],
+  },
+] as const;
