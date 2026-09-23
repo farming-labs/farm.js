@@ -4,6 +4,9 @@ const EXPORT_SERVER_FUNCTION_FACTORY_RE =
   /\bexport\s+(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*([A-Za-z_$][\w$]*)\s*(?:<[^<>]*(?:<[^<>]*>[^<>]*)*>)?\s*\(/g;
 const EXPORT_DEFAULT_SERVER_FUNCTION_FACTORY_RE =
   /\bexport\s+default\s+([A-Za-z_$][\w$]*)\s*(?:<[^<>]*(?:<[^<>]*>[^<>]*)*>)?\s*\(/g;
+const SERVER_FUNCTION_DECLARATION_RE =
+  /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*([A-Za-z_$][\w$]*)\s*(?:<[^<>]*(?:<[^<>]*>[^<>]*)*>)?\s*\(/g;
+const LOCAL_EXPORT_CLAUSE_RE = /\bexport\s*\{([^}]*)\}/g;
 const MODULE_EXT_RE = /\.[cm]?[jt]sx?$/;
 const DECLARATION_RE = /(^|\n)\s*["']([^"']+)["']\s*;?/g;
 
@@ -25,6 +28,15 @@ export function transformFarmServerFns(
 
   const factoryNames = findServerFunctionFactoryImportNames(code);
   if (factoryNames.size === 0) return null;
+
+  const reExport = findServerFnReExport(code, factoryNames);
+  if (reExport) {
+    const factoryName = reExport.factory === "fn" ? "createServerFn" : "createServerQuery";
+    throw new Error(
+      `Server function "${reExport.localName}" cannot be re-exported with an export clause. ` +
+        `Export it inline instead: export const ${reExport.exportName} = ${factoryName}(...).`,
+    );
+  }
 
   const replacements = findServerFnExportReplacements(code, factoryNames);
   if (replacements.length === 0) return null;
@@ -78,6 +90,39 @@ function findServerFunctionFactoryImportNames(code: string) {
   }
 
   return names;
+}
+
+function findServerFnReExport(code: string, factoryNames: Map<string, "fn" | "query">) {
+  const declarations = new Map<string, "fn" | "query">();
+
+  for (const match of code.matchAll(SERVER_FUNCTION_DECLARATION_RE)) {
+    const localName = match[1];
+    const factoryName = match[2];
+    const factory = factoryName ? factoryNames.get(factoryName) : undefined;
+    if (localName && factory) declarations.set(localName, factory);
+  }
+
+  if (declarations.size === 0) return null;
+
+  for (const match of code.matchAll(LOCAL_EXPORT_CLAUSE_RE)) {
+    const clause = match[1] ?? "";
+    const clauseEnd = (match.index ?? 0) + match[0].length;
+    if (code.slice(clauseEnd).trimStart().startsWith("from")) continue;
+
+    for (const specifier of clause.split(",")) {
+      const parts = specifier.trim().split(/\s+as\s+/);
+      const localName = parts[0]?.trim();
+      if (!localName || !declarations.has(localName)) continue;
+
+      return {
+        localName,
+        exportName: parts[1]?.trim() || localName,
+        factory: declarations.get(localName)!,
+      };
+    }
+  }
+
+  return null;
 }
 
 function findServerFnExportReplacements(code: string, factoryNames: Map<string, "fn" | "query">) {
