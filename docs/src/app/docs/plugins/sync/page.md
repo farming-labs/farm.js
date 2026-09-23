@@ -185,11 +185,10 @@ No migration runs. Models you do not describe stay invisible to the browser.
 ```tsx title="src/app/tasks/page.tsx"
 "use client";
 
-import { db } from "@farm.js/sync/client";
 import { useLiveQuery } from "@farm.js/sync/react";
 
 export default function TasksPage() {
-  const open = useLiveQuery(db.tasks, (task) => task.status === "open", {
+  const open = useLiveQuery("tasks", (task) => task.status === "open", {
     orderBy: (task) => task.updatedAt,
     direction: "desc",
   });
@@ -206,33 +205,46 @@ export default function TasksPage() {
 }
 ```
 
+The model name is not a loose string. Farm generates a `SyncModels` map into
+`src/farm.d.ts` from the schema, so `"tasks"` autocompletes, a wrong name is a
+compile error, and `task` in the predicate is fully typed, enum unions
+included. There is nothing to import or instantiate for this: write the
+schema, and the types follow.
+
 The predicate runs in the browser over rows already on the device, so any
 expression is fine. Which rows reach the device is decided separately, by the
 server's row filter.
 
-| Field     | Meaning                                                                              |
-| --------- | ------------------------------------------------------------------------------------ |
-| `rows`    | matching rows                                                                        |
-| `status`  | `"loading"` only on a genuine cold start; a revisit with persistence on is `"ready"` |
-| `error`   | a failed read. Previously loaded rows stay visible                                   |
-| `pending` | writes in flight against this model                                                  |
-| `paused`  | writes waiting for the connection to return                                          |
-| `isEmpty` | no rows matched                                                                      |
+| Field              | Meaning                                                                                          |
+| ------------------ | ------------------------------------------------------------------------------------------------ |
+| `rows`             | matching rows                                                                                    |
+| `status`           | `"loading"` only on a genuine cold start; a revisit with persistence on is `"ready"`             |
+| `error`            | a failed read. Previously loaded rows stay visible                                               |
+| `pending`          | writes in flight against this model                                                              |
+| `queued`           | writes waiting for the connection to return (`paused` is the same number)                        |
+| `isEmpty`          | no rows matched                                                                                  |
+| `isPersisted(row)` | true once the server confirmed the row; false while it is optimistic                             |
+| `failures`         | rolled-back writes awaiting the user; see [when a write fails](#what-happens-when-a-write-fails) |
 
-`useRow(db.tasks, id)` subscribes to a single row.
+`useRow("tasks", id)` subscribes to a single row.
 
 ## Write
 
+Writes hang off the same handle the live query returned, so a component has
+one object for the model:
+
 ```ts
-db.tasks.insert({ title: "Write the RFC" });
-db.tasks.update({ id, status: "done" });
-db.tasks.delete({ id });
+const tasks = useLiveQuery("tasks");
+
+tasks.insert({ title: "Write the RFC" });
+tasks.update(id, { status: "done" });
+tasks.delete(id);
 ```
 
 Each call applies to the local store immediately, so every view showing that row
 re-renders in the same frame, then persists in the background. Fields the schema
 fills in — the key, defaults, the cursor, and the columns owned by `where` — can
-be omitted.
+be omitted, and the generated types know it: `insert` marks them optional.
 
 Every write returns a handle, usable whichever way suits the call site:
 
@@ -259,24 +271,26 @@ surface as an unhandled rejection.
 | Offline              | the write pauses, `paused` increments, and it sends itself on reconnect |
 | Reload while pending | the pending write is lost; optimistic state is in memory only           |
 
-Because a rejected write reverts silently, surface the reason:
+A rejected write reverts on screen, but it does not vanish: it lands in the
+model's `failures` queue with the exact input that failed, the reason, and two
+verbs. Render the queue once and every rollback in the app is accounted for:
 
 ```tsx
-const [error, setError] = useState<string | null>(null);
-
-<button
-  onClick={() => {
-    setError(null);
-    db.tasks.update({ id, status: "done" }).catch((cause) => setError(cause.message));
-  }}
->
-  Done
-</button>;
-
 {
-  error && <p role="alert">{error}</p>;
+  tasks.failures.map((failure) => (
+    <p key={failure.id} role="alert">
+      {failure.error.message}
+      <button onClick={() => failure.retry()}>Retry</button>
+      <button onClick={() => failure.dismiss()}>Dismiss</button>
+    </p>
+  ));
 }
 ```
+
+`retry()` re-applies the optimistic state and sends the write again; a second
+refusal records once, not once per attempt. `failures` is a queue rather than a
+single error slot because fire-and-forget writes can fail out of order, minutes
+after the gestures that caused them.
 
 ## Security
 
@@ -330,14 +344,58 @@ setSyncPersistence(myIndexedDbStore);
 await clearSyncedRows(); // on logout, so a shared device stays clean
 ```
 
-## Operations beyond table writes
+## Server-ruled transitions
 
-Anything that is not a row-level change stays an ordinary server function, and
-composes with collections through invalidation:
+A plain write cannot express "the server gets to say no before it becomes
+true". Transitions with rules — complete, claim, approve — are ordinary server
+functions, written once against your real database, and bound to a model with
+`useSyncAction` so calling one behaves like every other sync write:
+
+```ts title="src/actions.ts"
+export const completeTask = createServerFn({
+  async handler({ input, request }) {
+    const task = await db.tasks.findFirst({ where: { id: input.id, ...scope(request) } });
+    if (task?.status !== "open") throw new Error("Only an open task can be completed.");
+    return db.tasks.update({ where: { id: input.id }, data: { status: "done" } });
+  },
+});
+```
+
+```tsx title="src/app/tasks/page.tsx"
+import { completeTask } from "../actions";
+
+const complete = useSyncAction(completeTask, "tasks", {
+  optimistic: { status: "done" },
+});
+
+complete({ id: task.id }); // fire and forget, like any other write
+```
+
+The optimistic patch shows the transition instantly; the row the handler
+returns replaces it when the server confirms, and a refusal rolls it back into
+the same `failures` queue plain writes use. Every `useLiveQuery` over the model
+follows along — the action writes the same store the queries read.
+
+The patch resolves in tiers, so most actions declare nothing:
+
+1. **Derived.** When the input carries the model's key plus fields that are
+   schema columns — `rename({ id, title })` — those fields are the patch.
+2. **Declared.** For transitions the input does not spell out, pass
+   `optimistic` as a patch object, or as `(input) => patch` when it depends on
+   the input.
+3. **None.** Skip both and the action still lands: the returned rows commit
+   into the store on arrival. Only the instant preview is missing.
+
+The handler returning the changed row (or an array of rows) is what makes the
+commit precise; return nothing row-shaped and the model refreshes instead. Do
+not put the outcome in the input to game tier one — the handler owns the
+transition, the patch is only the client's drawing of it.
+
+Anything that is not a row-level change at all stays a plain server function
+and composes through invalidation:
 
 ```ts
-export const archiveProject = createServerFn({
-  input: z.object({ projectId: z.string() }),
+export const exportBoard = createServerFn({
   invalidates: () => [{ key: ["tasks"] }],
   async handler({ input, context }) {
     /* ... */
