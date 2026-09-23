@@ -92,4 +92,38 @@ export const product = createServerQuery({ key: () => ["product"], handler: asyn
       ),
     ).toThrow("must live in a server module");
   });
+
+  it("fails closed for server functions re-exported through an export clause", () => {
+    expect(() =>
+      transformFarmServerFns(
+        `import { createServerFn } from "@farm.js/core";
+const save = createServerFn({ handler: async () => true });
+export { save as persist };`,
+        "/app/src/actions.ts",
+      ),
+    ).toThrow(
+      'Server function "save" cannot be re-exported with an export clause. Export it inline instead',
+    );
+  });
+
+  it("does not treat re-exports from another module as local server functions", () => {
+    const result = transformFarmServerFns(
+      `import { save } from "./save";
+export { save } from "./save";`,
+      "/app/src/actions.ts",
+    );
+
+    expect(result).toBeNull();
+  });
+
+  it("names the query factory in the fail-closed message", () => {
+    expect(() =>
+      transformFarmServerFns(
+        `import { createServerQuery } from "@farm.js/core";
+const product = createServerQuery({ key: () => ["product"], handler: async () => true });
+export { product };`,
+        "/app/src/queries.ts",
+      ),
+    ).toThrow("createServerQuery(...)");
+  });
 });
