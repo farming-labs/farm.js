@@ -592,7 +592,7 @@ describe("compiler-owned mixed conditional and keyed ranges runtime", () => {
     }
   });
 
-  it("falls back on duplicate keys and keeps every mixed dependency live", async () => {
+  it("falls back on duplicate keys and preserves recovered nested fallback state", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const fixture = createMixedFixture();
     const container = document.createElement("div");
@@ -630,7 +630,7 @@ describe("compiler-owned mixed conditional and keyed ranges runtime", () => {
       fixture.setModel((value) => ({ ...(value as Model), title: "Still safe" }));
       await flushCompilerUpdates();
     });
-    expect(container.querySelector("[data-mixed]")).not.toBe(recoveredSurface);
+    expect(container.querySelector("[data-mixed]")).toBe(recoveredSurface);
     expect(container.querySelector("header")?.textContent).toBe("Still safe");
   });
 

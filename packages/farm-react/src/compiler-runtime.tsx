@@ -3545,51 +3545,82 @@ function materializeCompilerHostChildren(descriptor: CompilerHostElement): reado
   return children;
 }
 
-interface CompilerFallbackRecoveryMetadata {
-  requiresReset: boolean;
-  preservedRootBlockId?: number;
-}
-
-function collectCompilerHostBlockIds(
-  descriptor: CompilerHostElement,
-  ids: Set<number>,
-  recovery?: CompilerFallbackRecoveryMetadata,
-): void {
+function collectCompilerHostBlockIds(descriptor: CompilerHostElement, ids: Set<number>): void {
   for (const child of flattenCompilerHostElements(descriptor.children)) {
-    collectCompilerHostBlockIds(child, ids, recovery);
+    collectCompilerHostBlockIds(child, ids);
   }
   const block = descriptor.block;
   if (!block) return;
-  if (
-    recovery &&
-    block.id !== recovery.preservedRootBlockId &&
-    (block.kind === "keyed-ranges" ||
-      (block.kind === "mixed-ranges" && block.ranges.some((range) => range.kind === "keyed")))
-  ) {
-    recovery.requiresReset = true;
-  }
   if (ids.has(block.id)) return;
   ids.add(block.id);
   if (block.kind === "conditional-ranges") {
     for (const range of block.ranges) {
-      if (range.truthy) collectCompilerHostBlockIds(range.truthy.create(), ids, recovery);
-      if (range.falsy) collectCompilerHostBlockIds(range.falsy.create(), ids, recovery);
+      if (range.truthy) collectCompilerHostBlockIds(range.truthy.create(), ids);
+      if (range.falsy) collectCompilerHostBlockIds(range.falsy.create(), ids);
     }
   } else if (block.kind === "keyed-ranges") {
     for (const range of block.ranges) {
       const first = materializeIterable(range.items())[0];
-      if (first !== undefined) collectCompilerHostBlockIds(range.create(first, 0), ids, recovery);
+      if (first !== undefined) collectCompilerHostBlockIds(range.create(first, 0), ids);
     }
   } else {
     for (const range of block.ranges) {
       if (range.kind === "conditional") {
-        if (range.truthy) collectCompilerHostBlockIds(range.truthy.create(), ids, recovery);
-        if (range.falsy) collectCompilerHostBlockIds(range.falsy.create(), ids, recovery);
+        if (range.truthy) collectCompilerHostBlockIds(range.truthy.create(), ids);
+        if (range.falsy) collectCompilerHostBlockIds(range.falsy.create(), ids);
       } else {
         const first = materializeIterable(range.items())[0];
-        if (first !== undefined) collectCompilerHostBlockIds(range.create(first, 0), ids, recovery);
+        if (first !== undefined) collectCompilerHostBlockIds(range.create(first, 0), ids);
       }
     }
+  }
+}
+
+/**
+ * React can preserve a fallback subtree only while every mounted keyed range has
+ * an unambiguous identity. Inspect the complete live descriptor because nested
+ * row instances may own different blocks or keys than the first row.
+ */
+function hasUnsafeCompilerFallbackKeys(descriptor: CompilerHostElement): boolean {
+  const visitKeyedRange = (range: CompilerKeyedRange): boolean => {
+    const items = materializeIterable(range.items());
+    const keys = items.map((item, index) => keyedRowIdentity(range.rowKey(item, index)));
+    if (new Set(keys).size !== keys.length) return true;
+    return items.some((item, index) => visit(range.create(item, index)));
+  };
+  const visit = (current: CompilerHostElement): boolean => {
+    for (const child of flattenCompilerHostElements(current.children)) {
+      if (visit(child)) return true;
+    }
+    const block = current.block;
+    if (!block) return false;
+    if (block.kind === "conditional-ranges") {
+      for (const range of block.ranges) {
+        const selection = hostConditionalSelection(range);
+        if (selection.kind === "branch" && visit(selection.branch.create())) return true;
+      }
+      return false;
+    }
+    if (block.kind === "keyed-ranges") {
+      return block.ranges.some(visitKeyedRange);
+    }
+    for (const range of block.ranges) {
+      if (range.kind === "keyed") {
+        if (visitKeyedRange(range)) return true;
+        continue;
+      }
+      const selection = hostConditionalSelection(range);
+      if (selection.kind === "branch" && visit(selection.branch.create())) return true;
+    }
+    return false;
+  };
+
+  try {
+    return visit(descriptor);
+  } catch {
+    // Reading an iterable, key, or nested descriptor must be proven safe before
+    // React is allowed to reuse the existing fallback subtree.
+    return true;
   }
 }
 
@@ -5335,7 +5366,7 @@ function createHostConditionalBlockComponent(
     private currentProps = this.props;
     private unsubscribe: (() => void) | undefined;
     private fallbackUnsubscribers: Array<() => void> = [];
-    private fallbackRequiresReset = false;
+    private fallbackKeysWereUnsafe = false;
     private activeBranch: "truthy" | "falsy" | null = null;
     private instance: CompilerHostInstance | null = null;
 
@@ -5348,23 +5379,38 @@ function createHostConditionalBlockComponent(
       for (const unsubscribe of this.fallbackUnsubscribers) unsubscribe();
       this.fallbackUnsubscribers = [];
       const ids = new Set<number>();
-      const recovery: CompilerFallbackRecoveryMetadata = { requiresReset: false };
       if (this.currentProps.truthy) {
-        collectCompilerHostBlockIds(this.currentProps.truthy.create(), ids, recovery);
+        collectCompilerHostBlockIds(this.currentProps.truthy.create(), ids);
       }
       if (this.currentProps.falsy) {
-        collectCompilerHostBlockIds(this.currentProps.falsy.create(), ids, recovery);
+        collectCompilerHostBlockIds(this.currentProps.falsy.create(), ids);
       }
       ids.delete(this.currentProps.id);
-      this.fallbackRequiresReset = recovery.requiresReset;
       for (const id of ids) {
         this.fallbackUnsubscribers.push(
           owner.subscribe(id, (afterCommit) => {
-            if (this.fallbackRequiresReset) this.fallbackVersion += 1;
+            this.prepareFallbackUpdate();
             this.forceUpdate(afterCommit);
           }),
         );
       }
+    }
+
+    private hasUnsafeFallbackKeys(): boolean {
+      try {
+        const selection = hostConditionalSelection(this.currentProps);
+        return (
+          selection.kind === "branch" && hasUnsafeCompilerFallbackKeys(selection.branch.create())
+        );
+      } catch {
+        return true;
+      }
+    }
+
+    private prepareFallbackUpdate(): void {
+      const unsafeKeys = this.hasUnsafeFallbackKeys();
+      if (unsafeKeys || this.fallbackKeysWereUnsafe) this.fallbackVersion += 1;
+      this.fallbackKeysWereUnsafe = unsafeKeys;
     }
 
     private captureRoot = (root: Element | null) => {
@@ -5414,6 +5460,7 @@ function createHostConditionalBlockComponent(
       this.instance = null;
       this.activeBranch = null;
       this.subscribeFallbackDescendants();
+      this.fallbackKeysWereUnsafe = this.hasUnsafeFallbackKeys();
       // One key change on entry: the compiled path mutated the DOM behind
       // React's back, so the first fallback render must rebuild the subtree.
       this.fallbackVersion += 1;
@@ -5426,9 +5473,7 @@ function createHostConditionalBlockComponent(
         return;
       }
       if (this.state.fallback) {
-        // Keyed descendants may contain duplicate keys and retain a complete recovery reset.
-        // Conditional-only descendants can preserve the subtree that React already owns.
-        if (this.fallbackRequiresReset) this.fallbackVersion += 1;
+        this.prepareFallbackUpdate();
         this.forceUpdate(afterCommit);
         return;
       }
@@ -5500,6 +5545,7 @@ function createHostConditionalBlockComponent(
 
     shouldComponentUpdate(nextProps: CompilerHostConditionalBlockProps, nextState: State): boolean {
       this.currentProps = nextProps;
+      if (this.state.fallback && nextState.fallback) this.prepareFallbackUpdate();
       if (nextState.fallback || this.state.fallback) return true;
       this.schedulePropSync();
       return false;
@@ -5509,8 +5555,10 @@ function createHostConditionalBlockComponent(
       this.mounted = true;
       this.unsubscribe = owner.subscribe(this.props.id, this.refresh);
       // Replay must restore nested listeners even before the fallback state update commits.
-      if (this.state.fallback || this.fallbackRequested) this.subscribeFallbackDescendants();
-      else if (!this.adopt()) this.activateFallback();
+      if (this.state.fallback || this.fallbackRequested) {
+        this.subscribeFallbackDescendants();
+        this.fallbackKeysWereUnsafe = this.hasUnsafeFallbackKeys();
+      } else if (!this.adopt()) this.activateFallback();
     }
 
     componentWillUnmount(): void {
@@ -5518,7 +5566,7 @@ function createHostConditionalBlockComponent(
       this.unsubscribe?.();
       for (const unsubscribe of this.fallbackUnsubscribers) unsubscribe();
       this.fallbackUnsubscribers = [];
-      this.fallbackRequiresReset = false;
+      this.fallbackKeysWereUnsafe = false;
       this.instance?.scope?.cleanup();
       // React 18 replays lifecycles without detaching refs; captureRoot owns ref cleanup.
       this.activeBranch = null;
@@ -5569,7 +5617,7 @@ function createConditionalRangesBlockComponent(
     private currentProps = this.props;
     private unsubscribe: (() => void) | undefined;
     private fallbackUnsubscribers: Array<() => void> = [];
-    private fallbackRequiresReset = false;
+    private fallbackKeysWereUnsafe = false;
     private rangeInstances: Array<ConditionalRangeInstance | null> = [];
     private staticSegments: Element[][] = [];
     private readonly staticValues: unknown[] = [];
@@ -5583,21 +5631,42 @@ function createConditionalRangesBlockComponent(
       for (const unsubscribe of this.fallbackUnsubscribers) unsubscribe();
       this.fallbackUnsubscribers = [];
       const ids = new Set<number>();
-      const recovery: CompilerFallbackRecoveryMetadata = { requiresReset: false };
       for (const range of this.currentProps.ranges) {
-        if (range.truthy) collectCompilerHostBlockIds(range.truthy.create(), ids, recovery);
-        if (range.falsy) collectCompilerHostBlockIds(range.falsy.create(), ids, recovery);
+        if (range.truthy) collectCompilerHostBlockIds(range.truthy.create(), ids);
+        if (range.falsy) collectCompilerHostBlockIds(range.falsy.create(), ids);
       }
       ids.delete(this.currentProps.id);
-      this.fallbackRequiresReset = recovery.requiresReset;
       for (const id of ids) {
         this.fallbackUnsubscribers.push(
           owner.subscribe(id, (afterCommit) => {
-            if (this.fallbackRequiresReset) this.fallbackVersion += 1;
+            this.prepareFallbackUpdate();
             this.forceUpdate(afterCommit);
           }),
         );
       }
+    }
+
+    private hasUnsafeFallbackKeys(): boolean {
+      try {
+        for (const range of this.currentProps.ranges) {
+          const selection = hostConditionalSelection(range);
+          if (
+            selection.kind === "branch" &&
+            hasUnsafeCompilerFallbackKeys(selection.branch.create())
+          ) {
+            return true;
+          }
+        }
+        return false;
+      } catch {
+        return true;
+      }
+    }
+
+    private prepareFallbackUpdate(): void {
+      const unsafeKeys = this.hasUnsafeFallbackKeys();
+      if (unsafeKeys || this.fallbackKeysWereUnsafe) this.fallbackVersion += 1;
+      this.fallbackKeysWereUnsafe = unsafeKeys;
     }
 
     private captureRoot = (root: Element | null) => {
@@ -5761,9 +5830,7 @@ function createConditionalRangesBlockComponent(
         return;
       }
       if (this.state.fallback) {
-        // Keyed descendants may contain duplicate keys and retain a complete recovery reset.
-        // Conditional-only descendants can preserve the subtree that React already owns.
-        if (this.fallbackRequiresReset) this.fallbackVersion += 1;
+        this.prepareFallbackUpdate();
         this.forceUpdate(afterCommit);
         return;
       }
@@ -5808,6 +5875,7 @@ function createConditionalRangesBlockComponent(
       this.fallbackRequested = true;
       for (const instance of this.rangeInstances) instance?.host.scope?.cleanup();
       this.subscribeFallbackDescendants();
+      this.fallbackKeysWereUnsafe = this.hasUnsafeFallbackKeys();
       this.setState({ fallback: true }, afterCommit);
     }
 
@@ -5825,6 +5893,7 @@ function createConditionalRangesBlockComponent(
       nextState: State,
     ): boolean {
       this.currentProps = nextProps;
+      if (this.state.fallback && nextState.fallback) this.prepareFallbackUpdate();
       if (nextState.fallback || this.state.fallback) return true;
       this.schedulePropFallback();
       return false;
@@ -5834,8 +5903,10 @@ function createConditionalRangesBlockComponent(
       this.mounted = true;
       this.unsubscribe = owner.subscribe(this.props.id, this.refresh);
       // Replay must restore nested listeners even before the fallback state update commits.
-      if (this.state.fallback || this.fallbackRequested) this.subscribeFallbackDescendants();
-      else if (!this.adopt()) this.activateFallback();
+      if (this.state.fallback || this.fallbackRequested) {
+        this.subscribeFallbackDescendants();
+        this.fallbackKeysWereUnsafe = this.hasUnsafeFallbackKeys();
+      } else if (!this.adopt()) this.activateFallback();
     }
 
     componentWillUnmount(): void {
@@ -5843,7 +5914,7 @@ function createConditionalRangesBlockComponent(
       this.unsubscribe?.();
       for (const unsubscribe of this.fallbackUnsubscribers) unsubscribe();
       this.fallbackUnsubscribers = [];
-      this.fallbackRequiresReset = false;
+      this.fallbackKeysWereUnsafe = false;
       for (const instance of this.rangeInstances) instance?.host.scope?.cleanup();
       // Keep the attached root for React 18 replay; captureRoot clears real detachments.
       this.rangeInstances = [];
@@ -9843,48 +9914,22 @@ function createMixedRangesBlockComponent(
       this.fallbackUnsubscribers = [];
     }
 
-    private hasUnsafeFallbackKeys(descriptor?: CompilerHostElement): boolean {
-      try {
-        const block = (descriptor || this.currentProps.create()).block;
-        if (block?.kind !== "mixed-ranges" || block.id !== this.currentProps.id) return true;
-        for (const range of block.ranges) {
-          if (range.kind !== "keyed") continue;
-          const items = materializeIterable(range.items());
-          const keys = items.map((item, index) => keyedRowIdentity(range.rowKey(item, index)));
-          if (new Set(keys).size !== keys.length) return true;
-        }
-        return false;
-      } catch {
-        return true;
-      }
-    }
-
-    private readFallbackRecovery(descriptor: CompilerHostElement): {
-      ids: Set<number>;
-      requiresReset: boolean;
-    } {
+    private readFallbackBlockIds(descriptor: CompilerHostElement): Set<number> {
       const ids = new Set<number>();
-      const recovery: CompilerFallbackRecoveryMetadata = {
-        requiresReset: false,
-        preservedRootBlockId: this.currentProps.id,
-      };
-      collectCompilerHostBlockIds(descriptor, ids, recovery);
-      return { ids, requiresReset: recovery.requiresReset };
+      collectCompilerHostBlockIds(descriptor, ids);
+      return ids;
     }
 
     private prepareFallbackUpdate(descriptor: CompilerHostElement): void {
-      const recovery = this.readFallbackRecovery(descriptor);
-      const unsafeKeys = this.hasUnsafeFallbackKeys(descriptor);
-      if (recovery.requiresReset || unsafeKeys || this.fallbackKeysWereUnsafe) {
-        this.fallbackVersion += 1;
-      }
+      const unsafeKeys = hasUnsafeCompilerFallbackKeys(descriptor);
+      if (unsafeKeys || this.fallbackKeysWereUnsafe) this.fallbackVersion += 1;
       this.fallbackKeysWereUnsafe = unsafeKeys;
     }
 
     private subscribeFallbackBlocks(): void {
       this.clearFallbackSubscriptions();
       const descriptor = this.currentProps.create();
-      const { ids } = this.readFallbackRecovery(descriptor);
+      const ids = this.readFallbackBlockIds(descriptor);
       for (const id of ids) {
         this.fallbackUnsubscribers.push(
           owner.subscribe(id, (afterCommit) => {
@@ -9933,7 +9978,7 @@ function createMixedRangesBlockComponent(
       this.fallbackRequested = true;
       this.controller?.cleanup();
       this.controller = null;
-      this.fallbackKeysWereUnsafe = this.hasUnsafeFallbackKeys();
+      this.fallbackKeysWereUnsafe = hasUnsafeCompilerFallbackKeys(this.currentProps.create());
       this.fallbackVersion += 1;
       this.setState({ fallback: true }, () => {
         this.subscribeFallbackBlocks();
@@ -9962,7 +10007,10 @@ function createMixedRangesBlockComponent(
 
     componentDidMount(): void {
       this.mounted = true;
-      if (!this.adopt()) this.activateFallback();
+      if (this.state.fallback || this.fallbackRequested) {
+        this.fallbackKeysWereUnsafe = hasUnsafeCompilerFallbackKeys(this.currentProps.create());
+        this.subscribeFallbackBlocks();
+      } else if (!this.adopt()) this.activateFallback();
     }
 
     componentDidUpdate(): void {
