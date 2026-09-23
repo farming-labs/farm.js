@@ -1719,7 +1719,7 @@ const farmCatchAllParamSegments = Symbol("farm.catch-all-param-segments");
 
 function matchRuntimePathPattern(pattern, pathname) {
   const patternSegments = splitRuntimePath(pattern);
-  const pathnameSegments = splitRuntimePath(pathname);
+  const pathnameSegments = splitRuntimePath(pathname).map(decodeRouteSegment);
   const failedStates = new Set();
 
   function matchFrom(patternIndex, pathIndex, params, catchAllParamSegments) {
@@ -1748,7 +1748,7 @@ function matchRuntimePathPattern(pattern, pathname) {
         const required = !!(catchAll || (starCatchAll && !starCatchAll[2]));
 
         if (patternIndex === patternSegments.length - 1) {
-          const remainingSegments = pathnameSegments.slice(pathIndex).map(decodeRouteSegment);
+          const remainingSegments = pathnameSegments.slice(pathIndex);
           const remaining = remainingSegments.join("/");
           if (!remaining && required) return null;
           params[name] = remaining;
@@ -1761,21 +1761,24 @@ function matchRuntimePathPattern(pattern, pathname) {
         const maxConsume = pathnameSegments.length - pathIndex;
         const minConsume = required ? 1 : 0;
         for (let consume = maxConsume; consume >= minConsume; consume--) {
-          const consumedSegments = pathnameSegments
-            .slice(pathIndex, pathIndex + consume)
-            .map(decodeRouteSegment);
-          const remaining = consumedSegments.join("/");
           const trialParams = Object.assign({}, params);
           const trialCatchAll = Object.assign({}, catchAllParamSegments);
-          trialParams[name] = remaining;
-          trialCatchAll[name] = consumedSegments;
+          // Downstream matching only needs path indexes. Defer constructing the
+          // catch-all value until a split actually matches; otherwise a long
+          // failing path repeatedly slices, decodes, and joins the same prefix.
+          trialParams[name] = "";
           const matched = matchFrom(
             patternIndex + 1,
             pathIndex + consume,
             trialParams,
             trialCatchAll,
           );
-          if (matched) return matched;
+          if (matched) {
+            const consumedSegments = pathnameSegments.slice(pathIndex, pathIndex + consume);
+            matched[name] = consumedSegments.join("/");
+            matched[farmCatchAllParamSegments][name] = consumedSegments;
+            return matched;
+          }
         }
         return null;
       }
@@ -1790,7 +1793,7 @@ function matchRuntimePathPattern(pattern, pathname) {
         continue;
       }
 
-      if (segment !== decodeRouteSegment(pathnameSegment)) return null;
+      if (segment !== pathnameSegment) return null;
       pathIndex += 1;
       patternIndex += 1;
     }
