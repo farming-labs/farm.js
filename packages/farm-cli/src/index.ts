@@ -14,6 +14,7 @@ export {
   FarmDeployError,
   formatFarmDeployPlan,
   resolveCloudflareAgentDeployPlan,
+  resolveDeployCliExecutable,
   type CloudflareAgentDeployPlan,
   type FarmDeployCommand,
   type FarmDeployErrorCode,

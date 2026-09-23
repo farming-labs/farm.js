@@ -10,7 +10,30 @@ const {
   createFarmDeployPlan,
   formatFarmDeployPlan,
   resolveCloudflareAgentDeployPlan,
+  resolveDeployCliExecutable,
 } = require("../dist/index.js");
+
+test("resolves project-local deployment CLIs and Windows shims", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "farm-cli-deploy-cli-"));
+  try {
+    const bin = path.join(root, "node_modules", ".bin");
+    await mkdir(bin, { recursive: true });
+    await writeFile(path.join(bin, "wrangler"), "");
+    await writeFile(path.join(bin, "wrangler.cmd"), "");
+
+    assert.equal(
+      resolveDeployCliExecutable("wrangler", root, "darwin"),
+      path.join(bin, "wrangler"),
+    );
+    assert.equal(
+      resolveDeployCliExecutable("wrangler", root, "win32"),
+      path.join(bin, "wrangler.cmd"),
+    );
+    assert.equal(resolveDeployCliExecutable("vercel", root, "win32"), "vercel.cmd");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test("resolves a deployment plan without building or invoking a platform CLI", async () => {
   let root;
