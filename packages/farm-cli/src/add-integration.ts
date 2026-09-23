@@ -12,6 +12,7 @@ import {
   jobsUIFeature,
   polarBillingUIFeature,
   resendEmailUIFeature,
+  sanityContentUIFeature,
   stripeBillingUIFeature,
   supabaseAuthUIFeature,
   unkeyApiKeysUIFeature,
@@ -71,6 +72,7 @@ export type FarmIntegrationProvider =
   | "jobs-trigger"
   | "polar"
   | "resend"
+  | "sanity"
   | "stripe"
   | "supabase"
   | "unkey"
@@ -557,6 +559,38 @@ export const unkeyIntegration = unkey({
   protectedRoutes: ["/api/protected(.*)"],
   log(event) {
     console.log("[unkey]", event.phase, event.route?.path || "none");
+  },
+});
+`,
+  },
+  {
+    provider: "sanity",
+    aliases: ["cms", "sanity-cms"],
+    defaultKey: "cms",
+    packageName: "@farm.js/sanity",
+    fileName: "sanity",
+    exportName: "sanityIntegration",
+    description: "Sanity content with server queries, CDN images, and webhook cache invalidation",
+    env: ["SANITY_PROJECT_ID", "SANITY_DATASET", "SANITY_API_READ_TOKEN", "SANITY_WEBHOOK_SECRET"],
+    dependencies: { "@sanity/client": "^8.4.0" },
+    ui: sanityContentUIFeature(),
+    template: () => `import { sanity } from "@farm.js/sanity";
+
+export const sanityIntegration = sanity({
+  projectId: process.env.SANITY_PROJECT_ID,
+  dataset: process.env.SANITY_DATASET,
+  token: process.env.SANITY_API_READ_TOKEN,
+  // The webhook fires before Sanity's CDN updates, so reads go through the API.
+  useCdn: false,
+  webhook: {
+    secret: process.env.SANITY_WEBHOOK_SECRET,
+    onChange(payload) {
+      console.log("[sanity]", payload._type, payload._id);
+      return undefined;
+    },
+  },
+  log(event) {
+    console.log("[sanity]", event.phase, event.route?.path || "none");
   },
 });
 `,

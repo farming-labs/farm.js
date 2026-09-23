@@ -31,6 +31,7 @@ export const FARM_TELEMETRY_TEMPLATES = [
   "jobs-trigger",
   "polar",
   "resend",
+  "sanity",
   "stripe",
   "supabase",
   "unkey",

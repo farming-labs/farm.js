@@ -25,6 +25,7 @@ export default defineConfig({
     "packages/farm-sentry/package.json",
     "packages/farm-polar/package.json",
     "packages/farm-preview-gateway/package.json",
+    "packages/farm-sanity/package.json",
     "packages/farm-stripe/package.json",
     "packages/farm-supabase/package.json",
     "packages/farm-unkey/package.json",
