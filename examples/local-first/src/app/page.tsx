@@ -1,36 +1,28 @@
 "use client";
 
-import { db, type SyncMutationHandle } from "@farm.js/sync/client";
-import { useLiveQuery } from "@farm.js/sync/react";
+import { useLiveQuery, useSyncAction } from "@farm.js/sync/react";
 import { useState } from "react";
-
-type Task = {
-  id: string;
-  title: string;
-  status: "open" | "done";
-  listId: string;
-  updatedAt?: string;
-};
+import { completeTask } from "../lib/actions";
 
 export default function LocalFirstPage() {
   const [title, setTitle] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const tasks = db.tasks;
 
-  /**
-   * A write that the server refuses is rolled back on screen. Without showing
-   * why, the row would simply vanish — so every mutation reports its failure.
-   */
-  const run = (handle: SyncMutationHandle) => {
-    setError(null);
-    handle.catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
-  };
-
-  const open = useLiveQuery<Task>(tasks, (task) => task.status === "open", {
+  // The model name is typed against the generated farm.d.ts: a wrong name or
+  // a wrong field here is a compile error, and `task` infers the row type.
+  const open = useLiveQuery("tasks", (task) => task.status === "open", {
     orderBy: (task) => task.updatedAt ?? "",
     direction: "desc",
   });
-  const done = useLiveQuery<Task>(tasks, (task) => task.status === "done");
+  const done = useLiveQuery("tasks", (task) => task.status === "done");
+
+  /**
+   * A transition the server rules on: only an open task may complete. The
+   * optimistic patch shows the result instantly; a refusal rolls the row
+   * back into the failures queue above the composer.
+   */
+  const complete = useSyncAction(completeTask, "tasks", {
+    optimistic: { status: "done" },
+  });
 
   return (
     <main className="landing-main">
@@ -63,19 +55,24 @@ export default function LocalFirstPage() {
             <span className="status-separator">/</span>
             <span className="status-item">
               <b>queued</b>
-              <span>{open.paused}</span>
+              <span>{open.queued}</span>
             </span>
           </div>
 
-          {error && (
-            <p className="offline-note" role="alert" data-testid="error">
-              Write failed — {error}
+          {/* A write the server refused is rolled back on screen. The queue
+              keeps the reason and the input until the user retries or lets
+              it go, so nothing vanishes silently. */}
+          {open.failures.map((failure) => (
+            <p key={failure.id} className="offline-note" role="alert" data-testid="error">
+              Write failed — {failure.error.message}{" "}
+              <button onClick={() => failure.retry()}>Retry</button>{" "}
+              <button onClick={() => failure.dismiss()}>Dismiss</button>
             </p>
-          )}
+          ))}
 
-          {open.paused > 0 && (
+          {open.queued > 0 && (
             <p className="offline-note" role="status">
-              Offline — {open.paused} change(s) will send when the connection returns.
+              Offline — {open.queued} change(s) will send when the connection returns.
             </p>
           )}
 
@@ -86,7 +83,7 @@ export default function LocalFirstPage() {
               const value = title.trim();
               if (!value) return;
               // Fire and forget: the optimistic row is the feedback.
-              run(tasks.insert({ title: value, status: "open" }));
+              open.insert({ title: value, status: "open" });
               setTitle("");
             }}
           >
@@ -113,14 +110,18 @@ export default function LocalFirstPage() {
           ) : (
             <ul className="task-list" data-testid="open-list">
               {open.rows.map((task, index) => (
-                <li key={task.id} className="task-row">
+                <li
+                  key={task.id}
+                  className="task-row"
+                  // A row still waiting on the server renders dimmed; it turns
+                  // solid the moment the write is durably persisted.
+                  style={open.isPersisted(task) ? undefined : { opacity: 0.55 }}
+                >
                   <span>{String(index + 1).padStart(2, "0")}</span>
                   <span className="task-title">{task.title}</span>
                   <span className="task-actions">
-                    <button onClick={() => run(tasks.update({ id: task.id, status: "done" }))}>
-                      Done
-                    </button>
-                    <button onClick={() => run(tasks.delete({ id: task.id }))}>Delete</button>
+                    <button onClick={() => complete({ id: task.id })}>Done</button>
+                    <button onClick={() => open.delete(task.id)}>Delete</button>
                   </span>
                 </li>
               ))}
@@ -137,13 +138,15 @@ export default function LocalFirstPage() {
           ) : (
             <ul className="task-list" data-testid="done-list">
               {done.rows.map((task, index) => (
-                <li key={task.id} className="task-row is-done">
+                <li
+                  key={task.id}
+                  className="task-row is-done"
+                  style={done.isPersisted(task) ? undefined : { opacity: 0.55 }}
+                >
                   <span>{String(index + 1).padStart(2, "0")}</span>
                   <span className="task-title">{task.title}</span>
                   <span className="task-actions">
-                    <button onClick={() => run(tasks.update({ id: task.id, status: "open" }))}>
-                      Reopen
-                    </button>
+                    <button onClick={() => done.update(task.id, { status: "open" })}>Reopen</button>
                   </span>
                 </li>
               ))}

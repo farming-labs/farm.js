@@ -5,6 +5,9 @@ export type SyncModelDescriptor = {
   access: "read" | "write";
   persist: boolean;
   cursor: string | null;
+  /** Schema column names, for deriving an action's optimistic patch from its
+   *  input. Absent on configs emitted before this field existed. */
+  fields?: readonly string[];
 };
 
 export type SyncRuntimeConfig = {
@@ -13,6 +16,19 @@ export type SyncRuntimeConfig = {
 };
 
 export type SyncStoreStatus = "idle" | "loading" | "ready" | "error";
+
+/** A write the server refused, kept until the user retries or dismisses it. */
+export type SyncWriteFailure = {
+  id: number;
+  /** "insert" | "update" | "delete", or a server action name. */
+  operation: string;
+  input: unknown;
+  error: Error;
+  at: number;
+  /** Re-apply the optimistic state and send the write again. */
+  retry: () => unknown;
+  dismiss: () => void;
+};
 
 type OptimisticLayer =
   | { type: "upsert"; key: unknown; row: SyncRow }
@@ -35,6 +51,10 @@ export class SyncModelStore {
   cursor: string | null = null;
   pending = 0;
   paused = 0;
+  /** Rolled-back writes awaiting the user. Replaced, never mutated, so a
+   *  useSyncExternalStore snapshot of it stays referentially stable. */
+  failures: readonly SyncWriteFailure[] = [];
+  private nextFailureId = 1;
 
   constructor(
     readonly name: string,
@@ -132,6 +152,43 @@ export class SyncModelStore {
     this.cursor = cursor;
     if (rows.length > 0) this.status = "ready";
     this.invalidate();
+  }
+
+  /** True when no optimistic layer still shadows this row's key. */
+  isPersisted(row: SyncRow): boolean {
+    const key = String(row[this.descriptor.key]);
+    return !this.layers.some((layer) => String(layer.key) === key);
+  }
+
+  recordFailure(entry: {
+    operation: string;
+    input: unknown;
+    error: Error;
+    retry: () => unknown;
+  }): void {
+    const id = this.nextFailureId++;
+    const failure: SyncWriteFailure = {
+      id,
+      operation: entry.operation,
+      input: entry.input,
+      error: entry.error,
+      at: Date.now(),
+      // Retrying is a fresh write; the stale entry goes first so a second
+      // refusal records once instead of stacking duplicates.
+      retry: () => {
+        this.dismissFailure(id);
+        return entry.retry();
+      },
+      dismiss: () => this.dismissFailure(id),
+    };
+    this.failures = [...this.failures, failure];
+    this.emit();
+  }
+
+  dismissFailure(id: number): void {
+    if (!this.failures.some((failure) => failure.id === id)) return;
+    this.failures = this.failures.filter((failure) => failure.id !== id);
+    this.emit();
   }
 
   trackPending(delta: number): void {

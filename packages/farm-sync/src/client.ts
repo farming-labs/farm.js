@@ -228,6 +228,12 @@ function runMutation(
     } catch (error) {
       store.removeLayer(layer);
       handleState = "failed";
+      store.recordFailure({
+        operation,
+        input,
+        error: error instanceof Error ? error : new Error(String(error)),
+        retry: () => runMutation(model, operation, input, optimistic),
+      });
       throw error;
     } finally {
       store.trackPending(-1);
@@ -240,6 +246,115 @@ function runMutation(
 
   return {
     key: optimistic.key,
+    get state() {
+      return handleState;
+    },
+    get persisted() {
+      return isPersisted;
+    },
+    then: (onFulfilled, onRejected) => isPersisted.then(onFulfilled, onRejected),
+    catch: (onRejected) => isPersisted.catch(onRejected),
+    finally: (onFinally) => isPersisted.finally(onFinally),
+  } as SyncMutationHandle;
+}
+
+/**
+ * Run a server-defined action with the mutation lifecycle: an optimistic
+ * layer when the effect is predictable, the same offline pause, commit of
+ * whatever rows the server returns, rollback plus a failures entry on
+ * refusal.
+ *
+ * The optimistic patch resolves in tiers: an explicit patch wins; otherwise
+ * input fields that are schema columns form one (when the input carries the
+ * model's key); otherwise the action runs with no preview and the screen
+ * updates when the server's rows land.
+ */
+export function runSyncAction(
+  model: string,
+  action: string,
+  invoke: (input: unknown) => Promise<unknown>,
+  input: unknown,
+  explicitPatch?: SyncRow,
+): SyncMutationHandle {
+  const state = requireRuntime();
+  const store = getSyncStore(model);
+  const keyField = store.descriptor.key;
+  const record =
+    input && typeof input === "object" ? (input as Record<string, unknown>) : undefined;
+  const key = record?.[keyField];
+
+  let patch = explicitPatch;
+  if (!patch && record && key !== undefined) {
+    const columns = new Set(store.descriptor.fields ?? []);
+    const derived = Object.fromEntries(
+      Object.entries(record).filter(([field]) => field !== keyField && columns.has(field)),
+    );
+    if (Object.keys(derived).length > 0) patch = derived;
+  }
+
+  const layer =
+    patch && key !== undefined
+      ? ({ type: "upsert", key, row: store.mergeRow(key, patch) } as const)
+      : null;
+  if (layer) store.addLayer(layer);
+  store.trackPending(1);
+
+  let handleState: SyncMutationState = "pending";
+  const isPersisted = (async () => {
+    try {
+      if ((state.options.networkMode ?? "online") === "online" && !isOnline()) {
+        store.trackPaused(1);
+        try {
+          await waitForOnline();
+        } finally {
+          store.trackPaused(-1);
+        }
+      }
+
+      const result = await invoke(input);
+      const rows = Array.isArray(result) ? result : [result];
+      let committed = false;
+      for (const row of rows) {
+        if (row && typeof row === "object" && (row as SyncRow)[keyField] !== undefined) {
+          // Commit through the layer once so the prediction is replaced, then
+          // fold any further returned rows straight into the confirmed set.
+          store.commitLayer(
+            !committed && layer
+              ? layer
+              : { type: "upsert", key: (row as SyncRow)[keyField], row: row as SyncRow },
+            row as SyncRow,
+          );
+          committed = true;
+        }
+      }
+      if (!committed) {
+        // The action changed something this client cannot address by key;
+        // drop the prediction and converge on the server's truth instead.
+        if (layer) store.removeLayer(layer);
+        void loadModel(model);
+      }
+      handleState = "completed";
+      persistModel(model);
+      return (rows[0] ?? null) as SyncRow;
+    } catch (error) {
+      if (layer) store.removeLayer(layer);
+      handleState = "failed";
+      store.recordFailure({
+        operation: action,
+        input,
+        error: error instanceof Error ? error : new Error(String(error)),
+        retry: () => runSyncAction(model, action, invoke, input, explicitPatch),
+      });
+      throw error;
+    } finally {
+      store.trackPending(-1);
+    }
+  })();
+
+  void isPersisted.catch(() => undefined);
+
+  return {
+    key,
     get state() {
       return handleState;
     },
@@ -266,7 +381,33 @@ export type SyncModelClient = {
   readonly __farmSyncModel: string;
 };
 
+/**
+ * Model row types, filled in by the generated `farm.d.ts` through declaration
+ * merging. Empty here so an app without generated types still compiles with
+ * plain `SyncRow` rows and any model name.
+ */
+export interface SyncModels {}
+
+/** Insert shapes per model: key, defaulted, and nullable columns optional. */
+export interface SyncModelInputs {}
+
+export type SyncModelName = [keyof SyncModels] extends [never] ? string : keyof SyncModels & string;
+
+export type SyncRowOf<K> = K extends keyof SyncModels ? SyncModels[K] : SyncRow;
+
+export type SyncInsertOf<K> = K extends keyof SyncModelInputs ? SyncModelInputs[K] : SyncRow;
+
 const clientCache = new Map<string, SyncModelClient>();
+
+/** The per-model client, created lazily. The `db` proxy delegates here. */
+export function getSyncModelClient(model: string): SyncModelClient {
+  let client = clientCache.get(model);
+  if (!client) {
+    client = createModelClient(model);
+    clientCache.set(model, client);
+  }
+  return client;
+}
 
 function createModelClient(model: string): SyncModelClient {
   const client: SyncModelClient = {
@@ -333,12 +474,7 @@ export const db: Record<string, SyncModelClient> = new Proxy(
   {
     get(_target, property: string) {
       if (typeof property !== "string") return undefined;
-      let client = clientCache.get(property);
-      if (!client) {
-        client = createModelClient(property);
-        clientCache.set(property, client);
-      }
-      return client;
+      return getSyncModelClient(property);
     },
   },
 ) as Record<string, SyncModelClient>;
