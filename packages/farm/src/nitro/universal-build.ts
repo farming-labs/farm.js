@@ -7948,10 +7948,12 @@ function getManifestPageEntry(
   manifest: FarmRouteRuntimeManifest,
   pathname: string,
 ): FarmRouteRuntimeManifestEntry | undefined {
-  return manifest.routes
-    .filter((entry) => entry.kind === "page" && middlewarePatternMatches(entry.pattern, pathname))
-    // Page patterns, so this uses the shared file-route ordering contract too.
-    .sort((left, right) => compareRoutePatternSpecificity(left.pattern, right.pattern))[0];
+  return (
+    manifest.routes
+      .filter((entry) => entry.kind === "page" && middlewarePatternMatches(entry.pattern, pathname))
+      // Page patterns, so this uses the shared file-route ordering contract too.
+      .sort((left, right) => compareRoutePatternSpecificity(left.pattern, right.pattern))[0]
+  );
 }
 
 function getPhysicalPrerenderBypassReason(options: {
