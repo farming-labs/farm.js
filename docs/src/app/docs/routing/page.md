@@ -335,6 +335,36 @@ Cache keys are part of your data security model. If data depends on the current 
 
 ## Route actions
 
+An action is a typed server function, not necessarily a URL route. Use a standalone
+`createServerFn` when an operation is shared by several pages, belongs to a background job or
+integration, or does not have one resource owner:
+
+```ts
+import { createServerFn } from "@farm.js/core/server-fn";
+import { z } from "zod";
+
+export const sendInvite = createServerFn({
+  input: z.object({ email: z.string().email() }),
+  async handler({ input }) {
+    return { queued: true, email: input.email };
+  },
+});
+```
+
+```tsx
+import { useAction } from "@farm.js/core/client";
+import { sendInvite as sendInviteFn } from "./actions";
+
+const sendInvite = useAction(sendInviteFn);
+await sendInvite({ email: "ada@example.com" });
+```
+
+Attach actions to a route when they are commands on that route's resource. This gives the page a
+typed namespace for related mutations, lets `useAction(route)` select a declared default, and lets
+Farm expose an action-only client proxy without shipping the route loader, component, or database
+code to the browser. The action still uses Farm's server-function transport; it does not become a
+public URL such as `/products/update`.
+
 With React Server Components and Server Actions enabled, a programmatic route can own named server
 functions. Keep the functions in a dedicated server module so Farm can replace the route with an
 action-only proxy when a Client Component imports it. The proxy contains no loader, component, or
