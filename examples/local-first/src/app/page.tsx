@@ -20,6 +20,7 @@ export default function LocalFirstPage() {
    * optimistic patch shows the result instantly; a refusal rolls the row
    * back into the failures queue above the composer.
    */
+  const tasks = useSyncAction("tasks");
   const complete = useSyncAction(completeTask, "tasks", {
     optimistic: { status: "done" },
   });
@@ -83,7 +84,7 @@ export default function LocalFirstPage() {
               const value = title.trim();
               if (!value) return;
               // Fire and forget: the optimistic row is the feedback.
-              open.insert({ title: value, status: "open" });
+              tasks.insert({ title: value, status: "open" });
               setTitle("");
             }}
           >
@@ -121,7 +122,7 @@ export default function LocalFirstPage() {
                   <span className="task-title">{task.title}</span>
                   <span className="task-actions">
                     <button onClick={() => complete({ id: task.id })}>Done</button>
-                    <button onClick={() => open.delete(task.id)}>Delete</button>
+                    <button onClick={() => tasks.delete(task.id)}>Delete</button>
                   </span>
                 </li>
               ))}
@@ -146,7 +147,7 @@ export default function LocalFirstPage() {
                   <span>{String(index + 1).padStart(2, "0")}</span>
                   <span className="task-title">{task.title}</span>
                   <span className="task-actions">
-                    <button onClick={() => done.update(task.id, { status: "open" })}>Reopen</button>
+                    <button onClick={() => tasks.update(task.id, { status: "open" })}>Reopen</button>
                   </span>
                 </li>
               ))}

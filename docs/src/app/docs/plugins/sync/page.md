@@ -230,16 +230,20 @@ server's row filter.
 
 ## Write
 
-Writes hang off the same handle the live query returned, so a component has
-one object for the model:
+Reading and writing are separate surfaces: `useLiveQuery` observes, and
+`useSyncAction` with a model name is the plain write surface. A wrong model
+name or field on either side is a compile error.
 
 ```ts
-const tasks = useLiveQuery("tasks");
+const tasks = useSyncAction("tasks");
 
 tasks.insert({ title: "Write the RFC" });
 tasks.update(id, { status: "done" });
 tasks.delete(id);
 ```
+
+The write methods that shipped on the live query result remain as deprecated
+aliases; new code should keep queries read-only.
 
 Each call applies to the local store immediately, so every view showing that row
 re-renders in the same frame, then persists in the background. Fields the schema

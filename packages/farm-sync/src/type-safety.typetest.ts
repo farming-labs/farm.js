@@ -38,6 +38,16 @@ export function compileTimeContract() {
   // @ts-expect-error title is required on insert
   tasks.insert({ status: "open" });
 
+  // The model-name form is the plain write surface; reads never mutate.
+  const writes = useSyncAction("tasks");
+  writes.insert({ title: "typed" });
+  writes.update("t1", { status: "done" });
+  const counts: number = writes.inFlight + writes.queued;
+  // @ts-expect-error unknown insert field on the CRUD form
+  writes.insert({ titel: "typo" });
+  // @ts-expect-error unknown model on the CRUD form
+  useSyncAction("task");
+
   const complete = useSyncAction((input: { id: string }) => Promise.resolve(input), "tasks", {
     optimistic: { status: "done" },
   });
@@ -55,5 +65,5 @@ export function compileTimeContract() {
     optimistic: { status: "opne" },
   });
 
-  return { title, persisted, handle };
+  return { title, persisted, handle, counts };
 }

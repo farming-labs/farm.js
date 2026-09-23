@@ -47,9 +47,11 @@ export type LiveQueryResult<TRow, TInsert = TRow> = {
   isEmpty: boolean;
   refresh(): Promise<void>;
 
-  /** Write straight into the local store; the engine persists it behind you. */
+  /** @deprecated A query result is for reading; write through `useSyncAction(model).insert`. */
   insert(input: TInsert): SyncMutationHandle<TRow>;
+  /** @deprecated Write through `useSyncAction(model).update`. */
   update(key: unknown, patch: Partial<TRow>): SyncMutationHandle<TRow>;
+  /** @deprecated Write through `useSyncAction(model).delete`. */
   delete(key: unknown): SyncMutationHandle<TRow>;
 
   /** True once the server confirmed this row; false while it is optimistic. */
@@ -219,20 +221,46 @@ export type SyncAction<TInput, TRow> = ((input: TInput) => SyncMutationHandle<TR
   failures: readonly SyncWriteFailure[];
 };
 
+/** The plain write surface of a model, with the shared durability counters. */
+export type SyncModelActions<TRow, TInsert = TRow> = {
+  insert(input: TInsert): SyncMutationHandle<TRow>;
+  update(key: unknown, patch: Partial<TRow>): SyncMutationHandle<TRow>;
+  delete(key: unknown): SyncMutationHandle<TRow>;
+  /** Writes persisting right now. */
+  inFlight: number;
+  /** Writes waiting for the connection to return. */
+  queued: number;
+  /** Rolled-back writes awaiting the user, shared with the model's store. */
+  failures: readonly SyncWriteFailure[];
+};
+
 /**
- * Bind a server-defined function to a model so calling it behaves like every
- * other sync write: an optimistic layer when the effect is predictable, the
- * returned rows committed into the store every live query reads, rollback
- * into the failures queue when the server refuses.
+ * The mutation side of a model. `useLiveQuery` reads; this writes.
+ *
+ * The model-name form is the plain CRUD surface. The function form binds a
+ * server-defined action so calling it behaves like every other sync write:
+ * an optimistic layer when the effect is predictable, the returned rows
+ * committed into the store every live query reads, rollback into the
+ * failures queue when the server refuses.
  */
+export function useSyncAction<K extends SyncModelName>(
+  model: K,
+): SyncModelActions<SyncRowOf<K>, SyncInsertOf<K>>;
 export function useSyncAction<K extends SyncModelName, TInput>(
   fn: (input: TInput) => Promise<unknown>,
   // The model is its own argument, not an options field, so TypeScript fixes
   // K before it contextually types the optimistic callback. In one options
   // object the two infer in the same round and the patch widens to string.
   model: K,
+  options?: SyncActionOptions<K, TInput>,
+): SyncAction<TInput, SyncRowOf<K>>;
+export function useSyncAction<K extends SyncModelName, TInput>(
+  fnOrModel: ((input: TInput) => Promise<unknown>) | K,
+  maybeModel?: K,
   options: SyncActionOptions<K, TInput> = {},
-): SyncAction<TInput, SyncRowOf<K>> {
+): SyncAction<TInput, SyncRowOf<K>> | SyncModelActions<SyncRowOf<K>, SyncInsertOf<K>> {
+  const fn = typeof fnOrModel === "function" ? fnOrModel : undefined;
+  const model = (typeof fnOrModel === "string" ? fnOrModel : maybeModel) as string;
   const store = getSyncStore(model);
 
   const subscribe = useCallback((listener: () => void) => store.subscribe(listener), [store]);
@@ -257,12 +285,32 @@ export function useSyncAction<K extends SyncModelName, TInput>(
   const fnRef = useRef(fn);
   fnRef.current = fn;
 
+  if (!fn) {
+    const client = getSyncModelClient(model);
+    const crud: SyncModelActions<SyncRowOf<K>, SyncInsertOf<K>> = {
+      insert: (input) => client.insert(input as SyncRow) as SyncMutationHandle<SyncRowOf<K>>,
+      update: (key, patch) =>
+        client.update({ ...patch, [store.descriptor.key]: key } as SyncRow) as SyncMutationHandle<
+          SyncRowOf<K>
+        >,
+      delete: (key) =>
+        client.delete({ [store.descriptor.key]: key } as SyncRow) as SyncMutationHandle<
+          SyncRowOf<K>
+        >,
+      inFlight,
+      queued,
+      failures,
+    };
+    return crud;
+  }
+
   const call = (input: TInput) => {
     const current = optionsRef.current;
+    const bound = fnRef.current!;
     return runSyncAction(
-      model as string,
-      current.name || fnRef.current.name || "action",
-      (value) => fnRef.current(value as TInput),
+      model,
+      current.name || bound.name || "action",
+      (value) => bound(value as TInput),
       input,
       (typeof current.optimistic === "function" ? current.optimistic(input) : current.optimistic) as
         | SyncRow
