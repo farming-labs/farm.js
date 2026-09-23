@@ -1687,6 +1687,121 @@ const testSource = String.raw`
   assert.equal(mixedRangeExecutions, initialMixedRangeExecutions);
   flushSync(() => mixedRangeRoot.unmount());
 
+  let setMixedFallbackModel = () => undefined;
+  function MixedFallbackCounter() {
+    const [count, setCount] = React.useState(0);
+    return React.createElement(
+      "button",
+      { "data-mixed-local-counter": true, onClick: () => setCount((value) => value + 1) },
+      "Local: " + count,
+    );
+  }
+  const MixedFallback = createCompiledComponent({
+    displayName: "CompatibilityMixedFallback",
+    initialize: () => [{ loading: false, items: [{ id: "a", label: "Alpha" }, { id: "b", label: "Beta" }] }],
+    render(_props, state, blocks) {
+      const model = () => state[0].get();
+      setMixedFallbackModel = (next) => state[0].set(next);
+      const loadingBranch = {
+        create: () => ({ kind: "element", tag: "p", attributes: [], styles: [], children: ["Loading"] }),
+        bindings: [],
+      };
+      const rowDescriptor = (item) => ({
+        kind: "element",
+        tag: "article",
+        attributes: [{ name: "data-fallback-key", value: item.id }],
+        styles: [],
+        children: [item.label],
+      });
+      const create = () => ({
+        kind: "element",
+        tag: "section",
+        attributes: [{ name: "data-mixed-fallback", value: true }],
+        styles: [],
+        children: [
+          { kind: "element", tag: "aside", attributes: [], styles: [], children: [] },
+          ...(model().loading ? [loadingBranch.create()] : []),
+          { kind: "element", tag: "i", attributes: [], styles: [], children: ["Rows: " + model().items.length] },
+          ...model().items.map(rowDescriptor),
+        ],
+        block: {
+          kind: "mixed-ranges",
+          id: 0,
+          ranges: [
+            { kind: "conditional", before: 1, test: () => model().loading, logical: true, truthy: loadingBranch },
+            {
+              kind: "keyed",
+              before: 1,
+              items: () => model().items,
+              rowKey: (item) => item.id,
+              create: rowDescriptor,
+              bindings: [{ kind: "text", path: [], read: (item) => item.label }],
+            },
+          ],
+          trailing: 0,
+          bindings: [],
+        },
+      });
+      return React.createElement(blocks.MixedRanges, {
+        id: 0,
+        create,
+        render: () => React.createElement(
+          "section",
+          { "data-mixed-fallback": true },
+          React.createElement(
+            "aside",
+            null,
+            React.createElement(MixedFallbackCounter),
+            React.createElement("input", { "aria-label": "Mixed draft", defaultValue: "draft" }),
+          ),
+          model().loading ? React.createElement("p", null, "Loading") : null,
+          React.createElement("i", null, "Rows: " + model().items.length),
+          ...model().items.map((item) =>
+            React.createElement("article", { key: item.id, "data-fallback-key": item.id }, item.label),
+          ),
+        ),
+      });
+    },
+    bindings: [{ kind: "block", id: 0, dependencies: [0] }],
+  });
+  const mixedFallbackContainer = document.createElement("div");
+  document.body.append(mixedFallbackContainer);
+  const mixedFallbackRoot = createRoot(mixedFallbackContainer);
+  flushSync(() => mixedFallbackRoot.render(React.createElement(MixedFallback)));
+  await Promise.resolve();
+  await Promise.resolve();
+  const updateMixedFallback = async (model) => {
+    setMixedFallbackModel(model);
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    flushSync(() => {});
+  };
+  const mixedFallbackSurface = mixedFallbackContainer.querySelector("[data-mixed-fallback]");
+  const mixedFallbackInput = mixedFallbackContainer.querySelector("[aria-label='Mixed draft']");
+  flushSync(() => mixedFallbackContainer.querySelector("[data-mixed-local-counter]").click());
+  mixedFallbackInput.value = "typed";
+  mixedFallbackInput.focus();
+  mixedFallbackInput.setSelectionRange(1, 4, "backward");
+  await updateMixedFallback({ loading: true, items: [{ id: "b", label: "Beta updated" }, { id: "a", label: "Alpha updated" }] });
+  assert.equal(mixedFallbackContainer.querySelector("[data-mixed-fallback]"), mixedFallbackSurface);
+  assert.equal(mixedFallbackContainer.querySelector("[aria-label='Mixed draft']"), mixedFallbackInput);
+  assert.equal(mixedFallbackInput.value, "typed");
+  assert.equal(mixedFallbackContainer.querySelector("[data-mixed-local-counter]").textContent, "Local: 1");
+  assert.equal(document.activeElement, mixedFallbackInput);
+  assert.deepEqual(
+    [mixedFallbackInput.selectionStart, mixedFallbackInput.selectionEnd, mixedFallbackInput.selectionDirection],
+    [1, 4, "backward"],
+  );
+  await updateMixedFallback({ loading: false, items: [{ id: "duplicate", label: "One" }, { id: "duplicate", label: "Two" }] });
+  assert.notEqual(mixedFallbackContainer.querySelector("[aria-label='Mixed draft']"), mixedFallbackInput);
+  await updateMixedFallback({ loading: false, items: [{ id: "a", label: "Alpha" }, { id: "b", label: "Beta" }] });
+  const recoveredMixedInput = mixedFallbackContainer.querySelector("[aria-label='Mixed draft']");
+  recoveredMixedInput.value = "recovered";
+  await updateMixedFallback({ loading: true, items: [{ id: "b", label: "Beta final" }, { id: "a", label: "Alpha final" }] });
+  assert.equal(mixedFallbackContainer.querySelector("[aria-label='Mixed draft']"), recoveredMixedInput);
+  assert.equal(recoveredMixedInput.value, "recovered");
+  flushSync(() => mixedFallbackRoot.unmount());
+
   let conditionalRangeExecutions = 0;
   const ConditionalRanges = createCompiledComponent({
     displayName: "CompatibilityConditionalRanges",

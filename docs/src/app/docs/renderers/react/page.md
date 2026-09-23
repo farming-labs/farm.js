@@ -2222,6 +2222,12 @@ DOM identity therefore survive later safe updates. A render containing duplicate
 a complete remount, as does the first unique-key render after it; that recovery reset prevents React
 from reusing an identity made ambiguous by the preceding duplicate keys.
 
+Mixed conditional-and-keyed range containers use the same recovery rule for their direct keyed
+ranges. Once React owns the fallback subtree, branch changes and uniquely keyed list updates keep
+unaffected controls, focus, selection, child state, and DOM identity. Duplicate or unreadable keys
+still reset the subtree, followed by one recovery reset when the keys become safe again. Nested
+keyed fallback boundaries remain conservative and continue to use complete resets.
+
 For example, changing `[A, B, C, D]` to `[D, A, B, C]` keeps `[A, B, C]` as the LIS and moves only
 `D`. Reversing four rows needs three moves because the LIS has length one. Insertions and removals
 still do their necessary DOM work; LIS only minimizes moves among surviving keys.
@@ -2580,7 +2586,9 @@ The package and example test suites verify more than generated code:
 - mixed conditional/keyed containers match normal React across 3,000 deterministic branch, reorder,
   insertion, removal, binding, and recursively nested list transitions, with additional Strict Mode,
   simultaneous parent/local, duplicate-key fallback, error-boundary, queued-unmount, SSR, and
-  recoverable-hydration coverage;
+  recoverable-hydration coverage; fallback state-preservation coverage also spans static and hybrid
+  reactivity, nested and component-root ownership, uncontrolled controls, focus, selection, local
+  child state, duplicate keys, and unique-key recovery;
 - component islands update only dependent children, preserve child-local state and context, route
   failures through React error boundaries, hydrate in Strict Mode, and safely drop queued updates
   after unmount;
