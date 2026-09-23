@@ -9,9 +9,11 @@
  * trailing packages during v0.1.0-beta.52/53). This script absorbs that by
  * polling for visibility and retrying stragglers before promotion.
  *
- * Usage: node scripts/publish-beta.js [--verify-only] [--help]
+ * Usage: node scripts/publish-beta.js [--verify-only|--dry-run] [--help]
  *   --verify-only  Skip the initial bulk publish and only verify, retry
  *                  stragglers, and promote. Useful to resume after a failure.
+ *   --dry-run      Pack every public package with pnpm's publish dry run and
+ *                  stop before contacting the registry or changing tags.
  */
 const { execFileSync } = require("node:child_process");
 const path = require("node:path");
@@ -22,21 +24,27 @@ const workspaceRoot = path.resolve(__dirname, "..");
 const VERIFY_ATTEMPTS = 30;
 const VERIFY_DELAY_MS = 30_000;
 
-const supportedFlags = new Set(["--help", "--verify-only"]);
-const helpText = `Usage: node scripts/publish-beta.js [--verify-only]
+const supportedFlags = new Set(["--help", "--verify-only", "--dry-run"]);
+const helpText = `Usage: node scripts/publish-beta.js [--verify-only|--dry-run]
 
 Options:
   --verify-only  Skip the bulk publish; verify registry visibility, retry
-                 staged packages, and promote betas.`;
+                 staged packages, and promote betas.
+  --dry-run      Pack every public package without publishing or promoting
+                 any package.`;
 
 function parsePublishBetaArgs(args) {
   const unknownFlags = args.filter((arg) => !supportedFlags.has(arg));
   if (unknownFlags.length > 0) {
     throw new Error(`Unknown publish:beta option(s): ${unknownFlags.join(", ")}`);
   }
+  if (args.includes("--verify-only") && args.includes("--dry-run")) {
+    throw new Error("publish:beta cannot combine --verify-only and --dry-run");
+  }
   return {
     help: args.includes("--help"),
     verifyOnly: args.includes("--verify-only"),
+    dryRun: args.includes("--dry-run"),
   };
 }
 
@@ -132,6 +140,24 @@ async function main(args = process.argv.slice(2)) {
   const packages = readPublicPackages();
   if (packages.length === 0) {
     throw new Error("No public packages found under packages/.");
+  }
+
+  if (options.dryRun) {
+    run("pnpm", [
+      "-r",
+      "--filter",
+      "./packages/*",
+      "publish",
+      "--access",
+      "public",
+      "--tag",
+      "beta",
+      "--publish-branch",
+      "main",
+      "--dry-run",
+      "--no-git-checks",
+    ]);
+    return;
   }
 
   if (!options.verifyOnly) {

@@ -39,6 +39,17 @@ To build and publish a beta without running the test suite, pass `--no-test`:
 pnpm release:beta --no-test
 ```
 
+Before a release, validate the complete public package set without contacting
+the registry or changing any dist-tags:
+
+```bash
+pnpm publish:beta --dry-run
+```
+
+This runs pnpm's publish dry run for every public package under `packages/`.
+Use `pnpm publish:beta --verify-only` only after a real publish has completed
+partially and the registry needs time to expose staged versions.
+
 This still synchronizes template versions, builds every public package, and performs the normal
 npm publish and dist-tag promotion steps. Use it only when the release has already been tested or
 when intentionally accepting the risk of publishing without the release test suite.
