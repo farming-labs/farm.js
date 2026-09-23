@@ -101,6 +101,7 @@ export function sync(options: SyncPluginOptions) {
               access: model.access,
               persist: model.persist,
               cursor: model.cursorField ?? null,
+              fields: Object.keys(model.fields),
             },
           ]),
         ),

@@ -5,6 +5,7 @@ import {
   getSyncModelClient,
   getSyncStore,
   hydrateModel,
+  runSyncAction,
   type SyncInsertOf,
   type SyncModelClient,
   type SyncModelName,
@@ -196,4 +197,78 @@ export function useRow<TRow extends SyncRow = SyncRow>(
     () => (rows as TRow[]).find((row) => String(row[store.descriptor.key]) === String(key)),
     [rows, key, store.descriptor.key],
   );
+}
+
+export type SyncActionOptions<K extends SyncModelName, TInput> = {
+  /** The model whose rows this action changes. */
+  model: K;
+  /**
+   * What to show while the server decides, for transitions the input does not
+   * spell out. Left out, input fields that are schema columns become the
+   * patch; failing that the screen updates when the server's rows arrive.
+   */
+  optimistic?: (input: TInput) => Partial<SyncRowOf<K>>;
+  /** Name shown in the failures queue; defaults to the function's name. */
+  name?: string;
+};
+
+export type SyncAction<TInput, TRow> = ((input: TInput) => SyncMutationHandle<TRow>) & {
+  /** Calls persisting right now. */
+  inFlight: number;
+  /** Calls waiting for the connection to return. */
+  queued: number;
+  /** Rolled-back calls awaiting the user, shared with the model's store. */
+  failures: readonly SyncWriteFailure[];
+};
+
+/**
+ * Bind a server-defined function to a model so calling it behaves like every
+ * other sync write: an optimistic layer when the effect is predictable, the
+ * returned rows committed into the store every live query reads, rollback
+ * into the failures queue when the server refuses.
+ */
+export function useSyncAction<K extends SyncModelName, TInput>(
+  fn: (input: TInput) => Promise<unknown>,
+  options: SyncActionOptions<K, TInput>,
+): SyncAction<TInput, SyncRowOf<K>> {
+  const model = options.model as string;
+  const store = getSyncStore(model);
+
+  const subscribe = useCallback((listener: () => void) => store.subscribe(listener), [store]);
+  const failures = useSyncExternalStore(
+    subscribe,
+    () => store.failures,
+    () => EMPTY_FAILURES,
+  );
+  const inFlight = useSyncExternalStore(
+    subscribe,
+    () => store.pending,
+    () => 0,
+  );
+  const queued = useSyncExternalStore(
+    subscribe,
+    () => store.paused,
+    () => 0,
+  );
+
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
+  const fnRef = useRef(fn);
+  fnRef.current = fn;
+
+  const call = (input: TInput) => {
+    const current = optionsRef.current;
+    return runSyncAction(
+      model,
+      current.name || fnRef.current.name || "action",
+      (value) => fnRef.current(value as TInput),
+      input,
+      current.optimistic?.(input) as SyncRow | undefined,
+    ) as SyncMutationHandle<SyncRowOf<K>>;
+  };
+  call.inFlight = inFlight;
+  call.queued = queued;
+  call.failures = failures;
+
+  return call as SyncAction<TInput, SyncRowOf<K>>;
 }

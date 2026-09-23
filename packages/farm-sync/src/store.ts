@@ -5,6 +5,9 @@ export type SyncModelDescriptor = {
   access: "read" | "write";
   persist: boolean;
   cursor: string | null;
+  /** Schema column names, for deriving an action's optimistic patch from its
+   *  input. Absent on configs emitted before this field existed. */
+  fields?: readonly string[];
 };
 
 export type SyncRuntimeConfig = {
