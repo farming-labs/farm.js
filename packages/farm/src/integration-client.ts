@@ -294,20 +294,6 @@ function isOperation(value: unknown): value is FarmIntegrationAPIOperation<any, 
   );
 }
 
-function resolveSourceAPI(
-  source: FarmIntegrationDefinition | FarmIntegrationAPI,
-): FarmIntegrationAPI {
-  if ("kind" in source && source.kind === "farm-integration") {
-    if (!source.api) {
-      throw new Error(`Integration "${source.type}" does not expose a client API definition.`);
-    }
-
-    return source.api as FarmIntegrationAPI;
-  }
-
-  return source as FarmIntegrationAPI;
-}
-
 function tryResolveSourceAPI(
   source: FarmIntegrationDefinition | FarmIntegrationAPI,
 ): FarmIntegrationAPI | null {
