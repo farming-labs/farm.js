@@ -44,7 +44,7 @@ export function resolveConfigRoutePathname(
   const localizedPathname = i18n?.enabled ? resolveFarmLocalePath(pathname, i18n) : { pathname };
   return {
     pathname: normalizeConfigRoutePathname(decodeConfigRoutePathname(localizedPathname.pathname)),
-    ...(i18n?.enabled ? { locale: localizedPathname.locale } : {}),
+    ...(i18n?.enabled && "locale" in localizedPathname ? { locale: localizedPathname.locale } : {}),
   };
 }
 
@@ -60,7 +60,10 @@ function decodeConfigRoutePathname(pathname: string): string {
     .split("/")
     .map((segment) => {
       try {
-        return decodeURIComponent(segment);
+        // Keep an encoded slash inside its original segment. Decoding it here
+        // would make a catch-all capture grow an extra path segment and would
+        // lose the encoding when a redirect or rewrite reuses that capture.
+        return decodeURIComponent(segment).replace(/\//g, "%2F");
       } catch {
         return segment;
       }
