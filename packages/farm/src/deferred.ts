@@ -33,6 +33,8 @@ export type DeferredSettlements = Record<string, DeferredSettlement>;
 
 export interface DeferredDataResponseOptions {
   onError?: (error: unknown, id: string) => void;
+  /** Called only after a deferred response reaches the end of its stream. */
+  onComplete?: () => void;
 }
 
 export class DeferredDataError extends Error {
@@ -198,10 +200,15 @@ export function createDeferredDataResponse(
   return new Response(stream, { ...init, headers });
 }
 
-export async function readDeferredDataResponse<T>(response: Response): Promise<T> {
+export async function readDeferredDataResponse<T>(
+  response: Response,
+  options: DeferredDataResponseOptions = {},
+): Promise<T> {
   const contentType = response.headers.get("Content-Type") || "";
   if (!contentType.toLowerCase().startsWith(FARM_DEFERRED_CONTENT_TYPE)) {
-    return (await response.json()) as T;
+    const data = (await response.json()) as T;
+    notifyDeferredComplete(options);
+    return data;
   }
   if (!response.body) {
     throw new DeferredDataError("Deferred route data response has no body");
@@ -263,6 +270,7 @@ export async function readDeferredDataResponse<T>(response: Response): Promise<T
         }
       }
       rejectPendingDeferred(controllers, "Deferred route data stream ended before completion");
+      notifyDeferredComplete(options);
     } catch {
       rejectPendingDeferred(controllers, "Deferred route data stream could not be read");
     } finally {
@@ -271,6 +279,14 @@ export async function readDeferredDataResponse<T>(response: Response): Promise<T
   })();
 
   return data;
+}
+
+function notifyDeferredComplete(options: DeferredDataResponseOptions): void {
+  try {
+    options.onComplete?.();
+  } catch {
+    // Completion observers must not break deferred stream consumption.
+  }
 }
 
 interface EncodingContext {

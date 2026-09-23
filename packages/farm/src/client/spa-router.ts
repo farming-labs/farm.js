@@ -654,22 +654,43 @@ export class SPARouter {
       throw new Error(`Failed to fetch page data: ${response.status}`);
     }
 
-    const data = await readDeferredDataResponse<PageData>(response);
+    const isDeferredResponse = (response.headers.get("Content-Type") || "")
+      .toLowerCase()
+      .startsWith("application/x-farm-deferred+json");
 
-    // Cache the result. Expiry was previously only consulted on read, so a
-    // long-lived tab that navigates or prefetches many distinct routes grew
-    // this map without bound; sweeping on write bounds it to entries touched
-    // within the cacheMaxAge window.
+    if (!isDeferredResponse) {
+      const data = await readDeferredDataResponse<PageData>(response);
+      this.cachePageData(cacheKey, data);
+      return data;
+    }
+
+    // The first deferred stream line is available before its promises settle.
+    // Do not cache that object until the stream closes normally: an aborted
+    // navigation otherwise leaves rejected deferreds in the page-data cache.
+    let data: PageData | undefined;
+    let streamCompleted = false;
+    const markStreamComplete = () => {
+      streamCompleted = true;
+      if (data) this.cachePageData(cacheKey, data);
+    };
+    data = await readDeferredDataResponse<PageData>(response, {
+      onComplete: markStreamComplete,
+    });
+    if (streamCompleted) this.cachePageData(cacheKey, data);
+
+    return data;
+  }
+
+  private cachePageData(cacheKey: string, data: PageData): void {
+    // Expiry was previously only consulted on read, so a long-lived tab that
+    // navigates or prefetches many distinct routes grew this map without
+    // bound; sweeping on write bounds it to entries touched within the
+    // cacheMaxAge window.
     const now = Date.now();
     for (const [key, entry] of this.cache) {
       if (now - entry.timestamp >= this.options.cacheMaxAge) this.cache.delete(key);
     }
-    this.cache.set(cacheKey, {
-      data,
-      timestamp: now,
-    });
-
-    return data;
+    this.cache.set(cacheKey, { data, timestamp: now });
   }
 
   /**

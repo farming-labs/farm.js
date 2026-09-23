@@ -3,6 +3,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SPARouter } from "../client/spa-router";
+import { createDeferredDataResponse, defer } from "../deferred";
 
 describe("SPA router page-data cache eviction", () => {
   beforeEach(() => {
@@ -52,5 +53,24 @@ describe("SPA router page-data cache eviction", () => {
     await router.prefetch("/b");
 
     expect(cache.size).toBe(2);
+  });
+
+  it("does not cache deferred page data until its stream completes", async () => {
+    let resolveValue!: (value: string) => void;
+    const pending = new Promise<string>((resolve) => {
+      resolveValue = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => createDeferredDataResponse({ page: null, value: defer(pending) })),
+    );
+    const router = new SPARouter({ scrollRestoration: false, cacheMaxAge: 30_000 });
+    const cache = (router as unknown as { cache: Map<string, unknown> }).cache;
+
+    await router.prefetch("/deferred");
+    expect(cache.size).toBe(0);
+
+    resolveValue("complete");
+    await vi.waitFor(() => expect(cache.size).toBe(1));
   });
 });

@@ -92,6 +92,20 @@ describe("deferred route data", () => {
     expect((data.reviews as any).status).toBe("fulfilled");
   });
 
+  it("reports completion only after a deferred stream closes", async () => {
+    const source = createControlledPromise<string>();
+    const onComplete = vi.fn();
+    const response = createDeferredDataResponse({ value: defer(source.promise) });
+    const data = await readDeferredDataResponse<{ value: Promise<string> }>(response, {
+      onComplete,
+    });
+
+    expect(onComplete).not.toHaveBeenCalled();
+    source.resolve("ready");
+    await expect(data.value).resolves.toBe("ready");
+    await vi.waitFor(() => expect(onComplete).toHaveBeenCalledOnce());
+  });
+
   it("streams nested deferred values discovered after the first result", async () => {
     const details = createControlledPromise<{ related: Deferred<string[]> }>();
     const related = createControlledPromise<string[]>();
