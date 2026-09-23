@@ -3547,6 +3547,7 @@ function materializeCompilerHostChildren(descriptor: CompilerHostElement): reado
 
 interface CompilerFallbackRecoveryMetadata {
   requiresReset: boolean;
+  preservedRootBlockId?: number;
 }
 
 function collectCompilerHostBlockIds(
@@ -3561,6 +3562,7 @@ function collectCompilerHostBlockIds(
   if (!block) return;
   if (
     recovery &&
+    block.id !== recovery.preservedRootBlockId &&
     (block.kind === "keyed-ranges" ||
       (block.kind === "mixed-ranges" && block.ranges.some((range) => range.kind === "keyed")))
   ) {
@@ -9825,6 +9827,7 @@ function createMixedRangesBlockComponent(
     private mounted = false;
     private fallbackRequested = false;
     private fallbackVersion = 0;
+    private fallbackKeysWereUnsafe = false;
     private propFallbackQueued = false;
     private currentProps = this.props;
     private controller: CompilerNestedMixedRanges | null = null;
@@ -9840,11 +9843,48 @@ function createMixedRangesBlockComponent(
       this.fallbackUnsubscribers = [];
     }
 
+    private hasUnsafeFallbackKeys(descriptor?: CompilerHostElement): boolean {
+      try {
+        const block = (descriptor || this.currentProps.create()).block;
+        if (block?.kind !== "mixed-ranges" || block.id !== this.currentProps.id) return true;
+        for (const range of block.ranges) {
+          if (range.kind !== "keyed") continue;
+          const items = materializeIterable(range.items());
+          const keys = items.map((item, index) => keyedRowIdentity(range.rowKey(item, index)));
+          if (new Set(keys).size !== keys.length) return true;
+        }
+        return false;
+      } catch {
+        return true;
+      }
+    }
+
+    private readFallbackRecovery(descriptor: CompilerHostElement): {
+      ids: Set<number>;
+      requiresReset: boolean;
+    } {
+      const ids = new Set<number>();
+      const recovery: CompilerFallbackRecoveryMetadata = {
+        requiresReset: false,
+        preservedRootBlockId: this.currentProps.id,
+      };
+      collectCompilerHostBlockIds(descriptor, ids, recovery);
+      return { ids, requiresReset: recovery.requiresReset };
+    }
+
+    private prepareFallbackUpdate(descriptor: CompilerHostElement): void {
+      const recovery = this.readFallbackRecovery(descriptor);
+      const unsafeKeys = this.hasUnsafeFallbackKeys(descriptor);
+      if (recovery.requiresReset || unsafeKeys || this.fallbackKeysWereUnsafe) {
+        this.fallbackVersion += 1;
+      }
+      this.fallbackKeysWereUnsafe = unsafeKeys;
+    }
+
     private subscribeFallbackBlocks(): void {
       this.clearFallbackSubscriptions();
       const descriptor = this.currentProps.create();
-      const ids = new Set<number>();
-      collectCompilerHostBlockIds(descriptor, ids);
+      const { ids } = this.readFallbackRecovery(descriptor);
       for (const id of ids) {
         this.fallbackUnsubscribers.push(
           owner.subscribe(id, (afterCommit) => {
@@ -9852,7 +9892,8 @@ function createMixedRangesBlockComponent(
               afterCommit?.();
               return;
             }
-            this.fallbackVersion += 1;
+            const nextDescriptor = this.currentProps.create();
+            this.prepareFallbackUpdate(nextDescriptor);
             this.forceUpdate(afterCommit);
           }),
         );
@@ -9892,6 +9933,7 @@ function createMixedRangesBlockComponent(
       this.fallbackRequested = true;
       this.controller?.cleanup();
       this.controller = null;
+      this.fallbackKeysWereUnsafe = this.hasUnsafeFallbackKeys();
       this.fallbackVersion += 1;
       this.setState({ fallback: true }, () => {
         this.subscribeFallbackBlocks();
@@ -9910,6 +9952,9 @@ function createMixedRangesBlockComponent(
 
     shouldComponentUpdate(nextProps: CompilerMixedRangesBlockProps, nextState: State): boolean {
       this.currentProps = nextProps;
+      if (this.state.fallback && nextState.fallback) {
+        this.prepareFallbackUpdate(this.currentProps.create());
+      }
       if (nextState.fallback || this.state.fallback) return true;
       this.schedulePropFallback();
       return false;
@@ -9929,6 +9974,7 @@ function createMixedRangesBlockComponent(
       this.controller?.cleanup();
       this.controller = null;
       this.clearFallbackSubscriptions();
+      this.fallbackKeysWereUnsafe = false;
       // Keep the attached root for React 18 replay; captureRoot clears real detachments.
     }
 

@@ -373,6 +373,15 @@ function cloneInitialModel(): Model {
   return structuredClone(initialModel);
 }
 
+function LocalFallbackCounter() {
+  const [count, setCount] = useState(0);
+  return (
+    <button type="button" onClick={() => setCount((value) => value + 1)}>
+      Local: {count}
+    </button>
+  );
+}
+
 function createMixedFixture(initial = cloneInitialModel()) {
   let setModel: (next: CompilerStateUpdater) => void = () => undefined;
   let executions = 0;
@@ -615,7 +624,251 @@ describe("compiler-owned mixed conditional and keyed ranges runtime", () => {
     expect(container.querySelector('[data-item="safe"] span')?.textContent).toBe("Safe");
     expect(container.querySelector("[data-loading]")).not.toBeNull();
     expect(container.querySelector('[data-status="error"]')).not.toBeNull();
+
+    const recoveredSurface = container.querySelector("[data-mixed]");
+    await act(async () => {
+      fixture.setModel((value) => ({ ...(value as Model), title: "Still safe" }));
+      await flushCompilerUpdates();
+    });
+    expect(container.querySelector("[data-mixed]")).not.toBe(recoveredSurface);
+    expect(container.querySelector("header")?.textContent).toBe("Still safe");
   });
+
+  it.each(
+    (["static", "hybrid"] as const).flatMap((reactivity) =>
+      (["nested container", "component root"] as const).flatMap((ownership) =>
+        (["mount", "hydrate"] as const).map((lifecycle) => ({
+          lifecycle,
+          ownership,
+          reactivity,
+          rootOwned: ownership === "component root",
+        })),
+      ),
+    ),
+  )(
+    "preserves React-owned state across safe mixed fallback updates ($reactivity, $ownership, $lifecycle)",
+    async ({ lifecycle, reactivity, rootOwned }) => {
+      vi.spyOn(console, "error").mockImplementation(() => undefined);
+      interface FallbackModel {
+        loading: boolean;
+        items: Array<{ id: string; label: string }>;
+      }
+      const initial: FallbackModel = {
+        loading: false,
+        items: [
+          { id: "a", label: "Alpha" },
+          { id: "b", label: "Beta" },
+        ],
+      };
+      let updateModel: (next: CompilerStateUpdater) => void = () => undefined;
+      const FallbackMixedRanges = createCompiledComponent<{ prefix: string }>({
+        displayName: "FallbackMixedRangesState",
+        reactivity,
+        initialize: () => [initial],
+        render(props, state, blocks) {
+          const model = () => state[0].get() as FallbackModel;
+          updateModel = (next) => state[0].set(next);
+          const MixedRanges = blocks.MixedRanges;
+          const create = (): CompilerHostElement => {
+            const value = model();
+            return {
+              ...host(
+                "section",
+                [
+                  // The intentionally incomplete descriptor makes React own the
+                  // fallback subtree without changing its server/client markup.
+                  host("aside"),
+                  ...(value.loading ? [host("p", ["Loading…"])] : []),
+                  host("i", [`Rows: ${value.items.length}`]),
+                  ...value.items.map((item) =>
+                    host("article", [item.label], [{ name: "data-key", value: item.id }]),
+                  ),
+                ],
+                [{ name: "data-prefix", value: props.prefix }],
+              ),
+              block: {
+                kind: "mixed-ranges",
+                id: 0,
+                ranges: [
+                  {
+                    kind: "conditional",
+                    before: 1,
+                    test: () => model().loading,
+                    logical: true,
+                    truthy: branch(() => host("p", ["Loading…"])),
+                  },
+                  {
+                    kind: "keyed",
+                    before: 1,
+                    items: () => model().items,
+                    rowKey: (item: unknown) => (item as FallbackModel["items"][number]).id,
+                    create: (item: unknown) =>
+                      host(
+                        "article",
+                        [(item as FallbackModel["items"][number]).label],
+                        [
+                          {
+                            name: "data-key",
+                            value: (item as FallbackModel["items"][number]).id,
+                          },
+                        ],
+                      ),
+                    bindings: [
+                      {
+                        kind: "text",
+                        path: [],
+                        read: (item: unknown) => (item as FallbackModel["items"][number]).label,
+                      },
+                    ],
+                  },
+                ],
+                trailing: 0,
+                bindings: [],
+              },
+            };
+          };
+          const ranges = (
+            <MixedRanges
+              id={0}
+              create={create}
+              render={() => {
+                const value = model();
+                return (
+                  <section data-surface="fallback-mixed-ranges" data-prefix={props.prefix}>
+                    <aside>
+                      <LocalFallbackCounter />
+                      <input aria-label="Text" defaultValue="draft" />
+                      <textarea aria-label="Note" defaultValue="draft" />
+                      <select aria-label="Choice" defaultValue="a">
+                        <option value="a">A</option>
+                        <option value="b">B</option>
+                      </select>
+                    </aside>
+                    {value.loading && <p>Loading…</p>}
+                    <i>Rows: {value.items.length}</i>
+                    {value.items.map((item) => (
+                      <article data-key={item.id} key={item.id}>
+                        {item.label}
+                      </article>
+                    ))}
+                  </section>
+                );
+              }}
+            />
+          );
+          return rootOwned ? ranges : <main>{ranges}</main>;
+        },
+        bindings: [{ kind: "block", id: 0, dependencies: [0] }],
+      });
+      function Parent() {
+        const [prefix, setPrefix] = useState("before");
+        return (
+          <>
+            <button data-parent-prefix type="button" onClick={() => setPrefix("after")} />
+            <FallbackMixedRanges prefix={prefix} />
+          </>
+        );
+      }
+      const container = document.createElement("div");
+      document.body.append(container);
+      const tree = (
+        <StrictMode>
+          <Parent />
+        </StrictMode>
+      );
+      if (lifecycle === "hydrate") container.innerHTML = renderToString(tree);
+      const recoverable = vi.fn();
+      const root =
+        lifecycle === "hydrate"
+          ? hydrateRoot(container, tree, { onRecoverableError: recoverable })
+          : createRoot(container);
+      roots.push(root);
+      await act(async () => {
+        if (lifecycle === "mount") root.render(tree);
+        await flushCompilerUpdates();
+      });
+      expect(recoverable).not.toHaveBeenCalled();
+
+      const surface = container.querySelector<HTMLElement>(
+        "[data-surface='fallback-mixed-ranges']",
+      )!;
+      const input = container.querySelector<HTMLInputElement>("input")!;
+      const textarea = container.querySelector<HTMLTextAreaElement>("textarea")!;
+      const select = container.querySelector<HTMLSelectElement>("select")!;
+      await act(async () => surface.querySelector("button")!.click());
+      input.value = "typed text";
+      textarea.value = "typed note";
+      select.value = "b";
+      input.focus();
+      input.setSelectionRange(1, 4, "backward");
+
+      await act(async () => {
+        container.querySelector<HTMLButtonElement>("[data-parent-prefix]")?.click();
+        updateModel({
+          loading: true,
+          items: [
+            { id: "b", label: "Beta renamed" },
+            { id: "a", label: "Alpha renamed" },
+          ],
+        });
+        await flushCompilerUpdates();
+      });
+
+      expect(container.querySelector("[data-surface='fallback-mixed-ranges']")).toBe(surface);
+      expect(container.querySelector("input")).toBe(input);
+      expect(container.querySelector("textarea")).toBe(textarea);
+      expect(container.querySelector("select")).toBe(select);
+      expect(input.value).toBe("typed text");
+      expect(textarea.value).toBe("typed note");
+      expect(select.value).toBe("b");
+      expect(surface.querySelector("button")?.textContent).toBe("Local: 1");
+      expect(document.activeElement).toBe(input);
+      expect([input.selectionStart, input.selectionEnd, input.selectionDirection]).toEqual([
+        1,
+        4,
+        "backward",
+      ]);
+      expect(surface.querySelector("p")?.textContent).toBe("Loading…");
+      expect(surface.dataset.prefix).toBe("after");
+      expect(
+        [...surface.querySelectorAll<HTMLElement>("article")].map((row) => row.textContent),
+      ).toEqual(["Beta renamed", "Alpha renamed"]);
+
+      await act(async () => {
+        updateModel({
+          loading: false,
+          items: [
+            { id: "duplicate", label: "Again one" },
+            { id: "duplicate", label: "Again two" },
+          ],
+        });
+        await flushCompilerUpdates();
+      });
+      expect(container.querySelector("input")).not.toBe(input);
+      expect(
+        container.querySelector("[data-surface='fallback-mixed-ranges'] button")?.textContent,
+      ).toBe("Local: 0");
+
+      await act(async () => {
+        updateModel(initial);
+        await flushCompilerUpdates();
+      });
+      const recoveredInput = container.querySelector<HTMLInputElement>("input")!;
+      recoveredInput.value = "recovered";
+      await act(async () => {
+        updateModel({
+          loading: true,
+          items: [
+            { id: "a", label: "Alpha final" },
+            { id: "b", label: "Beta final" },
+          ],
+        });
+        await flushCompilerUpdates();
+      });
+      expect(container.querySelector("input")).toBe(recoveredInput);
+      expect(recoveredInput.value).toBe("recovered");
+    },
+  );
 
   it("routes mixed keyed binding failures through React error boundaries", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
