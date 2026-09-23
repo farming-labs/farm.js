@@ -2220,7 +2220,8 @@ Once a keyed list or keyed-range container is on React fallback, updates with un
 in place. Unchanged form controls, user-entered values, focus, selection, local component state, and
 DOM identity therefore survive later safe updates. A render containing duplicate keys still forces
 a complete remount, as does the first unique-key render after it; that recovery reset prevents React
-from reusing an identity made ambiguous by the preceding duplicate keys.
+from reusing an identity made ambiguous by the preceding duplicate keys. Farm applies the same
+check when the collection changes through compiler state or through new parent props.
 
 Mixed conditional-and-keyed range containers use the same recovery rule for their direct keyed
 ranges. Once React owns the fallback subtree, branch changes and uniquely keyed list updates keep

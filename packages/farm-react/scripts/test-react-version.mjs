@@ -1227,6 +1227,95 @@ const testSource = String.raw`
     }
   }
   assert.deepEqual(structuralReplayFailures, []);
+
+  // Parent prop commits must use the same duplicate-key fallback recovery as compiler-state commits.
+  const propFallbackFailures = [];
+  for (const kind of ["KeyedRows", "KeyedRanges"]) {
+    for (const lifecycle of ["mount", "hydrate"]) {
+      const context = kind + "/parent-props/" + lifecycle;
+      const duplicate = [{ id: "duplicate", label: "One" }, { id: "duplicate", label: "Two" }];
+      const safe = [{ id: "a", label: "Alpha" }, { id: "b", label: "Beta" }];
+      function LocalCounter() {
+        const [count, setCount] = React.useState(0);
+        return React.createElement("button", { onClick: () => setCount((value) => value + 1) }, "Local: " + count);
+      }
+      const hostRow = (item) => ({
+        kind: "element", tag: "article", attributes: [{ name: "data-key", value: item.id }],
+        styles: [], children: [item.label],
+      });
+      const PropFallback = createCompiledComponent({
+        displayName: "CompatibilityPropFallback" + kind,
+        reactivity: "hybrid",
+        initialize: () => [],
+        render(props, _cells, blocks) {
+          const items = () => props.items;
+          const render = () => React.createElement("section", { "data-surface": kind },
+            React.createElement("aside", null,
+              React.createElement(LocalCounter),
+              React.createElement("input", { "aria-label": "Draft", defaultValue: "draft" }),
+            ),
+            ...items().map((item) => React.createElement("article", {
+              key: item.id, "data-key": item.id,
+            }, item.label)),
+          );
+          const row = {
+            items,
+            rowKey: (item) => item.id,
+            create: hostRow,
+            bindings: [{ kind: "text", path: [], read: (item) => item.label }],
+          };
+          const blockProps = kind === "KeyedRows"
+            ? { id: 0, render, ...row }
+            : { id: 0, render, ranges: [{ before: 1, ...row }], trailing: 0 };
+          return React.createElement("main", null, React.createElement(blocks[kind], blockProps));
+        },
+        bindings: [{ kind: "block", id: 0, dependencies: [] }],
+      });
+      const target = document.createElement("div");
+      document.body.append(target);
+      const tree = (items) => React.createElement(React.StrictMode, null,
+        React.createElement(PropFallback, { items }));
+      if (lifecycle === "hydrate") target.innerHTML = renderToString(tree(duplicate));
+      const recoverableErrors = [];
+      let propRoot;
+      try {
+        await React.act(async () => {
+          propRoot = lifecycle === "hydrate"
+            ? hydrateRoot(target, tree(duplicate), { onRecoverableError: (error) => recoverableErrors.push(error) })
+            : createRoot(target);
+          if (lifecycle === "mount") propRoot.render(tree(duplicate));
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+        const ambiguous = target.querySelector("section");
+        await React.act(async () => propRoot.render(tree(safe)));
+        const recovered = target.querySelector("section");
+        assert.notEqual(recovered, ambiguous, context + "/recovery reset");
+        await React.act(async () => recovered.querySelector("button").click());
+        const input = recovered.querySelector("input");
+        input.value = "typed";
+        await React.act(async () => propRoot.render(tree([
+          { id: "b", label: "Beta renamed" }, { id: "a", label: "Alpha renamed" },
+        ])));
+        assert.equal(target.querySelector("section"), recovered, context + "/safe surface");
+        assert.equal(target.querySelector("input"), input, context + "/safe input");
+        assert.equal(input.value, "typed", context + "/safe value");
+        assert.equal(recovered.querySelector("button").textContent, "Local: 1", context + "/safe state");
+        await React.act(async () => propRoot.render(tree(duplicate)));
+        const ambiguousAgain = target.querySelector("section");
+        assert.notEqual(ambiguousAgain, recovered, context + "/duplicate reset");
+        await React.act(async () => propRoot.render(tree(safe)));
+        assert.notEqual(target.querySelector("section"), ambiguousAgain, context + "/second recovery reset");
+        assert.deepEqual(recoverableErrors, [], context);
+      } catch (error) {
+        propFallbackFailures.push({ context, message: error.message });
+      } finally {
+        await React.act(async () => propRoot?.unmount());
+        target.remove();
+      }
+    }
+  }
+  assert.deepEqual(propFallbackFailures, []);
   delete globalThis.IS_REACT_ACT_ENVIRONMENT;
 
   const StaticBindings = createCompiledComponentWithFeatures({
@@ -1371,27 +1460,23 @@ const testSource = String.raw`
   const conditionalContainer = document.createElement("div");
   document.body.append(conditionalContainer);
   const conditionalRoot = createRoot(conditionalContainer);
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   flushSync(() => conditionalRoot.render(React.createElement(ConditionalBlocks)));
   const initialConditionalExecutions = conditionalExecutions;
-  conditionalContainer.querySelectorAll("button")[0].click();
-  await Promise.resolve();
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  flushSync(() => {});
+  await React.act(async () => conditionalContainer.querySelectorAll("button")[0].click());
   assert.equal(
     conditionalContainer.querySelector("[data-branch='enabled']").textContent,
     "Enabled 0",
   );
-  conditionalContainer.querySelectorAll("button")[1].click();
-  await Promise.resolve();
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  flushSync(() => {});
+  await React.act(async () => conditionalContainer.querySelectorAll("button")[1].click());
   assert.equal(
     conditionalContainer.querySelector("[data-branch='enabled']").textContent,
     "Enabled 1",
   );
   assert.equal(conditionalContainer.querySelector("output").textContent, "1");
   assert.equal(conditionalExecutions, initialConditionalExecutions);
-  flushSync(() => conditionalRoot.unmount());
+  await React.act(async () => conditionalRoot.unmount());
+  delete globalThis.IS_REACT_ACT_ENVIRONMENT;
 
   let hostConditionalExecutions = 0;
   const HostConditionalBlocks = createCompiledComponent({
