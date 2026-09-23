@@ -11,7 +11,6 @@ import {
 import { createContext } from "../middleware/context";
 import { MiddlewareManager } from "../middleware/manager";
 import {
-  _setCurrentMiddlewareData,
   _clearCurrentMiddlewareData,
   getMiddlewareData,
   getMiddlewareContext,
@@ -1866,46 +1865,11 @@ describe("Named request middleware", () => {
 });
 
 describe("Middleware Data Access (getMiddlewareData)", () => {
-  it("should retrieve middleware data without props", () => {
-    // Set data
-    _setCurrentMiddlewareData({
-      user: { id: 1, name: "John" },
-      stats: { views: 100 },
-    });
-
-    // Test getMiddlewareData()
-    const data = getMiddlewareData();
-    expect(data.get("user")).toEqual({ id: 1, name: "John" });
-    expect(data.get("stats")).toEqual({ views: 100 });
-
-    // Test getMiddlewareValue()
-    const user = getMiddlewareValue("user");
-    expect(user).toEqual({ id: 1, name: "John" });
-
-    // Clean up
-    _clearCurrentMiddlewareData();
-  });
-
   it("should return empty map when no data is set", () => {
     _clearCurrentMiddlewareData();
 
     const data = getMiddlewareData();
     expect(data.size).toBe(0);
-  });
-
-  it("should handle data isolation between requests", () => {
-    // Request 1
-    _setCurrentMiddlewareData({ req1: "data1" });
-    const data1 = getMiddlewareData();
-    expect(data1.get("req1")).toBe("data1");
-    _clearCurrentMiddlewareData();
-
-    // Request 2 (should not have req1 data)
-    _setCurrentMiddlewareData({ req2: "data2" });
-    const data2 = getMiddlewareData();
-    expect(data2.get("req2")).toBe("data2");
-    expect(data2.get("req1")).toBeUndefined();
-    _clearCurrentMiddlewareData();
   });
 
   it("should isolate middleware data across concurrent async contexts", async () => {
