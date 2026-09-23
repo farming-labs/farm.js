@@ -200,14 +200,12 @@ export function useRow<TRow extends SyncRow = SyncRow>(
 }
 
 export type SyncActionOptions<K extends SyncModelName, TInput> = {
-  /** The model whose rows this action changes. */
-  model: K;
   /**
    * What to show while the server decides, for transitions the input does not
    * spell out. Left out, input fields that are schema columns become the
    * patch; failing that the screen updates when the server's rows arrive.
    */
-  optimistic?: (input: TInput) => Partial<SyncRowOf<K>>;
+  optimistic?: Partial<SyncRowOf<K>> | ((input: TInput) => Partial<SyncRowOf<K>>);
   /** Name shown in the failures queue; defaults to the function's name. */
   name?: string;
 };
@@ -229,9 +227,12 @@ export type SyncAction<TInput, TRow> = ((input: TInput) => SyncMutationHandle<TR
  */
 export function useSyncAction<K extends SyncModelName, TInput>(
   fn: (input: TInput) => Promise<unknown>,
-  options: SyncActionOptions<K, TInput>,
+  // The model is its own argument, not an options field, so TypeScript fixes
+  // K before it contextually types the optimistic callback. In one options
+  // object the two infer in the same round and the patch widens to string.
+  model: K,
+  options: SyncActionOptions<K, TInput> = {},
 ): SyncAction<TInput, SyncRowOf<K>> {
-  const model = options.model as string;
   const store = getSyncStore(model);
 
   const subscribe = useCallback((listener: () => void) => store.subscribe(listener), [store]);
@@ -259,11 +260,13 @@ export function useSyncAction<K extends SyncModelName, TInput>(
   const call = (input: TInput) => {
     const current = optionsRef.current;
     return runSyncAction(
-      model,
+      model as string,
       current.name || fnRef.current.name || "action",
       (value) => fnRef.current(value as TInput),
       input,
-      current.optimistic?.(input) as SyncRow | undefined,
+      (typeof current.optimistic === "function" ? current.optimistic(input) : current.optimistic) as
+        | SyncRow
+        | undefined,
     ) as SyncMutationHandle<SyncRowOf<K>>;
   };
   call.inFlight = inFlight;
